@@ -1,0 +1,41 @@
+[package]
+name = "axiolid-minkowski"
+description = "Minkowski sum and difference of planar-faced solids"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-mesh.workspace = true
+axiolid-contracts.workspace = true
+axiolid-construct.workspace = true
+axiolid-decompose.workspace = true
+axiolid-mesh-boolean-contract.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+axiolid-measure.workspace = true
+axiolid-mesh-boolean-boolmesh.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.discrete"
+domain = "discrete.minkowski"
+public = true
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-decompose",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-boolean-contract",
+]

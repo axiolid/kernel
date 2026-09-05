@@ -38,6 +38,7 @@ members = [
     "crates/algorithms/repair/heal",
     "crates/algorithms/discrete/decimate",
     "crates/algorithms/discrete/decompose",
+    "crates/algorithms/discrete/minkowski",
     "crates/algorithms/discrete/refine",
     "crates/algorithms/sampled/levelset",
     "crates/providers/mesh/boolmesh",
@@ -71,6 +72,7 @@ axiolid-primitive = { path = "crates/representations/analytic/primitive", versio
 axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.11.0" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.11.0" }
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.11.0" }
+axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.11.0" }
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.11.0" }
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.11.0" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.11.0" }

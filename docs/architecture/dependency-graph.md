@@ -39,6 +39,7 @@ graph TD
     axiolid_mesh_compile_contract["axiolid-mesh-compile-contract\ncontract.operation"]
     axiolid_mesh_contracts["axiolid-mesh-contracts\ncontract.common.mesh"]
     axiolid_mesh_section_contract["axiolid-mesh-section-contract\ncontract.operation"]
+    axiolid_minkowski["axiolid-minkowski\nalgorithm.discrete"]
     axiolid_model["axiolid-model\nrepresentation.graph"]
     axiolid_nurbs["axiolid-nurbs\nalgorithm.parametric"]
     axiolid_oracle["axiolid-oracle\ntool.oracle"]
@@ -227,6 +228,14 @@ graph TD
     axiolid_mesh_section_contract --> axiolid_core
     axiolid_mesh_section_contract --> axiolid_mesh
     axiolid_mesh_section_contract --> axiolid_mesh_contracts
+    axiolid_minkowski --> axiolid_construct
+    axiolid_minkowski --> axiolid_contracts
+    axiolid_minkowski --> axiolid_core
+    axiolid_minkowski --> axiolid_decompose
+    axiolid_minkowski --> axiolid_measure
+    axiolid_minkowski --> axiolid_mesh
+    axiolid_minkowski --> axiolid_mesh_boolean_boolmesh
+    axiolid_minkowski --> axiolid_mesh_boolean_contract
     axiolid_model --> axiolid_core
     axiolid_model --> axiolid_curve
     axiolid_model --> axiolid_mesh
