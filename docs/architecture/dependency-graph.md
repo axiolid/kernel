@@ -44,6 +44,9 @@ graph TD
     axiolid_nurbs["axiolid-nurbs\nalgorithm.parametric"]
     axiolid_oracle["axiolid-oracle\ntool.oracle"]
     axiolid_overlay["axiolid-overlay\nalgorithm.planar"]
+    axiolid_pointcloud["axiolid-pointcloud\nrepresentation.discrete"]
+    axiolid_pointcloud_reconstruction_contract["axiolid-pointcloud-reconstruction-contract\ncontract.operation"]
+    axiolid_pointcloud_reconstruction_sdf["axiolid-pointcloud-reconstruction-sdf\nprovider.pointcloud"]
     axiolid_predicates["axiolid-predicates\nalgorithm.reference"]
     axiolid_primitive["axiolid-primitive\nrepresentation.atomic"]
     axiolid_profile["axiolid-profile\nrepresentation.region"]
@@ -81,6 +84,9 @@ graph TD
     axiolid --> axiolid_model
     axiolid --> axiolid_nurbs
     axiolid --> axiolid_overlay
+    axiolid --> axiolid_pointcloud
+    axiolid --> axiolid_pointcloud_reconstruction_contract
+    axiolid --> axiolid_pointcloud_reconstruction_sdf
     axiolid --> axiolid_predicates
     axiolid --> axiolid_primitive
     axiolid --> axiolid_profile
@@ -144,6 +150,9 @@ graph TD
     axiolid_dispatch --> axiolid_mesh_boolean_contract
     axiolid_dispatch --> axiolid_mesh_contracts
     axiolid_dispatch --> axiolid_mesh_section_contract
+    axiolid_dispatch --> axiolid_pointcloud
+    axiolid_dispatch --> axiolid_pointcloud_reconstruction_contract
+    axiolid_dispatch --> axiolid_pointcloud_reconstruction_sdf
     axiolid_evaluate --> axiolid_contracts
     axiolid_evaluate --> axiolid_core
     axiolid_evaluate --> axiolid_curve
@@ -257,6 +266,18 @@ graph TD
     axiolid_oracle --> axiolid_evaluate
     axiolid_oracle --> axiolid_surface
     axiolid_overlay --> axiolid_core
+    axiolid_pointcloud --> axiolid_core
+    axiolid_pointcloud_reconstruction_contract --> axiolid_contracts
+    axiolid_pointcloud_reconstruction_contract --> axiolid_core
+    axiolid_pointcloud_reconstruction_contract --> axiolid_mesh
+    axiolid_pointcloud_reconstruction_contract --> axiolid_pointcloud
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_contracts
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_core
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_levelset
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_mesh
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_pointcloud
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_pointcloud_reconstruction_contract
+    axiolid_pointcloud_reconstruction_sdf --> axiolid_spatial
     axiolid_predicates --> axiolid_core
     axiolid_predicates --> axiolid_guarantees
     axiolid_primitive --> axiolid_core

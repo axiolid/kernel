@@ -48,6 +48,25 @@ overlay = ["dep:axiolid-overlay"]
 project = ["mesh", "overlay", "dep:axiolid-project"]
 route = ["overlay", "predicates", "dep:axiolid-route"]
 field = ["dep:axiolid-field"]
+# Point-sampled geometry. `pointcloud` is representation-only, so a consumer
+# that just wants to hold scan data pays for nothing else.
+pointcloud = ["dep:axiolid-pointcloud"]
+pointcloud-queries = ["pointcloud", "spatial"]
+pointcloud-reconstruction = [
+    "pointcloud",
+    "contracts",
+    "mesh",
+    "dep:axiolid-pointcloud-reconstruction-contract",
+]
+dispatch-pointcloud-reconstruction = [
+    "pointcloud-reconstruction",
+    "dep:axiolid-dispatch",
+    "axiolid-dispatch/pointcloud-reconstruction",
+]
+pointcloud-provider = [
+    "pointcloud-reconstruction",
+    "dep:axiolid-pointcloud-reconstruction-sdf",
+]
 field-ops = ["field", "dep:axiolid-field-ops"]
 field-navigation = ["field-ops", "axiolid-field-ops/navigation"]
 heal = ["mesh", "dep:axiolid-heal"]
@@ -112,6 +131,9 @@ axiolid-overlay = { workspace = true, optional = true }
 axiolid-project = { workspace = true, optional = true }
 axiolid-route = { workspace = true, optional = true }
 axiolid-field = { workspace = true, optional = true }
+axiolid-pointcloud = { workspace = true, optional = true }
+axiolid-pointcloud-reconstruction-contract = { workspace = true, optional = true }
+axiolid-pointcloud-reconstruction-sdf = { workspace = true, optional = true }
 axiolid-field-ops = { workspace = true, optional = true }
 axiolid-heal = { workspace = true, optional = true }
 axiolid-contracts = { workspace = true, optional = true }
@@ -133,4 +155,7 @@ role = "facade"
 domain = "public"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-backend-cpu", "axiolid-backend-gpu", "axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-linear", "axiolid-linear-intersection", "axiolid-predicates", "axiolid-project", "axiolid-route", "axiolid-field", "axiolid-field-ops", "axiolid-construct", "axiolid-heal", "axiolid-contracts", "axiolid-dispatch", "axiolid-evaluate", "axiolid-mesh-boolean-boolmesh", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-ray-mesh", "axiolid-reference", "axiolid-spatial", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-backend-cpu", "axiolid-backend-gpu", "axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-linear", "axiolid-linear-intersection", "axiolid-predicates", "axiolid-project", "axiolid-route", "axiolid-field", "axiolid-field-ops", "axiolid-construct", "axiolid-heal", "axiolid-contracts", "axiolid-dispatch", "axiolid-evaluate", "axiolid-mesh-boolean-boolmesh",
+    "axiolid-pointcloud",
+    "axiolid-pointcloud-reconstruction-contract",
+    "axiolid-pointcloud-reconstruction-sdf", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-ray-mesh", "axiolid-reference", "axiolid-spatial", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]

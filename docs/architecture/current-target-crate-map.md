@@ -44,6 +44,11 @@ Facade feature migration:
 
 - `kernel` is replaced by `contracts`.
 - `field` is value-only; add `field-ops` or `field-navigation` for algorithms.
+- `pointcloud` is value-only: `axiolid` + `axiolid-core` + `axiolid-pointcloud`
+  and nothing else. Add `pointcloud-queries` for KNN/radius search,
+  `pointcloud-reconstruction` for the contract,
+  `dispatch-pointcloud-reconstruction` to select a provider at runtime, or
+  `pointcloud-provider` for the bundled reference implementation.
 - `mesh-boolean`, `mesh-section`, and `graph-compile` expose portable contracts.
 - provider selection is opt-in through `dispatch-mesh-boolean` or `dispatch-mesh-section`.
 
@@ -73,5 +78,7 @@ Fresh-target `cargo check -p axiolid --no-default-features` measurements on the 
 |---|---:|---:|---:|---:|
 | `model` | 17 | 17 | 1.915 s | 1.915 s |
 | `field` | 5 | 5 | 1.781 s | 1.815 s |
+| `pointcloud` | 3 | 3 | 3.54 s | 3.54 s |
+| `pointcloud-reconstruction` | 10 | 10 | 4.04 s | 4.04 s |
 
 The package split changes ownership and compilation units, not external normal-dependency count. This single cold run is noise-equivalent and is **not** evidence of a performance improvement.

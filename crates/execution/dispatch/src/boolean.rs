@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use axiolid_contracts::{
-    BackendId, DevicePreference, ExecutionOptions, ExecutionTarget, GeomError, GeomResult,
-    Operation,
-};
+use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, GeomResult, Operation};
+
+use crate::device::matches_device;
 use axiolid_core::BooleanOperator;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::{conformance, BooleanOutcome, MeshBoolean};
@@ -157,22 +156,9 @@ impl MeshBooleanRegistry {
     }
 }
 
-fn matches_device(preference: DevicePreference, id: BackendId, target: ExecutionTarget) -> bool {
-    match preference {
-        DevicePreference::Auto => true,
-        DevicePreference::Cpu => {
-            matches!(
-                target,
-                ExecutionTarget::PortableCpu | ExecutionTarget::OptimizedCpu
-            )
-        }
-        DevicePreference::Gpu => matches!(target, ExecutionTarget::Gpu),
-        DevicePreference::Backend(required) => required == id,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use axiolid_contracts::{DevicePreference, ExecutionTarget};
     /// Outward-oriented unit cube: the minimal admissible operand.
     ///
     /// Dispatch tests need a mesh that passes contract validation, because

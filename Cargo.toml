@@ -11,6 +11,7 @@ members = [
     "crates/representations/fixtures",
     "crates/representations/brep",
     "crates/representations/discrete/mesh",
+    "crates/representations/discrete/pointcloud",
     "crates/representations/sampled/field",
     "crates/representations/modeling/graph",
     "crates/contracts/guarantees",
@@ -19,6 +20,7 @@ members = [
     "crates/contracts/operations/compile",
     "crates/contracts/operations/exact-compile",
     "crates/contracts/operations/mesh-boolean",
+    "crates/contracts/operations/pointcloud-reconstruction",
     "crates/contracts/operations/mesh-section",
     "crates/contracts/operations/tessellate",
     "crates/algorithms/predicates",
@@ -42,6 +44,7 @@ members = [
     "crates/algorithms/discrete/refine",
     "crates/algorithms/sampled/levelset",
     "crates/providers/mesh/boolmesh",
+    "crates/providers/pointcloud/sdf",
     "crates/execution/compile",
     "crates/execution/dispatch",
     "crates/execution/cpu",
@@ -67,6 +70,7 @@ readme = "README.md"
 axiolid = { path = "crates/facade/axiolid", version = "0.11.0", default-features = false }
 axiolid-core = { path = "crates/foundation/core", version = "0.11.0" }
 axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.11.0" }
+axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.11.0" }
 axiolid-model = { path = "crates/representations/modeling/graph", version = "0.11.0" }
 axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.11.0" }
 axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.11.0" }
@@ -111,11 +115,13 @@ axiolid-mesh-contracts = { path = "crates/contracts/common/mesh", version = "0.1
 axiolid-mesh-compile-contract = { path = "crates/contracts/operations/compile", version = "0.11.0" }
 axiolid-exact-compile-contract = { path = "crates/contracts/operations/exact-compile", version = "0.11.0" }
 axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boolean", version = "0.11.0" }
+axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.11.0" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.11.0" }
 axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.11.0", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.11.0", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.11.0", default-features = false }
 axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.11.0" }
+axiolid-pointcloud-reconstruction-sdf = { path = "crates/providers/pointcloud/sdf", version = "0.11.0" }
 glam = "0.29"
 thiserror = "2.0"
 rayon = "1.10"

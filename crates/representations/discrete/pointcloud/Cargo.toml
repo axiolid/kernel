@@ -1,0 +1,23 @@
+[package]
+name = "axiolid-pointcloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Portable point-sampled geometry values with optional per-point channels."
+
+[dependencies]
+axiolid-core.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "representations"
+role = "representation.discrete"
+domain = "discrete.pointcloud"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core"]

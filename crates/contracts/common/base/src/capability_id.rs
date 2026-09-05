@@ -34,6 +34,14 @@ pub mod capability_ids {
         CapabilityId::from_static("org.axiolid.geometry.mesh-boolean.v1");
     pub const MESH_SECTION: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.mesh-section.v1");
+    /// Point-sampled geometry reconstructed into a discrete surface.
+    ///
+    /// Distinct from [`MESH_BOOLEAN`] and friends because the input is not a
+    /// mesh at all: a provider advertising this claims it can turn an
+    /// unstructured point set into a surface, which is a different
+    /// obligation from operating on one that already exists.
+    pub const POINTCLOUD_RECONSTRUCTION: CapabilityId =
+        CapabilityId::from_static("org.axiolid.geometry.pointcloud-reconstruction.v1");
     pub const MESH_VALIDATE: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.mesh-validate.v1");
     pub const MESH_MEASURE: CapabilityId =

@@ -13,6 +13,7 @@ readme.workspace = true
 default = []
 mesh-boolean = ["dep:axiolid-core", "dep:axiolid-mesh", "dep:axiolid-mesh-contracts", "dep:axiolid-mesh-boolean-contract"]
 mesh-section = ["dep:axiolid-core", "dep:axiolid-mesh", "dep:axiolid-mesh-contracts", "dep:axiolid-mesh-section-contract"]
+pointcloud-reconstruction = ["dep:axiolid-pointcloud", "dep:axiolid-pointcloud-reconstruction-contract"]
 
 [dependencies]
 axiolid-contracts.workspace = true
@@ -21,6 +22,8 @@ axiolid-mesh = { workspace = true, optional = true }
 axiolid-mesh-contracts = { workspace = true, optional = true }
 axiolid-mesh-boolean-contract = { workspace = true, optional = true }
 axiolid-mesh-section-contract = { workspace = true, optional = true }
+axiolid-pointcloud = { workspace = true, optional = true }
+axiolid-pointcloud-reconstruction-contract = { workspace = true, optional = true }
 
 [package.metadata.axiolid]
 architecture-version = 1
@@ -29,4 +32,11 @@ role = "execution.dispatch"
 domain = "providers"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-mesh", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-mesh", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-pointcloud", "axiolid-pointcloud-reconstruction-contract", "axiolid-pointcloud-reconstruction-sdf"]
+
+[dev-dependencies]
+axiolid-pointcloud-reconstruction-sdf.workspace = true
+axiolid-mesh.workspace = true
+axiolid-pointcloud.workspace = true
+axiolid-core.workspace = true
+axiolid-pointcloud-reconstruction-contract.workspace = true

@@ -7,6 +7,8 @@
 
 pub mod bvh;
 pub mod index;
+pub mod points;
 
 pub use bvh::{Bvh, CandidatePair, NearestCandidate, PairCandidates, SpatialQueryStats};
 pub use index::{RayHit, SpatialIndex, SpatialItem};
+pub use points::{PointHit, PointIndex, PointQueryError};

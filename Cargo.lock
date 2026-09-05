@@ -86,6 +86,9 @@ dependencies = [
  "axiolid-model",
  "axiolid-nurbs",
  "axiolid-overlay",
+ "axiolid-pointcloud",
+ "axiolid-pointcloud-reconstruction-contract",
+ "axiolid-pointcloud-reconstruction-sdf",
  "axiolid-predicates",
  "axiolid-primitive",
  "axiolid-profile",
@@ -221,6 +224,9 @@ dependencies = [
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-contracts",
  "axiolid-mesh-section-contract",
+ "axiolid-pointcloud",
+ "axiolid-pointcloud-reconstruction-contract",
+ "axiolid-pointcloud-reconstruction-sdf",
 ]
 
 [[package]]
@@ -484,6 +490,36 @@ version = "0.11.0"
 dependencies = [
  "axiolid-core",
  "i_overlay",
+]
+
+[[package]]
+name = "axiolid-pointcloud"
+version = "0.11.0"
+dependencies = [
+ "axiolid-core",
+]
+
+[[package]]
+name = "axiolid-pointcloud-reconstruction-contract"
+version = "0.11.0"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-mesh",
+ "axiolid-pointcloud",
+]
+
+[[package]]
+name = "axiolid-pointcloud-reconstruction-sdf"
+version = "0.11.0"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-levelset",
+ "axiolid-mesh",
+ "axiolid-pointcloud",
+ "axiolid-pointcloud-reconstruction-contract",
+ "axiolid-spatial",
 ]
 
 [[package]]

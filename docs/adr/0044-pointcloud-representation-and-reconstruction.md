@@ -1,7 +1,7 @@
 # 0044 — Pointcloud representation and reconstruction capability
 
-- **Status:** Proposed
-- **Date:** 2026-09-03
+- **Status:** Accepted
+- **Date:** 2026-09-03 (accepted 2026-09-05)
 - **Deciders:** GeneralPawz, Hermes
 - **Supersedes:** —
 
@@ -110,6 +110,30 @@ outcomes, consistent with every other operation contract.
   not as a "just this once" exception inside the pointcloud representation.
 - Reconstruction algorithm choice (Poisson vs. ball-pivot vs. alpha-shape) is
   a provider decision, not fixed by this ADR or its contract.
+
+## As built
+
+Landed 2026-09-05 across #60–#65. The shape matches this ADR; two points are
+worth recording because they were decided during implementation:
+
+- **The provider is not an adopted dependency.** The ADR anticipated
+  vendoring an external reconstruction library. Instead
+  `axiolid-pointcloud-reconstruction-sdf` composes two capabilities the
+  kernel already owns: `PointIndex` neighbour queries (#61) and
+  `axiolid-levelset` extraction (#87). No third-party numerics are adopted,
+  so there is no new licensing surface and nothing unauditable. A Poisson or
+  ball-pivot provider can still be added later — that is what the contract is
+  for — but the contract is verifiable *now*, satisfying ADR 0035's rule that
+  a contract lands with a real implementation.
+- **Refusal is not a fallback trigger in dispatch.** When a provider says the
+  data cannot support the request, that is an answer about the *data*, not a
+  provider failure. Falling through would search for a provider willing to
+  guess, which is exactly the silent degradation the contract forbids. Only
+  `Unsupported`/`Unavailable` fall through.
+
+The ingestion boundary is unchanged and enforced by the architecture gate:
+`axiolid-pointcloud` declares `allowed-internal-dependencies = ["axiolid-core"]`
+and no crate under `crates/` names a source format.
 
 ## Relation to existing code
 

@@ -1,0 +1,37 @@
+[package]
+name = "axiolid-pointcloud-reconstruction-sdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Reference pointcloud reconstruction: signed-distance field from samples, extracted as a level set."
+
+[dependencies]
+axiolid-contracts.workspace = true
+axiolid-core.workspace = true
+axiolid-pointcloud.workspace = true
+axiolid-mesh.workspace = true
+axiolid-spatial.workspace = true
+axiolid-levelset.workspace = true
+axiolid-pointcloud-reconstruction-contract.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "providers"
+role = "provider.pointcloud"
+domain = "pointcloud.reconstruction"
+public = true
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-levelset",
+    "axiolid-mesh",
+    "axiolid-pointcloud",
+    "axiolid-pointcloud-reconstruction-contract",
+    "axiolid-spatial",
+]

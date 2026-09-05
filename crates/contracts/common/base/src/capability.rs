@@ -170,6 +170,7 @@ pub enum Operation {
     Tessellation,
     MeshBoolean,
     MeshPlaneSection,
+    PointcloudReconstruction,
     SpatialQuery,
     Measurement,
     Healing,

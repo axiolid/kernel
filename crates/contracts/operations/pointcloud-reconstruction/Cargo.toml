@@ -1,0 +1,31 @@
+[package]
+name = "axiolid-pointcloud-reconstruction-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite."
+
+[dependencies]
+axiolid-contracts.workspace = true
+axiolid-core.workspace = true
+axiolid-pointcloud.workspace = true
+axiolid-mesh.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "contracts"
+role = "contract.operation"
+domain = "operation.pointcloud-reconstruction"
+public = true
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-mesh",
+    "axiolid-pointcloud",
+]

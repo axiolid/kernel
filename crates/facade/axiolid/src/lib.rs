@@ -27,6 +27,29 @@ pub mod mesh {
     pub use axiolid_mesh::*;
 }
 
+/// Point-sampled geometry: scans and photogrammetry captures.
+///
+/// Representation only. Parsing LAS/LAZ/E57/PCD/COPC is deliberately out of
+/// the kernel (ADR 0038); an ingestion crate converts a file into this value
+/// and the kernel never sees the source format.
+#[cfg(feature = "pointcloud")]
+pub mod pointcloud {
+    pub use axiolid_pointcloud::*;
+}
+
+/// Turning point-sampled geometry into a surface.
+///
+/// The contract and its types. A concrete provider arrives with the
+/// `pointcloud-provider` feature, or a caller supplies its own.
+#[cfg(feature = "pointcloud-reconstruction")]
+pub mod pointcloud_reconstruction {
+    pub use axiolid_pointcloud_reconstruction_contract::*;
+
+    /// Reference provider: a signed-distance field extracted as a level set.
+    #[cfg(feature = "pointcloud-provider")]
+    pub use axiolid_pointcloud_reconstruction_sdf::SdfReconstruction;
+}
+
 #[cfg(feature = "linear")]
 pub mod linear {
     pub use axiolid_linear::*;
