@@ -1,0 +1,41 @@
+[package]
+name = "axiolid-decompose"
+description = "Convex decomposition of a solid, exact or approximate and always labelled"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-mesh.workspace = true
+axiolid-measure.workspace = true
+axiolid-construct.workspace = true
+axiolid-reference.workspace = true
+axiolid-mesh-boolean-contract.workspace = true
+axiolid-contracts.workspace = true
+thiserror.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.discrete"
+domain = "discrete.decompose"
+public = true
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-boolean-contract",
+    "axiolid-reference",
+]
+
+[dev-dependencies]
+axiolid-mesh-boolean-boolmesh.workspace = true

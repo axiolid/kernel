@@ -197,6 +197,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-decompose"
+version = "0.11.0"
+dependencies = [
+ "axiolid-construct",
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-measure",
+ "axiolid-mesh",
+ "axiolid-mesh-boolean-boolmesh",
+ "axiolid-mesh-boolean-contract",
+ "axiolid-reference",
+ "thiserror",
+]
+
+[[package]]
 name = "axiolid-dispatch"
 version = "0.11.0"
 dependencies = [

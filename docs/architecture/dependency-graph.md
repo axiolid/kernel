@@ -18,6 +18,7 @@ graph TD
     axiolid_core["axiolid-core\nfoundation.values"]
     axiolid_curve["axiolid-curve\nrepresentation.atomic"]
     axiolid_decimate["axiolid-decimate\nalgorithm.discrete"]
+    axiolid_decompose["axiolid-decompose\nalgorithm.discrete"]
     axiolid_dispatch["axiolid-dispatch\nexecution.dispatch"]
     axiolid_evaluate["axiolid-evaluate\nalgorithm.parametric"]
     axiolid_exact_compile_contract["axiolid-exact-compile-contract\ncontract.operation"]
@@ -128,6 +129,14 @@ graph TD
     axiolid_decimate --> axiolid_heal
     axiolid_decimate --> axiolid_measure
     axiolid_decimate --> axiolid_mesh
+    axiolid_decompose --> axiolid_construct
+    axiolid_decompose --> axiolid_contracts
+    axiolid_decompose --> axiolid_core
+    axiolid_decompose --> axiolid_measure
+    axiolid_decompose --> axiolid_mesh
+    axiolid_decompose --> axiolid_mesh_boolean_boolmesh
+    axiolid_decompose --> axiolid_mesh_boolean_contract
+    axiolid_decompose --> axiolid_reference
     axiolid_dispatch --> axiolid_contracts
     axiolid_dispatch --> axiolid_core
     axiolid_dispatch --> axiolid_mesh
