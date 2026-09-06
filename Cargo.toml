@@ -56,7 +56,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 rust-version = "1.88"
 license = "MPL-2.0"
@@ -67,61 +67,61 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Format-agnostic Axiolid geometry kernel. Leaf crates remain independently consumable.
-axiolid = { path = "crates/facade/axiolid", version = "0.11.0", default-features = false }
-axiolid-core = { path = "crates/foundation/core", version = "0.11.0" }
-axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.11.0" }
-axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.11.0" }
-axiolid-model = { path = "crates/representations/modeling/graph", version = "0.11.0" }
-axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.11.0" }
-axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.11.0" }
-axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.11.0" }
-axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.11.0" }
-axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.11.0" }
-axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.11.0" }
-axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.11.0" }
-axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.11.0" }
-axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.11.0" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.11.0" }
-axiolid-profile = { path = "crates/representations/region/profile", version = "0.11.0" }
-axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.11.0" }
-axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.11.0", default-features = false }
-axiolid-surface = { path = "crates/representations/analytic/surface", version = "0.11.0" }
-axiolid-topology = { path = "crates/representations/topology", version = "0.11.0" }
-axiolid-brep = { path = "crates/representations/brep", version = "0.11.0" }
-axiolid-tessellation-contract = { path = "crates/contracts/operations/tessellate", version = "0.11.0" }
-axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.11.0" }
-axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.11.0" }
-axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.11.0" }
-axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.11.0" }
-axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.11.0" }
-axiolid-project = { path = "crates/algorithms/planar/project", version = "0.11.0" }
-axiolid-route = { path = "crates/algorithms/planar/route", version = "0.11.0" }
-axiolid-field = { path = "crates/representations/sampled/field", version = "0.11.0" }
-axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.11.0", default-features = false }
+axiolid = { path = "crates/facade/axiolid", version = "0.12.0", default-features = false }
+axiolid-core = { path = "crates/foundation/core", version = "0.12.0" }
+axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.12.0" }
+axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.12.0" }
+axiolid-model = { path = "crates/representations/modeling/graph", version = "0.12.0" }
+axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.12.0" }
+axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.12.0" }
+axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.12.0" }
+axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.12.0" }
+axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.12.0" }
+axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.12.0" }
+axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.12.0" }
+axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.12.0" }
+axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.12.0" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.12.0" }
+axiolid-profile = { path = "crates/representations/region/profile", version = "0.12.0" }
+axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.12.0" }
+axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.12.0", default-features = false }
+axiolid-surface = { path = "crates/representations/analytic/surface", version = "0.12.0" }
+axiolid-topology = { path = "crates/representations/topology", version = "0.12.0" }
+axiolid-brep = { path = "crates/representations/brep", version = "0.12.0" }
+axiolid-tessellation-contract = { path = "crates/contracts/operations/tessellate", version = "0.12.0" }
+axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.12.0" }
+axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.12.0" }
+axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.12.0" }
+axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.12.0" }
+axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.12.0" }
+axiolid-project = { path = "crates/algorithms/planar/project", version = "0.12.0" }
+axiolid-route = { path = "crates/algorithms/planar/route", version = "0.12.0" }
+axiolid-field = { path = "crates/representations/sampled/field", version = "0.12.0" }
+axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.12.0", default-features = false }
 i_overlay = "4.5.2"
-axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.11.0", default-features = false }
-axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.11.0", default-features = false }
-axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.11.0", default-features = false }
-axiolid-reference = { path = "crates/algorithms/reference", version = "0.11.0" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.11.0" }
+axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.12.0", default-features = false }
+axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.12.0", default-features = false }
+axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.12.0", default-features = false }
+axiolid-reference = { path = "crates/algorithms/reference", version = "0.12.0" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.12.0" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that
 # depend on axiolid-nurbs never need axiolid-oracle to exist on crates.io.
 axiolid-oracle = { path = "tools/oracle" }
-axiolid-contracts = { path = "crates/contracts/common/base", version = "0.11.0" }
-axiolid-guarantees = { path = "crates/contracts/guarantees", version = "0.11.0" }
-axiolid-mesh-contracts = { path = "crates/contracts/common/mesh", version = "0.11.0" }
-axiolid-mesh-compile-contract = { path = "crates/contracts/operations/compile", version = "0.11.0" }
-axiolid-exact-compile-contract = { path = "crates/contracts/operations/exact-compile", version = "0.11.0" }
-axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boolean", version = "0.11.0" }
-axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.11.0" }
-axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.11.0" }
-axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.11.0", default-features = false }
-axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.11.0", default-features = false }
-axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.11.0", default-features = false }
-axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.11.0" }
-axiolid-pointcloud-reconstruction-sdf = { path = "crates/providers/pointcloud/sdf", version = "0.11.0" }
+axiolid-contracts = { path = "crates/contracts/common/base", version = "0.12.0" }
+axiolid-guarantees = { path = "crates/contracts/guarantees", version = "0.12.0" }
+axiolid-mesh-contracts = { path = "crates/contracts/common/mesh", version = "0.12.0" }
+axiolid-mesh-compile-contract = { path = "crates/contracts/operations/compile", version = "0.12.0" }
+axiolid-exact-compile-contract = { path = "crates/contracts/operations/exact-compile", version = "0.12.0" }
+axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boolean", version = "0.12.0" }
+axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.12.0" }
+axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.12.0" }
+axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.12.0", default-features = false }
+axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.12.0", default-features = false }
+axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.12.0", default-features = false }
+axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.12.0" }
+axiolid-pointcloud-reconstruction-sdf = { path = "crates/providers/pointcloud/sdf", version = "0.12.0" }
 glam = "0.29"
 thiserror = "2.0"
 rayon = "1.10"
