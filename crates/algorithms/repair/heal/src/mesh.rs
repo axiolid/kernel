@@ -6,11 +6,11 @@
 //! index so a caller can act on it, and applies only the repairs it was
 //! explicitly asked for.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use axiolid_core::{Scalar, Tolerance};
 use axiolid_measure::volume_properties;
-use axiolid_mesh::TriMesh;
+use axiolid_mesh::{EdgeAdjacency, TriMesh};
 
 use crate::diagnosis::{Defect, DefectKind, Diagnosis};
 use crate::repair::{RepairAction, RepairPlan, RepairReport};
@@ -318,12 +318,10 @@ fn unify_orientation(mesh: &mut TriMesh) -> bool {
     if count == 0 {
         return false;
     }
-    let mut directed: BTreeMap<(u32, u32), Vec<usize>> = BTreeMap::new();
-    for t in 0..count {
-        for (a, b) in corners(mesh, t) {
-            directed.entry((a.min(b), a.max(b))).or_default().push(t);
-        }
-    }
+    // Adjacency is derived once by the shared structure. Flipping a triangle
+    // reverses its corner order but not its undirected edge set, so the map
+    // stays valid for the whole traversal.
+    let adjacency = EdgeAdjacency::build(mesh);
     let mut visited = vec![false; count];
     let mut flipped = false;
     for seed in 0..count {
@@ -334,12 +332,16 @@ fn unify_orientation(mesh: &mut TriMesh) -> bool {
         let mut queue = VecDeque::from([seed]);
         while let Some(t) = queue.pop_front() {
             for (a, b) in corners(mesh, t) {
-                let key = (a.min(b), a.max(b));
-                let Some(neighbours) = directed.get(&key) else {
-                    continue;
-                };
-                for &n in neighbours {
-                    if n == t || visited[n] {
+                for n in adjacency.triangle_neighbours(t) {
+                    if visited[n] {
+                        continue;
+                    }
+                    // Only the neighbour across THIS corner is judged here;
+                    // the others are reached on their own corner.
+                    let shares = corners(mesh, n)
+                        .into_iter()
+                        .any(|(c, d)| (c.min(d), c.max(d)) == (a.min(b), a.max(b)));
+                    if !shares {
                         continue;
                     }
                     // Same directed edge means the neighbour winds the

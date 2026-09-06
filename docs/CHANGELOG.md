@@ -8,7 +8,7 @@ All notable changes to Axiolid are documented in this file.
 - `axiolid-spatial` no longer claims an octree it does not implement; the crate description and docs name only the BVH and uniform point grid, with the octree listed as a structure that *could* implement the same callback API
 
 ### Added
-- Added `EdgeAdjacency` to `axiolid-mesh`: edge-to-triangle adjacency derived once, with boundary, non-manifold, inconsistent-winding, vertex-neighbour, and Euler-characteristic queries. `genus`, `smooth`, and `decompose` now ask it instead of each rebuilding their own edge map
+- Added `EdgeAdjacency` to `axiolid-mesh`: edge-to-triangle adjacency derived once, with boundary, non-manifold, inconsistent-winding, vertex-neighbour, and Euler-characteristic queries. `genus`, `smooth`, `decompose`, and heal's orientation unification now ask it instead of each rebuilding their own edge map
 - Added `axiolid-pointcloud`: a validated point-set value with optional per-point normal, colour, and intensity channels. Representation only — no topology, no algorithms, and no source-format types; LAS/LAZ/E57/PCD/COPC parsing stays outside the kernel per ADR 0044
 - Added KNN and radius queries over point sets to `axiolid-spatial` (`PointIndex`). Callback-based so the hot path allocates nothing per hit, with exact distances rather than the BVH's broad-phase bounds, and deterministic tie-breaking by point index
 - Added `axiolid-pointcloud-reconstruction-contract`: request, evidence, typed refusal, and an exported conformance suite for turning point sets into surfaces. A missing surface is always a named refusal, never an empty mesh; surface invented across gaps in a capture is counted in `interpolated_triangles`
