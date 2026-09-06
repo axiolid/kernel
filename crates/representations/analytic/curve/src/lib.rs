@@ -7,11 +7,13 @@
 
 pub mod conic;
 pub mod evaluate;
+pub mod intrinsic;
 pub mod linear;
 pub mod spline;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use evaluate::CurveEvaluator;
+pub use intrinsic::{CurvatureLaw, Intrinsic2};
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
 
@@ -36,6 +38,10 @@ pub enum Curve2 {
     Polyline(Polyline2),
     /// Polynomial or rational B-spline.
     BSpline(BSplineCurve2),
+    /// Curve given by its natural equation: curvature as a function of arc
+    /// length, anchored to a start frame. Carries clothoid and other
+    /// transition spirals exactly, which no parametric variant can.
+    Intrinsic(Intrinsic2),
 }
 
 /// Atomic three-dimensional curve values.
