@@ -11,10 +11,10 @@
 //! border against the original is asking an exactness question and deserves
 //! an exact answer.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use axiolid_core::{Point3, Scalar};
-use axiolid_mesh::TriMesh;
+use axiolid_mesh::{EdgeAdjacency, TriMesh};
 
 use crate::{RefineError, SmoothReport};
 
@@ -68,32 +68,12 @@ pub fn smooth(
         return Err(RefineError::InvalidTarget(options.factor));
     }
 
-    // An edge belongs to exactly two triangles in a closed mesh. One
-    // occurrence means the edge is on the border, so both its endpoints are
-    // boundary vertices.
-    let mut edge_uses: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for chunk in mesh.indices.chunks_exact(3) {
-        for (from, to) in [(0, 1), (1, 2), (2, 0)] {
-            let (a, b) = (chunk[from], chunk[to]);
-            let key = if a < b { (a, b) } else { (b, a) };
-            *edge_uses.entry(key).or_insert(0) += 1;
-        }
-    }
-    let mut boundary: BTreeSet<u32> = BTreeSet::new();
-    for (&(a, b), &uses) in &edge_uses {
-        if uses == 1 {
-            boundary.insert(a);
-            boundary.insert(b);
-        }
-    }
-
-    // Adjacency is derived once: the connectivity never changes, only the
-    // positions, so recomputing it per pass would be wasted work.
-    let mut neighbours: Vec<BTreeSet<u32>> = vec![BTreeSet::new(); vertex_count];
-    for &(a, b) in edge_uses.keys() {
-        neighbours[a as usize].insert(b);
-        neighbours[b as usize].insert(a);
-    }
+    // Adjacency is derived once: connectivity never changes here, only
+    // positions, so rebuilding it per pass would be wasted work. Boundary
+    // vertices are pinned, since moving them would shrink the surface.
+    let adjacency = EdgeAdjacency::build(mesh);
+    let boundary: BTreeSet<u32> = adjacency.boundary_vertices().into_iter().collect();
+    let neighbours = adjacency.vertex_neighbours();
 
     let mut positions = mesh.positions.clone();
     let mut moved = 0usize;

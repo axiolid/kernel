@@ -77,7 +77,7 @@ pub mod split;
 use std::collections::BTreeMap;
 
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
-use axiolid_mesh::{audit_mesh, TriMesh};
+use axiolid_mesh::{audit_mesh, EdgeAdjacency, TriMesh};
 use thiserror::Error;
 
 /// Why a decomposition could not be produced.
@@ -515,18 +515,14 @@ fn clip(mesh: &TriMesh, normal: Vec3, offset: Scalar, tolerance: Tolerance) -> O
     // closed shell every undirected edge is used exactly twice, so the
     // edges used ONCE are precisely the hole -- whatever the clipping did
     // upstream. The cap can then be neither too generous nor too strict.
-    let mut usage: BTreeMap<(u32, u32), i32> = BTreeMap::new();
-    for chunk in indices.chunks_exact(3) {
-        for (from, to) in [(0, 1), (1, 2), (2, 0)] {
-            let (a, b) = (chunk[from], chunk[to]);
-            let key = if a < b { (a, b) } else { (b, a) };
-            *usage.entry(key).or_insert(0) += 1;
-        }
-    }
-    let open_edges: Vec<(Point3, Point3)> = usage
-        .iter()
-        .filter(|(_, &count)| count == 1)
-        .map(|(&(a, b), _)| (positions[a as usize], positions[b as usize]))
+    let shell = TriMesh::new(positions.clone(), indices.clone());
+    let adjacency = EdgeAdjacency::build(&shell);
+    let open_edges: Vec<(Point3, Point3)> = adjacency
+        .boundary_edges()
+        .map(|edge| {
+            let (a, b) = edge.endpoints();
+            (positions[a as usize], positions[b as usize])
+        })
         .collect();
 
     if open_edges.is_empty() {

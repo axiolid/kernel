@@ -1,6 +1,7 @@
 # axiolid-spatial implementation plan
 
-Status: BVH implemented; octree and uniform-grid providers remain planned.
+Status: BVH and uniform point grid implemented; octree remains unimplemented
+and is deliberately not claimed in the crate description or docs.
 
 ## Established
 
@@ -18,8 +19,10 @@ Status: BVH implemented; octree and uniform-grid providers remain planned.
 - Benchmark this BVH against an external reference implementation on
   representative sparse, dense, and adversarial distributions before adding
   parallel build/query code.
-- Add octree or uniform-grid providers only where a measured workload justifies
-  their different update/query trade-offs.
+- `PointIndex` (uniform grid) is implemented for point KNN/radius queries.
+- Add an octree only where a measured workload justifies it. The BVH covers
+  object queries and the grid covers point queries; an octree's advantage is
+  sparse volumetric subdivision, which no consumer needs yet.
 
 ## Exit evidence
 

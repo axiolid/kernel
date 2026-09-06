@@ -19,6 +19,13 @@ deliberately conservative:
 Where the two differ, the status column wins. An accepted ambition is not
 evidence that an algorithm exists.
 
+::: tip Looking for a quick answer?
+The [support map](/support-map) is the scannable version: one row per
+capability, red/yellow/green, including what is deliberately **out** of scope
+and which Cargo feature turns each thing on. This page is the detailed
+prose account.
+:::
+
 ## Where the implementation stands against the ambition
 
 Graph execution now has **separate exact and discrete paths**. The reference exact

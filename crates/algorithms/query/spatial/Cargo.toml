@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 authors.workspace = true
-description = "Acceleration structures: BVH, octree, uniform grid, and their queries."
+description = "Acceleration structures: BVH and uniform point grid, and their queries."
 
 [dependencies]
 axiolid-core.workspace = true

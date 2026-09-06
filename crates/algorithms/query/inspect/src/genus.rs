@@ -4,8 +4,7 @@
 //! meaningful on a closed two-manifold, so this refuses anything else
 //! rather than returning a number the caller would have no way to distrust.
 
-use axiolid_mesh::TriMesh;
-use std::collections::BTreeSet;
+use axiolid_mesh::{EdgeAdjacency, TriMesh};
 use thiserror::Error;
 
 /// Why a genus could not be computed.
@@ -37,26 +36,9 @@ pub enum GenusError {
 /// assumes a closed two-manifold, and applying it anyway would produce a
 /// plausible-looking integer with no meaning.
 pub fn genus(mesh: &TriMesh) -> Result<u32, GenusError> {
-    let faces = mesh.indices.len() / 3;
-    let mut edge_uses: std::collections::BTreeMap<(u32, u32), usize> =
-        std::collections::BTreeMap::new();
-    let mut vertices = BTreeSet::new();
-
-    for triangle in mesh.indices.chunks_exact(3) {
-        for corner in triangle {
-            vertices.insert(*corner);
-        }
-        for i in 0..3 {
-            let a = triangle[i];
-            let b = triangle[(i + 1) % 3];
-            // Undirected key: the same edge from either side must collide.
-            let key = if a < b { (a, b) } else { (b, a) };
-            *edge_uses.entry(key).or_insert(0) += 1;
-        }
-    }
-
-    let boundary = edge_uses.values().filter(|uses| **uses == 1).count();
-    let non_manifold = edge_uses.values().filter(|uses| **uses > 2).count();
+    let adjacency = EdgeAdjacency::build(mesh);
+    let boundary = adjacency.boundary_edges().count();
+    let non_manifold = adjacency.non_manifold_edges().count();
     if boundary > 0 || non_manifold > 0 {
         return Err(GenusError::NotClosedManifold {
             boundary,
@@ -65,11 +47,9 @@ pub fn genus(mesh: &TriMesh) -> Result<u32, GenusError> {
     }
 
     // Only vertices actually referenced by a triangle count: an unused
-    // position is stray data, not part of the surface.
-    let v = vertices.len() as i64;
-    let e = edge_uses.len() as i64;
-    let f = faces as i64;
-    let characteristic = v - e + f;
+    // position is stray data, not part of the surface. `EdgeAdjacency`
+    // already applies that rule, so the two cannot disagree.
+    let characteristic = adjacency.euler_characteristic();
 
     // chi = 2 - 2g, so g = (2 - chi) / 2. An odd characteristic means the
     // input is not a closed orientable surface after all.

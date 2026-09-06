@@ -77,6 +77,16 @@ impl Diagnose<TriMesh> for MeshHealer {
 
         // Edge topology over usable triangles only. The key is the
         // undirected edge; the stored direction is what reveals winding.
+        //
+        // This deliberately does NOT use `axiolid_mesh::EdgeAdjacency`.
+        // That type excludes triangles with a repeated corner -- a purely
+        // combinatorial test. Healing excludes triangles whose *area* is
+        // below tolerance, which is strictly stronger: a sliver with three
+        // distinct corners is sound to `EdgeAdjacency` and a defect here.
+        // Sharing the structure would mean diagnosing slivers' edges as
+        // real adjacency and reporting manifold defects that do not exist.
+        //
+        // The duplication is the tolerance-aware filter, not the edge map.
         let mut edges: HashMap<(u32, u32), Vec<(usize, bool)>> = HashMap::new();
         for &t in &usable {
             for (a, b) in corners(mesh, t) {

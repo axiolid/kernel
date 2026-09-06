@@ -5,6 +5,7 @@
 //! N-gons remain [`PolygonMesh`] until explicit triangulation. [`TriMesh`] is
 //! the compact exchange type for render, spatial, and mesh-kernel algorithms.
 
+pub mod adjacency;
 pub mod attribute;
 pub mod audit;
 pub mod component;
@@ -13,6 +14,7 @@ pub mod polygon;
 pub mod triangle;
 pub mod view;
 
+pub use adjacency::{EdgeAdjacency, EdgeKey, EdgeUse};
 pub use attribute::{AttributeChannel, AttributeFate, Blend, DropReason};
 pub use audit::{audit_mesh, audit_mesh_scratch_bytes, try_audit_mesh, MeshAuditError, MeshHealth};
 pub use component::{component_count, compose, decompose};
