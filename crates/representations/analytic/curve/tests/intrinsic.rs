@@ -198,6 +198,31 @@ fn a_quadratic_law_integrates_with_descending_weights() {
     assert!((turning - 16.0).abs() < 1e-12);
 }
 
+/// Curvature of a composite law at one arc length, computed in the TEST
+/// only. This is direct closed-form arithmetic on stored coefficients --
+/// not position evaluation, quadrature, or sampling -- and it lives here
+/// rather than in the crate so the representation keeps refusing to
+/// evaluate. It exists to pin endpoint values the spec names explicitly.
+fn composite_curvature_at(law: &CurvatureLaw, s: Scalar) -> Scalar {
+    let CurvatureLaw::Composite {
+        polynomial,
+        harmonics,
+    } = law
+    else {
+        panic!("expected a composite law");
+    };
+    let poly: Scalar = polynomial
+        .iter()
+        .enumerate()
+        .map(|(power, c)| c * s.powi(power as i32))
+        .sum();
+    let harm: Scalar = harmonics
+        .iter()
+        .map(|h| h.amplitude * (h.angular_frequency * s + h.phase).sin())
+        .sum();
+    poly + harm
+}
+
 // --- Composite: polynomial and harmonic terms at once ---
 
 /// The acceptance case: k(s) = k0 + (d/L) s - (d/2pi) sin(2 pi s / L).
@@ -227,9 +252,18 @@ fn a_sine_corrected_transition_meets_both_endpoints_and_turns_the_mean() {
     );
     assert_eq!(harmonics[0].phase, 0.0);
 
-    // k(0): the sine vanishes at s = 0, leaving the constant term.
-    // k(L): the sine vanishes again after a full period, leaving k0 + d.
-    // Both are structural here -- no evaluator exists to ask.
+    // The spec names both endpoint curvatures, so assert them rather than
+    // asserting the coefficients that imply them. The sine vanishes at s = 0
+    // and again after a whole period, so the endpoints are exactly k0 and k0+d.
+    assert!(composite_curvature_at(&law, 0.0).abs() < 1e-18);
+    assert!((composite_curvature_at(&law, length) - delta).abs() < 1e-18);
+
+    // A quarter along, the sine is at its extreme rather than a zero, so this
+    // is the point that actually discriminates the harmonic term: a law that
+    // dropped the sine would still pass the endpoints and the total turning.
+    let quarter = composite_curvature_at(&law, length / 4.0);
+    let expected_quarter = delta / 4.0 - delta / core::f64::consts::TAU;
+    assert!((quarter - expected_quarter).abs() < 1e-15);
     let turning = Intrinsic2::new(frame(), law, length)
         .total_turning()
         .expect("finite length turns a finite amount");
