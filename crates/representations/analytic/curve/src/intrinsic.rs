@@ -23,6 +23,22 @@
 
 use axiolid_core::{Frame2, Scalar};
 
+/// One sinusoidal term of a curvature law:
+/// `amplitude * sin(angular_frequency * s + phase)`.
+///
+/// A term is deliberately not a law: it carries no mean. The constant part of
+/// a composite law lives in its polynomial, so a given function has one
+/// representation instead of many that differ only in where the mean was put.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Harmonic {
+    /// Peak deviation contributed by this term.
+    pub amplitude: Scalar,
+    /// Radians of phase per unit arc length.
+    pub angular_frequency: Scalar,
+    /// Phase offset at `s = 0`, in radians.
+    pub phase: Scalar,
+}
+
 /// Curvature as a closed-form function of arc length.
 ///
 /// Sign follows the usual plane convention: positive curvature turns the
@@ -66,6 +82,30 @@ pub enum CurvatureLaw {
         /// Phase offset at `s = 0`, in radians.
         phase: Scalar,
     },
+    /// `k(s) = sum c_i s^i + sum A_j sin(w_j s + p_j)`.
+    ///
+    /// A polynomial and any number of harmonic terms at once. Neither
+    /// `Polynomial` nor `Sinusoid` can hold a law with both a secular trend and
+    /// an oscillation, so a curve of that shape previously had to be refused or
+    /// approximated; this variant stores it exactly.
+    ///
+    /// The shape is flat and additive rather than a recursive `Sum(Vec<Self>)`.
+    /// A recursive sum would let the same function be written in unboundedly
+    /// many ways, would make `is_constant` a search over arbitrary trees, and
+    /// would admit nested sums that mean nothing extra. Flattening keeps one
+    /// canonical slot per kind of term, keeps the family closed under
+    /// differentiation and integration, and keeps the structural predicates a
+    /// finite check over two lists.
+    ///
+    /// Empty `harmonics` is exactly the polynomial law; an empty polynomial with
+    /// empty harmonics is the zero law. Both are legal, so a caller assembling
+    /// terms never has to special-case the empty stage.
+    Composite {
+        /// Coefficients in ascending powers of arc length.
+        polynomial: Vec<Scalar>,
+        /// Additive sinusoidal terms.
+        harmonics: Vec<Harmonic>,
+    },
 }
 
 impl CurvatureLaw {
@@ -100,6 +140,33 @@ impl CurvatureLaw {
         }
     }
 
+    /// A transition whose linear ramp carries one full sine correction over
+    /// its length: `k(s) = start + (d/L) s - (d / 2pi) sin(2 pi s / L)`, where
+    /// `d = end - start`.
+    ///
+    /// The sine term removes the curvature-rate step a plain clothoid has at
+    /// each end, so the rate starts and ends at zero instead of jumping. The
+    /// mean rate is still `d / L`, so the total turning is unchanged from the
+    /// clothoid's `(start + end) / 2 * L`.
+    ///
+    /// As with `clothoid`, a non-finite or zero `length` cannot define a rate,
+    /// so the result degrades to a constant `start` law.
+    #[must_use]
+    pub fn sine_corrected_transition(start: Scalar, end: Scalar, length: Scalar) -> Self {
+        if !length.is_finite() || length == 0.0 {
+            return Self::Constant { curvature: start };
+        }
+        let delta = end - start;
+        let turn = core::f64::consts::TAU;
+        Self::Composite {
+            polynomial: vec![start, delta / length],
+            harmonics: vec![Harmonic {
+                amplitude: -delta / turn,
+                angular_frequency: turn / length,
+                phase: 0.0,
+            }],
+        }
+    }
     /// Whether the law is identically zero, i.e. a straight line.
     ///
     /// Exact: this is a structural test on the stored coefficients, not a
@@ -121,6 +188,21 @@ impl CurvatureLaw {
                 // evaluation. Report false rather than guess.
                 *mean == 0.0 && *amplitude == 0.0 && angular_frequency.is_finite()
             }
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => {
+                // Every polynomial coefficient must vanish, and every harmonic
+                // must contribute nothing. A harmonic contributes nothing only
+                // when its amplitude is zero: a zero-frequency term freezes at
+                // A*sin(p), which cancels only for particular phases, and
+                // deciding that needs evaluation. Report false rather than
+                // guess, matching the Sinusoid precedent.
+                polynomial.iter().all(|c| *c == 0.0)
+                    && harmonics
+                        .iter()
+                        .all(|h| h.amplitude == 0.0 && h.angular_frequency.is_finite())
+            }
         }
     }
 
@@ -131,6 +213,19 @@ impl CurvatureLaw {
             Self::Constant { .. } => true,
             Self::Polynomial { coefficients } => coefficients.iter().skip(1).all(|c| *c == 0.0),
             Self::Sinusoid { amplitude, .. } => *amplitude == 0.0,
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => {
+                // Constant in s: no polynomial term above degree 0 survives, and
+                // no harmonic actually oscillates. A zero-frequency harmonic is
+                // frozen at A*sin(p) and so IS constant, unlike the straightness
+                // case where its value would also have to cancel.
+                polynomial.iter().skip(1).all(|c| *c == 0.0)
+                    && harmonics
+                        .iter()
+                        .all(|h| h.amplitude == 0.0 || h.angular_frequency == 0.0)
+            }
         }
     }
 
@@ -165,6 +260,29 @@ impl CurvatureLaw {
                 angular_frequency: *angular_frequency,
                 phase: phase + core::f64::consts::FRAC_PI_2,
             },
+            // Differentiation is linear, so each part differentiates in place:
+            // the polynomial drops a degree, and each harmonic keeps its
+            // frequency while gaining a factor w and a quarter-turn of phase.
+            // The result is again a Composite, so the family stays closed.
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => Self::Composite {
+                polynomial: polynomial
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .map(|(power, c)| *c * power as Scalar)
+                    .collect(),
+                harmonics: harmonics
+                    .iter()
+                    .map(|h| Harmonic {
+                        amplitude: h.amplitude * h.angular_frequency,
+                        angular_frequency: h.angular_frequency,
+                        phase: h.phase + core::f64::consts::FRAC_PI_2,
+                    })
+                    .collect(),
+            },
         }
     }
 
@@ -189,10 +307,53 @@ impl CurvatureLaw {
                 angular_frequency: *angular_frequency,
                 phase: *phase,
             },
+            // Negation is linear too: negate every coefficient and every
+            // amplitude. Frequencies and phases are untouched, so mirroring
+            // twice returns the original law exactly.
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => Self::Composite {
+                polynomial: polynomial.iter().map(|c| -c).collect(),
+                harmonics: harmonics
+                    .iter()
+                    .map(|h| Harmonic {
+                        amplitude: -h.amplitude,
+                        angular_frequency: h.angular_frequency,
+                        phase: h.phase,
+                    })
+                    .collect(),
+            },
         }
     }
 }
 
+/// Integral over `[0, s]` of `sum c_i x^i`, i.e. `sum c_i s^(i+1) / (i+1)`.
+fn polynomial_turning(coefficients: &[Scalar], s: Scalar) -> Scalar {
+    coefficients
+        .iter()
+        .enumerate()
+        .map(|(power, c)| c * s.powi(power as i32 + 1) / (power as Scalar + 1.0))
+        .sum()
+}
+
+/// Integral over `[0, s]` of `A sin(w x + p)`.
+///
+/// That antiderivative is `-(A/w)[cos(w s + p) - cos(p)]`, which is undefined
+/// at `w == 0`. The integrand is then the constant `A sin(p)`, so the integral
+/// is `A sin(p) s` -- the honest limit, not a special case invented to avoid a
+/// division.
+fn harmonic_turning(harmonic: &Harmonic, s: Scalar) -> Scalar {
+    let Harmonic {
+        amplitude,
+        angular_frequency,
+        phase,
+    } = *harmonic;
+    if angular_frequency == 0.0 {
+        return amplitude * phase.sin() * s;
+    }
+    -(amplitude / angular_frequency) * ((angular_frequency * s + phase).cos() - phase.cos())
+}
 /// A plane curve given by its natural equation: a curvature law anchored to a
 /// start frame and run for a finite arc length.
 ///
@@ -271,6 +432,19 @@ impl Intrinsic2 {
                         * ((angular_frequency * s + phase).cos() - phase.cos());
                 Some(turn)
             }
+            // The integral of a sum is the sum of the integrals, so the
+            // composite turning is its polynomial's plus each harmonic's. No
+            // new mathematics -- only the same closed forms, added up.
+            CurvatureLaw::Composite {
+                polynomial,
+                harmonics,
+            } => Some(
+                polynomial_turning(polynomial, s)
+                    + harmonics
+                        .iter()
+                        .map(|h| harmonic_turning(h, s))
+                        .sum::<Scalar>(),
+            ),
         }
     }
 }

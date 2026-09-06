@@ -54,7 +54,7 @@ Indices that answer *which candidates*, never *what the intersection is*.
 | Point clouds | 🟢 | `pointcloud` | `PointCloud`: positions plus optional normal, colour, intensity. No topology, no adjacency, no source-format types. |
 | Layered scalar fields (2.5D grid) | 🟢 | `field` | `LayeredField`, row-major cells with a validated configuration. |
 | Curves and surfaces | 🟢 | `curves`, `surfaces` | Neutral value types. Representation is not an evaluator claim — see the algorithms table. |
-| Intrinsic (natural-equation) curves | 🟢 | `curves` | `Curve2::Intrinsic` + `CurvatureLaw` — curvature as a function of arc length. Exact clothoid, Bloss, cubic-parabola, and sinusoidal transition spirals. Symbolic only: closed-form derivative, mirror, and total turning; no position evaluation, which needs quadrature. |
+| Intrinsic (natural-equation) curves | 🟢 | `curves` | `Curve2::Intrinsic` + `CurvatureLaw` — curvature as a function of arc length. Constant, polynomial (clothoid, Bloss), sinusoid, and composite polynomial-plus-harmonics laws for transition spirals. Exact and symbolic: differentiate, mirror, total turning in closed form. No position evaluation — that is a Fresnel-type integral and belongs to an evaluator that can state a tolerance. |
 | Profiles and contours | 🟢 | `profiles` | Validated closed/open contour values. |
 | Primitive solids and half-spaces | 🟢 | `primitives` | Neutral values with validation. |
 | Exact B-rep topology | 🟢 | `brep` | `BRep<Curve3, Curve2, Surface>` — faces, edges, vertices with exact underlying geometry. |

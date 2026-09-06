@@ -13,7 +13,7 @@ pub mod spline;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use evaluate::CurveEvaluator;
-pub use intrinsic::{CurvatureLaw, Intrinsic2};
+pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
 

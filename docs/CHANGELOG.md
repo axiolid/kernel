@@ -4,6 +4,9 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added `CurvatureLaw::Composite` and `Harmonic` to `axiolid-curve`: a polynomial part plus any number of additive sinusoidal terms in one law, so a transition spiral with both a linear ramp and a sine correction -- `k(s) = k0 + (d/L)s - (d/2pi) sin(2 pi s/L)` -- is stored exactly instead of being refused or approximated. `sine_corrected_transition` derives it from the endpoint curvatures and length. The shape is flat and additive rather than a recursive sum, so a given function has one representation, the family stays closed under differentiation and integration, and `is_straight`/`is_constant` stay structural. Existing variants are unchanged
+
 ## [0.12.0] - 2026-09-06
 
 ### Fixed
