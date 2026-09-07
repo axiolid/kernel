@@ -4,6 +4,14 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `docs/architecture/threading.md`: the CPU thread-pool model, why
+  `boolmesh`'s `rayon` feature is deliberately off (determinism, plus
+  measured net regression on realistic IFC with the crossover point),
+  and how a caller sizes worker count. Documents a shipped decision
+  whose evidence previously existed only in a stale worktree.
+
 ## [0.14.0] - 2026-09-07
 
 ### Added

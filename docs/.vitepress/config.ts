@@ -108,6 +108,7 @@ export default defineConfig({
           { text: "C ABI v0.4", link: "/architecture/c-abi-v0.4" },
           { text: "Native distribution", link: "/architecture/native-distribution" },
           { text: "Dependency graph", link: "/architecture/dependency-graph" },
+          { text: "Threading", link: "/architecture/threading" },
           { text: "openbim.geometry boundary", link: "/architecture/openbim-geometry-boundary" },
           { text: "Public crate reference", link: "/reference/crates" },
         ],
