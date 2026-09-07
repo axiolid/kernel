@@ -72,6 +72,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: callgrind-measurements
-          path: target/iai/
+          # Honour a CARGO_TARGET_DIR override if one is ever set.
+          path: ${{ env.CARGO_TARGET_DIR || 'target' }}/iai/
           if-no-files-found: ignore
           retention-days: 14

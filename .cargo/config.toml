@@ -1,5 +1,18 @@
-[build]
-target-dir = "/mnt/backup/build-cache/axiolid-target"
+# Workspace cargo configuration.
+#
+# Deliberately carries no `[build] target-dir`. It used to point at
+# `/mnt/backup/build-cache/axiolid-target`, an absolute path that exists only on
+# one development machine, which made every other environment -- CI runners,
+# fresh clones, other developers -- fail with a permission error before any
+# compilation started. A build directory is a local preference, not a property
+# of the repository.
+#
+# To keep a shared build cache locally, set it per-machine instead:
+#
+#   export CARGO_TARGET_DIR=/your/path        # shell profile
+#
+# or in ~/.cargo/config.toml, which applies to every project without being
+# committed to any of them.
 
 [alias]
 xtask = "run --quiet -p xtask --"
