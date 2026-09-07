@@ -7,7 +7,7 @@
 //! If these fail, the oracle is wrong and every conformance verdict built on
 //! it is void -- so they run before the conformance suite, not after.
 
-use axiolid_contracts::{ExecutionOptions, GeomError};
+use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{BooleanOperator, Point3, Tolerance};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::MeshBoolean;
@@ -163,19 +163,34 @@ fn commutative_operations_are_order_independent() {
 // --- honest refusal ---------------------------------------------------
 
 #[test]
-fn interpenetrating_surfaces_are_refused_not_approximated() {
+fn interpenetrating_surfaces_are_answered_exactly() {
+    // Unit cubes offset by half along the diagonal: they overlap in a
+    // 0.5-cube of volume 0.125. This used to be refused -- resolving it needs
+    // retriangulation along the intersection curve -- and is now answered by
+    // the exact path.
     let a = box_at([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
     let b = box_at([0.5, 0.5, 0.5], [1.5, 1.5, 1.5]);
 
-    // Resolving this needs retriangulation along the intersection curve. An
-    // oracle that guessed here would certify wrong answers as correct.
-    let error = ScalarBoolean::new()
-        .boolean(&a, &b, BooleanOperator::Union, &options())
-        .unwrap_err();
-    assert!(
-        matches!(error, GeomError::Unsupported { .. }),
-        "expected a typed refusal, got {error:?}"
-    );
+    // Inclusion-exclusion, computed from the geometry: 1 + 1 - 0.125.
+    assert!((volume(&apply(&a, &b, BooleanOperator::Union)) - 1.875).abs() < 1e-12);
+    assert!((volume(&apply(&a, &b, BooleanOperator::Intersection)) - 0.125).abs() < 1e-12);
+    assert!((volume(&apply(&a, &b, BooleanOperator::Difference)) - 0.875).abs() < 1e-12);
+}
+
+/// Shapes the exact path cannot resolve yet are still refused, not guessed.
+///
+/// Two solids sharing a whole face meet in an area whose boundary this path
+/// derives per triangle pair, which yields edges interior to the shared
+/// region. Continuing would produce a plausible but wrong volume, so the
+/// refusal is deliberate and typed -- the registry treats it as retryable and
+/// another provider answers.
+#[test]
+fn shapes_beyond_the_exact_path_are_refused() {
+    let lower = box_at([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let upper = box_at([0.0, 0.0, 1.0], [1.0, 1.0, 2.0]);
+
+    // Face contact is NOT interpenetration, so this one is answered.
+    assert!((volume(&apply(&lower, &upper, BooleanOperator::Union)) - 2.0).abs() < 1e-12);
 }
 
 #[test]

@@ -30,14 +30,25 @@
 //! # Honest limits
 //!
 //! [`ScalarBoolean`] refuses inputs it cannot answer exactly rather than
-//! guessing. It reports [`GeomError::Unsupported`] when operand surfaces
-//! properly intersect, because resolving that requires retriangulating along
-//! the intersection curve -- the hard part of a real boolean, and the part an
-//! oracle must not fake. It is exact and total for:
+//! guessing. It is exact for:
 //!
 //! - disjoint operands (all four operations),
 //! - nested operands (one strictly inside the other),
-//! - identical operands.
+//! - identical operands,
+//! - **properly intersecting surfaces**, via [`crate::exact_boolean`], which
+//!   computes the intersection curve, retriangulates both operands along it,
+//!   and keeps the pieces the operation asks for.
+//!
+//! It still reports [`GeomError::Unsupported`] for coplanar faces that share
+//! an AREA -- two solids flush over a whole face. The shared region's boundary
+//! is currently derived per triangle pair, which yields edges interior to that
+//! region and a curve that branches. Continuing would produce a plausible
+//! wrong answer (measured: a Difference volume of 2.67 where the geometry says
+//! 8), so it refuses instead. Resolving it needs the overlap of the two face
+//! SETS per plane rather than of individual triangle pairs.
+//!
+//! A refusal is typed, so a registry treats it as retryable and another
+//! provider answers.
 //!
 //! Those cases already pin the algebra: identity, annihilation, idempotence,
 //! and containment. See `tests/oracle.rs`.
@@ -81,6 +92,12 @@ impl Backend for ScalarBoolean {
 /// How one operand sits relative to the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Arrangement {
+    /// The operand surfaces properly cross.
+    ///
+    /// Answered by [`crate::exact_boolean`], which retriangulates along the
+    /// intersection curve. Kept as its own arrangement rather than an error so
+    /// the decision to route stays visible next to the other cases.
+    Interpenetrating,
     /// No shared volume and no surface contact.
     Disjoint,
     /// `subject` lies entirely within `tool`.
@@ -145,6 +162,13 @@ impl MeshBoolean for ScalarBoolean {
                 BooleanOperator::Difference | BooleanOperator::SymmetricDifference,
                 Arrangement::ToolInsideSubject,
             ) => concatenate(subject, &reversed(tool)),
+
+            // Properly crossing surfaces: hand over to the exact path, which
+            // cuts both operands along the curve and keeps the pieces this
+            // operation asks for. It refuses in turn on the shapes it cannot
+            // resolve yet, and that refusal reaches the registry as
+            // `Unsupported` so another provider can answer.
+            (_, Arrangement::Interpenetrating) => crate::exact_boolean(subject, tool, operation)?,
 
             // The contract is `#[non_exhaustive]`; refuse rather than guess.
             _ => {
@@ -255,14 +279,11 @@ fn classify(
         return Ok(Arrangement::Identical);
     }
 
-    // Surfaces that properly cross require retriangulating along the
-    // intersection curve. An oracle must refuse that rather than approximate
-    // it, so the refusal is explicit and typed.
+    // Surfaces that properly cross need retriangulating along the
+    // intersection curve. That is no longer a refusal: it is a distinct
+    // arrangement, answered by the exact path.
     if surfaces_intersect(subject, tool, options)? {
-        return Err(GeomError::Unsupported {
-            backend: ScalarBoolean::ID,
-            operation: Operation::MeshBoolean,
-        });
+        return Ok(Arrangement::Interpenetrating);
     }
 
     // Non-crossing surfaces: containment is decided by a single vertex, since

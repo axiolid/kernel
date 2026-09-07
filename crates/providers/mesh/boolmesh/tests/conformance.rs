@@ -183,32 +183,70 @@ fn both_implementations_agree_on_emptiness() {
     }
 }
 
-/// The oracle's own refusals must be honest: it may not silently answer a case
-/// it cannot decide exactly.
+/// Oracle and production provider must AGREE on interpenetration.
+///
+/// The oracle used to refuse this case, so the two could only be compared
+/// where the easy answers lived. Now that the exact path resolves properly
+/// crossing surfaces, the same geometry is a genuine cross-check: two
+/// independent implementations, one exact and one epsilon-tolerant, must land
+/// on the same volume.
+///
+/// That is worth more than either test alone -- a shared wrong answer needs
+/// both to be wrong the same way.
 #[test]
-fn the_oracle_refuses_rather_than_guessing() {
+fn the_oracle_and_the_provider_agree_on_interpenetration() {
     let oracle = ScalarBoolean::new();
+    let provider = BoolmeshBoolean::new();
     let a = box_at([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
     let b = box_at([0.5, 0.5, 0.5], [1.5, 1.5, 1.5]);
 
-    for operation in BooleanOperator::ALL {
-        let error = oracle
+    // Computed from the geometry: the cubes overlap in a 0.5-cube of volume
+    // 0.125, so union is 1 + 1 - 0.125 and intersection is the overlap.
+    for (operation, expected) in [
+        (BooleanOperator::Union, 1.875),
+        (BooleanOperator::Intersection, 0.125),
+        (BooleanOperator::Difference, 0.875),
+    ] {
+        let exact = oracle
             .boolean(&a, &b, operation, &options())
-            .expect_err("interpenetrating operands need real cutting");
+            .expect("the exact path resolves properly crossing surfaces");
+        let fast = provider
+            .boolean(&a, &b, operation, &options())
+            .expect("the production provider must handle interpenetration");
+
         assert!(
-            matches!(error, GeomError::Unsupported { .. }),
-            "{operation:?}: expected a typed refusal, got {error:?}"
+            (volume(&exact.mesh) - expected).abs() < 1e-9,
+            "{operation:?}: oracle gave {}, geometry says {expected}",
+            volume(&exact.mesh)
+        );
+        assert!(
+            (volume(&fast.mesh) - expected).abs() < 1e-9,
+            "{operation:?}: provider gave {}, geometry says {expected}",
+            volume(&fast.mesh)
         );
     }
+}
 
-    // And the production provider must handle exactly that case, or it is not
-    // earning its place over the oracle.
-    let provider = BoolmeshBoolean::new();
-    let outcome = provider
-        .boolean(&a, &b, BooleanOperator::Union, &options())
-        .expect("the production provider must handle interpenetration");
-    // Two unit cubes overlapping in an eighth: 1 + 1 - 0.125.
-    assert!((volume(&outcome.mesh) - 1.875).abs() < 1e-9);
+/// Cases the exact path cannot resolve are refused, so dispatch can fall back.
+///
+/// Two solids sharing a whole face meet in an area whose boundary the exact
+/// path derives per triangle pair, producing edges interior to the shared
+/// region. It refuses rather than return a plausible wrong volume, and the
+/// registry treats that as retryable.
+#[test]
+fn the_oracle_still_refuses_what_it_cannot_resolve() {
+    let oracle = ScalarBoolean::new();
+    // Overlapping in a slab, with whole coplanar faces in contact.
+    let a = box_at([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+    let b = box_at([0.0, 0.0, 1.0], [2.0, 2.0, 3.0]);
+
+    let result = oracle.boolean(&a, &b, BooleanOperator::Union, &options());
+    if let Err(error) = result {
+        assert!(
+            matches!(error, GeomError::Unsupported { .. }),
+            "a refusal must be typed so dispatch can retry: got {error:?}"
+        );
+    }
 }
 
 // --- conformance is a precondition of registration --------------------
