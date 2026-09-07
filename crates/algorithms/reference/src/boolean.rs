@@ -389,7 +389,54 @@ fn edges_cross_triangle(edges: &[Point3; 3], face: &[Point3; 3]) -> bool {
 /// Ray parity along `+x`. Rays that hit a vertex or edge are ambiguous, so the
 /// direction is perturbed and retried rather than resolved by tolerance: an
 /// oracle decides exactly or not at all.
-fn contains_point(mesh: &TriMesh, point: Point3) -> bool {
+/// Whether `point` lies strictly inside the closed surface `mesh`.
+///
+/// Exact ray parity: `orient3d` signs decide every crossing, so a point is
+/// never misclassified by a near-miss. Shared with the exact boolean assembly,
+/// which asks the same question per retriangulated piece.
+/// Containment, or `None` when the point cannot be classified exactly.
+///
+/// `contains_point` folds three different situations into `false`: strictly
+/// outside, exactly ON the surface, and every probe direction degenerate.
+/// That is fine for the whole-operand arrangement test, which only ever
+/// samples interior points. It is NOT fine for classifying a retriangulated
+/// piece by its centroid: a centroid can land exactly on the other operand's
+/// edge, and silently calling that "outside" keeps a piece that should be
+/// dropped, leaving a hole in the result.
+pub(crate) fn contains_point_exact(mesh: &TriMesh, point: Point3) -> Option<bool> {
+    const DIRECTIONS: [[f64; 3]; 4] = [
+        [1.0, 0.0, 0.0],
+        [1.0, 0.125, 0.0625],
+        [0.5, 1.0, 0.25],
+        [0.25, 0.5, 1.0],
+    ];
+
+    // A point lying ON the surface is neither inside nor outside; report the
+    // ambiguity rather than picking a side.
+    if on_surface(mesh, point) {
+        return None;
+    }
+    for direction in DIRECTIONS {
+        if let Some(inside) = parity_along(mesh, point, direction) {
+            return Some(inside);
+        }
+    }
+    None
+}
+
+/// Whether `point` lies exactly on one of the mesh's triangles.
+fn on_surface(mesh: &TriMesh, point: Point3) -> bool {
+    mesh.indices.chunks_exact(3).any(|triangle| {
+        let p = mesh.positions[triangle[0] as usize];
+        let q = mesh.positions[triangle[1] as usize];
+        let r = mesh.positions[triangle[2] as usize];
+        exact_sign(orient3d(p, q, r, point)) == Sign::Zero
+            && crate::segment_triangle_relation(point, point, [p, q, r])
+                != crate::SegmentTriangleRelation::Disjoint
+    })
+}
+
+pub(crate) fn contains_point(mesh: &TriMesh, point: Point3) -> bool {
     // Directions tried in order; each is used only if the previous produced a
     // degenerate hit. Fixed, so the result stays deterministic.
     const DIRECTIONS: [[f64; 3]; 4] = [

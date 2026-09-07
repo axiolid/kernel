@@ -96,18 +96,45 @@ pub fn retriangulate_face(
         ));
     }
 
-    // The untouched face is already its own triangulation.
-    if segments.is_empty() {
+    let mut points: Vec<Point3> = corners.to_vec();
+    let mut sources: Vec<Option<NodeKey>> = vec![None; 3];
+    let mut index_of: BTreeMap<NodeKey, u32> = BTreeMap::new();
+
+    // A node can lie on this face's EDGE without any segment crossing this
+    // face -- the curve runs through the neighbour instead. Splitting the
+    // edge here anyway is what keeps the two faces combinatorially matched.
+    //
+    // Skipping this leaves a T-junction: the neighbour splits the shared edge
+    // at the node while this face keeps it whole, so the edge is used once
+    // from each side under different names and the surface reads as open.
+    // The volume still comes out right, which is exactly why this needs an
+    // explicit closure check rather than a volume check to catch.
+    let mut edge_nodes: Vec<(NodeKey, Point3)> = Vec::new();
+    for (&node, &point) in positions {
+        if corners.contains(&point) {
+            continue;
+        }
+        if point_on_face_edge(point, corners) {
+            edge_nodes.push((node, point));
+        }
+    }
+    for (node, point) in edge_nodes {
+        if index_of.contains_key(&node) {
+            continue;
+        }
+        index_of.insert(node, points.len() as u32);
+        points.push(point);
+        sources.push(Some(node));
+    }
+
+    // With no cut and no edge node, the face is already its own triangulation.
+    if segments.is_empty() && points.len() == 3 {
         return Ok(FacePatch {
             points: corners.to_vec(),
             sources: vec![None; 3],
             triangles: vec![[0, 1, 2]],
         });
     }
-
-    let mut points: Vec<Point3> = corners.to_vec();
-    let mut sources: Vec<Option<NodeKey>> = vec![None; 3];
-    let mut index_of: BTreeMap<NodeKey, u32> = BTreeMap::new();
 
     // Curve nodes join the corner list. A node that coincides with a corner
     // reuses that corner's index instead of adding a duplicate point, which
@@ -365,4 +392,27 @@ fn centroid([a, b, c]: [Point2; 3]) -> Point2 {
 
 fn sign(value: axiolid_contracts::Certified) -> Sign {
     value.sign().expect("certified predicates are total")
+}
+
+/// Whether `point` lies exactly on one of the face's three edges.
+///
+/// Exact: the point must be collinear with the edge by `orient3d`-grade
+/// reasoning and lie within its span. Used to find T-junction nodes that
+/// belong to this face's boundary even though no segment crosses the face.
+fn point_on_face_edge(point: Point3, corners: [Point3; 3]) -> bool {
+    for i in 0..3 {
+        let a = corners[i];
+        let b = corners[(i + 1) % 3];
+        let ab = b - a;
+        let ap = point - a;
+        // Collinear, and strictly between the endpoints.
+        if ab.cross(ap).length_squared() != 0.0 {
+            continue;
+        }
+        let t = ab.dot(ap);
+        if t > 0.0 && t < ab.dot(ab) {
+            return true;
+        }
+    }
+    false
 }

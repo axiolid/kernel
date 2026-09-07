@@ -12,6 +12,7 @@
 //! unaffected while a narrow consumer can depend on the substrate directly
 //! instead of acquiring this package's whole dependency graph.
 
+pub mod assemble;
 pub mod boolean;
 pub mod clash;
 pub mod convex_hull;
@@ -33,6 +34,7 @@ pub use axiolid_predicates::{
     arithmetic, expansion, orient3, orientation, scene, sphere, static_filter,
 };
 
+pub use assemble::exact_boolean;
 pub use axiolid_evaluate::{
     derivative2, derivative3, evaluate2, evaluate3, flatten2, partials, Patch, ScalarCurve,
     ScalarSurface,
