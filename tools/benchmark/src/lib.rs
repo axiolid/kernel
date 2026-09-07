@@ -29,6 +29,7 @@
 //! workload on any machine produce byte-identical inputs, which is what makes
 //! instruction-count regression measurement meaningful.
 
+pub mod dataset;
 pub mod validate;
 pub mod workload;
 

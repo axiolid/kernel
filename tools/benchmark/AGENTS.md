@@ -99,3 +99,22 @@ time — reproducible on any machine.
 The `orient3d` pair is the interesting one: certification costs ~3.7x the
 filtered path, and that gap is what any future optimisation of the predicates
 has to move.
+
+## Scenarios and scaling
+
+`benches/scenario.rs` drives `axiolid::application::Application` -- the public
+facade, not internal crates -- so a scenario measures what a consumer actually
+pays: dispatch, provider selection, validation, and the geometry itself. The
+wall-subtraction rows sweep opening count; the section rows sweep mesh density.
+Both validate their output (signed volume against a derived ground truth,
+contour count against the expected cut) so a fast wrong answer cannot look
+like a win.
+
+`tests/scaling.rs` asserts complexity rather than recording it. A benchmark
+says an operation took 40us; these say the cost grows linearly with triangle
+count and that a bounded radius query does not grow with cloud size. They run
+in the normal test suite, so a change of complexity class fails the gate
+instead of appearing as a slow drift on a chart nobody reads.
+
+Both are mutation-checked: perturbing the query radius so it scans the whole
+cloud, or changing a workload seed so runs stop being reproducible, must fail.

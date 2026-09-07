@@ -5,7 +5,7 @@
 //! code under test. Nothing here consults the clock, the allocator, or a
 //! randomly-seeded hasher.
 
-use axiolid_core::{Point3, Scalar};
+use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_mesh::TriMesh;
 
 /// A counter-based pseudo-random generator with an explicit seed.
@@ -232,4 +232,62 @@ pub fn point_cloud(seed: u64, count: usize, half_extent: Scalar) -> Vec<Point3> 
             )
         })
         .collect()
+}
+
+/// A wall with `openings` evenly spaced rectangular voids, as separate cutters.
+///
+/// The shape of a real subtraction workload rather than a synthetic one: a
+/// large thin subject and many small disjoint tools. Cutters are disjoint and
+/// each passes fully through the wall, so the removed volume is exactly the
+/// sum of the cutter volumes -- a *derived* ground truth, not a recording of
+/// what the kernel happened to return.
+///
+/// Deterministic: positions come from the opening index, never from a clock
+/// or a hash seed.
+#[must_use]
+pub fn wall_with_openings(openings: usize) -> WallWorkload {
+    // A wall long enough that every opening keeps a solid margin around it.
+    let length = 2.0 * openings as Scalar + 2.0;
+    let height = 3.0;
+    let thickness = 0.4;
+    let subject = box_mesh(length, thickness, height).mesh;
+
+    // Each opening is a cuboid that pierces the wall completely, so the
+    // subtraction removes its full volume rather than a clipped part of it.
+    let opening_width = 1.0;
+    let opening_height = 1.5;
+    let depth = thickness * 2.0;
+    let mut tools = Vec::with_capacity(openings);
+    for index in 0..openings {
+        let centre = -length / 2.0 + 2.0 * index as Scalar + 2.0;
+        let mut cutter = box_mesh(opening_width, depth, opening_height).mesh;
+        translate(&mut cutter, Vec3::new(centre, 0.0, 0.0));
+        tools.push(cutter);
+    }
+
+    let solid = length * thickness * height;
+    let removed = opening_width * thickness * opening_height * openings as Scalar;
+    WallWorkload {
+        subject,
+        tools,
+        expected_volume: solid - removed,
+    }
+}
+
+/// A subtraction workload with a ground truth derived from its construction.
+pub struct WallWorkload {
+    /// The wall being cut.
+    pub subject: TriMesh,
+    /// Disjoint cutters, each piercing the wall completely.
+    pub tools: Vec<TriMesh>,
+    /// Solid volume minus the cutter volumes, computed from the dimensions
+    /// rather than measured from a result.
+    pub expected_volume: Scalar,
+}
+
+/// Shift every vertex of `mesh` by `offset`.
+fn translate(mesh: &mut TriMesh, offset: Vec3) {
+    for position in &mut mesh.positions {
+        *position += offset;
+    }
 }

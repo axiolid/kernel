@@ -139,6 +139,7 @@ dependencies = [
 name = "axiolid-benchmark"
 version = "0.14.0"
 dependencies = [
+ "axiolid",
  "axiolid-core",
  "axiolid-curve",
  "axiolid-guarantees",

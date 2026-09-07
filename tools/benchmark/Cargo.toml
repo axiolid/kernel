@@ -15,6 +15,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+axiolid = { workspace = true, features = ["application", "dispatch-mesh-section"] }
 axiolid-core.workspace = true
 axiolid-mesh.workspace = true
 axiolid-curve.workspace = true
@@ -35,6 +36,7 @@ domain = "workspace"
 public = false
 format-neutral = true
 allowed-internal-dependencies = [
+    "axiolid",
     "axiolid-core",
     "axiolid-mesh",
     "axiolid-curve",
@@ -43,6 +45,10 @@ allowed-internal-dependencies = [
     "axiolid-measure",
     "axiolid-spatial",
 ]
+
+[[bench]]
+name = "scenario"
+harness = false
 
 [[bench]]
 name = "micro"
