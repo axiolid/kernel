@@ -51,6 +51,10 @@ name = "scenario"
 harness = false
 
 [[bench]]
+name = "audit"
+harness = false
+
+[[bench]]
 name = "micro"
 harness = false
 

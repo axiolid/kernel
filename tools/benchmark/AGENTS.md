@@ -118,3 +118,24 @@ instead of appearing as a slow drift on a chart nobody reads.
 
 Both are mutation-checked: perturbing the query radius so it scans the whole
 cloud, or changing a workload seed so runs stop being reproducible, must fail.
+
+## Rejected: radix sort in the mesh audit
+
+Recorded so it is not attempted twice. `callgrind_annotate` showed 68.8% of
+`volume_sphere` inside the audit's `sort_unstable_by_key`. Replacing it with
+an LSD radix sort over the `(low, high)` key:
+
+| metric | comparison sort | radix sort |
+|---|---|---|
+| instructions | 2,512,504 | 2,037,744 (**-18.9%**) |
+| D1 misses | 11,607 | 50,648 (**+336%**) |
+| wall clock, 399k tris | 41.2 ms | 70.3 ms (**2.2x slower**) |
+
+Fewer instructions, more than twice the time. The 256-bucket scatter defeats
+the cache; the comparison sort's access pattern does not. **The audit is
+memory-bound, not compute-bound** -- which is also why SIMD would not help it.
+
+The lesson generalises: instruction count is a deterministic *regression*
+signal, not a speed metric. Always confirm a win in wall clock and cache
+counters before claiming one.
+

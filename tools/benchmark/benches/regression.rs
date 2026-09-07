@@ -26,6 +26,7 @@
 use axiolid_benchmark::workload::{self, Scale};
 use axiolid_core::{Point3, Tolerance};
 use axiolid_measure::volume_properties;
+use axiolid_mesh::try_audit_mesh;
 use axiolid_predicates::orient3d;
 use axiolid_spatial::PointIndex;
 use iai_callgrind::{
@@ -91,6 +92,18 @@ fn point_index_build() -> usize {
     black_box(index.len())
 }
 
+// The mesh audit's edge pass. Profiling volume_sphere showed 68.8% of its
+// instructions inside one sort_unstable_by_key over per-triangle edge
+// records, so the audit -- not the arithmetic -- is the real cost centre.
+// Benchmarked directly to make that hot path visible on its own.
+#[library_benchmark]
+fn mesh_audit() -> usize {
+    let sphere = workload::sphere_mesh(1.0, Scale::Medium.count());
+    let health = try_audit_mesh(black_box(&sphere.mesh), tolerance())
+        .expect("the medium sphere fits the audit scratch budget");
+    black_box(health.boundary_edges)
+}
+
 library_benchmark_group!(
     name = regression;
     // Fail the run when a benchmark executes measurably more
@@ -108,7 +121,8 @@ library_benchmark_group!(
         volume_sphere,
         orient3d_filtered,
         orient3d_exact,
-        point_index_build
+        point_index_build,
+        mesh_audit
 );
 
 main!(library_benchmark_groups = regression);
