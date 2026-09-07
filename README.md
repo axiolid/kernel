@@ -109,7 +109,7 @@ npm --prefix docs ci
 npm --prefix docs run docs:build
 ```
 
-The workspace also carries feature-isolation and mutation probes. See [Contributing](https://axiolid.github.io/kernel/guide/contributing) and [`HERMES.md`](HERMES.md) for project-specific checks.
+The workspace also carries feature-isolation and mutation probes. See [Contributing](https://axiolid.github.io/kernel/guide/contributing) and [`AGENTS.md`](AGENTS.md) for project-specific checks.
 
 ## Project links
 
