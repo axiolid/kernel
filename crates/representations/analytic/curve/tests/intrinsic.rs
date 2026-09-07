@@ -428,3 +428,245 @@ fn a_non_finite_harmonic_frequency_is_not_declared_straight() {
     };
     assert!(!law.is_straight());
 }
+
+// --- Piecewise: several laws over one arc-length domain ---
+
+/// The alignment shape the variant exists for: straight, then a clothoid
+/// transition, then a circular arc -- all under ONE start frame, because
+/// no interior frame can be computed without a Fresnel integral.
+#[test]
+fn a_three_piece_alignment_turns_the_sum_of_its_pieces() {
+    let radius = 300.0;
+    let curvature = 1.0 / radius;
+    let (tangent, transition, arc) = (50.0, 60.0, 100.0);
+
+    let law = CurvatureLaw::piecewise(
+        vec![tangent, tangent + transition],
+        vec![
+            CurvatureLaw::straight(),
+            CurvatureLaw::clothoid(0.0, curvature, transition),
+            CurvatureLaw::circular(curvature),
+        ],
+    );
+    assert!(law.is_well_formed());
+
+    let total = tangent + transition + arc;
+    let turning = Intrinsic2::new(frame(), law, total)
+        .total_turning()
+        .expect("a well-formed piecewise law over a finite length turns");
+
+    // Straight contributes nothing; the clothoid turns the mean of its
+    // endpoint curvatures; the arc turns length/radius.
+    let expected = 0.0 + curvature * transition / 2.0 + curvature * arc;
+    assert!((turning - expected).abs() < 1e-15);
+}
+
+/// Each piece integrates over its OWN subinterval, not the whole domain.
+/// Two arcs of equal length and opposite curvature must cancel exactly;
+/// integrating either over the full span would not cancel.
+#[test]
+fn piecewise_pieces_integrate_over_their_own_subintervals() {
+    let law = CurvatureLaw::piecewise(
+        vec![10.0],
+        vec![CurvatureLaw::circular(0.2), CurvatureLaw::circular(-0.2)],
+    );
+    let turning = Intrinsic2::new(frame(), law, 20.0)
+        .total_turning()
+        .expect("well formed");
+    assert!(turning.abs() < 1e-15);
+}
+
+/// Seams are positions in arc length, so an off-centre break must shift
+/// the balance. This is what pins the subinterval arithmetic.
+#[test]
+fn an_off_centre_seam_shifts_the_turning() {
+    let law = CurvatureLaw::piecewise(
+        vec![5.0],
+        vec![CurvatureLaw::circular(0.2), CurvatureLaw::circular(-0.2)],
+    );
+    let turning = Intrinsic2::new(frame(), law, 20.0)
+        .total_turning()
+        .expect("well formed");
+    // 0.2*5 - 0.2*15 = -2.0
+    assert!((turning - -2.0).abs() < 1e-15);
+}
+
+/// Straight exactly when every piece is straight -- seams are irrelevant.
+#[test]
+fn a_piecewise_law_is_straight_only_when_every_piece_is() {
+    let all_straight = CurvatureLaw::piecewise(
+        vec![5.0],
+        vec![CurvatureLaw::straight(), CurvatureLaw::straight()],
+    );
+    assert!(all_straight.is_straight());
+    assert!(all_straight.is_constant());
+
+    let one_bent = CurvatureLaw::piecewise(
+        vec![5.0],
+        vec![CurvatureLaw::straight(), CurvatureLaw::circular(0.1)],
+    );
+    assert!(!one_bent.is_straight());
+}
+
+/// Constant needs every piece constant AND mutually equal: two arcs of
+/// different radius are each constant, but the law that joins them is not.
+#[test]
+fn differing_constant_pieces_are_not_a_constant_law() {
+    let same = CurvatureLaw::piecewise(
+        vec![5.0],
+        vec![CurvatureLaw::circular(0.1), CurvatureLaw::circular(0.1)],
+    );
+    assert!(same.is_constant());
+    assert!(!same.is_straight());
+
+    let differing = CurvatureLaw::piecewise(
+        vec![5.0],
+        vec![CurvatureLaw::circular(0.1), CurvatureLaw::circular(0.2)],
+    );
+    assert!(!differing.is_constant());
+}
+
+/// Differentiation is per piece and keeps the seams, so the derivative of
+/// a straight-then-clothoid law is 0 then the constant sharpness -- a real
+/// jump at the seam, which is mathematically correct for this family.
+#[test]
+fn differentiating_a_piecewise_law_differentiates_each_piece() {
+    let sharpness = 0.5;
+    let law = CurvatureLaw::piecewise(
+        vec![10.0],
+        vec![
+            CurvatureLaw::straight(),
+            CurvatureLaw::Polynomial {
+                coefficients: vec![0.0, sharpness],
+            },
+        ],
+    );
+
+    let CurvatureLaw::Piecewise { breaks, laws } = law.derivative() else {
+        panic!("the derivative of a piecewise law stays piecewise");
+    };
+    assert_eq!(breaks, vec![10.0]);
+    assert_eq!(laws[0], CurvatureLaw::Constant { curvature: 0.0 });
+    assert_eq!(
+        laws[1],
+        CurvatureLaw::Polynomial {
+            coefficients: vec![sharpness],
+        }
+    );
+}
+
+/// Mirroring negates every piece and leaves the seams alone, so the
+/// mirrored law turns exactly the opposite amount.
+#[test]
+fn mirroring_a_piecewise_law_negates_every_piece() {
+    let law = CurvatureLaw::piecewise(
+        vec![10.0],
+        vec![
+            CurvatureLaw::clothoid(0.0, 0.01, 10.0),
+            CurvatureLaw::circular(0.01),
+        ],
+    );
+    let forward = Intrinsic2::new(frame(), law.clone(), 25.0)
+        .total_turning()
+        .expect("well formed");
+    let mirrored = Intrinsic2::new(frame(), law.reversed_orientation(), 25.0)
+        .total_turning()
+        .expect("well formed");
+    assert!((forward + mirrored).abs() < 1e-15);
+}
+
+/// A malformed law refuses to report turning rather than guessing which
+/// piece the missing seam belonged to.
+#[test]
+fn a_malformed_piecewise_law_refuses_to_turn() {
+    // Three pieces need two seams; one seam leaves the tiling ambiguous.
+    let law = CurvatureLaw::Piecewise {
+        breaks: vec![5.0],
+        laws: vec![
+            CurvatureLaw::straight(),
+            CurvatureLaw::circular(0.1),
+            CurvatureLaw::circular(0.2),
+        ],
+    };
+    assert!(!law.is_well_formed());
+    assert_eq!(Intrinsic2::new(frame(), law, 20.0).total_turning(), None);
+}
+
+/// Unordered seams are malformed: a descending break would make a piece
+/// span a negative length.
+#[test]
+fn descending_seams_are_malformed() {
+    let law = CurvatureLaw::Piecewise {
+        breaks: vec![10.0, 5.0],
+        laws: vec![
+            CurvatureLaw::straight(),
+            CurvatureLaw::circular(0.1),
+            CurvatureLaw::circular(0.2),
+        ],
+    };
+    assert!(!law.is_well_formed());
+    assert_eq!(Intrinsic2::new(frame(), law, 20.0).total_turning(), None);
+}
+
+/// A seam beyond the curve length does not tile the domain, so the stored
+/// integral is not the one being asked for. Refuse instead of clamping.
+#[test]
+fn a_seam_outside_the_curve_length_refuses() {
+    let law = CurvatureLaw::piecewise(
+        vec![50.0],
+        vec![CurvatureLaw::straight(), CurvatureLaw::circular(0.1)],
+    );
+    assert!(law.is_well_formed());
+    assert_eq!(Intrinsic2::new(frame(), law, 20.0).total_turning(), None);
+}
+
+/// A single piece with no seams is the law itself; the wrapper must not
+/// change the answer.
+#[test]
+fn a_single_piece_law_matches_the_bare_law() {
+    let bare = CurvatureLaw::circular(0.05);
+    let wrapped = CurvatureLaw::piecewise(vec![], vec![bare.clone()]);
+    assert!(wrapped.is_well_formed());
+
+    let a = Intrinsic2::new(frame(), bare, 12.0)
+        .total_turning()
+        .expect("finite");
+    let b = Intrinsic2::new(frame(), wrapped, 12.0)
+        .total_turning()
+        .expect("finite");
+    assert_eq!(a, b);
+}
+
+/// An empty piecewise law has nothing to integrate. It is well formed
+/// (zero pieces need zero seams) and turns nothing.
+#[test]
+fn an_empty_piecewise_law_turns_nothing() {
+    let law = CurvatureLaw::piecewise(vec![], vec![]);
+    assert!(law.is_well_formed());
+    assert!(law.is_straight());
+    assert!(law.is_constant());
+    let turning = Intrinsic2::new(frame(), law, 10.0)
+        .total_turning()
+        .expect("an empty law still integrates, to nothing");
+    assert_eq!(turning, 0.0);
+}
+
+/// Pieces may themselves be composite laws: a straight, then the
+/// sine-corrected transition, then an arc. Nesting must stay closed.
+#[test]
+fn a_piece_may_itself_be_a_composite_law() {
+    let delta = 1.0 / 300.0;
+    let (transition, arc) = (60.0, 40.0);
+    let law = CurvatureLaw::piecewise(
+        vec![transition],
+        vec![
+            CurvatureLaw::sine_corrected_transition(0.0, delta, transition),
+            CurvatureLaw::circular(delta),
+        ],
+    );
+    let turning = Intrinsic2::new(frame(), law, transition + arc)
+        .total_turning()
+        .expect("well formed");
+    let expected = delta * transition / 2.0 + delta * arc;
+    assert!((turning - expected).abs() < 1e-15);
+}

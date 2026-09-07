@@ -106,6 +106,38 @@ pub enum CurvatureLaw {
         /// Additive sinusoidal terms.
         harmonics: Vec<Harmonic>,
     },
+    /// Pieces laid end to end along arc length, each with its own law.
+    ///
+    /// `breaks` holds the INTERIOR seam positions in arc length from the
+    /// curve start, so `laws.len() == breaks.len() + 1` and piece `i` spans
+    /// `breaks[i - 1] .. breaks[i]`, the first starting at `0` and the last
+    /// ending at the carrying curve's length.
+    ///
+    /// Each piece's law is written in its OWN arc length, restarting at zero
+    /// at its seam, so a piece does not depend on where it sits and moving
+    /// one never rewrites its coefficients.
+    ///
+    /// This variant exists because a piecewise profile genuinely cannot be
+    /// decomposed into several `Intrinsic2` values. Every piece after the
+    /// first would need an absolute start frame whose origin is the position
+    /// at the seam, and that position is the non-elementary integral this
+    /// crate refuses to compute. Holding the pieces in ONE curve keeps a
+    /// single absolute frame at the start and anchors the interior purely by
+    /// arc length, so no interior position is ever required.
+    ///
+    /// Unlike a summed law, pieces are disjoint and ordered: the seams are
+    /// observable data, not a redundant re-encoding of one function. That is
+    /// why nesting is meaningful here and was not for `Composite` -- a piece
+    /// may itself be piecewise, expressing refinement.
+    ///
+    /// Mismatched lengths stay representable, as everywhere else in this
+    /// crate; the operations report `None`/`false` rather than guessing.
+    Piecewise {
+        /// Interior seam positions in arc length, ascending.
+        breaks: Vec<Scalar>,
+        /// One law per piece; `laws.len() == breaks.len() + 1`.
+        laws: Vec<CurvatureLaw>,
+    },
 }
 
 impl CurvatureLaw {
@@ -167,6 +199,46 @@ impl CurvatureLaw {
             }],
         }
     }
+    /// Pieces laid end to end, each carrying its own law.
+    ///
+    /// The seams are interior positions in ascending arc length; the caller
+    /// supplies one more law than seam. A mismatch is storable and reported
+    /// by `is_well_formed`, not rejected here.
+    #[must_use]
+    pub fn piecewise(breaks: Vec<Scalar>, laws: Vec<CurvatureLaw>) -> Self {
+        Self::Piecewise { breaks, laws }
+    }
+
+    /// Whether the stored shape is internally consistent.
+    ///
+    /// Only `Piecewise` can be malformed: it carries two lists whose lengths
+    /// must agree and seams that must ascend. Every other variant is
+    /// well-formed by construction, so this is `true` for them.
+    ///
+    /// Structural, like the other predicates: it inspects stored data and
+    /// never evaluates the law. Non-finite or descending seams are reported
+    /// rather than silently sorted, because reordering would change which
+    /// piece owns which arc length.
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        match self {
+            Self::Piecewise { breaks, laws } => {
+                // n pieces need n-1 interior seams. The empty law is the
+                // one exception: zero pieces carry zero seams, and it is a
+                // legitimate value (an alignment with nothing in it yet)
+                // rather than a broken one, so it is well formed and turns
+                // nothing.
+                if laws.is_empty() {
+                    return breaks.is_empty();
+                }
+                laws.len() == breaks.len() + 1
+                    && breaks.iter().all(|b| b.is_finite())
+                    && breaks.windows(2).all(|w| w[0] < w[1])
+                    && laws.iter().all(Self::is_well_formed)
+            }
+            _ => true,
+        }
+    }
     /// Whether the law is identically zero, i.e. a straight line.
     ///
     /// Exact: this is a structural test on the stored coefficients, not a
@@ -203,6 +275,10 @@ impl CurvatureLaw {
                         .iter()
                         .all(|h| h.amplitude == 0.0 && h.angular_frequency.is_finite())
             }
+            // Straight overall exactly when every piece is straight. The
+            // seams are irrelevant to this question: a union of zero-curvature
+            // pieces is zero-curvature whatever the break positions.
+            Self::Piecewise { laws, .. } => laws.iter().all(Self::is_straight),
         }
     }
 
@@ -225,6 +301,19 @@ impl CurvatureLaw {
                     && harmonics
                         .iter()
                         .all(|h| h.amplitude == 0.0 || h.angular_frequency == 0.0)
+            }
+            // Constant across the WHOLE curve needs every piece constant and
+            // every piece equal to its neighbours: a staircase of differing
+            // constants is piecewise-constant but not constant.
+            //
+            // Structural equality is the honest test available. Two pieces can
+            // be equal in value while differing in form (`Constant { 0 }` versus
+            // an empty `Polynomial`), and settling that needs evaluation, so
+            // report false rather than guess -- the Sinusoid precedent.
+            Self::Piecewise { laws, .. } => {
+                self.is_well_formed()
+                    && laws.iter().all(Self::is_constant)
+                    && laws.windows(2).all(|w| w[0] == w[1])
             }
         }
     }
@@ -283,6 +372,17 @@ impl CurvatureLaw {
                     })
                     .collect(),
             },
+            // Differentiate each piece in its own arc length. Seams are
+            // untouched: a piece restarts at zero at its seam, so its
+            // derivative is again a law in the same local parameter.
+            //
+            // dk/ds is generally DISCONTINUOUS at a seam. That is the correct
+            // answer, not a defect: a profile assembled from pieces jumps
+            // wherever the pieces disagree, and nothing here smooths it.
+            Self::Piecewise { breaks, laws } => Self::Piecewise {
+                breaks: breaks.clone(),
+                laws: laws.iter().map(Self::derivative).collect(),
+            },
         }
     }
 
@@ -324,11 +424,78 @@ impl CurvatureLaw {
                     })
                     .collect(),
             },
+            // Mirroring negates curvature everywhere, so it negates each piece
+            // in place. The seams are positions in arc length, not curvature
+            // values, so they are unchanged -- this mirrors the curve about its
+            // start tangent rather than reversing its direction of travel.
+            Self::Piecewise { breaks, laws } => Self::Piecewise {
+                breaks: breaks.clone(),
+                laws: laws.iter().map(Self::reversed_orientation).collect(),
+            },
         }
     }
 }
 
 /// Integral over `[0, s]` of `sum c_i x^i`, i.e. `sum c_i s^(i+1) / (i+1)`.
+/// Turning accumulated by `law` over `span` arc length from its own start.
+///
+/// Closed form for every variant, including nested pieces: each piece is
+/// integrated over its OWN subinterval and the results are added. Recursion
+/// terminates because a piece's span is strictly shorter than its parent's.
+///
+/// Returns `None` when the shape cannot define an integral: a malformed
+/// piecewise law, or seams that fall outside `[0, span]`. Reporting the
+/// refusal beats inventing a clamp the caller did not ask for.
+fn turning_over(law: &CurvatureLaw, span: Scalar) -> Option<Scalar> {
+    match law {
+        CurvatureLaw::Constant { curvature } => Some(curvature * span),
+        CurvatureLaw::Polynomial { coefficients } => Some(polynomial_turning(coefficients, span)),
+        CurvatureLaw::Sinusoid {
+            mean,
+            amplitude,
+            angular_frequency,
+            phase,
+        } => Some(
+            mean * span
+                + harmonic_turning(
+                    &Harmonic {
+                        amplitude: *amplitude,
+                        angular_frequency: *angular_frequency,
+                        phase: *phase,
+                    },
+                    span,
+                ),
+        ),
+        CurvatureLaw::Composite {
+            polynomial,
+            harmonics,
+        } => Some(
+            polynomial_turning(polynomial, span)
+                + harmonics
+                    .iter()
+                    .map(|h| harmonic_turning(h, span))
+                    .sum::<Scalar>(),
+        ),
+        CurvatureLaw::Piecewise { breaks, laws } => {
+            if !law.is_well_formed() {
+                return None;
+            }
+            // Seams must lie strictly inside the span, or the pieces do not
+            // tile it and the requested integral is not the one stored.
+            if breaks.iter().any(|b| *b <= 0.0 || *b >= span) {
+                return None;
+            }
+            let mut total = 0.0;
+            let mut start = 0.0;
+            for (index, piece) in laws.iter().enumerate() {
+                let end = breaks.get(index).copied().unwrap_or(span);
+                total += turning_over(piece, end - start)?;
+                start = end;
+            }
+            Some(total)
+        }
+    }
+}
 fn polynomial_turning(coefficients: &[Scalar], s: Scalar) -> Scalar {
     coefficients
         .iter()
@@ -404,47 +571,6 @@ impl Intrinsic2 {
         if !self.length.is_finite() {
             return None;
         }
-        let s = self.length;
-        match &self.curvature {
-            CurvatureLaw::Constant { curvature } => Some(curvature * s),
-            // Integral of sum c_i s^i is sum c_i s^(i+1) / (i+1).
-            CurvatureLaw::Polynomial { coefficients } => Some(
-                coefficients
-                    .iter()
-                    .enumerate()
-                    .map(|(power, c)| c * s.powi(power as i32 + 1) / (power as Scalar + 1.0))
-                    .sum(),
-            ),
-            CurvatureLaw::Sinusoid {
-                mean,
-                amplitude,
-                angular_frequency,
-                phase,
-            } => {
-                // Integral of m + A sin(w s + p) is m s - (A/w)[cos(w s + p) - cos(p)].
-                // A zero frequency makes that undefined, but the integrand is then
-                // the constant m + A sin(p), which integrates directly.
-                if *angular_frequency == 0.0 {
-                    return Some((mean + amplitude * phase.sin()) * s);
-                }
-                let turn = mean * s
-                    - (amplitude / angular_frequency)
-                        * ((angular_frequency * s + phase).cos() - phase.cos());
-                Some(turn)
-            }
-            // The integral of a sum is the sum of the integrals, so the
-            // composite turning is its polynomial's plus each harmonic's. No
-            // new mathematics -- only the same closed forms, added up.
-            CurvatureLaw::Composite {
-                polynomial,
-                harmonics,
-            } => Some(
-                polynomial_turning(polynomial, s)
-                    + harmonics
-                        .iter()
-                        .map(|h| harmonic_turning(h, s))
-                        .sum::<Scalar>(),
-            ),
-        }
+        turning_over(&self.curvature, self.length)
     }
 }
