@@ -4,6 +4,8 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-07
+
 ### Added
 - Added `CurvatureLaw::Piecewise` to `axiolid-curve`: several curvature laws over one arc-length domain, tiled by interior seams. This is what lets a straight/transition/arc alignment live in a single `Intrinsic2` under one absolute start frame -- decomposing it into separate curves would require an interior start frame whose origin is the position at the seam, a Fresnel-type integral the representation must not compute. `total_turning` sums each piece over its own subinterval in closed form and refuses (`None`) on a malformed law or a seam outside the curve length rather than clamping; `derivative` is per piece and genuinely discontinuous at seams; `is_straight`/`is_constant` stay structural, with constancy requiring pieces that are constant AND mutually equal. Pieces may nest, so a `Composite` transition can sit inside a `Piecewise` alignment.
 
