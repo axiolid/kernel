@@ -16,6 +16,7 @@ pub mod assemble;
 pub mod boolean;
 pub mod clash;
 pub mod convex_hull;
+pub mod coplanar;
 pub mod intersection;
 pub mod polygon;
 pub mod primitive;

@@ -210,3 +210,25 @@ fn a_slab_through_a_box_crosses_in_two_closed_rings() {
         );
     }
 }
+
+/// Sharing a plane without sharing area must not block the operation.
+///
+/// Two boxes with faces in the same plane but set apart along that plane
+/// produce many coplanar face pairs and zero shared area. Refusing over
+/// those would reject ordinary models: buildings are full of walls and
+/// slabs that are flush in one plane and nowhere near each other in it.
+#[test]
+fn coplanar_faces_without_shared_area_do_not_block_the_curve() {
+    let subject = cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+    // Same z-range, so the z=0 and z=2 faces are coplanar with the
+    // subject's, but shifted far along x: no shared area anywhere.
+    let tool = cuboid(Point3::new(5.0, 0.0, 0.0), Point3::new(7.0, 2.0, 2.0));
+
+    let curve = intersection_segments(&subject, &tool)
+        .expect("coplanar but non-overlapping faces are not a refusal");
+
+    assert!(
+        curve.segments.is_empty(),
+        "the solids are disjoint, so there is no curve"
+    );
+}

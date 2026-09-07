@@ -309,8 +309,14 @@ pub fn intersection_segments(subject: &TriMesh, tool: &TriMesh) -> GeomResult<In
                 TriangleTriangleRelation::Disjoint => continue,
                 // An area, not a curve. Refuse rather than pick a policy.
                 TriangleTriangleRelation::Coplanar => {
-                    // An area, not a curve: resolving it needs a 2D overlap
-                    // policy the caller must choose, so refuse by contract.
+                    // Sharing a plane is not sharing area. Two walls in one
+                    // plane metres apart produce many coplanar pairs and no
+                    // overlap at all; refusing over those would reject
+                    // ordinary models. Only a real shared AREA is beyond what
+                    // a curve can describe.
+                    if crate::coplanar::coplanar_overlap(subject_points, tool_points).is_empty() {
+                        continue;
+                    }
                     return Err(GeomError::Unsupported {
                         backend: BackendId::new("scalar-intersection"),
                         operation: Operation::MeshBoolean,
