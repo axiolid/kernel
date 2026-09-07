@@ -1,0 +1,77 @@
+name: Performance
+
+# Instruction-count regression measurement.
+#
+# Deliberately NOT wall-clock: a shared GitHub runner's elapsed time moves more
+# between runs than most real regressions, so a wall-clock threshold is either
+# too loose to catch anything or too tight to trust. Callgrind counts executed
+# instructions under emulation, which is independent of machine load and
+# reproducible run-to-run, so a change in it is a change in work done.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Instruction-count regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The comparison needs the base commit to measure against.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b # 1.88.0
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Read the declared iai-callgrind version
+        id: iai
+        run: |
+          version="$(grep -m1 '^iai-callgrind' tools/benchmark/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The runner binary must match the library version exactly or it refuses
+      # to run, so the version is read from the manifest rather than pinned
+      # twice and allowed to drift.
+      - name: Install iai-callgrind-runner
+        run: cargo install iai-callgrind-runner --version "${{ steps.iai.outputs.version }}"
+
+      - name: Measure the base commit
+        if: github.event_name == 'pull_request'
+        run: |
+          git checkout --quiet "${{ github.event.pull_request.base.sha }}"
+          # A base commit predating the benchmark crate has nothing to measure;
+          # that is not a failure, it is the first run.
+          if [ -d tools/benchmark ]; then
+            bash scripts/bench-regression.sh || true
+          else
+            echo "base commit has no benchmark crate; nothing to compare against"
+          fi
+          git checkout --quiet -
+
+      - name: Measure this commit
+        run: bash scripts/bench-regression.sh
+
+      - name: Keep the measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: callgrind-measurements
+          path: target/iai/
+          if-no-files-found: ignore
+          retention-days: 14

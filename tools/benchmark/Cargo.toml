@@ -1,0 +1,53 @@
+[package]
+name = "axiolid-benchmark"
+description = "Internal benchmarking foundation: workloads, validation, and regression measurement"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+authors.workspace = true
+# Never published. This is measurement scaffolding for the kernel's own
+# development, not a public capability, and keeping it unpublished keeps it out
+# of the release cascade entirely.
+publish = false
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-mesh.workspace = true
+axiolid-curve.workspace = true
+axiolid-predicates.workspace = true
+axiolid-guarantees.workspace = true
+axiolid-measure.workspace = true
+axiolid-spatial.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+iai-callgrind = "0.16.1"
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "tools"
+role = "tool.benchmark"
+domain = "workspace"
+public = false
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-core",
+    "axiolid-mesh",
+    "axiolid-curve",
+    "axiolid-predicates",
+    "axiolid-guarantees",
+    "axiolid-measure",
+    "axiolid-spatial",
+]
+
+[[bench]]
+name = "micro"
+harness = false
+
+[[bench]]
+name = "regression"
+harness = false

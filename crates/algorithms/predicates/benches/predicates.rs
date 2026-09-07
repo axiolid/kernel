@@ -1,6 +1,6 @@
 //! Predicate throughput and escalation rate across degeneracy tiers.
 //!
-//! Run with: `cargo bench -p axiolid-reference`
+//! Run with: `cargo bench -p axiolid-predicates`
 //!
 //! No criterion dependency: this reports wall-clock throughput and the
 //! escalation rate side by side, which is the pairing that makes the numbers

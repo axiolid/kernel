@@ -16,6 +16,10 @@ default = []
 axiolid-core.workspace = true
 axiolid-guarantees.workspace = true
 
+[[bench]]
+name = "predicates"
+harness = false
+
 [package.metadata.axiolid]
 architecture-version = 1
 layer = "algorithms"

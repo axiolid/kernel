@@ -53,6 +53,7 @@ members = [
     "crates/facade/axiolid-capi",
     "tools/oracle",
     "tools/xtask",
+    "tools/benchmark",
 ]
 
 [workspace.package]
@@ -147,3 +148,8 @@ opt-level = 1
 lto = "thin"
 codegen-units = 1
 debug = true
+# Must be explicit: `bench` inherits from `release`, which strips symbols.
+# A stripped binary silently defeats callgrind's function toggle -- the
+# run succeeds and reports zero instructions for every benchmark, which
+# looks like a working harness rather than a broken one.
+strip = false
