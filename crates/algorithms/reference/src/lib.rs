@@ -18,6 +18,7 @@ pub mod convex_hull;
 pub mod intersection;
 pub mod polygon;
 pub mod primitive;
+pub mod retriangulate;
 pub mod section;
 pub mod segment_triangle;
 pub mod tessellate;
@@ -47,6 +48,7 @@ pub use intersection::{
     NodeKey, Operand, Polyline,
 };
 pub use polygon::{ring_orientation, signed_area2, triangulate_simple};
+pub use retriangulate::{retriangulate_face, FacePatch};
 pub use section::ScalarSection;
 pub use segment_triangle::{segment_triangle_relation, SegmentTriangleRelation};
 pub use triangle_triangle::{triangle_triangle_relation, TriangleTriangleRelation};

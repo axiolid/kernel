@@ -59,7 +59,7 @@ pub struct EdgeKey {
 }
 
 impl EdgeKey {
-    fn new(operand: Operand, first: u32, second: u32) -> Self {
+    pub fn new(operand: Operand, first: u32, second: u32) -> Self {
         Self {
             operand,
             low: first.min(second),
@@ -120,7 +120,7 @@ pub struct PointKey {
 }
 
 impl PointKey {
-    fn new(point: Point3) -> Self {
+    pub fn new(point: Point3) -> Self {
         Self {
             // `+ 0.0` folds `-0.0` into `0.0` so equal points share bits.
             bits: [point.x + 0.0, point.y + 0.0, point.z + 0.0].map(f64::to_bits),
@@ -138,8 +138,11 @@ pub struct IntersectionSegment {
 }
 
 impl IntersectionSegment {
-    /// Build a segment, rejecting one that collapses to a single node.
-    fn new(start: NodeKey, end: NodeKey) -> GeomResult<Self> {
+    /// Build a segment between two distinct nodes.
+    ///
+    /// Rejects a segment that collapses to one node: that is a degenerate
+    /// contact, not a piece of curve.
+    pub fn between(start: NodeKey, end: NodeKey) -> GeomResult<Self> {
         if start == end {
             return Err(GeomError::Degenerate(
                 "an intersection segment collapsed to one source-topology node".into(),
@@ -270,6 +273,14 @@ pub struct IntersectionCurve {
     pub segments: Vec<IntersectionSegment>,
     /// Position of every node named by a segment.
     pub positions: BTreeMap<NodeKey, Point3>,
+    /// Segments lying on each subject face, keyed by face index.
+    ///
+    /// Retriangulation needs to know which constraints belong to the face it
+    /// is cutting; without this the caller would have to re-derive the
+    /// association geometrically and could disagree with what was computed.
+    pub subject_face_segments: BTreeMap<u32, Vec<IntersectionSegment>>,
+    /// Segments lying on each tool face, keyed by face index.
+    pub tool_face_segments: BTreeMap<u32, Vec<IntersectionSegment>>,
 }
 
 /// Compute the intersection curve between two triangle meshes.
@@ -285,6 +296,8 @@ pub struct IntersectionCurve {
 pub fn intersection_segments(subject: &TriMesh, tool: &TriMesh) -> GeomResult<IntersectionCurve> {
     let mut segments = BTreeSet::new();
     let mut positions = BTreeMap::new();
+    let mut subject_face_segments: BTreeMap<u32, Vec<IntersectionSegment>> = BTreeMap::new();
+    let mut tool_face_segments: BTreeMap<u32, Vec<IntersectionSegment>> = BTreeMap::new();
 
     for subject_face in 0..subject.triangle_count() {
         let (subject_indices, subject_points) = face(subject, subject_face)?;
@@ -391,14 +404,36 @@ pub fn intersection_segments(subject: &TriMesh, tool: &TriMesh) -> GeomResult<In
                 continue;
             }
 
-            let segment = IntersectionSegment::new(interval[0].0, interval[1].0)?;
+            let segment = IntersectionSegment::between(interval[0].0, interval[1].0)?;
             segments.insert(segment);
+            // The segment lies in BOTH faces' planes -- it is exactly where
+            // they meet -- so it constrains the retriangulation of each.
+            let subject_key = u32::try_from(subject_face).map_err(|_| face_count_error())?;
+            let tool_key = u32::try_from(tool_face).map_err(|_| face_count_error())?;
+            subject_face_segments
+                .entry(subject_key)
+                .or_default()
+                .push(segment);
+            tool_face_segments
+                .entry(tool_key)
+                .or_default()
+                .push(segment);
         }
+    }
+
+    for list in subject_face_segments
+        .values_mut()
+        .chain(tool_face_segments.values_mut())
+    {
+        list.sort_unstable();
+        list.dedup();
     }
 
     Ok(IntersectionCurve {
         segments: segments.into_iter().collect(),
         positions,
+        subject_face_segments,
+        tool_face_segments,
     })
 }
 
@@ -548,4 +583,9 @@ fn face(mesh: &TriMesh, index: usize) -> GeomResult<([u32; 3], [Point3; 3])> {
             .ok_or_else(|| GeomError::Degenerate("face references a missing vertex".into()))?;
     }
     Ok((indices, points))
+}
+
+/// A mesh with more faces than a `u32` index can name.
+fn face_count_error() -> GeomError {
+    GeomError::Degenerate("mesh has more faces than a u32 index can name".into())
 }
