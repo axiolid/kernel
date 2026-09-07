@@ -15,6 +15,7 @@
 pub mod boolean;
 pub mod clash;
 pub mod convex_hull;
+pub mod intersection;
 pub mod polygon;
 pub mod primitive;
 pub mod section;
@@ -41,6 +42,10 @@ pub use axiolid_predicates::{
 };
 pub use boolean::ScalarBoolean;
 pub use convex_hull::{minimum_area_rectangle, strict_convex_hull, OrientedRectangle2};
+pub use intersection::{
+    assemble_polylines, intersection_segments, EdgeKey, IntersectionCurve, IntersectionSegment,
+    NodeKey, Operand, Polyline,
+};
 pub use polygon::{ring_orientation, signed_area2, triangulate_simple};
 pub use section::ScalarSection;
 pub use segment_triangle::{segment_triangle_relation, SegmentTriangleRelation};
