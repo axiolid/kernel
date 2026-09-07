@@ -3,7 +3,6 @@
 //! Every expectation is derived from the construction, never from a previous
 //! run of the code under test.
 
-use axiolid_contracts::GeomError;
 use axiolid_core::Point3;
 use axiolid_mesh::TriMesh;
 use axiolid_reference::{assemble_polylines, intersection_segments};
@@ -136,11 +135,14 @@ fn coplanar_faces_are_refused_rather_than_approximated() {
 
 /// The loop must have the exact node count the geometry implies.
 ///
-/// Two boxes overlapping at one corner cross in a hexagonal ring: the
-/// subject contributes 6 edge punctures and the tool 6, giving 12 nodes and
-/// 12 segments. Asserting only 'one closed loop' is too weak -- taking the
-/// OUTER pair of each 4-node face intersection instead of the inner pair
-/// still closes, but traces the wrong curve. Pinning the counts catches it.
+/// Two equal cubes offset along the diagonal so one corner of each lies inside
+/// the other cross in a HEXAGON: six points, six segments. The subject and the
+/// tool each contribute six edge punctures, but they are the SAME six points
+/// seen from either side, not twelve distinct ones.
+///
+/// Asserting only "one closed loop" is too weak: taking the outer pair of each
+/// face intersection instead of the inner pair still closes, but traces the
+/// wrong curve. Pinning the counts catches that.
 #[test]
 fn the_loop_has_the_node_count_the_geometry_implies() {
     let subject = cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 4.0, 4.0));
@@ -148,21 +150,13 @@ fn the_loop_has_the_node_count_the_geometry_implies() {
 
     let curve = intersection_segments(&subject, &tool).expect("supported");
 
-    assert_eq!(
-        curve.segments.len(),
-        12,
-        "a corner overlap gives 12 segments"
-    );
-    assert_eq!(curve.positions.len(), 12, "and exactly 12 distinct nodes");
+    assert_eq!(curve.segments.len(), 6, "a hexagonal ring has six sides");
+    assert_eq!(curve.positions.len(), 6, "and six corners");
 
     let polylines = assemble_polylines(&curve.segments).expect("1-manifold");
     assert_eq!(polylines.len(), 1);
     assert!(polylines[0].closed);
-    assert_eq!(
-        polylines[0].nodes.len(),
-        12,
-        "the ring visits every node once"
-    );
+    assert_eq!(polylines[0].nodes.len(), 6, "six nodes around the hexagon");
 }
 
 /// Every curve node must lie on both surfaces.
@@ -190,30 +184,29 @@ fn every_node_lies_inside_both_operands_bounds() {
     }
 }
 
-/// A through-cut where operand edges cross exactly is refused, not guessed.
+/// A slab cutting through a box crosses its surface in two closed rings.
 ///
-/// A slab spanning a box makes subject edges and tool edges meet at the same
-/// point. Each operand names that puncture from its own side, so the node
-/// arrives twice under different names. Merging by coordinate was tried and
-/// rejected -- it welded genuinely distinct nodes elsewhere -- so the curve
-/// refuses instead.
+/// This case used to be REFUSED. The slab's faces land exactly on the box's
+/// edges, so one physical puncture is reached both as "a box edge crossing the
+/// slab" and "a slab edge crossing the box". Naming those separately left the
+/// rings open; merging on exact coordinate bits closes them.
 ///
-/// This test exists to pin the REFUSAL. If a later change resolves shared
-/// punctures properly, this test should be rewritten to assert two closed
-/// rings, which is the geometrically correct answer.
+/// Two rings, not one: a through-cut enters one side and exits the other.
 #[test]
-fn a_through_cut_with_coincident_edges_is_refused() {
+fn a_slab_through_a_box_crosses_in_two_closed_rings() {
     let box_solid = cuboid(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, 10.0));
     let slab = cuboid(Point3::new(3.0, -5.0, -5.0), Point3::new(6.0, 15.0, 15.0));
 
-    // Segment finding itself succeeds: the individual crossings are all
-    // real. The break only becomes visible when they are stitched, so that
-    // is where the refusal lives.
-    let curve = intersection_segments(&box_solid, &slab).expect("segments are computable");
-    let result = assemble_polylines(&curve.segments);
+    let curve = intersection_segments(&box_solid, &slab).expect("a through-cut is a curve");
+    let polylines = assemble_polylines(&curve.segments).expect("both rings close");
 
-    assert!(
-        matches!(result, Err(GeomError::Unsupported { .. })),
-        "coincident operand edges must be refused, not silently mis-stitched"
-    );
+    assert_eq!(polylines.len(), 2, "a through-cut enters and exits");
+    for line in &polylines {
+        assert!(line.closed, "a cut through a closed solid closes");
+        assert_eq!(
+            line.nodes.len(),
+            8,
+            "four box faces, two of them split by a diagonal"
+        );
+    }
 }

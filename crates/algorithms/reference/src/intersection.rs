@@ -353,6 +353,19 @@ pub fn intersection_segments(subject: &TriMesh, tool: &TriMesh) -> GeomResult<In
                 }
             }
 
+            // One physical point can arrive under two names here: the subject
+            // edge crossing the tool surface and the tool edge crossing the
+            // subject surface coincide when the operands share coordinates.
+            // Collapsing them BEFORE choosing the interval matters: left
+            // duplicated, the interval rule picks the two identical names,
+            // the segment collapses, and a real piece of the curve vanishes.
+            nodes.sort_by(|left, right| {
+                point_bits(left.1)
+                    .cmp(&point_bits(right.1))
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+            nodes.dedup_by(|left, right| point_bits(left.1) == point_bits(right.1));
+
             // The two triangles' planes meet in a line; each triangle clips
             // that line to an interval, and the curve here is the OVERLAP of
             // those two intervals.
@@ -588,4 +601,14 @@ fn face(mesh: &TriMesh, index: usize) -> GeomResult<([u32; 3], [Point3; 3])> {
 /// A mesh with more faces than a `u32` index can name.
 fn face_count_error() -> GeomError {
     GeomError::Degenerate("mesh has more faces than a u32 index can name".into())
+}
+
+/// Exact coordinate bits, with `-0.0` folded into `0.0` so equal points match.
+///
+/// UNPROVEN: no fixture produces a `-0.0` coordinate, so removing the fold
+/// leaves the suite green. It is kept because `-0.0` and `0.0` compare equal
+/// as numbers but differ in bits, which would split one point into two names
+/// exactly like the bug this function exists to fix.
+fn point_bits(point: Point3) -> [u64; 3] {
+    [point.x + 0.0, point.y + 0.0, point.z + 0.0].map(f64::to_bits)
 }
