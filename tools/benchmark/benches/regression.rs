@@ -23,6 +23,8 @@
 //! not part of the default gate; see `scripts/bench-regression.sh`, which skips
 //! with a clear message rather than failing when valgrind is absent.
 
+use axiolid::application::Application;
+use axiolid::contracts::ExecutionOptions;
 use axiolid_benchmark::workload::{self, Scale};
 use axiolid_core::{Point3, Tolerance};
 use axiolid_measure::volume_properties;
@@ -104,6 +106,20 @@ fn mesh_audit() -> usize {
     black_box(health.boundary_edges)
 }
 
+// The boolean path: subtracting openings from a wall through the
+// provider. Compute-heavy and the most expensive scenario measured, so
+// this is where acceleration would pay if anywhere.
+#[library_benchmark]
+fn boolean_subtract() -> usize {
+    let wall = workload::wall_with_openings(4);
+    let application = Application::portable().expect("portable application");
+    let options = ExecutionOptions::new(tolerance());
+    let outcome = application
+        .subtract_many(black_box(&wall.subject), black_box(&wall.tools), &options)
+        .expect("subtraction succeeds");
+    black_box(outcome.mesh.triangle_count())
+}
+
 library_benchmark_group!(
     name = regression;
     // Fail the run when a benchmark executes measurably more
@@ -122,7 +138,8 @@ library_benchmark_group!(
         orient3d_filtered,
         orient3d_exact,
         point_index_build,
-        mesh_audit
+        mesh_audit,
+        boolean_subtract
 );
 
 main!(library_benchmark_groups = regression);

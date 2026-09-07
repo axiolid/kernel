@@ -1,0 +1,13 @@
+/home/friedrich/projects/axiolid/kernel/tests/consumers/2d-curves/target/debug/deps/axiolid_mesh-d5597c6d9742854e.d: /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/adjacency.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/attribute.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/audit.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/component.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/polygon.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/triangle.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/view.rs
+
+/home/friedrich/projects/axiolid/kernel/tests/consumers/2d-curves/target/debug/deps/libaxiolid_mesh-d5597c6d9742854e.rmeta: /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/adjacency.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/attribute.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/audit.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/component.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/polygon.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/triangle.rs /home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/view.rs
+
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/lib.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/adjacency.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/attribute.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/audit.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/component.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/error.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/polygon.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/triangle.rs:
+/home/friedrich/projects/axiolid/kernel/crates/representations/discrete/mesh/src/view.rs:

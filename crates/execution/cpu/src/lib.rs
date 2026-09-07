@@ -9,7 +9,9 @@
 pub mod config;
 pub mod execution;
 pub mod features;
+pub mod topology;
 
 pub use config::{CpuConfigError, CpuExecutionBuilder, InstructionPolicy};
 pub use execution::CpuExecution;
 pub use features::{CpuFeatures, CpuInstructionSet};
+pub use topology::{CacheLevel, CpuTopology};

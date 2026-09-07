@@ -139,3 +139,34 @@ The lesson generalises: instruction count is a deterministic *regression*
 signal, not a speed metric. Always confirm a win in wall clock and cache
 counters before claiming one.
 
+
+## Where the boolean path's cost actually is
+
+Profiled `boolean_subtract` (8.25M instructions, the most expensive
+benchmark here) with `callgrind_annotate`:
+
+| region | share |
+| --- | --- |
+| `boolmesh` + libc + libm | 66.6% |
+| allocator (`malloc`/`free`/`realloc`) | 11.3% |
+| `shadows01` (single hottest fn, inside `boolmesh`) | 16.0% |
+| transcendental (`acos` etc.) | 1.0% |
+| **Axiolid's own crates** | **0.0% (884 instructions)** |
+
+Two consequences for acceleration work:
+
+1. **SIMD or rayon inside Axiolid cannot speed this path up.** There is
+   almost no Axiolid code executing. Optimisation here means changing the
+   provider, contributing upstream, or adding a second provider -- not
+   vectorising kernel code.
+2. **The grouping path exposes no parallelism on this workload.**
+   `examples/grouping_probe.rs` measures it: 4/16/64/256 openings all
+   collapse to ONE group, because the tools are mutually disjoint and get
+   fused into a single cut. Groups run sequentially by necessity (each cuts
+   the previous result), so parallel-across-groups would gain nothing here.
+   Re-run the probe before assuming otherwise on a different workload.
+
+The 11.3% allocator share is the one Axiolid-side lever visible: it comes
+from per-operation `TriMesh` clones and temporaries. Reducing it needs a
+measured before/after like any other change, and both wall-clock and
+instruction counts, given the audit result above.

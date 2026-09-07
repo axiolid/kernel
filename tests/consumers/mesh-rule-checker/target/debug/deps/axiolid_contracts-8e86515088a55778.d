@@ -1,0 +1,14 @@
+/home/friedrich/projects/axiolid/kernel/tests/consumers/mesh-rule-checker/target/debug/deps/axiolid_contracts-8e86515088a55778.d: /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/backend.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/cancel.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability_id.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/execution.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/integration.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/plan.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/profiles.rs
+
+/home/friedrich/projects/axiolid/kernel/tests/consumers/mesh-rule-checker/target/debug/deps/libaxiolid_contracts-8e86515088a55778.rmeta: /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/backend.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/cancel.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability_id.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/execution.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/integration.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/plan.rs /home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/profiles.rs
+
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/lib.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/backend.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/cancel.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/capability_id.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/error.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/execution.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/integration.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/plan.rs:
+/home/friedrich/projects/axiolid/kernel/crates/contracts/common/base/src/profiles.rs:

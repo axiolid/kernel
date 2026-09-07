@@ -1,0 +1,14 @@
+/home/friedrich/projects/axiolid/kernel/tests/consumers/c-abi-profile/target/debug/deps/axiolid_reference-6a13528265cbe3b9.d: /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/boolean.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/clash.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/convex_hull.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/polygon.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/primitive.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/section.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/segment_triangle.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/tessellate.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/triangle_triangle.rs
+
+/home/friedrich/projects/axiolid/kernel/tests/consumers/c-abi-profile/target/debug/deps/libaxiolid_reference-6a13528265cbe3b9.rmeta: /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/boolean.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/clash.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/convex_hull.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/polygon.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/primitive.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/section.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/segment_triangle.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/tessellate.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/triangle_triangle.rs
+
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/lib.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/boolean.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/clash.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/convex_hull.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/polygon.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/primitive.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/section.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/segment_triangle.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/tessellate.rs:
+/home/friedrich/projects/axiolid/kernel/crates/algorithms/reference/src/triangle_triangle.rs:
