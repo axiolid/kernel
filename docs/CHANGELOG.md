@@ -6,7 +6,27 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
-- `docs/architecture/threading.md`: the CPU thread-pool model, why
+- `axiolid-reference` now answers booleans of INTERPENETRATING solids
+  exactly, where it previously refused with `Unsupported`. Three stages:
+  the intersection curve (nodes named by source topology, never by
+  position), retriangulation of every cut face against that curve, and
+  classification of each resulting piece by exact ray parity. Verified
+  against hand-computed volumes -- half-offset unit cubes give union
+  1.875, intersection 0.125, difference 0.875. `ScalarBoolean` routes to
+  it through a new `Arrangement::Interpenetrating` rather than erroring,
+  so the decision sits beside the disjoint and nested cases. This also
+  gave conformance a real cross-check: the exact and epsilon-tolerant
+  implementations must agree on geometry that could not be compared while
+  the oracle refused it. `boolmesh` is unchanged and remains the
+  production path. Coplanar faces sharing an AREA are still refused --
+  see ADR 0046 for why continuing would produce a plausible wrong answer.
+- `axiolid-reference` no longer refuses coplanar faces that share a plane
+  but no area. Two solids flush in one plane and metres apart along it
+  produced sixteen coplanar face pairs and a blanket refusal; buildings
+  are full of that shape. A new `coplanar` module clips triangle against
+  triangle on exact `orient2d` signs, and only a genuine shared area --
+  which a curve cannot describe -- still refuses.
+- `docs/architecture/threading.md: the CPU thread-pool model, why
   `boolmesh`'s `rayon` feature is deliberately off (determinism, plus
   measured net regression on realistic IFC with the crossover point),
   and how a caller sizes worker count. Documents a shipped decision
