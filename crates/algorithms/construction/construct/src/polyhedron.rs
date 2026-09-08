@@ -386,14 +386,12 @@ pub fn boolean_polyhedra_exact(
     tool: &Polyhedron,
     op: BooleanOp,
 ) -> GeomResult<Polyhedron> {
-    let direction = probe_direction(subject, tool);
-
     let subject_parts = split_all(subject.faces(), tool.faces())?;
     let tool_parts = split_all(tool.faces(), subject.faces())?;
 
     let mut faces = Vec::new();
     for fragment in subject_parts {
-        let keep = match classify_fragment(&fragment, tool, direction)? {
+        let keep = match classify_fragment(&fragment, tool)? {
             Containment::Inside => matches!(op, BooleanOp::Intersection),
             Containment::Outside => matches!(op, BooleanOp::Union | BooleanOp::Difference),
             // Coplanar contact: this fragment lies IN the tool's surface, so
@@ -430,7 +428,7 @@ pub fn boolean_polyhedra_exact(
         }
     }
     for fragment in tool_parts {
-        let containment = classify_fragment(&fragment, subject, direction)?;
+        let containment = classify_fragment(&fragment, subject)?;
         // A tool fragment on the subject's boundary is the same surface the
         // subject loop already kept, so it is always dropped here.
         let keep = match op {
@@ -478,14 +476,22 @@ fn split_all(faces: &[Vec<Point3>], planes: &[Vec<Point3>]) -> GeomResult<Vec<Ve
 /// exactly on the boundary means the fragment is coplanar with an opposing
 /// face -- the case the issue calls out, handled by its own arm rather than
 /// resolved arbitrarily.
-fn classify_fragment(
-    fragment: &[Point3],
-    other: &Polyhedron,
-    direction: Vec3,
-) -> GeomResult<Containment> {
+fn classify_fragment(fragment: &[Point3], other: &Polyhedron) -> GeomResult<Containment> {
     let centroid = centroid_of(fragment);
-    contains(other, centroid, direction)
-        .ok_or_else(|| unsupported("ray met a vertex or edge exactly"))
+    // A degenerate ray is an unlucky direction, not an unanswerable point:
+    // containment is the same along every ray, so try the next direction
+    // rather than refusing. Each attempt is exact; none perturbs coordinates.
+    for direction in probe_directions() {
+        if let Some(containment) = contains(other, centroid, direction) {
+            return Ok(containment);
+        }
+    }
+    // Every direction in the family was degenerate. That is vanishingly
+    // unlikely for real geometry, and refusing remains correct: guessing a
+    // parity here would silently produce a wrong solid.
+    Err(unsupported(
+        "every probe direction met a vertex or edge exactly",
+    ))
 }
 
 /// Average of a polygon's vertices.
@@ -497,17 +503,26 @@ fn centroid_of(polygon: &[Point3]) -> Point3 {
     Point3::new(0.0, 0.0, 0.0) + sum / polygon.len() as f64
 }
 
-/// A ray direction unlikely to meet any vertex or edge of either operand.
+/// Ray directions tried in order when classifying a point.
 ///
-/// Deliberately not random: the same inputs must produce the same answer on
-/// every run, matching the determinism discipline the plan contract set in
-/// v0.6. The components are incommensurable with axis-aligned and
-/// 45-degree geometry, which is what building models are made of. When a
-/// ray still hits an edge exactly, the operation refuses rather than
-/// retrying with a different direction, so no result depends on how many
-/// attempts it took.
-fn probe_direction(_subject: &Polyhedron, _tool: &Polyhedron) -> Vec3 {
-    Vec3::new(0.577_215_664_9, 0.313_724_518_3, 0.144_729_885_8)
+/// Containment does not depend on the probe direction: a closed orientable
+/// solid has the same inside/outside answer along every ray. So a ray that
+/// meets a vertex or edge exactly is not an unanswerable input, only an
+/// unlucky one, and trying another direction is exact rather than a fudge.
+///
+/// The family is fixed, not random, so the same input gives the same answer
+/// on every run. The first entry is the long-standing direction, so inputs
+/// that already worked keep taking the same path. The rest are chosen to be
+/// mutually non-parallel with irrational-ish ratios, which is what keeps them
+/// from lining up with the axis-aligned and diagonal features that made the
+/// first one degenerate.
+fn probe_directions() -> [Vec3; 4] {
+    [
+        Vec3::new(0.577_215_664_9, 0.313_724_518_3, 0.144_729_885_8),
+        Vec3::new(0.211_324_865_4, 0.788_675_134_6, 0.366_025_403_8),
+        Vec3::new(0.867_513_459_5, 0.132_486_540_5, 0.539_189_129_1),
+        Vec3::new(0.404_508_497_2, 0.595_491_502_8, 0.951_056_516_3),
+    ]
 }
 
 /// Triangulate a polyhedron for measurement and diagnosis.

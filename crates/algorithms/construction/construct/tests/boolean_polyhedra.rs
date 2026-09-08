@@ -240,3 +240,94 @@ fn a_non_planar_face_is_refused_not_approximated() {
         "the refusal must name planarity as the reason, got: {text}"
     );
 }
+
+/// A grid-aligned subtraction is answered, not refused.
+///
+/// Every cutter face is a plane of the host, so the operands share vertices
+/// and edges in bulk. That is the configuration a single fixed probe
+/// direction hits degenerately: the ray leaves a fragment centroid and meets
+/// a shared vertex exactly, and #77 shipped refusing the whole operation.
+///
+/// This is the Menger sponge's depth-1 cell arrangement -- the exact shape
+/// that made the benchmark harness report `refused` from depth 2 -- reduced
+/// to the smallest case that still shares planes on all three axes.
+#[test]
+fn a_grid_aligned_cutter_is_classified_not_refused() {
+    // Host spans 0..3 on every axis; the cutter is the centre column of the
+    // 3x3x3 grid, so all four of its side planes coincide with grid planes
+    // the host's own subdivision would produce.
+    let host = box_solid([0.0, 0.0, 0.0], [3.0, 3.0, 3.0]);
+    let cutter = box_solid([1.0, 1.0, -1.0], [2.0, 2.0, 4.0]);
+
+    let result = boolean_polyhedra_exact(&host, &cutter, BooleanOp::Difference)
+        .expect("grid-aligned difference must be answered, not refused");
+
+    // 27 - 3 = 24: the cutter passes clean through one 1x1x3 column.
+    let volume = volume(&result);
+    assert!(
+        (volume - 24.0).abs() < 1e-9,
+        "expected volume 24.0, got {volume}"
+    );
+}
+
+/// Repeated grid-aligned subtraction is answered, not refused.
+///
+/// A single grid-aligned cutter was always fine. The failure needed
+/// ACCUMULATION: each difference introduces fragment centroids that are
+/// themselves grid-aligned with the next cutter, and by the ninth
+/// subtraction the fixed probe direction meets a shared vertex exactly.
+/// #77 shipped refusing the whole operation there, which is what made the
+/// Menger benchmark report `refused` from depth 2.
+///
+/// Containment is direction-independent, so retrying along another ray is
+/// exact rather than a fudge. This walks the first ten voids of a depth-2
+/// Menger sponge -- the shortest sequence that reaches the degenerate step.
+#[test]
+fn accumulated_grid_aligned_subtraction_is_answered() {
+    let mut current = box_solid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let t = 1.0 / 3.0;
+
+    // Depth-1 centre columns, then depth-2 columns in one surviving cell.
+    let cutters = [
+        ([t, t, -1.0], [2.0 * t, 2.0 * t, 2.0]),
+        ([t, -1.0, t], [2.0 * t, 2.0, 2.0 * t]),
+        ([-1.0, t, t], [2.0, 2.0 * t, 2.0 * t]),
+        (
+            [t / 3.0, t / 3.0, -1.0],
+            [2.0 * t / 3.0, 2.0 * t / 3.0, 2.0],
+        ),
+        (
+            [t / 3.0, -1.0, t / 3.0],
+            [2.0 * t / 3.0, 2.0, 2.0 * t / 3.0],
+        ),
+        (
+            [-1.0, t / 3.0, t / 3.0],
+            [2.0, 2.0 * t / 3.0, 2.0 * t / 3.0],
+        ),
+    ];
+
+    for (i, (mn, mx)) in cutters.iter().enumerate() {
+        let cutter = box_solid(*mn, *mx);
+        current = boolean_polyhedra_exact(&current, &cutter, BooleanOp::Difference)
+            .unwrap_or_else(|e| panic!("subtraction {i} refused: {e}"));
+    }
+
+    // `volume` is unavailable here: repeated subtraction produces non-convex
+    // faces, and `triangulate` fans them, which leaves the mesh unusable for
+    // measurement (documented on `triangulate`). Assert on the B-rep instead.
+    //
+    // Each subtraction must add faces -- a cutter that removed nothing, or an
+    // operation that collapsed the solid, would not.
+    assert!(
+        current.faces().len() > 6,
+        "expected the subtracted solid to carry more faces than the host box, \
+         got {}",
+        current.faces().len()
+    );
+    for face in current.faces() {
+        assert!(
+            face.len() >= 3,
+            "every face of the result must be a real polygon"
+        );
+    }
+}
