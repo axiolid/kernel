@@ -302,12 +302,50 @@ fn face_normal(face: &[Point3]) -> Vec3 {
 /// side means the polygon does not reach it.
 type SplitParts = (Option<Vec<Point3>>, Option<Vec<Point3>>);
 
-/// Split a polygon by a plane, returning the negative and positive parts.
+/// Whether a ring encloses no area at f64 precision.
 ///
-/// The plane is given by three points of an input face, never a derived one,
-/// so the crossing points computed here are one step from input data. A
-/// polygon lying wholly on one side comes back whole, so a non-crossing
-/// plane costs nothing and introduces no vertices.
+/// Two distinct failures are caught here, and neither is visible from a
+/// ring's overall size.
+///
+/// A SLIVER spans only a couple of ULPs in every direction: repeated
+/// boolean composes coordinate error (ADR 0045 builds intersection
+/// coordinates in f64), so a vertex shared between operands can drift
+/// apart, and splitting through it emits a face that corresponds to
+/// nothing in the modelled solid.
+///
+/// A COLLAPSED ring is worse because it looks healthy: a quad whose
+/// vertices pair up, spanning a third of the model, yet enclosing no
+/// area because its width is one ULP. Its normal is meaningless, so
+/// every probe ray meets it edge-on and containment cannot be decided --
+/// no ray direction can rescue a face that has no plane.
+///
+/// Thresholds are relative to the ring's own magnitude, so behaviour is
+/// identical on a millimetre part and a kilometre site.
+fn ring_is_below_precision(ring: &[Point3]) -> bool {
+    let anchor = ring[0];
+    let mut span = 0.0f64;
+    let mut magnitude = 0.0f64;
+    for &v in ring {
+        span = span.max((v - anchor).length());
+        magnitude = magnitude.max(v.x.abs()).max(v.y.abs()).max(v.z.abs());
+    }
+    let scale = magnitude.max(1.0) * f64::EPSILON;
+    if span <= scale * 8.0 {
+        return true;
+    }
+
+    // Area, not extent: the collapsed case is long in one direction and
+    // vanishing in the other, so only the enclosed area exposes it.
+    // Twice the triangle-fan area is the Newell normal's length.
+    let mut normal = Vec3::new(0.0, 0.0, 0.0);
+    for i in 0..ring.len() {
+        let a = ring[i];
+        let b = ring[(i + 1) % ring.len()];
+        normal += (a - anchor).cross(b - anchor);
+    }
+    normal.length() <= span * scale * 8.0
+}
+
 fn split_polygon(polygon: &[Point3], plane: &[Point3]) -> Option<SplitParts> {
     let mut signs = Vec::with_capacity(polygon.len());
     for &v in polygon {
@@ -347,10 +385,13 @@ fn split_polygon(polygon: &[Point3], plane: &[Point3]) -> Option<SplitParts> {
             positive.push(cut);
         }
     }
-    Some((
-        (negative.len() >= 3).then_some(negative),
-        (positive.len() >= 3).then_some(positive),
-    ))
+    // A ring needs three vertices to bound area, and it needs measurable
+    // extent to have a usable plane. Both checks belong here: a sliver
+    // emitted now becomes an unclassifiable fragment several operations
+    // later, where the cause is no longer visible.
+    let keep =
+        |ring: Vec<Point3>| (ring.len() >= 3 && !ring_is_below_precision(&ring)).then_some(ring);
+    Some((keep(negative), keep(positive)))
 }
 
 /// Where segment `a`-`b` meets the plane through `plane`'s first 3 points.

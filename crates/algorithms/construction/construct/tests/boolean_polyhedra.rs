@@ -331,3 +331,70 @@ fn accumulated_grid_aligned_subtraction_is_answered() {
         );
     }
 }
+
+/// Void boxes of a Menger sponge at `depth`, on the unit cube.
+///
+/// Each level splits a cell into 27 and removes the 7 with at least two
+/// centred coordinates: the six face centres and the core.
+fn menger_voids(depth: u32) -> Vec<([f64; 3], [f64; 3])> {
+    fn carve(out: &mut Vec<([f64; 3], [f64; 3])>, origin: [f64; 3], size: f64, depth: u32) {
+        if depth == 0 {
+            return;
+        }
+        let t = size / 3.0;
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    let lo = [
+                        origin[0] + t * i as f64,
+                        origin[1] + t * j as f64,
+                        origin[2] + t * k as f64,
+                    ];
+                    let centred = usize::from(i == 1) + usize::from(j == 1) + usize::from(k == 1);
+                    if centred >= 2 {
+                        out.push((lo, [lo[0] + t, lo[1] + t, lo[2] + t]));
+                    } else {
+                        carve(out, lo, t, depth - 1);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    carve(&mut out, [0.0, 0.0, 0.0], 1.0, depth);
+    out
+}
+
+/// A long grid-aligned subtraction chain completes.
+///
+/// Repeated subtraction against grid-aligned cutters composes coordinate
+/// error until a split emits a COLLAPSED ring: a quad whose vertices pair
+/// up, spanning a third of the model yet enclosing no area because its
+/// width is one ULP. Such a face has no usable normal, so every probe ray
+/// meets it edge-on and containment cannot be decided at all -- the
+/// direction-retry family cannot rescue it, because the problem is the
+/// face, not the ray.
+///
+/// This walks the void set of a depth-2 Menger sponge, which is the
+/// benchmark workload that exposed it. Before the area check in
+/// `split_polygon`, this refused at the 82nd of 147 subtractions.
+#[test]
+fn a_long_grid_aligned_subtraction_chain_completes() {
+    let mut current = box_solid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let mut done = 0usize;
+
+    for (min, max) in menger_voids(2) {
+        let cutter = box_solid(min, max);
+        current = boolean_polyhedra_exact(&current, &cutter, BooleanOp::Difference)
+            .unwrap_or_else(|e| panic!("subtraction {done} of 147 refused: {e}"));
+        done += 1;
+    }
+
+    assert_eq!(done, 147, "every void must be subtracted");
+    // Sanity on the result itself: a solid this carved has far more faces
+    // than the host box, and every face must still be a real polygon.
+    assert!(current.faces().len() > 100);
+    for face in current.faces() {
+        assert!(face.len() >= 3);
+    }
+}
