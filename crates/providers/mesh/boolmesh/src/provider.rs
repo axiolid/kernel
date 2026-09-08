@@ -11,7 +11,7 @@ use axiolid_mesh_boolean_contract::{
     symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
 };
 
-use crate::convert::{from_manifold, six_signed_volume, to_manifold};
+use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 
 /// Mesh boolean backed by `boolmesh` (pure Rust, `glam`-only, MPL-2.0).
 ///
@@ -263,7 +263,7 @@ impl MeshBoolean for BoolmeshBoolean {
             }
         };
 
-        let result = from_manifold(&output);
+        let result = from_boolean_mesh(&output);
         check_result(&result, operation)?;
         let evidence = evidence_for(subject, &[tool], &result, 1);
         Ok(BooleanOutcome::new(result, evidence))

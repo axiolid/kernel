@@ -41,25 +41,54 @@ pub(crate) use manifold::*;
 
 use boolean03::boolean03;
 use boolean45::boolean45;
-use manifold::cleanup_unused_verts;
+use manifold::{cleanup_unused_verts, halfedges_are_two_manifold};
 use simplification::simplify_topology;
 use triangulation::triangulate;
 
 pub(crate) use common::{OpType, Vec3u};
 pub(crate) use manifold::Manifold;
 
+/// The boolean's result as plain geometry.
+///
+/// `compute_boolean` used to end by feeding its result back through
+/// `Manifold::new_impl`, which sorts faces into Morton order, builds a
+/// half-edge mesh, a BVH, and a coplanar-face index, then validates
+/// two-manifoldness. The provider reads none of that: `from_manifold`
+/// takes positions and triangles and nothing else, and the provider
+/// re-checks orientation itself.
+///
+/// Returning the geometry directly skips that whole rebuild. The
+/// validity it used to assert is not lost -- see `compute_boolean`.
+pub(crate) struct BooleanMesh {
+    pub ps: Vec<Vec3>,
+    pub tris: Vec<Vec3u>,
+}
+
 /// Boolean of two closed, oriented manifolds.
 ///
-/// Preserved verbatim from upstream `boolmesh::compute_boolean` so that
-/// absorption is behaviour-identical; the conformance and differential
-/// suites are the gate on that claim. Optimisation is separate work.
+/// Returns plain geometry rather than a rebuilt [`Manifold`]. Upstream
+/// ended by calling `Manifold::new_impl` on the result, which sorts the
+/// faces into Morton order, rebuilds a half-edge mesh, builds a BVH and
+/// a coplanar-face index, and validates two-manifoldness. The provider
+/// consumes none of it: `from_manifold` read only positions and
+/// triangles, so every one of those structures was discarded on the
+/// next line.
+///
+/// Two behaviours of that call did matter and are kept explicitly:
+///
+/// - An empty result was signalled by `new_impl` failing on an empty
+///   position matrix, which the provider matches on to return the empty
+///   solid. The same error is raised directly here.
+/// - `new_impl` rejected a non-two-manifold result. `simplify_topology`
+///   can in principle leave one, so the check is retained -- but on the
+///   half-edge data the boolean already has, rather than on a fresh
+///   half-edge mesh built solely to ask the question.
 pub(crate) fn compute_boolean(
     mp: &Manifold,
     mq: &Manifold,
     op: OpType,
-) -> Result<Manifold, String> {
+) -> Result<BooleanMesh, String> {
     let eps = mp.eps.max(mq.eps);
-    let tol = mp.tol.max(mq.tol);
 
     let b03 = boolean03(mp, mq, &op);
     let mut b45 = boolean45(mp, mq, &b03, &op);
@@ -75,15 +104,32 @@ pub(crate) fn compute_boolean(
         eps,
     );
 
+    // Validate BEFORE cleanup: `cleanup_unused_verts` renumbers `tail` and
+    // `head` but leaves `pair` addressing the pre-cleanup half-edge order,
+    // so afterwards `pair` can point past the end of the array. Upstream
+    // never hit that because it validated a freshly rebuilt half-edge mesh;
+    // here the check has to happen while the indices are still coherent.
+    if !halfedges_are_two_manifold(&trg.hs) {
+        return Err("The input mesh is not manifold".into());
+    }
+
     cleanup_unused_verts(&mut b45.ps, &mut trg.hs);
 
-    Manifold::new_impl(
-        b45.ps,
-        trg.hs
+    // Preserves the signal the provider matches on: upstream reached this
+    // through `edge_topology`, which refuses an empty position matrix.
+    if b45.ps.is_empty() {
+        return Err("empty pos matrix".into());
+    }
+    if trg.hs.is_empty() {
+        return Err("empty idx matrix".into());
+    }
+
+    Ok(BooleanMesh {
+        tris: trg
+            .hs
             .chunks(3)
             .map(|hs| Vec3u::new(hs[0].tail, hs[1].tail, hs[2].tail))
             .collect(),
-        Some(eps),
-        Some(tol),
-    )
+        ps: b45.ps,
+    })
 }

@@ -9,7 +9,7 @@ pub enum Query {
     Pt(BPos),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BBox {
     pub id: Option<usize>,
     pub min: Vec3,

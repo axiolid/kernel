@@ -192,7 +192,7 @@ impl MortonCollider {
 
     fn update_boxes(&mut self, leaf_bb: &[BBox]) {
         for (i, box_val) in leaf_bb.iter().enumerate() {
-            self.node_bb[i * 2] = box_val.clone();
+            self.node_bb[i * 2] = *box_val;
         }
         let mut counter: Vec<i32> = vec![0; self.num_intl()];
         for i in 0..self.num_leaf() {

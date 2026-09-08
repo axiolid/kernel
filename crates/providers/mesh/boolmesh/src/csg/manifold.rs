@@ -22,7 +22,6 @@ pub struct Manifold {
     pub nf: usize,                // number of faces
     pub nh: usize,                // number of halfedges
     pub eps: Real,                // epsilon
-    pub tol: Real,                // tolerance
     pub face_normals: Vec<Vec3>,  //
     pub vert_normals: Vec<Vec3>,  //
     pub collider: MortonCollider, //
@@ -41,7 +40,10 @@ impl Manifold {
         // dedup vertices
         let mut hash = HashMap::with_capacity(pos.len() / 3);
         let mut weld = Vec::with_capacity(pos.len() / 3);
-        let mut rmap = vec![0; pos.len()];
+        // One entry per VERTEX, not per coordinate: `i` below counts
+        // `pos.chunks(3)`. Upstream allocated `pos.len()`, three times what
+        // the loop can address.
+        let mut rmap = vec![0; pos.len() / 3];
 
         for (i, p) in pos.chunks(3).enumerate() {
             let v = Vec3::new(p[0] as Real, p[1] as Real, p[2] as Real);
@@ -63,15 +65,10 @@ impl Manifold {
             .filter(|&is| is.x != is.y && is.y != is.z && is.z != is.x)
             .collect::<Vec<_>>();
 
-        Self::new_impl(weld, idx, None, None)
+        Self::new_impl(weld, idx)
     }
 
-    pub fn new_impl(
-        ps: Vec<Vec3>,
-        idx: Vec<Vec3u>,
-        eps: Option<Real>,
-        tol: Option<Real>,
-    ) -> Result<Self, String> {
+    pub fn new_impl(ps: Vec<Vec3>, idx: Vec<Vec3u>) -> Result<Self, String> {
         let bb = BBox::new(None, &ps);
         let (mut f_bb, mut f_mt) = compute_face_morton(&ps, &idx, &bb);
         let hm = sort_faces(&ps, &idx, &mut f_bb, &mut f_mt)?;
@@ -83,8 +80,7 @@ impl Manifold {
 
         let mut e = K_PRECISION * bb.scale();
         e = if e.is_finite() { e } else { -1. };
-        let eps = if let Some(e_) = eps { e_ } else { e };
-        let tol = if let Some(t_) = tol { t_ } else { e };
+        let eps = e;
         let collider = MortonCollider::new(&f_bb, &f_mt);
         let coplanar = compute_coplanar_idx(&ps, &hm.fns, &hs, eps);
 
@@ -97,7 +93,6 @@ impl Manifold {
             vert_normals: hm.vns,
             face_normals: hm.fns,
             eps,
-            tol,
             collider,
             coplanar,
         };
@@ -106,13 +101,6 @@ impl Manifold {
             return Err("The input mesh is not manifold".into());
         }
         Ok(mfd)
-    }
-
-    pub fn get_indices(&self) -> Vec<Vec3u> {
-        self.hs
-            .chunks(3)
-            .map(|cs| Vec3u::new(cs[0].tail, cs[1].tail, cs[2].tail))
-            .collect()
     }
 
     pub fn is_manifold(&self) -> bool {
@@ -179,11 +167,10 @@ fn sort_faces(
     face_morton: &mut Vec<u32>,
 ) -> Result<Hmesh, String> {
     let mut map = (0..face_morton.len()).collect::<Vec<_>>();
-    map.sort_by_key(|&i| face_morton[i]);
-    *face_bboxes = map
-        .iter()
-        .map(|&i| face_bboxes[i].clone())
-        .collect::<Vec<_>>();
+    // Morton codes are u32 keys and the permutation is rebuilt from scratch,
+    // so equal-key order is not observable: the unstable sort is free here.
+    map.sort_unstable_by_key(|&i| face_morton[i]);
+    *face_bboxes = map.iter().map(|&i| face_bboxes[i]).collect::<Vec<_>>();
     *face_morton = map.iter().map(|&i| face_morton[i]).collect::<Vec<_>>();
 
     Hmesh::new(pos, &map.iter().map(|&i| idx[i]).collect::<Vec<_>>())
@@ -278,4 +265,28 @@ pub fn cleanup_unused_verts(ps: &mut Vec<Vec3>, hs: &mut Vec<Half>) {
 
     *ps = new2old.iter().map(|&i| ps[i]).collect();
     *hs = hs.iter().filter(|h| h.pair().is_some()).cloned().collect();
+}
+
+/// Whether a half-edge array describes a closed two-manifold.
+///
+/// Extracted verbatim from `Manifold::is_manifold` so the result of a
+/// boolean can be validated without building a `Manifold` around it.
+/// Same predicate, same acceptance of unset tail/head as vacuously fine.
+pub(crate) fn halfedges_are_two_manifold(hs: &[Half]) -> bool {
+    hs.iter().enumerate().all(|(i, h)| {
+        if h.tail().is_none() || h.head().is_none() {
+            return true;
+        }
+        match h.pair() {
+            None => false,
+            Some(pair) => {
+                let mut good = true;
+                good &= hs[pair].pair() == Some(i);
+                good &= h.tail != h.head;
+                good &= h.tail == hs[pair].head;
+                good &= h.head == hs[pair].tail;
+                good
+            }
+        }
+    })
 }

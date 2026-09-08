@@ -12,7 +12,7 @@
 //!
 //! So orientation is checked here, on the way in, using the divergence theorem.
 
-use crate::csg::Manifold;
+use crate::csg::{BooleanMesh, Manifold};
 use axiolid_contracts::GeomError;
 use axiolid_core::Point3;
 use axiolid_mesh::TriMesh;
@@ -63,14 +63,10 @@ pub(crate) fn to_manifold(mesh: &TriMesh, role: &str) -> Result<Manifold, GeomEr
 /// re-exporting them as *vertex* normals would misrepresent hard edges created
 /// by the cut. Downstream code that needs normals should derive them from the
 /// topology it actually wants.
-pub(crate) fn from_manifold(manifold: &Manifold) -> TriMesh {
-    let positions = manifold
-        .ps
-        .iter()
-        .map(|p| Point3::new(p.x, p.y, p.z))
-        .collect();
-    let indices = manifold
-        .get_indices()
+pub(crate) fn from_boolean_mesh(mesh: &BooleanMesh) -> TriMesh {
+    let positions = mesh.ps.iter().map(|p| Point3::new(p.x, p.y, p.z)).collect();
+    let indices = mesh
+        .tris
         .iter()
         .flat_map(|t| [t.x as u32, t.y as u32, t.z as u32])
         .collect();
