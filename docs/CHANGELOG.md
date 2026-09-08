@@ -45,6 +45,7 @@ All notable changes to Axiolid are documented in this file.
 ## [0.12.0] - 2026-09-06
 
 ### Fixed
+- The exact planar-faced boolean now retries a fixed family of ray directions when a containment probe meets a vertex or edge exactly, instead of refusing the whole operation. Containment is direction-independent, so each attempt stays exact. Grid-aligned operands -- repeated axis-aligned subtraction, where operands share vertices in bulk -- are now answered; previously they refused after a few accumulated operations. Exhausting the family still refuses.
 - `axiolid-spatial` no longer claims an octree it does not implement; the crate description and docs name only the BVH and uniform point grid, with the octree listed as a structure that *could* implement the same callback API
 
 ### Added
