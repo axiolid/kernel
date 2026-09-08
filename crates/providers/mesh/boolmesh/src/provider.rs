@@ -218,6 +218,47 @@ impl MeshBoolean for BoolmeshBoolean {
         operation: BooleanOperator,
         options: &ExecutionOptions,
     ) -> GeomResult<BooleanOutcome> {
+        self.boolean_impl(subject, tool, operation, options, false)
+    }
+}
+
+impl BoolmeshBoolean {
+    /// Alternative to [`MeshBoolean::boolean`] using a cheaper winding-number
+    /// classification for the same result.
+    ///
+    /// See `csg::boolean03::kernel03::winding03_fast`'s doc comment for the
+    /// guarantee: not an approximation, but a bug in edge-break detection
+    /// would mislabel a whole connected component instead of one vertex.
+    /// Opt-in rather than the default until this has run against a wider
+    /// correctness corpus than the differential tests already covering it.
+    ///
+    /// `SymmetricDifference` is refused rather than silently composed from
+    /// three slow-path calls: a caller asking for the fast path should get
+    /// it or a clear refusal, not a surprise fallback.
+    pub fn boolean_fast(
+        &self,
+        subject: &TriMesh,
+        tool: &TriMesh,
+        operation: BooleanOperator,
+        options: &ExecutionOptions,
+    ) -> GeomResult<BooleanOutcome> {
+        if operation == BooleanOperator::SymmetricDifference {
+            return Err(GeomError::Unsupported {
+                backend: BoolmeshBoolean::ID,
+                operation: axiolid_contracts::Operation::MeshBoolean,
+            });
+        }
+        self.boolean_impl(subject, tool, operation, options, true)
+    }
+
+    fn boolean_impl(
+        &self,
+        subject: &TriMesh,
+        tool: &TriMesh,
+        operation: BooleanOperator,
+        options: &ExecutionOptions,
+        fast_winding: bool,
+    ) -> GeomResult<BooleanOutcome> {
         // `SymmetricDifference` has no `boolmesh` counterpart. Compose it from
         // the three primitives rather than pretending the backend's operation
         // set is the contract's; `sub_operations` in the evidence records that
@@ -244,7 +285,7 @@ impl MeshBoolean for BoolmeshBoolean {
         let subject_manifold = to_manifold(subject, "subject")?;
         let tool_manifold = to_manifold(tool, "tool")?;
 
-        let output = match compute_boolean(&subject_manifold, &tool_manifold, op) {
+        let output = match compute_boolean(&subject_manifold, &tool_manifold, op, fast_winding) {
             Ok(output) => output,
             // An empty result is a legitimate value under the contract: the
             // intersection of disjoint solids is nothing. `boolmesh` signals

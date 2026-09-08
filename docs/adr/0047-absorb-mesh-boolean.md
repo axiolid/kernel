@@ -369,3 +369,92 @@ real reduction needs a different algorithm -- a wider branching factor,
 or batching queries to share descents -- not a cheaper node or an earlier
 reject. Parallelism is NOT available: the `parallel` feature is off by
 design because it drops `determinism()` to `BestEffort`.
+## Addendum, 2026-09-08: winding-number classification, made opt-in fast
+
+The standing conclusion above said the traversal needed a different
+algorithm, not a cheaper node. Comparing axiolid's own flame graph
+against a standalone Manifold-only profile (same sphere-union geometry,
+identical `perf record` settings) found where: `winding03` costs axiolid
+~12% of runtime, while Manifold's equivalent (`Winding03_`, `boolean3.cpp`)
+costs it only ~2.7%.
+
+### The mechanism, and why it is not an approximation
+
+Manifold does not classify every vertex. It union-finds vertices of one
+operand by the edges an intersection did NOT break, runs the (expensive)
+winding-number query once per connected component, and flood-fills the
+answer to every vertex in that component. If an edge's endpoints are both
+untouched by an intersection, they are on the same side of the other
+solid by definition of "crossing" -- that is a topological fact, not a
+tolerance relaxation.
+
+axiolid already computes the exact input this needs: `p1q2`, the broken-
+edge set `intersect12` builds using the identical `Kernel02` predicate
+`winding03` itself calls per-vertex. The two classifiers share one
+numerical primitive, so there is no second epsilon strategy to silently
+disagree with the first.
+
+### Decision: opt-in, not a default
+
+Requested explicitly: keep `winding03`/`boolean()` as the only path a
+caller gets by default, and land the flood-fill version as an alternative
+a caller must ask for.
+
+Reasoning, from a direct question about what is lost: mathematically
+nothing -- the flood-filled answer is provably identical to the per-vertex
+one, given a correct `p1q2`. What changes is fault containment. A bug in
+edge-break detection today would corrupt one vertex; under flood-fill it
+mislabels an entire connected component, which for a sphere union is most
+of the mesh. That is a real cost even though the algorithm itself is
+sound, and it has not yet run against a correctness corpus wider than the
+sphere fixtures below.
+
+### What was built
+
+- `kernel03::winding03_fast(mp, mq, expand, fwd, p1q2)` -- the union-find
+  and flood-fill, reusing the same `Kernel02`/`PlanarGrid` broad phase as
+  `winding03`. `winding03` itself is untouched.
+- `boolean03_fast` -- calls `intersect12` then `winding03_fast` per
+  direction; cannot share `winding03`'s `rayon::join` with `intersect12`
+  since it needs `intersect12`'s output first, so parallelism moves to
+  being across the two `fwd` directions instead of within one.
+- `compute_boolean(.., fast_winding: bool)` -- `false` is bit-for-bit the
+  pre-existing behaviour.
+- `BoolmeshBoolean::boolean_fast(...)` -- a second public method beside
+  `MeshBoolean::boolean`, not a flag on it. Refuses `SymmetricDifference`
+  outright rather than silently composing three slow calls.
+
+### Verification
+
+Five differential unit tests in `kernel03` assert `winding03_fast` equals
+`winding03` exactly: overlapping spheres, deeply nested spheres, near-
+tangent spheres (thinnest possible intersection band), completely
+disjoint spheres (the whole mesh is one component -- the degenerate case
+the optimisation is built around), and asymmetric subdivision density
+between the two operands. A sixth integration test runs `boolean_fast`
+against the fixture corpus through the public API and compares volumes
+against `boolean`; a seventh confirms the `SymmetricDifference` refusal.
+All pass. Full workspace suite and `clippy --all-targets --all-features
+-- -D warnings` both clean.
+
+### Measurement
+
+`perf stat`, 10 unions at 81920 triangles per operand, `boolean()` vs
+`boolean_fast()`, identical checksums both sides:
+
+    instructions      17,908,660,747 -> 16,734,190,747   -6.6%
+    cycles             7,507,309,629 ->  6,975,685,451   -7.1%
+
+Wall-clock, 4 interleaved best-of-15 runs each: slow 181.1-188.6 ms, fast
+154.6-167.7 ms -- non-overlapping. Against a standalone Manifold profile
+on identical geometry (146.7-150.3 ms), the gap is now roughly 1.03x-1.14x
+depending on which runs are paired, down from 1.70x at the start of this
+kernel's absorption and ~1.11x-1.2x before this change.
+
+### What was NOT done
+
+`winding03` (the default) is untouched. No caller was switched to
+`boolean_fast` -- it exists as an available path, not a migration target.
+Whether to route any specific caller through it is a decision for that
+caller, weighing the fault-containment cost above against the measured
+win.

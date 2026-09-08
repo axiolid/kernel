@@ -74,3 +74,56 @@ pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
         v21,
     }
 }
+
+/// Alternative to [`boolean03`] using [`kernel03::winding03_fast`] for the
+/// winding-number classification.
+///
+/// Not run under the same `rayon::join` as `intersect12`: the fast path
+/// needs `intersect12`'s `p1q2` before it can start, so this sequences
+/// where `boolean03` parallelised. The two `fwd` directions (`p1q2` vs
+/// `p2q1`) are still independent of each other and stay parallel.
+pub fn boolean03_fast(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
+    let e = if op == &OpType::Add { 1. } else { -1. };
+    let mut p1q2 = vec![];
+    let mut p2q1 = vec![];
+
+    #[cfg(feature = "parallel")]
+    let (((x12, v12), w03), ((x21, v21), w30)) = rayon::join(
+        || {
+            let r = intersect12(mp, mq, &mut p1q2, e, true);
+            let w = kernel03::winding03_fast(mp, mq, e, true, &p1q2);
+            (r, w)
+        },
+        || {
+            let r = intersect12(mp, mq, &mut p2q1, e, false);
+            let w = kernel03::winding03_fast(mp, mq, e, false, &p2q1);
+            (r, w)
+        },
+    );
+
+    #[cfg(not(feature = "parallel"))]
+    let (((x12, v12), w03), ((x21, v21), w30)) = {
+        let a = {
+            let r = intersect12(mp, mq, &mut p1q2, e, true);
+            let w = kernel03::winding03_fast(mp, mq, e, true, &p1q2);
+            (r, w)
+        };
+        let b = {
+            let r = intersect12(mp, mq, &mut p2q1, e, false);
+            let w = kernel03::winding03_fast(mp, mq, e, false, &p2q1);
+            (r, w)
+        };
+        (a, b)
+    };
+
+    Boolean03 {
+        p1q2,
+        p2q1,
+        x12,
+        x21,
+        w03,
+        w30,
+        v12,
+        v21,
+    }
+}

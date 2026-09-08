@@ -39,7 +39,7 @@ pub(crate) mod triangulation;
 pub(crate) use common::*;
 pub(crate) use manifold::*;
 
-use boolean03::boolean03;
+use boolean03::{boolean03, boolean03_fast};
 use boolean45::boolean45;
 use manifold::{cleanup_unused_verts, halfedges_are_two_manifold};
 use simplification::simplify_topology;
@@ -83,14 +83,24 @@ pub(crate) struct BooleanMesh {
 ///   can in principle leave one, so the check is retained -- but on the
 ///   half-edge data the boolean already has, rather than on a fresh
 ///   half-edge mesh built solely to ask the question.
+///
+/// `fast_winding` selects [`boolean03_fast`] over [`boolean03`] for the
+/// winding-number classification -- see `kernel03::winding03_fast`'s doc
+/// comment for the guarantee and the trade-off. `false` reproduces exactly
+/// what this function did before the fast path existed.
 pub(crate) fn compute_boolean(
     mp: &Manifold,
     mq: &Manifold,
     op: OpType,
+    fast_winding: bool,
 ) -> Result<BooleanMesh, String> {
     let eps = mp.eps.max(mq.eps);
 
-    let b03 = boolean03(mp, mq, &op);
+    let b03 = if fast_winding {
+        boolean03_fast(mp, mq, &op)
+    } else {
+        boolean03(mp, mq, &op)
+    };
     let mut b45 = boolean45(mp, mq, &b03, &op);
     let mut trg = triangulate(mp, mq, &b45, eps)?;
 

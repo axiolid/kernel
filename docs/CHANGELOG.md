@@ -6,6 +6,12 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `BoolmeshBoolean::boolean_fast` -- an opt-in alternative to `boolean()`
+  using a component-wise winding-number classification instead of one
+  query per vertex, matching Manifold's own approach. Wins ~6.6% instructions,
+  ~7.1% cycles on a sphere union; not the default because a bug in edge-break
+  detection would mislabel a whole connected component instead of one vertex.
+  See ADR 0047 addendum.
 - `axiolid-reference` now answers booleans of INTERPENETRATING solids
   exactly, where it previously refused with `Unsupported`. Three stages:
   the intersection curve (nodes named by source topology, never by
