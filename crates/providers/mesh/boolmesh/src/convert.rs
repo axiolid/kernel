@@ -1,4 +1,4 @@
-//! `TriMesh` <-> `boolmesh::Manifold` conversion.
+//! `TriMesh` <-> `csg::Manifold` conversion.
 //!
 //! Orientation is the dangerous part. An inside-out solid is structurally
 //! valid: every edge still has exactly two incident faces, so a manifold check
@@ -12,11 +12,11 @@
 //!
 //! So orientation is checked here, on the way in, using the divergence theorem.
 
+use crate::csg::Manifold;
 use axiolid_contracts::GeomError;
 use axiolid_core::Point3;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_contracts::SolidRequirements;
-use boolmesh::prelude::Manifold;
 
 /// Six times the signed volume of a closed triangle mesh.
 ///
@@ -38,7 +38,7 @@ pub(crate) fn six_signed_volume(positions: &[Point3], indices: &[u32]) -> f64 {
     total
 }
 
-/// Convert a `TriMesh` into a `boolmesh::Manifold`, rejecting inputs whose
+/// Convert a `TriMesh` into a `csg::Manifold`, rejecting inputs whose
 /// orientation would silently invert the operation.
 ///
 /// `role` names the argument for the diagnostic, so a caller learns *which*
@@ -57,7 +57,7 @@ pub(crate) fn to_manifold(mesh: &TriMesh, role: &str) -> Result<Manifold, GeomEr
         .map_err(|reason| GeomError::NotManifold(format!("{role}: {reason}")))
 }
 
-/// Convert a `boolmesh::Manifold` back into a `TriMesh`.
+/// Convert a `csg::Manifold` back into a `TriMesh`.
 ///
 /// The result carries no normals: `boolmesh` computes its own face normals, and
 /// re-exporting them as *vertex* normals would misrepresent hard edges created

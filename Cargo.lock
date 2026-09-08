@@ -393,6 +393,8 @@ dependencies = [
  "axiolid-predicates",
  "axiolid-reference",
  "boolmesh",
+ "glam 0.30.10",
+ "rayon",
 ]
 
 [[package]]
@@ -696,7 +698,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ede2e53d77b54cd1aae2a8641693c4c65b0ecd0d423194ca4ef78278b53313a"
 dependencies = [
  "glam 0.30.10",
- "rayon",
 ]
 
 [[package]]

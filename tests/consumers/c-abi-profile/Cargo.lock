@@ -170,7 +170,7 @@ dependencies = [
  "axiolid-mesh",
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-contracts",
- "boolmesh",
+ "glam 0.30.10",
 ]
 
 [[package]]
@@ -319,15 +319,6 @@ name = "axiolid-topology"
 version = "0.14.0"
 dependencies = [
  "axiolid-core",
-]
-
-[[package]]
-name = "boolmesh"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ede2e53d77b54cd1aae2a8641693c4c65b0ecd0d423194ca4ef78278b53313a"
-dependencies = [
- "glam 0.30.10",
 ]
 
 [[package]]

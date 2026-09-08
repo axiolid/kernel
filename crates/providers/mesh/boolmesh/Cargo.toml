@@ -15,20 +15,28 @@ axiolid-mesh.workspace = true
 axiolid-contracts.workspace = true
 axiolid-mesh-contracts.workspace = true
 axiolid-mesh-boolean-contract.workspace = true
-boolmesh = { version = "0.1.9", default-features = false }
+# The mesh boolean is absorbed into `src/csg` (ADR 0047), not depended
+# upon. `glam` is what that code is written against; `axiolid-core` pins
+# 0.29, which lacks the USizeVec3 the absorbed code uses.
+glam = "0.30"
+rayon = { version = "1.11", optional = true }
 
 [features]
 # Upstream multi-threading. OFF by default: the parallel path has not been
 # audited for run-to-run byte stability, and `determinism()` drops to
 # `BestEffort` when it is on, so `Plan::admit` refuses a stronger request
 # rather than silently returning a schedule-dependent result.
-parallel = ["boolmesh/rayon"]
+parallel = ["dep:rayon"]
 
 [[bench]]
 name = "subtract_many"
 harness = false
 
 [dev-dependencies]
+# Upstream, for the absorption differential test ONLY (ADR 0047). The
+# production path uses `src/csg`; this pin exists so a port bug shows up
+# as a failing comparison rather than as silently different geometry.
+boolmesh = { version = "0.1.9", default-features = false }
 # The scalar oracle, used only for differential testing (ADR 0012). A
 # dev-dependency deliberately: the production provider must never depend on the
 # reference implementation at runtime.

@@ -1,6 +1,6 @@
 # 0014 — Adopt `boolmesh` for the mesh boolean
 
-- **Status:** Accepted
+- **Status:** Superseded by [0047](0047-absorb-mesh-boolean.md)
 - **Date:** 2026-08-19
 - **Deciders:** Friedrich, axiolid
 - **Supersedes:** resolves the open evaluation in [0003](0003-pure-rust-mesh-boolean.md)

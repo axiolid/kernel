@@ -1,5 +1,6 @@
 //! The `MeshBoolean` implementation.
 
+use crate::csg::{compute_boolean, OpType};
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, Determinism, ExecutionOptions,
     ExecutionTarget, GeomError, GeomResult, ScratchRequirement,
@@ -9,7 +10,6 @@ use axiolid_mesh::{AttributeFate, TriMesh};
 use axiolid_mesh_boolean_contract::{
     symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
 };
-use boolmesh::prelude::{compute_boolean, OpType};
 
 use crate::convert::{from_manifold, six_signed_volume, to_manifold};
 
