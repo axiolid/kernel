@@ -17,7 +17,6 @@ pub(in crate::csg::manifold) struct Hmesh {
     pub twin: Vec<usize>,
     pub head: Vec<usize>,
     pub tail: Vec<usize>,
-    pub half: Vec<usize>,
     pub vns: Vec<Vec3>,
     pub fns: Vec<Vec3>,
 }
@@ -162,10 +161,9 @@ impl Hmesh {
             return Err("Input mesh must not contain boundary edges.".into());
         }
 
-        let mut half = vec![];
-        for i in 0..nh {
-            half.push(i);
-        }
+        // `half` used to be materialised here as an identity permutation
+        // over 0..nh, then immediately walked in that same order by the
+        // caller. Removed: the caller now just uses 0..nh directly.
         let mut vns = vec![Vec3::ZERO; nv];
         let mut fns = vec![Vec3::ZERO; nf];
 
@@ -229,7 +227,6 @@ impl Hmesh {
             twin,
             head,
             tail,
-            half,
             vns,
             fns,
         })

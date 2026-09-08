@@ -81,10 +81,8 @@ impl Manifold {
         let bb = BBox::new(None, &ps);
         let (mut f_bb, mut f_mt) = compute_face_morton(&ps, &idx, &bb);
         let hm = sort_faces(&ps, &idx, &mut f_bb, &mut f_mt)?;
-        let hs = hm
-            .half
-            .iter()
-            .map(|&i| Half::new(hm.tail[i], hm.head[i], hm.twin[i]))
+        let hs = (0..hm.nh)
+            .map(|i| Half::new(hm.tail[i], hm.head[i], hm.twin[i]))
             .collect::<Vec<_>>();
 
         let mut e = K_PRECISION * bb.scale();
