@@ -19,7 +19,10 @@ pub fn winding03(mp: &Manifold, mq: &Manifold, expand: Real, fwd: bool) -> Vec<i
         fwd,
     };
 
-    mb.collider.collision(
+    // The xy grid: this query never reads z (see `BPos::overlaps_node`),
+    // and is run once per operand, so an O(n) structure beats a tree here
+    // -- there is no second call to amortize a tree build against.
+    mb.planar_grid.collision(
         &ma.ps
             .iter()
             .enumerate()

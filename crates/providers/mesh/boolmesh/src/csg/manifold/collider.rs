@@ -1,8 +1,8 @@
 //--- Copyright (C) 2025 Saki Komikado <komietty@gmail.com>,
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 
-use crate::csg::bounds::{union_bbs, Aabb, BBox, QueryShape};
-use crate::csg::Vec3;
+use crate::csg::bounds::{union_bbs, Aabb, BBox, BPos, QueryShape};
+use crate::csg::{Real, Vec3};
 
 pub const K_NO_CODE: u32 = 0xFFFFFFFF;
 const K_INITIAL_LENGTH: i32 = 128;
@@ -168,6 +168,129 @@ fn build_internal_boxes(
             &node_bb[intl_children[intl_idx].1 as usize],
         );
         flag = true;
+    }
+}
+
+/// A uniform grid over x/y, for queries that only test x and y.
+///
+/// `winding03`'s point-in-polygon test reads only x/y (see
+/// `BPos::overlaps_node`); the earlier attempt at this problem built a
+/// second BVH sorted the same way and found that its O(n log n)
+/// construction cost as much as the traversal it saved, because the tree
+/// is built once and used for exactly one pass of queries -- there is no
+/// second call to amortize it against.
+///
+/// A grid is O(n) to build: bucket each face's xy footprint into the
+/// cells it overlaps, no sort and no tree. It trades the BVH's adaptivity
+/// for a resolution tuned to the expected density -- appropriate here
+/// because a subdivided icosphere's faces are close to uniform in size,
+/// which is exactly the case a uniform grid is suited to and a tree
+/// derives no extra benefit from adapting to.
+#[derive(Clone, Debug)]
+pub struct PlanarGrid {
+    min: Vec3,
+    cell: Real,
+    dim: u32,
+    /// CSR row offsets: cell `(cx, cy)` at index `cy * dim + cx` owns
+    /// `bucket[start[i]..start[i + 1]]`.
+    start: Vec<u32>,
+    bucket: Vec<u32>,
+    /// The exact box the query must still confirm against: cell
+    /// membership is a broad-phase over-approximation for faces whose
+    /// bbox straddles a cell boundary, not the collision test itself.
+    face_bb: Vec<BBox>,
+}
+
+impl PlanarGrid {
+    pub fn new(face_bb: &[BBox], bb: &BBox) -> Self {
+        let n = face_bb.len();
+        // Target ~2 faces per cell: dense enough that a query's candidate
+        // list stays short, sparse enough that few faces straddle more
+        // than one cell.
+        let dim = ((n as f64 / 2.0).sqrt().ceil() as u32).max(1);
+        let sx = (bb.max.x - bb.min.x).max(Real::EPSILON);
+        let sy = (bb.max.y - bb.min.y).max(Real::EPSILON);
+        let cell = (sx.max(sy)) / dim as Real;
+        let min = bb.min;
+
+        let cell_of = |x: Real, y: Real| -> (u32, u32) {
+            let cx = (((x - min.x) / cell) as i64).clamp(0, dim as i64 - 1) as u32;
+            let cy = (((y - min.y) / cell) as i64).clamp(0, dim as i64 - 1) as u32;
+            (cx, cy)
+        };
+
+        let n_cells = (dim * dim) as usize;
+        let mut count = vec![0u32; n_cells + 1];
+        // Pass 1: how many (face, cell) pairs exist, per cell -- a face
+        // whose bbox spans several cells is counted once per cell it
+        // touches, matching how it will be looked up from any of them.
+        let mut ranges = Vec::with_capacity(n);
+        for fb in face_bb {
+            let (cx0, cy0) = cell_of(fb.min.x, fb.min.y);
+            let (cx1, cy1) = cell_of(fb.max.x, fb.max.y);
+            for cy in cy0..=cy1 {
+                for cx in cx0..=cx1 {
+                    count[(cy * dim + cx) as usize + 1] += 1;
+                }
+            }
+            ranges.push((cx0, cy0, cx1, cy1));
+        }
+        for i in 0..n_cells {
+            count[i + 1] += count[i];
+        }
+        let start = count.clone();
+
+        let mut bucket = vec![0u32; *count.last().unwrap() as usize];
+        let mut cursor = start.clone();
+        for (i, &(cx0, cy0, cx1, cy1)) in ranges.iter().enumerate() {
+            for cy in cy0..=cy1 {
+                for cx in cx0..=cx1 {
+                    let c = (cy * dim + cx) as usize;
+                    bucket[cursor[c] as usize] = i as u32;
+                    cursor[c] += 1;
+                }
+            }
+        }
+
+        PlanarGrid {
+            min,
+            cell,
+            dim,
+            start,
+            bucket,
+            face_bb: face_bb.to_vec(),
+        }
+    }
+
+    /// Test every point query against the grid.
+    ///
+    /// Specific to `BPos` rather than generic over `QueryShape`: this is a
+    /// spatial-hash lookup, not a tree descent, and the only caller
+    /// (`winding03`) only ever has points. Forcing it through the shared
+    /// trait would buy genericity nothing has asked for.
+    pub fn collision<F>(&self, queries: &[BPos], record: &mut F)
+    where
+        F: FnMut(usize, usize),
+    {
+        let hi_x = self.min.x + self.cell * self.dim as Real;
+        let hi_y = self.min.y + self.cell * self.dim as Real;
+        for q in queries {
+            let Some(qid) = q.id else { continue };
+            let px = q.pos.x as Real;
+            let py = q.pos.y as Real;
+            if px < self.min.x || py < self.min.y || px > hi_x || py > hi_y {
+                continue;
+            }
+            let cx = (((px - self.min.x) / self.cell) as i64).clamp(0, self.dim as i64 - 1) as u32;
+            let cy = (((py - self.min.y) / self.cell) as i64).clamp(0, self.dim as i64 - 1) as u32;
+            let c = (cy * self.dim + cx) as usize;
+            for &f in &self.bucket[self.start[c] as usize..self.start[c + 1] as usize] {
+                let fb = &self.face_bb[f as usize];
+                if q.overlaps_node(&fb.into()) {
+                    record(qid, f as usize);
+                }
+            }
+        }
     }
 }
 

@@ -6,7 +6,7 @@ pub mod collider;
 pub mod hmesh;
 
 use super::hmesh::Hmesh;
-use crate::csg::collider::{morton_code, MortonCollider, K_NO_CODE};
+use crate::csg::collider::{morton_code, MortonCollider, PlanarGrid, K_NO_CODE};
 use crate::csg::{next_of, Half, Real, Vec3, Vec3u, K_PRECISION};
 use bounds::BBox;
 #[cfg(feature = "parallel")]
@@ -25,7 +25,16 @@ pub struct Manifold {
     pub face_normals: Vec<Vec3>,  //
     pub vert_normals: Vec<Vec3>,  //
     pub collider: MortonCollider, //
-    pub coplanar: Vec<i32>,       // indices of coplanar faces
+    /// A second broad phase over x/y alone, O(n) to build.
+    ///
+    /// `winding03`'s point-in-polygon test reads only x and y (see
+    /// `BPos::overlaps_node`), and is run exactly once per operand --
+    /// there is no second call to amortize a tree's O(n log n) build
+    /// against. A uniform grid is O(n) to build and, for a subdivided
+    /// mesh where faces are close to uniform in size, resolves the
+    /// query about as well as a tree does.
+    pub planar_grid: PlanarGrid,
+    pub coplanar: Vec<i32>, // indices of coplanar faces
 }
 
 impl Manifold {
@@ -82,6 +91,7 @@ impl Manifold {
         e = if e.is_finite() { e } else { -1. };
         let eps = e;
         let collider = MortonCollider::new(&f_bb, &f_mt);
+        let planar_grid = PlanarGrid::new(&f_bb, &bb);
         let coplanar = compute_coplanar_idx(&ps, &hm.fns, &hs, eps);
 
         let mfd = Manifold {
@@ -94,6 +104,7 @@ impl Manifold {
             face_normals: hm.fns,
             eps,
             collider,
+            planar_grid,
             coplanar,
         };
 
