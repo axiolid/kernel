@@ -66,6 +66,12 @@ All notable changes to Axiolid are documented in this file.
 - Added `AttributeChannel` to `axiolid-mesh`: named per-vertex data (`name`, `values`, `width`, `blend`) carried on `TriMesh::attributes`, with a `Blend` policy (`Linear`, `Nearest`, `None`) that is a property of the DATA rather than of any operation. `validate_structure` refuses a channel that does not cover every vertex, declares a zero tuple width, or repeats a name.
 
 ### Changed
+- The BVH broad phase specialises its traversal per query shape and
+  stores identity-free `Aabb` nodes instead of `BBox`, cutting the node
+  array from 10.0 MiB to 7.5 MiB at 81920 triangles per operand. A union
+  executes 8.9% fewer instructions with 16.5% fewer cache misses; the
+  wall-clock effect is smaller than this machine's run-to-run noise, so
+  it is reported as counters rather than a speedup (ADR 0047).
 - The mesh boolean no longer rebuilds a full `Manifold` for its own
   result: `compute_boolean` returns positions and triangles, keeping the
   empty-result signal and the two-manifold check as explicit steps. With

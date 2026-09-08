@@ -258,3 +258,47 @@ and axiolid now leads at 5120 (13.5 ms vs 22.9 ms union). The remaining
 hot paths -- the Morton broad phase and the two INPUT `Manifold` builds,
 which are genuinely required since `triangulation` reads `coplanar` --
 are untouched.
+
+## Addendum, 2026-09-08: the broad phase, and the limit of wall-clock
+
+With the output-path rebuild gone, the Morton broad phase became the
+largest single cost at 12.6%. Two changes, both reachable only because
+the code is owned:
+
+- The query shape is a type parameter (`QueryShape`) rather than a
+  `Query` enum. Each `collision` call already passes a homogeneous slice,
+  so the per-node match on the variant was decidable at compile time.
+- Tree nodes are `Aabb` (min, max) instead of `BBox` (id, min, max). The
+  id exists so a QUERY can name itself to the recorder; a node never used
+  it, and `union_bbs` wrote `id: None` when constructing one. That is 16
+  bytes of a 64-byte struct, always empty, in the array the traversal
+  walks -- 10.0 MiB of node boxes at 81920 triangles, against an L2 of
+  1-2 MiB.
+
+Measured with `perf stat`, 10 unions at 81920 triangles per operand:
+
+    instructions      20,276,499,802 -> 18,480,585,574   -8.9%
+    cache-references     222,855,766 ->    217,842,530   -2.2%
+    cache-misses          32,262,975 ->     26,954,355  -16.5%
+    miss rate                 14.48% ->         12.37%
+
+### Why this is reported as counters, not a speedup
+
+Best-of-25 medians move 218.6 ms to 207.3 ms, which reads as ~1.05x. But
+the run-to-run distributions OVERLAP: the slowest new run is slower than
+the fastest old one. Reporting 1.05x would assert more than the
+measurement supports.
+
+Instruction counts do not have this problem -- they are deterministic and
+independent of scheduling. Where an effect is smaller than the machine's
+noise floor, counters are the honest instrument. The earlier 1.31x
+output-path result was reported as wall-clock because there the arms did
+NOT overlap.
+
+### What this did not fix
+
+The traversal is still ~12% of runtime. The enum dispatch was not the
+dominant cost; the tree walk itself is, and it is memory-bound. Making it
+substantially cheaper means a different algorithm -- a wider branching
+factor, or batching queries to share descents -- not a cheaper node. That
+is a larger change than this one and is not attempted here.

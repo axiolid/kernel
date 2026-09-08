@@ -2,7 +2,7 @@
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 
 use super::kernel02::Kernel02;
-use crate::csg::bounds::{BPos, Query};
+use crate::csg::bounds::BPos;
 use crate::csg::{Manifold, Real, Vec2};
 
 pub fn winding03(mp: &Manifold, mq: &Manifold, expand: Real, fwd: bool) -> Vec<i32> {
@@ -23,11 +23,9 @@ pub fn winding03(mp: &Manifold, mq: &Manifold, expand: Real, fwd: bool) -> Vec<i
         &ma.ps
             .iter()
             .enumerate()
-            .map(|(i, p)| {
-                Query::Pt(BPos {
-                    id: Some(i),
-                    pos: Vec2::new(p.x, p.y),
-                })
+            .map(|(i, p)| BPos {
+                id: Some(i),
+                pos: Vec2::new(p.x, p.y),
             })
             .collect::<Vec<_>>(),
         &mut |a, b| {

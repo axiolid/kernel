@@ -1,7 +1,7 @@
 //--- Copyright (C) 2025 Saki Komikado <komietty@gmail.com>,
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 
-use crate::csg::bounds::{union_bbs, BBox, Query};
+use crate::csg::bounds::{union_bbs, Aabb, BBox, QueryShape};
 use crate::csg::Vec3;
 
 pub const K_NO_CODE: u32 = 0xFFFFFFFF;
@@ -144,7 +144,7 @@ impl<'a> RadixTree<'a> {
 }
 
 fn build_internal_boxes(
-    node_bb: &mut [BBox],
+    node_bb: &mut [Aabb],
     counter: &mut [i32],
     node_parent: &[i32],
     intl_children: &[(i32, i32)],
@@ -173,7 +173,7 @@ fn build_internal_boxes(
 
 #[derive(Clone, Debug)]
 pub struct MortonCollider {
-    pub node_bb: Vec<BBox>,
+    pub node_bb: Vec<Aabb>,
     pub node_parent: Vec<i32>,
     pub intl_children: Vec<(i32, i32)>,
 }
@@ -192,7 +192,7 @@ impl MortonCollider {
 
     fn update_boxes(&mut self, leaf_bb: &[BBox]) {
         for (i, box_val) in leaf_bb.iter().enumerate() {
-            self.node_bb[i * 2] = *box_val;
+            self.node_bb[i * 2] = box_val.into();
         }
         let mut counter: Vec<i32> = vec![0; self.num_intl()];
         for i in 0..self.num_leaf() {
@@ -222,7 +222,7 @@ impl MortonCollider {
         }
 
         let mut res = MortonCollider {
-            node_bb: vec![BBox::default(); n_node],
+            node_bb: vec![Aabb::empty(); n_node],
             node_parent,
             intl_children,
         };
@@ -231,81 +231,81 @@ impl MortonCollider {
         res
     }
 
-    pub fn collision<F>(&self, queries: &[Query], record: &mut F)
+    /// Test every query against the tree, recording (query id, leaf) hits.
+    ///
+    /// Generic over the query shape rather than taking a `Query` enum: each
+    /// caller passes a homogeneous slice, so this monomorphises into one
+    /// traversal with the overlap test inlined and no per-node branch on
+    /// the variant.
+    pub fn collision<Q, F>(&self, queries: &[Q], record: &mut F)
     where
+        Q: QueryShape,
         F: FnMut(usize, usize),
     {
-        for i in 0..queries.len() {
-            find_collisions(
-                queries,
-                &self.node_bb,
-                &self.intl_children,
-                i,
-                record,
-                false,
-            )
+        for (i, query) in queries.iter().enumerate() {
+            find_collisions(query, i, &self.node_bb, &self.intl_children, record, false)
         }
     }
 }
 
-fn find_collisions<F>(
-    queries: &[Query],
-    node_bb: &[BBox],
-    children: &[(i32, i32)],
+fn find_collisions<Q, F>(
+    query: &Q,
     query_idx: usize,
+    node_bb: &[Aabb],
+    children: &[(i32, i32)],
     record: &mut F,
     self_collision: bool,
 ) where
+    Q: QueryShape,
     F: FnMut(usize, usize),
 {
+    // The query's id is loop-invariant: upstream re-matched the enum and
+    // re-read `id` at every leaf hit. Nothing to record without one, so
+    // an id-less query can skip the descent entirely.
+    let Some(query_id) = query.id() else {
+        return;
+    };
+
     // depth-first search
-    let mut stack = [0; 64];
+    let mut stack = [0i32; 64];
     let mut top = -1i32;
     let mut node = K_ROOT;
-
-    let mut rec = |node: i32| {
-        let q = &queries[query_idx];
-        let overlap = node_bb[node as usize].overlaps(q);
-        // Edition 2021: the workspace predates let-chains, so the upstream
-        // `if overlap && let Some(il) = ...` is nested instead. Same control
-        // flow, no behaviour change.
-        if overlap {
-            if let Some(il) = node2leaf(node) {
-                if !self_collision || il != query_idx as i32 {
-                    match q {
-                        Query::Bb(q) => {
-                            if let Some(iq) = q.id {
-                                record(iq, il as usize);
-                            }
-                        }
-                        Query::Pt(q) => {
-                            if let Some(iq) = q.id {
-                                record(iq, il as usize);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        overlap && node2intl(node).is_some() //should traverse into node
-    };
 
     loop {
         let intl = node2intl(node).unwrap();
         let (c1, c2) = children[intl as usize];
-        let traverse1 = rec(c1);
-        let traverse2 = rec(c2);
+
+        let mut visit = |n: i32| -> bool {
+            if !query.overlaps_node(&node_bb[n as usize]) {
+                return false;
+            }
+            match node2leaf(n) {
+                Some(leaf) => {
+                    if !self_collision || leaf != query_idx as i32 {
+                        record(query_id, leaf as usize);
+                    }
+                    // A leaf is never descended into.
+                    false
+                }
+                // Overlapping and internal: traverse.
+                None => true,
+            }
+        };
+
+        let traverse1 = visit(c1);
+        let traverse2 = visit(c2);
+
         if !traverse1 && !traverse2 {
             if top < 0 {
                 break;
-            } // done
+            }
             node = stack[top as usize];
             top -= 1;
         } else {
-            node = if traverse1 { c1 } else { c2 }; // go here next
+            node = if traverse1 { c1 } else { c2 };
             if traverse1 && traverse2 {
                 top += 1;
-                stack[top as usize] = c2; // save the other for later
+                stack[top as usize] = c2;
             }
         }
     }

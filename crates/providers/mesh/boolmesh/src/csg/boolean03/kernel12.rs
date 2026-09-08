@@ -4,7 +4,7 @@
 use super::kernel01::intersect;
 use super::kernel02::Kernel02;
 use super::kernel11::Kernel11;
-use crate::csg::bounds::{BBox, Query};
+use crate::csg::bounds::BBox;
 use crate::csg::{Half, Manifold, Real, Vec3};
 
 pub struct Kernel12<'a> {
@@ -128,8 +128,8 @@ pub fn intersect12(
         .iter()
         .enumerate()
         .filter(|(_, h)| h.is_forward())
-        .map(|(i, h)| Query::Bb(BBox::new(Some(i), &[ma.ps[h.tail], ma.ps[h.head]])))
-        .collect::<Vec<Query>>();
+        .map(|(i, h)| BBox::new(Some(i), &[ma.ps[h.tail], ma.ps[h.head]]))
+        .collect::<Vec<BBox>>();
 
     let mut x12_ = vec![];
     let mut v12_ = vec![];
