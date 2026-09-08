@@ -42,9 +42,6 @@ impl Ecvt {
     pub fn dir_l(&self) -> Vec2 {
         self.ptr_l().borrow().dir
     }
-    pub fn dir_r(&self) -> Vec2 {
-        self.ptr_r().borrow().dir
-    }
     pub fn ptr_l_of_r(&self) -> EvPtr {
         self.ptr_r().borrow().ptr_l()
     }
@@ -632,11 +629,13 @@ impl EarClip {
         let eb = end.borrow();
         let p_end = end.borrow().pos;
         let p_bgn = bgn.borrow().pos;
+        // The two middle branches both select `end`, so they are one
+        // condition. Written as a disjunction the intent reads directly:
+        // take `end` when it is left of the bridge origin, or when it sits
+        // further above than `end` sits below.
         let mut con = if p_end.x < p_bgn.x {
             eb.ptr_r()
-        } else if eb.pos_r().x < p_bgn.x {
-            Rc::clone(end)
-        } else if eb.pos_r().y - p_bgn.y > p_bgn.y - p_end.y {
+        } else if eb.pos_r().x < p_bgn.x || eb.pos_r().y - p_bgn.y > p_bgn.y - p_end.y {
             Rc::clone(end)
         } else {
             eb.ptr_r()

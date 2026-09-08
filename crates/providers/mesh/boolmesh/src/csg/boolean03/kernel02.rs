@@ -1,7 +1,7 @@
 //--- Copyright (C) 2025 Saki Komikado <komietty@gmail.com>,
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 
-use super::kernel01::{interpolate, shadows, shadows01};
+use super::kernel01::{interpolate, shadows, shadows01, ShadowOperands};
 use crate::csg::{Half, Real, Vec3};
 
 pub struct Kernel02<'a> {
@@ -46,9 +46,13 @@ impl<'a> Kernel02<'a> {
             }
 
             // If the value is None, then these do not overlap
-            if let Some((s01, yz01)) = shadows01(
-                p0, q1_f, self.ps_p, self.ps_q, self.hs_q, self.ns, exp, !fwd,
-            ) {
+            let ops = ShadowOperands {
+                ps_p: self.ps_p,
+                ps_q: self.ps_q,
+                hs_q: self.hs_q,
+                ns: self.ns,
+            };
+            if let Some((s01, yz01)) = shadows01(p0, q1_f, &ops, exp, !fwd) {
                 s02 += s01 * if fwd == half.is_forward() { -1 } else { 1 };
                 if k < 2 && (k == 0 || (s01 != 0) != shadows_) {
                     shadows_ = s01 != 0;
@@ -65,14 +69,15 @@ impl<'a> Kernel02<'a> {
         assert_eq!(k, 2, "Boolean manifold error: s02");
         let p = self.ps_p[p0];
         let z02 = interpolate(yzz_rl[0], yzz_rl[1], p.y)[1];
-        if fwd {
-            if !shadows(p.z, z02, exp * self.ns[p0].z) {
-                s02 = 0;
-            }
+        // Same test either way; `fwd` only decides which operand is the
+        // shadow caster and whose normal supplies the expansion.
+        let lit = if fwd {
+            shadows(p.z, z02, exp * self.ns[p0].z)
         } else {
-            if !shadows(z02, p.z, exp * self.ns[closest_vid].z) {
-                s02 = 0;
-            }
+            shadows(z02, p.z, exp * self.ns[closest_vid].z)
+        };
+        if !lit {
+            s02 = 0;
         }
         Some((s02, z02))
     }

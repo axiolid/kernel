@@ -2,7 +2,7 @@
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 #![allow(clippy::needless_range_loop)]
 
-use super::kernel01::{intersect, shadows, shadows01};
+use super::kernel01::{intersect, shadows, shadows01, ShadowOperands};
 use crate::csg::{Half, Real, Vec3, Vec4};
 
 pub struct Kernel11<'a> {
@@ -26,16 +26,14 @@ impl<'a> Kernel11<'a> {
         let q0 = [self.hs_q[q1].tail, self.hs_q[q1].head];
 
         for i in 0..2 {
-            if let Some((s, yz)) = shadows01(
-                p0[i],
-                q1,
-                self.ps_p,
-                self.ps_q,
-                self.hs_q,
-                self.ns,
-                self.expand,
-                false,
-            ) {
+            // P casts onto Q.
+            let ops = ShadowOperands {
+                ps_p: self.ps_p,
+                ps_q: self.ps_q,
+                hs_q: self.hs_q,
+                ns: self.ns,
+            };
+            if let Some((s, yz)) = shadows01(p0[i], q1, &ops, self.expand, false) {
                 s11 += s * if i == 0 { -1 } else { 1 };
                 if k < 2 && (k == 0 || (s != 0) != shadow_) {
                     shadow_ = s != 0;
@@ -47,16 +45,14 @@ impl<'a> Kernel11<'a> {
         }
 
         for i in 0..2 {
-            if let Some((s, yz)) = shadows01(
-                q0[i],
-                p1,
-                self.ps_q,
-                self.ps_p,
-                self.hs_p,
-                self.ns,
-                self.expand,
-                true,
-            ) {
+            // ...and Q casts onto P: the operands swap roles.
+            let ops = ShadowOperands {
+                ps_p: self.ps_q,
+                ps_q: self.ps_p,
+                hs_q: self.hs_p,
+                ns: self.ns,
+            };
+            if let Some((s, yz)) = shadows01(q0[i], p1, &ops, self.expand, true) {
                 s11 += s * if i == 0 { -1 } else { 1 };
                 if k < 2 && (k == 0 || (s != 0) != shadow_) {
                     shadow_ = s != 0;

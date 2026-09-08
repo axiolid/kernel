@@ -137,3 +137,79 @@ crates.io dependency.
   established is what makes this a one-crate change.
 - `docs/adr/0014-adopt-boolmesh-mesh-boolean.md` — superseded by this ADR.
 
+
+## Addendum, 2026-09-08: the absorbed code is now ours to shape
+
+The initial landing was deliberately a faithful port, so that the
+differential test could prove absorption changed nothing. That property
+has been demonstrated, so the code was then reworked to the workspace's
+own standards. The differential test in
+`tests/absorbed_differential.rs` still passes against upstream 0.1.9, so
+every change below is behaviour-preserving by construction.
+
+`crates/providers/mesh/boolmesh/src/lib.rs` carried nine
+`#[allow(...)]` attributes scoped to `mod csg` when the port landed.
+**All nine are gone**; the module builds warning-free under both the
+default and `--all-features` configurations with no suppressions.
+
+### Changes that were latent defects, not style
+
+- Five `x.abs() as usize` casts became `unsigned_abs()`. The original
+  panics in debug builds for `i32::MIN` (which has no positive
+  counterpart) and wraps silently in release, so the behaviour depended
+  on the build profile.
+- `Manifold::translate`, `rotate`, and `scale` each rebuilt the mesh
+  through `.unwrap()`. They had no callers, so removing them deleted
+  three panic paths rather than merely three functions. Upstream removed
+  the same methods after 0.1.9.
+- `Vec4::default()` followed by four field writes became a single
+  `Vec4::new(...)`, so the value is never observable half-initialised.
+
+### Parameter bundles, where they name a real thing
+
+Six functions exceeded the argument limit. Rather than raise the limit,
+five small structs were introduced -- each one named an existing concept
+that was previously passed as loose parallel slices:
+
+| Struct | Replaces | In |
+| --- | --- | --- |
+| `ResultEdges` | `hs_r`, `rs_r`, `face_ptr_r` | the result mesh being filled |
+| `SourceSide` | `i03`, `hs_p`, `vid_p2r`, `fid_p2r`, `fwd` | one operand plus its index maps |
+| `Windings` | `i03`, `i30`, `i12`, `i21` | operation-adjusted winding numbers |
+| `EdgePoints` | `pt_old`, `pt_new` | where new vertices accumulate |
+| `ShadowOperands` | `ps_p`, `ps_q`, `hs_q`, `ns` | the two operands of a shadow test |
+| `SwapWalk` | `tag`, `visit`, `stack`, `edges` | edge-swap traversal state |
+
+`Windings` also absorbed the four parallel `let` bindings that derived
+those arrays, so the operation's sign convention now lives in one
+constructor instead of four adjacent expressions.
+
+`SourceSide` makes the symmetry of the algorithm visible:
+`append_partial_edges` and `append_whole_edges` are each called twice,
+once per operand, and the call sites now differ only in which side is
+passed.
+
+### Dead code removed rather than allowed
+
+`compute_orthogonal`, `query_two_d_tree`, `Rect::overlap`, `dir_r`,
+`Mat3`, and the `bounding_box` / `original_idx` fields were unused.
+`original_idx` was always constructed empty, which invites a caller to
+trust a value that is never populated.
+
+Two of these were traps for a blanket fix. `Rect::overlap` looks dead in
+isolation but serves `query_two_d_tree`, so removing only the leaf
+breaks the build; they had to go together. And `tri_halfs_single` is
+reported dead only under `--all-features`: it is the serial path,
+replaced by `tri_halfs_multi` when `parallel` is on. It is now marked
+`#[cfg(not(feature = "parallel"))]`, which states the fact instead of
+suppressing the question -- deleting it would have broken the default
+build.
+
+### Verification
+
+`cargo clippy --all-targets` and `--all-targets --all-features` both
+report zero warnings with no `allow` attributes. The full suite passes
+in both feature configurations, and `absorbed_differential` continues to
+assert bit-identical vertex positions and volumes within 1e-12 against
+upstream `boolmesh` 0.1.9 for union, intersection, and difference.
+

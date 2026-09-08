@@ -7,7 +7,7 @@ pub mod hmesh;
 
 use super::hmesh::Hmesh;
 use crate::csg::collider::{morton_code, MortonCollider, K_NO_CODE};
-use crate::csg::{next_of, Half, Mat3, Real, Vec3, Vec3u, K_PRECISION};
+use crate::csg::{next_of, Half, Real, Vec3, Vec3u, K_PRECISION};
 use bounds::BBox;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -23,10 +23,8 @@ pub struct Manifold {
     pub nh: usize,                // number of halfedges
     pub eps: Real,                // epsilon
     pub tol: Real,                // tolerance
-    pub bounding_box: BBox,       //
     pub face_normals: Vec<Vec3>,  //
     pub vert_normals: Vec<Vec3>,  //
-    pub original_idx: Vec<usize>, //
     pub collider: MortonCollider, //
     pub coplanar: Vec<i32>,       // indices of coplanar faces
 }
@@ -96,10 +94,8 @@ impl Manifold {
             nh: hm.nh,
             ps,
             hs,
-            bounding_box: bb,
             vert_normals: hm.vns,
             face_normals: hm.fns,
-            original_idx: vec![],
             eps,
             tol,
             collider,
@@ -119,19 +115,6 @@ impl Manifold {
             .collect()
     }
 
-    pub fn set_epsilon(&mut self, min_epsilon: Real, use_single: bool) {
-        let scl = self.bounding_box.scale();
-        let mut e = min_epsilon.max(K_PRECISION * scl);
-        e = if e.is_finite() { e } else { -1. };
-        let t = if use_single {
-            e.max(Real::EPSILON * scl)
-        } else {
-            e
-        };
-        self.eps = e;
-        self.tol = self.tol.max(t);
-    }
-
     pub fn is_manifold(&self) -> bool {
         self.hs.iter().enumerate().all(|(i, h)| {
             if h.tail().is_none() || h.head().is_none() {
@@ -149,27 +132,6 @@ impl Manifold {
                 }
             }
         })
-    }
-
-    pub fn translate(&mut self, x: f64, y: f64, z: f64) {
-        let t = Vec3::new(x as Real, y as Real, z as Real);
-        let p = self.ps.iter().map(|p| *p + t).collect();
-        *self = Manifold::new_impl(p, self.get_indices(), None, None).unwrap();
-    }
-
-    pub fn rotate(&mut self, x: f64, y: f64, z: f64) {
-        let r = Mat3::from_euler(glam::EulerRot::XYZ, x as Real, y as Real, z as Real);
-        let p = self.ps.iter().map(|p| r * *p).collect();
-        *self = Manifold::new_impl(p, self.get_indices(), None, None).unwrap();
-    }
-
-    pub fn scale(&mut self, x: f64, y: f64, z: f64) {
-        let p = self
-            .ps
-            .iter()
-            .map(|p| Vec3::new(p.x * x as Real, p.y * y as Real, p.z * z as Real))
-            .collect();
-        *self = Manifold::new_impl(p, self.get_indices(), None, None).unwrap();
     }
 }
 

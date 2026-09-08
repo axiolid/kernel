@@ -10,6 +10,7 @@ use crate::csg::triangulation::ear_clip::EarClip;
 #[cfg(feature = "parallel")]
 use crate::csg::triangulation::tri_halfs::tri_halfs_multi;
 #[cfg(not(feature = "parallel"))]
+#[cfg(not(feature = "parallel"))]
 use crate::csg::triangulation::tri_halfs::tri_halfs_single;
 use crate::csg::{
     compute_aa_proj, get_aa_proj_matrix, is_ccw_3d, Half, Manifold, Real, Tref, Vec2, Vec3, Vec3u,
@@ -95,12 +96,15 @@ fn process_face(b45: &Boolean45, fid: usize, eps: Real) -> Vec<Vec3u> {
 fn assemble_halfs(hs: &[Half], hid_f: &[i32], fid: usize) -> Vec<Vec<usize>> {
     let bgn = hid_f[fid] as usize;
     let end = hid_f[fid + 1] as usize;
-    let num = end - bgn;
     let mut v2h = BTreeMap::new();
 
-    for i in bgn..bgn + num {
-        let id = hs[i].tail;
-        v2h.entry(id).or_insert_with(VecDeque::new).push_front(i);
+    // `i` is not just a cursor: it is the half-edge id stored in the map,
+    // so it has to survive into the value. Zipping the id range against the
+    // slice keeps both meanings visible and drops the bounds check.
+    for (i, h) in (bgn..end).zip(&hs[bgn..end]) {
+        v2h.entry(h.tail)
+            .or_insert_with(VecDeque::new)
+            .push_front(i);
     }
 
     let mut loops: Vec<Vec<usize>> = vec![];

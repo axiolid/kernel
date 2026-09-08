@@ -9,14 +9,13 @@ mod precision {
     pub type Vec2 = glam::DVec2;
     pub type Vec3 = glam::DVec3;
     pub type Vec4 = glam::DVec4;
-    pub type Mat3 = glam::DMat3;
     pub type Real = f64;
     pub const K_PRECISION: f64 = 1e-12;
 }
 
 pub type Vec2u = glam::USizeVec2;
 pub type Vec3u = glam::USizeVec3;
-pub use precision::{Mat3, Real, Vec2, Vec3, Vec4, K_PRECISION};
+pub use precision::{Real, Vec2, Vec3, Vec4, K_PRECISION};
 pub const K_BEST: Real = Real::MIN;
 
 #[derive(PartialEq)]
@@ -179,15 +178,6 @@ pub fn safe_normalize(v: Vec2) -> Vec2 {
     } else {
         Vec2::new(0., 0.)
     }
-}
-
-pub fn compute_orthogonal(n: Vec3) -> Vec3 {
-    let b = if n.x.abs() < 0.9 {
-        Vec3::new(1., 0., 0.)
-    } else {
-        Vec3::new(0., 1., 0.)
-    };
-    n.cross(b).normalize()
 }
 
 /*

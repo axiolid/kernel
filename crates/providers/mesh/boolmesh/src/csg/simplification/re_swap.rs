@@ -38,16 +38,30 @@ fn record(hs: &[Half], ps: &[Vec3], ns: &[Vec3], hid: usize, oft: usize, tol: Re
     is_ccw_2d(&a, &b, &c, tol) > 0 || is01_longest_2d(&a, &b, &c)
 }
 
+/// Working state carried through the edge-swap recursion.
+///
+/// `tag`, `visit`, `stack`, and `edges` are one traversal's bookkeeping,
+/// not four independent inputs: every recursive call forwards all four
+/// unchanged. Naming them together makes the recursion's state explicit
+/// and leaves the mesh arrays as the actual subject of the function.
+struct SwapWalk<'a> {
+    /// Monotonic visit marker for the current sweep.
+    tag: &'a mut i32,
+    /// Last tag that touched each halfedge.
+    visit: &'a mut [i32],
+    /// Halfedges still to revisit.
+    stack: &'a mut Vec<usize>,
+    /// Edges collected for the caller.
+    edges: &'a mut Vec<usize>,
+}
+
 fn recursive_edge_swap(
     hs: &mut [Half],
     ps: &mut Vec<Vec3>,
     ns: &mut [Vec3],
     ts: &mut [Tref],
     hid: usize,
-    tag: &mut i32,
-    visit: &mut [i32],
-    stack: &mut Vec<usize>,
-    edges: &mut Vec<usize>,
+    walk: &mut SwapWalk,
     tol: Real,
 ) {
     if hid >= hs.len() {
@@ -60,7 +74,7 @@ fn recursive_edge_swap(
         return;
     }
 
-    if visit[h0] == *tag && visit[h1] == *tag {
+    if walk.visit[h0] == *walk.tag && walk.visit[h1] == *walk.tag {
         return;
     } // avoid infinite recursion
 
@@ -125,13 +139,13 @@ fn recursive_edge_swap(
         // Two facing, long-edge degenerates can swap.
         swap_edge();
         if (u3 - u2).length_squared() < tol * tol {
-            *tag += 1;
-            collapse_edge(hs, ps, ns, ts, t0e.2, tol, edges);
-            edges.clear();
+            *walk.tag += 1;
+            collapse_edge(hs, ps, ns, ts, t0e.2, tol, walk.edges);
+            walk.edges.clear();
         } else {
-            visit[h0] = *tag;
-            visit[h1] = *tag;
-            stack.extend_from_slice(&[t1e.1, t1e.0, t0e.1, t0e.0]);
+            walk.visit[h0] = *walk.tag;
+            walk.visit[h1] = *walk.tag;
+            walk.stack.extend_from_slice(&[t1e.1, t1e.0, t0e.1, t0e.0]);
         }
         return;
     } else if is_ccw_2d(&u0, &u3, &u2, tol) <= 0 || is_ccw_2d(&u1, &u2, &u3, tol) <= 0 {
@@ -139,9 +153,10 @@ fn recursive_edge_swap(
     }
 
     swap_edge();
-    visit[h0] = *tag;
-    visit[h1] = *tag;
-    stack.extend_from_slice(&[pair_of(hs, t1e.0), pair_of(hs, t0e.1)]);
+    walk.visit[h0] = *walk.tag;
+    walk.visit[h1] = *walk.tag;
+    walk.stack
+        .extend_from_slice(&[pair_of(hs, t1e.0), pair_of(hs, t0e.1)]);
 }
 
 pub fn swap_degenerates(
@@ -166,13 +181,15 @@ pub fn swap_degenerates(
 
     for hid in rec {
         tag += 1;
-        recursive_edge_swap(
-            hs, ps, ns, ts, hid, &mut tag, &mut visit, &mut stack, &mut buff, tol,
-        );
-        while let Some(last) = stack.pop() {
-            recursive_edge_swap(
-                hs, ps, ns, ts, last, &mut tag, &mut visit, &mut stack, &mut buff, tol,
-            );
+        let mut walk = SwapWalk {
+            tag: &mut tag,
+            visit: &mut visit,
+            stack: &mut stack,
+            edges: &mut buff,
+        };
+        recursive_edge_swap(hs, ps, ns, ts, hid, &mut walk, tol);
+        while let Some(last) = walk.stack.pop() {
+            recursive_edge_swap(hs, ps, ns, ts, last, &mut walk, tol);
         }
     }
 }
