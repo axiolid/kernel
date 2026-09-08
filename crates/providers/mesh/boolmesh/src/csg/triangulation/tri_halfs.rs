@@ -31,7 +31,10 @@ pub fn tri_halfs_single(ts: &[Vec3u]) -> Vec<Half> {
         }
     }
 
-    is.sort_by_key(|&i| ky[i]);
+    // `ky` packs (min vert, max vert, direction) into a u64, so every
+    // half-edge has a distinct key: there are no ties for a stable sort
+    // to preserve.
+    is.sort_unstable_by_key(|&i| ky[i]);
 
     let mut ini = 0;
     for i in 0..ne {

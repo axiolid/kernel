@@ -36,7 +36,9 @@ fn edge_topology(
         return Err("empty idx matrix".into());
     }
 
-    let mut ett: Vec<[usize; 4]> = vec![];
+    // Exactly three entries per face, known up front: reserving avoids the
+    // ~log2(3n) reallocations and copies a push-grown Vec pays.
+    let mut ett: Vec<[usize; 4]> = Vec::with_capacity(idx.len() * 3);
 
     for (i, idx_) in idx.iter().enumerate() {
         for j in 0..3 {
@@ -48,7 +50,9 @@ fn edge_topology(
             ett.push([v1, v2, i, j]);
         }
     }
-    ett.sort();
+    // Entries end with (face, corner), which is unique per element, so no
+    // two rows compare equal and stability is vacuous.
+    ett.sort_unstable();
 
     let mut ne = 1;
     for i in 0..ett.len() - 1 {

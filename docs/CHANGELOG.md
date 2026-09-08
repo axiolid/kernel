@@ -66,6 +66,10 @@ All notable changes to Axiolid are documented in this file.
 - Added `AttributeChannel` to `axiolid-mesh`: named per-vertex data (`name`, `values`, `width`, `blend`) carried on `TriMesh::attributes`, with a `Blend` policy (`Linear`, `Nearest`, `None`) that is a property of the DATA rather than of any operation. `validate_structure` refuses a channel that does not cover every vertex, declares a zero tuple width, or repeats a name.
 
 ### Changed
+- Three sorts in the boolean asked for stability their keys make
+  unobservable, and `edge_topology` grew its table by reallocation. A
+  union of two 81920-triangle icospheres is ~3.7% faster (median 196.7 ms
+  to 189.4 ms, non-overlapping runs) with identical output (ADR 0047).
 - The BVH broad phase specialises its traversal per query shape and
   stores identity-free `Aabb` nodes instead of `BBox`, cutting the node
   array from 10.0 MiB to 7.5 MiB at 81920 triangles per operand. A union

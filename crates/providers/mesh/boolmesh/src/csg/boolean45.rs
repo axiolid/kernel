@@ -292,8 +292,10 @@ fn pair_up(pts: &mut [EdgePt]) -> Vec<Half> {
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.cid.cmp(&b.cid))
     };
-    pts[..mid_idx].sort_by(cmp);
-    pts[mid_idx..].sort_by(cmp);
+    // The comparator breaks ties on `cid`, so the order is total and a
+    // stable sort has nothing left to preserve.
+    pts[..mid_idx].sort_unstable_by(cmp);
+    pts[mid_idx..].sort_unstable_by(cmp);
 
     let mut edges = Vec::with_capacity(nh);
     for i in 0..nh {

@@ -302,3 +302,70 @@ dominant cost; the tree walk itself is, and it is memory-bound. Making it
 substantially cheaper means a different algorithm -- a wider branching
 factor, or batching queries to share descents -- not a cheaper node. That
 is a larger change than this one and is not attempted here.
+
+## Addendum, 2026-09-08: two failed hypotheses, and what the counters said
+
+Approval was given to attack the BVH traversal algorithmically. Two
+attempts were made and BOTH were reverted after measurement. They are
+recorded because the negative results are the useful part.
+
+### Attempt 1: split the node array by kind (REVERTED)
+
+`node_bb` interleaves leaves and internal nodes, so consecutive leaves sit
+96 bytes apart and a cache line fetched for one leaf carries no second
+leaf. Splitting into separate leaf and internal arrays makes them 48
+bytes apart.
+
+Result: instructions ROSE 13% (18.47e9 -> 20.88e9), cache misses
+unchanged. Resolving leaf-ness before the overlap test -- required to
+know which array to read -- added a branch on every node visit that cost
+more than the locality gained. Reverted.
+
+### Attempt 2: reject queries against the root box (REVERTED)
+
+Instrumentation showed 25% of queries in a sphere-sphere union do not
+overlap the tree at all. Testing the root once before descending should
+skip them.
+
+Result: 0.3% fewer instructions, inside run-to-run variance. Those
+queries were ALREADY being rejected cheaply by the two child tests in the
+first loop iteration; the root test moved the same work earlier without
+removing it. Reverted.
+
+### What the counters actually showed
+
+    IPC                     2.25
+    branch misses           1.99% of branches
+    L1-dcache miss rate     2.59% of accesses
+
+The traversal is neither memory-stalled nor mispredicting. It is
+executing efficiently and there are simply many instructions. That
+invalidates the "memory-bound" framing in the previous addendum, which
+was inferred from the node array exceeding L2 rather than measured.
+
+### What did work
+
+Re-profiling put SORTING at ~13.5% across three entries -- more than the
+traversal. Three sorts request stability their keys make unobservable
+(unique u64 half-edge keys; a comparator that breaks ties on `cid`; rows
+ending in a unique (face, corner) pair), and `edge_topology` grew a
+known-size table by reallocation.
+
+    cycles     8,169,317,122 -> 8,041,949,834   -1.6%
+    IPC                 2.26 ->          2.30
+
+Wall-clock best-of-25 over six interleaved runs: median 196.7 ms to 189.4
+ms, with every run after faster than every run before. Non-overlapping
+distributions, so ~3.7% is reportable directly.
+
+One sort was deliberately left alone: kernel12's `seq` keys on (hid, fid)
+pairs, which repeat when several intersections share a half-edge and
+face, and the permutation reorders output.
+
+### Standing conclusion
+
+The traversal is ~12% of runtime and resisted two targeted attempts. A
+real reduction needs a different algorithm -- a wider branching factor,
+or batching queries to share descents -- not a cheaper node or an earlier
+reject. Parallelism is NOT available: the `parallel` feature is off by
+design because it drops `determinism()` to `BestEffort`.
