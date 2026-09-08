@@ -213,3 +213,48 @@ in both feature configurations, and `absorbed_differential` continues to
 assert bit-identical vertex positions and volumes within 1e-12 against
 upstream `boolmesh` 0.1.9 for union, intersection, and difference.
 
+
+## Addendum, 2026-09-08: the first optimisation the absorption paid for
+
+ADR 0047 argued absorption was worth it because over 99% of a boolean's
+runtime sat inside one opaque upstream call. The first change to exploit
+that: `compute_boolean` no longer rebuilds a `Manifold` from its own
+result.
+
+Upstream ended with `Manifold::new_impl`, which recomputes Morton codes,
+sorts every face, rebuilds the half-edge mesh, constructs a BVH, and
+computes a coplanar-face index. `from_manifold` then read positions and
+triangles and discarded all of it. That work was unreachable behind the
+crates.io API; owning the code made deleting it a two-line change to a
+return type.
+
+Two guarantees `new_impl` provided are now explicit rather than
+incidental:
+
+- The empty-result signal. The provider detects "empty pos matrix" by
+  message and returns the empty solid the contract specifies. Previously
+  that depended on a rebuild failing.
+- Two-manifoldness, via `halfedges_are_two_manifold`, extracted verbatim.
+  It must run BEFORE `cleanup_unused_verts`: that function reindexes
+  `tail`/`head` but leaves `pair` addressing the old half-edge ordering,
+  so validating afterwards indexes out of bounds. The differential test
+  caught this immediately, with a `pair` index of 5414 into an array of
+  5364.
+
+Measured by interleaved A/B runs of the two binaries, best-of-25 at
+81920 triangles per operand, with identical output checksums:
+
+    op              baseline  optimised  speedup
+    union              264.6      201.4    1.31x
+    intersection       218.6      180.1    1.21x
+    difference         240.4      191.4    1.26x
+
+Interleaving is load-bearing. A single run of unchanged code varied
+216-273 ms on this machine -- enough to manufacture a 1.2x result from
+nothing, or to hide one.
+
+Against Manifold, the gap closed from 1.70x to 1.11x at 81920 triangles,
+and axiolid now leads at 5120 (13.5 ms vs 22.9 ms union). The remaining
+hot paths -- the Morton broad phase and the two INPUT `Manifold` builds,
+which are genuinely required since `triangulation` reads `coplanar` --
+are untouched.

@@ -66,6 +66,13 @@ All notable changes to Axiolid are documented in this file.
 - Added `AttributeChannel` to `axiolid-mesh`: named per-vertex data (`name`, `values`, `width`, `blend`) carried on `TriMesh::attributes`, with a `Blend` policy (`Linear`, `Nearest`, `None`) that is a property of the DATA rather than of any operation. `validate_structure` refuses a channel that does not cover every vertex, declares a zero tuple width, or repeats a name.
 
 ### Changed
+- The mesh boolean no longer rebuilds a full `Manifold` for its own
+  result: `compute_boolean` returns positions and triangles, keeping the
+  empty-result signal and the two-manifold check as explicit steps. With
+  a `Copy` `BBox`, an unstable Morton sort, and a correctly sized weld
+  map, a union of two 81920-triangle icospheres drops from 264.6 ms to
+  201.4 ms (1.31x), measured by interleaved A/B runs with identical
+  output checksums (ADR 0047).
 - The mesh boolean is now absorbed into `crates/providers/mesh/boolmesh` rather than taken as a `boolmesh` crates.io dependency (ADR 0047, superseding ADR 0014). Profiling put 99.6% of a boolean's runtime inside upstream's single `compute_boolean` call, so neither the hot paths nor the known defects -- including the depth-2 Menger sponge panic -- were reachable from axiolid. Behaviour is unchanged and proven so: a differential test runs union, intersection and difference through both the absorbed algorithm and upstream 0.1.9 and requires bit-identical vertices, equal triangle counts, and volumes agreeing to 1e-12. Upstream's copyright headers are preserved; both projects are MPL-2.0, so absorbing adds no new licence obligation.
 - `BooleanEvidence` now reports `attribute_fates`: one `AttributeFate` per named channel on the subject (`Preserved`, `Interpolated`, or `Dropped(DropReason)`). A boolean creates vertices along the cut with no preimage in either operand, so attributes could not always survive -- but they were being dropped SILENTLY, leaving a caller to compare the mesh before and after to discover the loss and with no reason for it. `DropReason` separates `NotBlendable` (the data forbids derivation) from `ProviderLimitation` (this backend does not carry it), so a capability gap does not read as a property of the data. `BooleanEvidence` is no longer `Copy` as a result; it remains `Clone`.
 
