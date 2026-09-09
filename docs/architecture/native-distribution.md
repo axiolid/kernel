@@ -38,13 +38,13 @@ cmake --install build/native --config Release --prefix "$PWD/dist/axiolid"
 Extract only after verification, then point CMake at its root:
 
 ```sh
-sha256sum -c axiolid-native-v0.4.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-python3 scripts/verify-native-package.py axiolid-native-v0.4.0-x86_64-unknown-linux-gnu.tar.gz --extract-to /opt
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/axiolid-native-v0.4.0-x86_64-unknown-linux-gnu
+sha256sum -c axiolid-native-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+python3 scripts/verify-native-package.py axiolid-native-v0.1.1-x86_64-unknown-linux-gnu.tar.gz --extract-to /opt
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/axiolid-native-v0.1.1-x86_64-unknown-linux-gnu
 cmake --build build --config Release
 ```
 
-`find_package(Axiolid 0.4 CONFIG REQUIRED)` then creates:
+`find_package(Axiolid 0.1 CONFIG REQUIRED)` then creates:
 
 - `Axiolid::axiolid` — stable selected target;
 - `Axiolid::axiolid_shared` — shared implementation;
@@ -69,7 +69,7 @@ Other triples, MinGW, 32-bit processes, and ARM macOS are not claimed by v0.4. T
 
 ## Archive contract and integrity
 
-Each `axiolid-native-v0.4.0-<target>` archive contains:
+Each `axiolid-native-v0.1.1-<target>` archive contains:
 
 - `include/axiolid.h`;
 - shared, static, and platform import libraries;

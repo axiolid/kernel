@@ -25,7 +25,7 @@ verify = load("verify_native", ROOT / "scripts/verify-native-package.py")
 class NativePackagingTests(unittest.TestCase):
     @staticmethod
     def manifest_files() -> dict[str, bytes]:
-        root = "axiolid-native-v0.4.0-x86_64-unknown-linux-gnu"
+        root = "axiolid-native-v0.1.1-x86_64-unknown-linux-gnu"
         relative = {
             "LICENSE": b"license",
             "include/axiolid.h": b"header",
@@ -36,7 +36,7 @@ class NativePackagingTests(unittest.TestCase):
         }
         manifest = {
             "schema_version": 1,
-            "package_version": "0.4.0",
+            "package_version": "0.1.1",
             "abi_version": "0.4",
             "source_commit": "a" * 40,
             "source_dirty": False,
@@ -115,7 +115,7 @@ class NativePackagingTests(unittest.TestCase):
         self.assertIsNone(verify.machine(weak_prefix))
 
     def test_shared_library_requires_platform_image_magic(self) -> None:
-        root = "axiolid-native-v0.4.0-x86_64-unknown-linux-gnu"
+        root = "axiolid-native-v0.1.1-x86_64-unknown-linux-gnu"
         files = {
             f"{root}/lib/libaxiolid_capi.so": (0x8664).to_bytes(2, "little")
             + bytes(62),
@@ -130,7 +130,7 @@ class NativePackagingTests(unittest.TestCase):
     def test_manifest_schema_is_strict_and_root_is_bound(self) -> None:
         files = self.manifest_files()
         root, _ = verify.verify_files(files, allow_dirty=False)
-        self.assertEqual(root, "axiolid-native-v0.4.0-x86_64-unknown-linux-gnu")
+        self.assertEqual(root, "axiolid-native-v0.1.1-x86_64-unknown-linux-gnu")
         manifest_name = f"{root}/manifest.json"
         manifest = json.loads(files[manifest_name])
         del manifest["source_dirty"]

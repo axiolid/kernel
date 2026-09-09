@@ -113,7 +113,7 @@ The full compiled, CI-executed source — including the typed `AxiolidStatus_Uns
 The same ABI, linked through one CMake target regardless of consumption path:
 
 ```cmake
-find_package(Axiolid 0.4 CONFIG REQUIRED PATHS "/opt/axiolid-native-v0.4.0-x86_64-unknown-linux-gnu")
+find_package(Axiolid 0.1 CONFIG REQUIRED PATHS "/opt/axiolid-native-v0.1.1-x86_64-unknown-linux-gnu")
 target_link_libraries(your_target PRIVATE Axiolid::axiolid)
 ```
 

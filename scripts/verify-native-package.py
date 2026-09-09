@@ -262,7 +262,7 @@ def verify_files(files: dict[str, bytes], allow_dirty: bool) -> tuple[str, dict]
         raise ValueError("manifest keys differ from schema v1")
     if manifest.get("schema_version") != 1 or manifest.get("abi_version") != "0.4":
         raise ValueError("unsupported manifest or ABI version")
-    if manifest.get("package_version") != "0.4.0":
+    if manifest.get("package_version") != "0.1.1":
         raise ValueError("unsupported native package version")
     target = manifest.get("target")
     if not isinstance(target, str) or target not in SUPPORTED_TARGETS:

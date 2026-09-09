@@ -57,17 +57,26 @@ All notable changes to Axiolid are documented in this file.
   and how a caller sizes worker count. Documents a shipped decision
   whose evidence previously existed only in a stale worktree.
 
-## [0.14.0] - 2026-09-07
+<!-- Versions 0.1.1-0.1.8 were renumbered on 2026-09-09. They were
+originally tagged 0.4.0, 0.9.0, 0.9.1, 0.10.0, 0.11.0, 0.12.0, 0.13.0 and
+0.14.0, with gaps where no release was cut. None of them ever reached
+crates.io -- only 0.1.0 did -- so the published numbering never matched the
+git numbering. They are renumbered contiguously here so tags, GitHub
+releases and this changelog agree, and so the next crates.io release
+follows 0.1.0 honestly. GitHub MILESTONES are a separate axis (capability
+themes v0.2-v1.0) and are deliberately unchanged. -->
+
+## [0.1.8] - 2026-09-07
 
 ### Added
 - Added `CurvatureLaw::Piecewise` to `axiolid-curve`: several curvature laws over one arc-length domain, tiled by interior seams. This is what lets a straight/transition/arc alignment live in a single `Intrinsic2` under one absolute start frame -- decomposing it into separate curves would require an interior start frame whose origin is the position at the seam, a Fresnel-type integral the representation must not compute. `total_turning` sums each piece over its own subinterval in closed form and refuses (`None`) on a malformed law or a seam outside the curve length rather than clamping; `derivative` is per piece and genuinely discontinuous at seams; `is_straight`/`is_constant` stay structural, with constancy requiring pieces that are constant AND mutually equal. Pieces may nest, so a `Composite` transition can sit inside a `Piecewise` alignment.
 
-## [0.13.0] - 2026-09-06
+## [0.1.7] - 2026-09-06
 
 ### Added
 - Added `CurvatureLaw::Composite` and `Harmonic` to `axiolid-curve`: a polynomial part plus any number of additive sinusoidal terms in one law, so a transition spiral with both a linear ramp and a sine correction -- `k(s) = k0 + (d/L)s - (d/2pi) sin(2 pi s/L)` -- is stored exactly instead of being refused or approximated. `sine_corrected_transition` derives it from the endpoint curvatures and length. The shape is flat and additive rather than a recursive sum, so a given function has one representation, the family stays closed under differentiation and integration, and `is_straight`/`is_constant` stay structural. Existing variants are unchanged
 
-## [0.12.0] - 2026-09-06
+## [0.1.6] - 2026-09-06
 
 ### Fixed
 - The exact planar-faced boolean gained a contact/tangency lattice test sweep: disjoint, contained, identical, face/edge/vertex touching, and an epsilon ladder from 1e-3 to 1e-15 swept as both a positive gap and a negative overlap. Two limits it found are recorded in the crate PLAN.md rather than hidden: long grid-aligned subtraction chains refuse partway through, and a thin overlap below 1e-12 returns an open shell.
@@ -112,7 +121,7 @@ All notable changes to Axiolid are documented in this file.
 - `BooleanEvidence` now reports `attribute_fates`: one `AttributeFate` per named channel on the subject (`Preserved`, `Interpolated`, or `Dropped(DropReason)`). A boolean creates vertices along the cut with no preimage in either operand, so attributes could not always survive -- but they were being dropped SILENTLY, leaving a caller to compare the mesh before and after to discover the loss and with no reason for it. `DropReason` separates `NotBlendable` (the data forbids derivation) from `ProviderLimitation` (this backend does not carry it), so a capability gap does not read as a property of the data. `BooleanEvidence` is no longer `Copy` as a result; it remains `Clone`.
 
 
-## [0.11.0] - 2026-09-05
+## [0.1.5] - 2026-09-05
 
 ### Added
 - Added `invert2`/`invert3` to `axiolid-evaluate` (re-exported as `axiolid_reference::curve`): the exact point-to-parameter map for lines, circles and ellipses. Curves had `evaluate`, `derivative` and `jet` but no inversion, so a trim stated as a POINT could not be turned into a parameter. Families with no closed-form inversion are refused by name rather than iterated: introducing Newton here would put a tolerance and a convergence failure mode into every consumer of a point trim, and the certified iterative path belongs to a caller that can carry its evidence. A point off the curve is refused with its residual rather than projected onto the nearest parameter.
@@ -120,7 +129,7 @@ All notable changes to Axiolid are documented in this file.
 ### Fixed
 - `CurveRelation::Trimmed` with `TrimmingPreference::Cartesian` now resolves. Point selectors were validated and stored but never read: `parameter()` returned `None` for Cartesian, so every point-trimmed curve compiled to `trimmed directrix start needs a finite parameter selector`. Formats that can only stated a trim as endpoints -- a three-point arc knows its endpoints, not their parameters -- were representable but not usable. A basis that is itself a curve relation has no analytic curve to invert against, so a point selector there is still refused, now by a message that says why.
 
-## [0.10.0] - 2026-09-05
+## [0.1.4] - 2026-09-05
 
 ### Added
 - `SurfaceCurve` now records which p-curve belongs to which surface. `associated_geometry: Vec<NodeId>` was an unordered list that accepted a single entry, a swapped pair, or three unrelated nodes equally; it is replaced by `SurfaceSides`, which pairs each surface with its own p-curve and keeps a single-sided curve expressible.
@@ -136,12 +145,12 @@ All notable changes to Axiolid are documented in this file.
 - `axiolid-evaluate` now validates surface frames against the caller's tolerance instead of a hardcoded `1e-9`.
 - `axiolid-project` decided plane orthonormality with the LINEAR tolerance. Orthonormality is a dot product of unit vectors and therefore dimensionless, so the check scaled with the model length unit: under `Tolerance::MILLIMETRE` a basis skewed by up to 0.5 milliradians passed as orthonormal and every projected coordinate was silently wrong, while the same basis was correctly refused under `Tolerance::METRE`. `Plane` is now an alias for `PlaneFrame`, which decides validity with the ANGULAR tolerance. `ProjectionError::InvalidPlane` is no longer produced and is retained only because removing a public variant is breaking.
 
-## [0.9.1] - 2026-09-05
+## [0.1.3] - 2026-09-05
 
 ### Fixed
 - `mesh_distance` and `proximity_components` now report zero separation for transverse triangle crossings. The pairwise scan sampled vertex/triangle and edge/edge candidates only, so two surfaces crossing edge-through-face reported their nearest non-intersecting feature instead of zero: a genuine interpenetration read as a real gap, which is fail-open for any consumer asking whether two bodies clash. Coplanar overlap was already caught by the edge/edge family, which is why the existing crossing test did not detect this. A segment/triangle family now runs last, so it cannot disturb the documented tie order of the metric candidates and only ever lowers a result to exactly zero.
 
-## [0.9.0] - 2026-09-05
+## [0.1.2] - 2026-09-05
 
 ### Added
 - Added `axiolid-route`: exact planar shortest path over a visibility graph, with typed unreachable reasons (`StartOutside`, `GoalOutside`, `Disconnected`) rather than an empty path. Barriers are zero-width polylines, so a wall modelled as a line still blocks a route without bounding area. The kernel reports that no route exists under a given envelope; it never reports that a design is non-compliant.
@@ -180,7 +189,7 @@ All notable changes to Axiolid are documented in this file.
 - Pinned Python 3.12 via `actions/setup-python` in the `rust-consumers` CI job (`.github/workflows/native.yml`): the job previously relied on the Ubuntu runner's default Python 3.10, which lacks the standard-library `tomllib` module (3.11+ only) that `test-downstream-consumers.py` and `tests/downstream/test_downstream_consumers.py` require, so every push and release failed on `ubuntu-22.04` with `ModuleNotFoundError: No module named 'tomllib'`.
 - Fixed `scripts/package-native.py` shipping an empty `INTERFACE_LINK_LIBRARIES` for the Windows STATIC package, and the identical gap in the parallel in-tree `native/CMakeLists.txt` source-build install path and `axiolid_static` target (both `AxiolidTargets.cmake.in`-templated install and direct `add_subdirectory`/`axiolid_fetch(... LINKAGE STATIC)` consumption): `axiolid-capi` statically linked pulls in Rust std's Windows system-library dependencies (`kernel32.lib`, `ntdll.lib`, `userenv.lib`, `ws2_32.lib`, `dbghelp.lib`, confirmed via `rustc --print=native-static-libs` on `x86_64-pc-windows-msvc`), which were never declared to STATIC consumers on any of the three affected paths, so every downstream C/C++ project linking `Axiolid::axiolid_static` on Windows failed at link time with unresolved externals.
 
-## [0.4.0] - 2026-09-03
+## [0.1.1] - 2026-09-03
 
 ### Added
 - Added `scripts/prepare-release.py`, a version-bump and changelog-rollover tool: validates a strictly-forward semver bump, rejects releasing an empty Unreleased section, dates and rolls the Unreleased section into a versioned heading, and bumps both `[workspace.package].version` and every internal `axiolid-*` path-dependency version requirement in `[workspace.dependencies]` so 0.x caret semantics never strand an internal dependency behind the bumped crate it points to.
