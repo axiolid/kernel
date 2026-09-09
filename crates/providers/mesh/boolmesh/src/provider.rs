@@ -485,6 +485,41 @@ impl BoolmeshBoolean {
     /// (44.4s to 1.5s). The gap widens with n because the difference is
     /// complexity, not a constant factor.
     ///
+    /// # Known cost: intermediates are rebuilt at every level
+    ///
+    /// Each level hands the next one a [`TriMesh`], so every intermediate is
+    /// converted back from the internal half-edge form and rebuilt by
+    /// `to_manifold` on the level above. Instrumenting `to_manifold` against
+    /// `compute_boolean` on a disjoint sphere grid:
+    ///
+    /// ```text
+    ///   n   wall_ms  build_ms  build%  triangles rebuilt vs input
+    ///   8       8.9       3.9   43.8%   3.00x
+    ///  27      51.2      22.2   43.4%   4.85x
+    ///  64     145.7      65.2   44.7%   6.00x
+    /// 125     344.1     147.5   42.9%   6.98x
+    /// ```
+    ///
+    /// Construction is ~43% of wall time and the redundancy grows with `n`:
+    /// at 125 solids the same triangles are rebuilt seven times. Threading
+    /// the built structure through the levels instead would have a ceiling
+    /// of about **1.6x** for this path (perfect reuse, zero conversion
+    /// cost), so the real figure would be lower.
+    ///
+    /// It has NOT been done, deliberately. It requires a new internal type
+    /// boundary carrying a collider and planar grid between levels, which
+    /// makes intermediates heavier in memory, and it touches the code path
+    /// with the recorded ordering nondeterminism -- while this path is
+    /// currently STABLE at 1000 solids. That is a real property to risk for
+    /// a bounded win.
+    ///
+    /// Note the ceiling applies to BATCH paths only. A single
+    /// [`MeshBoolean::boolean`] call has no intermediates -- both operands
+    /// are leaves -- so construction there is irreducible and reuse saves
+    /// exactly nothing. It is not a lead on the single-boolean gap against
+    /// upstream Manifold, which profiling showed to be flat rather than
+    /// hotspot-shaped.
+    ///
     /// Union is associative and commutative, so any reduction order yields
     /// the same solid; unlike `subtract_grouped` this needs no disjointness
     /// precondition and no fusing, and therefore has no correctness cliff.

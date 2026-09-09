@@ -259,6 +259,64 @@ fn an_open_mesh_refuses_rather_than_guessing() {
     ));
 }
 
+/// Two disjoint cubes: the simplest multi-component case (#98).
+///
+/// `chi = 2c - 2g` gives `chi = 4` here, so the single-component formula
+/// `g = (2 - chi) / 2` yields `-1`. Converting that to `u32` used to clamp
+/// to `Ok(0)`, which is indistinguishable from a genuine sphere.
+#[test]
+fn two_disjoint_cubes_refuse_rather_than_reporting_genus_zero() {
+    let mut mesh = box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let far = box_mesh([4.0, 0.0, 0.0], [5.0, 1.0, 1.0]);
+    let base = mesh.positions.len() as u32;
+    mesh.positions.extend(far.positions.iter().copied());
+    mesh.indices.extend(far.indices.iter().map(|i| i + base));
+
+    match genus(&mesh) {
+        Err(GenusError::MultipleComponents {
+            components,
+            characteristic,
+        }) => {
+            assert_eq!(components, 2, "two cubes are two components");
+            assert_eq!(characteristic, 4, "chi = 2c for two genus-0 solids");
+        }
+        other => panic!("expected MultipleComponents, got {other:?}"),
+    }
+}
+
+/// A solid with interior cavities is the case that motivated #98.
+///
+/// A cube containing one hollow cube is 2 components with `chi = 4`. The
+/// old clamp reported `Ok(0)` -- a hollow solid and a plain sphere gave the
+/// same answer, so no caller could tell them apart.
+#[test]
+fn a_solid_with_a_cavity_is_not_reported_as_a_sphere() {
+    let mut mesh = box_mesh([0.0, 0.0, 0.0], [4.0, 4.0, 4.0]);
+    let cavity = box_mesh([1.0, 1.0, 1.0], [2.0, 2.0, 2.0]);
+    let base = mesh.positions.len() as u32;
+    mesh.positions.extend(cavity.positions.iter().copied());
+    // Reversed winding: an interior void faces inward.
+    for t in cavity.indices.chunks(3) {
+        mesh.indices
+            .extend_from_slice(&[t[0] + base, t[2] + base, t[1] + base]);
+    }
+
+    assert!(
+        matches!(
+            genus(&mesh),
+            Err(GenusError::MultipleComponents { components: 2, .. })
+        ),
+        "a cavity-bearing solid must refuse, not report genus 0"
+    );
+}
+
+/// The single-component path must keep working unchanged.
+#[test]
+fn one_component_still_reports_its_genus() {
+    assert_eq!(genus(&box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])), Ok(0));
+    assert_eq!(genus(&torus(16, 8)), Ok(1));
+}
+
 #[test]
 fn containment_holds_at_scales_where_a_tolerance_test_fails() {
     // A tolerance-based orientation test treats anything within epsilon of a
