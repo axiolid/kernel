@@ -62,7 +62,7 @@ an accumulator already holding `i` solids. Measured on a k^3 box grid
 | 8 | 0.38 ms | 0.23 ms | 1.6x |
 | 27 | 4.30 ms | 1.60 ms | 2.7x |
 | 64 | 21.69 ms | 3.97 ms | 5.5x |
-| 125 | 82.80 ms | 10.33 ms | 8.0x |
+| 125 | 82.80 ms | 10.33 ms | 8.0x (7.5-9.5x across three runs) |
 
 The ratio GROWS with n, which is what makes it a complexity difference rather
 than a constant factor. On OVERLAPPING grids the win is smaller (1.1x at n=8,
