@@ -6,6 +6,16 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `parallel-batch` feature on the `boolmesh` provider: independent nodes of
+  `union_many`'s reduction tree run concurrently. Deliberately separate from
+  the existing `parallel` feature, which threads inside a single solve and is
+  a measured regression on realistic IFC. Measured 1.5-2.6x on disjoint grids
+  of 64-216 solids, saturating by 8 threads; 16 threads buys nothing. The
+  ceiling is structural -- per-level cost is flat while parallel width
+  collapses 62 to 1, so the last three levels hold 44.7% of the runtime and
+  cannot use more than 4, 2 and 1 threads. Amdahl over the measured level
+  costs caps this at 3.28x with infinite threads. Off by default; see
+  docs/architecture/threading.md.
 - `MeshBoolean::union_many` — batch union with a provider-chosen reduction
   order, plumbed through dispatch and the facade. The trait default folds
   left; `boolmesh` overrides it with a balanced pairwise tree, which issues

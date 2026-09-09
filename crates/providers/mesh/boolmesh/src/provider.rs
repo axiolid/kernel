@@ -508,16 +508,49 @@ impl BoolmeshBoolean {
         let mut level: Vec<TriMesh> = solids.to_vec();
         let mut sub_operations = 0;
         while level.len() > 1 {
-            let mut next = Vec::with_capacity(level.len().div_ceil(2));
+            // Every pair at one level is independent: no pair reads another
+            // pair's output, so the level is a pure map. That is the whole
+            // reason this axis can be threaded while intra-solve threading
+            // cannot pay for itself -- there is no coordination inside the
+            // level, only a join at the end of it.
             let mut pairs = level.chunks_exact(2);
-            for pair in &mut pairs {
-                // Between booleans is the only real poll point: `boolmesh`
-                // takes no cancellation handle, so a single union cannot be
-                // interrupted once it starts.
-                options.check_cancelled()?;
-                sub_operations += 1;
-                next.push(self.union(&pair[0], &pair[1], options)?.mesh);
-            }
+
+            // Cancellation is polled ONCE per level rather than per pair.
+            // Under rayon the pairs are not ordered, so a per-pair poll
+            // would abort at a schedule-dependent point; per level, the
+            // cut point is deterministic and the partial work discarded is
+            // the same either way.
+            options.check_cancelled()?;
+
+            #[cfg(feature = "parallel-batch")]
+            let mut next: Vec<TriMesh> = {
+                use rayon::prelude::*;
+                // `par_iter` over an indexed slice, NOT `par_bridge`: the
+                // bridge does not preserve order, which would permute the
+                // level and silently change the tree's shape from run to
+                // run. An indexed parallel iterator collects positionally,
+                // so the output is identical to the sequential path.
+                let chunks: Vec<&[TriMesh]> = pairs.clone().collect();
+                let merged: Result<Vec<TriMesh>, GeomError> = chunks
+                    .par_iter()
+                    .map(|pair| Ok(self.union(&pair[0], &pair[1], options)?.mesh))
+                    .collect();
+                merged?
+            };
+
+            #[cfg(not(feature = "parallel-batch"))]
+            let mut next: Vec<TriMesh> = {
+                let mut acc = Vec::with_capacity(level.len().div_ceil(2));
+                for pair in pairs.clone() {
+                    acc.push(self.union(&pair[0], &pair[1], options)?.mesh);
+                }
+                acc
+            };
+
+            sub_operations += next.len();
+            // `chunks_exact` was cloned for the merge above, so advance the
+            // original to reach its remainder.
+            for _ in pairs.by_ref() {}
             // An odd trailing solid rides to the next level uncombined
             // rather than being unioned into an already-merged neighbour,
             // which would unbalance the tree this exists to keep balanced.

@@ -96,6 +96,56 @@ fn sequential(
     current
 }
 
+/// Thread-scaling sweep: same batch, increasing rayon pool size.
+///
+/// Reports speedup against the SAME BINARY at one thread, not against the
+/// non-parallel build, so the comparison isolates thread count rather than
+/// mixing in codegen differences.
+#[cfg(feature = "parallel-batch")]
+fn scaling_sweep() {
+    let provider = BoolmeshBoolean::new();
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+
+    println!("\nthread scaling -- disjoint grid, union_many tree reduction");
+    println!(
+        "{:>5}  {:>8}  {:>11}  {:>9}  {:>10}",
+        "n", "threads", "ms", "speedup", "volumes"
+    );
+
+    for &k in &[4usize, 5, 6] {
+        let solids = grid(k, 3.0);
+        let n = solids.len();
+        let mut baseline = 0.0f64;
+        for &threads in &[1usize, 2, 4, 8, 16] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("pool");
+            let (ms, vol) = pool.install(|| {
+                timed(|| {
+                    provider
+                        .union_many(&solids, &options)
+                        .expect("batch union")
+                        .mesh
+                })
+            });
+            if threads == 1 {
+                baseline = ms;
+            }
+            let want: f64 = solids.iter().map(volume).sum();
+            let agree = if ((vol - want) / want).abs() < 1e-9 {
+                "agree"
+            } else {
+                "DISAGREE"
+            };
+            println!(
+                "{n:>5}  {threads:>8}  {ms:>11.2}  {:>8.2}x  {agree:>10}",
+                baseline / ms
+            );
+        }
+    }
+}
+
 fn main() {
     let provider = BoolmeshBoolean::new();
     let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
@@ -141,4 +191,7 @@ fn main() {
             assert!(agree, "n={n}: seq {seq_vol} vs tree {tree_vol}");
         }
     }
+
+    #[cfg(feature = "parallel-batch")]
+    scaling_sweep();
 }

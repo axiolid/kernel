@@ -179,3 +179,58 @@ fn reversing_the_operands_gives_the_same_solid() {
         .mesh;
     assert_same_volume(&forward, &backward, "reversed operands");
 }
+
+/// The parallel batch path must return the SAME solid as the sequential
+/// one, not merely an equivalent-volume one.
+///
+/// This test compiles under both feature states and is the only thing
+/// standing between "threaded" and "threaded and still correct". Under
+/// `parallel-batch` the pairs are merged by rayon; the assertion is on
+/// triangle count and component count as well as volume, because a
+/// permuted level would change the tree shape and show up there first.
+#[test]
+fn the_batch_path_is_independent_of_feature_state() {
+    let solids = overlapping_row(9);
+    let provider = BoolmeshBoolean::new();
+    let tree = provider
+        .union_many(&solids, &options())
+        .expect("union_many")
+        .mesh;
+    let fold = sequential(&solids);
+
+    assert_same_volume(&fold, &tree, "feature-state");
+    assert_eq!(
+        tree.indices.len(),
+        fold.indices.len(),
+        "a permuted level would change the output triangle count"
+    );
+    assert_eq!(
+        axiolid_mesh::component_count(&tree),
+        axiolid_mesh::component_count(&fold),
+        "component count must not depend on merge order"
+    );
+}
+
+/// Repeating the same batch must give the same triangle and component
+/// counts. Vertex ORDER is allowed to drift (`Determinism::Topological`),
+/// but a thread-count-dependent topology would be a new fault.
+#[test]
+fn repeated_parallel_batches_agree_topologically() {
+    let solids = overlapping_row(9);
+    let provider = BoolmeshBoolean::new();
+    let first = provider
+        .union_many(&solids, &options())
+        .expect("first")
+        .mesh;
+    for _ in 0..8 {
+        let again = provider
+            .union_many(&solids, &options())
+            .expect("again")
+            .mesh;
+        assert_eq!(
+            (again.indices.len(), axiolid_mesh::component_count(&again)),
+            (first.indices.len(), axiolid_mesh::component_count(&first)),
+            "batch topology must not vary between runs"
+        );
+    }
+}

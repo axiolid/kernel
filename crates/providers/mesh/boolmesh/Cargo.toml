@@ -28,6 +28,13 @@ rayon = { version = "1.11", optional = true }
 # rather than silently returning a schedule-dependent result.
 parallel = ["dep:rayon"]
 
+# Inter-boolean batch parallelism: independent tree nodes in `union_many`
+# run concurrently. Deliberately SEPARATE from `parallel`, which threads
+# INSIDE one solve and is a measured regression on realistic IFC (see
+# docs/architecture/threading.md). This axis is untested by that table:
+# it parallelises ACROSS independent booleans, not within one.
+parallel-batch = ["dep:rayon"]
+
 [[bench]]
 name = "subtract_many"
 harness = false

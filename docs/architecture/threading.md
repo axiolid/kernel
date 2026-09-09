@@ -168,3 +168,61 @@ in the consumer is currently the only threading lever that pays.
 The remaining gap to faster kernels is therefore not a threading problem:
 it is per-element overhead and algorithmic cost in the single-threaded
 path. That is where further optimisation work belongs.
+
+## Addendum: inter-boolean batch threading (`parallel-batch`)
+
+Everything above measures threading INSIDE one solve. `union_many`'s tree
+reduction opened a second, independent axis: the pairs at one level of the
+tree are mutually independent, so they can run concurrently without any
+coordination inside a boolean. That is a different question from the one
+the table above answered, and it needed its own measurement.
+
+`parallel-batch` is therefore a SEPARATE feature from `parallel`. Enabling
+one does not enable the other.
+
+Measured on a 20-core box, disjoint grids, best-of-3, speedup against the
+SAME BINARY at one thread (so codegen is held constant):
+
+| solids | 1 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| 64 | 1.00x | 1.51x | 1.95x | 2.07x | 2.07x |
+| 125 | 1.00x | 1.63x | 2.18x | 2.56x | 2.59x |
+| 216 | 1.00x | 1.58x | 1.94x | 2.37x | 2.28x |
+
+**It saturates at roughly 2.1-2.6x and 16 threads buys nothing** -- at 216
+solids it is slightly slower than 8. That ceiling is structural, not a
+defect, and the per-level profile shows why:
+
+```
+level  unions       ms    share      (125 solids, serial)
+    1      62     1.25    12.6%
+    2      31     1.27    12.8%
+    3      16     1.49    15.0%
+    4       8     1.48    14.9%
+    5       4     1.40    14.1%
+    6       2     1.41    14.2%
+    7       1     1.63    16.4%
+```
+
+Cost per level is nearly FLAT while the available parallel width collapses
+62 -> 1: operand size doubles as operand count halves, so each level does
+about the same total work. The last three levels hold 44.7% of the runtime
+and can use at most 4, 2 and 1 threads.
+
+Feeding those measured level costs into Amdahl predicts 1.72x / 2.45x /
+2.95x / 3.18x at 2 / 4 / 8 / 16 threads, against 1.63x / 2.18x / 2.56x /
+2.59x measured -- consistently 10-20% below the model, which is thread-pool
+overhead. **The asymptotic ceiling with infinite threads is 3.28x.**
+
+So: worth enabling for large disjoint batches, not worth expecting linear
+scaling from, and not a substitute for the algorithmic win. The tree
+reduction itself already bought 8.7x-18x over the sequential fold at these
+sizes -- an order of magnitude more than threading adds on top.
+
+Correctness is unaffected: `union` takes `&self` on a unit struct, the
+per-level map is order-preserving (`into_par_iter().enumerate()`, never
+`par_bridge`, which does not preserve order), and `tests/union_batch.rs`
+gates that the batch path agrees with the sequential fold under both
+feature states. `determinism()` stays `Topological`, which the general path
+already was for reasons unrelated to threading.
+
