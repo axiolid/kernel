@@ -14,7 +14,7 @@
 
 use crate::csg::{BooleanMesh, Manifold};
 use axiolid_contracts::GeomError;
-use axiolid_core::Point3;
+use axiolid_core::{Point3, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_contracts::SolidRequirements;
 
@@ -26,13 +26,34 @@ use axiolid_mesh_contracts::SolidRequirements;
 /// relative-magnitude comparison are ever needed, and dividing would add a
 /// rounding step for no benefit.
 ///
-/// This is O(triangles) with no allocation, so it is affordable on every call.
+/// Centroid-relative: summing triple products of absolute coordinates
+/// cancels catastrophically for a small solid far from the origin, which
+/// turns the sign into rounding noise (#99). Shifting first is exact in
+/// real arithmetic and far better conditioned in f64.
+///
+/// This is O(triangles) with one pass for the centroid, so it is still
+/// affordable on every call.
 pub(crate) fn six_signed_volume(positions: &[Point3], indices: &[u32]) -> f64 {
+    let n = positions.len() as f64;
+    if n == 0.0 {
+        return 0.0;
+    }
+    let mut c = [0.0f64; 3];
+    for p in positions {
+        c[0] += p.x;
+        c[1] += p.y;
+        c[2] += p.z;
+    }
+    let c = [c[0] / n, c[1] / n, c[2] / n];
+    let shifted = |i: u32| {
+        let p = positions[i as usize];
+        Vec3::new(p.x - c[0], p.y - c[1], p.z - c[2])
+    };
     let mut total = 0.0;
     for corner in indices.chunks_exact(3) {
-        let a = positions[corner[0] as usize];
-        let b = positions[corner[1] as usize];
-        let c = positions[corner[2] as usize];
+        let a = shifted(corner[0]);
+        let b = shifted(corner[1]);
+        let c = shifted(corner[2]);
         total += a.dot(b.cross(c));
     }
     total
