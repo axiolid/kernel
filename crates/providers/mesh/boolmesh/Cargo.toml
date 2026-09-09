@@ -32,6 +32,10 @@ parallel = ["dep:rayon"]
 name = "subtract_many"
 harness = false
 
+[[bench]]
+name = "union_many"
+harness = false
+
 [dev-dependencies]
 # Upstream, for the absorption differential test ONLY (ADR 0047). The
 # production path uses `src/csg`; this pin exists so a port bug shows up

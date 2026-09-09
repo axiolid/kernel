@@ -381,6 +381,26 @@ impl Application {
             })
     }
 
+    /// Union many solids in one batch.
+    ///
+    /// Providers may choose the reduction order; `boolmesh` reduces in a
+    /// balanced tree rather than folding left, which is materially faster
+    /// as the operand count grows.
+    pub fn union_many(
+        &self,
+        solids: &[TriMesh],
+        options: &ExecutionOptions,
+    ) -> Result<BooleanOutcome, ApplicationError> {
+        self.boolean.union_many(solids, options).map_err(|source| {
+            self.geometry_error(
+                Operation::MeshBoolean,
+                self.boolean_provider.unwrap_or(APPLICATION_ID),
+                options.tolerance(),
+                source,
+            )
+        })
+    }
+
     pub fn section_mesh(
         &self,
         mesh: &TriMesh,

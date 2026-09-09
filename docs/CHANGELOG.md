@@ -6,6 +6,15 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `MeshBoolean::union_many` — batch union with a provider-chosen reduction
+  order, plumbed through dispatch and the facade. The trait default folds
+  left; `boolmesh` overrides it with a balanced pairwise tree, which issues
+  the same n-1 booleans but keeps operands small until the final levels.
+  Measured 1.6x at 8 solids to 8.0x at 125 on a disjoint box grid (the ratio
+  grows with n, so it is a complexity difference); 1.1x to 1.9x on
+  overlapping grids, where operands merge into one growing solid. Union is
+  associative and commutative, so unlike `subtract_many` there is no
+  disjointness precondition and no correctness cliff.
 - `BoolmeshBoolean::boolean_fast` -- an opt-in alternative to `boolean()`
   using a component-wise winding-number classification instead of one
   query per vertex, matching Manifold's own approach. Wins ~6.6% instructions,

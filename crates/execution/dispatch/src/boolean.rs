@@ -154,6 +154,30 @@ impl MeshBooleanRegistry {
             provider.subtract_many(subject, tools, options)
         })
     }
+
+    /// Union many solids through one provider dispatch.
+    ///
+    /// An empty batch is answered without consulting a provider: the union
+    /// of nothing is nothing, and there is no operand to validate or size a
+    /// budget against.
+    pub fn union_many(
+        &self,
+        solids: &[TriMesh],
+        options: &ExecutionOptions,
+    ) -> GeomResult<BooleanOutcome> {
+        let Some((first, rest)) = solids.split_first() else {
+            return Ok(BooleanOutcome::new(TriMesh::default(), Default::default()));
+        };
+        // Union has no privileged operand, but validation is expressed as
+        // subject-plus-tools. Naming the first solid the subject validates
+        // exactly the same set, in the same way the provider reports it.
+        let borrowed: Vec<&TriMesh> = rest.iter().collect();
+        SolidRequirements::Oriented.validate_operands(first, &borrowed)?;
+        let elements = solids.iter().map(TriMesh::triangle_count).sum::<usize>();
+        self.dispatch(options, elements, |provider| {
+            provider.union_many(solids, options)
+        })
+    }
 }
 
 #[cfg(test)]
