@@ -40,15 +40,16 @@ REQUIRED_POINTERS = (
 
 
 def milestones_on_github() -> list[str] | None:
-    """Milestone titles, or None when GitHub is unreachable."""
+    """Milestone objects, or None when GitHub is unreachable."""
     try:
         out = subprocess.run(
-            ["gh", "api", "repos/axiolid/kernel/milestones", "--paginate"],
+            ["gh", "api", "repos/axiolid/kernel/milestones",
+             "-X", "GET", "-f", "state=all", "--paginate"],
             capture_output=True, text=True, timeout=30,
         )
         if out.returncode != 0:
             return None
-        return [m["title"] for m in json.loads(out.stdout)]
+        return json.loads(out.stdout)
     except Exception:
         return None
 
@@ -62,7 +63,8 @@ def milestone_description_problems() -> list[str]:
     """
     try:
         out = subprocess.run(
-            ["gh", "api", "repos/axiolid/kernel/milestones", "--paginate"],
+            ["gh", "api", "repos/axiolid/kernel/milestones",
+             "-X", "GET", "-f", "state=all", "--paginate"],
             capture_output=True, text=True, timeout=30, check=True,
         ).stdout
     except Exception:
@@ -108,17 +110,31 @@ def main() -> int:
                 f"live source"
             )
 
-    titles = milestones_on_github()
-    if titles is None:
+    milestones = milestones_on_github()
+    if milestones is None:
         print("roadmap: skipping milestone coverage (gh unavailable)")
     else:
-        for title in titles:
-            # Match on the version prefix; the prose after the dash may differ.
-            key = re.split(r"[—:]", title)[0].strip()
-            if key and key.lower() not in text.lower():
+        for milestone in milestones:
+            # Require the milestone's own LINK, not its prose. Matching title
+            # text anywhere in the page is vacuous: the words recur in the
+            # surrounding argument, so deleting a whole row still passed.
+            # Verified by mutation -- removing a row must fail this check.
+            link = f"/milestone/{milestone['number']})"
+            if link not in text:
                 problems.append(
-                    f"milestone {title!r} exists on GitHub but is not "
-                    f"explained here"
+                    f"milestone {milestone['title']!r} exists on GitHub but "
+                    f"has no row linking to {link} here"
+                )
+
+        # And the reverse: a row may not link to a milestone that does not
+        # exist. Without this, repointing a row at /milestone/999 silently
+        # passes -- the row looks present while linking nowhere real.
+        live_numbers = {m["number"] for m in milestones}
+        for linked in re.findall(r"/milestone/(\d+)\)", text):
+            if int(linked) not in live_numbers:
+                problems.append(
+                    f"roadmap links to /milestone/{linked} which does not "
+                    f"exist on GitHub"
                 )
 
     for title in milestone_description_problems():
