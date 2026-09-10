@@ -1,6 +1,7 @@
 # Rust build artifacts. `target` is a symlink to /mnt/backup/build-cache/nehirde-target
 # (bbv-dev root disk is sparse) — see AGENTS.md.
 /target
+**/target/
 **/*.rs.bk
 *.pdb
 /target/criterion

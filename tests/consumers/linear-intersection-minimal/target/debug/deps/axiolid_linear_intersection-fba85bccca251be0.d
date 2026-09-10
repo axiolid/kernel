@@ -1,9 +1,0 @@
-/home/friedrich/projects/axiolid/kernel/tests/consumers/linear-intersection-minimal/target/debug/deps/axiolid_linear_intersection-fba85bccca251be0.d: /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/line_line.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/segment_segment.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/validate.rs
-
-/home/friedrich/projects/axiolid/kernel/tests/consumers/linear-intersection-minimal/target/debug/deps/libaxiolid_linear_intersection-fba85bccca251be0.rmeta: /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/lib.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/error.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/line_line.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/segment_segment.rs /home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/validate.rs
-
-/home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/lib.rs:
-/home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/error.rs:
-/home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/line_line.rs:
-/home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/segment_segment.rs:
-/home/friedrich/projects/axiolid/kernel/crates/algorithms/query/intersection/linear/src/validate.rs:

@@ -22,3 +22,23 @@ cargo xtask architecture closure check
 cargo xtask architecture closure explain <profile>
 bash scripts/probe_closure_gate.sh
 ```
+
+## Build output is never tracked
+
+Each consumer is a real cargo project, so running one creates a local
+`target/`. Those artifacts must never enter git.
+
+The root `.gitignore` had `/target`, which is anchored and matches only
+the repo-root directory. Nested `tests/consumers/*/target/` was therefore
+NOT ignored, and 1427 artifact files (70 MB) were committed by accident.
+
+The rule is now `**/target/`, which matches at any depth. Verify with:
+
+```bash
+git check-ignore -v tests/consumers/2d-curves/target
+```
+
+A `.gitignore` rule does NOT apply to a file already tracked, so fixing
+the pattern alone changes nothing: the path must be untracked first with
+`git rm -r --cached <dir>` (index only -- leaves files on disk).
+
