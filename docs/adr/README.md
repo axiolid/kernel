@@ -45,3 +45,7 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0042](./0042-black-box-downstream-compatibility-gate.md) | Downstream compatibility is an executable black-box gate |
 | [0043](./0043-release-version-and-changelog-automation.md) | Release version/changelog rollover is a checked, reviewed script |
 | [0044](./0044-pointcloud-representation-and-reconstruction.md) | Pointcloud representation and reconstruction extend the discrete-family DAG |
+| [0045](./0045-boolean-construction-arithmetic.md) | Boolean construction arithmetic is f64; predicates verify, they do not construct |
+| [0046](./0046-exact-boolean-interpenetrating-solids.md) | Exact boolean path for interpenetrating solids |
+| [0047](./0047-absorb-mesh-boolean.md) | Absorb the mesh boolean into the provider crate |
+| [0048](./0048-coplanar-seam-merging.md) | Coplanar seam merging across chained booleans |
