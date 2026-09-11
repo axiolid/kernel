@@ -1,6 +1,6 @@
 # 0048 — Coplanar seam merging across chained booleans
 
-- **Status:** Proposed
+- **Status:** Proposed (steps 2-4 withdrawn, see amendment)
 - **Date:** 2026-09-11
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
@@ -120,6 +120,56 @@ Scope, in landing order, each independently gated:
 - `compute_coplanar_idx` currently runs only in `new_impl`; calling it
   on boolean output reintroduces cost that ADR 0047 removed. Measure
   before and after rather than assuming it is negligible.
+
+
+## Amendment 2026-09-11 — step 3 as written will not work
+
+Probed before implementing. Two measurements invalidate the planned
+approach.
+
+**`is_coplanar` does not decide which faces survive.** Its only
+callers are in `simplification/collapse.rs`, where it gates
+EDGE-COLLAPSE eligibility during decimation. The retained face set
+comes from the winding-number classification in
+`boolean03/kernel03.rs`, which never consults `pid`. Re-keying
+`is_coplanar` therefore cannot merge two shells into one.
+
+**Making it maximally permissive destroys the mesh.** Forcing
+`is_coplanar` to always return `true` and running the reconstruction
+fixture gives:
+
+```
+InvalidInput("subject: mesh has no triangles")
+```
+
+Decimation collapses the solid away entirely. So the guard is load
+bearing in the opposite direction from what step 3 assumed: it exists
+to RESTRICT collapsing, and loosening it is destructive, not
+corrective.
+
+**The premise itself survives.** The seam IS coplanar: 62 triangle
+pairs between `A-B` and `A^B` share a plane to 1e-9 in both normal
+and offset. So a geometric plane key is still the right IDEA; it just
+cannot be applied at `is_coplanar`, which runs too late and governs
+the wrong decision.
+
+### Revised direction
+
+The union never treats the two operands as touching. With 62 coplanar
+pairs present and zero EXACTLY-shared faces, the two shells are
+coincident over a region but combinatorially disjoint, and the
+classification stage retains both copies of the interface instead of
+recognising it as interior.
+
+That places the fix in coplanar-region handling during
+INTERSECTION/CLASSIFICATION -- `intersect12` and `winding03` in
+`boolean03/` -- not in decimation. This is materially deeper than
+steps 2-4 assumed: it is the part of the algorithm that decides what
+a boolean MEANS, and getting it wrong changes volumes, not just
+triangle counts.
+
+Step 1 (the fixture) stands and is unaffected. Steps 2-4 are
+withdrawn pending a design for coplanar-region classification.
 
 ## Relation to existing code
 
