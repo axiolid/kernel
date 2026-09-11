@@ -268,8 +268,21 @@ fn add_new_edge_verts(
 // Creating a partial halfedges from a list of positions.
 // It's very confusing, but it's not aiming to pair twins (pair is -1).
 // It's more likely to say pairing sta-end vertex and make a halfedge
-fn pair_up(pts: &mut [EdgePt]) -> Vec<Half> {
-    assert_eq!(pts.len() % 2, 0);
+/// Returns `Err` rather than asserting when the edge-point list has an
+/// odd length.
+///
+/// Each intersection edge must contribute a tail and a head, so an odd
+/// count means the classification upstream produced an unpairable set --
+/// reachable from real-world input (see kernel#101), not just from a
+/// logic error here. The provider promises a `Result`, so this has to
+/// refuse rather than abort a process the caller cannot defend.
+fn pair_up(pts: &mut [EdgePt]) -> Result<Vec<Half>, String> {
+    if pts.len() % 2 != 0 {
+        return Err(format!(
+            "boolean produced {} edge points, which cannot be paired into halfedges",
+            pts.len()
+        ));
+    }
     let nh = pts.len() / 2;
     let mid_idx = {
         let mut sta_idx = 0;
@@ -301,7 +314,7 @@ fn pair_up(pts: &mut [EdgePt]) -> Vec<Half> {
     for i in 0..nh {
         edges.push(Half::new_without_pair(pts[i].vid, pts[i + nh].vid));
     }
-    edges
+    Ok(edges)
 }
 
 fn append_partial_edges(
@@ -311,7 +324,7 @@ fn append_partial_edges(
     out: &mut ResultEdges,
     pt_p: &mut HashMap<usize, Vec<EdgePt>>, //
     whole_flag: &mut [bool], // a flag to find out a halfedge from mfd_p is entirely usable in mfd_r
-) {
+) -> Result<(), String> {
     for (hid_p, pt) in pt_p {
         let hpos_p = pt;
         let h = &side.hs[*hid_p];
@@ -346,7 +359,7 @@ fn append_partial_edges(
             });
         }
 
-        let mut half_seq = pair_up(hpos_p);
+        let mut half_seq = pair_up(hpos_p)?;
         let fp_l = face_of(*hid_p);
         let fp_r = face_of(h.pair);
         let fid_l = side.fid2r[fp_l] as usize;
@@ -379,6 +392,7 @@ fn append_partial_edges(
             out.rs[bk_edge] = bk_tri;
         }
     }
+    Ok(())
 }
 
 fn append_new_edges(
@@ -387,7 +401,7 @@ fn append_new_edges(
     nf_p: usize,      // num of faces in mfd_p
     pt_new: &mut HashMap<(usize, usize), Vec<EdgePt>>,
     out: &mut ResultEdges,
-) {
+) -> Result<(), String> {
     for ((fid_p, fid_q), pt_init) in pt_new.iter_mut() {
         let pt = pt_init;
         let mut bb = BBox::default();
@@ -400,7 +414,7 @@ fn append_new_edges(
             p.val = ps_r[p.vid][d];
         }
 
-        let mut half_seq = pair_up(pt);
+        let mut half_seq = pair_up(pt)?;
         let fid_l = fid_pq2r[*fid_p] as usize;
         let fid_r = fid_pq2r[*fid_q + nf_p] as usize;
         let fw_ref = Tref {
@@ -425,6 +439,7 @@ fn append_new_edges(
             out.rs[bk_edge] = bk_ref;
         }
     }
+    Ok(())
 }
 
 fn append_whole_edges(side: &SourceSide, whole_flag: &[bool], out: &mut ResultEdges) {
@@ -485,7 +500,12 @@ pub struct Boolean45 {
     pub nv_from_q: usize,
 }
 
-pub fn boolean45(mp: &Manifold, mq: &Manifold, b03: &Boolean03, op: &OpType) -> Boolean45 {
+pub fn boolean45(
+    mp: &Manifold,
+    mq: &Manifold,
+    b03: &Boolean03,
+    op: &OpType,
+) -> Result<Boolean45, String> {
     let c1 = if op == &OpType::Intersect { 0 } else { 1 };
     let c2 = if op == &OpType::Add { 1 } else { 0 };
     let c3 = if op == &OpType::Intersect { 1 } else { -1 };
@@ -616,7 +636,7 @@ pub fn boolean45(mp: &Manifold, mq: &Manifold, b03: &Boolean03, op: &OpType) -> 
         &mut out,
         &mut pt_p,
         &mut whole_flag_p,
-    );
+    )?;
     append_partial_edges(
         &side_q,
         &mq.ps,
@@ -624,14 +644,14 @@ pub fn boolean45(mp: &Manifold, mq: &Manifold, b03: &Boolean03, op: &OpType) -> 
         &mut out,
         &mut pt_q,
         &mut whole_flag_q,
-    );
+    )?;
 
-    append_new_edges(&ps_r, &fid_pq2r, mp.nf, &mut pt_new, &mut out);
+    append_new_edges(&ps_r, &fid_pq2r, mp.nf, &mut pt_new, &mut out)?;
 
     append_whole_edges(&side_p, &whole_flag_p, &mut out);
     append_whole_edges(&side_q, &whole_flag_q, &mut out);
 
-    Boolean45 {
+    Ok(Boolean45 {
         ps: ps_r,
         ns: ns_r,
         hs: hs_r,
@@ -639,5 +659,49 @@ pub fn boolean45(mp: &Manifold, mq: &Manifold, b03: &Boolean03, op: &OpType) -> 
         hid_per_f,
         nv_from_p: nv_rp as usize,
         nv_from_q: nv_rq as usize,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// kernel#101: an unpairable edge-point set must refuse, not abort.
+    ///
+    /// Guards the contract rather than the arithmetic: `pair_up` used to
+    /// `assert_eq!` on an odd edge-point count, which killed the calling
+    /// process through a `Result`-returning API the caller could not defend.
+    /// A count of 3 is the smallest odd case that reaches the pairing step.
+    #[test]
+    fn unpairable_edge_points_refuse_instead_of_panicking() {
+        let mut pts = vec![
+            EdgePt {
+                val: 0.0,
+                vid: 0,
+                cid: 0,
+                is_tail: true,
+            },
+            EdgePt {
+                val: 1.0,
+                vid: 1,
+                cid: 1,
+                is_tail: false,
+            },
+            EdgePt {
+                val: 2.0,
+                vid: 2,
+                cid: 2,
+                is_tail: true,
+            },
+        ];
+        let err = pair_up(&mut pts).expect_err("odd edge-point count must refuse");
+        assert!(
+            err.contains("cannot be paired"),
+            "refusal must name the cause, got: {err}"
+        );
+
+        // The even case still succeeds, so the guard did not break pairing.
+        pts.pop();
+        assert!(pair_up(&mut pts).is_ok());
     }
 }

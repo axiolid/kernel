@@ -101,7 +101,7 @@ pub(crate) fn compute_boolean(
     } else {
         boolean03(mp, mq, &op)
     };
-    let mut b45 = boolean45(mp, mq, &b03, &op);
+    let mut b45 = boolean45(mp, mq, &b03, &op)?;
     let mut trg = triangulate(mp, mq, &b45, eps)?;
 
     simplify_topology(
