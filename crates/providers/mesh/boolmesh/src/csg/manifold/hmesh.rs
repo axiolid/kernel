@@ -53,11 +53,36 @@ fn edge_topology(
     // two rows compare equal and stability is vacuous.
     ett.sort_unstable();
 
-    let mut ne = 1;
-    for i in 0..ett.len() - 1 {
-        if !(ett[i][0] == ett[i + 1][0] && ett[i][1] == ett[i + 1][1]) {
-            ne += 1;
+    // Walk the sorted table in runs sharing an (v1, v2) key. One run is
+    // one edge: a single row is a border edge, two rows an interior one.
+    //
+    // Three or more rows means three or more faces meet on that edge,
+    // which this structure cannot represent -- `e2f` holds exactly two
+    // face slots. The previous count collapsed any run to one edge while
+    // the fill loop below emits ceil(k/2) of them, so a non-manifold edge
+    // overran the allocation and aborted the process (kernel#102).
+    //
+    // Refusing is deliberate rather than widening the count to match:
+    // making the arithmetic agree would keep the first two faces, drop
+    // the rest, and return a plausible-looking mesh that silently lost
+    // geometry. A caller cannot detect that; it can handle an error.
+    let mut ne = 0;
+    let mut i = 0;
+    while i < ett.len() {
+        let mut j = i + 1;
+        while j < ett.len() && ett[j][0] == ett[i][0] && ett[j][1] == ett[i][1] {
+            j += 1;
         }
+        if j - i > 2 {
+            return Err(format!(
+                "edge ({}, {}) has {} incident faces; a half-edge mesh admits at most two",
+                ett[i][0],
+                ett[i][1],
+                j - i
+            ));
+        }
+        ne += 1;
+        i = j;
     }
 
     e2v.resize(ne, Vec2u::MAX);
@@ -230,5 +255,51 @@ impl Hmesh {
             vns,
             fns,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// kernel#102: an edge shared by three faces must refuse.
+    ///
+    /// Three triangles fanned around the shared edge (0, 1), so that
+    /// edge has three incident faces. The half-edge table has two
+    /// face slots per edge, so this is unrepresentable and must be
+    /// rejected -- it used to overrun the allocation and abort.
+    #[test]
+    fn an_edge_with_three_faces_is_refused() {
+        let pos = vec![
+            Vec3::new(0., 0., 0.),
+            Vec3::new(1., 0., 0.),
+            Vec3::new(0., 1., 0.),
+            Vec3::new(0., -1., 0.),
+            Vec3::new(0., 0., 1.),
+        ];
+        let idx = vec![
+            Vec3u::new(0, 1, 2),
+            Vec3u::new(0, 1, 3),
+            Vec3u::new(0, 1, 4),
+        ];
+        let (mut e2v, mut e2f, mut f2e) = (vec![], vec![], vec![]);
+        let r = edge_topology(&pos, &idx, &mut e2v, &mut e2f, &mut f2e);
+        let err = r.expect_err("three faces on one edge must refuse");
+        assert!(err.contains("incident faces"), "unexpected: {err}");
+    }
+
+    /// The two-face case still builds, so the guard did not
+    /// over-reject ordinary interior edges.
+    #[test]
+    fn an_edge_with_two_faces_still_builds() {
+        let pos = vec![
+            Vec3::new(0., 0., 0.),
+            Vec3::new(1., 0., 0.),
+            Vec3::new(0., 1., 0.),
+            Vec3::new(0., -1., 0.),
+        ];
+        let idx = vec![Vec3u::new(0, 1, 2), Vec3u::new(0, 1, 3)];
+        let (mut e2v, mut e2f, mut f2e) = (vec![], vec![], vec![]);
+        assert!(edge_topology(&pos, &idx, &mut e2v, &mut e2f, &mut f2e).is_ok());
     }
 }
