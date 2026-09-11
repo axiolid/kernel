@@ -171,6 +171,75 @@ triangle counts.
 Step 1 (the fixture) stands and is unaffected. Steps 2-4 are
 withdrawn pending a design for coplanar-region classification.
 
+
+## Trace 2026-09-11 — winding number to emitted triangle
+
+Requested before any further implementation. The path, with the file
+and line where each step happens:
+
+1. `boolean03/kernel03.rs::winding03` — produces `w03[v]`, a count
+   per VERTEX of how many times that vertex is enclosed by the other
+   operand. Computed by a planar-grid collision query, not by any
+   face-pair test.
+2. `boolean45.rs::Windings::new` — applies the operation
+   coefficients: `i03[v] = c1 + c3*w03[v]`. For union `c1=1, c3=-1`,
+   so `i03 = 1 - w03`.
+3. `boolean45.rs::size_output` — accumulates
+   `side_p[f] += |i03[tail]|` over each halfedge of `f`.
+4. `boolean45.rs` — `keep_fs`: a face is emitted iff `side[f] > 0`.
+
+### Why the reconstruction case degenerates
+
+Measured on the benchmark operands:
+
+```
+A-B verts = 18, of which 18 lie ON the A^B surface
+A^B verts = 10, of which 10 lie ON the A-B surface
+```
+
+Every vertex of both operands is a boundary case. Not one vertex is
+strictly inside or strictly outside the other solid, so `w03` is
+never driven to the value that would zero `i03` and drop a face.
+With `side[f] > 0` for every face of both shells, both complete
+surfaces are emitted — the doubled interface observed as `chi=4
+comps=2`.
+
+### `.abs()` is NOT the bug
+
+The absolute value in step 3 looks like it prevents opposite-facing
+coincident faces from cancelling, and removing it is the obvious
+candidate fix. It is not: `side_pq` is also consumed at
+`boolean45.rs:174-182`, where the per-face values are halfedge COUNTS
+fed through `inclusive_scan` to produce `ih_per_f`, the output buffer
+offsets. A negative or cancelled entry there corrupts allocation
+rather than dropping a face. `side` is a retention count, and `|.|`
+is correct for that role.
+
+### Where the fix has to go
+
+The gap is upstream of the keep decision: coincident boundary faces
+never generate the cancelling windings that step 4 would act on. A
+correct union of two solids meeting along a shared surface has to
+classify that surface as INTERIOR and drop both copies, which means
+recognising coplanar overlap during intersection/classification.
+Confirmed such overlap exists here: 62 triangle pairs between `A-B`
+and `A^B` share a plane to 1e-9 in both normal and offset, while zero
+pairs are exactly equal as triangles.
+
+`intersect12` (`boolean03/kernel12.rs`) finds edge-face crossings. A
+face lying exactly IN another face crosses nothing, so it generates
+no intersection record and the classifier never learns the two
+surfaces are the same. That is the actual missing capability.
+
+### Consequence for scope
+
+This is a coplanar-overlap classification feature, not a repair of an
+existing decision. It changes what the boolean considers interior,
+so it moves volumes and not merely triangle counts, and it must be
+gated on the full exactness and drift tables plus determinism before
+it can be trusted. Estimated blast radius: `kernel12.rs` and
+`kernel03.rs`, the two files that define boolean semantics.
+
 ## Relation to existing code
 
 - `crates/providers/mesh/boolmesh/src/csg/common.rs` — `Tref { mid,
