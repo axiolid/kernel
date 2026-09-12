@@ -141,3 +141,57 @@ exact fast case, unchanged.
 - `crates/algorithms/parametric/nurbs/src/certified_surface_arcs.rs`
 - `crates/algorithms/parametric/nurbs/tests/curved_arcs.rs`
 - `docs/plans/certified-boundary-roots.md`
+
+## Exact elementary curves (addendum)
+
+The analysis above certifies *where* a regular intersection curve exists. It
+does not produce one. Producing a curve generally means marching sampled
+points and fitting a spline through them, which is an approximation carrying
+an error bound.
+
+`ExactBRep` documents itself as holding "exact 3D curve supports", and
+ADR 0046 requires that every decision be an exact predicate. A fitted spline
+placed in that type would make its central claim false, so fitting is not
+used.
+
+Instead, the surface pairs whose intersection has a **closed-form** answer
+are derived symbolically in `exact_surface_intersection.rs`:
+
+| pair | condition | curve | identity |
+|---|---|---|---|
+| plane / plane | normals not parallel | `Line3` | direction `n1 x n2` |
+| cylinder / plane | normal parallel to axis | `Circle3` | radius `r` |
+| cylinder / plane | oblique, not axis-parallel | `Ellipse3` | semi-axes `r`, `r / cos(theta)` |
+| sphere / plane | `\|d\| < r` | `Circle3` | radius `sqrt(r^2 - d^2)` |
+
+Every other pair returns a typed refusal. `UnsupportedPair` says only that
+*this module* does not derive the case — sphere/sphere, for instance, is a
+circle in principle but is not implemented, and saying so is preferable to
+fitting one and calling it exact.
+
+Degenerate configurations refuse rather than returning a degenerate curve:
+
+- parallel planes -> `Disjoint` (coincident or never meeting)
+- tangent sphere/plane -> `NotRegularCurve` (a point, not a curve)
+- axis-parallel cylinder/plane -> `NotRegularCurve` (two lines, or none)
+
+### How the algebra is checked
+
+Asserting "an ellipse came back" would pass on a *wrong* ellipse. The tests
+instead substitute sampled curve points into both operands' own defining
+equations and require residuals below `1e-12`. That catches a wrong frame,
+radius, or semi-axis, which a variant check cannot.
+
+Mutation testing confirms the checks bite: stretching the ellipse by
+`cos(theta)` instead of `1/cos(theta)`, using `r^2 + d^2` for the sphere
+section, centring the cylinder section on the axis origin rather than the
+plane, returning a zero-radius circle for a tangent plane, and dropping the
+axis-parallel refusal were each introduced deliberately and each failed the
+suite.
+
+### Scope
+
+These curves are exact and are real B-rep-ready geometry, but they cover
+elementary analytic surfaces only. A spline-surface pair still yields
+regions, not curves, and still refuses rather than approximating.
+

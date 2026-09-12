@@ -20,6 +20,17 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- Exact intersection curves for elementary surface pairs
+  (`exact_surface_intersection`). Plane/plane yields a `Line3`,
+  cylinder/plane a `Circle3` or `Ellipse3` with semi-axes `r` and
+  `r / cos(theta)`, and sphere/plane a `Circle3` of radius
+  `sqrt(r^2 - d^2)`. Each curve is derived symbolically from the
+  operands, so it is exact rather than fitted, and is usable as
+  B-rep edge geometry directly. Degenerate configurations refuse
+  with a typed reason instead of returning a degenerate curve:
+  parallel planes, a tangent sphere/plane touch, and an
+  axis-parallel cylinder section are all explicit refusals.
+  Unsupported pairs say so rather than approximating.
 - Certified curved surface analysis (`certify_surface_arcs`). A whole-patch
   transversality bound is structurally zero on curved patches, because the
   swept normal's interval hull straddles the other normal, so curved pairs
