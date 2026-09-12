@@ -4,6 +4,21 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `SurfacePairSplitUnresolvedReason` now distinguishes a proven refusal
+  from an unimplemented one. `NoPartitionExists` is returned when the
+  certified trace is shown to slit BOTH patches -- one endpoint strictly
+  interior, the other on a boundary side -- which leaves each face simply
+  connected, so no pair of closed trimmed faces exists at any tolerance.
+  `UnsupportedEndpointOwnership` keeps its former meaning: an arrangement
+  this crate has not built yet. Previously both collapsed to the latter,
+  so a caller could not tell "stop, the answer is no" from "retry may
+  help". `classify` now returns the reason instead of a bare `None`, and
+  endpoint/domain resolution failures report `DegenerateRepresentative`
+  rather than being mislabelled as an ownership problem. Breaking: the
+  enum gained a variant.
+
 ### Added
 - Exact boolean results now carry face provenance. Every output face of
   `boolean_prisms_exact` reports a `FaceName::Fragment` naming which
