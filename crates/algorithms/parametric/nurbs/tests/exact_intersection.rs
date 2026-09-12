@@ -8,7 +8,7 @@
 use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_curve::Curve3;
 use axiolid_nurbs::{exact_surface_intersection, Derivation, ExactIntersectionRefusal};
-use axiolid_surface::{Cylinder, Plane, Sphere, Surface};
+use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -65,6 +65,23 @@ fn residual(surface: &Surface, point: Point3) -> f64 {
             let offset = point - cylinder.frame.origin;
             let radial = offset - axis * axis.dot(offset);
             radial.length() - cylinder.radius
+        }
+        Surface::Cone(cone) => {
+            // rho = radius + z * tan(semi_angle), in cone-local coordinates.
+            let axis = cone.frame.z.normalize();
+            let offset = point - cone.frame.origin;
+            let height = axis.dot(offset);
+            let radial = (offset - axis * height).length();
+            radial - (cone.radius + height * cone.semi_angle.tan())
+        }
+        Surface::Torus(torus) => {
+            // (rho - major)^2 + z^2 = minor^2, in torus-local coordinates.
+            let axis = torus.frame.z.normalize();
+            let offset = point - torus.frame.origin;
+            let height = axis.dot(offset);
+            let radial = (offset - axis * height).length();
+            let planar = radial - torus.major_radius;
+            planar * planar + height * height - torus.minor_radius * torus.minor_radius
         }
         other => panic!("no residual for {other:?}"),
     }
@@ -268,20 +285,24 @@ fn parallel_planes_are_refused() {
 }
 
 #[test]
-fn an_unsupported_pair_is_refused_explicitly_rather_than_approximated() {
-    let torus = Surface::Torus(axiolid_surface::Torus {
+fn a_spline_surface_pair_is_refused_explicitly_rather_than_approximated() {
+    // Two offset tori: both are surfaces of revolution, but the axes do
+    // not coincide, so no closed-form circle family exists. Previously
+    // coaxial torus/plane stood here; that case is now derived, so this
+    // guards a pair that genuinely remains outside the closed forms.
+    let first = Surface::Torus(Torus {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         major_radius: 3.0,
         minor_radius: 1.0,
     });
-    let plane = Surface::Plane(Plane {
-        frame: frame(Point3::new(0.0, 0.0, 0.5), Vec3::new(0.0, 0.0, 1.0)),
+    let second = Surface::Torus(Torus {
+        frame: frame(Point3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        major_radius: 3.0,
+        minor_radius: 1.0,
     });
 
-    // A torus section is a real curve, but not a conic this module
-    // derives. The refusal names that gap instead of fitting something.
     assert_eq!(
-        exact_surface_intersection(&torus, &plane),
+        exact_surface_intersection(&first, &second),
         Err(ExactIntersectionRefusal::UnsupportedPair)
     );
 }
@@ -437,5 +458,159 @@ fn identical_cylinders_refuse_rather_than_naming_a_curve() {
     assert_eq!(
         exact_surface_intersection(&cylinder, &cylinder),
         Err(ExactIntersectionRefusal::NotRegularCurve)
+    );
+}
+
+#[test]
+fn a_coaxial_sphere_and_cylinder_meet_in_two_circles() {
+    let sphere = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 5.0,
+    });
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 3.0,
+    });
+
+    let result = exact_surface_intersection(&sphere, &cylinder).expect("derivable");
+    assert_eq!(result.derivation, Derivation::CoaxialRevolutionCircles);
+    assert_eq!(
+        result.branches.len(),
+        2,
+        "a sphere is cut twice by a cylinder"
+    );
+
+    // 3^2 + z^2 = 5^2 gives z = -4 and z = +4, radius 3 on both.
+    let mut heights = Vec::new();
+    for branch in &result.branches {
+        match branch {
+            Curve3::Circle(circle) => {
+                assert!((circle.radius - 3.0).abs() < 1.0e-12);
+                heights.push(circle.frame.origin.z);
+            }
+            other => panic!("expected circles, got {other:?}"),
+        }
+        assert_on_both(&sphere, &cylinder, branch);
+    }
+    heights.sort_by(f64::total_cmp);
+    assert!((heights[0] + 4.0).abs() < 1.0e-12, "lower circle at z=-4");
+    assert!((heights[1] - 4.0).abs() < 1.0e-12, "upper circle at z=+4");
+}
+
+#[test]
+fn a_coaxial_torus_and_plane_meet_in_two_circles() {
+    let torus = Surface::Torus(Torus {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        major_radius: 4.0,
+        minor_radius: 1.5,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(0.0, 0.0, 0.9), Vec3::new(0.0, 0.0, 1.0)),
+    });
+
+    let result = exact_surface_intersection(&torus, &plane).expect("derivable");
+    assert_eq!(result.derivation, Derivation::CoaxialRevolutionCircles);
+    assert_eq!(
+        result.branches.len(),
+        2,
+        "a plane cuts the tube inner and outer"
+    );
+
+    // rho = 4 +- sqrt(1.5^2 - 0.9^2) = 4 +- 1.2
+    let mut radii = Vec::new();
+    for branch in &result.branches {
+        match branch {
+            Curve3::Circle(circle) => {
+                assert!((circle.frame.origin.z - 0.9).abs() < 1.0e-12);
+                radii.push(circle.radius);
+            }
+            other => panic!("expected circles, got {other:?}"),
+        }
+        assert_on_both(&torus, &plane, branch);
+    }
+    radii.sort_by(f64::total_cmp);
+    assert!((radii[0] - 2.8).abs() < 1.0e-12, "inner radius 4 - 1.2");
+    assert!((radii[1] - 5.2).abs() < 1.0e-12, "outer radius 4 + 1.2");
+}
+
+#[test]
+fn a_coaxial_cone_and_sphere_meet_in_a_circle() {
+    let cone = Surface::Cone(Cone {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 1.0,
+        semi_angle: std::f64::consts::FRAC_PI_6,
+    });
+    let sphere = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 3.0,
+    });
+
+    let result = exact_surface_intersection(&cone, &sphere).expect("derivable");
+    assert_eq!(result.derivation, Derivation::CoaxialRevolutionCircles);
+    // The other profile root has rho < 0, which generates no circle.
+    assert_eq!(
+        result.branches.len(),
+        1,
+        "only the positive-radius root lifts"
+    );
+    assert_on_both(&cone, &sphere, &result.branches[0]);
+}
+
+#[test]
+fn a_coaxial_torus_and_sphere_meet_in_two_circles() {
+    let sphere = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 5.0,
+    });
+    let torus = Surface::Torus(Torus {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        major_radius: 4.0,
+        minor_radius: 1.5,
+    });
+
+    let result = exact_surface_intersection(&sphere, &torus).expect("derivable");
+    assert_eq!(result.branches.len(), 2);
+    for branch in &result.branches {
+        assert_on_both(&sphere, &torus, branch);
+    }
+}
+
+#[test]
+fn an_offset_sphere_and_cylinder_are_refused_rather_than_approximated() {
+    let sphere = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 5.0,
+    });
+    // Axis shifted sideways: the shared rotational symmetry is gone and
+    // the intersection is a space quartic, not a circle.
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame(Point3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 3.0,
+    });
+
+    assert_eq!(
+        exact_surface_intersection(&sphere, &cylinder),
+        Err(ExactIntersectionRefusal::UnsupportedPair),
+        "a non-coaxial pair must refuse, never return a plausible circle"
+    );
+}
+
+#[test]
+fn a_hyperbolic_cone_section_is_refused_as_unrepresentable() {
+    let cone = Surface::Cone(Cone {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 1.0,
+        semi_angle: std::f64::consts::FRAC_PI_6,
+    });
+    // Plane containing the axis direction: the section is a hyperbola,
+    // and Curve3 has no hyperbola variant.
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+    });
+
+    assert_eq!(
+        exact_surface_intersection(&cone, &plane),
+        Err(ExactIntersectionRefusal::UnrepresentableConic),
+        "a parabola or hyperbola must be named, not swapped for an ellipse"
     );
 }

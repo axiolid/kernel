@@ -29,6 +29,7 @@ mod intersection_curve;
 mod periodic;
 mod periodic_surface;
 mod projection;
+mod revolution_profile;
 mod surface_analysis;
 mod surface_projection;
 mod surface_transform;

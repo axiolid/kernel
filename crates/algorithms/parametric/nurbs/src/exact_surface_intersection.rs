@@ -33,6 +33,14 @@ pub enum ExactIntersectionRefusal {
     NotRegularCurve,
     /// A required frame axis was degenerate, so no exact frame can be built.
     DegenerateFrame,
+    /// The intersection is a parabola or hyperbola, which `Curve3` has no
+    /// variant for.
+    ///
+    /// The curve is perfectly well defined and exactly derivable; it simply
+    /// cannot be represented without adding a conic variant. Refusing names
+    /// that representational gap instead of substituting a nearby ellipse or
+    /// a fitted spline.
+    UnrepresentableConic,
 }
 
 /// The exact intersection curve of two elementary surfaces, when one exists
@@ -90,6 +98,9 @@ pub enum Derivation {
     CylinderCylinderSteinmetzEllipses,
     /// Cylinders with parallel axes meet in one or two axis-parallel lines.
     ParallelCylinderLines,
+    /// Two coaxial surfaces of revolution meet in circles perpendicular to
+    /// the shared axis, found by intersecting their meridian profiles.
+    CoaxialRevolutionCircles,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -108,9 +119,18 @@ pub fn exact_surface_intersection(
         (Surface::Plane(p), Surface::Cylinder(c)) => cylinder_plane(c, p),
         (Surface::Sphere(s), Surface::Plane(p)) => sphere_plane(s, p),
         (Surface::Plane(p), Surface::Sphere(s)) => sphere_plane(s, p),
+        // A plane cutting a cone gives a conic whose kind depends on the
+        // tilt: circle and ellipse are representable, parabola and
+        // hyperbola are not. Coaxial (tilt 0) is handled by the shared
+        // revolution path; any other tilt is refused by kind.
+        (Surface::Cone(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cone(c)) => {
+            cone_plane(c, p)
+        }
         (Surface::Sphere(a), Surface::Sphere(b)) => sphere_sphere(a, b),
         (Surface::Cylinder(a), Surface::Cylinder(b)) => cylinder_cylinder(a, b),
-        _ => Err(ExactIntersectionRefusal::UnsupportedPair),
+        // Every remaining elementary pair is covered by the shared
+        // surface-of-revolution identity when the axes coincide.
+        _ => crate::revolution_profile::coaxial_revolution_intersection(first, second),
     }
 }
 
@@ -288,7 +308,10 @@ fn cylinder_section_curve(
 /// axis least aligned with the normal as a seed. A deterministic choice
 /// matters because the frame ends up in the returned curve, and an
 /// orientation that varied run to run would make results irreproducible.
-fn frame_from_normal(origin: Point3, normal: Vec3) -> Result<Frame3, ExactIntersectionRefusal> {
+pub(crate) fn frame_from_normal(
+    origin: Point3,
+    normal: Vec3,
+) -> Result<Frame3, ExactIntersectionRefusal> {
     let seed = if normal.x.abs() <= normal.y.abs() && normal.x.abs() <= normal.z.abs() {
         Vec3::new(1.0, 0.0, 0.0)
     } else if normal.y.abs() <= normal.z.abs() {
@@ -485,4 +508,41 @@ fn parallel_cylinders(
         branches,
         derivation: Derivation::ParallelCylinderLines,
     })
+}
+
+/// A plane cuts a cone in a conic whose kind follows the tilt.
+///
+/// With `phi` the angle between the plane and the cone axis and `alpha`
+/// the semi-angle, the section is an ellipse while `phi > alpha`, a
+/// parabola at `phi == alpha`, and a hyperbola below. Only the
+/// perpendicular case reduces to a circle, and that is the coaxial case
+/// handled by the shared revolution identity.
+///
+/// `Curve3` has no parabola or hyperbola variant, so those kinds are
+/// refused by name. The ellipse case is genuinely derivable in closed
+/// form but needs the apex-offset construction rather than the
+/// cylinder's parallel-axis one, so it is refused as unsupported until
+/// that derivation is written and tested. Naming the two gaps
+/// differently keeps 'not representable' distinct from 'not implemented'.
+fn cone_plane(
+    cone: &axiolid_surface::Cone,
+    plane: &axiolid_surface::Plane,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    let axis = cone.frame.z;
+    let normal = plane.frame.z;
+    let alignment = axis.dot(normal).abs().clamp(0.0, 1.0);
+    // Angle between the plane and the axis, from the axis/normal angle.
+    let plane_axis_angle = alignment.asin();
+    let semi = cone.semi_angle.abs();
+    if alignment == 1.0 {
+        // Perpendicular plane: a circle, via the coaxial profile path.
+        return crate::revolution_profile::coaxial_revolution_intersection(
+            &Surface::Cone(*cone),
+            &Surface::Plane(*plane),
+        );
+    }
+    if plane_axis_angle > semi {
+        return Err(ExactIntersectionRefusal::UnsupportedPair);
+    }
+    Err(ExactIntersectionRefusal::UnrepresentableConic)
 }
