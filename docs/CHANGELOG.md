@@ -5,6 +5,16 @@ All notable changes to Axiolid are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Exact boolean results now carry face provenance. Every output face of
+  `boolean_prisms_exact` reports a `FaceName::Fragment` naming which
+  operand and which original profile wall it is part of, so a material
+  assignment or an edge selection made before the boolean still resolves
+  after it. Recovery is geometric rather than bookkept: an exact overlay
+  never invents an edge, so every result edge lies on an input edge, and
+  `orient2d`'s filtered-then-exact cascade decides which. Both endpoints
+  must lie on the supporting line -- matching one accepts an edge that
+  merely touches a corner and attributes it to the wrong wall. A face
+  with no supporting input edge is left unnamed rather than guessed.
 
 - Persistent structural names for exact B-rep faces and edges
   (`axiolid-brep::name`). `FaceId`/`SurfaceId` are arena positions, valid
