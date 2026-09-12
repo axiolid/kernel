@@ -28,7 +28,7 @@
 
 use axiolid_brep::{EdgeName, ExactBRep, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
-use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
+use axiolid_core::{Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_profile::{Profile, RectangleProfile};
 
 use crate::extrude_exact::{extrude_polygon_rings, extrude_with_cylindrical_blend};
@@ -329,25 +329,53 @@ pub(crate) struct BlendCorner {
     pub(crate) sweep: Scalar,
 }
 
-/// Solve the blend for one corner of the rectangle ring.
-fn blend_corner(corners: &[Point2; 4], index: usize, radius: Scalar) -> BlendCorner {
+/// Solve the blend for one corner of a closed polygon ring.
+///
+/// # Why the general angle, not the right-angle shortcut
+///
+/// The rectangle-only version summed the two tangent offsets, which lands on
+/// the centre only when the edges meet at a right angle. For an arbitrary
+/// interior angle `theta` the setback along each edge is `r / tan(theta/2)`
+/// and the centre sits `r / sin(theta/2)` along the bisector. Both reduce to
+/// the old expressions at `theta = pi/2`, so rectangles are unchanged.
+///
+/// Returns `None` when the corner is degenerate -- collinear or reversed
+/// edges have no well-defined bisector, and a blend there is not geometry
+/// this can name.
+fn blend_corner(corners: &[Point2], index: usize, radius: Scalar) -> Option<BlendCorner> {
     let count = corners.len();
     let previous = corners[(index + count - 1) % count];
     let corner = corners[index];
     let next = corners[(index + 1) % count];
 
-    let into_previous = (previous - corner).normalize();
-    let into_next = (next - corner).normalize();
+    let into_previous = (previous - corner).normalize_or_zero();
+    let into_next = (next - corner).normalize_or_zero();
+    if into_previous == Vec2::ZERO || into_next == Vec2::ZERO {
+        return None;
+    }
 
-    // Tangent points: `radius` back along each edge, which is where the
-    // perpendicular from the centre meets the wall.
-    let start = corner + into_previous * radius;
-    let end = corner + into_next * radius;
+    // Interior angle at the corner.
+    let cosine = into_previous.dot(into_next).clamp(-1.0, 1.0);
+    let theta = cosine.acos();
+    let half = theta / 2.0;
+    let (sin_half, tan_half) = (half.sin(), half.tan());
+    // Collinear (theta = pi) or folded back (theta = 0) has no blend.
+    if sin_half.abs() <= f64::EPSILON || tan_half.abs() <= f64::EPSILON {
+        return None;
+    }
 
-    // The centre is the corner displaced along the interior bisector. For a
-    // right angle the two tangent offsets are orthogonal, so summing them
-    // lands exactly on the centre without needing the angle explicitly.
-    let centre = corner + (into_previous + into_next) * radius;
+    // Tangent points sit `r / tan(theta/2)` back along each edge, which is
+    // where the perpendicular from the centre meets the wall.
+    let setback = radius / tan_half;
+    let start = corner + into_previous * setback;
+    let end = corner + into_next * setback;
+
+    // The centre lies on the interior bisector at `r / sin(theta/2)`.
+    let bisector = (into_previous + into_next).normalize_or_zero();
+    if bisector == Vec2::ZERO {
+        return None;
+    }
+    let centre = corner + bisector * (radius / sin_half);
 
     // Sweep is measured between the two tangent directions; the frame's own
     // x-axis is built from the start point, so no absolute start angle is
@@ -363,12 +391,12 @@ fn blend_corner(corners: &[Point2; 4], index: usize, radius: Scalar) -> BlendCor
         sweep += core::f64::consts::TAU;
     }
 
-    BlendCorner {
+    Some(BlendCorner {
         centre,
         start,
         end,
         sweep,
-    }
+    })
 }
 
 /// Build the filleted prism: planar walls plus one cylindrical blend face.
@@ -395,7 +423,8 @@ fn build_filleted_prism(
 
     let index = edge.corner_index(&corners)?;
 
-    let blend = blend_corner(&corners, index, radius);
+    let blend = blend_corner(&corners, index, radius)
+        .ok_or_else(|| unsupported("fillet at a degenerate corner"))?;
 
     // The ring carries the tangent points in place of the sharp corner, in
     // winding order: enter along the previous edge, leave along the next.
@@ -410,4 +439,109 @@ fn build_filleted_prism(
     }
 
     extrude_with_cylindrical_blend(&ring, Vec3::Z * depth, index, &blend, radius)
+}
+
+/// Fillet one corner of an arbitrary closed polygon profile.
+///
+/// # Why this exists next to [`fillet_extruded_profile`]
+///
+/// The profile-based entry point takes a `Profile::Rectangle` and so can
+/// only ever round a four-corner box. This one takes the ring directly, so
+/// an L-shape, a hexagon, or any polygon a boolean produced can be
+/// filleted. Corners are addressed by index into `ring`, which is stable
+/// under a rebuild in a way an arena id is not.
+///
+/// # What is still refused
+///
+/// - A radius whose setback does not fit on either adjacent edge. Trimming
+///   past a neighbouring corner would silently delete that corner.
+/// - A degenerate corner: collinear or folded edges have no bisector.
+/// - A reflex corner. The blend there is a fillet on the outside of the
+///   material, which is a different surface and is not derived here.
+pub fn fillet_polygon_corner(
+    ring: &[Point2],
+    corner: usize,
+    radius: Scalar,
+    depth: Scalar,
+) -> GeomResult<ExactBRep> {
+    if ring.len() < 3 {
+        return Err(GeomError::InvalidInput(
+            "fillet needs a ring of at least three corners".to_owned(),
+        ));
+    }
+    if corner >= ring.len() {
+        return Err(GeomError::InvalidInput(format!(
+            "fillet corner {corner} is outside a ring of {} corners",
+            ring.len()
+        )));
+    }
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "fillet radius must be positive and finite, got {radius}"
+        )));
+    }
+    if !depth.is_finite() || depth <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "fillet extrusion depth must be positive and finite, got {depth}"
+        )));
+    }
+    if !ring.iter().all(|p| p.x.is_finite() && p.y.is_finite()) {
+        return Err(GeomError::InvalidInput(
+            "fillet ring has a non-finite corner".to_owned(),
+        ));
+    }
+
+    let count = ring.len();
+    let previous = ring[(corner + count - 1) % count];
+    let here = ring[corner];
+    let next = ring[(corner + 1) % count];
+
+    // A blend only makes sense on a convex corner of a counter-clockwise
+    // ring. On a reflex corner the arc bulges into the material and is a
+    // different surface, so it is refused rather than silently built wrong.
+    let ring_is_ccw = signed_area(ring) > 0.0;
+    let turn = (here - previous).perp_dot(next - here);
+    let convex = if ring_is_ccw { turn > 0.0 } else { turn < 0.0 };
+    if !convex {
+        return Err(unsupported("fillet on a reflex corner"));
+    }
+
+    let blend = blend_corner(ring, corner, radius)
+        .ok_or_else(|| unsupported("fillet at a degenerate corner"))?;
+
+    // The setback must fit on both adjacent edges. If it ran past a
+    // neighbour the blend would swallow that corner, changing the profile
+    // rather than rounding it.
+    let setback = (blend.start - here).length();
+    let to_previous = (previous - here).length();
+    let to_next = (next - here).length();
+    if setback >= to_previous || setback >= to_next {
+        return Err(unsupported("fillet radius larger than an adjacent edge"));
+    }
+
+    // Replace the corner with its two tangent points, so the planar walls
+    // already stop exactly where the blend begins.
+    let mut blended = Vec::with_capacity(count + 1);
+    for (index, point) in ring.iter().enumerate() {
+        if index == corner {
+            blended.push(blend.start);
+            blended.push(blend.end);
+        } else {
+            blended.push(*point);
+        }
+    }
+    let blend_index = corner;
+    extrude_with_cylindrical_blend(&blended, Vec3::Z * depth, blend_index, &blend, radius)
+}
+
+/// Twice the signed area of a closed ring; positive is counter-clockwise.
+fn signed_area(ring: &[Point2]) -> Scalar {
+    let count = ring.len();
+    (0..count)
+        .map(|index| {
+            let a = ring[index];
+            let b = ring[(index + 1) % count];
+            a.x * b.y - b.x * a.y
+        })
+        .sum()
 }

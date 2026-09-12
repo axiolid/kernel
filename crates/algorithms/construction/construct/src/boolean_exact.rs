@@ -42,7 +42,7 @@ use crate::extrude_arc::extrude_arc_ring;
 use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
 
-pub(crate) fn unsupported(input: &'static str) -> GeomError {
+pub fn unsupported(input: &'static str) -> GeomError {
     GeomError::UnsupportedInput {
         backend: BACKEND_ID,
         operation: Operation::MeshBoolean,

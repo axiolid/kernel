@@ -242,3 +242,57 @@ bulge-to-angle constant, centre ignoring the sagitta, hole refusal removed.
 
 Remaining gap: results with interior holes, and sections whose arcs survive
 into more than one disconnected region. Both refuse by name.
+
+## Follow-up: stepped union and general-polygon fillet
+
+Two gaps named in the thesis feedback are now closed.
+
+### Stepped union
+
+`boolean_prisms_exact` refuses a union of differing spans because one
+prism cannot hold a stepped solid. `union_prisms_stepped` returns the
+band decomposition instead: the result is a list of constant-section
+prisms, which is what the shape actually is.
+
+The cut heights are the operand bounds, deduplicated within tolerance so
+near-equal heights give one cut rather than a sliver band no solid can
+carry. Verified exhaustively over 34 span configurations: bands tile the
+full height with no gap and no overlap. Volume matches inclusion-
+exclusion.
+
+Mutation, 4/4 killed: a both-active band copying only the subject, cuts
+not merged within tolerance, membership leaking at band boundaries, and
+disjoint operands no longer refused.
+
+The both-active mutant initially SURVIVED. The tests used a tower
+standing on a slab, where the tower's section is contained in the slab's,
+so 'union of both' and 'subject only' coincide. A crossing-bars case,
+where neither section contains the other, kills it.
+
+### Fillet beyond rectangles
+
+`blend_corner` summed the two tangent offsets to find the arc centre.
+That is correct only at a right angle, which is why the feature was
+rectangle-only. The general corner uses the interior angle `theta`:
+
+    setback along each edge = r / tan(theta/2)
+    centre along bisector   = r / sin(theta/2)
+
+Both reduce to the old expressions at `theta = pi/2`, so rectangles are
+bit-for-bit unchanged. Verified before implementing: tangency and radius
+exact to 1.1e-16 across right, obtuse, and oblique corners.
+
+`fillet_polygon_corner` takes a ring directly, so an L-shape, a hexagon,
+or a boolean result can be filleted. Refusals: a reflex corner (the arc
+would bulge into the material, a different surface), a radius whose
+setback overruns an adjacent edge (would swallow a neighbouring corner),
+and a degenerate corner with no bisector.
+
+Mutation, 4/4 killed. The right-angle-shortcut mutant initially
+SURVIVED: the tangency test checked only the arc centre, and a wrong
+setback still leaves the centre on the bisector at the correct distance
+while the arc meets the walls in the wrong place. Asserting the tangent
+point positions -- against the closed-form setback -- kills it.
+
+Still open: variable-radius fillets, filleting several corners at once,
+and fillets on arc-bounded profiles.

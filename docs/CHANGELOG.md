@@ -4,6 +4,21 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Arc-aware planar boolean (`arc_overlay`): cross-sections whose edges are
+  circular arcs, with arcs preserved as arcs rather than tessellated.
+- Exact boolean for curved cross-sections (`boolean_arc_prisms_exact`): a
+  cylinder clipped by a box returns an `ExactBRep` with genuine
+  `Surface::Cylinder` walls. Closes the gap where curved solids could not
+  be boolean operands at all.
+- Stepped union of coaxial prisms (`union_prisms_stepped`): a union of
+  differing extrusion spans returns its band decomposition instead of
+  being refused.
+- Fillets on arbitrary polygon corners (`fillet_polygon_corner`): the
+  blend now uses the corner's own interior angle, so L-shapes and regular
+  polygons can be filleted. Rectangles are unchanged.
+
 ### Changed
 
 - Exact cylinder/plane rulings when the plane is parallel to the axis: the
