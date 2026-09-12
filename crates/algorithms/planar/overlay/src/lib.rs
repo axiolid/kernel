@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 //! Validated, deterministic planar boolean overlay and offset.
+mod arc;
 mod offset;
 mod region;
 
+pub use arc::{
+    arc_edge_radius, arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing, ArcVertex,
+};
 pub use offset::{
     offset_polygons, polygon_area, ring_area, stroke_polyline, total_area, CapStyle, JoinStyle,
     OffsetEvidence, OffsetResult,
@@ -59,6 +63,12 @@ pub enum OverlayError {
     /// Separate from [`OverlayError::InvalidOffsetDistance`] because the fix is
     /// different: the caller passed a malformed style, not a malformed measure.
     InvalidOffsetStyle,
+    /// An arc edge's implied radius was not above tolerance.
+    ///
+    /// Distinct from [`OverlayError::RepeatedVertex`]: the chord can be long
+    /// enough while the bulge still implies a radius too small to be a real
+    /// boundary. Such an edge is a point, not an arc.
+    ZeroRadiusArc,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverlayEvidence {

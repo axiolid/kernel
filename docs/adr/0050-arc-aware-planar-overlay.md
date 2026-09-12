@@ -92,7 +92,11 @@ mature and gated by existing tests. The arc backend is additive.
 ## Plan
 
 1. Contract types: arc-capable ring/segment in `axiolid-overlay`, polygon
-   types untouched.
+   types untouched. **Done.** `ArcRing`/`ArcVertex` carry a bulge per
+   departing edge (`tan(theta/4)`, DXF convention), with `arc_ring_area`,
+   `arc_edge_radius`, `reverse_arc_ring` and `validate_arc_ring`. The
+   existing `Ring`/`Polygon` types are unchanged, so nothing on the
+   polygon path shifted.
 2. Backend adapter behind the existing validation, with the neutral contract
    preserved (no library types in our public API).
 3. Verification harness: every case checked against an independent
@@ -131,3 +135,34 @@ Remaining unprobed: zero-radius arcs and a full circle expressed as a single
 segment. Those are input-validation concerns for the contract layer rather
 than backend behaviour, and step 1 should refuse them explicitly.
 
+
+## Step 1 findings
+
+Two things the plan did not anticipate.
+
+**The segment-area term must keep a signed angle.** A first implementation
+using `|theta|` gave the right area for a counter-clockwise disc and `+pi r^2`
+for a clockwise one, so a reversed ring failed to negate. Caught by
+comparing against a closed form rather than against another call of the
+same function. Mutation testing reproduces it: restoring `theta.abs()`
+is killed.
+
+**`ZeroRadiusArc` has a provably narrow trigger window.** Since
+`R = chord (1 + b^2) / 4|b|` and `(1 + b^2) / 4|b| >= 1/2` with equality at
+`b = 1`, every arc satisfies `R >= chord / 2`. A chord above tolerance `t`
+therefore forces `R > t/2`, so a sub-tolerance radius is reachable only for
+a chord in `(t, 2t]`. The first version of the test used a huge bulge on a
+short chord, assuming that shrinks the radius; it does the opposite -- a
+large bulge approaches a full circle and grows `R`. The test now targets the
+proven window explicitly.
+
+**Self-intersection is deliberately not validated for arc rings.** Arc/arc
+and arc/segment crossing tests are part of the overlay algorithm itself
+(step 2), and an approximate pre-check would either reject valid input or
+admit invalid input. The straight-edge contract keeps its exact check; the
+arc contract names the gap instead of implying a guarantee it cannot make.
+
+Mutation evidence for step 1: 7/7 killed -- unsigned segment term, dropped
+segment term (the tessellated reading), reversal without bulge negation,
+reversal without the index shift, removed zero-radius guard, two-vertex
+polygonal ring admitted, and unchecked bulge finiteness.
