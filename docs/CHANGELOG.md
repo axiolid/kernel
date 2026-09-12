@@ -6,6 +6,23 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- Persistent structural names for exact B-rep faces and edges
+  (`axiolid-brep::name`). `FaceId`/`SurfaceId` are arena positions, valid
+  only inside one assembled value, so nothing could refer to a face across
+  an operation -- which is why `EdgeSelector`'s only variant was
+  `NearestCorner(Point2)` and the fillet had to re-locate its target by
+  nearest-point search. `FaceName` records provenance instead of position
+  (`Swept`, `Blend(EdgeName)`, `Fragment{operand, source}`, explicit
+  `Anonymous`), and `EdgeName` names an edge by the canonically-ordered
+  pair of faces meeting there, so naming it from either side gives one
+  name. Names compose: `origin()` strips boolean layers, `is_anonymous()`
+  checks the whole chain. The exact extrusion names its caps and walls, a
+  blend is named after the edge it replaced rather than its own position,
+  and `EdgeSelector::Named` resolves through the same path as the
+  positional variant -- refusing an unresolvable name instead of snapping
+  to the nearest corner. Naming is opt-in per producer: an operation that
+  cannot say where a face came from reports `None` rather than a
+  fabricated name. 9 tests, 3/3 mutants killed.
 - `parallel-batch` feature on the `boolmesh` provider: independent nodes of
   `union_many`'s reduction tree run concurrently. Deliberately separate from
   the existing `parallel` feature, which threads inside a single solve and is
