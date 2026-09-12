@@ -127,3 +127,46 @@ contained and well-understood. Step 3 is ordinary topology work. Step 4 is
 a project: every assembly path that assumes a straight intersection edge
 (`add_line_edge`, `add_pcurve` over `Interval::UNIT`) has to learn curved
 trace geometry first.
+
+
+## Step 1 outcome (measured)
+
+Step 1 is DONE and the proof gap is closed. `krawczyk_root_on_edge` pins
+the parameter that sits on a domain edge and certifies the reduced
+two-unknown system, where the root is interior.
+
+Measured before: the dual-boundary case reached
+`endpoints=0 any_unresolved=true` -- no boundary root could be certified.
+
+Measured after: `endpoints=4 any_unresolved=false`. Four roots certified,
+zero unresolved. The certification blocker is gone.
+
+### The next blocker is NOT what this doc predicted
+
+`trace_affine_pair` refuses `endpoints > 2`:
+
+```rust
+if any_unresolved || endpoints.len() == 1 || endpoints.len() > 2 {
+    return Ok(AffineTraceOutcome::Unresolved(Vec::new()));
+}
+```
+
+Four endpoints is CORRECT for the dual-boundary case: two planar patches
+crossing symmetrically meet four domain edges, because the chord runs
+boundary-to-boundary on BOTH patches. The guard assumes a single trace has
+exactly two endpoints, which holds only when one patch contains the
+chord's interior.
+
+So the remaining work is trace ASSEMBLY, not certification: pair the four
+certified endpoints into the correct chord per patch, then split both
+patches instead of one. That also means `CertifiedTrimmedSurfacePair3`'s
+`split_surface: SurfacePairMember` / `unsplit_face` shape must generalise --
+in a dual chord there is no unsplit face. That is a breaking type change
+and belongs with steps 2-3, not smuggled into step 1.
+
+### Honest coverage note
+
+The discarded-row verification inside `krawczyk_root_on_edge` is NOT
+covered: every off-patch input reachable today is rejected earlier by
+`residual_excludes_zero`, so deleting the check fails no test. It is
+retained as defence and marked as unverified in the source.

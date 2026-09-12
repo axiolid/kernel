@@ -20,6 +20,14 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- Certified curve/surface intersection now certifies roots lying exactly
+  ON a patch domain edge. Krawczyk proves a root by mapping a parameter box
+  strictly inside itself, which a root on a box face can never satisfy, so
+  such roots previously subdivided forever and returned `Unresolved` at
+  every tolerance. The pinned parameter is now fixed and the reduced
+  two-unknown system certified instead, where the root is interior.
+  Boundary-restricted certificates only fire on the surface's own domain
+  edges, never on faces introduced by subdivision.
 - Exact boolean results now carry face provenance. Every output face of
   `boolean_prisms_exact` reports a `FaceName::Fragment` naming which
   operand and which original profile wall it is part of, so a material
