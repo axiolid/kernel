@@ -11,6 +11,7 @@ readme.workspace = true
 
 [dependencies]
 axiolid-core.workspace = true
+cavalier_contours.workspace = true
 i_overlay.workspace = true
 
 [package.metadata.axiolid]

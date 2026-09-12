@@ -99,6 +99,7 @@ axiolid-project = { path = "crates/algorithms/planar/project", version = "0.1.8"
 axiolid-route = { path = "crates/algorithms/planar/route", version = "0.1.8" }
 axiolid-field = { path = "crates/representations/sampled/field", version = "0.1.8" }
 axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.1.8", default-features = false }
+cavalier_contours = "0.9.0"
 i_overlay = "4.5.2"
 axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.1.8", default-features = false }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.1.8", default-features = false }

@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 //! Validated, deterministic planar boolean overlay and offset.
 mod arc;
+mod arc_overlay;
 mod offset;
 mod region;
 
 pub use arc::{
     arc_edge_radius, arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing, ArcVertex,
 };
+pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPolygon};
 pub use offset::{
     offset_polygons, polygon_area, ring_area, stroke_polyline, total_area, CapStyle, JoinStyle,
     OffsetEvidence, OffsetResult,

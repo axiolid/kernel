@@ -98,12 +98,16 @@ mature and gated by existing tests. The arc backend is additive.
    existing `Ring`/`Polygon` types are unchanged, so nothing on the
    polygon path shifted.
 2. Backend adapter behind the existing validation, with the neutral contract
-   preserved (no library types in our public API).
+   preserved (no library types in our public API). **Done.** `arc_overlay`
+   in `arc_overlay.rs`, returning `ArcPolygon` with holes. No
+   `cavalier_contours` type appears in the public API.
 3. Verification harness: every case checked against an independent
    closed-form area, plus the hole case that lives in `neg_plines`.
+   **Done.** 7 tests in `tests/arc_overlay.rs`.
 4. Mutation testing on the adapter: a dropped `neg_plines` loop, a dropped
    disjoint result, and a tessellated-instead-of-arc output must all be
-   caught by the tests before the path is trusted.
+   caught by the tests before the path is trusted. **Done.** All three
+   named mutants are killed, plus a mis-wound hole.
 5. Only then: widen `Prism` and wire `boolean_prisms_exact`.
 
 ## Open questions
@@ -166,3 +170,39 @@ Mutation evidence for step 1: 7/7 killed -- unsigned segment term, dropped
 segment term (the tessellated reading), reversal without bulge negation,
 reversal without the index shift, removed zero-radius guard, two-vertex
 polygonal ring admitted, and unchecked bulge finiteness.
+
+## Step 2-4 findings
+
+The `neg_plines` trap is real and the wall case proves it. A 10x3 wall
+minus a unit-radius opening returns the wall in `pos_plines` and the
+opening in `neg_plines`. An adapter reading only positives returns a
+SOLID wall with a plausible area and no error -- the opening silently
+disappears. That mutant is killed by asserting `holes == 1`, not by
+any area check.
+
+Edge counts, not areas, are what catch tessellation. A backend that
+approximated arcs by segments would still report an area within any
+reasonable tolerance. `ArcOverlayEvidence::arc_edges` and `line_edges`
+make that observable: an annulus must have zero straight edges and a
+handful of arcs, and a lens must have no straight edge at all.
+
+Mutation results on the adapter:
+
+| mutation | result |
+|----------|--------|
+| drop `neg_plines` (holes vanish) | KILLED |
+| keep only the first positive region | KILLED |
+| bulge dropped in conversion (tessellating) | KILLED |
+| hole not reoriented (winding lie) | KILLED |
+| input normalisation removed alone | survives (redundant) |
+| output reorientation removed alone | survives (redundant) |
+| ALL orientation handling removed | KILLED |
+
+The two lone survivors are genuine redundancy rather than a test gap:
+normalising the output repairs a mis-wound input, so either mechanism
+alone still produces the right answer. Both are kept and the source
+says why. This was verified by removing them together, which fails.
+
+Areas agree with closed forms to 1e-12 in every case: wall minus
+opening `30 - pi`, lens `2 acos(1/2) - sqrt(3)/2`, annulus `3 pi`,
+disjoint union `2 pi`.
