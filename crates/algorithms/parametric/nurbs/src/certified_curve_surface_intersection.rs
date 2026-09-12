@@ -170,6 +170,26 @@ pub fn intersect_curve_surface_certified(
 
     let mut intersections = Vec::new();
     let mut unresolved = Vec::new();
+    // The surface's own domain, captured before subdivision so a true
+    // edge stays distinguishable from a face introduced by splitting.
+    let domain = SurfaceDomain {
+        u_start: *surface
+            .u_knots
+            .first()
+            .ok_or_else(|| GeomError::InvalidInput("surface has no u knots".to_owned()))?,
+        u_end: *surface
+            .u_knots
+            .last()
+            .ok_or_else(|| GeomError::InvalidInput("surface has no u knots".to_owned()))?,
+        v_start: *surface
+            .v_knots
+            .first()
+            .ok_or_else(|| GeomError::InvalidInput("surface has no v knots".to_owned()))?,
+        v_end: *surface
+            .v_knots
+            .last()
+            .ok_or_else(|| GeomError::InvalidInput("surface has no v knots".to_owned()))?,
+    };
     let mut pending = Vec::new();
     pending
         .try_reserve(usize::from(options.max_depth()) + 1)
@@ -238,6 +258,28 @@ pub fn intersect_curve_surface_certified(
                         })?,
                         ..current
                     });
+                    continue;
+                }
+                // The 3x3 operator could not certify this box. Before
+                // subdividing, try the reduced solve on any DOMAIN edge the
+                // box touches: a root sitting exactly on a patch edge is
+                // unreachable for strict containment and would otherwise
+                // halve forever until depth runs out.
+                //
+                // Only true domain edges qualify. A face created by
+                // subdivision has interior geometry on both sides, so a root
+                // there is genuinely interior and belongs to the 3x3 path;
+                // pinning it would report a root the caller could also find
+                // by subdividing, i.e. a duplicate.
+                if let Some(root) = edge_root(
+                    curve,
+                    surface,
+                    &curve_cell,
+                    &patch,
+                    &domain,
+                    options.parameter_tolerance(),
+                )? {
+                    push_result(&mut intersections, root)?;
                     continue;
                 }
                 if current.depth >= options.max_depth() {
@@ -695,4 +737,369 @@ mod tests {
         assert!(determinant.lower() <= 1.0 && determinant.upper() >= 1.0);
         assert!(determinant.absolute_lower_bound() > 0.0);
     }
+}
+
+/// Which surface parameter is pinned to a domain edge, and where.
+///
+/// A root lying exactly ON a patch edge cannot be certified by the 3x3
+/// operator: strict containment `image.lower() > bounds.start` is
+/// unsatisfiable when the root equals `bounds.start`. Pinning that one
+/// parameter turns the 3-unknown system into a 2-unknown one whose root
+/// IS interior, so the same Krawczyk argument applies unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PinnedEdge {
+    /// Surface `u` is fixed at the domain edge.
+    U,
+    /// Surface `v` is fixed at the domain edge.
+    V,
+}
+/// Certify a root pinned to `edge` at parameter `pinned_value`.
+///
+/// Solves the reduced 2x2 system in the two free unknowns with the same
+/// interval-Krawczyk argument the 3x3 path uses: build the operator at the
+/// box centre, require its image to land strictly inside the free-parameter
+/// box, and require a nonzero Jacobian determinant lower bound. The pinned
+/// parameter is reported as a degenerate interval, which is the honest
+/// enclosure: it is known exactly, not bracketed.
+fn krawczyk_root_on_edge(
+    curve: &BSplineCurve3,
+    surface: &BSplineSurface,
+    curve_cell: &Cell,
+    patch: &Patch,
+    edge: PinnedEdge,
+    pinned_value: Scalar,
+) -> GeomResult<Option<TransverseCurveSurfaceIntersection3>> {
+    // Free axes: curve t is always free; the other surface parameter is
+    // whichever one is not pinned.
+    let (free_start, free_end) = match edge {
+        PinnedEdge::U => (patch.v_start, patch.v_end),
+        PinnedEdge::V => (patch.u_start, patch.u_end),
+    };
+    let center_t = curve_cell.start * 0.5 + curve_cell.end * 0.5;
+    let center_free = free_start * 0.5 + free_end * 0.5;
+    let (center_u, center_v) = match edge {
+        PinnedEdge::U => (pinned_value, center_free),
+        PinnedEdge::V => (center_free, pinned_value),
+    };
+
+    let curve_jet = bspline_jet3(curve, center_t)?;
+    let surface_jet = bspline_jet(surface, center_u, center_v)?;
+    // Column 2 is the derivative along the FREE surface parameter only.
+    let free_partial = match edge {
+        PinnedEdge::U => surface_jet.dv,
+        PinnedEdge::V => surface_jet.du,
+    };
+    let point_jacobian = [
+        [curve_jet.first.x, -free_partial.x],
+        [curve_jet.first.y, -free_partial.y],
+        [curve_jet.first.z, -free_partial.z],
+    ];
+
+    // Three equations, two unknowns. Pick the two rows whose 2x2 minor has
+    // the largest magnitude: that is the best-conditioned choice available,
+    // and any nonzero minor is a valid certificate basis. The discarded row
+    // is not ignored -- the residual bound below is taken over all three.
+    let rows = [(0usize, 1usize), (0, 2), (1, 2)];
+    let mut best: Option<([[Scalar; 2]; 2], [[Scalar; 2]; 2], (usize, usize))> = None;
+    let mut best_magnitude = 0.0;
+    for (first, second) in rows {
+        let candidate = [
+            [point_jacobian[first][0], point_jacobian[first][1]],
+            [point_jacobian[second][0], point_jacobian[second][1]],
+        ];
+        let Some(inverse) = inverse2(candidate) else {
+            continue;
+        };
+        let magnitude =
+            (candidate[0][0] * candidate[1][1] - candidate[0][1] * candidate[1][0]).abs();
+        if magnitude > best_magnitude {
+            best_magnitude = magnitude;
+            best = Some((candidate, inverse, (first, second)));
+        }
+    }
+    let Some((_, inverse, (row_a, row_b))) = best else {
+        return Ok(None);
+    };
+
+    let curve_midpoint = curve_cell.midpoint_point()?.euclidean()?;
+    let surface_midpoint = patch.midpoint_point()?.euclidean()?;
+    let residual_all = [
+        curve_midpoint[0].subtract(surface_midpoint[0])?,
+        curve_midpoint[1].subtract(surface_midpoint[1])?,
+        curve_midpoint[2].subtract(surface_midpoint[2])?,
+    ];
+    let residual = [residual_all[row_a], residual_all[row_b]];
+
+    let curve_derivative = curve_cell.derivative_intervals()?;
+    let free_intervals = match edge {
+        PinnedEdge::U => patch.partial_v_intervals()?,
+        PinnedEdge::V => patch.partial_u_intervals()?,
+    };
+    let minus_one = Interval::exact(-1.0)?;
+    let jacobian = [
+        [
+            curve_derivative[row_a],
+            free_intervals[row_a].multiply(minus_one)?,
+        ],
+        [
+            curve_derivative[row_b],
+            free_intervals[row_b].multiply(minus_one)?,
+        ],
+    ];
+
+    let zero = Interval::exact(0.0)?;
+    let one = Interval::exact(1.0)?;
+    let center = [center_t, center_free];
+    let mut corrected = [zero; 2];
+    for row in 0..2 {
+        corrected[row] = Interval::exact(center[row])?.subtract(dot2(inverse[row], residual)?)?;
+    }
+    let mut matrix = [[zero; 2]; 2];
+    for row in 0..2 {
+        for column in 0..2 {
+            let jacobian_column = [jacobian[0][column], jacobian[1][column]];
+            let identity = if row == column { one } else { zero };
+            matrix[row][column] = identity.subtract(dot2(inverse[row], jacobian_column)?)?;
+        }
+    }
+    let bounds = [
+        ParameterInterval {
+            start: curve_cell.start,
+            end: curve_cell.end,
+        },
+        ParameterInterval {
+            start: free_start,
+            end: free_end,
+        },
+    ];
+    let mut delta = [zero; 2];
+    for axis in 0..2 {
+        delta[axis] = Interval::hull([
+            Interval::exact(bounds[axis].start)?.subtract(Interval::exact(center[axis])?)?,
+            Interval::exact(bounds[axis].end)?.subtract(Interval::exact(center[axis])?)?,
+        ])?;
+    }
+    let mut image = [zero; 2];
+    for row in 0..2 {
+        image[row] = corrected[row].add(
+            matrix[row][0]
+                .multiply(delta[0])?
+                .add(matrix[row][1].multiply(delta[1])?)?,
+        )?;
+    }
+    // Same strict-containment demand as the 3x3 path, now over the two free
+    // axes only. The pinned axis needs no containment: it is fixed exactly.
+    if !(image[0].lower() > bounds[0].start
+        && image[0].upper() < bounds[0].end
+        && image[1].lower() > bounds[1].start
+        && image[1].upper() < bounds[1].end)
+    {
+        return Ok(None);
+    }
+    let determinant_lower = determinant2_interval(jacobian)?.absolute_lower_bound();
+    if determinant_lower == 0.0 {
+        return Ok(None);
+    }
+
+    let curve_parameter = ParameterInterval {
+        start: image[0].lower(),
+        end: image[0].upper(),
+    };
+    let free_parameter = ParameterInterval {
+        start: image[1].lower(),
+        end: image[1].upper(),
+    };
+    let pinned = ParameterInterval {
+        start: pinned_value,
+        end: pinned_value,
+    };
+    let (surface_u_parameter, surface_v_parameter) = match edge {
+        PinnedEdge::U => (pinned, free_parameter),
+        PinnedEdge::V => (free_parameter, pinned),
+    };
+
+    // `restrict` rejects a zero-width box, and the pinned axis is exactly
+    // zero-width by construction. Widen it to the smallest sliver that still
+    // lies inside the patch. This is sound in both directions a caller
+    // depends on: a SUPERSET of the true degenerate box can only inflate
+    // `residual_norm_upper` (conservative) and can only make the
+    // disjointness test below harder to pass (conservative). It never
+    // certifies a root that the exact degenerate box would reject.
+    let root_curve = {
+        let (start, end) = sliver(
+            curve_parameter.start,
+            curve_parameter.end,
+            curve_cell.start,
+            curve_cell.end,
+        );
+        curve_cell.restrict(start, end)?
+    };
+    let root_patch = {
+        let (u_start, u_end) = sliver(
+            surface_u_parameter.start,
+            surface_u_parameter.end,
+            patch.u_start,
+            patch.u_end,
+        );
+        let (v_start, v_end) = sliver(
+            surface_v_parameter.start,
+            surface_v_parameter.end,
+            patch.v_start,
+            patch.v_end,
+        );
+        patch.restrict(u_start, u_end, v_start, v_end)?
+    };
+    // The 2x2 solve only enforced two of the three coordinate equations.
+    // The third must be CHECKED, not assumed: a curve can meet the edge line
+    // in the chosen two coordinates while missing it in the third. The
+    // residual bound is conservative over the whole certified box, so
+    // requiring it to enclose zero is a sound test.
+    //
+    // NOT COVERED BY TESTS: every off-patch case reachable today is rejected
+    // earlier by `residual_excludes_zero` during subdivision, so this branch
+    // never fires in the current corpus -- deleting it does not fail any
+    // test. It is retained as defence for inputs that reach here with a
+    // satisfied 2x2 system and a violated third row, which the planar-only
+    // certified path cannot yet construct. Do not treat it as verified.
+    let residual_upper_bound = residual_norm_upper(&root_curve, &root_patch)?;
+    let discarded = 3 - row_a - row_b;
+    let curve_span = root_curve.coordinate_intervals()?[discarded];
+    let patch_span = root_patch.coordinate_intervals()?[discarded];
+    if curve_span.upper() < patch_span.lower() || patch_span.upper() < curve_span.lower() {
+        return Ok(None);
+    }
+
+    let curve_value = bspline_jet3(curve, interval_midpoint(curve_parameter))?.point;
+    let surface_value = bspline_jet(
+        surface,
+        interval_midpoint(surface_u_parameter),
+        interval_midpoint(surface_v_parameter),
+    )?
+    .point;
+    let point = Point3::new(
+        curve_value.x * 0.5 + surface_value.x * 0.5,
+        curve_value.y * 0.5 + surface_value.y * 0.5,
+        curve_value.z * 0.5 + surface_value.z * 0.5,
+    );
+    if !point.is_finite() || !residual_upper_bound.is_finite() {
+        return Err(GeomError::Degenerate(
+            "certified curve/surface edge representative overflowed".to_owned(),
+        ));
+    }
+    Ok(Some(TransverseCurveSurfaceIntersection3 {
+        curve_parameter,
+        surface_u_parameter,
+        surface_v_parameter,
+        point,
+        residual_upper_bound,
+        jacobian_determinant_lower_bound: determinant_lower,
+    }))
+}
+
+/// Widen a possibly-degenerate parameter range into a nonempty one.
+///
+/// The pinned axis of a boundary-restricted certificate has `start == end`,
+/// which `restrict` rejects. Returns the smallest nonempty range containing
+/// `[start, end]` and clamped inside `[low, high]`, so the result is always
+/// a superset of the requested range that the Bezier restriction accepts.
+fn sliver(start: Scalar, end: Scalar, low: Scalar, high: Scalar) -> (Scalar, Scalar) {
+    if end > start {
+        return (start, end);
+    }
+    if high <= low {
+        return (low, high);
+    }
+    let widened_end = next_up(end);
+    if widened_end < high {
+        return (start, widened_end);
+    }
+    // At the upper limit there is no room above, so grow downwards instead.
+    let widened_start = -next_up(-start);
+    if widened_start > low {
+        (widened_start, end)
+    } else {
+        (low, high)
+    }
+}
+
+fn dot2(coefficients: [Scalar; 2], values: [Interval; 2]) -> GeomResult<Interval> {
+    Interval::exact(coefficients[0])?
+        .multiply(values[0])?
+        .add(Interval::exact(coefficients[1])?.multiply(values[1])?)
+}
+
+fn inverse2(matrix: [[Scalar; 2]; 2]) -> Option<[[Scalar; 2]; 2]> {
+    if matrix.iter().flatten().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let [[a, b], [c, d]] = matrix;
+    let determinant = a * d - b * c;
+    if determinant == 0.0 || !determinant.is_finite() {
+        return None;
+    }
+    let inverse = [
+        [d / determinant, -b / determinant],
+        [-c / determinant, a / determinant],
+    ];
+    inverse
+        .iter()
+        .flatten()
+        .all(|value| value.is_finite())
+        .then_some(inverse)
+}
+
+fn determinant2_interval(matrix: [[Interval; 2]; 2]) -> GeomResult<Interval> {
+    matrix[0][0]
+        .multiply(matrix[1][1])?
+        .subtract(matrix[0][1].multiply(matrix[1][0])?)
+}
+
+/// The surface's own parameter domain, used to tell a true edge from a
+/// face created by subdivision.
+#[derive(Debug, Clone, Copy)]
+struct SurfaceDomain {
+    u_start: Scalar,
+    u_end: Scalar,
+    v_start: Scalar,
+    v_end: Scalar,
+}
+
+/// Try a boundary-restricted certificate on every domain edge this box
+/// touches.
+///
+/// Returns the first certified root. At most four edges are examined and
+/// each is a bounded 2x2 solve, so this adds constant work per node.
+fn edge_root(
+    curve: &BSplineCurve3,
+    surface: &BSplineSurface,
+    curve_cell: &Cell,
+    patch: &Patch,
+    domain: &SurfaceDomain,
+    tolerance: Scalar,
+) -> GeomResult<Option<TransverseCurveSurfaceIntersection3>> {
+    let candidates = [
+        (
+            patch.u_start == domain.u_start,
+            PinnedEdge::U,
+            patch.u_start,
+        ),
+        (patch.u_end == domain.u_end, PinnedEdge::U, patch.u_end),
+        (
+            patch.v_start == domain.v_start,
+            PinnedEdge::V,
+            patch.v_start,
+        ),
+        (patch.v_end == domain.v_end, PinnedEdge::V, patch.v_end),
+    ];
+    for (on_domain_edge, edge, value) in candidates {
+        if !on_domain_edge {
+            continue;
+        }
+        if let Some(root) = krawczyk_root_on_edge(curve, surface, curve_cell, patch, edge, value)? {
+            if certificate_meets_resolution(&root, tolerance) {
+                return Ok(Some(root));
+            }
+        }
+    }
+    Ok(None)
 }
