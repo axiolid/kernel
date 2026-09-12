@@ -13,7 +13,12 @@ use std::fmt;
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_surface::Surface;
-use axiolid_topology::{audit_brep, BRep, BRepHealth, EdgeId, LoopId};
+use axiolid_topology::{audit_brep, BRep, BRepHealth, EdgeId, FaceId, LoopId};
+
+/// Persistent structural names for faces and edges.
+pub mod name;
+
+pub use name::{EdgeName, FaceName, Operand, SweptFace};
 
 macro_rules! geometry_id {
     ($name:ident, $label:literal) => {
@@ -56,9 +61,44 @@ pub struct ExactBRep {
     surfaces: Vec<Surface>,
     edge_intervals: HashMap<EdgeId, Interval>,
     pcurve_intervals: HashMap<(LoopId, usize), Interval>,
+    face_names: HashMap<FaceId, FaceName>,
+    edge_names: HashMap<EdgeId, EdgeName>,
 }
 
 impl ExactBRep {
+    /// Persistent structural name for a face, when the producer supplied one.
+    ///
+    /// Absence means the producing operation did not track provenance, not
+    /// that the face is invalid. Callers that require a name should treat
+    /// `None` as a refusal rather than substituting an index.
+    pub fn face_name(&self, face: FaceId) -> Option<&FaceName> {
+        self.face_names.get(&face)
+    }
+
+    /// Persistent structural name for an edge, when the producer supplied one.
+    pub fn edge_name(&self, edge: EdgeId) -> Option<&EdgeName> {
+        self.edge_names.get(&edge)
+    }
+
+    /// Find the face carrying `name`.
+    ///
+    /// This is the lookup that makes names useful across operations: a caller
+    /// holding a name from before an edit resolves it against the new result
+    /// instead of hoping an arena index still points at the same face.
+    pub fn face_by_name(&self, name: &FaceName) -> Option<FaceId> {
+        self.face_names
+            .iter()
+            .find(|(_, candidate)| *candidate == name)
+            .map(|(id, _)| *id)
+    }
+
+    /// Find the edge carrying `name`.
+    pub fn edge_by_name(&self, name: &EdgeName) -> Option<EdgeId> {
+        self.edge_names
+            .iter()
+            .find(|(_, candidate)| *candidate == name)
+            .map(|(id, _)| *id)
+    }
     /// Structural topology with typed support handles.
     pub fn topology(&self) -> &ExactTopology {
         &self.topology
@@ -99,9 +139,24 @@ pub struct ExactBRepBuilder {
     surfaces: Vec<Surface>,
     edge_intervals: HashMap<EdgeId, Interval>,
     pcurve_intervals: HashMap<(LoopId, usize), Interval>,
+    face_names: HashMap<FaceId, FaceName>,
+    edge_names: HashMap<EdgeId, EdgeName>,
 }
 
 impl ExactBRepBuilder {
+    /// Record the persistent structural name of a face.
+    ///
+    /// Naming is opt-in per producer: an operation that cannot honestly say
+    /// where a face came from simply does not call this, and the face reports
+    /// no name rather than a misleading one.
+    pub fn set_face_name(&mut self, face: FaceId, name: FaceName) {
+        self.face_names.insert(face, name);
+    }
+
+    /// Record the persistent structural name of an edge.
+    pub fn set_edge_name(&mut self, edge: EdgeId, name: EdgeName) {
+        self.edge_names.insert(edge, name);
+    }
     /// Fallibly reserve owned support and interval catalogs for bounded assembly.
     pub fn try_reserve(
         &mut self,
@@ -165,6 +220,8 @@ impl ExactBRepBuilder {
             surfaces: self.surfaces,
             edge_intervals: self.edge_intervals,
             pcurve_intervals: self.pcurve_intervals,
+            face_names: self.face_names,
+            edge_names: self.edge_names,
         })
     }
 }

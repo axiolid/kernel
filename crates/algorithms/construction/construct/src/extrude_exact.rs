@@ -2,7 +2,7 @@
 
 use std::f64::consts::TAU;
 
-use axiolid_brep::{ExactBRep, ExactBRepBuilder};
+use axiolid_brep::{EdgeName, ExactBRep, ExactBRepBuilder, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
@@ -690,25 +690,41 @@ pub(crate) fn extrude_with_cylindrical_blend(
         }],
         orientation: Orientation::Forward,
     });
+    builder.set_face_name(bottom_face, FaceName::swept(SweptFace::StartCap));
+    builder.set_face_name(top_face, FaceName::swept(SweptFace::EndCap));
 
     let mut faces = vec![bottom_face, top_face];
-    for edge_index in 0..topology.bottom_edges.len() {
+    let side_count = topology.bottom_edges.len();
+    for edge_index in 0..side_count {
+        // `edge_index` is the profile edge ordinal this wall was swept from.
+        // It survives a rebuild with a different face count, which is exactly
+        // what an arena index does not.
+        let ordinal = u32::try_from(edge_index).map_err(|_| {
+            GeomError::Degenerate("profile edge count exceeds u32 capacity".to_owned())
+        })?;
         if edge_index == blend_index {
-            faces.push(add_cylindrical_blend(
-                &mut builder,
-                &topology,
-                edge_index,
-                offset,
-                blend,
-                radius,
-            )?);
+            let face =
+                add_cylindrical_blend(&mut builder, &topology, edge_index, offset, blend, radius)?;
+            // The blend replaced the edge between the two walls it is tangent
+            // to. Naming it after that edge -- rather than after its own
+            // position -- is what lets the same fillet be re-applied after an
+            // upstream edit: the edge name is still derivable from the profile.
+            let previous = (edge_index + side_count - 1) % side_count;
+            let previous_ordinal = u32::try_from(previous).map_err(|_| {
+                GeomError::Degenerate("profile edge count exceeds u32 capacity".to_owned())
+            })?;
+            builder.set_face_name(
+                face,
+                FaceName::blend(EdgeName::between(
+                    FaceName::swept(SweptFace::Side(previous_ordinal)),
+                    FaceName::swept(SweptFace::Side(ordinal)),
+                )),
+            );
+            faces.push(face);
         } else {
-            faces.push(add_planar_side(
-                &mut builder,
-                &topology,
-                edge_index,
-                offset,
-            )?);
+            let face = add_planar_side(&mut builder, &topology, edge_index, offset)?;
+            builder.set_face_name(face, FaceName::swept(SweptFace::Side(ordinal)));
+            faces.push(face);
         }
     }
     finish_closed(builder, faces)

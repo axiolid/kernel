@@ -26,7 +26,7 @@
 //! refusals naming the missing capability, never a silent no-op. A no-op is
 //! the worst outcome: the caller believes the feature was applied.
 
-use axiolid_brep::ExactBRep;
+use axiolid_brep::{EdgeName, ExactBRep, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
 use axiolid_profile::{Profile, RectangleProfile};
@@ -46,10 +46,62 @@ fn unsupported(input: &'static str) -> GeomError {
 ///
 /// Selecting by position rather than index keeps a caller's request stable
 /// across a topology change that renumbers edges.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EdgeSelector {
     /// The vertical edge at the profile corner nearest this point.
     NearestCorner(Point2),
+    /// The edge carrying this persistent structural name.
+    ///
+    /// Unlike [`Self::NearestCorner`], this does not depend on the caller
+    /// knowing where the edge currently is. A name obtained from a previous
+    /// result still selects the same edge after the profile has been resized
+    /// or the solid rebuilt, which is what re-applying a feature requires.
+    Named(EdgeName),
+}
+
+impl EdgeSelector {
+    /// Resolve this selector to a profile corner index.
+    ///
+    /// Both variants answer the same question -- which corner of the profile
+    /// ring -- so the construction below stays one code path.
+    fn corner_index(&self, corners: &[Point2]) -> GeomResult<usize> {
+        match self {
+            Self::NearestCorner(target) => corners
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    (**a - *target)
+                        .length_squared()
+                        .total_cmp(&(**b - *target).length_squared())
+                })
+                .map(|(index, _)| index)
+                .ok_or_else(|| GeomError::Degenerate("profile has no corners".to_owned())),
+            // A corner edge is where two consecutive walls meet. The name
+            // states that pair, so resolving it is a search for the corner
+            // whose adjacent side ordinals match -- no geometry involved, which
+            // is exactly why it survives an edit that moves the corner.
+            Self::Named(name) => {
+                let count = corners.len();
+                (0..count)
+                    .find(|index| {
+                        let previous = (index + count - 1) % count;
+                        let (Ok(ordinal), Ok(previous_ordinal)) =
+                            (u32::try_from(*index), u32::try_from(previous))
+                        else {
+                            return false;
+                        };
+                        let candidate = EdgeName::between(
+                            FaceName::swept(SweptFace::Side(previous_ordinal)),
+                            FaceName::swept(SweptFace::Side(ordinal)),
+                        );
+                        candidate == *name
+                    })
+                    .ok_or_else(|| {
+                        unsupported("edge name does not resolve to a corner of this profile")
+                    })
+            }
+        }
+    }
 }
 
 /// How much material a feature removes.
@@ -138,17 +190,7 @@ pub fn chamfer_extruded_profile(
         )));
     }
 
-    let EdgeSelector::NearestCorner(target) = edge;
-    let index = corners
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (**a - target)
-                .length_squared()
-                .total_cmp(&(**b - target).length_squared())
-        })
-        .map(|(index, _)| index)
-        .expect("the corner list is never empty");
+    let index = edge.corner_index(&corners)?;
 
     // Replace the corner with two points, each set back along one adjacent
     // edge. The corner's own vertex disappears: that is the chamfer.
@@ -351,17 +393,7 @@ fn build_filleted_prism(
         Point2::new(-half_x, half_y),
     ];
 
-    let EdgeSelector::NearestCorner(target) = edge;
-    let index = corners
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (**a - target)
-                .length_squared()
-                .total_cmp(&(**b - target).length_squared())
-        })
-        .map(|(index, _)| index)
-        .expect("the corner list is never empty");
+    let index = edge.corner_index(&corners)?;
 
     let blend = blend_corner(&corners, index, radius);
 
