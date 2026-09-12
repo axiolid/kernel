@@ -87,13 +87,19 @@ pub fn split_surface_pair_certified(
             SurfacePairSplitUnresolvedReason::ResidualExceedsPolicy,
         ));
     }
-    let Some(classification) = classify(first, second, trace_ref) else {
-        return Ok(unresolved_complete(
-            traces,
-            visited_patch_pairs,
-            boundary_queries,
-            SurfacePairSplitUnresolvedReason::UnsupportedEndpointOwnership,
-        ));
+    // The classifier distinguishes a proven terminal refusal from an
+    // unimplemented combination; pass its verdict through unchanged rather
+    // than collapsing both to one reason.
+    let classification = match classify(first, second, trace_ref) {
+        Ok(classification) => classification,
+        Err(reason) => {
+            return Ok(unresolved_complete(
+                traces,
+                visited_patch_pairs,
+                boundary_queries,
+                reason,
+            ));
+        }
     };
     let Some(trace) = traces.pop() else {
         return Ok(CertifiedSurfacePairSplit3::Empty {

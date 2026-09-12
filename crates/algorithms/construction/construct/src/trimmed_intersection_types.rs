@@ -105,7 +105,21 @@ pub enum SurfacePairSplitUnresolvedReason {
     /// The query did not produce exactly one finite trace.
     UnsupportedTraceCount,
     /// Endpoint ownership did not identify exactly one partitioned rectangle.
+    ///
+    /// The arrangement may still be constructible; this crate has not
+    /// implemented it. Distinct from [`Self::NoPartitionExists`], which is a
+    /// proof that no arrangement exists at all.
     UnsupportedEndpointOwnership,
+    /// Proven: this trace cannot partition either patch, so no split exists.
+    ///
+    /// A trace that stops strictly inside a patch is a slit, not a partition:
+    /// the face stays simply connected, exactly as a slot cut halfway into a
+    /// sheet leaves one piece. When that holds on *both* patches, neither can
+    /// become two closed trimmed faces and retrying with different options or
+    /// tighter tolerances cannot change the answer.
+    ///
+    /// This is terminal. Callers should stop rather than escalate.
+    NoPartitionExists,
     /// The certified carrier residual exceeded explicit policy.
     ResidualExceedsPolicy,
     /// Representative parameters or carrier were finite but degenerate for topology.

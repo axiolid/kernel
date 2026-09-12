@@ -332,13 +332,16 @@ fn dual_boundary_case_stays_unresolved_until_boundary_roots_are_certified() {
 
 #[test]
 fn mixed_endpoint_ownership_refuses_open_trim_chains() {
+    // Each patch sees the trace run from an interior point to one boundary,
+    // so each is slit rather than partitioned. That is provable, not a gap
+    // in this crate: the refusal must say so.
     let first = xy_plane(-1.0, 0.5);
     let second = xz_plane(-0.5, 1.0);
     let result = split_surface_pair_certified(&first, &second, options())
         .expect("valid mixed-ownership query terminates");
     match result {
         CertifiedSurfacePairSplit3::Unresolved {
-            reason: SurfacePairSplitUnresolvedReason::UnsupportedEndpointOwnership,
+            reason: SurfacePairSplitUnresolvedReason::NoPartitionExists,
             intersection: CertifiedSurfaceSurfaceIntersection3::Complete { traces, .. },
         } => assert_eq!(traces.len(), 1),
         other => panic!("expected mixed-ownership refusal, got {other:?}"),
@@ -350,5 +353,35 @@ fn split_policy_rejects_non_finite_or_non_positive_residual_limit() {
     let intersection = CertifiedSurfaceSurfaceIntersectionOptions::default();
     for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(CertifiedSurfacePairSplitOptions::new(intersection, invalid).is_err());
+    }
+}
+
+/// A proven no-partition refusal does not change with the residual policy.
+///
+/// This is what makes the reason worth its own variant: the caller can
+/// stop. If a tighter or looser policy could flip the verdict, it would be
+/// an unimplemented case wearing a proof's clothing.
+#[test]
+fn no_partition_is_terminal_across_residual_policies() {
+    let first = xy_plane(-1.0, 0.5);
+    let second = xz_plane(-0.5, 1.0);
+    for residual in [1e-12, 1e-9, 1e-6, 1e-3, 1.0] {
+        let policy = CertifiedSurfacePairSplitOptions::new(
+            CertifiedSurfaceSurfaceIntersectionOptions::default(),
+            residual,
+        )
+        .expect("a positive finite residual limit is valid");
+        let result = split_surface_pair_certified(&first, &second, policy)
+            .expect("the query terminates at every policy");
+        assert!(
+            matches!(
+                result,
+                CertifiedSurfacePairSplit3::Unresolved {
+                    reason: SurfacePairSplitUnresolvedReason::NoPartitionExists,
+                    ..
+                }
+            ),
+            "residual {residual} must not change a proven refusal, got {result:?}"
+        );
     }
 }

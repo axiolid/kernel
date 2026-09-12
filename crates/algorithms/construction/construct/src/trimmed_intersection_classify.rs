@@ -4,7 +4,7 @@ use axiolid_nurbs::{
 };
 use axiolid_surface::BSplineSurface;
 
-use crate::trimmed_intersection_types::SurfacePairMember;
+use crate::trimmed_intersection_types::{SurfacePairMember, SurfacePairSplitUnresolvedReason};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum BoundarySide {
@@ -39,17 +39,28 @@ pub(super) struct SplitClassification {
     pub embedded_end: Endpoint2,
 }
 
+/// Classify a trace into a split arrangement, or say why it cannot be one.
+///
+/// The error distinguishes a PROVEN terminal refusal from an unimplemented
+/// combination, so a caller knows whether retrying could ever help.
 pub(super) fn classify(
     first: &BSplineSurface,
     second: &BSplineSurface,
     trace: &TransverseSurfaceSurfaceTrace3,
-) -> Option<SplitClassification> {
-    let first_domain = domain(first)?;
-    let second_domain = domain(second)?;
-    let first_start = endpoint(&trace.start, SurfacePairMember::First, first_domain)?;
-    let first_end = endpoint(&trace.end, SurfacePairMember::First, first_domain)?;
-    let second_start = endpoint(&trace.start, SurfacePairMember::Second, second_domain)?;
-    let second_end = endpoint(&trace.end, SurfacePairMember::Second, second_domain)?;
+) -> Result<SplitClassification, SurfacePairSplitUnresolvedReason> {
+    // A domain or endpoint that will not resolve is a degenerate
+    // representative, not an ownership question -- report it as such.
+    let degenerate = SurfacePairSplitUnresolvedReason::DegenerateRepresentative;
+    let first_domain = domain(first).ok_or(degenerate)?;
+    let second_domain = domain(second).ok_or(degenerate)?;
+    let first_start =
+        endpoint(&trace.start, SurfacePairMember::First, first_domain).ok_or(degenerate)?;
+    let first_end =
+        endpoint(&trace.end, SurfacePairMember::First, first_domain).ok_or(degenerate)?;
+    let second_start =
+        endpoint(&trace.start, SurfacePairMember::Second, second_domain).ok_or(degenerate)?;
+    let second_end =
+        endpoint(&trace.end, SurfacePairMember::Second, second_domain).ok_or(degenerate)?;
 
     let first_owns = owns_chord(first_start, first_end, first_domain);
     let second_owns = owns_chord(second_start, second_end, second_domain);
@@ -58,7 +69,7 @@ pub(super) fn classify(
         interior(second_start, second_domain) && interior(second_end, second_domain);
 
     match (first_owns, second_owns, first_embeds, second_embeds) {
-        (true, false, false, true) => Some(SplitClassification {
+        (true, false, false, true) => Ok(SplitClassification {
             member: SurfacePairMember::First,
             owner_domain: first_domain,
             embedded_domain: second_domain,
@@ -67,7 +78,7 @@ pub(super) fn classify(
             embedded_start: second_start,
             embedded_end: second_end,
         }),
-        (false, true, true, false) => Some(SplitClassification {
+        (false, true, true, false) => Ok(SplitClassification {
             member: SurfacePairMember::Second,
             owner_domain: second_domain,
             embedded_domain: first_domain,
@@ -76,8 +87,45 @@ pub(super) fn classify(
             embedded_start: first_start,
             embedded_end: first_end,
         }),
-        _ => None,
+        // Neither patch is partitioned. Decide whether that is provable or
+        // merely unimplemented before refusing, because the two demand
+        // different things of the caller.
+        _ => Err(
+            if is_slit(first_start, first_end, first_domain)
+                && is_slit(second_start, second_end, second_domain)
+            {
+                SurfacePairSplitUnresolvedReason::NoPartitionExists
+            } else {
+                SurfacePairSplitUnresolvedReason::UnsupportedEndpointOwnership
+            },
+        ),
     }
+}
+
+/// Whether the trace merely slits this patch instead of partitioning it.
+///
+/// Exactly one endpoint strictly inside the domain and the other on a
+/// boundary side means the curve dead-ends in the interior. The face stays
+/// simply connected, so no pair of closed trimmed faces can be built from
+/// it -- and that conclusion does not depend on tolerance, so a caller
+/// gains nothing by retrying.
+///
+/// # Coverage gap
+///
+/// The caller requires BOTH patches to be slit before reporting a terminal
+/// proof. Relaxing that conjunction to a disjunction is NOT currently
+/// caught by any test: every trace the certified path can produce today
+/// comes from two planar patches, which meet in a full line and therefore
+/// clip symmetrically -- so one-patch-slit-one-not never arises. The case
+/// is reachable in principle (a short trace crossing one patch's edge but
+/// landing inside the other) and needs a curved patch or non-axis-aligned
+/// trim to construct, which waits on certified boundary roots.
+fn is_slit(start: Endpoint2, end: Endpoint2, domain: Domain2) -> bool {
+    let start_inside = interior(start, domain);
+    let end_inside = interior(end, domain);
+    let start_on_side = start.side.is_some() && side_interior(start, domain);
+    let end_on_side = end.side.is_some() && side_interior(end, domain);
+    (start_inside && end_on_side) || (end_inside && start_on_side)
 }
 
 fn owns_chord(start: Endpoint2, end: Endpoint2, domain: Domain2) -> bool {
@@ -179,5 +227,104 @@ pub(super) fn boundary_rank(side: BoundarySide, uv: Point2, domain: Domain2) -> 
         BoundarySide::UEnd => 1.0 + (uv.y - domain.v_start) / (domain.v_end - domain.v_start),
         BoundarySide::VEnd => 2.0 + (domain.u_end - uv.x) / (domain.u_end - domain.u_start),
         BoundarySide::UStart => 3.0 + (domain.v_end - uv.y) / (domain.v_end - domain.v_start),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_domain() -> Domain2 {
+        Domain2 {
+            u_start: 0.0,
+            u_end: 1.0,
+            v_start: 0.0,
+            v_end: 1.0,
+        }
+    }
+
+    fn inside() -> Endpoint2 {
+        Endpoint2 {
+            uv: Point2::new(0.5, 0.5),
+            side: None,
+        }
+    }
+
+    fn on_v_start() -> Endpoint2 {
+        Endpoint2 {
+            uv: Point2::new(0.5, 0.0),
+            side: Some(BoundarySide::VStart),
+        }
+    }
+
+    fn on_u_end() -> Endpoint2 {
+        Endpoint2 {
+            uv: Point2::new(1.0, 0.5),
+            side: Some(BoundarySide::UEnd),
+        }
+    }
+
+    /// Interior to boundary dead-ends inside the face: a slit.
+    #[test]
+    fn interior_to_boundary_is_a_slit() {
+        assert!(is_slit(inside(), on_v_start(), unit_domain()));
+        assert!(is_slit(on_v_start(), inside(), unit_domain()));
+    }
+
+    /// Boundary to boundary cuts clean through: a partition, not a slit.
+    #[test]
+    fn boundary_to_boundary_is_not_a_slit() {
+        assert!(!is_slit(on_v_start(), on_u_end(), unit_domain()));
+    }
+
+    /// Two interior endpoints touch no boundary at all, so the curve is
+    /// fully embedded rather than slitting the face open.
+    #[test]
+    fn interior_to_interior_is_not_a_slit() {
+        let other = Endpoint2 {
+            uv: Point2::new(0.25, 0.25),
+            side: None,
+        };
+        assert!(!is_slit(inside(), other, unit_domain()));
+    }
+
+    /// An endpoint at a CORNER sits on two sides at once, so it is not a
+    /// clean boundary landing and must not read as a slit.
+    #[test]
+    fn a_corner_endpoint_is_not_a_slit() {
+        let corner = Endpoint2 {
+            uv: Point2::new(0.0, 0.0),
+            side: Some(BoundarySide::VStart),
+        };
+        assert!(!is_slit(inside(), corner, unit_domain()));
+    }
+
+    /// Same corner rejection, with the corner as the START endpoint.
+    ///
+    /// Both orderings are asserted because the predicate tests each
+    /// endpoint on its own line; a one-sided check would pass the other.
+    #[test]
+    fn a_corner_start_endpoint_is_not_a_slit() {
+        let corner = Endpoint2 {
+            uv: Point2::new(0.0, 0.0),
+            side: Some(BoundarySide::VStart),
+        };
+        assert!(!is_slit(corner, inside(), unit_domain()));
+    }
+
+    /// Classification refuses as UNIMPLEMENTED when only one patch is slit.
+    ///
+    /// The terminal proof requires BOTH patches to be unpartitionable. One
+    /// slit patch alone leaves the other possibly splittable, so claiming a
+    /// proof there would refuse work that is actually constructible.
+    #[test]
+    fn one_slit_patch_alone_is_not_a_terminal_proof() {
+        let slit_patch = is_slit(inside(), on_v_start(), unit_domain());
+        let partitioned = is_slit(on_v_start(), on_u_end(), unit_domain());
+        assert!(slit_patch, "interior-to-boundary must read as a slit");
+        assert!(!partitioned, "boundary-to-boundary must not read as a slit");
+        // The conjunction is what the classifier requires: one true and one
+        // false must NOT yield a terminal verdict.
+        assert!(!(slit_patch && partitioned));
     }
 }
