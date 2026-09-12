@@ -442,6 +442,12 @@ fn trace_affine_pair(
             return Err(error);
         }
     }
+    // A chord ending ON a boundary of BOTH patches is discovered twice:
+    // once scanning the first surface's boundaries, once the second's.
+    // Both reports denote one point, so fold them before counting.
+    // Step 1 made these boundary roots certifiable, which is what
+    // exposed the duplication -- previously they were never found.
+    dedupe_coincident_endpoints(&mut endpoints);
     if any_unresolved || endpoints.len() == 1 || endpoints.len() > 2 {
         return Ok(AffineTraceOutcome::Unresolved(Vec::new()));
     }
@@ -584,6 +590,30 @@ fn map_endpoint(
         point: root.point,
         residual_upper_bound: root.residual_upper_bound,
     }
+}
+
+/// Fold endpoint reports that denote the same intersection point.
+///
+/// Two reports are the same point when their certified parameter boxes
+/// overlap on ALL FOUR axes -- both surfaces' u and v. That is the same
+/// test the trace builder already uses to reject a degenerate chord, so
+/// coincidence is decided one way in this file.
+///
+/// Conservative by construction: boxes that merely touch are folded, and
+/// two genuinely distinct roots cannot have overlapping boxes on every
+/// axis without violating the certificate that isolated each of them.
+fn dedupe_coincident_endpoints(endpoints: &mut Vec<SurfaceSurfaceTraceEndpoint3>) {
+    let mut kept: Vec<SurfaceSurfaceTraceEndpoint3> = Vec::new();
+    for endpoint in endpoints.drain(..) {
+        if kept
+            .iter()
+            .any(|existing| endpoint_boxes_overlap(existing, &endpoint))
+        {
+            continue;
+        }
+        kept.push(endpoint);
+    }
+    *endpoints = kept;
 }
 
 fn endpoint_boxes_overlap(

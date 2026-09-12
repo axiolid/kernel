@@ -10,12 +10,13 @@ use axiolid_nurbs::{intersect_surface_surface_certified, CertifiedSurfaceSurface
 use axiolid_surface::BSplineSurface;
 
 pub use crate::trimmed_intersection_types::{
-    CertifiedSurfacePairSplit3, CertifiedSurfacePairSplitOptions, CertifiedTrimmedSurfacePair3,
-    EmbeddedFaceCurve, SurfacePairMember, SurfacePairSplitUnresolvedReason,
+    CertifiedDualTrimmedSurfacePair3, CertifiedSurfacePairSplit3, CertifiedSurfacePairSplitOptions,
+    CertifiedTrimmedSurfacePair3, EmbeddedFaceCurve, SurfacePairMember,
+    SurfacePairSplitUnresolvedReason,
 };
 
-use crate::trimmed_intersection_assembly::assemble;
-use crate::trimmed_intersection_classify::classify;
+use crate::trimmed_intersection_assembly::{assemble, assemble_dual};
+use crate::trimmed_intersection_classify::{classify, Classification};
 
 /// Intersect two supported affine patches and construct a topology-aware trimmed arrangement.
 ///
@@ -107,16 +108,34 @@ pub fn split_surface_pair_certified(
             boundary_queries: u32::from(boundary_queries),
         });
     };
-    let split = assemble(
-        first,
-        second,
-        trace,
-        classification,
-        residual_upper_bound,
-        visited_patch_pairs,
-        boundary_queries,
-    )?;
-    Ok(CertifiedSurfacePairSplit3::Split(split))
+    // Both shapes assemble from the same certified trace; they differ only
+    // in how many faces the chord bounds.
+    match classification {
+        Classification::Single(single) => {
+            let split = assemble(
+                first,
+                second,
+                trace,
+                single,
+                residual_upper_bound,
+                visited_patch_pairs,
+                boundary_queries,
+            )?;
+            Ok(CertifiedSurfacePairSplit3::Split(split))
+        }
+        Classification::Dual(dual) => {
+            let split = assemble_dual(
+                first,
+                second,
+                trace,
+                dual,
+                residual_upper_bound,
+                visited_patch_pairs,
+                boundary_queries,
+            )?;
+            Ok(CertifiedSurfacePairSplit3::DualSplit(split))
+        }
+    }
 }
 
 fn unresolved_complete(

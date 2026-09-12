@@ -28,6 +28,26 @@ pub(super) struct Endpoint2 {
     pub side: Option<BoundarySide>,
 }
 
+/// A chord that partitions both patches: each side gets its own owner data.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DualClassification {
+    pub first_domain: Domain2,
+    pub second_domain: Domain2,
+    pub first_start: Endpoint2,
+    pub first_end: Endpoint2,
+    pub second_start: Endpoint2,
+    pub second_end: Endpoint2,
+}
+
+/// What the classifier proved about this trace.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Classification {
+    /// Exactly one patch is partitioned; the other contains the chord.
+    Single(SplitClassification),
+    /// Both patches are partitioned by the same chord.
+    Dual(DualClassification),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SplitClassification {
     pub member: SurfacePairMember,
@@ -47,7 +67,7 @@ pub(super) fn classify(
     first: &BSplineSurface,
     second: &BSplineSurface,
     trace: &TransverseSurfaceSurfaceTrace3,
-) -> Result<SplitClassification, SurfacePairSplitUnresolvedReason> {
+) -> Result<Classification, SurfacePairSplitUnresolvedReason> {
     // A domain or endpoint that will not resolve is a degenerate
     // representative, not an ownership question -- report it as such.
     let degenerate = SurfacePairSplitUnresolvedReason::DegenerateRepresentative;
@@ -69,7 +89,7 @@ pub(super) fn classify(
         interior(second_start, second_domain) && interior(second_end, second_domain);
 
     match (first_owns, second_owns, first_embeds, second_embeds) {
-        (true, false, false, true) => Ok(SplitClassification {
+        (true, false, false, true) => Ok(Classification::Single(SplitClassification {
             member: SurfacePairMember::First,
             owner_domain: first_domain,
             embedded_domain: second_domain,
@@ -77,8 +97,8 @@ pub(super) fn classify(
             owner_end: first_end,
             embedded_start: second_start,
             embedded_end: second_end,
-        }),
-        (false, true, true, false) => Ok(SplitClassification {
+        })),
+        (false, true, true, false) => Ok(Classification::Single(SplitClassification {
             member: SurfacePairMember::Second,
             owner_domain: second_domain,
             embedded_domain: first_domain,
@@ -86,7 +106,18 @@ pub(super) fn classify(
             owner_end: second_end,
             embedded_start: first_start,
             embedded_end: first_end,
-        }),
+        })),
+        // Both patches are partitioned by the same chord. Each side is a
+        // real trim boundary, so neither can be demoted to an embedded
+        // annotation without misreporting the topology.
+        (true, true, false, false) => Ok(Classification::Dual(DualClassification {
+            first_domain,
+            second_domain,
+            first_start,
+            first_end,
+            second_start,
+            second_end,
+        })),
         // Neither patch is partitioned. Decide whether that is provable or
         // merely unimplemented before refusing, because the two demand
         // different things of the caller.

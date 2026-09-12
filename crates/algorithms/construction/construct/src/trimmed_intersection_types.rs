@@ -97,6 +97,31 @@ pub struct CertifiedTrimmedSurfacePair3 {
     pub boundary_queries: u32,
 }
 
+/// Validated arrangement for a chord that partitions BOTH patches.
+///
+/// Four closed trimmed faces share one intersection edge: two on each
+/// input surface. Unlike [`CertifiedTrimmedSurfacePair3`] there is no
+/// asymmetry to record -- neither patch merely contains the chord.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CertifiedDualTrimmedSurfacePair3 {
+    /// Strict analytic B-rep containing four closed faces.
+    pub brep: ExactBRep,
+    /// The edge shared by all four trimmed loops.
+    pub intersection_edge: EdgeId,
+    /// Two deterministic trimmed faces on the first input surface.
+    pub first_faces: [FaceId; 2],
+    /// Two deterministic trimmed faces on the second input surface.
+    pub second_faces: [FaceId; 2],
+    /// Original certified bounded trace; no endpoint is widened.
+    pub trace: TransverseSurfaceSurfaceTrace3,
+    /// Conservative global carrier-to-surface residual bound.
+    pub max_surface_residual_upper_bound: Scalar,
+    /// Certified patch pairs processed by the intersection query.
+    pub visited_patch_pairs: u32,
+    /// Bounded boundary queries used by the intersection query.
+    pub boundary_queries: u32,
+}
+
 /// Why valid geometry could not be promoted to a closed trimmed arrangement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfacePairSplitUnresolvedReason {
@@ -144,6 +169,13 @@ pub enum CertifiedSurfacePairSplit3 {
     },
     /// One finite trace integrated into a strict trimmed arrangement.
     Split(CertifiedTrimmedSurfacePair3),
+    /// A chord that partitions BOTH patches, so each becomes two faces.
+    ///
+    /// Distinct from [`Self::Split`] because there is no unsplit face and
+    /// no embedded curve: the chord is a real trim boundary on both sides,
+    /// not an interior annotation on one. Representing it as `Split` would
+    /// force naming one patch the 'owner' and lying about the other.
+    DualSplit(CertifiedDualTrimmedSurfacePair3),
     /// Geometry remains usable, but no B-rep split was invented.
     Unresolved {
         /// Original intersection evidence retained without widening.

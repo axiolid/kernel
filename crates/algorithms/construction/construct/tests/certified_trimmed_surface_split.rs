@@ -315,21 +315,47 @@ fn certified_trace_above_residual_policy_stays_unresolved() {
     ));
 }
 
+/// A chord that partitions BOTH patches now splits both.
+///
+/// Two planes crossing corner-to-corner cut each other's rectangle in
+/// half. Before certified boundary roots existed this returned
+/// `IntersectionUnresolved`: every endpoint lies exactly ON a patch
+/// domain edge, which ordinary Krawczyk containment can never prove.
 #[test]
-fn dual_boundary_case_stays_unresolved_until_boundary_roots_are_certified() {
+fn a_chord_partitioning_both_patches_splits_both() {
     let first = xy_plane(-1.0, 1.0);
     let second = xz_plane(-1.0, 1.0);
     let result = split_surface_pair_certified(&first, &second, options())
-        .expect("valid asymmetric query terminates");
-    match result {
-        CertifiedSurfacePairSplit3::Unresolved {
-            reason: SurfacePairSplitUnresolvedReason::IntersectionUnresolved,
-            intersection: CertifiedSurfaceSurfaceIntersection3::Unresolved { traces, .. },
-        } => assert!(traces.is_empty()),
-        other => panic!("expected conservative boundary-root refusal, got {other:?}"),
-    }
-}
+        .expect("valid dual-boundary query terminates");
 
+    let CertifiedSurfacePairSplit3::DualSplit(split) = result else {
+        panic!("expected a dual split, got {result:?}");
+    };
+
+    // Four closed faces: two per input surface.
+    assert_eq!(split.brep.topology().faces().len(), 4);
+    let faces: BTreeSet<_> = split
+        .first_faces
+        .iter()
+        .chain(split.second_faces.iter())
+        .collect();
+    assert_eq!(faces.len(), 4, "the four faces must be distinct");
+
+    // One shared edge is what makes this a single arrangement rather than
+    // two that merely coincide in space.
+    for bound in split.brep.topology().faces().iter().flat_map(|f| &f.bounds) {
+        let uses = &split.brep.topology().loops()[bound.loop_id.index()].edges;
+        assert!(
+            uses.iter().any(|u| u.edge == split.intersection_edge),
+            "every trimmed loop must use the shared intersection edge"
+        );
+    }
+
+    let health = audit_brep(split.brep.topology());
+    assert!(health.is_tessellable(), "invalid dual split: {health:?}");
+    assert_eq!(health.dangling_references, 0);
+    assert_eq!(health.open_loops, 0);
+}
 #[test]
 fn mixed_endpoint_ownership_refuses_open_trim_chains() {
     // Each patch sees the trace run from an interior point to one boundary,

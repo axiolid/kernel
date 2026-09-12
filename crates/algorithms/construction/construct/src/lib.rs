@@ -68,7 +68,7 @@ pub use axiolid_brep::{
 };
 pub use result::{GeneratedGeometry, GenerationOutput, GenerationRequest, TessellationRequest};
 pub use trimmed_intersection::{
-    split_surface_pair_certified, CertifiedSurfacePairSplit3, CertifiedSurfacePairSplitOptions,
-    CertifiedTrimmedSurfacePair3, EmbeddedFaceCurve, SurfacePairMember,
-    SurfacePairSplitUnresolvedReason,
+    split_surface_pair_certified, CertifiedDualTrimmedSurfacePair3, CertifiedSurfacePairSplit3,
+    CertifiedSurfacePairSplitOptions, CertifiedTrimmedSurfacePair3, EmbeddedFaceCurve,
+    SurfacePairMember, SurfacePairSplitUnresolvedReason,
 };
