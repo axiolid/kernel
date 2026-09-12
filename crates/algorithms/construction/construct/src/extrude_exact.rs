@@ -162,6 +162,20 @@ fn extrude_rectangle(
 /// filleted one differs only in that an edge becomes an arc. Ring 0 is the
 /// outer boundary; any further rings are through-holes.
 pub(crate) fn extrude_polygon_rings(rings: &[Vec<Point2>], offset: Vec3) -> GeomResult<ExactBRep> {
+    extrude_polygon_rings_named(rings, offset, &mut |_| None)
+}
+
+/// Extrude polygon rings, naming each side wall from its own geometry.
+///
+/// `name_side` receives the wall's two base corners and returns the name
+/// that wall should carry, or `None` to leave it unnamed. Passing the
+/// geometry rather than an index is deliberate: the caller recovering
+/// provenance from a boolean has no index to match against, only position.
+pub(crate) fn extrude_polygon_rings_named(
+    rings: &[Vec<Point2>],
+    offset: Vec3,
+    name_side: &mut dyn FnMut((Point2, Point2)) -> Option<FaceName>,
+) -> GeomResult<ExactBRep> {
     let ring_count = rings.len();
     let edge_count = ring_count * 12;
     let pcurve_count = ring_count * 24;
@@ -219,9 +233,18 @@ pub(crate) fn extrude_polygon_rings(rings: &[Vec<Point2>], offset: Vec3) -> Geom
     });
 
     let mut faces = vec![bottom_face, top_face];
-    for ring in &ring_topology {
+    for (ring_index, ring) in ring_topology.iter().enumerate() {
+        let source = &rings[ring_index];
         for edge_index in 0..ring.bottom_edges.len() {
-            faces.push(add_planar_side(&mut builder, ring, edge_index, offset)?);
+            let face = add_planar_side(&mut builder, ring, edge_index, offset)?;
+            // The wall's own base corners are what the caller matches
+            // against its inputs, so they are what gets handed over.
+            let start = source[edge_index];
+            let end = source[(edge_index + 1) % source.len()];
+            if let Some(name) = name_side((start, end)) {
+                builder.set_face_name(face, name);
+            }
+            faces.push(face);
         }
     }
     finish_closed(builder, faces)

@@ -99,6 +99,23 @@ impl ExactBRep {
             .find(|(_, candidate)| *candidate == name)
             .map(|(id, _)| *id)
     }
+    /// Name the two cap faces of a swept solid after assembly.
+    ///
+    /// The caps are identified by construction order -- a sweep adds the
+    /// start cap then the end cap before any wall -- rather than by
+    /// geometry, because a cap that shares a plane with a wall would be
+    /// ambiguous geometrically. Passing `None` leaves that cap unnamed.
+    pub fn name_caps(&mut self, start: Option<FaceName>, end: Option<FaceName>) {
+        let start_id = self.topology.face_id_at(0);
+        let end_id = self.topology.face_id_at(1);
+        if let (Some(name), Some(id)) = (start, start_id) {
+            self.face_names.insert(id, name);
+        }
+        if let (Some(name), Some(id)) = (end, end_id) {
+            self.face_names.insert(id, name);
+        }
+    }
+
     /// Structural topology with typed support handles.
     pub fn topology(&self) -> &ExactTopology {
         &self.topology

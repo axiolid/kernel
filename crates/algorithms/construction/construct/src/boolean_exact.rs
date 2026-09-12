@@ -29,12 +29,13 @@
 //! Those cases are refused rather than approximated by the nearest prism,
 //! which would silently change the geometry.
 
-use axiolid_brep::ExactBRep;
+use axiolid_brep::{ExactBRep, FaceName, Operand, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{BooleanOperator, Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_overlay::{overlay, FillRule, OverlayInput, OverlayOperation, Polygon, Ring};
 
-use crate::extrude_exact::extrude_polygon_rings;
+use crate::boolean_provenance::{name_side_fragment, OperandRings};
+use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
 
 pub(crate) fn unsupported(input: &'static str) -> GeomError {
@@ -167,7 +168,28 @@ pub fn boolean_prisms_exact(
             "exact prism boolean whose result does not start at z = 0",
         ));
     }
-    extrude_polygon_rings(&rings, Vec3::Z * (top - bottom))
+    // Every edge of an exact overlay lies on an edge of one input, so each
+    // wall of the result is a fragment of an input wall and can say which.
+    // Recovering it here -- from geometry, after the fact -- avoids
+    // threading provenance through the overlay backend.
+    let subject_rings = OperandRings {
+        operand: Operand::Subject,
+        rings: &subject.rings,
+    };
+    let tool_rings = OperandRings {
+        operand: Operand::Tool,
+        rings: &tool.rings,
+    };
+    let operands = [subject_rings, tool_rings];
+    let mut solid =
+        extrude_polygon_rings_named(&rings, Vec3::Z * (top - bottom), &mut |(start, end)| {
+            name_side_fragment(start, end, &operands)
+        })?;
+
+    // The caps lie in the planes the height logic selected above, so they
+    // are fragments of whichever operand supplied each bound.
+    name_caps(&mut solid, subject, tool, bottom, top, tolerance);
+    Ok(solid)
 }
 
 fn validate(prism: &Prism, role: &'static str) -> GeomResult<()> {
@@ -208,4 +230,43 @@ fn to_polygons(prism: &Prism) -> Vec<Polygon> {
     };
     let holes = rings.map(|r| Ring { points: r.clone() }).collect();
     vec![Polygon { outer, holes }]
+}
+
+/// Name the result caps after the operand whose cap plane they lie in.
+///
+/// A coaxial boolean never tilts a cap, so each result cap is coplanar with
+/// a cap of at least one operand. When both operands share the plane the
+/// subject is named: the result is a fragment of both, and naming it after
+/// the subject keeps the choice deterministic rather than order-dependent.
+/// A cap matching neither operand is left unnamed rather than guessed.
+fn name_caps(
+    solid: &mut ExactBRep,
+    subject: &Prism,
+    tool: &Prism,
+    bottom: Scalar,
+    top: Scalar,
+    tolerance: Tolerance,
+) {
+    let start = cap_operand(subject.bottom, tool.bottom, bottom, tolerance);
+    let end = cap_operand(subject.top, tool.top, top, tolerance);
+    solid.name_caps(
+        start.map(|operand| FaceName::swept(SweptFace::StartCap).fragment(operand)),
+        end.map(|operand| FaceName::swept(SweptFace::EndCap).fragment(operand)),
+    );
+}
+
+/// Which operand a result cap height came from.
+fn cap_operand(
+    subject: Scalar,
+    tool: Scalar,
+    result: Scalar,
+    tolerance: Tolerance,
+) -> Option<Operand> {
+    if tolerance.eq(subject, result) {
+        Some(Operand::Subject)
+    } else if tolerance.eq(tool, result) {
+        Some(Operand::Tool)
+    } else {
+        None
+    }
 }
