@@ -170,3 +170,39 @@ The discarded-row verification inside `krawczyk_root_on_edge` is NOT
 covered: every off-patch input reachable today is rejected earlier by
 `residual_excludes_zero`, so deleting the check fails no test. It is
 retained as defence and marked as unverified in the source.
+
+## Step 2 outcome (measured)
+
+Shipped: the dual-boundary chord now splits BOTH patches, four closed
+trimmed faces sharing one intersection edge.
+
+My step 1 prediction was WRONG in two ways, both corrected by measuring:
+
+1. I predicted the blocker was assembling a 4-endpoint dual chord.
+   Measurement showed the four endpoints were only TWO distinct points,
+   each reported twice -- once from scanning each surface's boundaries.
+   A chord ending on a boundary of BOTH patches is found from both
+   sides. Before step 1 nothing was certifiable there, so the
+   duplication had never surfaced. The fix was de-duplication, not
+   assembly.
+
+2. I predicted this forces a breaking change to
+   `CertifiedTrimmedSurfacePair3`. It does not. The enum is
+   `#[non_exhaustive]`, so a new `DualSplit` variant carrying a new
+   `CertifiedDualSplitSurfacePair3` was added alongside `Split`.
+   The single-split type keeps its exact meaning -- `unsplit_face` and
+   `embedded_curve` stay honest because they are absent from the dual
+   type, where no unsplit face exists.
+
+### What the dual type does NOT claim
+
+`CertifiedDualSplitSurfacePair3` has no `embedded_curve`: with both
+patches partitioned there is no containing face to embed a dangling
+edge into. Every one of the four loops uses the shared edge, asserted
+in test.
+
+### Remaining
+
+Still planar-only: `is_exact_single_span_affine` requires degree 1,
+single span, no weights. Genuinely curved surface/surface intersection
+is unchanged by steps 1 and 2 and remains the large piece of work.

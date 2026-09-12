@@ -20,6 +20,15 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- A certified chord that partitions BOTH patches now splits both, as
+  `CertifiedSurfacePairSplit3::DualSplit`: four closed trimmed faces,
+  two per input surface, sharing one intersection edge. Previously this
+  arrangement was refused. The single-split path and its
+  `unsplit_face`/`embedded_curve` fields are unchanged; the dual type
+  omits them because no unsplit face exists.
+- Certified surface/surface endpoints are de-duplicated. A chord ending
+  on a boundary of both patches is discovered once per surface scanned,
+  and the two reports denote the same point.
 - Certified curve/surface intersection now certifies roots lying exactly
   ON a patch domain edge. Krawczyk proves a root by mapping a parameter box
   strictly inside itself, which a root on a box face can never satisfy, so
