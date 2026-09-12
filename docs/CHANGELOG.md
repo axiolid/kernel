@@ -20,6 +20,17 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- Certified curved surface analysis (`certify_surface_arcs`). A whole-patch
+  transversality bound is structurally zero on curved patches, because the
+  swept normal's interval hull straddles the other normal, so curved pairs
+  were refused wholesale. Transversality is now certified per cell and every
+  cell is returned with what was proven about it: `Empty`, `Transversal`,
+  `Tangential` (geometry obstructs, more budget cannot help), or
+  `BudgetExhausted` (policy stopped, more budget can help).
+- `audit_coverage` proves a region set accounts for the whole parameter
+  domain using exact `u128` measure arithmetic, so a dropped or
+  double-counted region is reported as `Gap` or `Overlap` instead of
+  silently shipping an incomplete result. See ADR 0049.
 - A certified chord that partitions BOTH patches now splits both, as
   `CertifiedSurfacePairSplit3::DualSplit`: four closed trimmed faces,
   two per input surface, sharing one intersection edge. Previously this

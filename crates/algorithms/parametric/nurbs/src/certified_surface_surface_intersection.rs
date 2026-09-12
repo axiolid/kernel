@@ -271,7 +271,7 @@ fn parameter_box(first: &Patch, second: &Patch) -> SurfaceSurfaceParameterBox {
     }
 }
 
-fn patches_are_disjoint(first: &Patch, second: &Patch) -> GeomResult<bool> {
+pub(crate) fn patches_are_disjoint(first: &Patch, second: &Patch) -> GeomResult<bool> {
     let first_bounds = first.coordinate_intervals()?;
     let second_bounds = second.coordinate_intervals()?;
     Ok((0..3).any(|axis| {
@@ -345,7 +345,10 @@ fn two_sum(left: Scalar, right: Scalar) -> (Scalar, Scalar) {
     (sum, left_roundoff + right_roundoff)
 }
 
-fn normal_cross_squared_lower_bound(first: &Patch, second: &Patch) -> GeomResult<Scalar> {
+pub(crate) fn normal_cross_squared_lower_bound(
+    first: &Patch,
+    second: &Patch,
+) -> GeomResult<Scalar> {
     let first_normal = cross_intervals(first.partial_u_intervals()?, first.partial_v_intervals()?)?;
     let second_normal =
         cross_intervals(second.partial_u_intervals()?, second.partial_v_intervals()?)?;

@@ -15,6 +15,7 @@ mod certified_curve_projection;
 mod certified_curve_surface_intersection;
 mod certified_projection;
 mod certified_refinement;
+mod certified_surface_arcs;
 mod certified_surface_bezier;
 mod certified_surface_inversion;
 mod certified_surface_projection;
@@ -49,6 +50,10 @@ pub use certified_projection::{
     CurveProjectionCertificate2, CurveProjectionCertificate3, ParameterInterval,
     SurfaceParameterBox, SurfaceProjectionCertificate3, SurfaceProjectionUnresolvedReason,
     MAX_CERTIFIED_SURFACE_PROJECTION_DEPTH, MAX_CERTIFIED_SURFACE_PROJECTION_WORK,
+};
+pub use certified_surface_arcs::{
+    audit_coverage, certify_surface_arcs, CertifiedRegion, CertifiedSurfaceArcs3,
+    CertifiedSurfaceArcsOptions, CoverageFault, RegionKind, MAX_AUDIT_DEPTH,
 };
 pub use certified_surface_inversion::{
     invert_periodic_surface_certified, invert_surface_certified, SurfaceInversionCertificate3,
