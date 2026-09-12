@@ -20,6 +20,17 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- Exact intersection circles for coaxial surfaces of revolution. Plane,
+  cylinder, cone, sphere and torus each reduce to a line or circle
+  meridian profile, so one closed-form derivation now covers every
+  coaxial combination of the five, including sphere/cylinder,
+  sphere/cone, sphere/torus, cylinder/cone, cylinder/torus, cone/cone,
+  cone/torus, torus/torus and plane/torus. Each profile solution with
+  positive radius lifts to a circle perpendicular to the shared axis.
+- Parabolic and hyperbolic cone sections refuse as `UnrepresentableConic`.
+  Those curves are exactly derivable but `Curve3` has no variant for
+  them, which is a representational gap rather than a missing
+  derivation, so it is reported distinctly from `UnsupportedPair`.
 - Exact intersection curves for sphere/sphere and cylinder/cylinder.
   Two spheres give the radical-plane circle. Equal-radius cylinders on
   crossing axes give the two Steinmetz ellipses; parallel-axis cylinders
