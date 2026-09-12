@@ -179,6 +179,10 @@ themes v0.2-v1.0) and are deliberately unchanged. -->
 ## [0.1.6] - 2026-09-06
 
 ### Fixed
+
+- Coaxiality is now decided by a scale-relative predicate, so the same
+  shape derives identically in metres, millimetres and kilometres; frame
+  axes are normalised on entry, and a degenerate axis is refused.
 - The exact planar-faced boolean gained a contact/tangency lattice test sweep: disjoint, contained, identical, face/edge/vertex touching, and an epsilon ladder from 1e-3 to 1e-15 swept as both a positive gap and a negative overlap. Two limits it found are recorded in the crate PLAN.md rather than hidden: long grid-aligned subtraction chains refuse partway through, and a thin overlap below 1e-12 returns an open shell.
 - The exact planar-faced boolean now retries a fixed family of ray directions when a containment probe meets a vertex or edge exactly, instead of refusing the whole operation. Containment is direction-independent, so each attempt stays exact. Grid-aligned operands -- repeated axis-aligned subtraction, where operands share vertices in bulk -- are now answered; previously they refused after a few accumulated operations. Exhausting the family still refuses.
 - `axiolid-spatial` no longer claims an octree it does not implement; the crate description and docs name only the BVH and uniform point grid, with the octree listed as a structure that *could* implement the same callback API

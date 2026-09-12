@@ -13,6 +13,26 @@ use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
 const TAU: f64 = std::f64::consts::TAU;
 
 /// A frame with the given origin and z axis, x and y completed arbitrarily.
+/// Build a frame whose `z` keeps the caller's length.
+///
+/// The ordinary `frame` helper normalises, which would make a test about
+/// non-unit axes silently vacuous.
+fn frame_keeping_axis_length(origin: Point3, z: Vec3) -> Frame3 {
+    let unit = z.normalize();
+    let seed = if unit.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    let x = unit.cross(seed).normalize();
+    Frame3 {
+        origin,
+        x,
+        y: unit.cross(x),
+        z,
+    }
+}
+
 fn frame(origin: Point3, z: Vec3) -> Frame3 {
     let z = z.normalize();
     let seed = if z.x.abs() < 0.9 {
@@ -88,16 +108,24 @@ fn residual(surface: &Surface, point: Point3) -> f64 {
 }
 
 /// Assert every sampled point lies on both operands.
+///
+/// The bound is relative to how far the sampled point sits from the origin.
+/// An absolute bound is itself unit-dependent: the same shape modelled in
+/// millimetres carries a thousand times more magnitude, so its rounding is
+/// a thousand times coarser and an absolute threshold fails for reasons
+/// that have nothing to do with the derivation being tested.
 fn assert_on_both(first: &Surface, second: &Surface, curve: &Curve3) {
     for point in sample(curve, 24) {
+        let magnitude = point.length().max(1.0);
+        let bound = 1.0e-12 * magnitude;
         let first_residual = residual(first, point).abs();
         let second_residual = residual(second, point).abs();
         assert!(
-            first_residual < 1.0e-12,
+            first_residual < bound,
             "point {point:?} off first surface by {first_residual:e}"
         );
         assert!(
-            second_residual < 1.0e-12,
+            second_residual < bound,
             "point {point:?} off second surface by {second_residual:e}"
         );
     }
@@ -613,4 +641,127 @@ fn a_hyperbolic_cone_section_is_refused_as_unrepresentable() {
         Err(ExactIntersectionRefusal::UnrepresentableConic),
         "a parabola or hyperbola must be named, not swapped for an ellipse"
     );
+}
+
+/// The same shape gets the same verdict in metres, millimetres and
+/// kilometres.
+///
+/// An absolute coaxiality threshold silently changes meaning with the
+/// modelling unit: a pair accepted in metres was refused in millimetres,
+/// which is the unit most building models are authored in. The failure
+/// was invisible -- a refusal, not a wrong curve -- so this pins the
+/// verdict rather than any particular coordinate.
+#[test]
+fn the_coaxiality_verdict_does_not_depend_on_modelling_units() {
+    for scale in [1.0_f64, 1000.0, 0.001] {
+        let radius = 3.0 * scale;
+        // A lateral offset fixed at 1e-13 OF THE RADIUS: the same shape
+        // every time, only the stored numbers differ.
+        let offset = radius * 1.0e-13;
+        let sphere = Surface::Sphere(Sphere {
+            frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+            radius: 5.0 * scale,
+        });
+        let cylinder = Surface::Cylinder(Cylinder {
+            frame: frame(Point3::new(offset, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+            radius,
+        });
+
+        let result = exact_surface_intersection(&sphere, &cylinder)
+            .unwrap_or_else(|error| panic!("scale {scale} refused: {error:?}"));
+        assert_eq!(result.branches.len(), 2, "scale {scale}");
+        for branch in &result.branches {
+            assert_on_both(&sphere, &cylinder, branch);
+        }
+    }
+}
+
+/// A frame whose `z` is not unit length describes the same surface.
+///
+/// Nothing in the type system forces `Frame3::z` to be normalised, and
+/// the coaxial derivation assumed it was: a frame storing a doubled axis
+/// was refused outright, though it denotes exactly the same geometry.
+#[test]
+fn a_non_unit_frame_axis_describes_the_same_surface() {
+    let mut results = Vec::new();
+    // The two operands carry DIFFERENTLY scaled axes. Using one length for
+    // both would leave the parallel test comparing two equally scaled
+    // vectors, which hides a missing normalisation on either side.
+    for (first_length, second_length) in [(1.0_f64, 1.0_f64), (2.0, 1.0), (1.0, 0.25)] {
+        let sphere = Surface::Sphere(Sphere {
+            frame: frame_keeping_axis_length(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, first_length),
+            ),
+            radius: 5.0,
+        });
+        let cylinder = Surface::Cylinder(Cylinder {
+            frame: frame_keeping_axis_length(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, second_length),
+            ),
+            radius: 3.0,
+        });
+
+        let result = exact_surface_intersection(&sphere, &cylinder).unwrap_or_else(|error| {
+            panic!("axis lengths {first_length}/{second_length} refused: {error:?}")
+        });
+        for branch in &result.branches {
+            assert_on_both(&sphere, &cylinder, branch);
+        }
+
+        // Only the FIRST operand's axis drives the derivation, so the
+        // reversed order must be checked too: otherwise a missing
+        // normalisation on the second operand never shows up.
+        let reversed = exact_surface_intersection(&cylinder, &sphere).unwrap_or_else(|error| {
+            panic!("reversed {first_length}/{second_length} refused: {error:?}")
+        });
+        for branch in &reversed.branches {
+            assert_on_both(&sphere, &cylinder, branch);
+        }
+
+        results.push(result);
+    }
+
+    // Same geometry in, same curves out -- not merely 'also derivable'.
+    assert_eq!(results[0], results[1]);
+    assert_eq!(results[0], results[2]);
+}
+
+/// A zero-length frame axis is refused, not divided by.
+///
+/// `Frame3` cannot express 'this axis is valid', so a degenerate frame
+/// reaches the derivation like any other. Normalising it would divide by
+/// zero and hand back a curve built from NaNs, which is far worse than a
+/// refusal because it looks like an answer.
+#[test]
+fn a_degenerate_frame_axis_is_refused() {
+    let zero = Vec3::new(0.0, 0.0, 0.0);
+    let sphere = Surface::Sphere(Sphere {
+        frame: Frame3 {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+            z: zero,
+        },
+        radius: 5.0,
+    });
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 3.0,
+    });
+
+    let result = exact_surface_intersection(&sphere, &cylinder);
+    assert!(result.is_err(), "degenerate axis produced {result:?}");
+
+    // And nothing NaN-shaped escaped in the other order either.
+    let reversed = exact_surface_intersection(&cylinder, &sphere);
+    if let Ok(curve) = reversed {
+        for branch in &curve.branches {
+            if let Curve3::Circle(circle) = branch {
+                assert!(circle.radius.is_finite(), "NaN radius escaped");
+                assert!(circle.frame.origin.is_finite(), "NaN centre escaped");
+            }
+        }
+    }
 }

@@ -273,3 +273,43 @@ and is dropped; if that leaves nothing, the result is a refusal rather
 than an empty success, so a caller cannot mistake a degenerate touch
 for an absent intersection. Tangential profile contact refuses for the
 same reason: a touch is not a transversal curve.
+
+## Scale-relative structural predicates
+
+The coaxiality test began as an absolute bound, `lateral > 1.0e-12`.
+That silently ties the verdict to modelling units. Measured, with the
+lateral offset held at a fixed 1e-13 OF THE RADIUS -- the same shape
+every time:
+
+```
+ m: radius=3e0   offset=3.0e-13 -> DERIVED 2 branches
+mm: radius=3e3   offset=3.0e-10 -> REFUSED UnsupportedPair
+km: radius=3e-3  offset=3.0e-16 -> DERIVED 2 branches
+```
+
+The millimetre row is the realistic one: building models are usually
+authored in millimetres. The failure was invisible -- a refusal, not a
+wrong curve -- so it would have read as an unsupported configuration
+rather than a defect.
+
+The lateral test now compares against a characteristic length taken
+from the operands (`profile_scale`), so the verdict follows shape
+rather than units. The direction test already compared unit vectors and
+is dimensionless, so it is unchanged.
+
+Two related findings came out of the same work:
+
+- `Revolution::axis` was documented as a unit vector but took `frame.z`
+  verbatim. `Frame3` does not constrain its axes, so a frame storing a
+  doubled `z` -- identical geometry -- was refused. Normalisation now
+  happens where the axis enters, with a degenerate axis refused.
+- The test harness had the same unit bug: `assert_on_both` used an
+  absolute 1e-12 residual, which no kilometre-scale shape can meet
+  because its coordinates carry proportionally coarser rounding. The
+  bound is now relative to the sampled point's magnitude. An absolute
+  tolerance in a test is as unit-dependent as one in the code.
+
+Consequence for future work: a bare floating-point threshold in a
+structural predicate should be treated as a bug unless it is comparing
+dimensionless quantities. Scale invariance is now asserted directly, by
+deriving the same shape at three scales and requiring one verdict.

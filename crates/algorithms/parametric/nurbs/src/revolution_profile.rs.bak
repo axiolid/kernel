@@ -246,13 +246,6 @@ pub(crate) struct Revolution {
 /// it is unit length, and every downstream step -- the parallel test, the
 /// axial/lateral split, the profile shift -- assumes it is. Normalising
 /// here keeps that assumption true at the one place the axis enters.
-///
-/// The zero/non-finite guard is deliberately redundant: `frame_about_axis`
-/// refuses a degenerate axis later, so removing this check still yields a
-/// refusal rather than a NaN curve, and mutation testing shows it as a
-/// surviving mutant for that reason. It is kept because relying on the
-/// distant check would make NaN propagation the mechanism of correctness,
-/// and a future caller of `unit_axis` would inherit that trap silently.
 fn unit_axis(axis: Vec3) -> Option<Vec3> {
     let length = axis.length();
     if length == 0.0 || !length.is_finite() {
