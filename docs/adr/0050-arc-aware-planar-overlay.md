@@ -108,7 +108,12 @@ mature and gated by existing tests. The arc backend is additive.
    disjoint result, and a tessellated-instead-of-arc output must all be
    caught by the tests before the path is trusted. **Done.** All three
    named mutants are killed, plus a mis-wound hole.
-5. Only then: widen `Prism` and wire `boolean_prisms_exact`.
+5. Only then: widen `Prism` and wire `boolean_prisms_exact`. **Done.** Added
+   `ArcPrism` + `boolean_arc_prisms_exact` alongside the polygon path (not
+   replacing it), and `extrude_arc.rs` which sweeps an arc edge into a
+   `Cylinder` face and a straight edge into a `Plane` face. Height logic is
+   now shared via `resolve_span` so the two paths cannot disagree about
+   which spans are representable.
 
 ## Open questions
 
@@ -206,3 +211,34 @@ says why. This was verified by removing them together, which fails.
 Areas agree with closed forms to 1e-12 in every case: wall minus
 opening `30 - pi`, lens `2 acos(1/2) - sqrt(3)/2`, annulus `3 pi`,
 disjoint union `2 pi`.
+
+## Step 5 findings
+
+A curved-surface exact boolean now exists. A unit cylinder intersected
+with a box returns an `ExactBRep` carrying `Cylinder` wall faces and
+`Plane` caps -- not a fan of planar strips.
+
+Three things worth recording.
+
+**A surface-kind count is not enough.** A wall can be a `Cylinder` of the
+correct radius and still sit in the wrong place: the arc centre comes from
+the bulge by way of a sagitta offset, and dropping that term leaves the
+radius intact while moving the axis to the chord midpoint. That mutant
+survived a radius check and a face-kind check; only asserting the wall axis
+passes through the disc centre killed it.
+
+**The cap pcurve has to be the arc, not its chord.** A cap loop built from
+chords would disagree with the wall loop along the same edge while still
+closing, still validating, and still reporting a plausible area. The cap
+pcurve is a `Circle2` for arc edges for that reason.
+
+**A hole is refused, not filled.** A plate minus a centred disc has an
+interior opening, and the arc extruder does not build a cap face with two
+bounds. Returning a solid plate would be a silent geometry change, so the
+case refuses with `interior hole` in the reason.
+
+Mutation testing, 4/4 killed: every wall built planar, wrong
+bulge-to-angle constant, centre ignoring the sagitta, hole refusal removed.
+
+Remaining gap: results with interior holes, and sections whose arcs survive
+into more than one disconnected region. Both refuse by name.

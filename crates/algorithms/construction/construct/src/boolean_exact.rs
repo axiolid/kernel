@@ -32,9 +32,13 @@
 use axiolid_brep::{ExactBRep, FaceName, Operand, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{BooleanOperator, Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
-use axiolid_overlay::{overlay, FillRule, OverlayInput, OverlayOperation, Polygon, Ring};
+use axiolid_overlay::{
+    arc_overlay, overlay, validate_arc_ring, ArcRing, FillRule, OverlayInput, OverlayOperation,
+    Polygon, Ring,
+};
 
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
+use crate::extrude_arc::extrude_arc_ring;
 use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
 
@@ -61,6 +65,22 @@ pub struct Prism {
     pub top: Scalar,
 }
 
+/// A prism whose cross-section may contain arc edges (ADR 0050).
+///
+/// Separate from [`Prism`] rather than replacing it: the polygon path is
+/// exact through integer predicates, the arc path agrees with closed forms
+/// to machine precision. Those are different guarantees, so a caller that
+/// wants the stronger one must not be silently moved to the weaker one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArcPrism {
+    /// Cross-section boundary; arcs carry a non-zero bulge.
+    pub section: ArcRing,
+    /// Base height along z.
+    pub bottom: Scalar,
+    /// Top height along z.
+    pub top: Scalar,
+}
+
 /// Exact boolean of two coaxial prisms.
 ///
 /// Returns an exact B-rep, or a typed refusal naming why the result is not
@@ -76,40 +96,12 @@ pub fn boolean_prisms_exact(
 
     // Height logic decides whether a prism can represent the answer at all,
     // so it is settled before any planar work.
-    let (bottom, top) = match operator {
-        BooleanOperator::Intersection => {
-            let bottom = subject.bottom.max(tool.bottom);
-            let top = subject.top.min(tool.top);
-            if top - bottom <= tolerance.linear() {
-                return Err(GeomError::Degenerate(
-                    "prism intersection is empty along the extrusion axis".to_owned(),
-                ));
-            }
-            (bottom, top)
-        }
-        BooleanOperator::Union => {
-            // Differing spans give a stepped solid, which is not a prism.
-            if !tolerance.eq(subject.bottom, tool.bottom) || !tolerance.eq(subject.top, tool.top) {
-                return Err(unsupported(
-                    "exact prism union with differing extrusion spans",
-                ));
-            }
-            (subject.bottom, subject.top)
-        }
-        BooleanOperator::Difference => {
-            // A tool that stops inside the subject leaves a step.
-            if tool.bottom > subject.bottom + tolerance.linear()
-                || tool.top < subject.top - tolerance.linear()
-            {
-                return Err(unsupported(
-                    "exact prism difference with a tool shorter than the subject",
-                ));
-            }
-            (subject.bottom, subject.top)
-        }
-        _ => return Err(unsupported("unknown exact prism boolean operator")),
-    };
-
+    let (bottom, top) = resolve_span(
+        (subject.bottom, subject.top),
+        (tool.bottom, tool.top),
+        operator,
+        tolerance,
+    )?;
     let operation = match operator {
         BooleanOperator::Intersection => OverlayOperation::Intersection,
         BooleanOperator::Union => OverlayOperation::Union,
@@ -268,5 +260,143 @@ fn cap_operand(
         Some(Operand::Tool)
     } else {
         None
+    }
+}
+
+/// Exact boolean of two coaxial prisms whose sections may contain arcs.
+///
+/// # What is exact here
+///
+/// The height reduction is identical to [`boolean_prisms_exact`]: a
+/// coaxial boolean is the planar boolean of the sections crossed with the
+/// boolean of the height intervals. Arc edges survive as arcs, so a
+/// cylindrical wall stays a `Cylinder` face rather than becoming a fan of
+/// planar strips.
+///
+/// The planar part agrees with closed-form areas to machine precision
+/// rather than being exact through integer predicates. That is a weaker
+/// claim than the polygon path makes and is stated here so a caller can
+/// choose deliberately.
+pub fn boolean_arc_prisms_exact(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    for (section, role) in [(&subject.section, "subject"), (&tool.section, "tool")] {
+        validate_arc_ring(section, tolerance).map_err(|error| {
+            GeomError::InvalidInput(format!("{role} arc prism section: {error:?}"))
+        })?;
+    }
+    if !subject.bottom.is_finite()
+        || !subject.top.is_finite()
+        || !tool.bottom.is_finite()
+        || !tool.top.is_finite()
+    {
+        return Err(GeomError::InvalidInput(
+            "arc prism heights must be finite".to_owned(),
+        ));
+    }
+    if subject.top <= subject.bottom || tool.top <= tool.bottom {
+        return Err(GeomError::InvalidInput(
+            "arc prism top must lie above its bottom".to_owned(),
+        ));
+    }
+
+    let (bottom, top) = resolve_span(
+        (subject.bottom, subject.top),
+        (tool.bottom, tool.top),
+        operator,
+        tolerance,
+    )?;
+
+    let operation = match operator {
+        BooleanOperator::Intersection => OverlayOperation::Intersection,
+        BooleanOperator::Union => OverlayOperation::Union,
+        BooleanOperator::Difference => OverlayOperation::Difference,
+        _ => return Err(unsupported("unknown exact prism boolean operator")),
+    };
+
+    let result =
+        arc_overlay(&subject.section, &tool.section, operation, tolerance).map_err(|error| {
+            GeomError::BackendContractViolation {
+                backend: BACKEND_ID,
+                detail: format!("arc prism cross-section overlay failed: {error:?}"),
+            }
+        })?;
+
+    if result.regions.is_empty() {
+        return Err(GeomError::Degenerate(
+            "arc prism boolean produced an empty cross-section".to_owned(),
+        ));
+    }
+    // One ExactBRep is one solid, so several regions cannot be returned
+    // without silently discarding material.
+    if result.regions.len() > 1 {
+        return Err(unsupported(
+            "exact arc prism boolean producing disconnected components",
+        ));
+    }
+
+    let region = &result.regions[0];
+    // A hole needs a cap face carrying two bounds with arc loops, which
+    // the arc extruder does not build. Refusing names the gap instead of
+    // returning a solid with its opening filled in.
+    if !region.holes.is_empty() {
+        return Err(unsupported(
+            "exact arc prism boolean whose result has an interior hole",
+        ));
+    }
+    // The arc extruder builds from z = 0, so a band starting elsewhere
+    // would come back at the wrong height.
+    if bottom.abs() > tolerance.linear() {
+        return Err(unsupported(
+            "exact arc prism boolean whose result does not start at z = 0",
+        ));
+    }
+    extrude_arc_ring(&region.outer, Vec3::Z * (top - bottom))
+}
+
+/// The height span a coaxial boolean result occupies.
+///
+/// Shared by the polygon and arc paths: the height reduction does not
+/// depend on what the cross-section looks like, so duplicating it would
+/// invite the two paths to disagree about which spans are representable.
+fn resolve_span(
+    subject: (Scalar, Scalar),
+    tool: (Scalar, Scalar),
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<(Scalar, Scalar)> {
+    match operator {
+        BooleanOperator::Intersection => {
+            let bottom = subject.0.max(tool.0);
+            let top = subject.1.min(tool.1);
+            if top - bottom <= tolerance.linear() {
+                return Err(GeomError::Degenerate(
+                    "prism intersection is empty along the extrusion axis".to_owned(),
+                ));
+            }
+            Ok((bottom, top))
+        }
+        BooleanOperator::Union => {
+            // Differing spans give a stepped solid, which is not a prism.
+            if !tolerance.eq(subject.0, tool.0) || !tolerance.eq(subject.1, tool.1) {
+                return Err(unsupported(
+                    "exact prism union with differing extrusion spans",
+                ));
+            }
+            Ok(subject)
+        }
+        BooleanOperator::Difference => {
+            // A tool that stops inside the subject leaves a step.
+            if tool.0 > subject.0 + tolerance.linear() || tool.1 < subject.1 - tolerance.linear() {
+                return Err(unsupported(
+                    "exact prism difference with a tool shorter than the subject",
+                ));
+            }
+            Ok(subject)
+        }
+        _ => Err(unsupported("unknown exact prism boolean operator")),
     }
 }

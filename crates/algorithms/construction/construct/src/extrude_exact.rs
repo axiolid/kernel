@@ -304,7 +304,7 @@ fn add_polygon_ring(
     })
 }
 
-fn add_line_edge(
+pub(crate) fn add_line_edge(
     builder: &mut ExactBRepBuilder,
     start: VertexId,
     end: VertexId,
@@ -556,7 +556,7 @@ fn add_circle_cap_loop(
     )
 }
 
-fn add_single_bound_face(
+pub(crate) fn add_single_bound_face(
     builder: &mut ExactBRepBuilder,
     surface: axiolid_brep::SurfaceId,
     loop_id: LoopId,
@@ -573,7 +573,7 @@ fn add_single_bound_face(
     })
 }
 
-fn add_loop(
+pub(crate) fn add_loop(
     builder: &mut ExactBRepBuilder,
     uses: Vec<EdgeUse<axiolid_brep::Curve2Id>>,
     intervals: Vec<Interval>,
@@ -586,7 +586,10 @@ fn add_loop(
     loop_id
 }
 
-fn finish_closed(mut builder: ExactBRepBuilder, faces: Vec<FaceId>) -> GeomResult<ExactBRep> {
+pub(crate) fn finish_closed(
+    mut builder: ExactBRepBuilder,
+    faces: Vec<FaceId>,
+) -> GeomResult<ExactBRep> {
     let shell = builder.topology_mut().add_shell(Shell {
         faces: faces
             .into_iter()
@@ -615,7 +618,7 @@ fn finish_closed(mut builder: ExactBRepBuilder, faces: Vec<FaceId>) -> GeomResul
 }
 
 #[allow(clippy::too_many_arguments)]
-fn reserve(
+pub(crate) fn reserve(
     builder: &mut ExactBRepBuilder,
     vertices: usize,
     edges: usize,
@@ -634,7 +637,7 @@ fn reserve(
         .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })
 }
 
-fn identity_frame3(origin: Point3) -> Frame3 {
+pub(crate) fn identity_frame3(origin: Point3) -> Frame3 {
     Frame3 {
         origin,
         x: Vec3::X,

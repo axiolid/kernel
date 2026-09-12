@@ -43,6 +43,7 @@ pub mod boolean_exact;
 mod boolean_provenance;
 pub mod center_line;
 pub mod extrude;
+mod extrude_arc;
 mod extrude_exact;
 pub mod feature;
 pub mod half_space;
