@@ -20,6 +20,14 @@ All notable changes to Axiolid are documented in this file.
   enum gained a variant.
 
 ### Added
+- Exact intersection curves for sphere/sphere and cylinder/cylinder.
+  Two spheres give the radical-plane circle. Equal-radius cylinders on
+  crossing axes give the two Steinmetz ellipses; parallel-axis cylinders
+  give one or two axis-parallel lines. `ExactIntersectionCurve` now
+  carries `branches: Vec<Curve3>` because these pairs genuinely have two
+  components, and unequal-radius crossing cylinders are refused as
+  `NotRegularCurve`: that intersection is a non-planar space quartic with
+  no exact conic form.
 - Exact intersection curves for elementary surface pairs
   (`exact_surface_intersection`). Plane/plane yields a `Line3`,
   cylinder/plane a `Circle3` or `Ellipse3` with semi-axes `r` and

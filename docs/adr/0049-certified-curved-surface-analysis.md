@@ -195,3 +195,26 @@ These curves are exact and are real B-rep-ready geometry, but they cover
 elementary analytic surfaces only. A spline-surface pair still yields
 regions, not curves, and still refuses rather than approximating.
 
+
+### Multi-branch results (sphere/sphere, cylinder/cylinder)
+
+Extending the closed forms past plane pairs broke the single-curve
+assumption. Equal-radius cylinders on crossing axes meet in TWO ellipses
+(the Steinmetz solid's seam), and parallel-axis cylinders meet in two
+lines, one when tangent. `ExactIntersectionCurve` therefore returns
+`branches: Vec<Curve3>`; `single()` is a convenience for the one-branch
+cases and panics rather than hiding a second component.
+
+Unequal-radius crossing cylinders are refused. Sampling their
+intersection and taking the SVD of the centred points leaves a third
+singular value of 2.83, so no plane contains the curve: it is a genuine
+space quartic. There is no exact conic to name, and fitting a spline
+would reintroduce precisely the approximation this module exists to
+avoid.
+
+A mutation that returned the same Steinmetz ellipse twice initially
+SURVIVED: both copies lie on both cylinders, so residual checks cannot
+tell them apart. The test now asserts the two section planes are
+distinct, which kills it. Worth recording as a pattern -- for
+multi-branch results, per-branch validity is not enough; distinctness
+must be asserted too, or a silently halved answer still passes.
