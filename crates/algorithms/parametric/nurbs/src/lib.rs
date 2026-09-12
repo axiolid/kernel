@@ -23,6 +23,7 @@ mod certified_surface_surface_intersection;
 mod curve_analysis;
 mod curve_projection;
 mod degree;
+mod exact_surface_intersection;
 mod fit;
 mod intersection_curve;
 mod periodic;
@@ -72,6 +73,9 @@ pub use curve_projection::{project_curve2, project_curve3};
 pub use degree::{
     elevate_degree2, elevate_degree3, reduce_degree2, reduce_degree3, remove_knot2, remove_knot3,
     BoundedResult,
+};
+pub use exact_surface_intersection::{
+    exact_surface_intersection, Derivation, ExactIntersectionCurve, ExactIntersectionRefusal,
 };
 pub use fit::{interpolate_curve3, loft_surface};
 pub use intersection_curve::{
