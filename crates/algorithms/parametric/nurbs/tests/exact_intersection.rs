@@ -246,19 +246,64 @@ fn a_tilted_plane_cuts_a_cylinder_in_an_ellipse_stretched_by_one_over_cosine() {
 }
 
 #[test]
-fn a_plane_parallel_to_the_cylinder_axis_is_refused() {
+fn a_plane_parallel_to_the_cylinder_axis_cuts_two_rulings() {
     let cylinder = Surface::Cylinder(Cylinder {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
-        radius: 1.0,
+        radius: 2.0,
     });
-    // Normal perpendicular to the axis: the section is two lines, not one curve.
+    // Normal perpendicular to the axis, offset 1.2 from it: the section is
+    // the two rulings at half-chord sqrt(4 - 1.44) = 1.6.
     let plane = Surface::Plane(Plane {
-        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+        frame: frame(Point3::new(1.2, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+    });
+
+    let result = exact_surface_intersection(&cylinder, &plane).expect("derivable");
+    assert_eq!(result.derivation, Derivation::CylinderPlaneParallelRulings);
+    assert_eq!(result.branches.len(), 2);
+    for branch in &result.branches {
+        assert_on_both(&cylinder, &plane, branch);
+    }
+    // The two rulings must be DISTINCT: returning one line twice would
+    // satisfy every on-surface check while losing half the section.
+    let origins: Vec<Point3> = result
+        .branches
+        .iter()
+        .map(|branch| match branch {
+            Curve3::Line(line) => line.origin,
+            other => panic!("expected lines, got {other:?}"),
+        })
+        .collect();
+    assert!((origins[0] - origins[1]).length() > 1.0e-9);
+}
+
+#[test]
+fn a_plane_tangent_to_the_cylinder_shares_exactly_one_ruling() {
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 2.0,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+    });
+
+    let result = exact_surface_intersection(&cylinder, &plane).expect("derivable");
+    assert_eq!(result.branches.len(), 1);
+    assert_on_both(&cylinder, &plane, result.single());
+}
+
+#[test]
+fn a_plane_clear_of_the_cylinder_is_disjoint() {
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
+        radius: 2.0,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame(Point3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
     });
 
     assert_eq!(
         exact_surface_intersection(&cylinder, &plane),
-        Err(ExactIntersectionRefusal::NotRegularCurve)
+        Err(ExactIntersectionRefusal::Disjoint)
     );
 }
 

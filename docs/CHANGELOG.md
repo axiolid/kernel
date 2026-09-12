@@ -6,6 +6,8 @@ All notable changes to Axiolid are documented in this file.
 
 ### Changed
 
+- Exact cylinder/plane rulings when the plane is parallel to the axis: the
+  section is derived as one or two lines instead of being refused.
 - `SurfacePairSplitUnresolvedReason` now distinguishes a proven refusal
   from an unimplemented one. `NoPartitionExists` is returned when the
   certified trace is shown to slit BOTH patches -- one endpoint strictly

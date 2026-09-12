@@ -98,6 +98,8 @@ pub enum Derivation {
     CylinderCylinderSteinmetzEllipses,
     /// Cylinders with parallel axes meet in one or two axis-parallel lines.
     ParallelCylinderLines,
+    /// A plane parallel to a cylinder axis cuts one or two rulings.
+    CylinderPlaneParallelRulings,
     /// Two coaxial surfaces of revolution meet in circles perpendicular to
     /// the shared axis, found by intersecting their meridian profiles.
     CoaxialRevolutionCircles,
@@ -236,8 +238,10 @@ fn cylinder_plane(
     // orientation, so the magnitude carries the geometry.
     let cosine = axis.dot(normal).abs();
     if cosine == 0.0 {
-        // Plane parallel to the axis: not a single regular curve.
-        return Err(ExactIntersectionRefusal::NotRegularCurve);
+        // Plane parallel to the axis: the section is a pair of rulings, one
+        // ruling when the plane is tangent, or empty. Each is an exact line,
+        // so this is derived rather than refused.
+        return cylinder_plane_parallel(cylinder, plane, axis, normal);
     }
     // The section centre is where the cylinder axis pierces the plane.
     let axis_origin = cylinder.frame.origin;
@@ -545,4 +549,52 @@ fn cone_plane(
         return Err(ExactIntersectionRefusal::UnsupportedPair);
     }
     Err(ExactIntersectionRefusal::UnrepresentableConic)
+}
+
+/// A plane parallel to a cylinder axis cuts rulings, not a conic.
+///
+/// Identity: with `d` the distance from the axis to the plane and the
+/// half-chord `h = sqrt(r^2 - d^2)`, the plane meets the cylinder in the
+/// two lines through `foot +/- t*h` along the axis, where `foot` is the
+/// axis point projected onto the plane and `t = axis x normal` is the unit
+/// in-plane direction perpendicular to the axis. A tangent plane gives one
+/// line; a plane clear of the cylinder gives none.
+fn cylinder_plane_parallel(
+    cylinder: &Cylinder,
+    plane: &Plane,
+    axis: Vec3,
+    normal: Vec3,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    let distance = normal.dot(cylinder.frame.origin - plane.frame.origin);
+    let squared = cylinder.radius * cylinder.radius - distance * distance;
+    if squared < 0.0 {
+        return Err(ExactIntersectionRefusal::Disjoint);
+    }
+    // `axis` and `normal` are unit and perpendicular here, so their cross
+    // product is already unit: no second normalisation is needed.
+    let tangent = axis.cross(normal);
+    let foot = cylinder.frame.origin - normal * distance;
+    if !foot.is_finite() || !tangent.is_finite() {
+        return Err(ExactIntersectionRefusal::DegenerateFrame);
+    }
+    let half_chord = squared.sqrt();
+    let mut branches = Vec::new();
+    let offsets: &[Scalar] = if half_chord == 0.0 {
+        &[0.0]
+    } else {
+        &[half_chord, -half_chord]
+    };
+    branches
+        .try_reserve_exact(offsets.len())
+        .map_err(|_| ExactIntersectionRefusal::DegenerateFrame)?;
+    for offset in offsets {
+        branches.push(Curve3::Line(axiolid_curve::Line3 {
+            origin: foot + tangent * *offset,
+            direction: axis,
+        }));
+    }
+    Ok(ExactIntersectionCurve {
+        branches,
+        derivation: Derivation::CylinderPlaneParallelRulings,
+    })
 }
