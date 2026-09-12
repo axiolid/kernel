@@ -800,7 +800,7 @@ fn krawczyk_root_on_edge(
     // and any nonzero minor is a valid certificate basis. The discarded row
     // is not ignored -- the residual bound below is taken over all three.
     let rows = [(0usize, 1usize), (0, 2), (1, 2)];
-    let mut best: Option<([[Scalar; 2]; 2], [[Scalar; 2]; 2], (usize, usize))> = None;
+    let mut best: Option<RowSelection> = None;
     let mut best_magnitude = 0.0;
     for (first, second) in rows {
         let candidate = [
@@ -1021,6 +1021,10 @@ fn sliver(start: Scalar, end: Scalar, low: Scalar, high: Scalar) -> (Scalar, Sca
         (low, high)
     }
 }
+
+/// A certified 2x2 row selection for a boundary-restricted solve: the chosen
+/// submatrix, its numeric inverse, and which two coordinate rows were kept.
+type RowSelection = ([[Scalar; 2]; 2], [[Scalar; 2]; 2], (usize, usize));
 
 fn dot2(coefficients: [Scalar; 2], values: [Interval; 2]) -> GeomResult<Interval> {
     Interval::exact(coefficients[0])?
