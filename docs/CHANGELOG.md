@@ -6,6 +6,22 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- Multi-corner filleting (`fillet_polygon_corners`): several corners of one
+  polygon profile are rounded in a single solid, each with its own radius.
+  Corners that share an edge are checked pairwise -- their setbacks must sum
+  to less than the edge length -- which a per-corner check cannot catch.
+- Variable-radius (tapered) fillet blends (`tapered_blend_surface`): the
+  radius varies linearly along the extrusion. The blend is represented as a
+  rational quadratic B-spline lofted linearly, which reproduces the
+  closed-form fillet exactly rather than approximating it.
+
+### Notes
+
+- A linearly tapered fillet is an oblique cone, not a right circular one, so
+  it cannot be stored as `Surface::Cone`. See ADR 0051 for the measurements.
+
+### Added
+
 - Arc-aware planar boolean (`arc_overlay`): cross-sections whose edges are
   circular arcs, with arcs preserved as arcs rather than tessellated.
 - Exact boolean for curved cross-sections (`boolean_arc_prisms_exact`): a

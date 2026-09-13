@@ -31,7 +31,9 @@ use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_profile::{Profile, RectangleProfile};
 
-use crate::extrude_exact::{extrude_polygon_rings, extrude_with_cylindrical_blend};
+use crate::extrude_exact::{
+    extrude_polygon_rings, extrude_with_cylindrical_blend, extrude_with_cylindrical_blends,
+};
 use crate::BACKEND_ID;
 
 fn unsupported(input: &'static str) -> GeomError {
@@ -322,11 +324,11 @@ fn rectangle_prism(
 /// centre lies on the bisector at `r / sin(pi/4)` = `r * sqrt(2)`. The
 /// tangent points are the feet of the perpendiculars from that centre, which
 /// land exactly `r` back along each adjacent edge.
-pub(crate) struct BlendCorner {
-    pub(crate) centre: Point2,
-    pub(crate) start: Point2,
-    pub(crate) end: Point2,
-    pub(crate) sweep: Scalar,
+pub struct BlendCorner {
+    pub centre: Point2,
+    pub start: Point2,
+    pub end: Point2,
+    pub sweep: Scalar,
 }
 
 /// Solve the blend for one corner of a closed polygon ring.
@@ -544,4 +546,123 @@ fn signed_area(ring: &[Point2]) -> Scalar {
             a.x * b.y - b.x * a.y
         })
         .sum()
+}
+
+/// Fillet several corners of a polygon profile in one solid.
+///
+/// Each entry is a `(corner index, radius)` pair. Corners are solved
+/// independently -- a blend depends only on its own corner and the two
+/// adjacent vertices -- and every replacement is applied in one pass.
+///
+/// # Why the pairwise check exists
+///
+/// Independence holds only while no two blends overlap. Two filleted
+/// corners sharing an edge each consume `r / tan(theta/2)` of it, so the
+/// pair fits only when the SUM of their setbacks is under the edge length.
+/// Checking each corner alone against the whole edge would admit a pair
+/// that individually fits and jointly self-intersects.
+pub fn fillet_polygon_corners(
+    ring: &[Point2],
+    fillets: &[(usize, Scalar)],
+    depth: Scalar,
+) -> GeomResult<ExactBRep> {
+    if fillets.is_empty() {
+        return Err(GeomError::InvalidInput(
+            "multi-corner fillet needs at least one corner".to_owned(),
+        ));
+    }
+    if ring.len() < 3 {
+        return Err(GeomError::InvalidInput(
+            "fillet profile ring needs at least three points".to_owned(),
+        ));
+    }
+
+    let count = ring.len();
+    let mut seen = vec![false; count];
+    let mut setbacks = vec![0.0; count];
+    let mut blends: Vec<Option<BlendCorner>> = (0..count).map(|_| None).collect();
+
+    for (corner, radius) in fillets.iter().copied() {
+        if corner >= count {
+            return Err(GeomError::InvalidInput(format!(
+                "fillet corner {corner} is outside a ring of {count} points"
+            )));
+        }
+        if seen[corner] {
+            return Err(GeomError::InvalidInput(format!(
+                "fillet corner {corner} given more than once"
+            )));
+        }
+        seen[corner] = true;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(GeomError::InvalidInput(format!(
+                "fillet radius must be positive and finite, got {radius}"
+            )));
+        }
+        let blend = blend_corner(ring, corner, radius)
+            .ok_or_else(|| unsupported("fillet at a degenerate corner"))?;
+        setbacks[corner] = (blend.start - ring[corner]).length();
+        blends[corner] = Some(blend);
+    }
+
+    // Reflex corners bulge the blend into material, which is a different
+    // surface, so they are refused here exactly as in the single-corner path.
+    for corner in 0..count {
+        if !seen[corner] {
+            continue;
+        }
+        let previous = ring[(corner + count - 1) % count];
+        let here = ring[corner];
+        let next = ring[(corner + 1) % count];
+        let cross = (here - previous).perp_dot(next - here);
+        if cross <= 0.0 {
+            return Err(unsupported("fillet on a reflex corner"));
+        }
+    }
+
+    // Every edge must hold the setbacks of BOTH its endpoints. An
+    // unfilleted endpoint contributes nothing, which is why the shared
+    // `setbacks` table is zero-initialised rather than skipped.
+    for start in 0..count {
+        let end = (start + 1) % count;
+        let length = (ring[end] - ring[start]).length();
+        if setbacks[start] + setbacks[end] >= length {
+            return Err(unsupported(
+                "fillet radii too large for the edge between two corners",
+            ));
+        }
+    }
+
+    // Replace each filleted corner with its two tangent points. Walking in
+    // ring order keeps the blend table aligned with the rebuilt ring: a
+    // corner contributes two points, so every later blend shifts by one.
+    let mut blended = Vec::with_capacity(count + fillets.len());
+    let mut table: Vec<Option<(BlendCorner, Scalar)>> = Vec::with_capacity(count + fillets.len());
+    let radius_of: Vec<Scalar> = {
+        let mut r = vec![0.0; count];
+        for (corner, radius) in fillets.iter().copied() {
+            r[corner] = radius;
+        }
+        r
+    };
+    for corner in 0..count {
+        match blends[corner].take() {
+            Some(blend) => {
+                // The blend arc is the edge leaving the first tangent point.
+                let end = blend.end;
+                blended.push(blend.start);
+                table.push(Some((blend, radius_of[corner])));
+                // The straight wall leaving the second tangent point runs to
+                // the next corner, so the sharp corner itself is gone.
+                blended.push(end);
+                table.push(None);
+            }
+            None => {
+                blended.push(ring[corner]);
+                table.push(None);
+            }
+        }
+    }
+
+    extrude_with_cylindrical_blends(&blended, Vec3::Z * depth, &table)
 }

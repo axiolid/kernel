@@ -47,6 +47,7 @@ pub mod extrude;
 mod extrude_arc;
 mod extrude_exact;
 pub mod feature;
+pub mod fillet_variable;
 pub mod half_space;
 pub mod hull;
 pub mod loft;

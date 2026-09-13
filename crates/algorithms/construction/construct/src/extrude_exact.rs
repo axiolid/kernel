@@ -670,6 +670,29 @@ pub(crate) fn extrude_with_cylindrical_blend(
     blend: &BlendCorner,
     radius: Scalar,
 ) -> GeomResult<ExactBRep> {
+    let mut blends: Vec<Option<(BlendCorner, Scalar)>> = (0..ring.len()).map(|_| None).collect();
+    blends[blend_index] = Some((
+        BlendCorner {
+            centre: blend.centre,
+            start: blend.start,
+            end: blend.end,
+            sweep: blend.sweep,
+        },
+        radius,
+    ));
+    extrude_with_cylindrical_blends(ring, offset, &blends)
+}
+
+/// Extrude a ring where any subset of edges is a cylindrical blend.
+///
+/// `blends[i]` is `Some` when edge `i` of the ring is a blend arc rather than
+/// a straight wall. Taking a table rather than one index is what lets several
+/// corners be filleted in a single solid without a second traversal.
+pub(crate) fn extrude_with_cylindrical_blends(
+    ring: &[Point2],
+    offset: Vec3,
+    blends: &[Option<(BlendCorner, Scalar)>],
+) -> GeomResult<ExactBRep> {
     let mut builder = ExactBRepBuilder::default();
     let n = ring.len();
     reserve(
@@ -728,9 +751,9 @@ pub(crate) fn extrude_with_cylindrical_blend(
         let ordinal = u32::try_from(edge_index).map_err(|_| {
             GeomError::Degenerate("profile edge count exceeds u32 capacity".to_owned())
         })?;
-        if edge_index == blend_index {
+        if let Some((blend, radius)) = blends.get(edge_index).and_then(Option::as_ref) {
             let face =
-                add_cylindrical_blend(&mut builder, &topology, edge_index, offset, blend, radius)?;
+                add_cylindrical_blend(&mut builder, &topology, edge_index, offset, blend, *radius)?;
             // The blend replaced the edge between the two walls it is tangent
             // to. Naming it after that edge -- rather than after its own
             // position -- is what lets the same fillet be re-applied after an
