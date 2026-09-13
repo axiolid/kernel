@@ -16,7 +16,7 @@ use axiolid_topology::{
 use crate::BACKEND_ID;
 
 #[derive(Debug)]
-struct RingTopology {
+pub(crate) struct RingTopology {
     bottom_edges: Vec<EdgeId>,
     top_edges: Vec<EdgeId>,
     vertical_edges: Vec<EdgeId>,
@@ -255,6 +255,22 @@ fn add_polygon_ring(
     ring: &[Point2],
     offset: Vec3,
 ) -> GeomResult<RingTopology> {
+    add_polygon_ring_with_blends(builder, ring, offset, &[])
+}
+
+/// Build ring topology where some edges are blend arcs rather than chords.
+///
+/// A blend edge MUST carry a `Circle3`, not the straight chord between its
+/// tangent points. The blend face attaches an arc pcurve to that same edge,
+/// so a chord here makes the face boundary and the edge disagree by the
+/// sagitta -- a defect no topological check can see, since the loop still
+/// closes and every handle still resolves.
+pub(crate) fn add_polygon_ring_with_blends(
+    builder: &mut ExactBRepBuilder,
+    ring: &[Point2],
+    offset: Vec3,
+    blends: &[Option<(BlendCorner, Scalar)>],
+) -> GeomResult<RingTopology> {
     let bottom_points: Vec<_> = ring
         .iter()
         .map(|point| Point3::new(point.x, point.y, 0.0))
@@ -274,20 +290,34 @@ fn add_polygon_ring(
     let mut vertical_edges = Vec::with_capacity(ring.len());
     for index in 0..ring.len() {
         let next = (index + 1) % ring.len();
-        bottom_edges.push(add_line_edge(
-            builder,
-            bottom_vertices[index],
-            bottom_vertices[next],
-            bottom_points[index],
-            bottom_points[next] - bottom_points[index],
-        ));
-        top_edges.push(add_line_edge(
-            builder,
-            top_vertices[index],
-            top_vertices[next],
-            top_points[index],
-            top_points[next] - top_points[index],
-        ));
+        // A blend edge follows its arc; every other edge is a chord.
+        if let Some(Some((blend, radius))) = blends.get(index) {
+            let (bottom_edge, top_edge) = add_blend_arc_edges(
+                builder,
+                blend,
+                *radius,
+                (bottom_vertices[index], bottom_vertices[next]),
+                (top_vertices[index], top_vertices[next]),
+                offset,
+            );
+            bottom_edges.push(bottom_edge);
+            top_edges.push(top_edge);
+        } else {
+            bottom_edges.push(add_line_edge(
+                builder,
+                bottom_vertices[index],
+                bottom_vertices[next],
+                bottom_points[index],
+                bottom_points[next] - bottom_points[index],
+            ));
+            top_edges.push(add_line_edge(
+                builder,
+                top_vertices[index],
+                top_vertices[next],
+                top_points[index],
+                top_points[next] - top_points[index],
+            ));
+        }
         vertical_edges.push(add_line_edge(
             builder,
             bottom_vertices[index],
@@ -322,19 +352,59 @@ pub(crate) fn add_line_edge(
 }
 
 fn add_cap_loop(builder: &mut ExactBRepBuilder, edges: &[EdgeId], points: &[Point3]) -> LoopId {
+    add_cap_loop_with_blends(builder, edges, points, &[])
+}
+
+/// A cap loop whose pcurves follow blend arcs where the ring has them.
+///
+/// The cap surface is the z-plane, so parameter space IS the cross-section
+/// plane and a straight edge maps to a `Line2`. A blend edge must map to a
+/// `Circle2`: using the chord would make the cap boundary disagree with both
+/// the blend face and the edge's own 3D curve, by the sagitta. The loop would
+/// still close and every handle would still resolve, so only a geometric
+/// audit can see the difference.
+fn add_cap_loop_with_blends(
+    builder: &mut ExactBRepBuilder,
+    edges: &[EdgeId],
+    points: &[Point3],
+    blends: &[Option<(BlendCorner, Scalar)>],
+) -> LoopId {
     let mut uses = Vec::with_capacity(edges.len());
     let mut intervals = Vec::with_capacity(edges.len());
     for (index, &edge) in edges.iter().enumerate() {
         let next = (index + 1) % edges.len();
-        let origin = points[index].truncate();
-        let direction = (points[next] - points[index]).truncate();
-        let pcurve = builder.add_curve2(Curve2::Line(Line2 { origin, direction }));
+        let (pcurve, interval) = match blends.get(index) {
+            Some(Some((blend, radius))) => {
+                let start = blend.start - blend.centre;
+                let length = start.length();
+                let x = if length == 0.0 {
+                    Vec2::X
+                } else {
+                    start / length
+                };
+                let curve = Curve2::Circle(Circle2 {
+                    frame: Frame2 {
+                        origin: Vec2::new(blend.centre.x, blend.centre.y),
+                        x,
+                        y: Vec2::new(-x.y, x.x),
+                    },
+                    radius: *radius,
+                });
+                (curve, Interval::new(0.0, blend.sweep))
+            }
+            _ => {
+                let origin = points[index].truncate();
+                let direction = (points[next] - points[index]).truncate();
+                (Curve2::Line(Line2 { origin, direction }), Interval::UNIT)
+            }
+        };
+        let pcurve = builder.add_curve2(pcurve);
         uses.push(EdgeUse {
             edge,
             orientation: Orientation::Forward,
             pcurve: Some(pcurve),
         });
-        intervals.push(Interval::UNIT);
+        intervals.push(interval);
     }
     add_loop(builder, uses, intervals)
 }
@@ -706,7 +776,8 @@ pub(crate) fn extrude_with_cylindrical_blends(
         2 + n,
     )?;
 
-    let topology = add_polygon_ring(&mut builder, ring, offset)?;
+    // Blend edges must be arcs, so the table has to reach ring construction.
+    let topology = add_polygon_ring_with_blends(&mut builder, ring, offset, blends)?;
 
     let bottom_surface = builder.add_surface(Surface::Plane(Plane {
         frame: identity_frame3(Vec3::ZERO),
@@ -714,12 +785,18 @@ pub(crate) fn extrude_with_cylindrical_blends(
     let top_surface = builder.add_surface(Surface::Plane(Plane {
         frame: identity_frame3(offset),
     }));
-    let bottom_loop = add_cap_loop(
+    let bottom_loop = add_cap_loop_with_blends(
         &mut builder,
         &topology.bottom_edges,
         &topology.bottom_points,
+        blends,
     );
-    let top_loop = add_cap_loop(&mut builder, &topology.top_edges, &topology.bottom_points);
+    let top_loop = add_cap_loop_with_blends(
+        &mut builder,
+        &topology.top_edges,
+        &topology.bottom_points,
+        blends,
+    );
 
     let bottom_face = builder.topology_mut().add_face(Face {
         surface: Some(bottom_surface),
@@ -870,4 +947,44 @@ fn add_cylindrical_blend(
         }],
         orientation: Orientation::Forward,
     }))
+}
+
+/// The bottom and top arc edges of one cylindrical blend.
+///
+/// Both lie on the blend cylinder, so each is a `Circle3` whose frame x-axis
+/// points at the arc start -- the same convention `add_cylindrical_blend`
+/// uses, which is what lets the edge interval be the sweep itself.
+fn add_blend_arc_edges(
+    builder: &mut ExactBRepBuilder,
+    blend: &BlendCorner,
+    radius: Scalar,
+    bottom: (VertexId, VertexId),
+    top: (VertexId, VertexId),
+    offset: Vec3,
+) -> (EdgeId, EdgeId) {
+    let centre = Point3::new(blend.centre.x, blend.centre.y, 0.0);
+    let start = Point3::new(blend.start.x, blend.start.y, 0.0);
+    let x = (start - centre).normalize_or_zero();
+    let z = offset.normalize_or_zero();
+    let y = z.cross(x);
+
+    let mut arc_edge = |origin: Point3, ends: (VertexId, VertexId)| {
+        let curve = builder.add_curve3(Curve3::Circle(Circle3 {
+            frame: Frame3 { origin, x, y, z },
+            radius,
+        }));
+        let edge = builder.topology_mut().add_edge(Edge {
+            start: ends.0,
+            end: ends.1,
+            curve: Some(curve),
+        });
+        // The circle is parameterised by angle from the frame x-axis, which
+        // points at the arc start, so the interval IS the sweep.
+        builder.set_edge_interval(edge, Interval::new(0.0, blend.sweep));
+        edge
+    };
+
+    let bottom_edge = arc_edge(centre, bottom);
+    let top_edge = arc_edge(centre + offset, top);
+    (bottom_edge, top_edge)
 }

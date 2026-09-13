@@ -1,0 +1,28 @@
+[package]
+name = "axiolid-brep-audit"
+description = "Geometric consistency auditing for exact boundary representations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-contracts.workspace = true
+axiolid-curve.workspace = true
+axiolid-surface.workspace = true
+axiolid-topology.workspace = true
+axiolid-brep.workspace = true
+axiolid-evaluate.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.repair"
+domain = "repair.brep"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core", "axiolid-contracts", "axiolid-curve", "axiolid-surface", "axiolid-topology", "axiolid-brep", "axiolid-evaluate"]

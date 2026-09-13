@@ -64,6 +64,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-brep-audit"
+version = "0.1.8"
+dependencies = [
+ "axiolid-brep",
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-curve",
+ "axiolid-evaluate",
+ "axiolid-surface",
+ "axiolid-topology",
+]
+
+[[package]]
 name = "axiolid-c-abi-profile-probe"
 version = "0.0.0"
 dependencies = [
@@ -82,6 +95,7 @@ name = "axiolid-construct"
 version = "0.1.8"
 dependencies = [
  "axiolid-brep",
+ "axiolid-brep-audit",
  "axiolid-contracts",
  "axiolid-core",
  "axiolid-curve",

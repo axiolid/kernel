@@ -38,6 +38,8 @@ use axiolid_overlay::{
 };
 
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
+use axiolid_brep_audit::geometric_audit;
+
 use crate::extrude_arc::extrude_arc_ring;
 use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
@@ -181,7 +183,7 @@ pub fn boolean_prisms_exact(
     // The caps lie in the planes the height logic selected above, so they
     // are fragments of whichever operand supplied each bound.
     name_caps(&mut solid, subject, tool, bottom, top, tolerance);
-    Ok(solid)
+    gate_geometry(solid, tolerance)
 }
 
 fn validate(prism: &Prism, role: &'static str) -> GeomResult<()> {
@@ -354,7 +356,8 @@ pub fn boolean_arc_prisms_exact(
             "exact arc prism boolean whose result does not start at z = 0",
         ));
     }
-    extrude_arc_ring(&region.outer, Vec3::Z * (top - bottom))
+    let solid = extrude_arc_ring(&region.outer, Vec3::Z * (top - bottom))?;
+    gate_geometry(solid, tolerance)
 }
 
 /// The height span a coaxial boolean result occupies.
@@ -399,4 +402,38 @@ fn resolve_span(
         }
         _ => Err(unsupported("unknown exact prism boolean operator")),
     }
+}
+
+/// Reject a boolean result whose geometry does not hold together.
+///
+/// # Why booleans specifically
+///
+/// A boolean is where pcurves get rebuilt against surfaces they did not
+/// originally trim, so it is the operation most able to produce a solid that
+/// is topologically perfect and geometrically wrong. Both properties held on
+/// the cap loops of an earlier arc boolean, and nothing caught it.
+///
+/// The audit is cheap here because an exact analytic boolean returns a handful
+/// of faces, not a mesh: a few evaluations per edge use.
+fn gate_geometry(solid: ExactBRep, tolerance: Tolerance) -> GeomResult<ExactBRep> {
+    let health = geometric_audit(&solid, tolerance);
+    if health.is_consistent() {
+        return Ok(solid);
+    }
+    // Report the measured deviation, not just the fact of failure: a caller
+    // deciding whether their tolerance is wrong needs the number.
+    let detail = match health.worst_error() {
+        Some(error) => format!(
+            "boolean result failed its geometric audit: {} defect(s), worst deviation {error:e}",
+            health.defects().len()
+        ),
+        None => format!(
+            "boolean result failed its geometric audit: {} defect(s)",
+            health.defects().len()
+        ),
+    };
+    Err(GeomError::BackendContractViolation {
+        backend: BACKEND_ID,
+        detail,
+    })
 }

@@ -27,6 +27,7 @@ axiolid-reference.workspace = true
 axiolid-surface.workspace = true
 axiolid-topology.workspace = true
 axiolid-tessellation-contract.workspace = true
+axiolid-brep-audit.workspace = true
 earcut = "0.4"
 [dev-dependencies]
 axiolid-heal.workspace = true
@@ -44,4 +45,4 @@ role = "algorithm.construction"
 domain = "construction"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-contracts", "axiolid-evaluate", "axiolid-guarantees", "axiolid-heal", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-measure", "axiolid-mesh", "axiolid-nurbs", "axiolid-overlay", "axiolid-predicates", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-contracts", "axiolid-evaluate", "axiolid-brep-audit", "axiolid-guarantees", "axiolid-heal", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-measure", "axiolid-mesh", "axiolid-nurbs", "axiolid-overlay", "axiolid-predicates", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]

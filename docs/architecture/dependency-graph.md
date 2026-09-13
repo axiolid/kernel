@@ -13,6 +13,7 @@ graph TD
     axiolid_backend_gpu["axiolid-backend-gpu\nexecution.context"]
     axiolid_benchmark["axiolid-benchmark\ntool.benchmark"]
     axiolid_brep["axiolid-brep\nrepresentation.composed"]
+    axiolid_brep_audit["axiolid-brep-audit\nalgorithm.repair"]
     axiolid_capi["axiolid-capi\nfacade.native-c"]
     axiolid_construct["axiolid-construct\nalgorithm.construction"]
     axiolid_contracts["axiolid-contracts\ncontract.common"]
@@ -116,8 +117,16 @@ graph TD
     axiolid_brep --> axiolid_curve
     axiolid_brep --> axiolid_surface
     axiolid_brep --> axiolid_topology
+    axiolid_brep_audit --> axiolid_brep
+    axiolid_brep_audit --> axiolid_contracts
+    axiolid_brep_audit --> axiolid_core
+    axiolid_brep_audit --> axiolid_curve
+    axiolid_brep_audit --> axiolid_evaluate
+    axiolid_brep_audit --> axiolid_surface
+    axiolid_brep_audit --> axiolid_topology
     axiolid_capi --> axiolid
     axiolid_construct --> axiolid_brep
+    axiolid_construct --> axiolid_brep_audit
     axiolid_construct --> axiolid_contracts
     axiolid_construct --> axiolid_core
     axiolid_construct --> axiolid_curve

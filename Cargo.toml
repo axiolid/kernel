@@ -38,6 +38,7 @@ members = [
     "crates/algorithms/query/measure",
     "crates/algorithms/sampled/field",
     "crates/algorithms/repair/heal",
+    "crates/algorithms/repair/brep-audit",
     "crates/algorithms/discrete/decimate",
     "crates/algorithms/discrete/decompose",
     "crates/algorithms/discrete/minkowski",
@@ -75,6 +76,7 @@ axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", vers
 axiolid-model = { path = "crates/representations/modeling/graph", version = "0.1.8" }
 axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.1.8" }
 axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.1.8" }
+axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.1.8" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.1.8" }
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.1.8" }
 axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.1.8" }

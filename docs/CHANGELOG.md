@@ -6,6 +6,24 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `axiolid-brep-audit`: geometric consistency auditing for exact B-reps.
+  `geometric_audit` evaluates curves and surfaces and checks that vertices lie
+  on their edge curves and that pcurves, lifted through their face surface,
+  follow the edges they trim. Complements the topological `audit_brep`, which
+  is exact and tolerance-free and cannot see these defects.
+- Both exact boolean paths are now gated through the geometric audit and
+  refuse a result that does not hold together, reporting the measured worst
+  deviation.
+
+### Fixed
+
+- Constant-radius fillets produced blend edges carrying a straight `Curve3`
+  and cap pcurves carrying a straight `Curve2`, both across arc geometry. The
+  face boundary disagreed with the edge by the chord-versus-arc sagitta while
+  remaining topologically valid. Found by the new geometric audit.
+
+### Added
+
 - Multi-corner filleting (`fillet_polygon_corners`): several corners of one
   polygon profile are rounded in a single solid, each with its own radius.
   Corners that share an edge are checked pairwise -- their setbacks must sum
