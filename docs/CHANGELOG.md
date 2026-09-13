@@ -6,6 +6,22 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `Profile::Contour` extrusion: an arbitrary exact contour of line and arc
+  segments extrudes to a solid with genuine `Plane` and `Cylinder` walls.
+  Curve kinds that cannot be carried exactly are refused rather than sampled
+  into chords.
+- `chamfer_polygon_corners`: chamfers several corners of an arbitrary polygon,
+  each with its own setback, mirroring `fillet_polygon_corners`.
+
+### Fixed
+
+- `arc_geometry` placed the arc centre with an unsigned apothem. Because
+  `cos` is even, a positive and a negative bulge produced the identical
+  circle, so every arc curved the same way regardless of its stated
+  direction. Existing tests used positive bulges only.
+
+### Added
+
 - `axiolid-brep-audit`: geometric consistency auditing for exact B-reps.
   `geometric_audit` evaluates curves and surfaces and checks that vertices lie
   on their edge curves and that pcurves, lifted through their face surface,

@@ -183,3 +183,65 @@ fn a_cylindrical_wall_is_centred_on_the_disc_axis() {
     }
     assert!(checked > 0, "no cylindrical wall was checked");
 }
+
+#[test]
+fn opposite_bulges_curve_to_opposite_sides() {
+    // Regression: the arc centre used an UNSIGNED apothem, and `cos` is even,
+    // so +b and -b produced the identical circle -- every arc bulged the same
+    // way regardless of its stated direction. Every existing test used
+    // positive bulges only, so nothing caught it.
+    //
+    // Driven through the boolean entry point because the extruder itself is
+    // crate-private; a huge tool prism leaves the subject shape intact.
+    let tool = ArcPrism {
+        section: square(50.0),
+        bottom: 0.0,
+        top: 1.0,
+    };
+
+    let centre_of = |bulge: f64| {
+        let section = ArcRing::new(vec![
+            ArcVertex::bulged(Point2::new(0.0, 0.0), bulge),
+            ArcVertex::straight(Point2::new(2.0, 0.0)),
+            ArcVertex::straight(Point2::new(2.0, 2.0)),
+            ArcVertex::straight(Point2::new(0.0, 2.0)),
+        ]);
+        let subject = ArcPrism {
+            section,
+            bottom: 0.0,
+            top: 1.0,
+        };
+        let solid = boolean_arc_prisms_exact(
+            &subject,
+            &tool,
+            BooleanOperator::Intersection,
+            Tolerance::METRE,
+        )
+        .expect("a bulged ring clipped by a large square");
+        solid
+            .surfaces()
+            .iter()
+            .find_map(|surface| match surface {
+                Surface::Cylinder(cylinder) => Some(cylinder.frame.origin),
+                _ => None,
+            })
+            .expect("a cylindrical wall")
+    };
+
+    let positive = centre_of(0.5);
+    let negative = centre_of(-0.5);
+
+    // The bulged chord runs along +x, so the two centres must straddle it.
+    assert!(
+        positive.y * negative.y < 0.0,
+        "opposite bulges must place centres on opposite sides, got {} and {}",
+        positive.y,
+        negative.y
+    );
+    assert!(
+        (positive.y + negative.y).abs() < 1e-12,
+        "equal magnitudes must mirror exactly, got {} and {}",
+        positive.y,
+        negative.y
+    );
+}

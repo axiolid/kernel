@@ -6,13 +6,15 @@ use axiolid_brep::{EdgeName, ExactBRep, ExactBRepBuilder, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
-use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
+use axiolid_profile::{CircleProfile, ContourProfile, Profile, RectangleProfile};
 use axiolid_surface::{Cylinder, Plane, Surface};
 use axiolid_topology::{
     audit_brep, Edge, EdgeId, EdgeUse, Face, FaceBound, FaceId, Loop, LoopId, Orientation, Shell,
     Solid, Vertex, VertexId,
 };
 
+use crate::contour_lower::contour_to_arc_ring;
+use crate::extrude_arc::extrude_arc_ring;
 use crate::BACKEND_ID;
 
 #[derive(Debug)]
@@ -41,7 +43,7 @@ pub fn extrude_profile_exact(
         Profile::Circle(circle) => extrude_circle(circle, offset),
         Profile::Ellipse(_) => Err(unsupported("ellipse extrusion")),
         Profile::Section(_) => Err(unsupported("section-profile extrusion")),
-        Profile::Contour(_) => Err(unsupported("contour extrusion")),
+        Profile::Contour(contour) => extrude_contour(contour, offset, tolerance),
         Profile::Derived { .. } => Err(unsupported("derived-profile extrusion")),
         Profile::Composite(_) => Err(unsupported("composite-profile extrusion")),
         Profile::CenterLine(_) => Err(unsupported("center-line extrusion")),
@@ -987,4 +989,33 @@ fn add_blend_arc_edges(
     let bottom_edge = arc_edge(centre, bottom);
     let top_edge = arc_edge(centre + offset, top);
     (bottom_edge, top_edge)
+}
+
+/// Extrude an arbitrary exact contour.
+///
+/// Lowers the contour onto the arc-ring extruder, which already builds exact
+/// planar walls for straight segments and cylindrical walls for circular
+/// ones. Curve kinds it cannot carry exactly are refused by the lowering
+/// rather than sampled into chords.
+///
+/// Holes are refused: the arc cap-loop builder emits a single bound, so a
+/// hole would be silently dropped from the caps while still appearing in the
+/// walls -- a solid that closes and is wrong.
+fn extrude_contour(
+    contour: &ContourProfile,
+    offset: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    if !contour.holes.is_empty() {
+        return Err(unsupported("contour extrusion with holes"));
+    }
+    let ring = contour_to_arc_ring(&contour.outer, tolerance)?;
+    // A contour of only straight segments is a polygon, and the polygon path
+    // carries face naming and hole support the arc path does not. Routing it
+    // there keeps one behaviour for one shape.
+    if ring.vertices.iter().all(|vertex| vertex.bulge == 0.0) {
+        let points: Vec<Point2> = ring.vertices.iter().map(|vertex| vertex.point).collect();
+        return extrude_polygon_rings(&[points], offset);
+    }
+    extrude_arc_ring(&ring, offset)
 }

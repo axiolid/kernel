@@ -66,7 +66,11 @@ pub(crate) fn arc_geometry(from: Point2, to: Point2, bulge: Scalar) -> GeomResul
     let radius = length / (2.0 * sine);
     let unit = chord / length;
     let normal = Vec2::new(-unit.y, unit.x);
-    let centre = from + chord * 0.5 + normal * (radius * half.cos());
+    // The apothem must carry the sweep's SIGN. `cos` is even, so using it
+    // unsigned puts +bulge and -bulge on the same centre: every arc would
+    // bulge the same way regardless of its stated direction. A positive
+    // sweep turns left, so its centre sits left of the chord.
+    let centre = from + chord * 0.5 + normal * (radius * half.cos()) * sweep.signum();
     if !centre.is_finite() || !radius.is_finite() {
         return Err(GeomError::Degenerate(
             "arc edge produced a non-finite circle".to_owned(),

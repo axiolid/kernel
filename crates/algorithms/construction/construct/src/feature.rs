@@ -666,3 +666,109 @@ pub fn fillet_polygon_corners(
 
     extrude_with_cylindrical_blends(&blended, Vec3::Z * depth, &table)
 }
+
+/// Chamfer several corners of an arbitrary polygon profile.
+///
+/// Each entry is a `(corner index, setback distance)` pair. The corner's own
+/// vertex is replaced by two points, each `distance` back along one adjacent
+/// edge; the flat between them is the chamfer.
+///
+/// # Why this shares the fillet's checks but not its geometry
+///
+/// A chamfer is the same corner problem with a straight cut instead of an
+/// arc, so the constraints are identical -- reflex corners are a different
+/// surface, and two chamfers sharing an edge must not consume more of it than
+/// it has. What differs is that the setback IS the given distance rather than
+/// `r / tan(theta/2)`, and the resulting wall is planar, so no blend table is
+/// needed.
+pub fn chamfer_polygon_corners(
+    ring: &[Point2],
+    chamfers: &[(usize, Scalar)],
+    depth: Scalar,
+) -> GeomResult<ExactBRep> {
+    if chamfers.is_empty() {
+        return Err(GeomError::InvalidInput(
+            "multi-corner chamfer needs at least one corner".to_owned(),
+        ));
+    }
+    if ring.len() < 3 {
+        return Err(GeomError::InvalidInput(
+            "chamfer profile ring needs at least three points".to_owned(),
+        ));
+    }
+    if !depth.is_finite() || depth <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "chamfer extrusion depth must be positive and finite, got {depth}"
+        )));
+    }
+
+    let count = ring.len();
+    let mut seen = vec![false; count];
+    let mut setbacks = vec![0.0; count];
+
+    for (corner, distance) in chamfers.iter().copied() {
+        if corner >= count {
+            return Err(GeomError::InvalidInput(format!(
+                "chamfer corner {corner} is outside a ring of {count} points"
+            )));
+        }
+        if seen[corner] {
+            return Err(GeomError::InvalidInput(format!(
+                "chamfer corner {corner} given more than once"
+            )));
+        }
+        seen[corner] = true;
+        if !distance.is_finite() || distance <= 0.0 {
+            return Err(GeomError::InvalidInput(format!(
+                "chamfer distance must be positive and finite, got {distance}"
+            )));
+        }
+        setbacks[corner] = distance;
+    }
+
+    // Reflex corners cut into the material from the outside: a different
+    // operation, refused here exactly as on the fillet path.
+    for corner in 0..count {
+        if !seen[corner] {
+            continue;
+        }
+        let previous = ring[(corner + count - 1) % count];
+        let here = ring[corner];
+        let next = ring[(corner + 1) % count];
+        if (here - previous).perp_dot(next - here) <= 0.0 {
+            return Err(unsupported("chamfer on a reflex corner"));
+        }
+    }
+
+    // Both endpoints of an edge draw from the same edge length.
+    for start in 0..count {
+        let end = (start + 1) % count;
+        let length = (ring[end] - ring[start]).length();
+        if setbacks[start] + setbacks[end] >= length {
+            return Err(unsupported(
+                "chamfer distances too large for the edge between two corners",
+            ));
+        }
+    }
+
+    let mut chamfered = Vec::with_capacity(count + chamfers.len());
+    for corner in 0..count {
+        let here = ring[corner];
+        if !seen[corner] {
+            chamfered.push(here);
+            continue;
+        }
+        let previous = ring[(corner + count - 1) % count];
+        let next = ring[(corner + 1) % count];
+        let into_previous = (previous - here).normalize_or_zero();
+        let into_next = (next - here).normalize_or_zero();
+        if into_previous == Vec2::ZERO || into_next == Vec2::ZERO {
+            return Err(unsupported("chamfer at a degenerate corner"));
+        }
+        // The corner vertex itself disappears: that is the chamfer.
+        chamfered.push(here + into_previous * setbacks[corner]);
+        chamfered.push(here + into_next * setbacks[corner]);
+    }
+
+    extrude_polygon_rings(&[chamfered], Vec3::Z * depth)
+}
