@@ -15,6 +15,7 @@ use axiolid_topology::{
 
 use crate::contour_lower::contour_to_arc_ring;
 use crate::extrude_arc::extrude_arc_ring;
+use crate::profile_lower::{lower_composite, lower_derived};
 use crate::BACKEND_ID;
 
 #[derive(Debug)]
@@ -44,8 +45,14 @@ pub fn extrude_profile_exact(
         Profile::Ellipse(_) => Err(unsupported("ellipse extrusion")),
         Profile::Section(_) => Err(unsupported("section-profile extrusion")),
         Profile::Contour(contour) => extrude_contour(contour, offset, tolerance),
-        Profile::Derived { .. } => Err(unsupported("derived-profile extrusion")),
-        Profile::Composite(_) => Err(unsupported("composite-profile extrusion")),
+        Profile::Derived { basis, transform } => {
+            // Lower to a concrete profile, then extrude that. Recursing on
+            // the LOWERED profile (not the basis) keeps one code path for
+            // each shape kind instead of a transform-aware variant of each.
+            let lowered = lower_derived(basis, transform, tolerance)?;
+            extrude_profile_exact(&lowered, direction, depth, tolerance)
+        }
+        Profile::Composite(members) => extrude_composite(members, offset, tolerance),
         Profile::CenterLine(_) => Err(unsupported("center-line extrusion")),
         _ => Err(unsupported("unknown profile extrusion")),
     }
@@ -1018,4 +1025,19 @@ fn extrude_contour(
         return extrude_polygon_rings(&[points], offset);
     }
     extrude_arc_ring(&ring, offset)
+}
+
+/// Extrude a composite profile: union the members, then extrude the result.
+fn extrude_composite(
+    members: &[Profile],
+    offset: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    let (outer, holes) = lower_composite(members, tolerance)?;
+    // Ring 0 is the outer boundary and the rest are through-holes, which is
+    // exactly the shape `extrude_polygon_rings` already expects.
+    let mut rings = Vec::with_capacity(1 + holes.len());
+    rings.push(outer);
+    rings.extend(holes);
+    extrude_polygon_rings(&rings, offset)
 }

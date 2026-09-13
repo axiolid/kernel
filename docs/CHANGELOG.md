@@ -6,6 +6,25 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `Profile::Derived` extrusion: the affine transform is pushed down onto the
+  basis geometry and the lowered profile is extruded. Nested derivations
+  compose their transforms. Segments are transformed as geometry, so arcs stay
+  arcs rather than becoming chords.
+- `Profile::Composite` extrusion: members are unioned into one section, with
+  holes formed by the union surviving into the solid. Members that are
+  mutually disjoint are refused, since a `Solid` holds one outer shell.
+
+### Notes
+
+- A circle survives a derived transform only when the linear part is
+  conformal. The check is `M^T M`, not the determinant: a shear has
+  determinant 1 and still turns a circle into an ellipse.
+- A mirroring transform (negative determinant) reverses ring orientation, so
+  lowered rings are re-oriented counter-clockwise rather than built
+  inside-out.
+
+### Added
+
 - `Profile::Contour` extrusion: an arbitrary exact contour of line and arc
   segments extrudes to a solid with genuine `Plane` and `Cylinder` walls.
   Curve kinds that cannot be carried exactly are refused rather than sampled

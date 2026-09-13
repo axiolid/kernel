@@ -55,6 +55,7 @@ pub mod loft;
 pub mod offset;
 pub mod polyhedron;
 pub mod profile;
+pub mod profile_lower;
 pub mod result;
 pub mod revolve;
 pub mod revolve_exact;
