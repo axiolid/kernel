@@ -1504,6 +1504,7 @@ fn surface_periods(surface: &axiolid_surface::Surface) -> (Option<Scalar>, Optio
     let tau = core::f64::consts::TAU;
     match surface {
         axiolid_surface::Surface::Cylinder(_)
+        | axiolid_surface::Surface::EllipticalCylinder(_)
         | axiolid_surface::Surface::Cone(_)
         | axiolid_surface::Surface::Sphere(_) => (Some(tau), None),
         axiolid_surface::Surface::Torus(_) => (Some(tau), Some(tau)),
@@ -2015,5 +2016,26 @@ mod tests {
             }
         ));
         assert_eq!(*state.total_curved_records, MAX_TOTAL_CURVED_RECORDS);
+    }
+
+    #[test]
+    fn an_elliptical_cylinder_is_periodic_in_u() {
+        // The seam only closes if the u-period is known. A new surface that
+        // falls into the catch-all arm silently reports (None, None), which
+        // leaves the wall split open along its seam instead of wrapping.
+        let frame = Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        };
+        let surface = Surface::EllipticalCylinder(axiolid_surface::EllipticalCylinder {
+            frame,
+            semi_axis_x: 3.0,
+            semi_axis_y: 1.0,
+        });
+        let (u, v) = surface_periods(&surface);
+        assert_eq!(u, Some(core::f64::consts::TAU), "u must wrap");
+        assert_eq!(v, None, "the axis direction does not wrap");
     }
 }

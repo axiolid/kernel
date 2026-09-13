@@ -66,6 +66,7 @@ fn family(surface: &Surface) -> &'static str {
         Surface::Cylinder(_) => "cylindrical",
         Surface::Cone(_) => "conical",
         Surface::Sphere(_) => "spherical",
+        Surface::EllipticalCylinder(_) => "elliptical-cylindrical",
         Surface::Torus(_) => "toroidal",
         _ => "non-planar",
     }

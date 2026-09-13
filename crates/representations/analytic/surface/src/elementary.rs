@@ -18,6 +18,23 @@ pub struct Cylinder {
     pub radius: Scalar,
 }
 
+/// Infinite elliptical cylinder.
+///
+/// Distinct from [`Cylinder`] rather than a special case of it: a circular
+/// cylinder's outward normal is its radial direction, and for an ellipse that
+/// is only true at the four axis points -- elsewhere the two disagree by up to
+/// 53 degrees for a 3:1 ellipse. Anything that assumes radial normals is wrong
+/// here, so the type is separate and forces the question.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EllipticalCylinder {
+    /// Local frame; `z` is the axis, `x` and `y` the semi-axis directions.
+    pub frame: Frame3,
+    /// Semi-axis along local `x`.
+    pub semi_axis_x: Scalar,
+    /// Semi-axis along local `y`.
+    pub semi_axis_y: Scalar,
+}
+
 /// Infinite right circular cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cone {

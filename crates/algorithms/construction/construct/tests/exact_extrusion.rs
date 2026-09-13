@@ -5,7 +5,7 @@ use axiolid_contracts::{GeomError, Operation};
 use axiolid_core::{Tolerance, Vec2, Vec3};
 use axiolid_curve::Curve2;
 use axiolid_evaluate::{evaluate2, evaluate3};
-use axiolid_profile::{CircleProfile, EllipseProfile, Profile, RectangleProfile};
+use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
 use axiolid_surface::Surface;
 use axiolid_topology::{audit_brep, Orientation};
 
@@ -179,15 +179,9 @@ fn exact_extrusion_refuses_families_whose_supports_are_not_populated() {
         radius: 1.0,
         thickness: Some(0.2),
     });
-    let ellipse = Profile::Ellipse(EllipseProfile {
-        semi_axis_x: 2.0,
-        semi_axis_y: 1.0,
-    });
-
     for (profile, family) in [
         (rounded, "rounded rectangle extrusion"),
         (annulus, "annular circle extrusion"),
-        (ellipse, "ellipse extrusion"),
     ] {
         let error = extrude_profile_exact(&profile, Vec3::Z, 1.0, Tolerance::METRE)
             .expect_err("unsupported exact family must refuse");

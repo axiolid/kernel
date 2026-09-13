@@ -5,9 +5,9 @@ use std::f64::consts::TAU;
 use axiolid_brep::{EdgeName, ExactBRep, ExactBRepBuilder, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
-use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
-use axiolid_profile::{CircleProfile, ContourProfile, Profile, RectangleProfile};
-use axiolid_surface::{Cylinder, Plane, Surface};
+use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Ellipse2, Ellipse3, Line2, Line3};
+use axiolid_profile::{CircleProfile, ContourProfile, EllipseProfile, Profile, RectangleProfile};
+use axiolid_surface::{Cylinder, EllipticalCylinder, Plane, Surface};
 use axiolid_topology::{
     audit_brep, Edge, EdgeId, EdgeUse, Face, FaceBound, FaceId, Loop, LoopId, Orientation, Shell,
     Solid, Vertex, VertexId,
@@ -42,7 +42,7 @@ pub fn extrude_profile_exact(
     match profile {
         Profile::Rectangle(rectangle) => extrude_rectangle(rectangle, offset, tolerance),
         Profile::Circle(circle) => extrude_circle(circle, offset),
-        Profile::Ellipse(_) => Err(unsupported("ellipse extrusion")),
+        Profile::Ellipse(ellipse) => extrude_ellipse(ellipse, offset),
         Profile::Section(_) => Err(unsupported("section-profile extrusion")),
         Profile::Contour(contour) => extrude_contour(contour, offset, tolerance),
         Profile::Derived { basis, transform } => {
@@ -1040,4 +1040,166 @@ fn extrude_composite(
     rings.push(outer);
     rings.extend(holes);
     extrude_polygon_rings(&rings, offset)
+}
+
+/// Extrude an ellipse profile into an elliptical-cylinder prism.
+///
+/// Mirrors `extrude_circle`: one seam edge, two closed cap edges, a single
+/// curved wall. The wall is a genuine `EllipticalCylinder`, not a spline
+/// approximation, and the cap pcurve is an `Ellipse2` whose parameter matches
+/// the wall's `u` -- both use `(a cos t, b sin t)`, which is what lets the
+/// cap boundary and the wall boundary agree exactly on the shared edge.
+fn extrude_ellipse(ellipse: &EllipseProfile, offset: Vec3) -> GeomResult<ExactBRep> {
+    let (a, b) = (ellipse.semi_axis_x, ellipse.semi_axis_y);
+    if !a.is_finite() || !b.is_finite() || a <= 0.0 || b <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "exact ellipse profile semi-axes must be positive and finite, got {a} x {b}"
+        )));
+    }
+    if offset.x != 0.0 || offset.y != 0.0 {
+        return Err(unsupported("oblique ellipse extrusion"));
+    }
+
+    let frame_bottom = identity_frame3(Vec3::ZERO);
+    let frame_top = identity_frame3(offset);
+    let frame2 = Frame2 {
+        origin: Vec2::ZERO,
+        x: Vec2::X,
+        y: Vec2::Y,
+    };
+    // The seam sits at t = 0, which is (a, 0) for this parameterisation.
+    let bottom_point = Vec3::new(a, 0.0, 0.0);
+    let top_point = bottom_point + offset;
+
+    let mut builder = ExactBRepBuilder::default();
+    reserve(&mut builder, 2, 3, 3, 3, 3, 8, 3)?;
+    let bottom_vertex = builder.topology_mut().add_vertex(Vertex {
+        position: bottom_point,
+    });
+    let top_vertex = builder.topology_mut().add_vertex(Vertex {
+        position: top_point,
+    });
+
+    let bottom_curve = builder.add_curve3(Curve3::Ellipse(Ellipse3 {
+        frame: frame_bottom,
+        semi_axis_x: a,
+        semi_axis_y: b,
+    }));
+    let bottom_edge = builder.topology_mut().add_edge(Edge {
+        start: bottom_vertex,
+        end: bottom_vertex,
+        curve: Some(bottom_curve),
+    });
+    builder.set_edge_interval(bottom_edge, Interval::new(0.0, TAU));
+
+    let top_curve = builder.add_curve3(Curve3::Ellipse(Ellipse3 {
+        frame: frame_top,
+        semi_axis_x: a,
+        semi_axis_y: b,
+    }));
+    let top_edge = builder.topology_mut().add_edge(Edge {
+        start: top_vertex,
+        end: top_vertex,
+        curve: Some(top_curve),
+    });
+    builder.set_edge_interval(top_edge, Interval::new(0.0, TAU));
+
+    let seam_curve = builder.add_curve3(Curve3::Line(Line3 {
+        origin: bottom_point,
+        direction: offset,
+    }));
+    let seam_edge = builder.topology_mut().add_edge(Edge {
+        start: bottom_vertex,
+        end: top_vertex,
+        curve: Some(seam_curve),
+    });
+    builder.set_edge_interval(seam_edge, Interval::UNIT);
+
+    let bottom_loop = add_ellipse_cap_loop(&mut builder, bottom_edge, frame2, a, b);
+    let top_loop = add_ellipse_cap_loop(&mut builder, top_edge, frame2, a, b);
+
+    // The wall's parameter domain is u in [0, TAU] by v in [0, depth], so the
+    // trim rectangle is the same as the circular case: only the SURFACE
+    // differs, because both parameterise u the same way.
+    let depth = offset.z;
+    let side_curves = [
+        Curve2::Line(Line2 {
+            origin: Vec2::ZERO,
+            direction: Vec2::X,
+        }),
+        Curve2::Line(Line2 {
+            origin: Vec2::new(TAU, 0.0),
+            direction: Vec2::new(0.0, depth),
+        }),
+        Curve2::Line(Line2 {
+            origin: Vec2::new(0.0, depth),
+            direction: Vec2::X,
+        }),
+        Curve2::Line(Line2 {
+            origin: Vec2::ZERO,
+            direction: Vec2::new(0.0, depth),
+        }),
+    ];
+    let side_edges = [
+        (bottom_edge, Orientation::Forward, Interval::new(0.0, TAU)),
+        (seam_edge, Orientation::Forward, Interval::UNIT),
+        (top_edge, Orientation::Reversed, Interval::new(TAU, 0.0)),
+        (seam_edge, Orientation::Reversed, Interval::new(1.0, 0.0)),
+    ];
+    let mut side_uses = Vec::with_capacity(4);
+    let mut side_intervals = Vec::with_capacity(4);
+    for ((edge, orientation, interval), curve) in side_edges.into_iter().zip(side_curves) {
+        let pcurve = builder.add_curve2(curve);
+        side_uses.push(EdgeUse {
+            edge,
+            orientation,
+            pcurve: Some(pcurve),
+        });
+        side_intervals.push(interval);
+    }
+    let side_loop = add_loop(&mut builder, side_uses, side_intervals);
+
+    let bottom_surface = builder.add_surface(Surface::Plane(Plane {
+        frame: frame_bottom,
+    }));
+    let top_surface = builder.add_surface(Surface::Plane(Plane { frame: frame_top }));
+    let side_surface = builder.add_surface(Surface::EllipticalCylinder(EllipticalCylinder {
+        frame: frame_bottom,
+        semi_axis_x: a,
+        semi_axis_y: b,
+    }));
+    let bottom_face = add_single_bound_face(
+        &mut builder,
+        bottom_surface,
+        bottom_loop,
+        Orientation::Reversed,
+    );
+    let top_face = add_single_bound_face(&mut builder, top_surface, top_loop, Orientation::Forward);
+    let side_face =
+        add_single_bound_face(&mut builder, side_surface, side_loop, Orientation::Forward);
+    finish_closed(builder, vec![bottom_face, top_face, side_face])
+}
+
+/// A closed cap loop whose single edge is trimmed by an ellipse pcurve.
+fn add_ellipse_cap_loop(
+    builder: &mut ExactBRepBuilder,
+    edge: EdgeId,
+    frame: Frame2,
+    semi_axis_x: Scalar,
+    semi_axis_y: Scalar,
+) -> LoopId {
+    let pcurve = builder.add_curve2(Curve2::Ellipse(Ellipse2 {
+        frame,
+        semi_axis_x,
+        semi_axis_y,
+    }));
+    add_loop(
+        builder,
+        vec![EdgeUse {
+            edge,
+            orientation: Orientation::Forward,
+            pcurve: Some(pcurve),
+        }],
+        vec![Interval::new(0.0, TAU)],
+    )
 }

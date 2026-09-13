@@ -9,7 +9,7 @@ pub mod elementary;
 pub mod evaluate;
 pub mod spline;
 
-pub use elementary::{Cone, Cylinder, Plane, Sphere, Torus};
+pub use elementary::{Cone, Cylinder, EllipticalCylinder, Plane, Sphere, Torus};
 pub use evaluate::SurfaceEvaluator;
 pub use spline::BSplineSurface;
 
@@ -21,6 +21,8 @@ pub enum Surface {
     Plane(Plane),
     /// Circular cylinder.
     Cylinder(Cylinder),
+    /// Elliptical cylinder.
+    EllipticalCylinder(EllipticalCylinder),
     /// Right circular cone.
     Cone(Cone),
     /// Sphere.

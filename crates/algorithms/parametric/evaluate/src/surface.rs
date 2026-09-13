@@ -37,7 +37,9 @@
 use axiolid_contracts::BackendId;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame3, Point3, Scalar, SpaceFrame, Tolerance, Vec3};
-use axiolid_surface::{BSplineSurface, Cone, Cylinder, Plane, Sphere, Surface, Torus};
+use axiolid_surface::{
+    BSplineSurface, Cone, Cylinder, EllipticalCylinder, Plane, Sphere, Surface, Torus,
+};
 
 use crate::curve::{de_boor_recurrence, eval_homogeneous, span_in};
 use crate::nurbs::SplineAxis;
@@ -142,6 +144,7 @@ fn finite_surface_frame(surface: &Surface) -> GeomResult<()> {
         Surface::Cone(value) => Some(&value.frame),
         Surface::Sphere(value) => Some(&value.frame),
         Surface::Torus(value) => Some(&value.frame),
+        Surface::EllipticalCylinder(value) => Some(&value.frame),
         _ => None,
     };
     if frame.is_none_or(|frame| {
@@ -166,6 +169,7 @@ pub fn evaluate(surface: &Surface, u: Scalar, v: Scalar) -> GeomResult<Point3> {
     let point = match surface {
         Surface::Plane(p) => Ok(plane_point(p, u, v)),
         Surface::Cylinder(c) => cylinder_point(c, u, v),
+        Surface::EllipticalCylinder(c) => elliptical_cylinder_point(c, u, v),
         Surface::Cone(c) => cone_point(c, u, v),
         Surface::Sphere(s) => sphere_point(s, u, v),
         Surface::Torus(t) => torus_point(t, u, v),
@@ -254,6 +258,21 @@ pub fn partials(surface: &Surface, u: Scalar, v: Scalar) -> GeomResult<(Vec3, Ve
                         torus.minor_radius * cv,
                     ),
                 ),
+            ))
+        }
+        Surface::EllipticalCylinder(c) => {
+            positive(c.semi_axis_x, "elliptical cylinder semi-axis x")?;
+            positive(c.semi_axis_y, "elliptical cylinder semi-axis y")?;
+            let (su, cu) = u.sin_cos();
+            // The u-partial is NOT radial: its components carry different
+            // semi-axes, which is exactly why the normal of an elliptical
+            // cylinder is not its radial direction.
+            Ok((
+                direct(
+                    &c.frame,
+                    Vec3::new(-c.semi_axis_x * su, c.semi_axis_y * cu, 0.0),
+                ),
+                direct(&c.frame, Vec3::Z),
             ))
         }
         Surface::BSpline(b) => bspline_partials(b, u, v),
@@ -397,6 +416,21 @@ pub fn normal(surface: &Surface, u: Scalar, v: Scalar) -> GeomResult<Vec3> {
             direct(&c.frame, Vec3::new(co, s, 0.0))
         }
         Surface::Cone(c) => cone_normal(c, u)?,
+        Surface::EllipticalCylinder(c) => {
+            positive(c.semi_axis_x, "elliptical cylinder semi-axis x")?;
+            positive(c.semi_axis_y, "elliptical cylinder semi-axis y")?;
+            // NOT the radial direction. For a circular cylinder the two
+            // coincide, but for a 3:1 ellipse they differ by up to 53
+            // degrees, agreeing only at the four axis points. Taking the
+            // cross product of the partials is the definition and is right
+            // everywhere.
+            let (su, cu) = u.sin_cos();
+            let along_u = direct(
+                &c.frame,
+                Vec3::new(-c.semi_axis_x * su, c.semi_axis_y * cu, 0.0),
+            );
+            along_u.cross(c.frame.z)
+        }
         Surface::Sphere(s) => {
             positive(s.radius, "sphere radius")?;
             let (su, cu) = u.sin_cos();
@@ -434,6 +468,16 @@ fn cylinder_point(c: &Cylinder, u: Scalar, v: Scalar) -> GeomResult<Point3> {
     positive(c.radius, "cylinder radius")?;
     let (s, co) = u.sin_cos();
     Ok(place(&c.frame, Vec3::new(c.radius * co, c.radius * s, v)))
+}
+
+fn elliptical_cylinder_point(c: &EllipticalCylinder, u: Scalar, v: Scalar) -> GeomResult<Point3> {
+    positive(c.semi_axis_x, "elliptical cylinder semi-axis x")?;
+    positive(c.semi_axis_y, "elliptical cylinder semi-axis y")?;
+    let (s, co) = u.sin_cos();
+    Ok(place(
+        &c.frame,
+        Vec3::new(c.semi_axis_x * co, c.semi_axis_y * s, v),
+    ))
 }
 
 fn cone_point(c: &Cone, u: Scalar, v: Scalar) -> GeomResult<Point3> {
