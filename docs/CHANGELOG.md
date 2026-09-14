@@ -5,26 +5,26 @@ All notable changes to Axiolid are documented in this file.
 ## [Unreleased]
 ### Added
 
-- `Profile::CenterLine` exact extrusion: the open path is offset AS CURVES
-  into a closed contour, so a curved centre line yields genuine cylindrical
-  walls instead of a flattened fan. A line offsets to a parallel line and a
-  circular arc to a concentric arc keeping its centre, frame and domain.
-  Curve kinds with no same-kind offset (ellipse, spline) are refused rather
-  than sampled: offsetting a 3:1 ellipse yields a curve whose best-fit
-  ellipse residual is 0.074, so it is not an ellipse.
-  The existing flattening offsetter still serves the tessellating pipeline.
-- Centre-line refusals are explicit and named: closed paths (they denote an
-  annulus, not a single ring), disconnected paths, tangent reversals, and a
-  half-width that collapses an arc's inner offset.
+- `Profile::Section` exact extrusion for all nine parameterised structural
+  variants (I, asymmetric I, L, T, U, C, Z, trapezium). Each lowers to a
+  corner ring routed through one shared rounding function, so concave root
+  fillets and convex toe radii share a single code path.
+- Root fillets are built as exact arcs, not dropped: measured on a 0.4 x 0.3
+  I-section with an 0.021 root radius they carry 2.40% of the cross-sectional
+  area, so discarding them would leave a section whose area, second moment
+  and mass are all wrong while still looking like the right shape.
+- Tapered flanges, webs and legs are refused by name rather than silently
+  built parallel. A declared `Some(0.0)` slope is a parallel flange and is
+  accepted; only a non-zero slope is a taper.
 
-### Notes
+### Fixed
 
-- Ring traversal is right-side-forward then left-side-back. The reverse
-  traces the boundary clockwise and builds the solid inside-out, which yields
-  the correct volume MAGNITUDE with a negative sign -- only a signed check
-  catches it.
-- Arc frame handedness determines which offset side grows, since a
-  left-handed frame runs the parameter clockwise in world orientation.
+- The section corner router placed the arc centre at `r / sin(turn / 2)`
+  instead of `r / cos(turn / 2)`. The two agree exactly at a right angle, and
+  every rounded corner reachable through `SectionProfile` is a right angle,
+  so the error was invisible to all area tests. Found by testing the router
+  directly at a 116.565-degree corner, where the arc came out with radius
+  0.01748 instead of 0.02.
 
 ## [0.1.8] - 2026-09-07
 

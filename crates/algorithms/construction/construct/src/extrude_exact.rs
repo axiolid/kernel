@@ -17,6 +17,7 @@ use crate::center_line_exact::center_line_contour;
 use crate::contour_lower::contour_to_arc_ring;
 use crate::extrude_arc::extrude_arc_ring;
 use crate::profile_lower::{lower_composite, lower_derived};
+use crate::section_lower::section_contour;
 use crate::BACKEND_ID;
 
 #[derive(Debug)]
@@ -44,7 +45,10 @@ pub fn extrude_profile_exact(
         Profile::Rectangle(rectangle) => extrude_rectangle(rectangle, offset, tolerance),
         Profile::Circle(circle) => extrude_circle(circle, offset),
         Profile::Ellipse(ellipse) => extrude_ellipse(ellipse, offset),
-        Profile::Section(_) => Err(unsupported("section-profile extrusion")),
+        Profile::Section(section) => {
+            let contour = section_contour(section)?;
+            extrude_contour(&contour, offset, tolerance)
+        }
         Profile::Contour(contour) => extrude_contour(contour, offset, tolerance),
         Profile::Derived { basis, transform } => {
             // Lower to a concrete profile, then extrude that. Recursing on

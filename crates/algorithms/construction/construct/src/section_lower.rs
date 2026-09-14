@@ -1,0 +1,715 @@
+//! Lower parameterised structural sections into exact contours (ADR 0057).
+//!
+//! # Why the fillets are not optional
+//!
+//! For a rolled steel section the web-to-flange root fillet is real material.
+//! Measured on a 0.4 x 0.3 I-section with an 0.021 root radius, the four
+//! fillets carry **2.40%** of the cross-sectional area. Dropping them yields a
+//! section that looks correct and whose area, second moment and mass are all
+//! wrong, so they are built as exact arcs rather than ignored or approximated.
+//!
+//! # Structure
+//!
+//! Every variant reduces to a closed counter-clockwise ring of corners, each
+//! carrying an optional radius. One shared router turns that into a contour,
+//! inserting a tangent arc at each rounded corner. Concave root fillets and
+//! convex toe radii are the SAME operation -- the sign of the turn decides
+//! which way the arc bends -- so neither gets a special case that could drift
+//! from the other.
+
+use axiolid_contracts::{GeomError, GeomResult, Operation};
+use axiolid_core::{Frame2, Interval, Point2, Scalar, Vec2};
+use axiolid_curve::{Circle2, Curve2, Line2};
+use axiolid_profile::{Contour, ContourProfile, ProfileSegment, SectionProfile};
+
+use crate::BACKEND_ID;
+
+fn unsupported(input: &'static str) -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: BACKEND_ID,
+        operation: Operation::Sweep,
+        input,
+    }
+}
+
+/// One boundary corner: a position and the radius rounding it.
+#[derive(Debug, Clone, Copy)]
+struct Corner {
+    point: Point2,
+    /// Zero means a sharp corner.
+    radius: Scalar,
+}
+
+fn sharp(x: Scalar, y: Scalar) -> Corner {
+    Corner {
+        point: Point2::new(x, y),
+        radius: 0.0,
+    }
+}
+
+fn rounded(x: Scalar, y: Scalar, radius: Option<Scalar>) -> Corner {
+    Corner {
+        point: Point2::new(x, y),
+        // `None` means the source did not state a radius, which is a sharp
+        // corner here; `Some(0.0)` states one explicitly and agrees.
+        radius: radius.unwrap_or(0.0).max(0.0),
+    }
+}
+
+/// Turn a closed counter-clockwise corner ring into an exact contour.
+///
+/// At each corner with a positive radius the boundary is cut back along both
+/// adjacent edges by `r * tan(alpha / 2)`, where `alpha` is the turn angle,
+/// and joined by an arc tangent to both. That setback is what makes the arc
+/// tangent rather than merely near the corner.
+fn route(corners: &[Corner]) -> GeomResult<Contour> {
+    let count = corners.len();
+    if count < 3 {
+        return Err(GeomError::InvalidInput(format!(
+            "a section outline needs at least three corners, got {count}"
+        )));
+    }
+
+    // Setback and arc geometry per corner, or `None` when sharp.
+    let mut cut = vec![0.0; count];
+    let mut arcs: Vec<Option<(Point2, Point2, Point2, Scalar)>> = vec![None; count];
+
+    for index in 0..count {
+        let here = corners[index];
+        if here.radius <= 0.0 {
+            continue;
+        }
+        let previous = corners[(index + count - 1) % count].point;
+        let next = corners[(index + 1) % count].point;
+        let incoming = (here.point - previous).normalize_or_zero();
+        let outgoing = (next - here.point).normalize_or_zero();
+        if incoming == Vec2::ZERO || outgoing == Vec2::ZERO {
+            return Err(GeomError::Degenerate(
+                "section outline has a zero-length edge".to_owned(),
+            ));
+        }
+        let cross = incoming.perp_dot(outgoing);
+        if cross == 0.0 {
+            // Collinear: there is no corner to round.
+            continue;
+        }
+        let turn = incoming.dot(outgoing).clamp(-1.0, 1.0).acos();
+        let setback = here.radius * (turn / 2.0).tan();
+        // Distance from the corner to the arc centre along the interior
+        // bisector.
+        //
+        // `turn` is the EXTERIOR deflection, so the interior angle is
+        // `pi - turn` and the centre sits `r / sin(interior / 2)` away, which
+        // is `r / cos(turn / 2)`. Using `sin(turn / 2)` here is wrong
+        // everywhere EXCEPT at a right angle, where the two coincide -- and
+        // every rounded corner in every section variant is a right angle, so
+        // the error is invisible to them.
+        let bisector = (outgoing - incoming).normalize_or_zero();
+        if bisector == Vec2::ZERO {
+            return Err(GeomError::Degenerate(
+                "section outline reverses on itself".to_owned(),
+            ));
+        }
+        let centre = here.point + bisector * (here.radius / (turn / 2.0).cos());
+        let start = here.point - incoming * setback;
+        let end = here.point + outgoing * setback;
+        cut[index] = setback;
+        arcs[index] = Some((centre, start, end, cross.signum() * turn));
+    }
+
+    // Both ends of an edge draw from the same edge length.
+    for start in 0..count {
+        let end = (start + 1) % count;
+        let length = (corners[end].point - corners[start].point).length();
+        if cut[start] + cut[end] > length + 1e-12 {
+            return Err(unsupported(
+                "section radii too large for the edge between two corners",
+            ));
+        }
+    }
+
+    Ok(Contour::new(emit(corners, &arcs)))
+}
+/// Emit segments: a straight run between consecutive corners, plus an arc at
+/// each rounded corner.
+fn emit(
+    corners: &[Corner],
+    arcs: &[Option<(Point2, Point2, Point2, Scalar)>],
+) -> Vec<ProfileSegment> {
+    let count = corners.len();
+    let mut segments = Vec::with_capacity(count * 2);
+    for index in 0..count {
+        // Where this corner hands over to the straight run that follows.
+        let leave = match arcs[index] {
+            Some((centre, start, end, sweep)) => {
+                segments.push(arc_segment(centre, start, sweep));
+                let _ = end;
+                end
+            }
+            None => corners[index].point,
+        };
+        let next = (index + 1) % count;
+        let arrive = match arcs[next] {
+            Some((_, start, _, _)) => start,
+            None => corners[next].point,
+        };
+        // A fully consumed edge leaves the two arcs touching; emitting a
+        // zero-length line there would be a degenerate segment.
+        if (arrive - leave).length() > 1e-15 {
+            segments.push(ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: leave,
+                    direction: arrive - leave,
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            });
+        }
+    }
+    segments
+}
+
+/// A tangent arc from `start`, about `centre`, turning by `sweep`.
+///
+/// The frame's x-axis points at the arc start, so the segment domain begins
+/// at zero. A negative sweep is carried by a LEFT-handed frame rather than a
+/// negative domain, matching the convention the contour lowering already
+/// uses: the parameter always increases, and handedness says which way the
+/// world turn goes.
+fn arc_segment(centre: Point2, start: Point2, sweep: Scalar) -> ProfileSegment {
+    let x = (start - centre).normalize_or_zero();
+    let perpendicular = Vec2::new(-x.y, x.x);
+    let y = if sweep >= 0.0 {
+        perpendicular
+    } else {
+        -perpendicular
+    };
+    ProfileSegment {
+        curve: Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: centre,
+                x,
+                y,
+            },
+            radius: (start - centre).length(),
+        }),
+        domain: Interval::new(0.0, sweep.abs()),
+        same_sense: true,
+    }
+}
+
+/// Reject a stated taper.
+///
+/// A sloped flange moves the fillet tangency onto an inclined face, which is
+/// a different construction rather than the same one with a shifted point.
+/// Building the parallel-flange outline anyway would silently return the
+/// wrong section, so a non-zero slope is refused by name.
+fn no_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<()> {
+    match slope {
+        Some(value) if value != 0.0 => Err(unsupported(what)),
+        _ => Ok(()),
+    }
+}
+
+fn positive(value: Scalar, what: &str) -> GeomResult<()> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "section {what} must be positive and finite, got {value}"
+        )));
+    }
+    Ok(())
+}
+/// Lower a parameterised section into an exact contour.
+///
+/// The outline is built counter-clockwise about the section centroid-ish
+/// origin each source entity declares, so the result needs no re-orientation.
+pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
+    let corners = match section {
+        SectionProfile::I {
+            depth,
+            width,
+            web_thickness,
+            flange_thickness,
+            fillet_radius,
+            flange_edge_radius,
+            flange_slope,
+        } => {
+            no_slope(*flange_slope, "tapered-flange I section")?;
+            i_corners(
+                *depth,
+                *width,
+                *width,
+                *web_thickness,
+                *flange_thickness,
+                *flange_thickness,
+                *fillet_radius,
+                *fillet_radius,
+                *flange_edge_radius,
+                *flange_edge_radius,
+            )?
+        }
+        SectionProfile::AsymmetricI {
+            depth,
+            web_thickness,
+            bottom_flange_width,
+            bottom_flange_thickness,
+            bottom_fillet_radius,
+            bottom_flange_edge_radius,
+            bottom_flange_slope,
+            top_flange_width,
+            top_flange_thickness,
+            top_fillet_radius,
+            top_flange_edge_radius,
+            top_flange_slope,
+        } => {
+            no_slope(*bottom_flange_slope, "tapered-flange I section")?;
+            no_slope(*top_flange_slope, "tapered-flange I section")?;
+            i_corners(
+                *depth,
+                *bottom_flange_width,
+                *top_flange_width,
+                *web_thickness,
+                *bottom_flange_thickness,
+                // The source may omit the top thickness, meaning "same as
+                // the bottom" rather than "zero".
+                top_flange_thickness.unwrap_or(*bottom_flange_thickness),
+                *bottom_fillet_radius,
+                *top_fillet_radius,
+                *bottom_flange_edge_radius,
+                *top_flange_edge_radius,
+            )?
+        }
+        SectionProfile::T {
+            depth,
+            flange_width,
+            web_thickness,
+            flange_thickness,
+            fillet_radius,
+            flange_edge_radius,
+            web_edge_radius,
+            web_slope,
+            flange_slope,
+        } => {
+            no_slope(*web_slope, "tapered-web T section")?;
+            no_slope(*flange_slope, "tapered-flange T section")?;
+            t_corners(
+                *depth,
+                *flange_width,
+                *web_thickness,
+                *flange_thickness,
+                *fillet_radius,
+                *flange_edge_radius,
+                *web_edge_radius,
+            )?
+        }
+        SectionProfile::U {
+            depth,
+            flange_width,
+            web_thickness,
+            flange_thickness,
+            fillet_radius,
+            edge_radius,
+            flange_slope,
+        } => {
+            no_slope(*flange_slope, "tapered-flange U section")?;
+            u_corners(
+                *depth,
+                *flange_width,
+                *web_thickness,
+                *flange_thickness,
+                *fillet_radius,
+                *edge_radius,
+            )?
+        }
+        SectionProfile::L {
+            depth,
+            width,
+            thickness,
+            fillet_radius,
+            edge_radius,
+            leg_slope,
+        } => {
+            no_slope(*leg_slope, "tapered-leg L section")?;
+            l_corners(
+                *depth,
+                // An absent width means an EQUAL angle, not a zero one.
+                width.unwrap_or(*depth),
+                *thickness,
+                *fillet_radius,
+                *edge_radius,
+            )?
+        }
+        SectionProfile::Z {
+            depth,
+            flange_width,
+            web_thickness,
+            flange_thickness,
+            fillet_radius,
+            edge_radius,
+        } => z_corners(
+            *depth,
+            *flange_width,
+            *web_thickness,
+            *flange_thickness,
+            *fillet_radius,
+            *edge_radius,
+        )?,
+        SectionProfile::C {
+            depth,
+            width,
+            wall_thickness,
+            girth,
+            internal_fillet_radius,
+        } => c_corners(
+            *depth,
+            *width,
+            *wall_thickness,
+            *girth,
+            *internal_fillet_radius,
+        )?,
+        SectionProfile::Trapezium {
+            bottom_x,
+            top_x,
+            y,
+            top_offset,
+        } => trapezium_corners(*bottom_x, *top_x, *y, *top_offset)?,
+        _ => return Err(unsupported("section profile of an unsupported kind")),
+    };
+
+    Ok(ContourProfile {
+        outer: route(&corners)?,
+        holes: Vec::new(),
+    })
+}
+/// Twelve-corner I outline, walked counter-clockwise from the bottom-right.
+///
+/// Handles the asymmetric case directly; the symmetric variant passes equal
+/// top and bottom dimensions rather than going through a separate routine
+/// that could drift from this one.
+#[allow(clippy::too_many_arguments)]
+fn i_corners(
+    depth: Scalar,
+    bottom_width: Scalar,
+    top_width: Scalar,
+    web_thickness: Scalar,
+    bottom_flange: Scalar,
+    top_flange: Scalar,
+    bottom_fillet: Option<Scalar>,
+    top_fillet: Option<Scalar>,
+    bottom_edge: Option<Scalar>,
+    top_edge: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(bottom_width, "flange width")?;
+    positive(top_width, "flange width")?;
+    positive(web_thickness, "web thickness")?;
+    positive(bottom_flange, "flange thickness")?;
+    positive(top_flange, "flange thickness")?;
+    if bottom_flange + top_flange >= depth {
+        return Err(GeomError::Degenerate(format!(
+            "flanges {bottom_flange} + {top_flange} leave no web in depth {depth}"
+        )));
+    }
+    if web_thickness >= bottom_width.min(top_width) {
+        return Err(GeomError::Degenerate(format!(
+            "web thickness {web_thickness} is not narrower than the flange"
+        )));
+    }
+
+    let (hd, hw) = (depth / 2.0, web_thickness / 2.0);
+    let (hb, ht) = (bottom_width / 2.0, top_width / 2.0);
+    let bottom_top = -hd + bottom_flange;
+    let top_bottom = hd - top_flange;
+
+    Ok(vec![
+        sharp(hb, -hd),
+        rounded(hb, bottom_top, bottom_edge),
+        rounded(hw, bottom_top, bottom_fillet),
+        rounded(hw, top_bottom, top_fillet),
+        rounded(ht, top_bottom, top_edge),
+        sharp(ht, hd),
+        sharp(-ht, hd),
+        rounded(-ht, top_bottom, top_edge),
+        rounded(-hw, top_bottom, top_fillet),
+        rounded(-hw, bottom_top, bottom_fillet),
+        rounded(-hb, bottom_top, bottom_edge),
+        sharp(-hb, -hd),
+    ])
+}
+
+/// Eight-corner T outline: flange on top, web hanging below.
+fn t_corners(
+    depth: Scalar,
+    flange_width: Scalar,
+    web_thickness: Scalar,
+    flange_thickness: Scalar,
+    fillet: Option<Scalar>,
+    flange_edge: Option<Scalar>,
+    web_edge: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(flange_width, "flange width")?;
+    positive(web_thickness, "web thickness")?;
+    positive(flange_thickness, "flange thickness")?;
+    if flange_thickness >= depth {
+        return Err(GeomError::Degenerate(format!(
+            "flange {flange_thickness} leaves no web in depth {depth}"
+        )));
+    }
+    if web_thickness >= flange_width {
+        return Err(GeomError::Degenerate(format!(
+            "web thickness {web_thickness} is not narrower than the flange"
+        )));
+    }
+
+    let (hd, hw, hf) = (depth / 2.0, web_thickness / 2.0, flange_width / 2.0);
+    let flange_bottom = hd - flange_thickness;
+
+    Ok(vec![
+        rounded(hw, -hd, web_edge),
+        rounded(hw, flange_bottom, fillet),
+        rounded(hf, flange_bottom, flange_edge),
+        sharp(hf, hd),
+        sharp(-hf, hd),
+        rounded(-hf, flange_bottom, flange_edge),
+        rounded(-hw, flange_bottom, fillet),
+        rounded(-hw, -hd, web_edge),
+    ])
+}
+
+/// Eight-corner U (channel) outline: web on the left, flanges to the right.
+fn u_corners(
+    depth: Scalar,
+    flange_width: Scalar,
+    web_thickness: Scalar,
+    flange_thickness: Scalar,
+    fillet: Option<Scalar>,
+    edge: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(flange_width, "flange width")?;
+    positive(web_thickness, "web thickness")?;
+    positive(flange_thickness, "flange thickness")?;
+    if 2.0 * flange_thickness >= depth {
+        return Err(GeomError::Degenerate(format!(
+            "flanges {flange_thickness} leave no web in depth {depth}"
+        )));
+    }
+    if web_thickness >= flange_width {
+        return Err(GeomError::Degenerate(format!(
+            "web thickness {web_thickness} is not narrower than the flange"
+        )));
+    }
+
+    let hd = depth / 2.0;
+    let inner = web_thickness;
+
+    Ok(vec![
+        sharp(flange_width, -hd),
+        rounded(flange_width, -hd + flange_thickness, edge),
+        rounded(inner, -hd + flange_thickness, fillet),
+        rounded(inner, hd - flange_thickness, fillet),
+        rounded(flange_width, hd - flange_thickness, edge),
+        sharp(flange_width, hd),
+        sharp(0.0, hd),
+        sharp(0.0, -hd),
+    ])
+}
+
+/// Six-corner L (angle) outline with the heel at the origin.
+fn l_corners(
+    depth: Scalar,
+    width: Scalar,
+    thickness: Scalar,
+    fillet: Option<Scalar>,
+    edge: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(width, "width")?;
+    positive(thickness, "thickness")?;
+    if thickness >= depth.min(width) {
+        return Err(GeomError::Degenerate(format!(
+            "thickness {thickness} is not thinner than the legs"
+        )));
+    }
+
+    Ok(vec![
+        sharp(0.0, 0.0),
+        sharp(width, 0.0),
+        rounded(width, thickness, edge),
+        rounded(thickness, thickness, fillet),
+        rounded(thickness, depth, edge),
+        sharp(0.0, depth),
+    ])
+}
+/// Eight-corner Z outline: flanges point in opposite directions.
+fn z_corners(
+    depth: Scalar,
+    flange_width: Scalar,
+    web_thickness: Scalar,
+    flange_thickness: Scalar,
+    fillet: Option<Scalar>,
+    edge: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(flange_width, "flange width")?;
+    positive(web_thickness, "web thickness")?;
+    positive(flange_thickness, "flange thickness")?;
+    if 2.0 * flange_thickness >= depth {
+        return Err(GeomError::Degenerate(format!(
+            "flanges {flange_thickness} leave no web in depth {depth}"
+        )));
+    }
+
+    let (hd, hw) = (depth / 2.0, web_thickness / 2.0);
+    let bottom_top = -hd + flange_thickness;
+    let top_bottom = hd - flange_thickness;
+
+    // Bottom flange runs right, top flange runs left.
+    Ok(vec![
+        sharp(hw + flange_width, -hd),
+        rounded(hw + flange_width, bottom_top, edge),
+        rounded(hw, bottom_top, fillet),
+        sharp(hw, hd),
+        sharp(-hw - flange_width, hd),
+        rounded(-hw - flange_width, top_bottom, edge),
+        rounded(-hw, top_bottom, fillet),
+        sharp(-hw, -hd),
+    ])
+}
+
+/// Twelve-corner C (lipped channel) outline.
+///
+/// Unlike `U`, this is a THIN-WALLED section: the boundary follows the wall
+/// all the way round, including the returned lips, so the enclosed area is
+/// the wall material rather than the full channel envelope.
+fn c_corners(
+    depth: Scalar,
+    width: Scalar,
+    wall_thickness: Scalar,
+    girth: Scalar,
+    fillet: Option<Scalar>,
+) -> GeomResult<Vec<Corner>> {
+    positive(depth, "depth")?;
+    positive(width, "width")?;
+    positive(wall_thickness, "wall thickness")?;
+    positive(girth, "girth")?;
+    if 2.0 * wall_thickness >= depth || 2.0 * wall_thickness >= width {
+        return Err(GeomError::Degenerate(format!(
+            "wall thickness {wall_thickness} leaves no opening"
+        )));
+    }
+    if girth <= wall_thickness {
+        return Err(GeomError::Degenerate(format!(
+            "lip girth {girth} is not longer than the wall thickness"
+        )));
+    }
+
+    let hd = depth / 2.0;
+    let t = wall_thickness;
+
+    Ok(vec![
+        // Outer boundary: up the web, out along each flange, down each lip.
+        sharp(width, -hd),
+        sharp(width, -hd + girth),
+        sharp(width - t, -hd + girth),
+        rounded(width - t, -hd + t, fillet),
+        rounded(t, -hd + t, fillet),
+        rounded(t, hd - t, fillet),
+        rounded(width - t, hd - t, fillet),
+        sharp(width - t, hd - girth),
+        sharp(width, hd - girth),
+        sharp(width, hd),
+        sharp(0.0, hd),
+        sharp(0.0, -hd),
+    ])
+}
+
+/// Four-corner trapezium.
+fn trapezium_corners(
+    bottom_x: Scalar,
+    top_x: Scalar,
+    y: Scalar,
+    top_offset: Scalar,
+) -> GeomResult<Vec<Corner>> {
+    positive(bottom_x, "bottom width")?;
+    positive(top_x, "top width")?;
+    positive(y, "height")?;
+    if !top_offset.is_finite() {
+        return Err(GeomError::InvalidInput(format!(
+            "trapezium top offset must be finite, got {top_offset}"
+        )));
+    }
+
+    Ok(vec![
+        sharp(0.0, 0.0),
+        sharp(bottom_x, 0.0),
+        sharp(top_offset + top_x, y),
+        sharp(top_offset, y),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The corner router must round a NON-right corner correctly.
+    ///
+    /// Every rounded corner reachable through `SectionProfile` today is a
+    /// right angle, and at 90 degrees `r * tan(45) == r`, so a setback that
+    /// ignored the turn angle would be indistinguishable there. The router is
+    /// general, so its generality is tested directly rather than left to a
+    /// variant that happens not to exercise it.
+    ///
+    /// The invariant checked is TANGENCY: the arc must meet both adjacent
+    /// edges at a point whose distance to the arc centre equals the radius,
+    /// and the centre must sit exactly `radius` from each edge line.
+    #[test]
+    fn a_non_right_corner_is_rounded_tangentially() {
+        // A 116.565-degree turn: setback is r*tan(58.28) = 1.618 r, not r.
+        let radius = 0.02;
+        let corners = vec![
+            sharp(0.0, 0.0),
+            Corner {
+                point: Point2::new(0.4, 0.0),
+                radius,
+            },
+            sharp(0.3, 0.2),
+            sharp(0.05, 0.2),
+        ];
+        let contour = route(&corners).expect("a trapezoidal ring routes");
+
+        let arc = contour
+            .segments
+            .iter()
+            .find_map(|segment| match &segment.curve {
+                Curve2::Circle(circle) => Some(*circle),
+                _ => None,
+            })
+            .expect("the rounded corner produced an arc");
+        assert!(
+            (arc.radius - radius).abs() < 1e-12,
+            "arc must carry the stated radius, got {}",
+            arc.radius
+        );
+
+        // Distance from the arc centre to each adjacent edge LINE must equal
+        // the radius. That is tangency, and it holds only for the correct
+        // setback.
+        let distance_to_line = |a: Point2, b: Point2| {
+            let along = (b - a).normalize();
+            let normal = Vec2::new(-along.y, along.x);
+            (arc.frame.origin - a).dot(normal).abs()
+        };
+        let incoming = distance_to_line(Point2::new(0.0, 0.0), Point2::new(0.4, 0.0));
+        let outgoing = distance_to_line(Point2::new(0.4, 0.0), Point2::new(0.3, 0.2));
+        assert!(
+            (incoming - radius).abs() < 1e-12,
+            "arc must be tangent to the incoming edge, distance {incoming}"
+        );
+        assert!(
+            (outgoing - radius).abs() < 1e-12,
+            "arc must be tangent to the outgoing edge, distance {outgoing}"
+        );
+    }
+}

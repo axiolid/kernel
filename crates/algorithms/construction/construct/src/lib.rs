@@ -60,6 +60,7 @@ pub mod profile_lower;
 pub mod result;
 pub mod revolve;
 pub mod revolve_exact;
+pub mod section_lower;
 pub mod sweep;
 pub mod trimmed_intersection;
 mod trimmed_intersection_assembly;
