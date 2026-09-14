@@ -78,11 +78,17 @@ pub fn revolve_profile_exact(
         }
         Profile::Circle(_) => Err(unsupported("circle-profile exact revolution")),
         Profile::Ellipse(_) => Err(unsupported("ellipse exact revolution")),
-        Profile::Section(_) => Err(unsupported("section-profile exact revolution")),
-        Profile::Contour(_) => Err(unsupported("contour exact revolution")),
-        Profile::Derived { .. } => Err(unsupported("derived-profile exact revolution")),
-        Profile::Composite(_) => Err(unsupported("composite-profile exact revolution")),
-        Profile::CenterLine(_) => Err(unsupported("center-line exact revolution")),
+        // Every one of these lowers to a contour, and a contour revolves.
+        // The refusals they carried described a missing module, not missing
+        // geometry, so they route through the general path rather than
+        // restating a limitation that no longer holds.
+        Profile::Section(_)
+        | Profile::Contour(_)
+        | Profile::Derived { .. }
+        | Profile::Composite(_)
+        | Profile::CenterLine(_) => {
+            revolve_via_contour(profile, axis_origin, axis_direction, tolerance)
+        }
         _ => Err(unsupported("unknown profile exact revolution")),
     }
 }
@@ -472,4 +478,37 @@ pub fn fixed_reference_sweep_exact(
     }
 
     extrude_profile_exact(profile, direction, length, tolerance)
+}
+
+/// Revolve any profile that lowers to a contour.
+///
+/// The axis must be the profile's local y and must lie in the profile plane,
+/// the same restriction `revolve_rectangle` carries: any other axis sweeps a
+/// general surface of revolution rather than the named quadrics this builds.
+fn revolve_via_contour(
+    profile: &Profile,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    let axis = axis_direction.normalize_or_zero();
+    if (axis.dot(Vec3::Y).abs() - 1.0).abs() > tolerance.linear() {
+        return Err(unsupported(
+            "exact revolution about an axis that is not the profile's local y",
+        ));
+    }
+    if axis_origin.z.abs() > tolerance.linear() {
+        return Err(unsupported(
+            "exact revolution about an axis off the profile plane",
+        ));
+    }
+
+    let contour = crate::extrude_exact::profile_to_contour(profile, tolerance)?;
+    if !contour.holes.is_empty() {
+        // A hole in a revolved section makes an internal void, which is a
+        // second shell rather than a second loop on a cap.
+        return Err(unsupported("exact revolution of a section with holes"));
+    }
+    let ring = crate::contour_lower::contour_to_arc_ring(&contour.outer, tolerance)?;
+    crate::revolve_contour::revolve_arc_ring(&ring, axis_origin, tolerance)
 }

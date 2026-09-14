@@ -1229,3 +1229,31 @@ fn add_ellipse_cap_loop(
         vec![Interval::new(0.0, TAU)],
     )
 }
+
+/// Lower a contour-shaped profile to its `ContourProfile`.
+///
+/// Shared by extrusion and revolution so the two cannot disagree about what
+/// a `Section`, `CenterLine`, `Derived` or `Composite` actually denotes: a
+/// second copy of this mapping is exactly how one sweep starts building a
+/// different shape from the other.
+pub fn profile_to_contour(profile: &Profile, tolerance: Tolerance) -> GeomResult<ContourProfile> {
+    match profile {
+        Profile::Contour(contour) => Ok(contour.clone()),
+        Profile::Section(section) => section_contour(section),
+        Profile::CenterLine(center_line) => center_line_contour(center_line, tolerance),
+        Profile::Derived { basis, transform } => {
+            let lowered = lower_derived(basis, transform, tolerance)?;
+            profile_to_contour(&lowered, tolerance)
+        }
+        // `lower_composite` unions its members into POINT rings, because the
+        // union operates on polygons. Those rings have already lost their
+        // segment kinds, so rebuilding a contour from them would fabricate
+        // straight edges where the members had arcs. Refused rather than
+        // silently re-approximated; the extrusion path consumes the rings
+        // directly and does not need this.
+        Profile::Composite(_) => Err(unsupported(
+            "composite profile does not lower to an exact contour",
+        )),
+        _ => Err(unsupported("profile does not lower to a contour")),
+    }
+}

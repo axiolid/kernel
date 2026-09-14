@@ -3,6 +3,27 @@
 All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
+
+### Added
+
+- Exact full-turn revolution of any profile that lowers to a contour:
+  `Section`, `Contour`, `CenterLine` and `Derived` no longer refuse. Segments
+  sweep cylinders, cones, planar annuli and tori according to their own
+  geometry; volumes are verified against Pappus. See ADR 0059.
+
+### Fixed
+
+- Reversed cap loops on a revolved annulus carried a forward pcurve interval,
+  placing the pcurve start diametrically opposite its 3D edge.
+- A torus seam was built as a straight ruling, sagging below the surface by
+  `r*(1 - cos(sweep/2))`. It is now an arc around the tube.
+
+### Changed
+
+- `construct` crate docs and `AGENTS.md` no longer claim exact generation is
+  limited to rectangle and circle extrusion, or that revolution refuses.
+- ADR 0053 (contour holes) and ADR 0057 (section taper) carry supersession
+  notes pointing at ADR 0058.
 ### Added
 
 - Arc extrusion with holes: `extrude_arc_rings` builds one cap face per end

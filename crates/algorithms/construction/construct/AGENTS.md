@@ -8,9 +8,13 @@ analytic B-rep arrangements; it owns no DAG, cache, execution context, or operat
 ## Entry points
 
 - `profile`: lower profile values to sampled rings and triangulate caps.
-- `extrude`: mesh extrusion plus exact sharp rectangle/hollow rectangle and axial
-  filled-circle families. Exact output owns every 3D support, pcurve, and native span.
-- `revolve`, `sweep`, `loft`: place/stitch station rings into discrete solids.
+- `extrude`: mesh extrusion plus exact extrusion of every `Profile` variant --
+  rectangle (sharp/hollow), circle, ellipse, contour (arcs and holes), section,
+  centre-line, derived and composite. Exact output owns every 3D support,
+  pcurve, and native span.
+- `revolve`: exact full-turn revolution of any profile that lowers to a contour,
+  sweeping cylinders, cones, planar annuli and tori; `sweep`, `loft` place/stitch
+  station rings into discrete solids.
 - `center_line`: turn constant-width centre-line profiles into rings.
 - `half_space`: construct a finite clipping proxy for an unbounded half-space.
 - `trimmed_intersection`: promote one certified affine trace into two closed trimmed
@@ -32,12 +36,16 @@ not report `scalar-compile` after this split.
   any L3 crate. `cargo xtask architecture check` enforces the declared internal
   dependency allowlist and production role-DAG edge; `scripts/probe_layering_gate.sh`
   mutation-verifies that enforcement.
-- Discrete sweeps remain the broad reference path. Exact solid output is limited to
-  sharp filled/hollow rectangle extrusion and axial filled-circle extrusion; the
-  certified affine trimmed-intersection arrangement is a separate exact surface slice.
-  Unsupported rounded, annular, elliptical, oblique-circle, reverse-axis, revolution,
-  sweep, loft, and Boolean families must refuse rather than tessellate; see ADR 0020,
-  ADR 0023, ADR 0024, and ADR 0029.
+- Discrete sweeps remain the broad reference path for `sweep` and `loft`. Exact
+  solid output covers every profile variant for extrusion, and full-turn
+  revolution for any profile that lowers to a contour; the certified affine
+  trimmed-intersection arrangement is a separate exact surface slice.
+  What still refuses is geometry the kernel cannot represent exactly rather
+  than unwritten work -- partial-turn revolution, a profile straddling the
+  revolution axis, oblique circle/ellipse extrusion, non-conformal derived
+  transforms, disjoint composite members, and Boolean families beyond the
+  stepped path -- and must refuse rather than tessellate; see ADR 0020,
+  ADR 0023, ADR 0024, ADR 0029, and ADR 0053-0059.
 
 ## Tests
 

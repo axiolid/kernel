@@ -33,7 +33,8 @@ and pairwise-edge constraints, straight cut instead of an arc.
 - A contour with holes is refused: the arc cap-loop builder emits a single
   bound, so a hole would vanish from the caps while still appearing in the
   walls. That is a solid that closes and is wrong, which is worse than a
-  refusal.
+  refusal. **Superseded by ADR 0058**, which generalised the cap builder to
+  emit one bound per ring; contours with holes now extrude exactly.
 - A circular segment sweeping half a turn or more is refused. `bulge` is
   `tan(sweep/4)`, and beyond a half turn the chord no longer determines the
   arc. Callers split such an arc into two segments, as the stadium test does.

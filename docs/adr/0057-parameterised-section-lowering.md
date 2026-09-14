@@ -47,6 +47,11 @@ area, second moment and mass are all wrong.
   the parallel-flange outline anyway would silently return the wrong section.
   `Some(0.0)` is a declared parallel flange and is accepted -- only a
   non-zero slope is a taper.
+  **Superseded by ADR 0058.** The premise was wrong: the bisector rounding
+  this ADR already shipped is tangent to an inclined face at every angle, as
+  measured at 5, 8 and 14 degrees. Taper needed a different corner list, not
+  different geometry. I, AsymmetricI, T, U and L now honour a slope; C and Z
+  declare no slope field so there is nothing to honour.
 - `None` and `Some(0.0)` stay distinct where the source distinguishes them:
   an absent L width means an EQUAL angle, an absent top flange thickness
   means the bottom value. Both are mutation-tested.

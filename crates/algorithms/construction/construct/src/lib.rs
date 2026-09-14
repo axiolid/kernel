@@ -20,13 +20,23 @@
 //! to construct a `SolidOperation` graph and run a compiler to get one. Under
 //! the old layout that was the only way to reach this code.
 //!
-//! # What this crate does not do
+//! # Exact generation coverage
 //!
-//! Broad sweep/profile families still produce meshes by default. Exact generation is
-//! intentionally narrow: sharp rectangular (including through-hole) and axial circular
-//! extrusions populate all supports, pcurves, and spans, while unsupported families
-//! refuse. Certified affine surface-pair arrangement remains the other focused analytic
-//! constructor. Neither slice implies exact booleans or general sweeps.
+//! Broad sweep families still produce meshes by default, but exact generation
+//! is no longer a narrow slice. Every `Profile` variant extrudes exactly:
+//! rectangle (including through-holes), circle, ellipse, contour (with holes
+//! and arcs), section, centre-line, derived and composite. Revolution covers
+//! any profile that lowers to a contour, sweeping cylinders, cones, planar
+//! annuli and tori.
+//!
+//! What still refuses is stated per call site and is about geometry the
+//! kernel cannot represent exactly rather than work not yet done -- a partial
+//! turn, a section straddling the revolution axis, an offset with no
+//! same-kind result, a non-conformal transform. None of this implies general
+//! exact booleans.
+//!
+//! Certified affine surface-pair arrangement remains the other focused
+//! analytic constructor.
 
 use axiolid_contracts::BackendId;
 
@@ -59,6 +69,7 @@ pub mod profile;
 pub mod profile_lower;
 pub mod result;
 pub mod revolve;
+pub mod revolve_contour;
 pub mod revolve_exact;
 pub mod section_lower;
 pub mod sweep;
