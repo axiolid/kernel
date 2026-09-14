@@ -14,8 +14,8 @@ use axiolid_topology::{
 };
 
 use crate::center_line_exact::center_line_contour;
-use crate::contour_lower::contour_to_arc_ring;
-use crate::extrude_arc::extrude_arc_ring;
+use crate::contour_lower::{contour_to_arc_ring, orient_arc_ring};
+use crate::extrude_arc::extrude_arc_rings;
 use crate::profile_lower::{lower_composite, lower_derived};
 use crate::section_lower::section_contour;
 use crate::BACKEND_ID;
@@ -1023,18 +1023,34 @@ fn extrude_contour(
     offset: Vec3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    if !contour.holes.is_empty() {
-        return Err(unsupported("contour extrusion with holes"));
+    // Outer runs counter-clockwise, holes clockwise, so every ring's wall
+    // normals point out of the material. Orienting here rather than demanding
+    // it of the caller means an imported contour with either winding builds
+    // the same solid.
+    let outer = orient_arc_ring(&contour_to_arc_ring(&contour.outer, tolerance)?, true)?;
+    let mut rings = Vec::with_capacity(1 + contour.holes.len());
+    rings.push(outer);
+    for hole in &contour.holes {
+        rings.push(orient_arc_ring(
+            &contour_to_arc_ring(hole, tolerance)?,
+            false,
+        )?);
     }
-    let ring = contour_to_arc_ring(&contour.outer, tolerance)?;
-    // A contour of only straight segments is a polygon, and the polygon path
-    // carries face naming and hole support the arc path does not. Routing it
-    // there keeps one behaviour for one shape.
-    if ring.vertices.iter().all(|vertex| vertex.bulge == 0.0) {
-        let points: Vec<Point2> = ring.vertices.iter().map(|vertex| vertex.point).collect();
-        return extrude_polygon_rings(&[points], offset);
+
+    // A section of only straight segments is a polygon, and the polygon path
+    // carries face naming the arc path does not. Routing it there keeps one
+    // behaviour for one shape.
+    if rings
+        .iter()
+        .all(|ring| ring.vertices.iter().all(|vertex| vertex.bulge == 0.0))
+    {
+        let polygons: Vec<Vec<Point2>> = rings
+            .iter()
+            .map(|ring| ring.vertices.iter().map(|vertex| vertex.point).collect())
+            .collect();
+        return extrude_polygon_rings(&polygons, offset);
     }
-    extrude_arc_ring(&ring, offset)
+    extrude_arc_rings(&rings, offset)
 }
 
 /// Extrude a composite profile: union the members, then extrude the result.

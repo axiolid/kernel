@@ -93,6 +93,29 @@ fn i_section(fillet: Option<f64>) -> Profile {
     })
 }
 
+/// The same I with an optional flange taper.
+fn i_sloped(fillet: Option<f64>, slope: Option<f64>) -> Profile {
+    Profile::Section(SectionProfile::I {
+        depth: 0.4,
+        width: 0.3,
+        web_thickness: 0.011,
+        flange_thickness: 0.019,
+        fillet_radius: fillet,
+        flange_edge_radius: None,
+        flange_slope: slope,
+    })
+}
+
+/// The `Profile::Section` payload, or a panic: these helpers only take
+/// sections, so anything else is a test-authoring mistake, not a case to
+/// handle.
+fn section_of(profile: &Profile) -> &SectionProfile {
+    match profile {
+        Profile::Section(section) => section,
+        _ => panic!("expected a section profile"),
+    }
+}
+
 #[test]
 fn a_sharp_i_section_matches_its_closed_form_area() {
     // 2*b*tf + (d - 2*tf)*tw, with no fillet material.
@@ -366,28 +389,6 @@ fn a_c_section_encloses_its_wall_not_its_envelope() {
 }
 
 #[test]
-fn a_tapered_flange_is_refused_not_silently_built_parallel() {
-    // A slope moves the fillet tangency onto an inclined face, which is a
-    // different construction. Returning the parallel-flange outline would be
-    // a wrong section that looks right.
-    let profile = Profile::Section(SectionProfile::I {
-        depth: 0.4,
-        width: 0.3,
-        web_thickness: 0.011,
-        flange_thickness: 0.019,
-        fillet_radius: Some(0.021),
-        flange_edge_radius: None,
-        flange_slope: Some(0.05),
-    });
-    let error = extrude_profile_exact(&profile, Vec3::Z, DEPTH, Tolerance::METRE)
-        .expect_err("a tapered flange is not built here");
-    assert!(
-        format!("{error:?}").contains("tapered"),
-        "the refusal must name the taper, got {error:?}"
-    );
-}
-
-#[test]
 fn a_declared_zero_slope_is_not_a_taper() {
     // `Some(0.0)` states a parallel flange explicitly; only a NON-ZERO slope
     // is a taper.
@@ -440,5 +441,113 @@ fn a_fillet_too_large_for_its_edge_is_refused() {
     assert!(
         format!("{error:?}").contains("too large for the edge"),
         "got {error:?}"
+    );
+}
+
+#[test]
+fn a_tapered_flange_keeps_the_declared_mean_thickness() {
+    // The taper pivots about the mid-point of the inner face, so the MEAN
+    // flange thickness is unchanged and the area matches the parallel case.
+    // Any other pivot silently changes the declared thickness.
+    let parallel = i_sloped(None, None);
+    let tapered = i_sloped(None, Some(8.0_f64.to_radians()));
+
+    let flat = contour_area(&parallel);
+    let sloped = contour_area(&tapered);
+    assert!(
+        (flat - sloped).abs() < 1e-12,
+        "taper must preserve the mean thickness: {flat} vs {sloped}"
+    );
+}
+
+#[test]
+fn a_tapered_flange_actually_slopes() {
+    // Guard against the taper being accepted and then ignored: the two ends
+    // of the bottom flange's inner face must sit at different heights.
+    let contour = section_contour(section_of(&i_sloped(None, Some(8.0_f64.to_radians()))))
+        .expect("tapered lowers");
+    let parallel = section_contour(section_of(&i_sloped(None, None))).expect("parallel lowers");
+
+    // Compare corner heights directly: a line segment's origin is a corner.
+    let heights = |profile: &axiolid_profile::ContourProfile| -> Vec<f64> {
+        profile
+            .outer
+            .segments
+            .iter()
+            .filter_map(|segment| match &segment.curve {
+                Curve2::Line(line) => Some(line.origin.y),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_ne!(
+        heights(&contour),
+        heights(&parallel),
+        "a declared taper must change the outline"
+    );
+}
+
+#[test]
+fn a_tapered_fillet_stays_tangent_to_the_inclined_face() {
+    // The whole point of the gap: the root fillet must touch the INCLINED
+    // flange face, not a horizontal one. Tangency means the arc centre sits
+    // exactly its own radius from both adjacent faces.
+    let radius = 0.021;
+    let tapered = i_sloped(Some(radius), Some(8.0_f64.to_radians()));
+    let contour = section_contour(section_of(&tapered)).expect("tapered lowers");
+
+    let arcs: Vec<_> = contour
+        .outer
+        .segments
+        .iter()
+        .filter_map(|segment| match &segment.curve {
+            Curve2::Circle(circle) => Some(*circle),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arcs.len(), 4, "four root fillets, got {}", arcs.len());
+
+    // Each fillet arc must carry the stated radius and be tangent to the two
+    // straight segments it joins.
+    for arc in &arcs {
+        assert!(
+            (arc.radius - radius).abs() < 1e-12,
+            "fillet radius {} should be {radius}",
+            arc.radius
+        );
+    }
+
+    // Tangency, checked against the segments the arc actually JOINS -- not
+    // the nearest line anywhere in the outline. An unrelated face can sit
+    // closer than the radius, so a global minimum would fail on correct
+    // geometry (it did: 0.0136 against a face the fillet never touches).
+    let segments = &contour.outer.segments;
+    for (index, segment) in segments.iter().enumerate() {
+        let Curve2::Circle(arc) = &segment.curve else {
+            continue;
+        };
+        let before = &segments[(index + segments.len() - 1) % segments.len()];
+        let after = &segments[(index + 1) % segments.len()];
+        for neighbour in [before, after] {
+            let Curve2::Line(line) = &neighbour.curve else {
+                continue;
+            };
+            let direction = line.direction.normalize();
+            let to_centre = arc.frame.origin - line.origin;
+            let distance = (to_centre - direction * to_centre.dot(direction)).length();
+            assert!(
+                (distance - radius).abs() < 1e-9,
+                "fillet must sit one radius from its ADJACENT face, got {distance}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_absurdly_steep_slope_is_refused() {
+    let section = i_sloped(None, Some(1.5));
+    assert!(
+        section_contour(section_of(&section)).is_err(),
+        "a near-right-angle taper leaves no flange and must be refused"
     );
 }

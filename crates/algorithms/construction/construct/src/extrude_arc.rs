@@ -92,31 +92,53 @@ struct RingTopology {
 }
 
 /// Extrude one arc-capable ring along `offset`, naming each wall.
-///
-/// Only single-ring sections are built here. A section with holes needs
-/// cap faces carrying several bounds, and the arc cap loop machinery for
-/// that is not written, so it is refused by the caller rather than
-/// silently dropping the hole.
 pub(crate) fn extrude_arc_ring(ring: &ArcRing, offset: Vec3) -> GeomResult<ExactBRep> {
-    let count = ring.vertices.len();
-    if count < 2 {
+    extrude_arc_rings(core::slice::from_ref(ring), offset)
+}
+
+/// Extrude an arc-capable section with holes along `offset`.
+///
+/// Ring 0 is the outer boundary; any further rings are through-holes. Each
+/// ring contributes its own walls and its own cap LOOP, and the two cap faces
+/// carry one bound per ring -- that is what makes a hole a hole rather than a
+/// second disconnected outline.
+///
+/// Hole rings must be wound CLOCKWISE, matching the polygon path: a ring's
+/// wall normals follow its winding, so a counter-clockwise hole would face
+/// its walls outward and produce a solid that is inside-out along the
+/// passage.
+pub(crate) fn extrude_arc_rings(rings: &[ArcRing], offset: Vec3) -> GeomResult<ExactBRep> {
+    if rings.is_empty() {
         return Err(GeomError::Degenerate(
-            "arc ring needs at least two vertices".to_owned(),
+            "arc extrusion needs at least one ring".to_owned(),
         ));
     }
+    for ring in rings {
+        if ring.vertices.len() < 2 {
+            return Err(GeomError::Degenerate(
+                "arc ring needs at least two vertices".to_owned(),
+            ));
+        }
+    }
+    let total: usize = rings.iter().map(|ring| ring.vertices.len()).sum();
+    let ring_count = rings.len();
+
     let mut builder = ExactBRepBuilder::default();
     reserve(
         &mut builder,
-        count * 2,
-        count * 3,
-        2 + count,
-        2 + count,
-        count * 3,
-        count * 8,
-        2 + count,
+        total * 2,
+        total * 3,
+        2 * ring_count + total,
+        2 + total,
+        total * 3,
+        total * 8,
+        2 + total,
     )?;
 
-    let topology = add_arc_ring(&mut builder, ring, offset)?;
+    let topologies = rings
+        .iter()
+        .map(|ring| add_arc_ring(&mut builder, ring, offset))
+        .collect::<GeomResult<Vec<_>>>()?;
 
     let bottom_surface = builder.add_surface(Surface::Plane(Plane {
         frame: identity_frame3(Vec3::ZERO),
@@ -124,43 +146,55 @@ pub(crate) fn extrude_arc_ring(ring: &ArcRing, offset: Vec3) -> GeomResult<Exact
     let top_surface = builder.add_surface(Surface::Plane(Plane {
         frame: identity_frame3(offset),
     }));
-    let bottom_loop = arc_cap_loop(&mut builder, ring, &topology, false);
-    let top_loop = arc_cap_loop(&mut builder, ring, &topology, true);
+
+    let mut bottom_bounds = Vec::with_capacity(ring_count);
+    let mut top_bounds = Vec::with_capacity(ring_count);
+    for (index, (ring, topology)) in rings.iter().zip(&topologies).enumerate() {
+        let bottom_loop = arc_cap_loop(&mut builder, ring, topology, false);
+        let top_loop = arc_cap_loop(&mut builder, ring, topology, true);
+        bottom_bounds.push(FaceBound {
+            loop_id: bottom_loop,
+            orientation: Orientation::Forward,
+            outer: index == 0,
+        });
+        top_bounds.push(FaceBound {
+            loop_id: top_loop,
+            orientation: Orientation::Forward,
+            outer: index == 0,
+        });
+    }
 
     let bottom_face = builder.topology_mut().add_face(Face {
         surface: Some(bottom_surface),
-        bounds: vec![FaceBound {
-            loop_id: bottom_loop,
-            orientation: Orientation::Forward,
-            outer: true,
-        }],
+        bounds: bottom_bounds,
         orientation: Orientation::Reversed,
     });
     let top_face = builder.topology_mut().add_face(Face {
         surface: Some(top_surface),
-        bounds: vec![FaceBound {
-            loop_id: top_loop,
-            orientation: Orientation::Forward,
-            outer: true,
-        }],
+        bounds: top_bounds,
         orientation: Orientation::Forward,
     });
     builder.set_face_name(bottom_face, FaceName::swept(SweptFace::StartCap));
     builder.set_face_name(top_face, FaceName::swept(SweptFace::EndCap));
 
     let mut faces = vec![bottom_face, top_face];
-    for index in 0..count {
-        let ordinal = u32::try_from(index).map_err(|_| {
-            GeomError::Degenerate("profile edge count exceeds u32 capacity".to_owned())
-        })?;
-        let bulge = ring.vertices[index].bulge;
-        let face = if bulge == 0.0 {
-            add_planar_wall(&mut builder, ring, &topology, index, offset)?
-        } else {
-            add_cylindrical_wall(&mut builder, ring, &topology, index, offset)?
-        };
-        builder.set_face_name(face, FaceName::swept(SweptFace::Side(ordinal)));
-        faces.push(face);
+    // Wall ordinals run across all rings so each side face keeps a distinct
+    // name; restarting per ring would collide the outer and hole walls.
+    let mut ordinal: u32 = 0;
+    for (ring, topology) in rings.iter().zip(&topologies) {
+        for index in 0..ring.vertices.len() {
+            let bulge = ring.vertices[index].bulge;
+            let face = if bulge == 0.0 {
+                add_planar_wall(&mut builder, ring, topology, index, offset)?
+            } else {
+                add_cylindrical_wall(&mut builder, ring, topology, index, offset)?
+            };
+            builder.set_face_name(face, FaceName::swept(SweptFace::Side(ordinal)));
+            ordinal = ordinal.checked_add(1).ok_or_else(|| {
+                GeomError::Degenerate("profile edge count exceeds u32 capacity".to_owned())
+            })?;
+            faces.push(face);
+        }
     }
     finish_closed(builder, faces)
 }

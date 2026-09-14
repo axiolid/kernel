@@ -137,3 +137,66 @@ fn unsupported_curve_name(curve: &Curve2) -> &'static str {
         _ => "contour segment of an unsupported curve kind",
     }
 }
+
+/// Signed area of a bulge-encoded ring; positive when counter-clockwise.
+///
+/// The polygon shoelace over the vertices plus each arc's circular-segment
+/// term, so a ring whose shape is decided by its arcs is classified by its
+/// actual geometry rather than by its chords. A crescent thin enough that its
+/// chord polygon winds the other way would otherwise be misread.
+pub fn arc_ring_signed_area(ring: &ArcRing) -> Scalar {
+    let count = ring.vertices.len();
+    let mut total = 0.0;
+    for index in 0..count {
+        let here = ring.vertices[index];
+        let next = ring.vertices[(index + 1) % count];
+        total += here.point.perp_dot(next.point);
+        if here.bulge != 0.0 {
+            let sweep = 4.0 * here.bulge.atan();
+            let chord = (next.point - here.point).length();
+            let half = (sweep.abs() / 2.0).sin();
+            if half > 0.0 {
+                let radius = chord / (2.0 * half);
+                total += radius * radius * (sweep - sweep.sin());
+            }
+        }
+    }
+    total / 2.0
+}
+
+/// Reverse an arc ring in place, preserving its arcs.
+///
+/// Reversing the vertex order alone is NOT enough: a bulge belongs to the
+/// edge LEAVING its vertex, so after reversal each vertex must take the
+/// negated bulge of what was previously its predecessor. Getting this wrong
+/// flips every arc to the wrong side while the ring still closes.
+pub fn reverse_arc_ring(ring: &ArcRing) -> ArcRing {
+    let count = ring.vertices.len();
+    let mut vertices = Vec::with_capacity(count);
+    for index in (0..count).rev() {
+        let previous = (index + count - 1) % count;
+        vertices.push(ArcVertex {
+            point: ring.vertices[index].point,
+            bulge: -ring.vertices[previous].bulge,
+        });
+    }
+    ArcRing { vertices }
+}
+
+/// Force a ring to the winding a boundary role requires.
+///
+/// Outer boundaries run counter-clockwise and holes run clockwise, so that a
+/// ring's wall normals point out of the material in both cases.
+pub fn orient_arc_ring(ring: &ArcRing, counter_clockwise: bool) -> GeomResult<ArcRing> {
+    let area = arc_ring_signed_area(ring);
+    if area == 0.0 {
+        return Err(GeomError::Degenerate(
+            "contour ring encloses no area".to_owned(),
+        ));
+    }
+    if (area > 0.0) == counter_clockwise {
+        Ok(ring.clone())
+    } else {
+        Ok(reverse_arc_ring(ring))
+    }
+}

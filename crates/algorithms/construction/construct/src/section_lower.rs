@@ -200,15 +200,33 @@ fn arc_segment(centre: Point2, start: Point2, sweep: Scalar) -> ProfileSegment {
 
 /// Reject a stated taper.
 ///
-/// A sloped flange moves the fillet tangency onto an inclined face, which is
-/// a different construction rather than the same one with a shifted point.
-/// Building the parallel-flange outline anyway would silently return the
-/// wrong section, so a non-zero slope is refused by name.
-fn no_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<()> {
-    match slope {
-        Some(value) if value != 0.0 => Err(unsupported(what)),
-        _ => Ok(()),
+/// Validate a declared taper and return it as an angle.
+///
+/// A slope is an angle from the horizontal, so it must stay well inside a
+/// quarter turn: at a right angle the inner face would be parallel to the web
+/// and the section would have no flange at all. The bound is deliberately
+/// generous -- rolled sections taper by 5 to 14 degrees -- because the job
+/// here is to exclude nonsense, not to second-guess a source that states an
+/// unusual but buildable value.
+///
+/// `None` means the source did not state a taper, which is a parallel flange.
+/// `Some(0.0)` states one explicitly and gives the same geometry.
+fn checked_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<Scalar> {
+    let value = slope.unwrap_or(0.0);
+    if !value.is_finite() {
+        return Err(GeomError::InvalidInput(format!(
+            "{what} slope must be finite, got {value}"
+        )));
     }
+    // A quarter turn is the hard limit; stop short of it so the tangent stays
+    // usable rather than exploding.
+    let limit = core::f64::consts::FRAC_PI_2 * 0.9;
+    if value.abs() >= limit {
+        return Err(GeomError::Degenerate(format!(
+            "{what} slope {value} rad is too steep to leave a flange"
+        )));
+    }
+    Ok(value)
 }
 
 fn positive(value: Scalar, what: &str) -> GeomResult<()> {
@@ -234,7 +252,7 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
             flange_edge_radius,
             flange_slope,
         } => {
-            no_slope(*flange_slope, "tapered-flange I section")?;
+            let slope = checked_slope(*flange_slope, "I section")?;
             i_corners(
                 *depth,
                 *width,
@@ -246,6 +264,8 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
                 *fillet_radius,
                 *flange_edge_radius,
                 *flange_edge_radius,
+                slope,
+                slope,
             )?
         }
         SectionProfile::AsymmetricI {
@@ -262,8 +282,8 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
             top_flange_edge_radius,
             top_flange_slope,
         } => {
-            no_slope(*bottom_flange_slope, "tapered-flange I section")?;
-            no_slope(*top_flange_slope, "tapered-flange I section")?;
+            let bottom_slope = checked_slope(*bottom_flange_slope, "I section")?;
+            let top_slope = checked_slope(*top_flange_slope, "I section")?;
             i_corners(
                 *depth,
                 *bottom_flange_width,
@@ -277,6 +297,8 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
                 *top_fillet_radius,
                 *bottom_flange_edge_radius,
                 *top_flange_edge_radius,
+                bottom_slope,
+                top_slope,
             )?
         }
         SectionProfile::T {
@@ -290,16 +312,20 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
             web_slope,
             flange_slope,
         } => {
-            no_slope(*web_slope, "tapered-web T section")?;
-            no_slope(*flange_slope, "tapered-flange T section")?;
+            // A T's web taper and flange taper are independent faces.
+            let web = checked_slope(*web_slope, "T section web")?;
+            let flange = checked_slope(*flange_slope, "T section flange")?;
             t_corners(
                 *depth,
                 *flange_width,
                 *web_thickness,
                 *flange_thickness,
-                *fillet_radius,
-                *flange_edge_radius,
-                *web_edge_radius,
+                &RadiiT {
+                    fillet: *fillet_radius,
+                    flange_edge: *flange_edge_radius,
+                    web_edge: *web_edge_radius,
+                },
+                &TaperT { web, flange },
             )?
         }
         SectionProfile::U {
@@ -311,7 +337,7 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
             edge_radius,
             flange_slope,
         } => {
-            no_slope(*flange_slope, "tapered-flange U section")?;
+            let slope = checked_slope(*flange_slope, "U section")?;
             u_corners(
                 *depth,
                 *flange_width,
@@ -319,6 +345,7 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
                 *flange_thickness,
                 *fillet_radius,
                 *edge_radius,
+                slope,
             )?
         }
         SectionProfile::L {
@@ -329,7 +356,7 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
             edge_radius,
             leg_slope,
         } => {
-            no_slope(*leg_slope, "tapered-leg L section")?;
+            let slope = checked_slope(*leg_slope, "L section")?;
             l_corners(
                 *depth,
                 // An absent width means an EQUAL angle, not a zero one.
@@ -337,6 +364,7 @@ pub fn section_contour(section: &SectionProfile) -> GeomResult<ContourProfile> {
                 *thickness,
                 *fillet_radius,
                 *edge_radius,
+                slope,
             )?
         }
         SectionProfile::Z {
@@ -398,6 +426,8 @@ fn i_corners(
     top_fillet: Option<Scalar>,
     bottom_edge: Option<Scalar>,
     top_edge: Option<Scalar>,
+    bottom_slope: Scalar,
+    top_slope: Scalar,
 ) -> GeomResult<Vec<Corner>> {
     positive(depth, "depth")?;
     positive(bottom_width, "flange width")?;
@@ -421,32 +451,58 @@ fn i_corners(
     let bottom_top = -hd + bottom_flange;
     let top_bottom = hd - top_flange;
 
+    // A tapered flange's inner face is inclined, so its height depends on x.
+    // The face pivots about the MID-POINT between the web face and the flange
+    // tip, which keeps `flange_thickness` the MEAN thickness -- the value
+    // section tables state. Pivoting about the tip or the web instead would
+    // silently change the declared thickness and with it the area.
+    let bottom_rise = |x: Scalar| (x - (hw + hb) / 2.0) * bottom_slope.tan();
+    let top_rise = |x: Scalar| (x - (hw + ht) / 2.0) * top_slope.tan();
+
     Ok(vec![
         sharp(hb, -hd),
-        rounded(hb, bottom_top, bottom_edge),
-        rounded(hw, bottom_top, bottom_fillet),
-        rounded(hw, top_bottom, top_fillet),
-        rounded(ht, top_bottom, top_edge),
+        rounded(hb, bottom_top - bottom_rise(hb), bottom_edge),
+        rounded(hw, bottom_top - bottom_rise(hw), bottom_fillet),
+        rounded(hw, top_bottom + top_rise(hw), top_fillet),
+        rounded(ht, top_bottom + top_rise(ht), top_edge),
         sharp(ht, hd),
         sharp(-ht, hd),
-        rounded(-ht, top_bottom, top_edge),
-        rounded(-hw, top_bottom, top_fillet),
-        rounded(-hw, bottom_top, bottom_fillet),
-        rounded(-hb, bottom_top, bottom_edge),
+        rounded(-ht, top_bottom + top_rise(ht), top_edge),
+        rounded(-hw, top_bottom + top_rise(hw), top_fillet),
+        rounded(-hw, bottom_top - bottom_rise(hw), bottom_fillet),
+        rounded(-hb, bottom_top - bottom_rise(hb), bottom_edge),
         sharp(-hb, -hd),
     ])
 }
 
 /// Eight-corner T outline: flange on top, web hanging below.
+/// The two independent tapers a T section can declare.
+///
+/// Grouped rather than passed loose so the web angle cannot be handed to the
+/// flange by accident: the two are the same type and adjacent in the argument
+/// list, which is exactly the shape of a silent swap.
+/// The three optional radii a T section can declare.
+struct RadiiT {
+    fillet: Option<Scalar>,
+    flange_edge: Option<Scalar>,
+    web_edge: Option<Scalar>,
+}
+
+struct TaperT {
+    web: Scalar,
+    flange: Scalar,
+}
+
 fn t_corners(
     depth: Scalar,
     flange_width: Scalar,
     web_thickness: Scalar,
     flange_thickness: Scalar,
-    fillet: Option<Scalar>,
-    flange_edge: Option<Scalar>,
-    web_edge: Option<Scalar>,
+    radii: &RadiiT,
+    taper: &TaperT,
 ) -> GeomResult<Vec<Corner>> {
+    let (web_slope, flange_slope) = (taper.web, taper.flange);
+    let (fillet, flange_edge, web_edge) = (radii.fillet, radii.flange_edge, radii.web_edge);
     positive(depth, "depth")?;
     positive(flange_width, "flange width")?;
     positive(web_thickness, "web thickness")?;
@@ -465,15 +521,22 @@ fn t_corners(
     let (hd, hw, hf) = (depth / 2.0, web_thickness / 2.0, flange_width / 2.0);
     let flange_bottom = hd - flange_thickness;
 
+    // Flange underside inclines about the mid-point between web face and tip,
+    // keeping `flange_thickness` the mean. The web's side faces incline about
+    // the mid-height of the exposed web run for the same reason.
+    let flange_rise = |x: Scalar| (x - (hw + hf) / 2.0) * flange_slope.tan();
+    let web_mid = (-hd + flange_bottom) / 2.0;
+    let web_out = |y: Scalar| (y - web_mid) * web_slope.tan();
+
     Ok(vec![
-        rounded(hw, -hd, web_edge),
-        rounded(hw, flange_bottom, fillet),
-        rounded(hf, flange_bottom, flange_edge),
+        rounded(hw + web_out(-hd), -hd, web_edge),
+        rounded(hw + web_out(flange_bottom), flange_bottom, fillet),
+        rounded(hf, flange_bottom - flange_rise(hf), flange_edge),
         sharp(hf, hd),
         sharp(-hf, hd),
-        rounded(-hf, flange_bottom, flange_edge),
-        rounded(-hw, flange_bottom, fillet),
-        rounded(-hw, -hd, web_edge),
+        rounded(-hf, flange_bottom - flange_rise(hf), flange_edge),
+        rounded(-hw - web_out(flange_bottom), flange_bottom, fillet),
+        rounded(-hw - web_out(-hd), -hd, web_edge),
     ])
 }
 
@@ -485,6 +548,7 @@ fn u_corners(
     flange_thickness: Scalar,
     fillet: Option<Scalar>,
     edge: Option<Scalar>,
+    flange_slope: Scalar,
 ) -> GeomResult<Vec<Corner>> {
     positive(depth, "depth")?;
     positive(flange_width, "flange width")?;
@@ -503,13 +567,24 @@ fn u_corners(
 
     let hd = depth / 2.0;
     let inner = web_thickness;
+    // Same convention as the I: pivot about the mid-point of the inner face so
+    // the stated flange thickness stays the mean.
+    let rise = |x: Scalar| (x - (inner + flange_width) / 2.0) * flange_slope.tan();
 
     Ok(vec![
         sharp(flange_width, -hd),
-        rounded(flange_width, -hd + flange_thickness, edge),
-        rounded(inner, -hd + flange_thickness, fillet),
-        rounded(inner, hd - flange_thickness, fillet),
-        rounded(flange_width, hd - flange_thickness, edge),
+        rounded(
+            flange_width,
+            -hd + flange_thickness - rise(flange_width),
+            edge,
+        ),
+        rounded(inner, -hd + flange_thickness - rise(inner), fillet),
+        rounded(inner, hd - flange_thickness + rise(inner), fillet),
+        rounded(
+            flange_width,
+            hd - flange_thickness + rise(flange_width),
+            edge,
+        ),
         sharp(flange_width, hd),
         sharp(0.0, hd),
         sharp(0.0, -hd),
@@ -523,6 +598,7 @@ fn l_corners(
     thickness: Scalar,
     fillet: Option<Scalar>,
     edge: Option<Scalar>,
+    leg_slope: Scalar,
 ) -> GeomResult<Vec<Corner>> {
     positive(depth, "depth")?;
     positive(width, "width")?;
@@ -533,12 +609,18 @@ fn l_corners(
         )));
     }
 
+    // Each leg's inner face inclines about the mid-point of its run, so the
+    // stated thickness remains the mean thickness of the leg.
+    let tan = leg_slope.tan();
+    let horizontal = |x: Scalar| (x - (thickness + width) / 2.0) * tan;
+    let vertical = |y: Scalar| (y - (thickness + depth) / 2.0) * tan;
+
     Ok(vec![
         sharp(0.0, 0.0),
         sharp(width, 0.0),
-        rounded(width, thickness, edge),
+        rounded(width, thickness - horizontal(width), edge),
         rounded(thickness, thickness, fillet),
-        rounded(thickness, depth, edge),
+        rounded(thickness - vertical(depth), depth, edge),
         sharp(0.0, depth),
     ])
 }

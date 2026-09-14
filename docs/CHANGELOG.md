@@ -5,6 +5,26 @@ All notable changes to Axiolid are documented in this file.
 ## [Unreleased]
 ### Added
 
+- Arc extrusion with holes: `extrude_arc_rings` builds one cap face per end
+  carrying every ring's loop, with ring 0 outer and the rest through-holes.
+  `Profile::Contour` with holes now extrudes instead of refusing, with
+  genuine cylindrical walls around curved holes. Hole winding is ENFORCED,
+  not demanded: a ring handed either way builds the same solid, because
+  `orient_arc_ring` reverses vertices, rotates the bulge assignment and
+  negates each bulge. Signed area includes each arc's circular-segment term,
+  so the sign is the winding for curved rings too.
+- Tapered structural sections: declared flange, web and leg slopes build for
+  I, AsymmetricI, T, U and L instead of being refused. Measurement showed
+  ADR 0057's stated blocker was wrong -- the existing bisector rounding is
+  already tangent to an inclined face at any angle (verified to 1e-9 at 5, 8
+  and 14 degrees), so a taper is a different corner list, not new geometry.
+  Each tapered face pivots about the mid-point of its run so the declared
+  thickness stays the MEAN thickness that section tables state; pivoting
+  about the tip would silently change the area. A slope beyond 0.9 of a
+  quarter turn is refused as leaving no flange. See ADR 0058.
+
+### Added
+
 - `Profile::Section` exact extrusion for all nine parameterised structural
   variants (I, asymmetric I, L, T, U, C, Z, trapezium). Each lowers to a
   corner ring routed through one shared rounding function, so concave root

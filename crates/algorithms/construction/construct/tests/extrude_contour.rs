@@ -182,7 +182,10 @@ fn an_open_contour_is_refused_rather_than_closed_silently() {
 }
 
 #[test]
-fn a_contour_with_holes_is_refused_not_silently_filled() {
+fn a_contour_with_holes_now_builds_a_through_passage() {
+    // ADR 0053 refused this; ADR 0058 implements it. The assertion flipped
+    // from "must refuse" to a measured volume so the test states the new
+    // capability instead of quietly disappearing.
     let outer = Contour::new(vec![
         line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)),
         line(Point2::new(4.0, 0.0), Point2::new(4.0, 4.0)),
@@ -199,10 +202,14 @@ fn a_contour_with_holes_is_refused_not_silently_filled() {
         outer,
         holes: vec![hole],
     });
-    assert!(
-        extrude_profile_exact(&value, Vec3::Z, 1.0, Tolerance::METRE).is_err(),
-        "a dropped hole would give a solid that closes and is wrong"
-    );
+    let solid = extrude_profile_exact(&value, Vec3::Z, 1.0, Tolerance::METRE)
+        .expect("a contour with holes extrudes");
+
+    // 16 minus the 1x1 hole, times unit depth. A dropped hole reads 16.
+    let volume = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .map(|properties| properties.signed_volume)
+        .expect("an all-planar prism is measurable");
+    assert!((volume - 15.0).abs() < 1e-12, "expected 15, got {volume}");
 }
 
 /// A quarter arc on a LEFT-handed frame: y is -perp(x), so the parameter
