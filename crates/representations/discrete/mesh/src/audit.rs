@@ -181,6 +181,10 @@ impl VecEdgeSink {
 
 /// Group equal edge keys by counting sort on vertex ids.
 ///
+/// Worth ~1.3x on `audit_mesh` and ~1.24x on the `measure` entry points
+/// at 81,920 triangles, measured against the comparison sort with a
+/// forced rebuild per arm.
+///
 /// Profiling attributed most of `audit_mesh` to sorting. The keys are
 /// vertex indices, bounded by the position count, so a two-pass counting
 /// sort replaces the comparison sort. Passes run high then low so the
