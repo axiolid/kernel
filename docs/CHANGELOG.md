@@ -5,22 +5,26 @@ All notable changes to Axiolid are documented in this file.
 ## [Unreleased]
 ### Added
 
-- `Surface::EllipticalCylinder { frame, semi_axis_x, semi_axis_y }`: an exact
-  elliptical cylinder, with point, partials and normal in `axiolid-evaluate`.
-  Deliberately NOT a generalisation of `Cylinder`: a circular cylinder's
-  outward normal is its radial direction, which for an ellipse holds only at
-  the four axis points and diverges by up to 53 degrees for a 3:1 ellipse, so
-  widening `Cylinder` would have silently broken that guarantee for existing
-  consumers. The normal is derived as the cross product of the partials.
-- `Profile::Ellipse` exact extrusion: produces a solid carrying a genuine
-  `EllipticalCylinder` wall with `Ellipse2`/`Ellipse3` cap boundaries, rather
-  than a spline fit or a polygon. The wall satisfies the implicit ellipse
-  equation to under `1e-15` across sampled points, and the cap/wall agreement
-  is confirmed by `geometric_audit` (ADR 0052).
-- `surface_periods` reports a `TAU` u-period for the new surface, so the wall
-  seam closes. On a `#[non_exhaustive]` enum a new variant compiles silently
-  into existing wildcard arms, so this and the measurement refusal name were
-  handled explicitly rather than left to a catch-all.
+- `Profile::CenterLine` exact extrusion: the open path is offset AS CURVES
+  into a closed contour, so a curved centre line yields genuine cylindrical
+  walls instead of a flattened fan. A line offsets to a parallel line and a
+  circular arc to a concentric arc keeping its centre, frame and domain.
+  Curve kinds with no same-kind offset (ellipse, spline) are refused rather
+  than sampled: offsetting a 3:1 ellipse yields a curve whose best-fit
+  ellipse residual is 0.074, so it is not an ellipse.
+  The existing flattening offsetter still serves the tessellating pipeline.
+- Centre-line refusals are explicit and named: closed paths (they denote an
+  annulus, not a single ring), disconnected paths, tangent reversals, and a
+  half-width that collapses an arc's inner offset.
+
+### Notes
+
+- Ring traversal is right-side-forward then left-side-back. The reverse
+  traces the boundary clockwise and builds the solid inside-out, which yields
+  the correct volume MAGNITUDE with a negative sign -- only a signed check
+  catches it.
+- Arc frame handedness determines which offset side grows, since a
+  left-handed frame runs the parameter clockwise in world orientation.
 
 ## [0.1.8] - 2026-09-07
 

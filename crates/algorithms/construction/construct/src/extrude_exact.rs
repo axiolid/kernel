@@ -13,6 +13,7 @@ use axiolid_topology::{
     Solid, Vertex, VertexId,
 };
 
+use crate::center_line_exact::center_line_contour;
 use crate::contour_lower::contour_to_arc_ring;
 use crate::extrude_arc::extrude_arc_ring;
 use crate::profile_lower::{lower_composite, lower_derived};
@@ -53,7 +54,12 @@ pub fn extrude_profile_exact(
             extrude_profile_exact(&lowered, direction, depth, tolerance)
         }
         Profile::Composite(members) => extrude_composite(members, offset, tolerance),
-        Profile::CenterLine(_) => Err(unsupported("center-line extrusion")),
+        Profile::CenterLine(center_line) => {
+            // Offsetting produces a contour, which the contour path already
+            // extrudes exactly -- including the arc walls.
+            let contour = center_line_contour(center_line, tolerance)?;
+            extrude_contour(&contour, offset, tolerance)
+        }
         _ => Err(unsupported("unknown profile extrusion")),
     }
 }

@@ -43,6 +43,7 @@ pub mod boolean_exact;
 mod boolean_provenance;
 pub mod boolean_stepped;
 pub mod center_line;
+pub mod center_line_exact;
 pub mod contour_lower;
 pub mod extrude;
 mod extrude_arc;
