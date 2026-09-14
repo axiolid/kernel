@@ -260,3 +260,21 @@ fn edge_length_refinement_reaches_its_target() {
         "longest edge {longest} must not exceed the {target} target"
     );
 }
+
+/// Weld caches moved to a hash map, whose iteration order is unstable.
+/// That is safe only because they are never iterated: output ordering
+/// comes from the triangle walk. A hash map seeded per-process would
+/// break the documented cross-process guarantee, so assert on exact
+/// vertex positions and indices, not just counts.
+#[test]
+fn refine_is_deterministic_across_runs() {
+    let mesh = cube();
+    let tolerance = tol();
+    let target = RefineTarget::Uniform { levels: 2 };
+    let (first, _) = refine(&mesh, target, None, tolerance).expect("refine");
+    for _ in 0..8 {
+        let (again, _) = refine(&mesh, target, None, tolerance).expect("refine");
+        assert_eq!(first.positions, again.positions, "vertex order drifted");
+        assert_eq!(first.indices, again.indices, "index order drifted");
+    }
+}

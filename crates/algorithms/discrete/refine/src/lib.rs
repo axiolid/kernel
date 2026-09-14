@@ -18,7 +18,7 @@
 
 pub mod smooth;
 
-use std::collections::BTreeMap;
+use ahash::AHashMap;
 
 use axiolid_core::{Point3, Scalar, Tolerance};
 use axiolid_mesh::{AttributeFate, TriMesh};
@@ -136,9 +136,12 @@ fn validate(mesh: &TriMesh) -> Result<(), RefineError> {
 /// improvement. Passing `None` subdivides linearly and says so in the
 /// report rather than implying an accuracy gain it did not deliver.
 ///
-/// Deterministic: edges are keyed by their ordered vertex pair in a
-/// `BTreeMap`, so the same input produces the same output vertex ordering
-/// on every run and across processes.
+/// Deterministic: new vertices are numbered in the order edges are first
+/// split during the triangle walk, which is fixed by the index buffer. The
+/// midpoint cache is keyed by the ordered vertex pair and is only ever
+/// queried by key, never iterated, so its internal ordering cannot reach
+/// the output. The same input produces the same output vertex ordering on
+/// every run and across processes.
 ///
 /// # Errors
 ///
@@ -180,7 +183,7 @@ pub fn refine(
     let mut max_deviation: Scalar = 0.0;
 
     for _ in 0..levels {
-        let mut midpoints: BTreeMap<(u32, u32), u32> = BTreeMap::new();
+        let mut midpoints: AHashMap<(u32, u32), u32> = AHashMap::new();
         let mut next = Vec::with_capacity(indices.len() * 4);
 
         for chunk in indices.chunks_exact(3) {
@@ -285,7 +288,7 @@ fn split_edge(
     a: u32,
     b: u32,
     positions: &mut Vec<Point3>,
-    midpoints: &mut BTreeMap<(u32, u32), u32>,
+    midpoints: &mut AHashMap<(u32, u32), u32>,
     surface: Option<&Surface>,
     tolerance: Tolerance,
     max_deviation: &mut Scalar,

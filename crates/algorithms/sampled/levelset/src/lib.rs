@@ -82,7 +82,7 @@
 //! A caller who needs the guarantee unconditionally should offset the
 //! bounds so no grid plane is tangent to the surface.
 
-use std::collections::BTreeMap;
+use ahash::AHashMap;
 
 use axiolid_core::{Aabb, Point3, Scalar};
 use axiolid_mesh::TriMesh;
@@ -267,14 +267,14 @@ where
     // Keyed by the two grid samples an intersection lies between, so both
     // tetrahedra sharing that edge reuse one vertex. This welding is what
     // makes the result closed rather than a soup of disconnected triangles.
-    let mut vertices: BTreeMap<(usize, usize), u32> = BTreeMap::new();
+    let mut vertices: AHashMap<(usize, usize), u32> = AHashMap::new();
     // A second index, keyed by exact position bits. Two DIFFERENT edges can
     // cross at the same point -- when a crossing lands on a shared grid
     // corner, for instance -- and giving that point two vertex ids collapses
     // the incident triangles to zero area. Dropping those then tears a hole,
     // which is how this first showed up: 36 exactly-zero-area faces and 48
     // unmatched boundary edges. Welding by position removes the cause.
-    let mut welded: BTreeMap<[u64; 3], u32> = BTreeMap::new();
+    let mut welded: AHashMap<[u64; 3], u32> = AHashMap::new();
 
     for k in 0..counts[2] - 1 {
         for j in 0..counts[1] - 1 {
@@ -317,8 +317,8 @@ fn emit_tetrahedron(
     edge_length: Scalar,
     positions: &mut Vec<Point3>,
     indices: &mut Vec<u32>,
-    vertices: &mut BTreeMap<(usize, usize), u32>,
-    welded: &mut BTreeMap<[u64; 3], u32>,
+    vertices: &mut AHashMap<(usize, usize), u32>,
+    welded: &mut AHashMap<[u64; 3], u32>,
 ) {
     // A sample exactly at the level would make an edge both crossing and
     // not crossing depending on which side asks, so the rule has to be

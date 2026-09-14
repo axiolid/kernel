@@ -10,6 +10,7 @@ homepage.workspace = true
 readme.workspace = true
 
 [dependencies]
+ahash.workspace = true
 axiolid-core.workspace = true
 axiolid-mesh.workspace = true
 axiolid-surface.workspace = true

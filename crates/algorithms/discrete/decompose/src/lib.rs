@@ -74,6 +74,7 @@
 
 pub mod split;
 
+use ahash::AHashMap;
 use std::collections::BTreeMap;
 
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
@@ -421,9 +422,9 @@ fn clip(mesh: &TriMesh, normal: Vec3, offset: Scalar, tolerance: Tolerance) -> O
     let linear = tolerance.linear();
     let mut positions: Vec<Point3> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
-    let mut lookup: BTreeMap<(u64, u64, u64), u32> = BTreeMap::new();
+    let mut lookup: AHashMap<(u64, u64, u64), u32> = AHashMap::new();
 
-    let intern = |point: Point3, positions: &mut Vec<Point3>, lookup: &mut BTreeMap<_, _>| {
+    let intern = |point: Point3, positions: &mut Vec<Point3>, lookup: &mut AHashMap<_, _>| {
         let key = (
             quantise(point.x, linear),
             quantise(point.y, linear),
@@ -611,13 +612,6 @@ fn stitch_loops(edges: &[(Point3, Point3)], linear: Scalar) -> Vec<Vec<Point3>> 
     };
 
     let mut adjacency: BTreeMap<(u64, u64, u64), Vec<usize>> = BTreeMap::new();
-    eprintln!(
-        "CAPDIAG edges {:?}",
-        edges
-            .iter()
-            .map(|(a, b)| ((a.x, a.z), (b.x, b.z)))
-            .collect::<Vec<_>>()
-    );
     for (index, (from, to)) in edges.iter().enumerate() {
         adjacency.entry(key(from)).or_default().push(index);
         adjacency.entry(key(to)).or_default().push(index);
@@ -664,10 +658,6 @@ fn stitch_loops(edges: &[(Point3, Point3)], linear: Scalar) -> Vec<Vec<Point3>> 
             }
         }
         if ring.len() >= 3 {
-            eprintln!(
-                "CAPDIAG ring {:?}",
-                ring.iter().map(|p| (p.x, p.z)).collect::<Vec<_>>()
-            );
             loops.push(ring);
         }
     }
