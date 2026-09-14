@@ -6,6 +6,13 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- Overlay hole reachability is pinned by test: `overlay` returns a polygon
+  carrying a hole for a difference that encloses a void, so `polygon_area`'s
+  hole subtraction is live code rather than an unreachable branch. Mutation-
+  verified by deleting the subtraction, which the new area assertion catches.
+
+### Added
+
 - Exact full-turn revolution of any profile that lowers to a contour:
   `Section`, `Contour`, `CenterLine` and `Derived` no longer refuse. Segments
   sweep cylinders, cones, planar annuli and tori according to their own
