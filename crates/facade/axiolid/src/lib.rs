@@ -13,6 +13,12 @@ pub mod integration;
 
 /// Supported provider-neutral application boundary.
 #[cfg(feature = "application")]
+// Gated on BOTH: the cache needs the ray crate for the narrow phase and
+// the spatial crate for the broad phase. Enabling ray-mesh alone must
+// still build, so the cache is absent there and the facade falls back.
+#[cfg(all(feature = "ray-mesh", feature = "spatial"))]
+mod ray_index;
+
 pub mod application;
 
 /// Always-available scalar, transform, and bounds vocabulary.

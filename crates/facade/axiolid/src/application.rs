@@ -26,7 +26,9 @@ use axiolid_mesh_section_contract::{
     conformance::ConformanceReport as SectionConformanceReport, SectionLimits, SectionOutcome,
 };
 use axiolid_profile::Profile;
-use axiolid_ray_mesh::{nearest_hit, RayHit3, RayMeshError};
+#[cfg(not(all(feature = "ray-mesh", feature = "spatial")))]
+use axiolid_ray_mesh::nearest_hit;
+use axiolid_ray_mesh::{RayHit3, RayMeshError};
 use axiolid_reference::ScalarSection;
 
 const APPLICATION_ID: BackendId = BackendId::new("axiolid-application");
@@ -230,6 +232,8 @@ impl ApplicationBuilder {
             .capabilities
             .sort_by_key(|capability| capability.id);
         Application {
+            #[cfg(all(feature = "ray-mesh", feature = "spatial"))]
+            ray_indices: crate::ray_index::RayIndexCache::default(),
             boolean: self.boolean,
             section: self.section,
             boolean_provider: self.boolean_provider,
@@ -287,6 +291,10 @@ fn direct_capabilities() -> [CapabilityDescriptor; 4] {
 /// Coherent application boundary backed by explicitly selected providers.
 #[derive(Debug, Clone)]
 pub struct Application {
+    /// Broad-phase indices for repeat ray casts. Behind a lock so the
+    /// public `&self` methods keep working and `Application` stays `Sync`.
+    #[cfg(all(feature = "ray-mesh", feature = "spatial"))]
+    ray_indices: crate::ray_index::RayIndexCache,
     boolean: MeshBooleanRegistry,
     section: MeshPlaneSectionRegistry,
     boolean_provider: Option<BackendId>,
@@ -426,7 +434,11 @@ impl Application {
         ray: &Ray3,
         tolerance: Tolerance,
     ) -> Result<Option<RayHit3>, ApplicationError> {
-        nearest_hit(mesh, ray, tolerance).map_err(|source| ApplicationError {
+        #[cfg(all(feature = "ray-mesh", feature = "spatial"))]
+        let outcome = self.ray_indices.nearest_hit(mesh, ray, tolerance);
+        #[cfg(not(all(feature = "ray-mesh", feature = "spatial")))]
+        let outcome = nearest_hit(mesh, ray, tolerance);
+        outcome.map_err(|source| ApplicationError {
             context: CallContext {
                 operation: Operation::SpatialQuery,
                 provider: RAY_MESH_ID,
