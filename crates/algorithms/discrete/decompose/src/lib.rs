@@ -362,6 +362,31 @@ fn worst_concavity(positions: &[Point3], indices: &[u32], tolerance: Tolerance) 
     let linear = tolerance.linear();
     let mut worst: Option<Reflex> = None;
 
+    // Bounding sphere over the vertices. For a unit normal `n`, no
+    // vertex can satisfy dot(v, n) > centre.dot(n) + radius, so the
+    // deepest a vertex could sit past a face plane is bounded without
+    // touching a single vertex.
+    //
+    // The bound is CONSERVATIVE: it can only skip a face when no vertex
+    // could qualify, so the result is identical to scanning every
+    // vertex of every face -- including which face and vertex win a
+    // tie. An AABB corner was tried first and prunes nothing on a
+    // round mesh: it overshoots the true extent by up to sqrt(3).
+    let &first = positions.first()?;
+    let (mut low, mut high) = (first, first);
+    for point in positions {
+        low = Point3::new(low.x.min(point.x), low.y.min(point.y), low.z.min(point.z));
+        high = Point3::new(
+            high.x.max(point.x),
+            high.y.max(point.y),
+            high.z.max(point.z),
+        );
+    }
+    let centre = (low + high) * 0.5;
+    let radius = positions
+        .iter()
+        .fold(0.0, |m: Scalar, p| m.max((*p - centre).length()));
+
     for chunk in indices.chunks_exact(3) {
         let a = positions[chunk[0] as usize];
         let b = positions[chunk[1] as usize];
@@ -375,6 +400,27 @@ fn worst_concavity(positions: &[Point3], indices: &[u32], tolerance: Tolerance) 
             continue;
         }
         let unit = normal / area;
+
+        // Deepest any vertex could sit past this plane, from the
+        // bounding sphere alone -- no vertex touched.
+        let reach = centre.dot(unit) + radius - a.dot(unit);
+
+        // A vertex must clear `linear` to be a candidate at all. Against
+        // an incumbent it must also reach the bottom of the tie window,
+        // `depth - linear`, since an equal-depth vertex can still win on
+        // coordinate order.
+        //
+        // Instrumented: the window is entered often (729 faces across
+        // this suite) but no face inside it ever held a tie-breaking
+        // winner, so pruning at `depth` behaves identically on every
+        // input tried. The wider bound is kept because it CANNOT drop a
+        // tie, not because a test distinguishes the two.
+        let threshold = worst
+            .as_ref()
+            .map_or(linear, |current| (current.depth - linear).max(linear));
+        if reach <= threshold {
+            continue;
+        }
 
         for (index, &point) in positions.iter().enumerate() {
             let ahead = (point - a).dot(unit);
@@ -689,4 +735,314 @@ fn quantise(value: Scalar, linear: Scalar) -> u64 {
     let step = linear.max(Scalar::EPSILON);
     let snapped = (value / step).round();
     snapped.to_bits()
+}
+
+#[cfg(test)]
+mod concavity_tests {
+    use super::*;
+
+    fn tol() -> Tolerance {
+        Tolerance::new(1e-9, 1e-12).expect("tolerance")
+    }
+
+    /// The pre-prune implementation, kept verbatim as the oracle. The
+    /// prune is only correct if it agrees with this on every input.
+    fn unpruned(positions: &[Point3], indices: &[u32], tolerance: Tolerance) -> Option<Reflex> {
+        let linear = tolerance.linear();
+        let mut worst: Option<Reflex> = None;
+        for chunk in indices.chunks_exact(3) {
+            let a = positions[chunk[0] as usize];
+            let b = positions[chunk[1] as usize];
+            let c = positions[chunk[2] as usize];
+            let normal = (b - a).cross(c - a);
+            let area = normal.length();
+            if area <= linear * linear {
+                continue;
+            }
+            let unit = normal / area;
+            for &point in positions.iter() {
+                let ahead = (point - a).dot(unit);
+                if ahead <= linear {
+                    continue;
+                }
+                let better = match &worst {
+                    None => true,
+                    Some(current) => {
+                        ahead > current.depth + linear
+                            || ((ahead - current.depth).abs() <= linear
+                                && (point.x, point.y, point.z)
+                                    < (current.apex.x, current.apex.y, current.apex.z))
+                    }
+                };
+                if better {
+                    worst = Some(Reflex {
+                        depth: ahead,
+                        apex: point,
+                        normal: unit,
+                        offset: a.dot(unit),
+                    });
+                }
+            }
+        }
+        worst
+    }
+
+    fn agree(label: &str, mesh: &TriMesh) {
+        let want = unpruned(&mesh.positions, &mesh.indices, tol());
+        let got = worst_concavity(&mesh.positions, &mesh.indices, tol());
+        match (want, got) {
+            (None, None) => {}
+            (Some(w), Some(g)) => {
+                assert!((w.depth - g.depth).abs() < 1e-12, "{label}: depth");
+                // Same apex AND same plane: the caller splits on this
+                // plane, so a different face changes the decomposition.
+                assert_eq!(w.apex, g.apex, "{label}: apex");
+                assert_eq!(w.normal, g.normal, "{label}: normal");
+                assert!((w.offset - g.offset).abs() < 1e-12, "{label}: offset");
+            }
+            (a, b) => panic!(
+                "{label}: presence differs, {} vs {}",
+                a.is_some(),
+                b.is_some()
+            ),
+        }
+    }
+
+    fn cube() -> TriMesh {
+        let p = vec![
+            Point3::new(-1.0, -1.0, -1.0),
+            Point3::new(1.0, -1.0, -1.0),
+            Point3::new(1.0, 1.0, -1.0),
+            Point3::new(-1.0, 1.0, -1.0),
+            Point3::new(-1.0, -1.0, 1.0),
+            Point3::new(1.0, -1.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+            Point3::new(-1.0, 1.0, 1.0),
+        ];
+        let i = vec![
+            0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6,
+            5, 0, 4, 7, 0, 7, 3u32,
+        ];
+        TriMesh::new(p, i)
+    }
+
+    /// Extruded L: a genuine reflex corner, and enough symmetry that
+    /// several faces report the same depth.
+    fn l_shape() -> TriMesh {
+        let footprint = [
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 2.0),
+            (0.0, 2.0),
+        ];
+        let mut positions = Vec::new();
+        for &(x, y) in &footprint {
+            positions.push(Point3::new(x, y, 0.0));
+        }
+        for &(x, y) in &footprint {
+            positions.push(Point3::new(x, y, 1.0));
+        }
+        let n = footprint.len() as u32;
+        let mut indices = Vec::new();
+        for &(a, b, c) in &[(0u32, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 5)] {
+            indices.extend_from_slice(&[a, c, b]);
+            indices.extend_from_slice(&[a + n, b + n, c + n]);
+        }
+        for i in 0..n {
+            let j = (i + 1) % n;
+            indices.extend_from_slice(&[i, j, j + n]);
+            indices.extend_from_slice(&[i, j + n, i + n]);
+        }
+        TriMesh::new(positions, indices)
+    }
+
+    #[test]
+    fn prune_agrees_on_a_convex_solid() {
+        agree("cube", &cube());
+    }
+
+    /// Pull one corner inward so a genuine reflex feature exists: the
+    /// convex case alone would let a prune that skips EVERYTHING pass.
+    #[test]
+    fn prune_agrees_on_a_dented_solid() {
+        let mut mesh = cube();
+        mesh.positions[6] = Point3::new(0.1, 0.1, 0.1);
+        agree("dented", &mesh);
+        assert!(
+            worst_concavity(&mesh.positions, &mesh.indices, tol()).is_some(),
+            "the dent must register as concavity, or this proves nothing"
+        );
+    }
+
+    /// Many shapes, deterministic pseudo-random. A handcrafted fixture
+    /// exercises one path through the tie-break; this sweeps enough
+    /// geometry to hit equal-depth cases the prune must not skip.
+    #[test]
+    fn prune_agrees_across_many_dents() {
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for trial in 0..200 {
+            let mut mesh = cube();
+            for _ in 0..3 {
+                let which = (next() * 8.0) as usize % 8;
+                let scale = 0.2 + next() * 1.4;
+                mesh.positions[which] *= scale;
+            }
+            agree(&format!("trial {trial}"), &mesh);
+        }
+    }
+
+    /// Equal depths across several faces are what the tie-break exists
+    /// to resolve, and what a prune clamped to the incumbent depth
+    /// would skip. A symmetric dent produces them exactly; a coarse
+    /// tolerance widens the tie window enough to be reachable.
+    #[test]
+    fn prune_respects_the_tie_window() {
+        let coarse = Tolerance::new(0.05, 1e-12).expect("tolerance");
+        // Pull four top corners inward by the SAME amount: several
+        // faces then report identical reflex depth.
+        // Push four corners OUTWARD symmetrically: spikes give several
+        // faces an identical, genuinely-reflex depth.
+        let mesh = l_shape();
+        let want = unpruned(&mesh.positions, &mesh.indices, coarse);
+        let got = worst_concavity(&mesh.positions, &mesh.indices, coarse);
+        let (want, got) = (want.expect("reflex"), got.expect("reflex"));
+        assert!((want.depth - got.depth).abs() < 1e-12, "depth differs");
+        assert!(
+            (want.apex - got.apex).length() < 1e-12,
+            "same depth, different apex: the tie-break was not preserved"
+        );
+    }
+
+    /// Sweep tolerance so the tie window spans the gap between the
+    /// bounding-sphere reach and the true depth. Somewhere in that
+    /// sweep a face is skipped by a prune clamped to the incumbent
+    /// depth but kept by one that honours the window -- if the two
+    /// ever differ, this finds it.
+    #[test]
+    fn prune_matches_the_oracle_across_tolerances() {
+        let meshes = [("l", l_shape()), ("cube", cube())];
+        for (name, mesh) in &meshes {
+            let mut linear = 1e-12;
+            while linear < 2.0 {
+                let t = Tolerance::new(linear, 1e-12).expect("tolerance");
+                let want = unpruned(&mesh.positions, &mesh.indices, t);
+                let got = worst_concavity(&mesh.positions, &mesh.indices, t);
+                match (want, got) {
+                    (None, None) => {}
+                    (Some(a), Some(b)) => {
+                        assert!(
+                            (a.depth - b.depth).abs() < 1e-12 && (a.apex - b.apex).length() < 1e-12,
+                            "{name} at linear={linear:e}: prune changed the answer"
+                        );
+                    }
+                    (a, b) => panic!(
+                        "{name} at linear={linear:e}: presence differs, {} vs {}",
+                        a.is_some(),
+                        b.is_some()
+                    ),
+                }
+                linear *= 1.5;
+            }
+        }
+    }
+
+    /// Randomised search for an input where a prune clamped to the
+    /// incumbent depth differs from one honouring the tie window.
+    /// Coarse tolerances widen the window; random point sets give the
+    /// bounding-sphere bound a chance to be tight.
+    #[test]
+    fn prune_matches_the_oracle_on_random_solids() {
+        let mut seed = 0xD1B54A32D192ED03u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for trial in 0..400 {
+            // Quantised coordinates: exact ties are then reachable,
+            // which continuous random values would never produce.
+            let mut mesh = cube();
+            for slot in 0..8 {
+                let q = |v: f64| (v * 4.0).round() / 4.0;
+                let p = mesh.positions[slot];
+                let s = 0.25 + (next() * 8.0).floor() / 4.0;
+                mesh.positions[slot] = Point3::new(q(p.x * s), q(p.y * s), q(p.z * s));
+            }
+            for step in 0..6 {
+                let linear = 0.01 * 4.0_f64.powi(step);
+                let t = Tolerance::new(linear, 1e-12).expect("tolerance");
+                let want = unpruned(&mesh.positions, &mesh.indices, t);
+                let got = worst_concavity(&mesh.positions, &mesh.indices, t);
+                match (want, got) {
+                    (None, None) => {}
+                    (Some(a), Some(b)) => assert!(
+                        (a.depth - b.depth).abs() < 1e-12 && (a.apex - b.apex).length() < 1e-12,
+                        "trial {trial} linear={linear}: prune changed the answer"
+                    ),
+                    (a, b) => panic!(
+                        "trial {trial} linear={linear}: presence differs, {} vs {}",
+                        a.is_some(),
+                        b.is_some()
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Constructed, not searched: two spikes at equal depth, where the
+    /// second face has a bounding-sphere reach just below the
+    /// incumbent depth. A prune clamped to that depth skips it and
+    /// loses the tie-break; one honouring the window keeps it.
+    #[test]
+    fn prune_keeps_faces_inside_the_tie_window() {
+        // Coarse tolerance so the window has real width.
+        let t = Tolerance::new(0.25, 1e-12).expect("tolerance");
+        // Sweep asymmetric spikes: some trial puts a tie-breaking
+        // vertex behind a face whose reach sits inside the window.
+        for a in 1..14 {
+            for b in 1..14 {
+                let mut mesh = cube();
+                let sa = 1.0 + a as Scalar * 0.125;
+                let sb = 1.0 + b as Scalar * 0.125;
+                let p4 = mesh.positions[4];
+                let p6 = mesh.positions[6];
+                mesh.positions[4] = Point3::new(p4.x * sa, p4.y * sa, p4.z * sa);
+                mesh.positions[6] = Point3::new(p6.x * sb, p6.y * sb, p6.z * sb);
+                let want = unpruned(&mesh.positions, &mesh.indices, t);
+                let got = worst_concavity(&mesh.positions, &mesh.indices, t);
+                match (want, got) {
+                    (None, None) => {}
+                    (Some(x), Some(y)) => assert!(
+                        (x.depth - y.depth).abs() < 1e-12 && (x.apex - y.apex).length() < 1e-12,
+                        "a={a} b={b}: prune changed the answer"
+                    ),
+                    (x, y) => panic!("a={a} b={b}: {} vs {}", x.is_some(), y.is_some()),
+                }
+            }
+        }
+    }
+
+    /// The bounding sphere is computed from the first vertex, so an
+    /// empty mesh must not index it.
+    #[test]
+    fn empty_input_is_none() {
+        assert!(worst_concavity(&[], &[], tol()).is_none());
+    }
+
+    /// Degenerate faces are skipped before the plane is formed; the
+    /// prune must not change that.
+    #[test]
+    fn degenerate_faces_are_still_skipped() {
+        let p = vec![Point3::ZERO, Point3::ZERO, Point3::ZERO];
+        assert!(worst_concavity(&p, &[0, 1, 2], tol()).is_none());
+    }
 }
