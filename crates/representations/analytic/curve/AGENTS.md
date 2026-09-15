@@ -7,12 +7,18 @@ Allowed internal dependencies: axiolid-core. Follow parent `../AGENTS.md`. Do no
 
 ## Module ownership
 
-linear.rs; conic.rs; spline.rs; evaluate.rs. Split a module before unrelated data, validation, and algorithms grow
+linear.rs; conic.rs; spline.rs; intrinsic.rs; elevation.rs; evaluate.rs. Split a module before unrelated data, validation, and algorithms grow
 together. Add no empty placeholder files.
 
 ## Invariants
 
 Composite/trim/offset/surface relations belong in axiolid-model to avoid curve-surface cycles. Preserve knots, multiplicities, weights, and domains.
+
+An `ElevationLaw` is written against **plan distance**, never 3D arc length:
+the two diverge by `sqrt(1 + g^2)` wherever grade is non-zero. `Elevated3`
+pairs one with a `Curve2`, and only arc-length parameterisations (line,
+circle, intrinsic) may be paired — a B-spline parameter is not distance, so
+`axiolid-evaluate` refuses it rather than reinterpreting the law (ADR 0060).
 
 This crate is representation only: it declares `CurveEvaluator` but implements
 no evaluation. The scalar implementation is `axiolid_reference::curve`

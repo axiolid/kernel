@@ -6,12 +6,14 @@
 //! `axiolid-model`; keeping them there avoids a curve/surface dependency cycle.
 
 pub mod conic;
+pub mod elevation;
 pub mod evaluate;
-pub mod intrinsic;
+mod intrinsic;
 pub mod linear;
 pub mod spline;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
+pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
@@ -58,4 +60,7 @@ pub enum Curve3 {
     Polyline(Polyline3),
     /// Polynomial or rational B-spline.
     BSpline(BSplineCurve3),
+    /// A planar curve paired with an elevation law: the exact composition an
+    /// alignment centreline is authored as. See [`Elevated3`].
+    Elevated(Elevated3),
 }

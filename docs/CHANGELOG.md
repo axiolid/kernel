@@ -6,6 +6,21 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `Curve3::Elevated`: a planar layout paired with an `ElevationLaw`, the
+  exact composition an alignment centreline is authored as. The plan keeps
+  its own exactness -- including a `Curve2::Intrinsic` transition spiral --
+  and the vertical profile keeps its own; neither is approximated to pair
+  them (ADR 0060, #105).
+- `ElevationLaw`: polynomial and piecewise height laws over PLAN distance,
+  with `parabolic` and `constant_grade` constructors for the two vertical
+  segment kinds that carry most alignment data.
+- Arc-length evaluation of intrinsic curves: `intrinsic_point`,
+  `intrinsic_tangent`, `elevated_point`, `elevated_tangent`. Heading is
+  exact in closed form; position is Gauss-Legendre quadrature of the
+  non-elementary integral, matching a Fresnel reference to better than 1e-9.
+
+### Added
+
 - Overlay hole reachability is pinned by test: `overlay` returns a polygon
   carrying a hole for a difference that encloses a void, so `polygon_area`'s
   hole subtraction is live code rather than an unreachable branch. Mutation-

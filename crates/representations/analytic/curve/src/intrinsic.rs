@@ -557,6 +557,23 @@ impl Intrinsic2 {
         self.curvature.is_straight()
     }
 
+    /// Tangent heading at arc length `s` from the start, in radians.
+    ///
+    /// The integral of `k` over `[0, s]`, which every law in the family has in
+    /// closed form -- so the heading is exact even though the POSITION is not
+    /// and has to be quadratured. Measured from the start tangent, so the
+    /// absolute heading is this plus the start frame's rotation.
+    ///
+    /// Returns `None` when `s` is not finite or a piecewise law does not tile
+    /// `[0, s]`, matching [`Self::total_turning`].
+    #[must_use]
+    pub fn heading_at(&self, s: Scalar) -> Option<Scalar> {
+        if !s.is_finite() {
+            return None;
+        }
+        turning_over(&self.curvature, s)
+    }
+
     /// Total tangent turning over the curve, in radians, in closed form.
     ///
     /// This is the integral of k(s) over `[0, length]` -- exact for every law in

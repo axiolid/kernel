@@ -11,9 +11,11 @@
 //! No intrinsics, no threading, no feature gates: it must stay obviously
 //! correct in preference to being fast.
 
+pub mod arc_length;
 pub mod curve;
 mod nurbs;
 pub mod surface;
 
+pub use arc_length::{elevated_point, elevated_tangent, intrinsic_point, intrinsic_tangent};
 pub use curve::{derivative2, derivative3, evaluate2, evaluate3, flatten2, ScalarCurve};
 pub use surface::{partials, Patch, ScalarSurface};
