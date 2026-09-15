@@ -6,6 +6,27 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `Curve3::Intrinsic`: a space curve given by its natural equations,
+  curvature AND torsion as functions of arc length, anchored to a start
+  frame. Carries helices and general space spirals as exact values
+  (ADR 0061).
+- `axiolid-evaluate::frenet`: frame, point and tangent of a space curve by a
+  fourth-order Magnus expansion on SO(3). The frame is orthonormal to
+  machine precision at any step size because each step is an exponential of
+  a skew matrix, and zero torsion reproduces the planar answer exactly.
+- `Intrinsic2::turning_variation_bound`: an upper bound on the total
+  variation of heading, for quadrature budgeting.
+
+### Fixed
+
+- Arc-length evaluation of an oscillating curvature law budgeted its
+  quadrature from SIGNED turning, which is zero over whole periods of a
+  zero-mean law: `k(s) = 2 sin(10 s)` over `[0, pi]` was integrated with one
+  panel and landed 2.1e-1 from the true endpoint. Budgeting from total
+  variation lands it to 4.9e-15 (ADR 0061).
+
+### Added
+
 - `Curve3::Elevated`: a planar layout paired with an `ElevationLaw`, the
   exact composition an alignment centreline is authored as. The plan keeps
   its own exactness -- including a `Curve2::Intrinsic` transition spiral --

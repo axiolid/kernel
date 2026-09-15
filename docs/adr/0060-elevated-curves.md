@@ -85,6 +85,11 @@ anything shaped like a curve.
 - Torsion is still not representable. An alignment does not state torsion, so
   `Curve3::Intrinsic` with curvature and torsion laws (option 1) remains open
   for a future need rather than being built speculatively.
+  **Superseded by ADR 0061**, which adds `Intrinsic3` as its own value type
+  rather than a torsion field on `Intrinsic2` — in space the FRAME needs
+  integration, not just the position, so the 2D shape does not generalise.
+  ADR 0061 also fixes a latent bug in this ADR's panel budget, which used
+  signed turning where it needed total variation.
 
 ## Verification
 

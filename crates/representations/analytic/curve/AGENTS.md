@@ -7,7 +7,7 @@ Allowed internal dependencies: axiolid-core. Follow parent `../AGENTS.md`. Do no
 
 ## Module ownership
 
-linear.rs; conic.rs; spline.rs; intrinsic.rs; elevation.rs; evaluate.rs. Split a module before unrelated data, validation, and algorithms grow
+linear.rs; conic.rs; spline.rs; intrinsic.rs; intrinsic3.rs; elevation.rs; evaluate.rs. Split a module before unrelated data, validation, and algorithms grow
 together. Add no empty placeholder files.
 
 ## Invariants
