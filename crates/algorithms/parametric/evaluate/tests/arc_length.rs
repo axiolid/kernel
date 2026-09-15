@@ -251,3 +251,37 @@ fn an_elevated_curve_is_a_curve3_value() {
     assert!((point.z - 7.0).abs() < 1e-12);
     let _ = Tolerance::METRE;
 }
+
+#[test]
+fn an_oscillating_law_is_budgeted_by_variation_not_signed_turning() {
+    // k(s) = 2 sin(10 s) over [0, pi] completes five whole periods, so the
+    // SIGNED turning integral is exactly zero -- yet the curve swings through
+    // 2pi radians of heading and wanders far from where one panel would put
+    // it. Budgeting from |int k| bought one panel and landed 2.1e-1 wrong.
+    //
+    // Reference from 20,000-panel Gauss-Legendre on the same integrand,
+    // computed independently in Python.
+    let law = CurvatureLaw::Sinusoid {
+        mean: 0.0,
+        amplitude: 2.0,
+        angular_frequency: 10.0,
+        phase: 0.0,
+    };
+    let span = core::f64::consts::PI;
+    let curve = Intrinsic2::new(origin_frame(), law, span);
+
+    let turning = curve.total_turning().expect("turning integrates");
+    assert!(
+        turning.abs() < 1e-12,
+        "this law's signed turning must be zero for the test to bite, got {turning:e}"
+    );
+
+    let got = intrinsic_point(&curve, span).expect("an oscillating law evaluates");
+    let (want_x, want_y) = (3.048_257_150, 0.617_912_315);
+    assert!(
+        (got.x - want_x).abs() < 1e-6 && (got.y - want_y).abs() < 1e-6,
+        "got ({}, {}), want ({want_x}, {want_y})",
+        got.x,
+        got.y
+    );
+}

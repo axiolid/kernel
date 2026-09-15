@@ -590,4 +590,80 @@ impl Intrinsic2 {
         }
         turning_over(&self.curvature, self.length)
     }
+
+    /// Upper bound on the total variation of heading over `[0, s]`, in radians.
+    ///
+    /// `total_turning` is the SIGNED integral of `k`; over a zero-mean
+    /// oscillation it is zero however violently the curve wiggles. A quadrature
+    /// budget derived from it would then spend one panel on a curve that needs
+    /// many, so this returns the integral of `|k|` instead -- or a bound on it.
+    ///
+    /// Exact for `Constant`. For the other families an exact total variation
+    /// needs the sign changes of `k`, so this returns a cheap upper bound from
+    /// the triangle inequality: a bound is what a panel budget wants, and
+    /// overestimating costs panels while underestimating costs correctness.
+    ///
+    /// `None` when `s` is not finite, matching `heading_at`.
+    #[must_use]
+    pub fn turning_variation_bound(&self, s: Scalar) -> Option<Scalar> {
+        if !s.is_finite() {
+            return None;
+        }
+        variation_bound(&self.curvature, s)
+    }
+}
+
+/// Upper bound on the integral of `|k|` over `[0, span]`.
+fn variation_bound(law: &CurvatureLaw, span: Scalar) -> Option<Scalar> {
+    let span_abs = span.abs();
+    match law {
+        // Exact: |k| is constant, so the integral is just |k| * span.
+        CurvatureLaw::Constant { curvature } => Some(curvature.abs() * span_abs),
+        // sum |c_i| s^(i+1) / (i+1) >= |int sum c_i s^i|, term by term.
+        CurvatureLaw::Polynomial { coefficients } => {
+            Some(polynomial_variation(coefficients, span_abs))
+        }
+        // |mean| * span + |amplitude| * span bounds both parts; the harmonic
+        // term integrates to at most its amplitude times the span.
+        CurvatureLaw::Sinusoid {
+            mean, amplitude, ..
+        } => Some((mean.abs() + amplitude.abs()) * span_abs),
+        CurvatureLaw::Composite {
+            polynomial,
+            harmonics,
+        } => Some(
+            polynomial_variation(polynomial, span_abs)
+                + harmonics
+                    .iter()
+                    .map(|h| h.amplitude.abs() * span_abs)
+                    .sum::<Scalar>(),
+        ),
+        // Pieces tile the span, so their variations add. Each piece is written
+        // in its own arc length, exactly as `turning_over` treats them.
+        CurvatureLaw::Piecewise { breaks, laws } => {
+            if !law.is_well_formed() {
+                return None;
+            }
+            if breaks.iter().any(|b| *b <= 0.0 || *b >= span_abs) {
+                return None;
+            }
+            let mut total = 0.0;
+            let mut start = 0.0;
+            for (index, piece) in laws.iter().enumerate() {
+                let end = breaks.get(index).copied().unwrap_or(span_abs);
+                total += variation_bound(piece, end - start)?;
+                start = end;
+            }
+            Some(total)
+        }
+    }
+}
+
+/// Term-by-term bound on the integral of |polynomial| over `[0, span]`.
+fn polynomial_variation(coefficients: &[Scalar], span: Scalar) -> Scalar {
+    coefficients
+        .iter()
+        .enumerate()
+        .map(|(power, c)| c.abs() * span.powi(power as i32 + 1) / (power as Scalar + 1.0))
+        .sum()
 }

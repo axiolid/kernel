@@ -9,6 +9,7 @@ pub mod conic;
 pub mod elevation;
 pub mod evaluate;
 mod intrinsic;
+mod intrinsic3;
 pub mod linear;
 pub mod spline;
 
@@ -16,6 +17,7 @@ pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
+pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
 
@@ -60,6 +62,10 @@ pub enum Curve3 {
     Polyline(Polyline3),
     /// Polynomial or rational B-spline.
     BSpline(BSplineCurve3),
+    /// Curve given by its natural equations: curvature AND torsion as
+    /// functions of arc length, anchored to a start frame. Carries helices
+    /// and general space spirals as exact values.
+    Intrinsic(Intrinsic3),
     /// A planar curve paired with an elevation law: the exact composition an
     /// alignment centreline is authored as. See [`Elevated3`].
     Elevated(Elevated3),
