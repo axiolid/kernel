@@ -25,6 +25,12 @@ All notable changes to Axiolid are documented in this file.
 - A piecewise law can be evaluated over a partial span. Previously any
   seam beyond the requested arc length was refused, which made every
   intermediate evaluation of a joined curve fail (ADR 0062).
+- `Curve2::Intrinsic` is dispatched by `evaluate2`, `derivative2` and
+  `domain2`. The clothoid type has been storable since 0.1.8 but every
+  generic 2D consumer refused it by name, so a transition spiral could be
+  built and never evaluated or flattened. `domain2` reports the declared
+  ARC LENGTH, not the unit interval, so flattening samples the whole
+  curve instead of its first metre.
 
 
 ### Added

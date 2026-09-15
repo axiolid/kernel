@@ -82,6 +82,13 @@ pub fn domain2(curve: &Curve2) -> Interval {
         Curve2::Circle(_) | Curve2::Ellipse(_) => full_turn(),
         Curve2::Polyline(p) => polyline_domain(p.points.len(), p.closed),
         Curve2::BSpline(b) => spline_domain(b),
+        // Parameterised by ARC LENGTH, not by a unit parameter: the domain is
+        // the span the law is declared over. A non-finite or non-positive
+        // length claims no domain rather than a guessed one.
+        Curve2::Intrinsic(i) if i.length.is_finite() && i.length > 0.0 => Interval {
+            start: 0.0,
+            end: i.length,
+        },
         // Unknown family: no domain is knowable, so claim none.
         _ => Interval {
             start: 0.0,
@@ -165,6 +172,10 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
         Curve2::Ellipse(e) => Ok(conic_point2(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
         Curve2::Polyline(p) => polyline_point(&p.points, p.closed, t),
         Curve2::BSpline(b) => de_boor(b, t, |p| [p.x, p.y], |c| Point2::new(c[0], c[1])),
+        // Position has no elementary closed form for a general curvature law
+        // (a clothoid needs Fresnel integrals), so it is quadrature over the
+        // exact heading rather than a parametric formula.
+        Curve2::Intrinsic(i) => crate::arc_length::intrinsic_point(i, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -184,6 +195,10 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
         Curve2::Ellipse(e) => Ok(conic_tangent2(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
         Curve2::Polyline(p) => polyline_tangent(&p.points, p.closed, t),
         Curve2::BSpline(b) => de_boor_derivative(b, t, |p| [p.x, p.y], |c| Vec2::new(c[0], c[1])),
+        // Arc-length parameterised, so the derivative is the UNIT tangent, and
+        // the heading it is built from is exact -- only position needs
+        // quadrature, never the tangent.
+        Curve2::Intrinsic(i) => crate::arc_length::intrinsic_tangent(i, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
