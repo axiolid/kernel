@@ -103,6 +103,12 @@ pub struct EdgeAdjacency {
     edges: BTreeMap<EdgeKey, Vec<EdgeUse>>,
     vertex_count: usize,
     degenerate_triangles: usize,
+    /// Triangles that contributed adjacency, recorded during the build.
+    ///
+    /// Counting these by walking the edge map means inserting every
+    /// triangle index into a set -- three visits per triangle and an
+    /// allocation per node, to recover a number the build already knew.
+    face_count: usize,
 }
 
 impl EdgeAdjacency {
@@ -115,6 +121,7 @@ impl EdgeAdjacency {
     pub fn build(mesh: &TriMesh) -> Self {
         let mut edges: BTreeMap<EdgeKey, Vec<EdgeUse>> = BTreeMap::new();
         let mut degenerate_triangles = 0;
+        let mut face_count = 0;
 
         for (triangle, chunk) in mesh.indices.chunks_exact(3).enumerate() {
             let (a, b, c) = (chunk[0], chunk[1], chunk[2]);
@@ -122,6 +129,9 @@ impl EdgeAdjacency {
                 degenerate_triangles += 1;
                 continue;
             }
+            // Past the guard this triangle contributes all three of its
+            // edges, so it is exactly one face.
+            face_count += 1;
             for (from, to) in [(a, b), (b, c), (c, a)] {
                 let key = EdgeKey::new(from, to);
                 edges.entry(key).or_default().push(EdgeUse {
@@ -135,6 +145,7 @@ impl EdgeAdjacency {
             edges,
             vertex_count: mesh.positions.len(),
             degenerate_triangles,
+            face_count,
         }
     }
 
@@ -284,13 +295,7 @@ impl EdgeAdjacency {
 
     /// Usable triangles, i.e. those that contributed adjacency.
     #[must_use]
-    pub fn face_count(&self) -> usize {
-        let mut seen = std::collections::BTreeSet::new();
-        for uses in self.edges.values() {
-            for use_ in uses {
-                seen.insert(use_.triangle);
-            }
-        }
-        seen.len()
+    pub const fn face_count(&self) -> usize {
+        self.face_count
     }
 }

@@ -4,6 +4,7 @@
 //! closed shells have every edge twice, boundaries are edges used once,
 //! and winding disagreement is visible in traversal direction.
 
+use axiolid_core::Point3;
 use axiolid_mesh::{EdgeAdjacency, EdgeKey, TriMesh};
 
 /// Outward unit tetrahedron: the smallest closed two-manifold.
@@ -196,4 +197,68 @@ fn an_empty_mesh_has_no_adjacency() {
     assert_eq!(adjacency.edge_count(), 0);
     assert_eq!(adjacency.face_count(), 0);
     assert!(adjacency.vertex_neighbours().is_empty());
+}
+
+/// `face_count` counts triangles that contributed adjacency. The O(1)
+/// form (total minus degenerate) must agree with counting distinct
+/// triangle indices in the edge map: degenerate, duplicated, and
+/// fully-shared triangles all have to land the same way.
+#[test]
+fn face_count_matches_counting_distinct_triangles() {
+    let quad = || {
+        (
+            vec![
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            vec![0u32, 1, 2, 0, 2, 3],
+        )
+    };
+
+    // Two clean triangles.
+    let (positions, indices) = quad();
+    check_face_count("quad", &positions, &indices, 2);
+
+    // One degenerate triangle appended: skipped by build, so not a face.
+    let (positions, mut indices) = quad();
+    indices.extend_from_slice(&[1, 1, 2]);
+    check_face_count("one degenerate", &positions, &indices, 2);
+
+    // Every triangle degenerate: no edges at all.
+    let (positions, _) = quad();
+    check_face_count("all degenerate", &positions, &[0, 0, 0, 1, 1, 1], 0);
+
+    // The same triangle twice: two distinct indices, both real faces.
+    let (positions, _) = quad();
+    check_face_count("duplicated", &positions, &[0, 1, 2, 0, 1, 2], 2);
+
+    // No triangles.
+    check_face_count("empty", &[], &[], 0);
+}
+
+/// Compare the stored count against recounting distinct triangle indices
+/// from the edge map, which is what `face_count` used to do.
+fn check_face_count(label: &str, positions: &[Point3], indices: &[u32], want: usize) {
+    let mesh = TriMesh::new(positions.to_vec(), indices.to_vec());
+    let adjacency = EdgeAdjacency::build(&mesh);
+
+    let mut distinct = std::collections::BTreeSet::new();
+    for (_, uses) in adjacency.edges() {
+        for use_ in uses {
+            distinct.insert(use_.triangle);
+        }
+    }
+
+    assert_eq!(
+        adjacency.face_count(),
+        distinct.len(),
+        "{label}: stored count disagrees with recounting the edge map"
+    );
+    assert_eq!(
+        adjacency.face_count(),
+        want,
+        "{label}: unexpected face count"
+    );
 }

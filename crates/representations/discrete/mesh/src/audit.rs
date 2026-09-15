@@ -466,7 +466,7 @@ mod tests {
         let mesh = TriMesh::new(positions, indices);
 
         let tolerance = Tolerance::MILLIMETRE;
-        let mut fast = VecEdgeSink::try_new(mesh.triangle_count(), mesh.position_count())
+        let fast = VecEdgeSink::try_new(mesh.triangle_count(), mesh.position_count())
             .expect("fixture allocation");
         assert!(
             fast.buckets > 0,
