@@ -25,6 +25,77 @@ use axiolid_ray_mesh::{nearest_hit, nearest_hit_among, RayHit3, RayMeshError};
 use axiolid_spatial::{Bvh, SpatialIndex, SpatialItem};
 use std::ops::ControlFlow;
 
+/// A broad-phase index a caller builds once and casts against many
+/// times.
+///
+/// This is the zero-bookkeeping form of the cache below. It borrows the
+/// mesh for its whole life, so the borrow checker -- not a runtime
+/// digest -- guarantees the geometry cannot move underneath it:
+///
+/// ```compile_fail,E0502
+/// # use axiolid::ray_index::MeshRayIndex;
+/// # use axiolid::mesh::TriMesh;
+/// # use axiolid::core::Point3;
+/// let mut mesh = TriMesh::new(
+///     vec![Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0)],
+///     vec![0, 1, 2],
+/// );
+/// # let tol = axiolid::core::Tolerance::new(1e-9, 1e-9).unwrap();
+/// let index = MeshRayIndex::build(&mesh, tol);
+/// mesh.positions[0].x = 5.0; // E0502: index still borrows `mesh`
+/// let _ = &index;
+/// ```
+///
+/// Use this when casting many rays at one mesh. Prefer
+/// `Application::nearest_mesh_hit` when casts are incidental: it keeps
+/// its own cache and needs no lifetime plumbing, at the cost of a
+/// content digest per call.
+pub struct MeshRayIndex<'m> {
+    mesh: &'m TriMesh,
+    bvh: Bvh<usize>,
+    margin: f64,
+}
+
+impl<'m> MeshRayIndex<'m> {
+    /// Build the broad phase for queries at `tolerance`.
+    ///
+    /// The tolerance is taken at BUILD time because the bounds are padded
+    /// by it: the narrow phase accepts a hit within tolerance of a
+    /// triangle, so bounds tight to the vertices can prune a triangle the
+    /// full scan would accept. Casting with a larger tolerance than the
+    /// index was built for is rejected rather than silently answered from
+    /// bounds that are too tight.
+    ///
+    /// O(triangles); repays after ~22 casts.
+    #[must_use]
+    pub fn build(mesh: &'m TriMesh, tolerance: Tolerance) -> Self {
+        let margin = tolerance.linear();
+        Self {
+            bvh: build_bvh_with_margin(mesh, margin),
+            mesh,
+            margin,
+        }
+    }
+
+    /// Nearest hit, identical in result to a full scan.
+    ///
+    /// # Errors
+    ///
+    /// Propagates whatever `nearest_hit_among` refuses.
+    pub fn nearest_hit(
+        &self,
+        ray: &Ray3,
+        tolerance: Tolerance,
+    ) -> Result<Option<RayHit3>, RayMeshError> {
+        if tolerance.linear() > self.margin {
+            // Falling back to the scan is correct and slow; answering
+            // from bounds that are too tight is fast and wrong.
+            return nearest_hit(self.mesh, ray, tolerance);
+        }
+        accelerated(self.mesh, ray, tolerance, &self.bvh)
+    }
+}
+
 /// Entries retained. Each holds one BVH over a mesh, so this bounds
 /// memory: an unbounded map would leak an index per distinct mesh ever
 /// cast against, which for a caller streaming meshes is every mesh.
@@ -38,6 +109,10 @@ const WARMUP_CASTS: u32 = 1;
 
 struct Entry {
     digest: u64,
+    /// Margin the bounds were padded by. A later call with a LARGER
+    /// tolerance could accept a hit this index prunes away, so the
+    /// index is rebuilt rather than reused.
+    margin: f64,
     /// `None` until the mesh has been cast against `WARMUP_CASTS` times.
     bvh: Option<Bvh<usize>>,
     casts: u32,
@@ -91,7 +166,15 @@ fn digest(mesh: &TriMesh) -> u64 {
     hasher.finish()
 }
 
-fn build_bvh(mesh: &TriMesh) -> Bvh<usize> {
+/// Build the broad phase with bounds padded by `margin`.
+///
+/// The narrow phase accepts a hit within tolerance of a triangle, so a
+/// broad phase pruning on EXACT bounds can discard a triangle the full
+/// scan would accept: a ray passing 1.3e-16 outside a tight box was
+/// rejected before the tolerant test ever ran. A broad phase may
+/// over-include -- the narrow phase rejects -- but must never
+/// under-include.
+fn build_bvh_with_margin(mesh: &TriMesh, margin: f64) -> Bvh<usize> {
     let points = &mesh.positions;
     let items = (0..mesh.indices.len() / 3).map(|triangle| {
         let corners = &mesh.indices[triangle * 3..triangle * 3 + 3];
@@ -109,8 +192,8 @@ fn build_bvh(mesh: &TriMesh) -> Bvh<usize> {
         SpatialItem::new(
             triangle,
             Aabb {
-                min: low,
-                max: high,
+                min: Point3::new(low.x - margin, low.y - margin, low.z - margin),
+                max: Point3::new(high.x + margin, high.y + margin, high.z + margin),
             },
         )
     });
@@ -137,7 +220,10 @@ impl RayIndexCache {
             let inner = self.inner.read().expect("ray index cache poisoned");
             if let Some(entry) = inner.entries.iter().find(|e| e.digest == digest) {
                 if let Some(bvh) = &entry.bvh {
-                    return accelerated(mesh, ray, tolerance, bvh);
+                    // Only reuse when the padding still covers this call.
+                    if entry.margin >= tolerance.linear() {
+                        return accelerated(mesh, ray, tolerance, bvh);
+                    }
                 }
             }
         }
@@ -151,8 +237,10 @@ impl RayIndexCache {
             Some(entry) => {
                 entry.casts += 1;
                 entry.touched = tick;
-                if entry.bvh.is_none() && entry.casts > WARMUP_CASTS {
-                    entry.bvh = Some(build_bvh(mesh));
+                let stale_margin = entry.margin < tolerance.linear();
+                if (entry.bvh.is_none() || stale_margin) && entry.casts > WARMUP_CASTS {
+                    entry.margin = tolerance.linear();
+                    entry.bvh = Some(build_bvh_with_margin(mesh, entry.margin));
                 }
             }
             None => {
@@ -171,6 +259,7 @@ impl RayIndexCache {
                 }
                 inner.entries.push(Entry {
                     digest,
+                    margin: 0.0,
                     bvh: None,
                     casts: 1,
                     touched: tick,
@@ -388,6 +477,61 @@ mod ray_index_tests {
             digest(&reordered),
             "reordering vertices must change the key"
         );
+    }
+
+    /// The handle must give the same answer as the scan, including
+    /// which face owns a shared edge.
+    #[test]
+    fn handle_matches_the_full_scan() {
+        let mesh = grid(40, 1.0);
+        let index = MeshRayIndex::build(&mesh, tol());
+        for step in 0..64 {
+            let t = step as f64 * 0.03;
+            let ray = Ray3 {
+                origin: Point3::new(-1.9 + t, -1.9 + t, -3.0),
+                direction: Vec3::new(0.0, 0.0, 1.0),
+            };
+            let want = nearest_hit(&mesh, &ray, tol()).expect("scan");
+            let got = index.nearest_hit(&ray, tol()).expect("handle");
+            match (want, got) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert!((a.t - b.t).abs() < 1e-12, "step {step}: t differs");
+                    assert_eq!(a.triangle, b.triangle, "step {step}: face differs");
+                }
+                (a, b) => panic!("step {step}: {a:?} vs {b:?}"),
+            }
+        }
+    }
+
+    /// The cache path shares the broad phase, so it had the same
+    /// grazing-ray gap: a ray passing within tolerance of a triangle
+    /// but outside its exact bounds. Pinned separately from the handle
+    /// so a regression in either is attributable.
+    #[test]
+    fn cached_casts_agree_on_grazing_rays() {
+        let cache = RayIndexCache::default();
+        let mesh = grid(40, 1.0);
+        for step in 0..64 {
+            let t = step as f64 * 0.03;
+            let ray = Ray3 {
+                origin: Point3::new(-1.9 + t, -1.9 + t, -3.0),
+                direction: Vec3::new(0.0, 0.0, 1.0),
+            };
+            // Cast twice: the second goes through the built index.
+            let _ = cache.nearest_hit(&mesh, &ray, tol()).expect("warm");
+            let _ = cache.nearest_hit(&mesh, &ray, tol()).expect("warm");
+            let want = nearest_hit(&mesh, &ray, tol()).expect("scan");
+            let got = cache.nearest_hit(&mesh, &ray, tol()).expect("cached");
+            match (want, got) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert!((a.t - b.t).abs() < 1e-12, "step {step}: t differs");
+                    assert_eq!(a.triangle, b.triangle, "step {step}: face differs");
+                }
+                (a, b) => panic!("step {step}: {a:?} vs {b:?}"),
+            }
+        }
     }
 
     /// The cache must not grow without bound: a caller streaming meshes
