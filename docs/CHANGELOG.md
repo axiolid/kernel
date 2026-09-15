@@ -3,6 +3,40 @@
 All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-09-15
+### Performance
+
+Eight changes found by profiling the benchmark suite rather than by
+inspection. Every figure below is the median of an interleaved A/B on a
+pinned core, taken from the commit that made the change.
+
+- Mesh edge adjacency is laid out as CSR instead of a map of vectors:
+  genus 1335 ms -> 543 ms (2.46x). The map spent ~32% of the build in
+  malloc/free for one `Vec` per edge.
+- Edge records are grouped by counting sort rather than comparison
+  sort, in both `audit_mesh` and the adjacency build: audit 514 ms ->
+  322 ms (37% faster), and genus a further 590 ms -> 256 ms (2.30x)
+  once CSR had made comparison sort the dominant cost.
+- Face counts are reused from the build instead of being recomputed:
+  genus 2108 ms -> 1309 ms (-37.9%).
+- Weld caches hash their keys where ordering cannot be observed:
+  levelset 79 ms -> 45 ms (43% faster), refine 147 ms -> 47 ms (68%
+  faster). Profiling put 66% of levelset and 77% of refine in the
+  midpoint weld cache.
+- Decomposition prunes faces that cannot hold the worst concavity:
+  646 ms -> 13 ms (50x) on the benchmark mesh, with results identical
+  across tolerances from 1e-12 to 2.0.
+- Repeated ray casts reuse a cached broad phase: 5227 ms -> 1439 ms
+  (3.6x) over a mesh sequence. The index costs ~50 ms to build, so a
+  single ray against a fresh mesh is slower than a linear scan; the
+  break-even is around 22 rays per mesh.
+- The ray-cache key was made cheap enough to stop mattering:
+  0.52 ms -> 0.14 ms on 40,962 vertices.
+- A caller-held `MeshRayIndex` lets an application keep the index
+  across meshes: 4359 ms unindexed -> 369 ms via the application cache
+  (11.8x) -> 62 ms held by the caller (70.3x).
+
 ### Added
 
 - `CurvatureLaw::shifted`: re-write a law in a coordinate starting at `a`,
