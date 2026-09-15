@@ -11,15 +11,15 @@
 #[cfg(feature = "integration")]
 pub mod integration;
 
-/// Supported provider-neutral application boundary.
-#[cfg(feature = "application")]
+/// Caller-held broad-phase index for repeated ray casts.
 // Gated on BOTH: the cache needs the ray crate for the narrow phase and
 // the spatial crate for the broad phase. Enabling ray-mesh alone must
 // still build, so the cache is absent there and the facade falls back.
 #[cfg(all(feature = "ray-mesh", feature = "spatial"))]
-/// Caller-held broad-phase index for repeated ray casts.
 pub mod ray_index;
 
+/// Supported provider-neutral application boundary.
+#[cfg(feature = "application")]
 pub mod application;
 
 /// Always-available scalar, transform, and bounds vocabulary.
