@@ -318,24 +318,43 @@ fn integrate(curve: &Intrinsic3, s: Scalar) -> GeomResult<(Rotation, Point3)> {
         return Err(unsupported());
     }
 
-    let panels = panel_count(curve, s)?;
-    let h = s / panels as Scalar;
+    // Panels break at seams of EITHER law: Gauss-Legendre and the Magnus
+    // step both assume a smooth generator across a panel, and a piecewise
+    // law is only piecewise-smooth.
+    let mut bounds = vec![0.0];
+    bounds.extend(curve.curvature.seams_within(s));
+    bounds.extend(curve.torsion.seams_within(s));
+    bounds.push(s);
+    bounds.sort_by(Scalar::total_cmp);
+    bounds.dedup();
     let mut rotation = Rotation::identity_of(&curve.start);
     let mut position = curve.start.origin;
 
-    for panel in 0..panels {
-        let s0 = panel as Scalar * h;
-        // Position first: it needs the frame at the START of this panel.
-        let mut tangent_integral = Vec3::ZERO;
-        for (node, weight) in GAUSS_NODES.iter().zip(GAUSS_WEIGHTS.iter()) {
-            let u = 0.5 * h * (node + 1.0);
-            // Sub-generator from the panel start to this node, so the tangent
-            // is the true one there rather than a frozen-generator estimate.
-            let sub = magnus_generator(curve, s0, u)?;
-            tangent_integral += exp_skew(sub).tangent * *weight;
+    for window in bounds.windows(2) {
+        let (lo, hi) = (window[0], window[1]);
+        if hi <= lo {
+            continue;
         }
-        position += rotation.apply(tangent_integral * (0.5 * h));
-        rotation = rotation.compose(exp_skew(magnus_generator(curve, s0, h)?));
+        let span = hi - lo;
+        // Budget from variation over [0, hi]: an upper bound for this
+        // sub-span, since variation is monotone in the span. Never from
+        // `span` alone, which would ignore how far along the curve we are.
+        let panels = panel_count(curve, hi)?.max(1);
+        let h = span / panels as Scalar;
+        for panel in 0..panels {
+            let s0 = lo + panel as Scalar * h;
+            // Position first: it needs the frame at the START of this panel.
+            let mut tangent_integral = Vec3::ZERO;
+            for (node, weight) in GAUSS_NODES.iter().zip(GAUSS_WEIGHTS.iter()) {
+                let u = 0.5 * h * (node + 1.0);
+                // Sub-generator from the panel start to this node, so the
+                // tangent is the true one there rather than a frozen estimate.
+                let sub = magnus_generator(curve, s0, u)?;
+                tangent_integral += exp_skew(sub).tangent * *weight;
+            }
+            position += rotation.apply(tangent_integral * (0.5 * h));
+            rotation = rotation.compose(exp_skew(magnus_generator(curve, s0, h)?));
+        }
     }
 
     if !position.is_finite() {

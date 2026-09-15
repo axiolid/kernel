@@ -15,10 +15,20 @@ provider dependencies — the point of this package is that a parametric consume
 plan-plus-elevation composition;
 `frenet.rs` frame, point and tangent of a space curve from curvature AND
 torsion, by Magnus expansion on SO(3);
+`intrinsic_relation.rs` trim, offset and join over natural-equation space
+curves;
 `nurbs.rs` shared private spline-axis machinery.
 
 ## Invariants
 
+- A quadrature panel must never straddle a SEAM of a piecewise law:
+  Gauss-Legendre assumes a smooth integrand, and a joined curve was wrong
+  by 3.0e-3 until panels were split at seams. Use
+  `CurvatureLaw::seams_within` when adding any new integrator here.
+- An offset of an arc-length curve is only arc-length again when curvature
+  is CONSTANT (speed is `|1 - d*k(s)|`). Offsetting a varying law is
+  refused, not refitted -- a refit would be a guess wearing an exact type
+  (ADR 0062).
 - A 3D frame law does NOT integrate like a 2D one. In the plane, heading is
   `theta_0 + int k` because angles commute. In space the frame obeys a matrix
   ODE on SO(3) and `R(s) != exp(int Omega)` unless `tau/k` is constant. Use the

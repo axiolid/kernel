@@ -318,6 +318,77 @@ impl CurvatureLaw {
         }
     }
 
+    /// The law's value, when it does not vary with arc length.
+    ///
+    /// Returns `None` for a law that varies, so a caller that needs a
+    /// single number cannot silently read one off a varying law. The
+    /// variants that `is_constant` accepts are exactly the ones answered
+    /// here: a frozen harmonic contributes `A * sin(p)`, which is why a
+    /// zero-FREQUENCY term is constant without being zero.
+    #[must_use]
+    pub fn constant_value(&self) -> Option<Scalar> {
+        if !self.is_constant() {
+            return None;
+        }
+        match self {
+            Self::Constant { curvature } => Some(*curvature),
+            Self::Polynomial { coefficients } => Some(coefficients.first().copied().unwrap_or(0.0)),
+            Self::Sinusoid { mean, .. } => Some(*mean),
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => {
+                let constant = polynomial.first().copied().unwrap_or(0.0);
+                let frozen: Scalar = harmonics.iter().map(|h| h.amplitude * h.phase.sin()).sum();
+                Some(constant + frozen)
+            }
+            // `is_constant` already required every piece equal, so the first
+            // piece speaks for the whole law.
+            Self::Piecewise { laws, .. } => laws.first().and_then(Self::constant_value),
+        }
+    }
+    /// Interior seam positions strictly inside `(0, span)`, ascending.
+    ///
+    /// A piecewise law is only piecewise-smooth: its value can jump at a
+    /// seam. Gauss-Legendre quadrature assumes the integrand is smooth
+    /// across a panel, so a panel straddling a seam loses most of its
+    /// accuracy -- measured at 3.0e-3 on a joined curve, against 1e-9
+    /// once panels break at the seam. An integrator must therefore split
+    /// its panels here rather than spreading them uniformly.
+    ///
+    /// Nested piecewise laws report their inner seams too, in absolute
+    /// arc length from this law's origin, because a piece may itself be
+    /// piecewise and its seams are just as discontinuous.
+    #[must_use]
+    pub fn seams_within(&self, span: Scalar) -> Vec<Scalar> {
+        let mut out = Vec::new();
+        self.collect_seams(0.0, span, &mut out);
+        out.sort_by(Scalar::total_cmp);
+        out.dedup();
+        out
+    }
+
+    fn collect_seams(&self, origin: Scalar, span: Scalar, out: &mut Vec<Scalar>) {
+        let Self::Piecewise { breaks, laws } = self else {
+            return;
+        };
+        if laws.len() != breaks.len() + 1 {
+            return;
+        }
+        let mut start = 0.0;
+        for (index, piece) in laws.iter().enumerate() {
+            let end = breaks.get(index).copied().unwrap_or(Scalar::INFINITY);
+            let absolute = origin + start;
+            if absolute > 0.0 && absolute < span {
+                out.push(absolute);
+            }
+            piece.collect_seams(absolute, span, out);
+            if !end.is_finite() || origin + end >= span {
+                break;
+            }
+            start = end;
+        }
+    }
     /// The derivative law `dk/ds`, in closed form.
     ///
     /// Exact symbolic differentiation. The sharpness of a clothoid is the
@@ -383,6 +454,65 @@ impl CurvatureLaw {
                 breaks: breaks.clone(),
                 laws: laws.iter().map(Self::derivative).collect(),
             },
+        }
+    }
+
+    /// The same function re-written in a coordinate that starts at `a`.
+    ///
+    /// Returns the law `g` with `g(u) = self(a + u)`. This is what a TRIM
+    /// needs: restricting a curve to `[a, b]` does not approximate the
+    /// shape, it re-anchors the same law, so the trimmed curve is exactly
+    /// the original one on that span (ADR 0062).
+    ///
+    /// The family is closed under this operation, which is why trimming is
+    /// exact rather than a refit:
+    ///
+    /// - a polynomial shifts by the binomial expansion of `(a + u)^i`;
+    /// - a sinusoid shifts purely in PHASE, `p -> p + w * a`, because the
+    ///   amplitude and frequency do not depend on where the window starts;
+    /// - a piecewise law drops the pieces that end before `a`, rebases the
+    ///   one containing `a`, and keeps the rest with their seams moved back.
+    ///
+    /// Returns `None` when `a` is not finite, or when a piecewise law is
+    /// malformed, since the shifted law would then be a guess.
+    #[must_use]
+    pub fn shifted(&self, a: Scalar) -> Option<Self> {
+        if !a.is_finite() {
+            return None;
+        }
+        match self {
+            Self::Constant { curvature } => Some(Self::Constant {
+                curvature: *curvature,
+            }),
+            Self::Polynomial { coefficients } => Some(Self::Polynomial {
+                coefficients: shift_polynomial(coefficients, a),
+            }),
+            Self::Sinusoid {
+                mean,
+                amplitude,
+                angular_frequency,
+                phase,
+            } => Some(Self::Sinusoid {
+                mean: *mean,
+                amplitude: *amplitude,
+                angular_frequency: *angular_frequency,
+                phase: phase + angular_frequency * a,
+            }),
+            Self::Composite {
+                polynomial,
+                harmonics,
+            } => Some(Self::Composite {
+                polynomial: shift_polynomial(polynomial, a),
+                harmonics: harmonics
+                    .iter()
+                    .map(|h| Harmonic {
+                        amplitude: h.amplitude,
+                        angular_frequency: h.angular_frequency,
+                        phase: h.phase + h.angular_frequency * a,
+                    })
+                    .collect(),
+            }),
+            Self::Piecewise { breaks, laws } => shift_piecewise(breaks, laws, a),
         }
     }
 
@@ -480,21 +610,81 @@ fn turning_over(law: &CurvatureLaw, span: Scalar) -> Option<Scalar> {
             if !law.is_well_formed() {
                 return None;
             }
-            // Seams must lie strictly inside the span, or the pieces do not
-            // tile it and the requested integral is not the one stored.
-            if breaks.iter().any(|b| *b <= 0.0 || *b >= span) {
+            // A seam at or before zero would mean the pieces do not tile the
+            // span from its start, which is a malformed law rather than a
+            // short window.
+            if breaks.iter().any(|b| *b <= 0.0) {
                 return None;
             }
+            // Seams BEYOND the span are fine: integrating over `[0, span]`
+            // simply stops inside whichever piece contains `span`, and the
+            // later pieces are never reached. Rejecting them would make a
+            // partial evaluation of a piecewise curve impossible, which is
+            // exactly what trimming and mid-curve evaluation need.
             let mut total = 0.0;
             let mut start = 0.0;
             for (index, piece) in laws.iter().enumerate() {
-                let end = breaks.get(index).copied().unwrap_or(span);
+                let end = breaks.get(index).copied().unwrap_or(span).min(span);
+                if end <= start {
+                    break;
+                }
                 total += turning_over(piece, end - start)?;
                 start = end;
             }
             Some(total)
         }
     }
+}
+/// Coefficients of `p(a + u)` in ascending powers of `u`.
+///
+/// Binomial expansion: the `j`-th shifted coefficient collects
+/// `c_i * C(i, j) * a^(i-j)` over every `i >= j`. Exact in the family:
+/// a degree-`n` polynomial shifts to a degree-`n` polynomial.
+fn shift_polynomial(coefficients: &[Scalar], a: Scalar) -> Vec<Scalar> {
+    let n = coefficients.len();
+    let mut out = vec![0.0; n];
+    for (i, c) in coefficients.iter().enumerate() {
+        // Pascal's triangle row `i`, built incrementally so no factorial
+        // overflows and no combinatorial function is needed.
+        let mut binomial = 1.0;
+        for (j, slot) in out.iter_mut().enumerate().take(i + 1) {
+            *slot += c * binomial * a.powi((i - j) as i32);
+            // C(i, j+1) = C(i, j) * (i - j) / (j + 1)
+            binomial = binomial * ((i - j) as Scalar) / ((j + 1) as Scalar);
+        }
+    }
+    out
+}
+
+/// Restrict a piecewise law to the window starting at `a`.
+///
+/// Pieces wholly before `a` are dropped; the piece containing `a` is
+/// rebased into its own coordinate; later pieces keep their laws and move
+/// their seams back by `a`. Each piece is already written in its own arc
+/// length, so only the piece straddling `a` is rewritten.
+fn shift_piecewise(breaks: &[Scalar], laws: &[CurvatureLaw], a: Scalar) -> Option<CurvatureLaw> {
+    if laws.len() != breaks.len() + 1 {
+        return None;
+    }
+    if breaks.windows(2).any(|w| w[1] <= w[0]) || breaks.iter().any(|b| !b.is_finite()) {
+        return None;
+    }
+    // Which piece contains `a`? Pieces are [0, b0), [b0, b1), ...
+    let index = breaks.iter().take_while(|b| **b <= a).count();
+    let piece_start = if index == 0 { 0.0 } else { breaks[index - 1] };
+    let head = laws[index].shifted(a - piece_start)?;
+    if index == breaks.len() {
+        // `a` lies in the final piece: the window is that piece alone.
+        return Some(head);
+    }
+    let mut kept = Vec::with_capacity(laws.len() - index);
+    kept.push(head);
+    kept.extend_from_slice(&laws[index + 1..]);
+    let moved: Vec<Scalar> = breaks[index..].iter().map(|b| b - a).collect();
+    Some(CurvatureLaw::Piecewise {
+        breaks: moved,
+        laws: kept,
+    })
 }
 fn polynomial_turning(coefficients: &[Scalar], s: Scalar) -> Scalar {
     coefficients
@@ -588,6 +778,16 @@ impl Intrinsic2 {
         if !self.length.is_finite() {
             return None;
         }
+        // Over the DECLARED length, the pieces must tile the whole domain: a
+        // seam at or beyond the end means the stored law is not the one being
+        // asked about, so refuse rather than clamp. This is stricter than
+        // `heading_at`, which asks for a partial span and legitimately stops
+        // inside whichever piece contains the sample.
+        if let CurvatureLaw::Piecewise { breaks, .. } = &self.curvature {
+            if breaks.iter().any(|b| *b >= self.length) {
+                return None;
+            }
+        }
         turning_over(&self.curvature, self.length)
     }
 
@@ -644,13 +844,18 @@ fn variation_bound(law: &CurvatureLaw, span: Scalar) -> Option<Scalar> {
             if !law.is_well_formed() {
                 return None;
             }
-            if breaks.iter().any(|b| *b <= 0.0 || *b >= span_abs) {
+            if breaks.iter().any(|b| *b <= 0.0) {
                 return None;
             }
+            // As in `turning_over`: a seam past the span just means the later
+            // pieces are not reached by this window.
             let mut total = 0.0;
             let mut start = 0.0;
             for (index, piece) in laws.iter().enumerate() {
-                let end = breaks.get(index).copied().unwrap_or(span_abs);
+                let end = breaks.get(index).copied().unwrap_or(span_abs).min(span_abs);
+                if end <= start {
+                    break;
+                }
                 total += variation_bound(piece, end - start)?;
                 start = end;
             }

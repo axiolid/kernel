@@ -98,6 +98,13 @@ pub fn domain3(curve: &Curve3) -> Interval {
         Curve3::Circle(_) | Curve3::Ellipse(_) => full_turn(),
         Curve3::Polyline(p) => polyline_domain(p.points.len(), p.closed),
         Curve3::BSpline(b) => spline_domain(b),
+        // Parameterised by ARC LENGTH, not by a unit parameter: the domain is
+        // the span the laws are declared over. A non-finite or non-positive
+        // length claims no domain rather than a guessed one.
+        Curve3::Intrinsic(i) if i.length.is_finite() && i.length > 0.0 => Interval {
+            start: 0.0,
+            end: i.length,
+        },
         _ => Interval {
             start: 0.0,
             end: 0.0,
@@ -234,6 +241,11 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         Curve3::Ellipse(e) => Ok(conic_point3(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
         Curve3::Polyline(p) => polyline_point(&p.points, p.closed, t),
         Curve3::BSpline(b) => de_boor(b, t, |p| [p.x, p.y, p.z], |c| Point3::new(c[0], c[1], c[2])),
+        // Natural equations: `t` is ARC LENGTH, and the point comes from the
+        // Frenet integrator (ADR 0061). Dispatching here is what lets the
+        // graph's existing relation machinery -- trim, composite, sweep
+        // directrix -- work on a torsion curve without special-casing it.
+        Curve3::Intrinsic(i) => crate::frenet::frenet_point(i, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -255,6 +267,8 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::BSpline(b) => {
             de_boor_derivative(b, t, |p| [p.x, p.y, p.z], |c| Vec3::new(c[0], c[1], c[2]))
         }
+        // Arc-length parameterised, so the derivative is the UNIT tangent.
+        Curve3::Intrinsic(i) => crate::frenet::frenet_tangent(i, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {

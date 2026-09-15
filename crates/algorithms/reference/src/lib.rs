@@ -40,6 +40,14 @@ pub use axiolid_evaluate::{
     derivative2, derivative3, evaluate2, evaluate3, flatten2, partials, Patch, ScalarCurve,
     ScalarSurface,
 };
+// Arc-length evaluation of natural-equation curves (ADR 0061, ADR 0062).
+// Re-exported on the same footing as the rest of `axiolid-evaluate`, so a
+// consumer of the umbrella reaches a torsion curve without taking the
+// parametric package as a direct dependency.
+pub use axiolid_evaluate::{
+    elevated_point, elevated_tangent, frenet_frame, frenet_point, frenet_tangent, intrinsic_point,
+    intrinsic_tangent, join_intrinsic3, offset_intrinsic3, trim_intrinsic3,
+};
 pub use axiolid_predicates::{
     incircle, incircle_filter, insphere, insphere_filter, orient2d, orient2d_filter, orient3d,
     orient3d_filter, two_diff, two_product, two_sum, StaticFilter,

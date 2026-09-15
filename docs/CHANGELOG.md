@@ -3,6 +3,29 @@
 All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
+### Added
+
+- `CurvatureLaw::shifted`: re-write a law in a coordinate starting at `a`,
+  in closed form. Makes trimming a natural-equation curve exact rather
+  than a refit (ADR 0062).
+- `trim_intrinsic3`, `offset_intrinsic3`, `join_intrinsic3`: relations over
+  space curves given by curvature and torsion. Trim and join are exact;
+  offset is exact for a helix and refused for a varying law, where the
+  offset is not an arc-length curve at all (ADR 0062).
+- `Curve3::Intrinsic` is dispatched by `evaluate3`, `derivative3` and
+  `domain3`, so existing generic machinery -- graph trimming, composite
+  stitching, sweep directrix sampling -- works on a torsion curve without
+  special-casing it (ADR 0062).
+
+### Fixed
+
+- Quadrature panels now break at curvature and torsion seams. A panel
+  straddling a seam left a joined curve wrong by 3.0e-3, because
+  Gauss-Legendre assumes a smooth integrand (ADR 0062).
+- A piecewise law can be evaluated over a partial span. Previously any
+  seam beyond the requested arc length was refused, which made every
+  intermediate evaluation of a joined curve fail (ADR 0062).
+
 
 ### Added
 

@@ -14,10 +14,12 @@
 pub mod arc_length;
 pub mod curve;
 pub mod frenet;
+pub mod intrinsic_relation;
 mod nurbs;
 pub mod surface;
 
 pub use arc_length::{elevated_point, elevated_tangent, intrinsic_point, intrinsic_tangent};
 pub use curve::{derivative2, derivative3, evaluate2, evaluate3, flatten2, ScalarCurve};
 pub use frenet::{frenet_frame, frenet_point, frenet_tangent};
+pub use intrinsic_relation::{join_intrinsic3, offset_intrinsic3, trim_intrinsic3};
 pub use surface::{partials, Patch, ScalarSurface};

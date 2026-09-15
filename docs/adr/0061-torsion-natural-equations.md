@@ -106,6 +106,11 @@ This was shipped and wrong in ADR 0060, and is fixed here with a regression test
   elementary closed form.
 - **Not done here:** no `CurveRelation` composition of an `Intrinsic3` with
   anything, no trimming, no offsetting, and no lowering from any file format.
+  **Superseded in part by ADR 0062**, which adds exact trimming and joining,
+  helix offsetting (refusing a varying law, where the offset is not an
+  arc-length curve at all), and generic-API dispatch so graph relations
+  resolve over a torsion curve. Format lowering remains out of scope: there
+  is no format code in this repository to lower from.
   `Curve3::Intrinsic` is a representable value with an evaluator, nothing more.
 
 ## Evidence

@@ -99,21 +99,36 @@ pub fn intrinsic_point(curve: &Intrinsic2, s: Scalar) -> GeomResult<Point2> {
     if !s.is_finite() {
         return Err(invalid("arc length must be finite"));
     }
-    let panels = panel_count(curve, s)?;
-    let step = s / panels as Scalar;
+    // Panels must break at curvature seams: Gauss-Legendre assumes a smooth
+    // integrand across a panel, and a piecewise law is only piecewise-smooth.
+    let mut bounds = vec![0.0];
+    bounds.extend(curve.curvature.seams_within(s));
+    bounds.push(s);
     let mut x = 0.0;
     let mut y = 0.0;
-    for panel in 0..panels {
-        let a = step * panel as Scalar;
-        let half = step / 2.0;
-        let mid = a + half;
-        for (node, weight) in GAUSS_NODES.iter().zip(GAUSS_WEIGHTS.iter()) {
-            let u = mid + half * node;
-            let heading = curve
-                .heading_at(u)
-                .ok_or_else(|| invalid("curvature law does not integrate to the sample"))?;
-            x += weight * half * heading.cos();
-            y += weight * half * heading.sin();
+    for window in bounds.windows(2) {
+        let (lo, hi) = (window[0], window[1]);
+        if hi <= lo {
+            continue;
+        }
+        let span = hi - lo;
+        // Budget from variation over [0, hi]: an upper bound for this
+        // sub-span, since variation is monotone in the span. Never from
+        // `span` alone, which would ignore how far along the curve we are.
+        let panels = panel_count(curve, hi)?.max(1);
+        let step = span / panels as Scalar;
+        for panel in 0..panels {
+            let a = lo + step * panel as Scalar;
+            let half = step / 2.0;
+            let mid = a + half;
+            for (node, weight) in GAUSS_NODES.iter().zip(GAUSS_WEIGHTS.iter()) {
+                let u = mid + half * node;
+                let heading = curve
+                    .heading_at(u)
+                    .ok_or_else(|| invalid("curvature law does not integrate to the sample"))?;
+                x += weight * half * heading.cos();
+                y += weight * half * heading.sin();
+            }
         }
     }
     // The integral is taken in the start frame, whose x axis is the start
