@@ -480,3 +480,28 @@ fn uses_within_an_edge_are_ascending_by_triangle() {
         "fixture is too weak: only {shared} shared edges, nothing to reorder"
     );
 }
+
+/// A few triangles over a huge index space takes the comparison-sort
+/// fallback, not the counting sort. Without this every test above
+/// exercises only the counted path, so a broken fallback would ship
+/// unnoticed.
+#[test]
+fn a_sparse_index_space_still_sorts_correctly() {
+    // Indices far apart: buckets would dwarf the record count.
+    let far = 5_000_000u32;
+    let positions = vec![Point3::new(0.0, 0.0, 0.0); 4];
+    // Two triangles sharing edge (0, far): the shared edge must still
+    // report both, in ascending triangle order.
+    let indices = vec![0, far, far + 1, 0, far, far + 2];
+    let mesh = TriMesh::new(positions, indices);
+    let adjacency = EdgeAdjacency::build(&mesh);
+
+    let keys: Vec<(u32, u32)> = adjacency.edges().map(|(k, _)| k.endpoints()).collect();
+    let mut sorted = keys.clone();
+    sorted.sort_unstable();
+    assert_eq!(keys, sorted, "keys are not ascending on the sparse path");
+
+    let shared = adjacency.uses(EdgeKey::new(0, far));
+    let triangles: Vec<usize> = shared.iter().map(|u| u.triangle).collect();
+    assert_eq!(triangles, vec![0, 1], "shared edge lost a use or its order");
+}

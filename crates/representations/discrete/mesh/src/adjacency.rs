@@ -92,6 +92,50 @@ pub struct EdgeUse {
     pub forward: bool,
 }
 
+/// Sort edge records by key using two counting-sort passes.
+///
+/// `EdgeKey` is two vertex indices, so the key space is the vertex
+/// count rather than something unbounded: sorting by `upper` then
+/// `lower` orders the whole key in O(n) passes instead of O(n log n)
+/// comparisons. Same shape as `counting_sort_edges` in `audit`, which
+/// this follows deliberately.
+///
+/// Each pass is stable, and records are pushed in ascending triangle
+/// order, so the uses of one edge stay ascending by triangle without
+/// a third pass on the triangle index. That is load-bearing, not
+/// incidental: callers pair `uses[0]`/`uses[1]` to judge winding.
+fn counting_sort_records(
+    records: &mut Vec<(EdgeKey, EdgeUse)>,
+    scratch: &mut Vec<(EdgeKey, EdgeUse)>,
+    buckets: usize,
+) {
+    debug_assert_eq!(scratch.len(), records.len());
+    let mut counts: Vec<u32> = Vec::new();
+    // LSD: the less significant half of the key first, so the more
+    // significant pass decides the final order.
+    for pass in 0..2 {
+        counts.clear();
+        counts.resize(buckets + 2, 0);
+        for (key, _) in records.iter() {
+            let bucket = if pass == 0 { key.upper() } else { key.lower() } as usize;
+            counts[bucket + 1] += 1;
+        }
+        for index in 0..=buckets {
+            counts[index + 1] += counts[index];
+        }
+        for record in records.iter() {
+            let bucket = if pass == 0 {
+                record.0.upper()
+            } else {
+                record.0.lower()
+            } as usize;
+            scratch[counts[bucket] as usize] = *record;
+            counts[bucket] += 1;
+        }
+        std::mem::swap(records, scratch);
+    }
+}
+
 /// Edge-to-triangle adjacency over a triangle mesh.
 ///
 /// Built once with [`EdgeAdjacency::build`], then queried. Iteration order is
@@ -164,15 +208,43 @@ impl EdgeAdjacency {
             }
         }
 
-        // Sort by key, then by triangle within a key. `sort_unstable_by_key`
-        // would leave equal keys in an unspecified order, and the uses of one
-        // edge are documented as ascending by triangle -- callers pair
-        // `uses[0]`/`uses[1]` to judge winding, so the order is observable.
-        records.sort_unstable_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| left.1.triangle.cmp(&right.1.triangle))
-        });
+        // Buckets must cover the largest index actually present. `build`
+        // takes corners as given, so an index past the position array is
+        // possible and sizing from `positions.len()` would index out of
+        // bounds -- validation belongs to `audit_mesh`, not here.
+        let buckets = records
+            .iter()
+            .map(|(key, _)| key.upper() as usize)
+            .max()
+            .map_or(0, |highest| highest + 1);
+        // Counting sort when the key space is dense enough to pay for the
+        // counts array -- the same trade `audit` makes. A mesh with few
+        // triangles over a huge index space would spend longer clearing
+        // counts than sorting, so that case keeps the comparison sort.
+        let dense = buckets <= records.len().saturating_mul(2).max(1024);
+        let fits = u32::try_from(records.len()).is_ok();
+        let mut scratch: Vec<(EdgeKey, EdgeUse)> = Vec::new();
+        let counted = dense && fits && scratch.try_reserve_exact(records.len()).is_ok();
+        if counted {
+            scratch.resize(
+                records.len(),
+                (
+                    EdgeKey::new(0, 0),
+                    EdgeUse {
+                        triangle: 0,
+                        forward: false,
+                    },
+                ),
+            );
+            counting_sort_records(&mut records, &mut scratch, buckets);
+        } else {
+            // Same order as the counting sort: by key, ties by triangle.
+            records.sort_unstable_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| left.1.triangle.cmp(&right.1.triangle))
+            });
+        }
 
         let mut keys: Vec<EdgeKey> = Vec::new();
         let mut starts: Vec<u32> = Vec::new();
