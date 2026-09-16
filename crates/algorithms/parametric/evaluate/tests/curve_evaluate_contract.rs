@@ -5,7 +5,9 @@ use axiolid_curve::{
     Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse3, Intrinsic2,
     Intrinsic3, Line3,
 };
-use axiolid_curve_evaluate_contract::{conformance, CurveEvaluator, DistanceConvention};
+use axiolid_curve_evaluate_contract::{
+    conformance, CurveEvaluator, CurveMeasure, DistanceConvention,
+};
 use axiolid_evaluate::ReferenceCurveEvaluator;
 
 fn frame() -> Frame3 {
@@ -38,7 +40,9 @@ fn a_non_unit_line_direction_does_not_scale_the_distance() {
         direction: Vec3::new(0.0, 3.0, 4.0),
     });
     for distance in [0.0, 1.0, 7.5, 100.0] {
-        let p = e.point_at(&line, distance).expect("line point");
+        let p = e
+            .point_at(&line, CurveMeasure::Distance(distance))
+            .expect("line point");
         let moved = (p - origin).length();
         assert!(
             (moved - distance).abs() < 1e-9,
@@ -58,7 +62,9 @@ fn a_circle_advances_arc_length_not_angle() {
     });
     // Half the circumference must land diametrically opposite.
     let half = core::f64::consts::PI * radius;
-    let p = e.point_at(&circle, half).expect("circle point");
+    let p = e
+        .point_at(&circle, CurveMeasure::Distance(half))
+        .expect("circle point");
     let want = Point3::new(-radius, 0.0, 0.0);
     assert!((p - want).length() < 1e-9, "half circumference gave {p:?}");
 }
@@ -102,7 +108,9 @@ fn the_placement_frame_stays_upright_across_an_inflection() {
     let curve = crest_then_sag();
     for step in 0..=20 {
         let d = 200.0 * Scalar::from(step) / 20.0;
-        let f = e.frame_at(&curve, d).expect("frame");
+        let f = e
+            .frame_at(&curve, CurveMeasure::Distance(d))
+            .expect("frame");
         assert!(
             f.y.z > 0.9,
             "frame tipped at distance {d}: up component {}",
@@ -141,9 +149,9 @@ fn a_family_without_closed_form_arc_length_is_refused() {
         e.distance_convention(&ellipse),
         DistanceConvention::Unsupported
     );
-    assert!(e.point_at(&ellipse, 1.0).is_err());
-    assert!(e.tangent_at(&ellipse, 1.0).is_err());
-    assert!(e.frame_at(&ellipse, 1.0).is_err());
+    assert!(e.point_at(&ellipse, CurveMeasure::Distance(1.0)).is_err());
+    assert!(e.tangent_at(&ellipse, CurveMeasure::Distance(1.0)).is_err());
+    assert!(e.frame_at(&ellipse, CurveMeasure::Distance(1.0)).is_err());
 }
 
 /// A vertical tangent leaves roll undetermined, so the frame is refused.
@@ -157,10 +165,16 @@ fn a_tangent_parallel_to_up_refuses_a_frame() {
         origin: Point3::ZERO,
         direction: Vec3::Z,
     });
-    assert!(e.point_at(&vertical, 3.0).is_ok(), "point is still defined");
-    assert!(e.tangent_at(&vertical, 3.0).is_ok(), "tangent is defined");
     assert!(
-        e.frame_at(&vertical, 3.0).is_err(),
+        e.point_at(&vertical, CurveMeasure::Distance(3.0)).is_ok(),
+        "point is still defined"
+    );
+    assert!(
+        e.tangent_at(&vertical, CurveMeasure::Distance(3.0)).is_ok(),
+        "tangent is defined"
+    );
+    assert!(
+        e.frame_at(&vertical, CurveMeasure::Distance(3.0)).is_err(),
         "roll is undetermined, so the frame must be refused"
     );
 }
@@ -183,10 +197,14 @@ fn a_torsion_curve_uses_arc_length_directly() {
     // measured along the curve by dense sampling.
     let mut travelled = 0.0;
     let steps = 4000;
-    let mut previous = e.point_at(&helix, 0.0).expect("start");
+    let mut previous = e
+        .point_at(&helix, CurveMeasure::Distance(0.0))
+        .expect("start");
     for step in 1..=steps {
         let d = 40.0 * Scalar::from(step) / Scalar::from(steps);
-        let current = e.point_at(&helix, d).expect("point");
+        let current = e
+            .point_at(&helix, CurveMeasure::Distance(d))
+            .expect("point");
         travelled += (current - previous).length();
         previous = current;
     }
@@ -203,9 +221,15 @@ fn the_frame_agrees_with_the_point_and_tangent() {
     let curve = crest_then_sag();
     for step in 0..=10 {
         let d = 200.0 * Scalar::from(step) / 10.0;
-        let f = e.frame_at(&curve, d).expect("frame");
-        let p = e.point_at(&curve, d).expect("point");
-        let t = e.tangent_at(&curve, d).expect("tangent");
+        let f = e
+            .frame_at(&curve, CurveMeasure::Distance(d))
+            .expect("frame");
+        let p = e
+            .point_at(&curve, CurveMeasure::Distance(d))
+            .expect("point");
+        let t = e
+            .tangent_at(&curve, CurveMeasure::Distance(d))
+            .expect("tangent");
         assert!((f.origin - p).length() < 1e-12, "origin off curve at {d}");
         assert!((f.x - t).length() < 1e-12, "x is not the tangent at {d}");
         // Orthonormal and right-handed.
@@ -230,11 +254,130 @@ fn a_non_finite_distance_is_refused_as_a_distance() {
         direction: Vec3::new(2.0, 0.0, 0.0),
     });
     for bad in [Scalar::NAN, Scalar::INFINITY, Scalar::NEG_INFINITY] {
-        let err = e.point_at(&line, bad).expect_err("must refuse");
+        let err = e
+            .point_at(&line, CurveMeasure::Distance(bad))
+            .expect_err("must refuse");
         let text = format!("{err:?}");
         assert!(
             text.contains("distance"),
             "refusal for {bad} must name the distance, got: {text}"
         );
+    }
+}
+
+/// A refused DISTANCE must not also close the parameter route.
+///
+/// This is the case that matters for a consumer holding an authored
+/// `IfcParameterValue` on an ellipse: arc length needs elliptic integrals
+/// and is refused, but the native parameter is perfectly meaningful and
+/// must stay reachable through the contract -- otherwise the consumer is
+/// pushed back onto the engine crate their architecture gate forbids.
+#[test]
+fn a_parameter_works_where_a_distance_is_refused() {
+    let e = ReferenceCurveEvaluator::new();
+    let ellipse = Curve3::Ellipse(Ellipse3 {
+        frame: frame(),
+        semi_axis_x: 5.0,
+        semi_axis_y: 2.0,
+    });
+    assert!(
+        e.point_at(&ellipse, CurveMeasure::Distance(1.0)).is_err(),
+        "arc length on an ellipse has no closed form"
+    );
+    // Quarter turn: the parameter IS the angle, so this is the +y apex.
+    let quarter = core::f64::consts::FRAC_PI_2;
+    let p = e
+        .point_at(&ellipse, CurveMeasure::Parameter(quarter))
+        .expect("the parameter route must stay open");
+    let want = Point3::new(0.0, 2.0, 0.0);
+    assert!((p - want).length() < 1e-12, "got {p:?}, want {want:?}");
+    // And the frame follows, which is what a placement actually needs.
+    assert!(e
+        .frame_at(&ellipse, CurveMeasure::Parameter(quarter))
+        .is_ok());
+}
+
+/// The reporter's exact hazard: the same number, two meanings.
+///
+/// On a circle of radius 4, `1.5` as a parameter is 1.5 rad round; as a
+/// distance it is 1.5 m along, i.e. 0.375 rad. Roughly 86 degrees apart.
+/// Both are finite, plausible points -- nothing downstream could detect
+/// the confusion, which is why the method of measurement is carried in
+/// the value rather than left to the caller to remember.
+#[test]
+fn the_same_number_means_different_places() {
+    let e = ReferenceCurveEvaluator::new();
+    let radius = 4.0;
+    let circle = Curve3::Circle(Circle3 {
+        frame: frame(),
+        radius,
+    });
+    let value = 1.5;
+    let as_parameter = e
+        .point_at(&circle, CurveMeasure::Parameter(value))
+        .expect("parameter");
+    let as_distance = e
+        .point_at(&circle, CurveMeasure::Distance(value))
+        .expect("distance");
+    // The distance lands at angle d/r; the parameter lands at angle d.
+    let separation = (as_parameter - as_distance).length();
+    assert!(
+        separation > 1.0,
+        "parameter and distance must not collapse: {separation} apart"
+    );
+    // Pin each against its own closed form, so the test fails loudly if
+    // either route silently changes meaning.
+    let want_parameter = Point3::new(radius * value.cos(), radius * value.sin(), 0.0);
+    let angle = value / radius;
+    let want_distance = Point3::new(radius * angle.cos(), radius * angle.sin(), 0.0);
+    assert!((as_parameter - want_parameter).length() < 1e-12);
+    assert!((as_distance - want_distance).length() < 1e-12);
+}
+
+/// An intrinsic curve is arc-length parameterised, so the two routes
+/// legitimately AGREE. Pinned so the distinction is not over-enforced.
+#[test]
+fn the_routes_agree_where_the_parameter_is_arc_length() {
+    let e = ReferenceCurveEvaluator::new();
+    let helix = Curve3::Intrinsic(Intrinsic3::new(
+        frame(),
+        CurvatureLaw::circular(0.12),
+        CurvatureLaw::circular(0.05),
+        40.0,
+    ));
+    for s in [0.0, 7.5, 21.0] {
+        let by_p = e.point_at(&helix, CurveMeasure::Parameter(s)).expect("p");
+        let by_d = e.point_at(&helix, CurveMeasure::Distance(s)).expect("d");
+        assert!((by_p - by_d).length() < 1e-12, "disagreed at {s}");
+    }
+}
+
+/// A non-finite PARAMETER is refused as a curve measure.
+///
+/// The parameter route skips the distance conversion entirely, so it
+/// needs its own guard: without one a NaN reaches the evaluators and is
+/// refused as a `curve parameter`, naming an internal concept instead of
+/// the value the caller actually handed over.
+#[test]
+fn a_non_finite_parameter_is_refused_as_a_measure() {
+    let e = ReferenceCurveEvaluator::new();
+    let ellipse = Curve3::Ellipse(Ellipse3 {
+        frame: frame(),
+        semi_axis_x: 5.0,
+        semi_axis_y: 2.0,
+    });
+    for bad in [Scalar::NAN, Scalar::INFINITY, Scalar::NEG_INFINITY] {
+        let err = e
+            .point_at(&ellipse, CurveMeasure::Parameter(bad))
+            .expect_err("must refuse");
+        let text = format!("{err:?}");
+        assert!(
+            text.contains("measure"),
+            "refusal for {bad} must name the measure, got: {text}"
+        );
+        assert!(e
+            .tangent_at(&ellipse, CurveMeasure::Parameter(bad))
+            .is_err());
+        assert!(e.frame_at(&ellipse, CurveMeasure::Parameter(bad)).is_err());
     }
 }

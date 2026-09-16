@@ -7,13 +7,17 @@ without depending on an engine. Shaped like the mesh contracts.
   `tangent_at`, `frame_at`, `distance_convention`.
 - `convention.rs` `DistanceConvention`: which distance a provider
   measures, or `Unsupported`.
+- `measure.rs` `CurveMeasure`: whether the caller's number is a length or
+  a native parameter. Maps 1:1 to `IfcCurveMeasureSelect`.
 - `conformance.rs` the suite every provider must pass.
 
 ## Pitfalls
 
-- Distance is NOT the native curve parameter. Only `Line`, `Circle` and
-  `Intrinsic` recover it in closed form; the rest report `Unsupported`
-  rather than returning a parameter dressed as a distance.
+- Distance is NOT the native curve parameter, and the two axes are
+  separate: `DistanceConvention` says what a distance measures,
+  `CurveMeasure` says whether the value IS a distance. Only `Line`,
+  `Circle` and `Intrinsic` recover distance in closed form; the rest report
+  `Unsupported` for distance but still answer `CurveMeasure::Parameter`.
 - `frame_at` is reference-up, not Frenet. The Frenet normal flips at a
   vertical inflection and is undefined on a straight, which would
   silently invert a placement. See ADR 0063.

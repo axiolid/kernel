@@ -11,6 +11,7 @@
 pub mod conformance;
 mod contract;
 mod convention;
+mod measure;
 
 pub use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, Determinism, ExecutionTarget, GeomError, GeomResult,
@@ -18,6 +19,7 @@ pub use axiolid_contracts::{
 };
 pub use contract::CurveEvaluator;
 pub use convention::DistanceConvention;
+pub use measure::CurveMeasure;
 
 /// Capability this contract names.
 pub const CAPABILITY_ID: axiolid_contracts::CapabilityId =

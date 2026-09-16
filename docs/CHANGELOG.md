@@ -23,6 +23,10 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `CurveMeasure`: curve evaluation takes either a `Distance` or a native
+  `Parameter`, so an authored `IfcParameterValue` cannot be mistaken for
+  a length. The parameter route answers every curve family, including
+  those whose arc length is refused (issue #106, ADR 0063).
 - `axiolid-curve-evaluate-contract`: curve evaluation as a named
   capability, so a consumer can request "a point, tangent or frame at a
   distance" without depending on an engine. `axiolid-evaluate` provides

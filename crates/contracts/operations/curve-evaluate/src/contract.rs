@@ -1,10 +1,10 @@
 //! Portable curve-evaluation provider contract.
 
 use axiolid_contracts::{Backend, Determinism, GeomResult};
-use axiolid_core::{Frame3, Point3, Scalar, Vec3};
+use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_curve::Curve3;
 
-use crate::DistanceConvention;
+use crate::{CurveMeasure, DistanceConvention};
 
 /// Curve evaluation provider.
 ///
@@ -55,23 +55,28 @@ pub trait CurveEvaluator: Backend {
         Determinism::BestEffort
     }
 
-    /// Position at `distance` along `curve`.
+    /// Position at `at` along `curve`.
     ///
-    /// `distance` is measured in this provider's
-    /// [`distance_convention`](Self::distance_convention) for this curve.
-    /// Refuses when the convention is
-    /// [`Unsupported`](DistanceConvention::Unsupported), when the distance
-    /// is not finite, or when it falls outside the curve.
-    fn point_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Point3>;
+    /// [`CurveMeasure`] carries WHICH method of measurement the caller
+    /// means, so a native parameter cannot be mistaken for a length. A
+    /// [`Distance`](CurveMeasure::Distance) is interpreted in this
+    /// provider's [`distance_convention`](Self::distance_convention) for
+    /// this curve; a [`Parameter`](CurveMeasure::Parameter) is the curve's
+    /// own parameter and is independent of that convention.
+    ///
+    /// Refuses a non-finite value, a distance on a curve whose convention
+    /// is [`Unsupported`](DistanceConvention::Unsupported), and a value
+    /// outside the curve.
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3>;
 
-    /// Unit tangent at `distance` along `curve`.
+    /// Unit tangent at `at` along `curve`.
     ///
     /// Unit length is part of the contract: a caller composing a rotation
     /// from this must not have to renormalise, and a non-unit result
     /// would silently scale whatever it is applied to.
-    fn tangent_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Vec3>;
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3>;
 
-    /// Oriented frame at `distance` along `curve`.
+    /// Oriented frame at `at` along `curve`.
     ///
     /// `x` is the unit tangent, `z` is the reference-up direction, and
     /// `y = z x x` completes a right-handed orthonormal triad. See the
@@ -79,5 +84,5 @@ pub trait CurveEvaluator: Backend {
     ///
     /// Refuses when the tangent is parallel to `up`, where roll is
     /// genuinely undetermined.
-    fn frame_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Frame3>;
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3>;
 }

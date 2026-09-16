@@ -9,7 +9,7 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::Curve3;
-use axiolid_curve_evaluate_contract::{CurveEvaluator, DistanceConvention};
+use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConvention};
 
 use crate::arc_length::{elevated_point, elevated_tangent};
 use crate::frenet::{frenet_point, frenet_tangent};
@@ -81,6 +81,18 @@ fn invalid(detail: &str) -> GeomError {
     GeomError::InvalidInput(detail.into())
 }
 
+/// The carried number, rejected here if it is not finite.
+///
+/// A NaN parameter would otherwise reach the evaluators and be refused
+/// as a `curve parameter`, naming an internal concept rather than what
+/// the caller actually passed.
+fn finite_value(at: CurveMeasure) -> GeomResult<Scalar> {
+    let value = at.value();
+    if !value.is_finite() {
+        return Err(invalid("curve measure must be finite"));
+    }
+    Ok(value)
+}
 /// Which distance this provider can honour for `curve`.
 ///
 /// The families divide by whether distance is RECOVERABLE in closed
@@ -148,7 +160,13 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
         Determinism::Bitwise
     }
 
-    fn point_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Point3> {
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3> {
+        // A native parameter needs no conversion and no convention, so it
+        // works for EVERY family -- including the ones whose arc length has
+        // no closed form and whose distance route is refused.
+        let CurveMeasure::Distance(distance) = at else {
+            return crate::curve::evaluate3(curve, finite_value(at)?);
+        };
         match curve {
             // Native arc-length families: straight through, no conversion.
             Curve3::Intrinsic(i) => frenet_point(i, distance),
@@ -160,13 +178,19 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
         }
     }
 
-    fn tangent_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Vec3> {
-        let raw = match curve {
-            Curve3::Intrinsic(i) => frenet_tangent(i, distance)?,
-            Curve3::Elevated(e) => elevated_tangent(e, distance)?,
-            Curve3::Line(_) | Curve3::Circle(_) => {
-                crate::curve::derivative3(curve, parameter_for(curve, distance)?)?
-            }
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3> {
+        let raw = match at {
+            CurveMeasure::Parameter(_) => crate::curve::derivative3(curve, finite_value(at)?)?,
+            CurveMeasure::Distance(distance) => match curve {
+                Curve3::Intrinsic(i) => frenet_tangent(i, distance)?,
+                Curve3::Elevated(e) => elevated_tangent(e, distance)?,
+                Curve3::Line(_) | Curve3::Circle(_) => {
+                    crate::curve::derivative3(curve, parameter_for(curve, distance)?)?
+                }
+                _ => return Err(unsupported()),
+            },
+            // `CurveMeasure` is #[non_exhaustive]. An unknown method of
+            // measurement is refused by name rather than guessed at.
             _ => return Err(unsupported()),
         };
         // The contract promises a UNIT tangent. The intrinsic and elevated
@@ -175,14 +199,14 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
         // is what makes the families interchangeable to a caller.
         let length = raw.length();
         if !length.is_finite() || length <= 0.0 {
-            return Err(invalid("curve has no tangent direction at that distance"));
+            return Err(invalid("curve has no tangent direction there"));
         }
         Ok(raw / length)
     }
 
-    fn frame_at(&self, curve: &Curve3, distance: Scalar) -> GeomResult<Frame3> {
-        let origin = self.point_at(curve, distance)?;
-        let tangent = self.tangent_at(curve, distance)?;
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        let origin = self.point_at(curve, at)?;
+        let tangent = self.tangent_at(curve, at)?;
         // Reference-up construction. `right` is perpendicular to both the
         // tangent and the reference direction; `up` is then recovered from
         // those two so the triad is exactly orthonormal even when the

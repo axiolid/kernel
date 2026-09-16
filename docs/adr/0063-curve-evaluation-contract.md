@@ -136,3 +136,82 @@ frame convention across consumers -- which, given the Frenet flip above,
 means several of them would get it wrong in a way no test catches.
 Deciding the convention once is the substance of this change; the
 packaging is the cheap part.
+
+## Addendum: distance versus native parameter
+
+The first version of this contract took a bare `Scalar` distance. That
+was incomplete, raised on #106 after the fact.
+
+There are two independent axes, and the original design named only one:
+
+1. WHAT a distance measures -- 3D arc length or plan distance. Answered
+   by `DistanceConvention`.
+2. WHETHER the caller's number is a distance at all. Not answered.
+
+IFC4x3 makes the second axis explicit:
+`IfcPointByDistanceExpression.DistanceAlong` is an
+`IfcCurveMeasureSelect`, so an authored value is EITHER an
+`IfcNonNegativeLengthMeasure` or an `IfcParameterValue`, and a file says
+which. STEP carries the same distinction.
+
+With a bare `Scalar` a consumer holding a parameter had nothing to
+prevent passing it as a distance. On a circle of radius 4, `1.5` as a
+parameter is 1.5 rad round; as a distance it is 0.375 rad -- about 86
+degrees apart, both finite and plausible, undetectable downstream.
+
+### Decision
+
+The three methods take a `CurveMeasure` instead of a `Scalar`:
+
+```rust
+pub enum CurveMeasure {
+    Distance(Scalar),
+    Parameter(Scalar),
+}
+```
+
+Rejected: a `DistanceConvention::NativeParameter` variant, which was the
+other option offered. That enum answers what a DISTANCE measures, and a
+parameter is not a distance -- the variant would make the enum answer two
+questions and let `distance_convention` describe something that is not
+one. Rejected too: separate `*_at_parameter` methods, which leave the
+caller branching, and a caller that branches can branch wrongly.
+Carrying the method of measurement in the value makes the mistake
+unrepresentable rather than merely documented.
+
+### The refusal table was also too strict
+
+A second defect surfaced while implementing this. The original reply to
+#106 told consumers that `Ellipse`, `BSpline` and `Polyline` remain
+evaluable "through `evaluate3` at their native parameter". That advice
+was unusable: `evaluate3` lives in `axiolid-evaluate`, the engine crate,
+and the whole point of the contract is that a bridge may not depend on
+it. The parameter route existed only outside the contract.
+
+`CurveMeasure::Parameter` fixes that too. It needs no conversion and no
+convention, so it is answered for EVERY family, including those whose
+arc length has no closed form:
+
+| Family | `Distance` | `Parameter` |
+| --- | --- | --- |
+| `Line`, `Circle` | exact | yes |
+| `Intrinsic` | exact (identity) | yes, same value |
+| `Elevated` | exact, plan distance | yes, same value |
+| `Ellipse`, `BSpline`, `Polyline` | refused | yes |
+
+So a refused DISTANCE no longer means a curve is unreachable through the
+contract; only that one method of measurement is unavailable for it.
+
+### Evidence
+
+- The same number gives points ~1.5 apart on a circle depending on the
+  method of measurement, each pinned against its own closed form.
+- On an arc-length-parameterised curve the two routes AGREE exactly,
+  pinned so the distinction is not over-enforced.
+- An ellipse refuses a distance and answers a parameter, with a frame.
+- Mutation 3/3: collapsing `Parameter` into `Distance`, routing a
+  parameter through the distance conversion, and dropping the finiteness
+  guard all die.
+
+Landed before the crate was published, so no consumer saw the bare
+`Scalar` signature.

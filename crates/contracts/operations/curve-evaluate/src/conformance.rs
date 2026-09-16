@@ -7,7 +7,7 @@
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::{Circle3, CurvatureLaw, Curve3, Intrinsic3, Line3};
 
-use crate::CurveEvaluator;
+use crate::{CurveEvaluator, CurveMeasure};
 
 /// One failed conformance expectation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +36,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_tangent_is_unit(provider));
     out.extend(check_frame_is_orthonormal(provider));
     out.extend(check_refusals(provider));
+    out.extend(check_measure_routes_differ(provider));
     out
 }
 
@@ -53,7 +54,7 @@ fn check_line<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     if !provider.distance_convention(&line).is_supported() {
         return out;
     }
-    match provider.point_at(&line, 5.0) {
+    match provider.point_at(&line, CurveMeasure::Distance(5.0)) {
         Ok(p) => {
             let moved = (p - Point3::new(1.0, 2.0, 3.0)).length();
             if (moved - 5.0).abs() > 1e-9 {
@@ -86,7 +87,7 @@ fn check_circle<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     }
     // A quarter of the circumference must land on the +y axis.
     let quarter = core::f64::consts::FRAC_PI_2 * radius;
-    match provider.point_at(&circle, quarter) {
+    match provider.point_at(&circle, CurveMeasure::Distance(quarter)) {
         Ok(p) => {
             let want = Point3::new(0.0, radius, 0.0);
             let error = (p - want).length();
@@ -142,7 +143,7 @@ fn check_tangent_is_unit<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFail
             continue;
         }
         for distance in [0.0, 1.5, 4.0] {
-            if let Ok(t) = provider.tangent_at(&curve, distance) {
+            if let Ok(t) = provider.tangent_at(&curve, CurveMeasure::Distance(distance)) {
                 if (t.length() - 1.0).abs() > 1e-9 {
                     out.push(fail(
                         "tangent is unit length",
@@ -166,7 +167,7 @@ fn check_frame_is_orthonormal<E: CurveEvaluator>(provider: &E) -> Vec<Conformanc
             continue;
         }
         for distance in [0.0, 1.5, 4.0] {
-            let Ok(frame) = provider.frame_at(&curve, distance) else {
+            let Ok(frame) = provider.frame_at(&curve, CurveMeasure::Distance(distance)) else {
                 continue;
             };
             let checks = [
@@ -194,7 +195,7 @@ fn check_frame_is_orthonormal<E: CurveEvaluator>(provider: &E) -> Vec<Conformanc
                 ));
             }
             // The frame must sit ON the curve.
-            if let Ok(point) = provider.point_at(&curve, distance) {
+            if let Ok(point) = provider.point_at(&curve, CurveMeasure::Distance(distance)) {
                 let off = (frame.origin - point).length();
                 if off > 1e-9 {
                     out.push(fail(
@@ -204,7 +205,7 @@ fn check_frame_is_orthonormal<E: CurveEvaluator>(provider: &E) -> Vec<Conformanc
                 }
             }
             // And its x axis must be the tangent.
-            if let Ok(tangent) = provider.tangent_at(&curve, distance) {
+            if let Ok(tangent) = provider.tangent_at(&curve, CurveMeasure::Distance(distance)) {
                 let off = (frame.x - tangent).length();
                 if off > 1e-9 {
                     out.push(fail(
@@ -229,19 +230,28 @@ fn check_refusals<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
             continue;
         }
         for bad in [Scalar::NAN, Scalar::INFINITY, Scalar::NEG_INFINITY] {
-            if provider.point_at(&curve, bad).is_ok() {
+            if provider
+                .point_at(&curve, CurveMeasure::Distance(bad))
+                .is_ok()
+            {
                 out.push(fail(
                     "non-finite distance is refused",
                     format!("point_at accepted {bad}"),
                 ));
             }
-            if provider.tangent_at(&curve, bad).is_ok() {
+            if provider
+                .tangent_at(&curve, CurveMeasure::Distance(bad))
+                .is_ok()
+            {
                 out.push(fail(
                     "non-finite distance is refused",
                     format!("tangent_at accepted {bad}"),
                 ));
             }
-            if provider.frame_at(&curve, bad).is_ok() {
+            if provider
+                .frame_at(&curve, CurveMeasure::Distance(bad))
+                .is_ok()
+            {
                 out.push(fail(
                     "non-finite distance is refused",
                     format!("frame_at accepted {bad}"),
@@ -256,12 +266,51 @@ fn check_refusals<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
         direction: Vec3::ZERO,
     });
     if provider.distance_convention(&vertical).is_supported()
-        && provider.point_at(&vertical, 1.0).is_ok()
+        && provider
+            .point_at(&vertical, CurveMeasure::Distance(1.0))
+            .is_ok()
     {
         out.push(fail(
             "degenerate curve is refused",
             "a zero-direction line was evaluated instead of refused",
         ));
+    }
+    out
+}
+
+/// A parameter and a distance must not be silently interchangeable.
+///
+/// On a circle of radius 4 the same number means two different places:
+/// `Parameter(1.5)` is 1.5 radians round, `Distance(1.5)` is 1.5 m along,
+/// i.e. 0.375 rad. A provider that ignored the method of measurement would
+/// return the same point for both -- wrong, finite, and plausible.
+///
+/// Also pins that the parameter route stays OPEN where the distance route
+/// is refused: an ellipse has no closed-form arc length, but its native
+/// parameter is perfectly meaningful, and a consumer holding an authored
+/// parameter must still be able to evaluate it.
+fn check_measure_routes_differ<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let radius = 4.0;
+    let circle = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius,
+    });
+    let value = 1.5;
+    let by_parameter = provider.point_at(&circle, CurveMeasure::Parameter(value));
+    let by_distance = provider.point_at(&circle, CurveMeasure::Distance(value));
+    if let (Ok(p), Ok(d)) = (by_parameter, by_distance) {
+        if (p - d).length() < 1e-9 {
+            out.push(fail(
+                "parameter and distance are distinct",
+                format!("{value} gave the same point as a parameter and as a distance"),
+            ));
+        }
     }
     out
 }
