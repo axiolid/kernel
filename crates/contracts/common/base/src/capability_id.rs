@@ -64,7 +64,16 @@ pub mod capability_ids {
     /// analytic curve, not a sampled approximation of it.
     pub const CURVE_EVALUATE: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.curve-evaluate.v1");
-    pub const ALL: [CapabilityId; 10] = [
+    /// Every identifier this vocabulary defines.
+    ///
+    /// A SLICE rather than a fixed-size array on purpose: with
+    /// `[CapabilityId; N]` the length is part of the public type, so
+    /// registering a capability changed `N` and was technically a breaking
+    /// change for every consumer. Capabilities are added as the kernel
+    /// grows, and taxing each addition with a major bump would either
+    /// throttle them or push the break through silently. A slice makes
+    /// every future addition additive.
+    pub const ALL: &[CapabilityId] = &[
         TESSELLATE,
         MESH_BOOLEAN,
         MESH_SECTION,
@@ -83,6 +92,18 @@ mod tests {
     use super::capability_ids::ALL;
     use std::collections::BTreeSet;
 
+    /// Registering a capability must stay an ADDITIVE change.
+    ///
+    /// `ALL` was `[CapabilityId; N]`, where the count sat in the public
+    /// type: adding an identifier changed the type and broke every
+    /// consumer, so a routine addition demanded a major bump. Binding it
+    /// as a slice here fails to compile if it is ever narrowed back to a
+    /// fixed-size array.
+    #[test]
+    fn the_vocabulary_can_grow_without_a_breaking_change() {
+        let ids: &[super::CapabilityId] = super::capability_ids::ALL;
+        assert!(ids.len() >= 10, "vocabulary should not shrink");
+    }
     #[test]
     fn ids_are_unique_versioned_ascii_tokens() {
         let unique: BTreeSet<_> = ALL.iter().map(|id| id.as_str()).collect();

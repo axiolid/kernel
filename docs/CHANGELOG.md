@@ -16,6 +16,10 @@ All notable changes to Axiolid are documented in this file.
 
 ### Fixed
 
+- `capability_ids::ALL` is a `&[CapabilityId]` slice rather than a
+  fixed-size array. The length was part of the public type, so
+  registering a capability was technically a breaking change; additions
+  are now additive.
 - `axiolid-pointcloud-reconstruction-contract` and
   `axiolid-tessellation-contract` declared a `domain` that disagreed with
   their own names (`operation.*`); corrected to `pointcloud.reconstruction`
