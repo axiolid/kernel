@@ -4,6 +4,8 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-16
+
 ### Added
 
 - Crate names are derived from architecture metadata and checked by
