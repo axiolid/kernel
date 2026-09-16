@@ -11,24 +11,29 @@ use super::model::{Architecture, PackageArchitecture, Result};
 
 /// Names that predate the rule and cannot change without a breaking release.
 ///
-/// Each entry is `(actual, expected, reason)`. The list is CLOSED: a
+/// Each entry is `(actual, expected, reason)`. Deliberately NOT tied to a
+/// version: a rename is not worth manufacturing a breaking release for, so
+/// these land in the next release that is breaking for an independent
+/// reason.
+///
+/// The list is CLOSED: a
 /// violation not listed here fails, and an entry that no longer violates
 /// ALSO fails, so a fixed exception cannot linger as permanent amnesty.
 const GRANDFATHERED: &[(&str, &str, &str)] = &[
     (
         "axiolid-tessellation-contract",
         "axiolid-tessellate-contract",
-        "published 0.1.0/0.2.0; noun for a verb domain; rename at 0.3.0",
+        "published; noun for a verb domain; rename at the next breaking release",
     ),
     (
         "axiolid-exact-compile-contract",
         "axiolid-brep-compile-contract",
-        "published 0.1.0/0.2.0; domain is brep.compile; rename at 0.3.0",
+        "published; domain is brep.compile; rename at the next breaking release",
     ),
     (
         "axiolid-mesh-compile",
         "axiolid-graph-compile",
-        "published 0.1.0/0.2.0; orchestrator impersonating a contract's provider; rename at 0.3.0",
+        "published; orchestrator impersonating a contract's provider; rename at the next breaking release",
     ),
 ];
 

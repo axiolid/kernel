@@ -70,7 +70,8 @@ tell before resolving it that naming the capability is cheap.
 `axiolid-graph-compile` -- it compiles a GRAPH, which is what its own
 `domain = "graph.compile"` already says.
 
-It is not renamed. It is published on crates.io at 0.1.0 and 0.2.0, and
+It is not renamed. It is published on crates.io at 0.1.0, 0.2.0 and
+0.2.1, and
 `openbimrs/ifc` builds against it. A rename is a breaking change for
 every downstream consumer in exchange for a name that reads better, and
 48 internal references would move in the same commit.
@@ -80,6 +81,31 @@ its reason and its exit condition recorded there. The exception list is
 itself checked: a stale entry -- one naming a crate that no longer
 violates anything -- fails the gate, so the exemption cannot outlive the
 problem quietly.
+
+### Addendum: the renames are not tied to 0.3.0
+
+The exception entries originally read "rename at 0.3.0", on the
+assumption that the next release had to be breaking anyway, so the
+renames would ride along at no extra cost.
+
+That assumption was wrong twice over. The only breaking change in the
+0.2.0..0.2.1 delta was `capability_ids::ALL` being a fixed-size array,
+and that was a DEFECT worth fixing on its own terms rather than a cost
+worth absorbing -- it made every future capability addition breaking.
+With it fixed the release became a patch, so there was no breaking
+release to ride along with.
+
+More importantly, bundling made the renames hostage to an unrelated
+schedule. A consumer pinning `^0.2.0` picks up a patch with no manifest
+edit; a 0.3.0 would have forced all 14 of `openbimrs/ifc`'s requirements
+to move before it could build at all. Coupling a cosmetic improvement to
+that cost is what kept it deferred.
+
+The exception entries now carry no version. They land in the next
+release that is breaking for an INDEPENDENT reason, and the checker
+enforces the rule for everything else meanwhile. A rename is not worth
+manufacturing a breaking release for; it is worth doing when one
+arrives.
 
 ## What was fixed, and what was not
 
