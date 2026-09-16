@@ -248,6 +248,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-curve-evaluate-contract"
+version = "0.2.0"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-curve",
+]
+
+[[package]]
 name = "axiolid-decimate"
 version = "0.2.0"
 dependencies = [
@@ -296,6 +305,7 @@ dependencies = [
  "axiolid-contracts",
  "axiolid-core",
  "axiolid-curve",
+ "axiolid-curve-evaluate-contract",
  "axiolid-surface",
 ]
 

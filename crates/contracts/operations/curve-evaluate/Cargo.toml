@@ -1,0 +1,24 @@
+[package]
+name = "axiolid-curve-evaluate-contract"
+description = "Portable curve evaluation capability contract: point, tangent and oriented frame at a distance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-contracts.workspace = true
+axiolid-core.workspace = true
+axiolid-curve.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "contracts"
+role = "contract.operation"
+domain = "curve.evaluate"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-curve"]

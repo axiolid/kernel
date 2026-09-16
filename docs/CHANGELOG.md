@@ -4,6 +4,19 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `axiolid-curve-evaluate-contract`: curve evaluation as a named
+  capability, so a consumer can request "a point, tangent or frame at a
+  distance" without depending on an engine. `axiolid-evaluate` provides
+  `ReferenceCurveEvaluator` (issue #106, ADR 0063).
+- `CurveEvaluator::frame_at`: an oriented placement frame using a
+  reference-up convention, stable across crests, sags and straights
+  where a Frenet frame flips or is undefined (ADR 0063).
+- `DistanceConvention`: providers state whether a distance is 3D arc
+  length or plan distance, and refuse families where no closed-form arc
+  length exists rather than returning a native parameter (ADR 0063).
+
 ## [0.2.0] - 2026-09-15
 ### Performance
 

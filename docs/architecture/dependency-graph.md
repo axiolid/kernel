@@ -19,6 +19,7 @@ graph TD
     axiolid_contracts["axiolid-contracts\ncontract.common"]
     axiolid_core["axiolid-core\nfoundation.values"]
     axiolid_curve["axiolid-curve\nrepresentation.atomic"]
+    axiolid_curve_evaluate_contract["axiolid-curve-evaluate-contract\ncontract.operation"]
     axiolid_decimate["axiolid-decimate\nalgorithm.discrete"]
     axiolid_decompose["axiolid-decompose\nalgorithm.discrete"]
     axiolid_dispatch["axiolid-dispatch\nexecution.dispatch"]
@@ -150,6 +151,9 @@ graph TD
     axiolid_contracts --> axiolid_guarantees
     axiolid_curve --> axiolid_core
     axiolid_curve --> axiolid_linear
+    axiolid_curve_evaluate_contract --> axiolid_contracts
+    axiolid_curve_evaluate_contract --> axiolid_core
+    axiolid_curve_evaluate_contract --> axiolid_curve
     axiolid_decimate --> axiolid_core
     axiolid_decimate --> axiolid_heal
     axiolid_decimate --> axiolid_measure
@@ -174,6 +178,7 @@ graph TD
     axiolid_evaluate --> axiolid_contracts
     axiolid_evaluate --> axiolid_core
     axiolid_evaluate --> axiolid_curve
+    axiolid_evaluate --> axiolid_curve_evaluate_contract
     axiolid_evaluate --> axiolid_surface
     axiolid_exact_compile_contract --> axiolid_brep
     axiolid_exact_compile_contract --> axiolid_contracts

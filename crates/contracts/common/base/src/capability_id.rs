@@ -58,7 +58,13 @@ pub mod capability_ids {
     /// promises analytic supports and trims survive, never triangles.
     pub const GRAPH_TO_EXACT_BREP: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.graph-to-exact-brep.v1");
-    pub const ALL: [CapabilityId; 9] = [
+    /// Point, tangent and oriented frame at a distance along a curve.
+    ///
+    /// Distinct from tessellation: this is exact evaluation of an
+    /// analytic curve, not a sampled approximation of it.
+    pub const CURVE_EVALUATE: CapabilityId =
+        CapabilityId::from_static("org.axiolid.geometry.curve-evaluate.v1");
+    pub const ALL: [CapabilityId; 10] = [
         TESSELLATE,
         MESH_BOOLEAN,
         MESH_SECTION,
@@ -68,6 +74,7 @@ pub mod capability_ids {
         EXACT_EXTRUDE,
         GRAPH_TO_MESH,
         GRAPH_TO_EXACT_BREP,
+        CURVE_EVALUATE,
     ];
 }
 

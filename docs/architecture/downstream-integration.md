@@ -29,6 +29,7 @@ The protocol recognizes these stable identifiers. Presence here defines vocabula
 | `org.axiolid.geometry.exact-extrude.v1` |
 | `org.axiolid.geometry.graph-to-mesh.v1` |
 | `org.axiolid.geometry.graph-to-exact-brep.v1` |
+| `org.axiolid.geometry.curve-evaluate.v1` |
 
 ## Typed handshake
 

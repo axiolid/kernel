@@ -9,10 +9,10 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `linear-intersection-minimal` | 5 | A line-query application: linear values plus certified linear intersection. |
 | `mesh-rule-checker` | 4 | A rule checker over discrete meshes: mesh values, spatial acceleration, measurement. |
 | `2d-curves` | 3 | A 2D plan-geometry application: curves, affine transforms, and application-owned unit conversion without solids or CSG. |
-| `parametric-curves` | 7 | A parametric application: curve/surface values plus scalar evaluation, without the reference umbrella. |
-| `cad-exact` | 11 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
-| `rust-facade-application` | 30 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
-| `c-abi-profile` | 31 | Versioned native boundary over the supported portable application provider bundle. |
+| `parametric-curves` | 8 | A parametric application: curve/surface values plus scalar evaluation, without the reference umbrella. |
+| `cad-exact` | 12 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
+| `rust-facade-application` | 31 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
+| `c-abi-profile` | 32 | Versioned native boundary over the supported portable application provider bundle. |
 
 ## linear-intersection-minimal
 
@@ -70,6 +70,7 @@ Compiles exactly these internal packages:
 - `axiolid-contracts`
 - `axiolid-core`
 - `axiolid-curve`
+- `axiolid-curve-evaluate-contract`
 - `axiolid-evaluate`
 - `axiolid-guarantees`
 - `axiolid-linear`
@@ -89,6 +90,7 @@ Compiles exactly these internal packages:
 - `axiolid-contracts`
 - `axiolid-core`
 - `axiolid-curve`
+- `axiolid-curve-evaluate-contract`
 - `axiolid-evaluate`
 - `axiolid-guarantees`
 - `axiolid-linear`
@@ -115,6 +117,7 @@ Compiles exactly these internal packages:
 - `axiolid-contracts`
 - `axiolid-core`
 - `axiolid-curve`
+- `axiolid-curve-evaluate-contract`
 - `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-guarantees`
@@ -157,6 +160,7 @@ Compiles exactly these internal packages:
 - `axiolid-contracts`
 - `axiolid-core`
 - `axiolid-curve`
+- `axiolid-curve-evaluate-contract`
 - `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-guarantees`

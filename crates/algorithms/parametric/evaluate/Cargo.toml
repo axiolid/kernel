@@ -12,6 +12,7 @@ readme.workspace = true
 [dependencies]
 axiolid-core.workspace = true
 axiolid-contracts.workspace = true
+axiolid-curve-evaluate-contract.workspace = true
 axiolid-curve.workspace = true
 axiolid-surface.workspace = true
 
@@ -22,4 +23,4 @@ role = "algorithm.parametric"
 domain = "evaluate"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-core", "axiolid-contracts", "axiolid-curve", "axiolid-surface"]
+allowed-internal-dependencies = ["axiolid-core", "axiolid-contracts", "axiolid-curve", "axiolid-curve-evaluate-contract", "axiolid-surface"]

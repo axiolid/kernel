@@ -17,9 +17,19 @@ plan-plus-elevation composition;
 torsion, by Magnus expansion on SO(3);
 `intrinsic_relation.rs` trim, offset and join over natural-equation space
 curves;
+`provider.rs` `ReferenceCurveEvaluator`, this crate's implementation of
+the `CurveEvaluator` capability contract: point, tangent and placement
+frame at a DISTANCE rather than a native parameter;
 `nurbs.rs` shared private spline-axis machinery.
 
 ## Invariants
+
+- `provider.rs` answers DISTANCE questions; `curve.rs` answers native
+  PARAMETER questions. Only `Line`, `Circle` and `Intrinsic` convert in
+  closed form. Never hand a parameter back as a distance.
+- The placement frame is reference-up, never Frenet: the Frenet normal
+  flips sign at a vertical inflection and is undefined on a straight.
+  See ADR 0063.
 
 - A quadrature panel must never straddle a SEAM of a piecewise law:
   Gauss-Legendre assumes a smooth integrand, and a joined curve was wrong
