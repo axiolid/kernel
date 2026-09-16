@@ -6,6 +6,23 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- Crate names are derived from architecture metadata and checked by
+  `cargo xtask architecture check`: a `contract.operation` package is
+  `axiolid-<domain>-contract`, a `provider.*` package is
+  `axiolid-<domain>-<engine>`, and no other package may end in
+  `-contract` or take a name a contract reserves (ADR 0064).
+- `scripts/probe_naming_gate.sh` mutation-verifies that rule, including
+  decoys that must NOT trip it.
+
+### Fixed
+
+- `axiolid-pointcloud-reconstruction-contract` and
+  `axiolid-tessellation-contract` declared a `domain` that disagreed with
+  their own names (`operation.*`); corrected to `pointcloud.reconstruction`
+  and `tessellation`. Metadata only, no crate renamed (ADR 0064).
+
+### Added
+
 - `axiolid-curve-evaluate-contract`: curve evaluation as a named
   capability, so a consumer can request "a point, tangent or frame at a
   distance" without depending on an engine. `axiolid-evaluate` provides

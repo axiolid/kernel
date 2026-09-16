@@ -10,6 +10,7 @@ step() { local name="$1"; shift; printf '%-46s' "$name"; if "$@" >"$gate_out" 2>
 step "fmt --check" cargo fmt --all -- --check
 step "architecture" cargo xtask architecture check
 step "architecture mutation probe" scripts/probe_layering_gate.sh
+step "naming mutation probe" scripts/probe_naming_gate.sh
 step "closure check" cargo xtask architecture closure check
 step "closure mutation probe" scripts/probe_closure_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py

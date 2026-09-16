@@ -105,6 +105,7 @@ pub fn validate(architecture: &Architecture) -> Result<()> {
         }
     }
 
+    super::naming::validate(architecture, &mut errors)?;
     super::source_checks::validate(architecture, &mut errors)?;
     super::source_checks::validate_no_product_names(&architecture.root, &mut errors)?;
     if errors.is_empty() {

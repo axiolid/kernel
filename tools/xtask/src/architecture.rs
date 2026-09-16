@@ -1,6 +1,7 @@
 mod checks;
 mod closure;
 mod model;
+mod naming;
 mod render;
 mod source_checks;
 
