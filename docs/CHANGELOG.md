@@ -4,6 +4,14 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- The gate's isolated-build list is derived from `cargo metadata` instead of
+  hand-maintained, so a new publishable crate is covered the moment it exists.
+  Fourteen of 52 publishable crates were escaping the check, including
+  `axiolid-curve-evaluate-contract`. A mutation probe registers a throwaway
+  crate and fails if it is not picked up (kernel#38).
+
 ### Fixed
 
 - Boolean vertex duplication no longer reads past the incidence array

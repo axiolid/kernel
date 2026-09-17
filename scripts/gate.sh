@@ -11,6 +11,7 @@ step "fmt --check" cargo fmt --all -- --check
 step "architecture" cargo xtask architecture check
 step "architecture mutation probe" scripts/probe_layering_gate.sh
 step "naming mutation probe" scripts/probe_naming_gate.sh
+step "isolated build mutation probe" scripts/probe_isolated_build_gate.sh
 step "closure check" cargo xtask architecture closure check
 step "closure mutation probe" scripts/probe_closure_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
@@ -31,18 +32,12 @@ step "native CMake/package integration" scripts/check-native-packaging.sh
 step "release script tests" python3 -m unittest scripts.test_release_scripts
 step "release publish plan" python3 scripts/publish-workspace.py
 step "release package preflight" python3 scripts/verify-packages.py
-for c in \
-  axiolid-core axiolid-curve axiolid-surface axiolid-primitive axiolid-profile \
-  axiolid-topology axiolid-brep axiolid-mesh axiolid-field axiolid-model \
-  axiolid-guarantees axiolid-contracts axiolid-mesh-contracts \
-  axiolid-tessellation-contract axiolid-mesh-boolean-contract \
-  axiolid-mesh-section-contract axiolid-mesh-compile-contract \
-  axiolid-exact-compile-contract \
-  axiolid-spatial axiolid-measure axiolid-overlay axiolid-field-ops axiolid-heal \
-  axiolid-reference axiolid-nurbs axiolid-construct \
-  axiolid-linear axiolid-predicates axiolid-linear-intersection axiolid-ray-mesh axiolid-evaluate \
-  axiolid-mesh-boolean-boolmesh axiolid-mesh-compile axiolid-dispatch \
-  axiolid-backend-cpu axiolid-backend-gpu axiolid axiolid-capi; do
+# Derived from `cargo metadata`, never hand-maintained: a new publishable
+# member joins this loop the moment it exists (kernel#38). A crate that
+# escapes the check is a crate whose standalone manifest nobody proved.
+isolated_targets="$(python3 scripts/isolated-build-targets.py)" || { echo "cannot derive isolated build targets"; exit 1; }
+[ -n "$isolated_targets" ] || { echo "isolated build target list is empty"; exit 1; }
+for c in $isolated_targets; do
   step "isolated build -p $c" cargo build -p "$c"
 done
 echo
