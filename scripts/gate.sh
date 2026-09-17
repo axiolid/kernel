@@ -15,6 +15,8 @@ step "isolated build mutation probe" scripts/probe_isolated_build_gate.sh
 step "closure check" cargo xtask architecture closure check
 step "closure mutation probe" scripts/probe_closure_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
+step "capability evidence" python3 scripts/check-capabilities.py
+step "capability evidence mutation probe" scripts/probe_capabilities_gate.sh
 step "integration contract" scripts/check-integration-contract.sh
 step "integration contract mutation" python3 scripts/probe_integration_contract_gate.py
 step "downstream probe unit tests" python3 -m unittest tests/downstream/test_downstream_consumers.py
@@ -33,6 +35,8 @@ step "native CMake/package integration" scripts/check-native-packaging.sh
 step "release script tests" python3 -m unittest scripts.test_release_scripts
 step "release publish plan" python3 scripts/publish-workspace.py
 step "release package preflight" python3 scripts/verify-packages.py
+step "semver policy" python3 scripts/check-semver.py
+step "semver mutation probe" scripts/probe_semver_gate.sh
 # Derived from `cargo metadata`, never hand-maintained: a new publishable
 # member joins this loop the moment it exists (kernel#38). A crate that
 # escapes the check is a crate whose standalone manifest nobody proved.

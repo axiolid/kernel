@@ -4,6 +4,17 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Breaking-change policy with a mechanical gate. `docs/contributing/breaking-changes.md`
+  states what may change at each version step and what counts as public surface;
+  `scripts/check-semver.py` runs `cargo-semver-checks` against the newest published
+  baseline below the working version and fails when the public API breaks without a
+  bump that admits it (#34).
+- Capability evidence gate. `scripts/check-capabilities.py` fails when a row in
+  `docs/capabilities.md` claims a status without naming a crate or ADR a reader can
+  open; nine rows cited nothing and now cite their implementing crate (#35).
+
 ### Changed
 
 - Crate `PLAN.md` files no longer record per-item status. Seven unchecked

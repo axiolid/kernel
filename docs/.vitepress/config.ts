@@ -123,6 +123,7 @@ export default defineConfig({
           { text: "Contributing", link: "/guide/contributing" },
           { text: "Where things go", link: "/contributing/where-things-go" },
           { text: "Crate migration", link: "/contributing/crate-migration" },
+          { text: "Breaking changes", link: "/contributing/breaking-changes" },
         ],
       },
       {
