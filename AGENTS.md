@@ -31,6 +31,16 @@ scripts/check-native-packaging.sh
 scripts/gate.sh
 ```
 
+`scripts/gate.sh` needs `cargo-semver-checks` for the breaking-change gate.
+Install it once; pin the version because newer releases require a newer
+rustc than this workspace uses:
+
+```bash
+cargo install cargo-semver-checks --version 0.44.0 --locked
+```
+
+The gate fails loudly if it is missing rather than skipping the check.
+
 Benchmarks are not part of `scripts/gate.sh`; run them explicitly:
 
 ```bash

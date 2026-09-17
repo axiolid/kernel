@@ -2,17 +2,23 @@ name: Roadmap freshness
 
 # The roadmap explains ordering and reasoning; the project board carries status.
 # This gate stops the roadmap drifting back into a status page that goes stale.
+# It also covers crate `PLAN.md` design notes, which drifted the same way
+# (kernel#25), so their paths must trigger it too.
 
 on:
   push:
     branches: [main]
     paths:
       - "docs/ROADMAP.md"
+      - "crates/PLAN.md"
+      - "crates/**/PLAN.md"
       - "scripts/check-roadmap-freshness.py"
       - ".github/workflows/roadmap.yml"
   pull_request:
     paths:
       - "docs/ROADMAP.md"
+      - "crates/PLAN.md"
+      - "crates/**/PLAN.md"
       - "scripts/check-roadmap-freshness.py"
       - ".github/workflows/roadmap.yml"
   # Milestones change outside of any commit, so re-check on a schedule too.
