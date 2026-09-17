@@ -1,20 +1,24 @@
-# axiolid-backend-gpu implementation plan
+# axiolid-backend-gpu plan
 
-Status: architecture scaffold; algorithms incomplete. This is planning context,
-not standing agent instruction.
+Design constraints for GPU execution. Status lives on GitHub, not here
+(kernel#25).
 
-## Established
+## Standing invariants
 
-- Crate boundary and dependency direction are executable in the layering gate.
-- Public data/contracts compile. Behavior remains scaffold unless a test names it.
-- The generic adapter validates device and precision policy, graph-owned roots,
-  and one-result-per-root cardinality before accepting executor output.
+The generic adapter validates device and precision policy, graph-owned
+roots, and one-result-per-root cardinality before accepting executor
+output. An executor that cannot satisfy those is refused rather than
+trusted.
 
-## Next implementation wave
+## Shape of the work
 
-Add a separately feature-gated wgpu graph compiler only with real batched
-compute kernels and CPU differential tests. Add other GPU operation executors
-as separate traits/adapters, not methods on one god backend.
+A wgpu graph compiler stays separately feature-gated, and only earns its
+place with real batched compute kernels plus CPU differential tests --
+a GPU path that cannot be differentially checked against the CPU one is
+not evidence of anything.
+
+Further GPU operation executors arrive as separate traits and adapters,
+never as methods on one god backend.
 
 ## Exit evidence
 

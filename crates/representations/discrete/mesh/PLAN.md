@@ -2,7 +2,7 @@
 
 Status: structural audit implemented; repair and richer topology remain planned.
 
-## Established
+## Standing invariants
 
 - Crate boundary and dependency direction are executable in the layering gate.
 - `TriangleMeshView` adapts foreign index storage without ownership conversion.
@@ -10,7 +10,7 @@ Status: structural audit implemented; repair and richer topology remain planned.
   degenerate faces, boundary edges, and non-manifold edges deterministically.
   It does not mutate or reject dirty source geometry.
 
-## Next implementation wave
+## Shape of the work
 
 Add attribute channels, explicit repair plans, and richer topology diagnostics.
 

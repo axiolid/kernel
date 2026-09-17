@@ -3,23 +3,29 @@
 Owner: geometry
 Depends on: axiolid-mesh-boolean-contract, axiolid-mesh-contracts, axiolid-contracts, axiolid-mesh, axiolid-core
 
-## Done
+Design notes and standing constraints. Status lives on GitHub, not here
+(kernel#25).
 
-- [x] TriMesh <-> Manifold conversion with an orientation gate on input.
-- [x] `MeshBoolean` for union/intersection/difference.
-- [x] Volume-conservation and winding gates; fixture issue_2019 regression.
-- [x] Registry integration, including budget refusal.
+## What this provider owns
 
-## Next
+TriMesh <-> Manifold conversion with an orientation gate on input, and
+`MeshBoolean` for union/intersection/difference. Registry integration
+honours budget refusal: an over-budget provider is never invoked.
 
-- [ ] Override `subtract_many` to union disjoint cutters before subtracting, and
-      prove it beats the sequential baseline recorded in ADR 0014
-      (n=16: 6.95 ms, n=64: 48.68 ms). If it does not beat it, do not keep it.
-- [x] Fixture issue_1155 (near-degenerate halfspace) as a regression here. The
-      half-space is still bounded in the test; moving that bounding into
-      axiolid-model remains open.
-- [x] Differential test against certified `axiolid-predicates` (`orient3d`).
-      Convexity, inside/outside and winding are re-decided exactly where those
-      invariants hold; non-convex results stay covered by the conservation and
-      structural gates instead, because "wound away from one interior point" is
-      only true for convex solids.
+`subtract_many` unions disjoint cutters before subtracting rather than
+removing one cutter per boolean. The standing rule for that optimisation:
+it must beat the sequential baseline recorded in ADR 0014 (n=16: 6.95 ms,
+n=64: 48.68 ms). If it ever stops beating it, it does not earn its
+complexity and should go.
+
+## Gates
+
+- Volume-conservation and winding gates; fixture issue_2019 regression.
+- Fixture issue_1155 (near-degenerate halfspace). The half-space is still
+  bounded in the test; moving that bounding into axiolid-model remains a
+  separate concern.
+- Differential test against certified `axiolid-predicates` (`orient3d`).
+  Convexity, inside/outside and winding are re-decided exactly where those
+  invariants hold; non-convex results stay covered by the conservation and
+  structural gates instead, because "wound away from one interior point" is
+  only true for convex solids.

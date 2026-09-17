@@ -4,7 +4,7 @@ Status: coverage, representation, morphology, clearance, and opt-in traversal
 are implemented and mutation-verified. This is planning context, not standing
 agent instruction.
 
-## Established
+## Standing invariants
 
 - Explicit `Frame3` / `FieldBounds` / cell size / `Tolerance` /
   `FieldResourceBudget` configuration, validated together.
@@ -30,7 +30,7 @@ consumers needing the same neutral contract. One exists today. Until a second
 appears, `navigation` stays an opt-in feature of this crate rather than a
 kernel-level trait.
 
-## Next implementation wave
+## Shape of the work
 
 Only when driven by a real consumer:
 

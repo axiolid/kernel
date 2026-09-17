@@ -3,7 +3,7 @@
 Status: BVH and uniform point grid implemented; octree remains unimplemented
 and is deliberately not claimed in the crate description or docs.
 
-## Established
+## Standing invariants
 
 - Crate boundary and dependency direction are executable in the layering gate.
 - [`Bvh`](src/bvh.rs) is a read-only, deterministic median-split broad-phase
@@ -14,7 +14,7 @@ and is deliberately not claimed in the crate description or docs.
   leaves room for parallel CPU and GPU providers without coupling the contract
   to either execution strategy.
 
-## Next implementation wave
+## Shape of the work
 
 - Benchmark this BVH against an external reference implementation on
   representative sparse, dense, and adversarial distributions before adding

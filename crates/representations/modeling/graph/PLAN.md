@@ -1,18 +1,20 @@
-# axiolid-model implementation plan
+# axiolid-model plan
 
-Status: architecture scaffold; algorithms incomplete. This is planning context,
-not standing agent instruction.
+Design notes for the immutable geometry DAG.
+Status lives on GitHub, not here (kernel#25).
 
-## Established
+## Standing invariants
 
-- Crate boundary and dependency direction are executable in the layering gate.
-- Public data/contracts compile. Behavior remains scaffold unless a test names it.
-- Node handles carry a graph-owner brand. Insertion rejects foreign, forward, and
-  semantically invalid reference families before an immutable graph can exist.
+Node handles carry a graph-owner brand. Insertion rejects foreign,
+forward, and semantically invalid reference families before an immutable
+graph can exist -- the brand is what makes a handle from one graph
+unusable in another, so an invalid graph is unrepresentable rather than
+merely undetected.
 
-## Next implementation wave
+## Shape of the work
 
-Add graph visitors, budgets, provenance side tables, and complete compiler coverage.
+Graph visitors, budgets, provenance side tables, and complete compiler
+coverage.
 
 ## Exit evidence
 

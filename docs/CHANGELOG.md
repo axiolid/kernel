@@ -4,6 +4,16 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Crate `PLAN.md` files no longer record per-item status. Seven unchecked
+  boxes described work that was already implemented, and a contributor
+  reading one would have built it a second time. The files that carried
+  only a title and a stale status line are gone; the rest keep their
+  design rationale and invariants. `check-roadmap-freshness.py` now
+  rejects checkboxes and progress headings in `PLAN.md`, so the drift
+  cannot return silently (kernel#25).
+
 ### Fixed
 
 - The `axiolid-capi` cdylib now carries a SONAME (`libaxiolid_capi.so`)

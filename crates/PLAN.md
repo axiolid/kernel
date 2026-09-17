@@ -5,7 +5,7 @@ Last updated: 2026-09-01
 
 Read `AGENTS.md` for standing ownership rules. Canonical implemented structure is in [ADR 0035](../docs/adr/0035-nested-ownership-and-capability-contracts.md) and the generated [crate map](../docs/architecture/crate-map.md).
 
-## Established
+## Standing invariants
 
 - Nested ownership folders and 32 explicit Cargo packages.
 - Foundation/representation packages stay independently consumable.
@@ -16,7 +16,7 @@ Read `AGENTS.md` for standing ownership rules. Canonical implemented structure i
 - `axiolid-field` values and `axiolid-field-ops` algorithms are separate.
 - `openbim.geometry` claim mappings remain external; Rust contracts contain no Pkl runtime or schema types.
 
-## Next capability waves
+## Shape of the work
 
 1. Add a portable provider only after its typed contract, evidence, refusal, and conformance behavior are executable.
 2. Expand exact operations without silently tessellating exact intent.

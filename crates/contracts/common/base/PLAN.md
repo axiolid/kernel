@@ -3,13 +3,13 @@
 Status: superseded by ADR 0035. Common vocabulary remains here; operation schemas and execution policy were extracted to sibling packages.
 not standing agent instruction.
 
-## Established
+## Standing invariants
 
 - Crate boundary and dependency direction are executable in the layering gate.
 - Public operation traits compile; the mesh-boolean registry stores executable
   trait objects rather than capability metadata.
 
-## Next implementation wave
+## Shape of the work
 
 Add a narrow batch trait only when a real implementation needs it; add an
 operation-specific executable registry only when more than one provider exists.

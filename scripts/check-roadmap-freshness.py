@@ -24,6 +24,11 @@ import sys
 from pathlib import Path
 
 ROADMAP = Path(__file__).resolve().parent.parent / "docs" / "ROADMAP.md"
+CRATES = Path(__file__).resolve().parent.parent / "crates"
+
+# Crate `PLAN.md` files are design notes. The moment one records per-item
+# status it drifts from the code, and a contributor reading a stale
+# unchecked box reimplements something that already exists (kernel#25).
 
 # Headings that assert a state this page cannot keep current.
 STALE_HEADINGS = re.compile(
@@ -80,6 +85,33 @@ def milestone_description_problems() -> list[str]:
     return bad
 
 
+def plan_status_problems() -> list[str]:
+    """Crate `PLAN.md` files must not record per-item status.
+
+    A checkbox or a progress heading in a design note is a status claim
+    nobody updates when the code moves. Six of the seven unchecked boxes
+    that motivated kernel#25 described work that was already implemented.
+    """
+    problems: list[str] = []
+    for plan in sorted(CRATES.rglob("PLAN.md")):
+        text = plan.read_text(encoding="utf-8")
+        rel = plan.relative_to(CRATES.parent)
+        for match in CHECKBOX.finditer(text):
+            line = text[: match.start()].count("\n") + 1
+            problems.append(
+                f"{rel}:{line}: task checkbox — per-item status belongs on "
+                f"the project board, not in a design note"
+            )
+        for match in STALE_HEADINGS.finditer(text):
+            line = text[: match.start()].count("\n") + 1
+            heading = match.group(0).strip()
+            problems.append(
+                f"{rel}:{line}: heading {heading!r} asserts progress state "
+                f"this file cannot keep current"
+            )
+    return problems
+
+
 def main() -> int:
     if not ROADMAP.exists():
         print(f"roadmap: {ROADMAP} not found")
@@ -102,6 +134,8 @@ def main() -> int:
             f"line {line}: heading {heading!r} asserts progress state this "
             f"page cannot keep current"
         )
+
+    problems.extend(plan_status_problems())
 
     for pointer in REQUIRED_POINTERS:
         if pointer not in text:

@@ -3,7 +3,7 @@
 Status: diagnosis implemented; repair not started. This is planning context,
 not standing agent instruction.
 
-## Established
+## Standing invariants
 
 - Crate boundary and dependency direction are executable in the layering gate.
 - Public data/contracts compile. Behavior remains scaffold unless a test names it.
@@ -19,7 +19,7 @@ not standing agent instruction.
 - `Diagnosis::blocks_boolean` answers from measured defects rather than from
   vocabulary.
 
-## Next implementation wave
+## Shape of the work
 
 Repair. Every repair must report what it changed, per defect, so a caller can
 audit the difference rather than trust it. Diagnosis landed first deliberately:
