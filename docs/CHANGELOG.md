@@ -4,6 +4,14 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Boolean vertex duplication no longer reads past the incidence array
+  on meshes where a shared vertex is duplicated more than once. The
+  12/21 loops used a result-space bound (`nv_12`/`nv_21`, the sum of
+  winding magnitudes) to index source-space arrays, so any winding
+  magnitude above one overran and aborted the process (#103).
+
 ## [0.2.1] - 2026-09-16
 
 ### Added

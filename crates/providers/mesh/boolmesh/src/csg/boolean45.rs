@@ -540,7 +540,6 @@ pub fn boolean45(
         );
         nv = (*vid_12r.last().unwrap()).abs() + w.i12.last().unwrap().abs();
     }
-    let nv_12 = nv - nv_rp - nv_rq;
 
     if !b03.v21.is_empty() {
         exclusive_scan(
@@ -550,7 +549,9 @@ pub fn boolean45(
         );
         nv = (*vid_21r.last().unwrap()).abs() + w.i21.last().unwrap().abs();
     }
-    let nv_21 = nv - nv_rp - nv_rq - nv_12;
+    // `nv` is now the total result vertex count and is consumed by the
+    // `ps_r` allocation below. The former `nv_21` split is not needed: the
+    // duplication loops are bounded in source space, not result space.
 
     let mut ps_r = vec![Vec3::ZERO; nv as usize];
 
@@ -560,11 +561,23 @@ pub fn boolean45(
     for i in 0..mq.nv {
         duplicate_verts(&w.i30, &vid_q2r, &mq.ps, &mut ps_r, i);
     }
-    for i in 0..nv_12 {
-        duplicate_verts(&w.i12, &vid_12r, &b03.v12, &mut ps_r, i as usize);
+    // Bound by the SOURCE vertex count, not `nv_12`/`nv_21`.
+    //
+    // `duplicate_verts` indexes `inc`/`vt_r`/`ps_p` by source vertex, and
+    // emits `|inc[vid]|` result vertices for each. `nv_12` counts the
+    // RESULT vertices those duplications produce, so it equals the source
+    // count only while every winding magnitude is exactly one. A single
+    // vertex duplicated twice makes `nv_12` exceed `b03.v12.len()` and the
+    // loop reads one past the end of `w.i12` (kernel#103).
+    //
+    // The two loops above were always correct because `mp.nv` is the
+    // length of `w.i03`; only the 12/21 pair used a result-space bound in
+    // a source-space loop.
+    for i in 0..b03.v12.len() {
+        duplicate_verts(&w.i12, &vid_12r, &b03.v12, &mut ps_r, i);
     }
-    for i in 0..nv_21 {
-        duplicate_verts(&w.i21, &vid_21r, &b03.v21, &mut ps_r, i as usize);
+    for i in 0..b03.v21.len() {
+        duplicate_verts(&w.i21, &vid_21r, &b03.v21, &mut ps_r, i);
     }
 
     let mut pt_p = HashMap::new();
@@ -666,6 +679,45 @@ pub fn boolean45(
 mod tests {
     use super::*;
 
+    /// kernel#103: every source vertex is duplicated exactly once.
+    ///
+    /// Drives the real `duplicate_verts` over the same bound the
+    /// production loop uses. The bug was a RESULT-space bound
+    /// (`nv_12`, the sum of winding magnitudes) used in a SOURCE-space
+    /// loop, so with any magnitude above one the loop walked past the
+    /// end of `inc` and aborted the process.
+    ///
+    /// Windings [2, 1, 2] sum to 5 over 3 source vertices, so a
+    /// result-space bound overruns by two and panics here.
+    #[test]
+    fn every_source_vertex_is_duplicated_exactly_once() {
+        let inc: Vec<i32> = vec![2, 1, 2];
+        let n_result: usize = inc.iter().map(|v| v.unsigned_abs() as usize).sum();
+        assert!(n_result > inc.len(), "fixture must exercise the mismatch");
+
+        // Result slot offsets, as `exclusive_scan` produces them.
+        let mut vt_r = vec![0i32; inc.len()];
+        let mut acc = 0i32;
+        for (i, w) in inc.iter().enumerate() {
+            vt_r[i] = acc;
+            acc += w.abs();
+        }
+
+        let ps_p: Vec<Vec3> = (0..inc.len())
+            .map(|i| Vec3::new(i as Real, 0.0, 0.0))
+            .collect();
+        let mut ps_r = vec![Vec3::ZERO; n_result];
+
+        // The production bound: source space.
+        for vid in 0..ps_p.len() {
+            duplicate_verts(&inc, &vt_r, &ps_p, &mut ps_r, vid);
+        }
+
+        // Every result slot was written, and each carries the position
+        // of the source vertex it was duplicated from.
+        let expected: Vec<Vec3> = vec![ps_p[0], ps_p[0], ps_p[1], ps_p[2], ps_p[2]];
+        assert_eq!(ps_r, expected);
+    }
     /// kernel#101: an unpairable edge-point set must refuse, not abort.
     ///
     /// Guards the contract rather than the arithmetic: `pair_up` used to
