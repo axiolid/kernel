@@ -4,6 +4,15 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- The `axiolid-capi` cdylib now carries a SONAME (`libaxiolid_capi.so`)
+  and a `@rpath` install name on Mach-O. Without one, a consumer's
+  `DT_NEEDED` entry recorded whatever path the linker saw, and ELF never
+  resolves a `NEEDED` value containing `/` through `RPATH`/`RUNPATH`, so
+  a SHARED-linkage downstream build only loaded from its build tree
+  ([#70](https://github.com/axiolid/kernel/issues/70)).
+
 ### Added
 
 - The gate's isolated-build list is derived from `cargo metadata` instead of

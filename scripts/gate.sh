@@ -28,6 +28,7 @@ step "doc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 step "feature matrix" scripts/geometry-feature-matrix.sh
 step "Rust facade consumer" cargo run --quiet --manifest-path tests/consumers/rust-facade-application/Cargo.toml
 step "C ABI header and smoke" scripts/check-capi.sh
+step "capi soname mutation probe" scripts/probe_capi_soname.sh
 step "native CMake/package integration" scripts/check-native-packaging.sh
 step "release script tests" python3 -m unittest scripts.test_release_scripts
 step "release publish plan" python3 scripts/publish-workspace.py
