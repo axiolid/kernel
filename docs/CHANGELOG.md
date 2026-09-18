@@ -4,6 +4,18 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-18
+
+A minor bump because it carries a breaking change, and pre-1.0 Cargo
+treats the minor field as the major. Nothing outside this workspace
+depends on Axiolid yet, so the break costs nothing to take now and
+paying it honestly keeps the version an accurate claim.
+
+Note on the gate: at 0.3.0 every crate's bump already admits breakage,
+so `scripts/check-semver.py` reports "nothing to check" rather than
+verifying anything. That is correct but weak — the gate regains its
+teeth at the next patch release against a published 0.3.0 baseline.
+
 ### Added
 
 - `route::shortest_path_within` takes the vertex budget as a parameter.
@@ -22,8 +34,6 @@ All notable changes to Axiolid are documented in this file.
   its ends and obstacles only lengthen it. A refusal and a bound are
   different facts, and the caller can act on the second
   ([#92](https://github.com/axiolid/kernel/issues/92)).
-
-### Changed
 
 - `Polyline` reports `ArcLength3d` instead of `Unsupported`: its arc
   length is an exact finite sum of segment lengths, so a distance maps

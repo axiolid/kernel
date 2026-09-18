@@ -17,6 +17,19 @@ echo "=== baseline: clean tree reports no breakage ==="
 python3 scripts/check-semver.py >/dev/null 2>&1
 check "clean tree passes" 0 $?
 
+# A release commit that performs the breaking bump puts every crate past
+# its published baseline, so the gate has nothing left to compare and
+# CANNOT fail by design. Probing it there would report a false MISS and
+# read as a broken gate. Detect that state and skip, loudly: an inert
+# gate is worth saying out loud, not papering over.
+if python3 scripts/check-semver.py 2>&1 | grep -q "nothing to check"; then
+  echo "  gate has no baseline in scope at this version -- probe skipped"
+  echo "  (every crate's bump already admits breakage; the gate regains"
+  echo "   teeth once this version is published and becomes the baseline)"
+  echo "SEMVER GATE MATRIX SKIPPED"
+  exit 0
+fi
+
 echo "=== mutation: remove a public method from a published crate ==="
 # Bounds3::is_finite is public API in axiolid-core, published at 0.2.0.
 # Deleting it is unambiguously breaking, so the gate MUST fail.
