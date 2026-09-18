@@ -9,7 +9,7 @@ use crate::csg::{is_ccw_3d, Half, Real, Tref, Vec3};
 
 // Check around a halfedges from the same tail vertex.
 // If they consist of only two tris, then their edge is collapsable.
-fn record_if_collinear(hs: &[Half], rs: &[Tref], hid: usize, nv: usize) -> bool {
+fn record_if_collinear(hs: &[Half], ns: &[Vec3], rs: &[Tref], hid: usize, nv: usize) -> bool {
     let h = &hs[hid];
     if h.pair().is_none() || (h.tail < nv) {
         return false;
@@ -19,15 +19,15 @@ fn record_if_collinear(hs: &[Half], rs: &[Tref], hid: usize, nv: usize) -> bool 
 
     let bgn = hid;
     let mut cur = cw_next(bgn);
-    let r0 = &rs[bgn / 3];
-    let mut r1 = &rs[cur / 3];
-    let mut same = is_coplanar(r0, r1);
+    let t0 = bgn / 3;
+    let mut t1 = cur / 3;
+    let mut same = is_coplanar_at(ns, t0, t1, rs);
     while cur != bgn {
         cur = cw_next(cur);
-        let r2 = &rs[cur / 3];
-        if !is_coplanar(r2, r0) && !is_coplanar(r2, r1) {
+        let t2 = cur / 3;
+        if !is_coplanar_at(ns, t2, t0, rs) && !is_coplanar_at(ns, t2, t1, rs) {
             if same {
-                r1 = r2;
+                t1 = t2;
                 same = false;
             } else {
                 return false;
@@ -73,22 +73,22 @@ pub fn collapse_edge(
     // check validity by orbiting start vert ccw order
     if (pos_keep - pos_delt).length_squared() >= eps.powi(2) {
         let mut cur = bgn;
-        let mut tr0 = &rs[to_rmv.pair / 3];
+        let mut tri0 = to_rmv.pair / 3;
         let mut p_prev = ps[head_of(hs, t1.1)];
         while cur != to_rmv.pair {
             cur = next_of(cur); // incoming half around delt vert
             let p_next = ps[head_of(hs, cur)];
-            let r_curr = &rs[cur / 3];
+            let tri_curr = cur / 3;
             let n_curr = &ns[cur / 3];
             let n_pair = &ns[to_rmv.pair / 3];
             let ccw = |p0, p1, p2| is_ccw_3d(p0, p1, p2, n_curr, eps);
-            if !is_coplanar(r_curr, tr0) {
-                let tr2 = tr0;
-                tr0 = &rs[hid / 3];
-                if !is_coplanar(r_curr, tr0) {
+            if !is_coplanar_at(ns, tri_curr, tri0, rs) {
+                let tri2 = tri0;
+                tri0 = hid / 3;
+                if !is_coplanar_at(ns, tri_curr, tri0, rs) {
                     return false;
                 }
-                if tr0.mid != tr2.mid || n_pair.dot(*n_curr) < -0.5 {
+                if rs[tri0].mid != rs[tri2].mid || n_pair.dot(*n_curr) < -0.5 {
                     // Restrict collapse to co-linear edges when the edge separates faces or the edge is sharp.
                     // This ensures large shifts are not introduced parallel to the tangent plane.
                     if ccw(&p_prev, &pos_delt, &pos_keep) != 0 {
@@ -152,7 +152,7 @@ pub fn collapse_collinear_edges(
 ) {
     let mut _flag = 0;
     let rec = (0..hs.len())
-        .filter(|&hid| record_if_collinear(hs, rs, hid, nv))
+        .filter(|&hid| record_if_collinear(hs, ns, rs, hid, nv))
         .collect::<Vec<_>>();
     for hid in rec {
         if collapse_edge(hs, ps, ns, rs, hid, ep, &mut vec![]) {
@@ -185,7 +185,34 @@ pub fn collapse_short_edges(
     }
 }
 
+/// Do two triangles lie on the same plane?
+///
+/// Provenance (`mid`/`pid`) is the fast path: faces from one operand's own
+/// coplanar-index entry are known coplanar without arithmetic.
+///
+/// But provenance is only a PROXY for the geometric question. `pid` indexes
+/// the coplanar set WITHIN one operand, and `mid` says which operand a face
+/// came from, so two faces that are genuinely on one plane compare unequal
+/// whenever they arrive from different operands -- or from the same operand
+/// under a later call, where the index was recomputed. A reconstructed seam
+/// is exactly that case: the halves of a split face carry different ids, so
+/// the seam never collapses and the result stays two shells (kernel#100).
+///
+/// Falling back to the normals answers the real question. Being a fallback,
+/// it cannot make previously-merged faces stop merging: it only admits pairs
+/// provenance rejected.
 #[inline]
-fn is_coplanar(t0: &Tref, t1: &Tref) -> bool {
-    t0.mid == t1.mid && t0.pid == t1.pid
+fn is_coplanar_at(ns: &[Vec3], t0: usize, t1: usize, rs: &[Tref]) -> bool {
+    if rs[t0].mid == rs[t1].mid && rs[t0].pid == rs[t1].pid {
+        return true;
+    }
+    // Same plane means parallel normals. Antiparallel counts too: a seam
+    // between two solids has opposed windings by construction.
+    let (n0, n1) = (ns[t0], ns[t1]);
+    n0.cross(n1).length_squared() <= COPLANAR_EPS && n0.dot(n1).abs() > 0.0
 }
+
+/// Squared sine of the angle two normals may differ by and still count as
+/// one plane. Normals here are unit length, so this is an angle bound, not
+/// a scale-dependent distance.
+const COPLANAR_EPS: Real = 1e-20;

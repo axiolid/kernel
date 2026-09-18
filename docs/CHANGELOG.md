@@ -4,6 +4,17 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Splitting a solid and re-uniting the pieces returns ONE solid again,
+  not two touching shells
+  ([#100](https://github.com/axiolid/kernel/issues/100)). Coplanar
+  merging asked whether two faces shared PROVENANCE (same operand, same
+  index in that operand's coplanar set) rather than whether they share a
+  plane, so a seam between two pieces could never weld. It now falls
+  back to the face normals when provenance disagrees. The two
+  reconstruction tests are no longer `#[ignore]`d.
+
 ### Added
 
 - `scripts/closure-bench.py` measures every closure profile:

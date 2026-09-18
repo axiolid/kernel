@@ -1,10 +1,13 @@
 //! Reconstruction identity: splitting a solid and re-uniting the pieces
 //! must return one solid, not two shells.
 //!
-//! Ignored pending ADR 0048. This is a KNOWN upstream limitation shared
-//! with crates.io boolmesh 0.1.9, recorded as axiolid/kernel#100. The test
-//! is committed failing-but-ignored so the defect stays visible and the
-//! fix has a gate to turn green, rather than living only in prose.
+//! These ran ignored while axiolid/kernel#100 was open, because coplanar
+//! merging keyed on PROVENANCE (which operand a face came from, and its
+//! index in that operand's coplanar set) rather than on geometry. A seam
+//! between two pieces always failed that test, so it never welded.
+//!
+//! `is_coplanar_at` now falls back to the face normals when provenance
+//! disagrees, so they run by default and this file is the gate.
 
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{BooleanOperator, Point3, Tolerance};
@@ -48,7 +51,6 @@ fn topology(mesh: &TriMesh) -> (i64, usize) {
 /// because its coordinates are exactly representable in binary floating
 /// point and the two sides retriangulate identically.
 #[test]
-#[ignore = "known upstream limitation, see ADR 0048 and axiolid/kernel#100"]
 fn reconstruction_preserves_topology() {
     let a = obb([2.0, 0.2, 1.5], [2.0, 0.2, 1.5], 0.0);
     let b = obb(
@@ -129,7 +131,6 @@ fn axis_aligned_reconstruction_preserves_topology() {
 /// hard stop rather than a topology nitpick. Ignored alongside the
 /// reconstruction fixture it depends on; both turn green together.
 #[test]
-#[ignore = "known upstream limitation, see ADR 0048 and axiolid/kernel#100"]
 fn a_damaged_reconstruction_blocks_the_next_boolean() {
     let a = obb([2.0, 0.2, 1.5], [2.0, 0.2, 1.5], 0.0);
     let b = obb(

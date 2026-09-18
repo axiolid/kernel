@@ -358,3 +358,79 @@ exactly the result recorded in the "Alternatives considered" table. The
 weld joins the index graph while leaving the interior faces in place,
 converting an honest two-shell answer into a corrupt one-shell answer.
 Re-measured here rather than carried over, and it reproduces.
+
+## Resolution 2026-09-18 — fixed, and the earlier diagnosis was aimed one layer too deep
+
+kernel#100 is FIXED. The defect was not in classification, winding, or
+the boolean kernel at all. It was the coplanarity test used by edge
+collapse, in `csg/simplification/collapse.rs`:
+
+```rust
+fn is_coplanar(t0: &Tref, t1: &Tref) -> bool {
+    t0.mid == t1.mid && t0.pid == t1.pid
+}
+```
+
+That asks about PROVENANCE, not geometry. `mid` is which operand a face
+came from; `pid` indexes the coplanar set WITHIN that one operand, and
+it is recomputed per call from the operand's own triangles. Two faces
+that are genuinely on one plane therefore compare unequal whenever they
+arrive from different operands. A reconstructed seam is precisely that
+case, so the seam could never collapse and the result stayed two shells.
+
+### Measured, not argued
+
+Instrumenting the rejection and running the failing fixture logged 996
+rejected pairs:
+
+| Reason | Count | Share |
+| --- | ---: | ---: |
+| both `mid` and `pid` differ | 710 | 71% |
+| different `mid`, SAME `pid` | 181 | 18% |
+| same `mid`, different `pid` | 105 | 11% |
+
+89% are cross-operand. The `DIFF mid, same pid` class is the clearest
+evidence: those faces agree on their plane index and are still refused,
+purely because they came from different operands.
+
+### The fix
+
+`is_coplanar_at` keeps provenance as a fast path and falls back to the
+face normals when provenance disagrees. Being a fallback it can only
+ADMIT pairs that were previously rejected; it cannot stop an existing
+merge. Antiparallel normals count, because a seam between two solids
+has opposed windings by construction.
+
+### What this supersedes
+
+The 2026-09-11 amendment and the winding trace above concluded the fix
+belonged in classification (`kernel12.rs`/`kernel03.rs`), gated behind
+`assert_eq!(k, 2)` invariants, and would change what a boolean means.
+That was wrong. Those measurements were correct about the SYMPTOM -- the
+seam faces are emitted with opposed windings and never merge -- but the
+cause is one layer shallower, in simplification, and the classifier
+needed no change at all. The naive-weld rejection recorded earlier
+still stands: welding by coordinate after the fact gave chi=3, because
+it patched output instead of letting the collapse run.
+
+### Evidence the gate bites
+
+Both previously-`#[ignore]`d tests in `tests/reconstruction.rs` now run
+by default and pass, and the benchmarks `--only=exactness` suite scores
+the `reconstruction` row at `0.0e0` with euler still checked.
+
+Two mutations bound the epsilon from both sides:
+
+- delete the normal fallback -> both tests fail, reproducing #100 exactly;
+- widen `COPLANAR_EPS` to 4.0 so every pair counts as coplanar -> a
+  different boolmesh test fails.
+
+So the tolerance is pinned by a failure on each side, not chosen to make
+one test pass.
+
+### Not claimed
+
+The determinism finding in the exactness suite is UNCHANGED and
+unrelated: `subtract_many` and the upstream FUSED tool remain
+nondeterministic across repeated identical runs. This fix addresses
+seam merging only. Nondeterminism is its own defect and stays open.
