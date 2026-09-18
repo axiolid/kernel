@@ -6,7 +6,7 @@
 
 use axiolid_core::Point2;
 use axiolid_overlay::{Polygon, Ring};
-use axiolid_route::{shortest_path, RouteError, Unreachable, MAX_VERTICES};
+use axiolid_route::{shortest_path, shortest_path_within, RouteError, Unreachable, MAX_VERTICES};
 
 fn ring(points: &[(f64, f64)]) -> Ring {
     Ring {
@@ -154,6 +154,16 @@ fn equal_length_paths_resolve_deterministically() {
     }
 }
 
+/// A circular ring with `count` vertices, centred on (50, 50).
+fn big_ring(count: usize) -> Ring {
+    let mut points = Vec::new();
+    for index in 0..count {
+        let angle = (index as f64) * core::f64::consts::TAU / (count as f64);
+        points.push((50.0 + 40.0 * angle.cos(), 50.0 + 40.0 * angle.sin()));
+    }
+    ring(&points)
+}
+
 #[test]
 fn oversized_input_is_refused_rather_than_truncated() {
     // A ring with more vertices than the documented bound. Truncating would
@@ -235,5 +245,99 @@ fn no_shorter_path_exists_by_brute_force_enumeration() {
     assert!(
         best.is_finite(),
         "brute force must find at least one legal path"
+    );
+}
+
+/// A refusal must carry the bound and the budget, not just a complaint.
+///
+/// The endpoints are 1.0 apart, so no route between them can be
+/// shorter than 1.0 however the region is shaped (kernel#92).
+#[test]
+fn an_oversized_refusal_carries_a_proven_lower_bound() {
+    let region = vec![Polygon {
+        outer: big_ring(MAX_VERTICES + 8),
+        holes: Vec::new(),
+    }];
+    let error = shortest_path(
+        &region,
+        &[],
+        Point2::new(50.0, 50.0),
+        Point2::new(51.0, 50.0),
+    )
+    .expect_err("the budget must be enforced");
+
+    let RouteError::TooManyVertices {
+        supplied,
+        budget,
+        lower_bound,
+    } = error
+    else {
+        panic!("expected a budget refusal, got {error:?}");
+    };
+    assert!(supplied > budget, "{supplied} must exceed {budget}");
+    assert_eq!(budget, MAX_VERTICES);
+    assert_eq!(lower_bound, 1.0);
+}
+
+/// A raised budget accepts input the default refuses.
+///
+/// The consumer case from kernel#92: a caller with a larger time
+/// budget should not have to shrink its supported model size.
+#[test]
+fn a_raised_budget_accepts_what_the_default_refuses() {
+    let region = vec![Polygon {
+        outer: big_ring(MAX_VERTICES + 8),
+        holes: Vec::new(),
+    }];
+    let start = Point2::new(50.0, 50.0);
+    let goal = Point2::new(51.0, 50.0);
+
+    assert!(
+        shortest_path(&region, &[], start, goal).is_err(),
+        "the default budget must still refuse"
+    );
+
+    let route = shortest_path_within(&region, &[], start, goal, MAX_VERTICES * 2)
+        .expect("a raised budget admits this input")
+        .expect("both endpoints are inside a convex region");
+    // Unobstructed inside a convex ring, so the route is the straight
+    // line and the earlier lower bound is exactly attained.
+    assert_eq!(route.length, 1.0);
+}
+
+/// The bound stays valid when obstacles force a detour.
+///
+/// This is what makes it a BOUND rather than an estimate. A barrier
+/// between the endpoints lengthens the real route; the straight-line
+/// distance must still be less than or equal to it, never above.
+#[test]
+fn the_lower_bound_never_exceeds_the_real_route() {
+    let region = vec![Polygon {
+        outer: big_ring(MAX_VERTICES + 8),
+        holes: Vec::new(),
+    }];
+    // A wall across the direct line, open at one end only.
+    let barriers = vec![vec![Point2::new(50.5, 20.0), Point2::new(50.5, 70.0)]];
+    let start = Point2::new(40.0, 50.0);
+    let goal = Point2::new(60.0, 50.0);
+
+    let error = shortest_path(&region, &barriers, start, goal)
+        .expect_err("the default budget must refuse this input");
+    let RouteError::TooManyVertices { lower_bound, .. } = error else {
+        panic!("expected a budget refusal, got {error:?}");
+    };
+
+    let route = shortest_path_within(&region, &barriers, start, goal, MAX_VERTICES * 2)
+        .expect("a raised budget admits this input")
+        .expect("the wall is open at one end, so a route exists");
+
+    assert!(
+        lower_bound <= route.length,
+        "bound {lower_bound} must not exceed the real route {}",
+        route.length
+    );
+    assert!(
+        route.length > lower_bound,
+        "the detour must actually be longer than the straight line"
     );
 }

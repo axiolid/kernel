@@ -4,6 +4,25 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `route::shortest_path_within` takes the vertex budget as a parameter.
+  What is affordable depends on the caller's deadline, not on the kernel,
+  so a consumer no longer has to shrink its supported model size to adopt
+  routing ([#92](https://github.com/axiolid/kernel/issues/92)).
+  `MAX_VERTICES` remains the default for `shortest_path`.
+
+### Changed
+
+- **Breaking.** `RouteError::TooManyVertices` gained `budget` and
+  `lower_bound` fields, and `RouteError` no longer derives `Eq` because it
+  now carries a float. A refusal above the budget reports the
+  straight-line distance between the endpoints: a proven lower bound on
+  every route, since a polyline is at least as long as the line joining
+  its ends and obstacles only lengthen it. A refusal and a bound are
+  different facts, and the caller can act on the second
+  ([#92](https://github.com/axiolid/kernel/issues/92)).
+
 ### Changed
 
 - `Polyline` reports `ArcLength3d` instead of `Unsupported`: its arc

@@ -29,6 +29,13 @@
 //! so a large input silently becomes a hang. [`MAX_VERTICES`] caps it and
 //! oversized input is REFUSED, never truncated: truncating would answer a
 //! different question than the one asked, and the caller would not be told.
+//!
+//! The cap is a default, not a law. [`shortest_path_within`] takes the
+//! budget as a parameter, because what is affordable depends on the
+//! caller's deadline rather than on the kernel. And the refusal carries a
+//! PROVEN lower bound — the straight-line distance between the endpoints,
+//! which no route can beat — so an over-budget query still yields a usable
+//! fact instead of only an error.
 
 use axiolid_contracts::Sign;
 use axiolid_core::Point2;
@@ -56,7 +63,10 @@ pub enum Unreachable {
 }
 
 /// A malformed query, as opposed to an honest "no route".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `PartialEq` but not `Eq`: [`RouteError::TooManyVertices`] carries a
+/// float bound, and float equality is not reflexive.
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum RouteError {
     /// A coordinate was NaN or infinite.
@@ -65,10 +75,35 @@ pub enum RouteError {
     RingTooShort,
     /// A barrier had fewer than two vertices, so it bounds no segment.
     BarrierTooShort,
-    /// The input exceeds [`MAX_VERTICES`]. Refused, not truncated.
+    /// The input exceeds the vertex budget. Refused, not truncated.
+    ///
+    /// Carries a PROVEN lower bound rather than only a complaint. A
+    /// refusal and a bound are different facts: a caller that cannot
+    /// afford the exact route can still report a minimum, defer, or
+    /// escalate, where a bare error forces it to drop the query or
+    /// reimplement routing (kernel#92).
+    ///
+    /// The added fields make this a breaking change: `Eq` is gone because
+    /// the bound is a float, and an exhaustive struct variant gained
+    /// fields. Both are recorded against the 0.3.0 minor bump rather than
+    /// worked around — marking the variant `#[non_exhaustive]` now would
+    /// itself be breaking, so it buys nothing here.
     TooManyVertices {
         /// Vertices the caller supplied.
         supplied: usize,
+        /// The budget that was applied, so the caller can raise it.
+        budget: usize,
+        /// Straight-line distance between the endpoints.
+        ///
+        /// A lower bound on EVERY route between them, not an estimate:
+        /// a polyline is at least as long as the straight line joining
+        /// its ends, and obstacles only lengthen it. Both endpoints are
+        /// already proven inside the free-space region when this is
+        /// reported, so the bound applies to a route that could exist.
+        ///
+        /// Being a bound, it is safe to act on: no admissible route is
+        /// shorter. It says nothing about whether a route EXISTS.
+        lower_bound: f64,
     },
     /// The exact predicate could not decide a sidedness question.
     ///
@@ -105,6 +140,27 @@ pub fn shortest_path(
     start: Point2,
     goal: Point2,
 ) -> Result<Result<Route, Unreachable>, RouteError> {
+    shortest_path_within(region, barriers, start, goal, MAX_VERTICES)
+}
+
+/// [`shortest_path`] with a caller-chosen vertex budget.
+///
+/// The right cap depends on the caller's time budget, not on the kernel:
+/// construction is quadratic in vertices and cubic to verify, so what is
+/// affordable is a property of the deadline, not of the geometry
+/// (kernel#92). [`MAX_VERTICES`] remains the default for
+/// [`shortest_path`].
+///
+/// Raising the budget does not change any answer, only which inputs are
+/// affordable. Over-budget input is still REFUSED rather than truncated,
+/// but the refusal carries a proven lower bound.
+pub fn shortest_path_within(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    start: Point2,
+    goal: Point2,
+    budget: usize,
+) -> Result<Result<Route, Unreachable>, RouteError> {
     validate(region, barriers, start, goal)?;
 
     // Endpoint containment is decided before any graph work: it is the
@@ -130,9 +186,15 @@ pub fn shortest_path(
     // Duplicate vertices would create zero-length graph edges and duplicate
     // work without changing the answer.
     dedup_points(&mut nodes);
-    if nodes.len() > MAX_VERTICES {
+    if nodes.len() > budget {
+        // Both endpoints are proven inside the region by this point, so
+        // the straight line between them bounds any route that could
+        // exist. Reported as a fact the caller can act on, not as a
+        // consolation: no admissible route is shorter than this.
         return Err(RouteError::TooManyVertices {
             supplied: nodes.len(),
+            budget,
+            lower_bound: (goal - start).length(),
         });
     }
 
