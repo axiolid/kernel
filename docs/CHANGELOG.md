@@ -4,6 +4,15 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- The facade documents and tests the exactness guarantee: no public
+  entry point turns exact geometry into a mesh unless the caller asked
+  and supplied a tolerance
+  ([#36](https://github.com/axiolid/kernel/issues/36)). Audited rather
+  than assumed - `tests/exact_primary.rs` pins it, and both a removed
+  plane count and a weakened `requires_exact_brep` make it fail.
+
 ## [0.3.0] - 2026-09-18
 
 A minor bump because it carries a breaking change, and pre-1.0 Cargo

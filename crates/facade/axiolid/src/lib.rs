@@ -6,6 +6,23 @@
 //! portable CPU backend shell. Exact curves/surfaces/topology, algorithms,
 //! parallel scheduling, and GPU adapters are opt-in. Leaf crates remain public
 //! for consumers that want an even narrower dependency graph.
+//!
+//! # Exact geometry is the primary currency
+//!
+//! No entry point in this facade converts exact geometry into a mesh
+//! unless the caller asked for one and supplied a tolerance. Tessellation
+//! is a requested OUTPUT, never a fallback:
+//!
+//! - `generate::GenerationRequest::ExactBRep` carries no tolerance field,
+//!   so a mesh cannot be produced for it. A request it cannot satisfy
+//!   exactly is refused rather than approximated.
+//! - `generate::TessellationRequest` and `TessellationOptions` have no
+//!   `Default`. There is no global chord error to fall back to, because
+//!   acceptable error depends on source units and downstream use.
+//! - A tessellated result carries the tolerance it was built to, so an
+//!   approximation cannot later be mistaken for an exact value.
+//!
+//! `tests/exact_primary.rs` holds this to account (kernel#36).
 
 /// Versioned description of the compiled downstream surface.
 #[cfg(feature = "integration")]
