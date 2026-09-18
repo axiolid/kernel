@@ -256,3 +256,105 @@ it can be trusted. Estimated blast radius: `kernel12.rs` and
   recomputes plane groups.
 - Benchmarks: the `reconstruction` row of the exactness table, and
   `topology_report` in `drift.rs`, both of which must stay green.
+
+## Measurement 2026-09-17 — the defect blocks chained booleans
+
+Re-probed before attempting the fix, and one measurement changes the
+priority argument recorded above.
+
+The "Accept and document" alternative was rejected as the default but
+described the impact as "currently low", on the grounds that volume
+stays exact and both shells are closed. That understated it. The
+doubled interface leaves edges with four incident faces, and a
+half-edge mesh admits at most two, so the reconstructed solid cannot be
+used as an operand at all:
+
+```
+provider.boolean(rebuilt, cutter, Difference)
+  -> NotManifold("subject: edge (1, 3) has 4 incident faces;
+                  a half-edge mesh admits at most two")
+```
+
+The axis-aligned control chains successfully (`chi=2 comps=1`, then a
+further difference to `chi=0 comps=1`), which establishes the refusal
+is caused by this defect and not by chaining itself.
+
+So the failure mode is not a cosmetic topology count that a volume
+check happens to miss. A chained boolean — the primary CAD workload —
+hard-refuses on any solid that has been through a
+split-and-reunite cycle with inexactly-representable coordinates.
+Both measurements are now committed as `#[ignore]`d tests in
+`tests/reconstruction.rs` alongside their passing axis-aligned
+controls, so the fix has a gate and the controls guard the diagnosis.
+
+### Re-confirmed, independently
+
+The earlier findings were re-measured rather than trusted:
+
+```
+A        chi=2  comps=1        (one solid)
+A-B      chi=0  comps=1        (torus: B punches clean through)
+A^B      chi=2  comps=1        (the plug)
+rebuilt  chi=4  comps=2        (two shells)
+
+exact shared triangles between A-B and A^B : 0
+coplanar pairs, same-facing                : 32
+coplanar pairs, OPPOSED-facing             : 30
+```
+
+Thirty opposed-facing coplanar pairs is the interior-interface
+signature: the torus tunnel wall and the plug's side wall face each
+other across the same surface. Zero exactly-shared triangles confirms
+no face-pair cancellation can act on it.
+
+Instrumenting the winding computation on the union call shows the
+classification is not wrong, only blind:
+
+```
+PROBE  nvP=18 nvQ=10  w03={0: 18}  w30={1: 10}  x12=20  x21=14
+PROBE  nfP=36 keptP=36  nfQ=16 keptQ=8
+```
+
+`w03 = 0` for every `A-B` vertex and `w30 = 1` for every `A^B` vertex
+are both CORRECT answers: torus vertices are not inside the plug, and
+plug vertices are inside the torus region. With union coefficients
+`i03 = 1 - w03`, every `A-B` face scores 1 and all 36 are retained,
+including the tunnel wall that should have become interior.
+
+That is the confirmation of the diagnosis already recorded: a face
+lying exactly IN another face generates no edge-face crossing, so
+`intersect12` never records the surfaces as coincident and the
+classifier has nothing to act on. The windings do not need correcting;
+the coincidence needs detecting in the first place.
+
+### Refinement: the overlap is far smaller than "two doubled shells"
+
+One measurement narrows the target usefully. By VERTEX INDEX the
+rebuilt mesh is a clean two-manifold — every edge has exactly two
+incident faces — which is why it passes validation in isolation:
+
+```
+rebuilt   verts=20  tris=32  edge incidence by index      = {2: 48}
+                             edge incidence by COORDINATE = {2: 46, 4: 1}
+                             distinct positions=20  distinct coords=18
+```
+
+Only two vertices are duplicated at identical coordinates, and only ONE
+edge is four-incident. The two shells are not two fully independent
+copies of a surface; they touch along a seam that is combinatorially
+split at a single edge. That is what makes the next boolean refuse:
+`Manifold` construction keys edges after welding by position, so the
+pair collides there and nowhere else.
+
+This also re-confirms why welding is not the fix. Welding by coordinate
+and dropping the degenerate triangles gives:
+
+```
+welded  verts=18  tris=32  chi=3  comps=1
+```
+
+`chi = 3` is odd, which is impossible for a closed orientable surface —
+exactly the result recorded in the "Alternatives considered" table. The
+weld joins the index graph while leaving the interior faces in place,
+converting an honest two-shell answer into a corrupt one-shell answer.
+Re-measured here rather than carried over, and it reproduces.

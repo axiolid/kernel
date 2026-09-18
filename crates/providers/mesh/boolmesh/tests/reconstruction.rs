@@ -107,3 +107,86 @@ fn axis_aligned_reconstruction_preserves_topology() {
         "axis-aligned reconstruction must be exact"
     );
 }
+
+/// The damaged result is not inert: it BLOCKS the next boolean.
+///
+/// This is the measurement that sets the priority. `chi=4 comps=2` on
+/// its own looks cosmetic — volume is exact, both shells are closed,
+/// and by VERTEX INDEX every edge has exactly two incident faces, so
+/// the mesh passes a manifold check in isolation.
+///
+/// It stops being cosmetic at the next operation. The two shells share
+/// an interface at identical COORDINATES while carrying distinct vertex
+/// indices (20 positions, 18 distinct coordinates here), so when the
+/// next boolean welds by position one edge acquires four incident
+/// faces, and a half-edge mesh admits at most two:
+///
+/// ```text
+/// NotManifold("subject: edge (1, 3) has 4 incident faces")
+/// ```
+///
+/// Chained booleans are the primary CAD workload, so the defect is a
+/// hard stop rather than a topology nitpick. Ignored alongside the
+/// reconstruction fixture it depends on; both turn green together.
+#[test]
+#[ignore = "known upstream limitation, see ADR 0048 and axiolid/kernel#100"]
+fn a_damaged_reconstruction_blocks_the_next_boolean() {
+    let a = obb([2.0, 0.2, 1.5], [2.0, 0.2, 1.5], 0.0);
+    let b = obb(
+        [1.0, 0.1, 1.5],
+        [0.6, 0.5, 0.7],
+        std::f64::consts::FRAC_PI_6,
+    );
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let provider = BoolmeshBoolean::new();
+    let op = |s: &TriMesh, t: &TriMesh, o: BooleanOperator| {
+        provider
+            .boolean(s, t, o, &options)
+            .expect("operands are valid closed solids")
+            .mesh
+    };
+
+    let difference = op(&a, &b, BooleanOperator::Difference);
+    let intersection = op(&a, &b, BooleanOperator::Intersection);
+    let rebuilt = op(&difference, &intersection, BooleanOperator::Union);
+
+    // Any further operation on a correctly reconstructed A must succeed.
+    let cutter = obb([2.0, 0.2, 1.5], [1.0, 1.0, 1.0], 0.0);
+    let chained = provider.boolean(&rebuilt, &cutter, BooleanOperator::Difference, &options);
+    assert!(
+        chained.is_ok(),
+        "a reconstructed solid must stay usable as an operand, got {:?}",
+        chained.err()
+    );
+}
+
+/// Control: the axis-aligned chain must keep working.
+///
+/// Guards the causal claim above. If this ever fails, the chained
+/// refusal is not caused by the reconstruction defect and the priority
+/// argument in ADR 0048 needs revisiting.
+#[test]
+fn an_axis_aligned_reconstruction_stays_usable_as_an_operand() {
+    let a = obb([2.0, 0.2, 1.5], [2.0, 0.2, 1.5], 0.0);
+    let b = obb([1.0, 0.2, 1.5], [0.6, 0.5, 0.7], 0.0);
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let provider = BoolmeshBoolean::new();
+    let op = |s: &TriMesh, t: &TriMesh, o: BooleanOperator| {
+        provider
+            .boolean(s, t, o, &options)
+            .expect("operands are valid closed solids")
+            .mesh
+    };
+
+    let difference = op(&a, &b, BooleanOperator::Difference);
+    let intersection = op(&a, &b, BooleanOperator::Intersection);
+    let rebuilt = op(&difference, &intersection, BooleanOperator::Union);
+
+    let cutter = obb([2.0, 0.2, 1.5], [1.0, 1.0, 1.0], 0.0);
+    assert!(
+        provider
+            .boolean(&rebuilt, &cutter, BooleanOperator::Difference, &options)
+            .is_ok(),
+        "the axis-aligned reconstruction must chain"
+    );
+}
