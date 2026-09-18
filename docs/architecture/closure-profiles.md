@@ -13,6 +13,10 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `cad-exact` | 12 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
 | `rust-facade-application` | 31 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
 | `c-abi-profile` | 32 | Versioned native boundary over the supported portable application provider bundle. |
+| `core-only` | 1 | The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable. |
+| `spatial-rule-checker` | 2 | A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all. |
+| `linear-data` | 2 | Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm. |
+| `full` | 32 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
 
 ## linear-intersection-minimal
 
@@ -185,3 +189,84 @@ Compiles exactly these internal packages:
 - `axiolid-topology`
 
 And must never acquire any of 0 forbidden packages, including ``.
+
+## core-only
+
+The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable.
+
+Fixture: `tests/consumers/core-only/Cargo.toml`
+
+Compiles exactly these internal packages:
+
+- `axiolid-core`
+
+And must never acquire any of 39 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+
+## spatial-rule-checker
+
+A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all.
+
+Fixture: `tests/consumers/spatial-rule-checker/Cargo.toml`
+
+Compiles exactly these internal packages:
+
+- `axiolid-core`
+- `axiolid-spatial`
+
+And must never acquire any of 38 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+
+## linear-data
+
+Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm.
+
+Fixture: `tests/consumers/linear-data/Cargo.toml`
+
+Compiles exactly these internal packages:
+
+- `axiolid-core`
+- `axiolid-linear`
+
+And must never acquire any of 38 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+
+## full
+
+The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against.
+
+Fixture: `tests/consumers/full/Cargo.toml`
+
+Compiles exactly these internal packages:
+
+- `axiolid`
+- `axiolid-backend-cpu`
+- `axiolid-backend-gpu`
+- `axiolid-brep`
+- `axiolid-brep-audit`
+- `axiolid-construct`
+- `axiolid-contracts`
+- `axiolid-core`
+- `axiolid-curve`
+- `axiolid-curve-evaluate-contract`
+- `axiolid-evaluate`
+- `axiolid-guarantees`
+- `axiolid-heal`
+- `axiolid-linear`
+- `axiolid-measure`
+- `axiolid-mesh`
+- `axiolid-mesh-boolean-contract`
+- `axiolid-mesh-compile-contract`
+- `axiolid-mesh-contracts`
+- `axiolid-mesh-section-contract`
+- `axiolid-model`
+- `axiolid-nurbs`
+- `axiolid-overlay`
+- `axiolid-predicates`
+- `axiolid-primitive`
+- `axiolid-profile`
+- `axiolid-ray-mesh`
+- `axiolid-reference`
+- `axiolid-spatial`
+- `axiolid-surface`
+- `axiolid-tessellation-contract`
+- `axiolid-topology`
+
+And must never acquire any of 8 forbidden packages, including `axiolid-capi`, `axiolid-dispatch`, `axiolid-exact-compile-contract`.

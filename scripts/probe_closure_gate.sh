@@ -31,6 +31,10 @@ probe mesh-rule-checker           axiolid-nurbs     crates/algorithms/parametric
 probe 2d-curves                   axiolid-model     crates/representations/modeling/graph
 probe parametric-curves           axiolid-reference crates/algorithms/reference
 probe cad-exact                   axiolid-mesh      crates/representations/discrete/mesh
+probe core-only                  axiolid-mesh      crates/representations/discrete/mesh
+probe spatial-rule-checker       axiolid-mesh      crates/representations/discrete/mesh
+probe linear-data                axiolid-linear-intersection crates/algorithms/query/intersection/linear
+probe full                       axiolid-capi      crates/facade/axiolid-capi
 
 printf '%-57s' "restored fixtures pass"
 if cargo xtask architecture closure check >/dev/null 2>&1; then echo ok; else echo FAILED; fail=1; fi

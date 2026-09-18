@@ -1,0 +1,12 @@
+[package]
+name = "axiolid-consumer-core-only"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root: workspace feature unification must not hide what a
+# core-only downstream would really compile.
+[workspace]
+
+[dependencies]
+axiolid-core = { path = "../../../crates/foundation/core", default-features = false }

@@ -335,3 +335,230 @@ expected_internal = [
     "axiolid-topology",
 ]
 forbidden_internal = []
+
+[[profile]]
+name = "core-only"
+manifest = "tests/consumers/core-only/Cargo.toml"
+description = "The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable."
+features = []
+
+# The floor of the dependency graph. If anything else appears here, a core
+# value has grown a dependency on a representation, algorithm, or provider.
+expected_internal = [
+    "axiolid-core",
+]
+
+# Exhaustive by construction: every other internal crate is forbidden, so a
+# new crate leaking into core is caught without editing this list.
+forbidden_internal = [
+    "axiolid",
+    "axiolid-backend-cpu",
+    "axiolid-backend-gpu",
+    "axiolid-brep",
+    "axiolid-brep-audit",
+    "axiolid-capi",
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-curve",
+    "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
+    "axiolid-evaluate",
+    "axiolid-exact-compile-contract",
+    "axiolid-field",
+    "axiolid-field-ops",
+    "axiolid-guarantees",
+    "axiolid-heal",
+    "axiolid-linear",
+    "axiolid-linear-intersection",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-boolean-contract",
+    "axiolid-mesh-compile",
+    "axiolid-mesh-compile-contract",
+    "axiolid-mesh-contracts",
+    "axiolid-mesh-section-contract",
+    "axiolid-model",
+    "axiolid-nurbs",
+    "axiolid-overlay",
+    "axiolid-predicates",
+    "axiolid-primitive",
+    "axiolid-profile",
+    "axiolid-ray-mesh",
+    "axiolid-reference",
+    "axiolid-spatial",
+    "axiolid-surface",
+    "axiolid-tessellation-contract",
+    "axiolid-topology",
+]
+
+[[profile]]
+name = "spatial-rule-checker"
+manifest = "tests/consumers/spatial-rule-checker/Cargo.toml"
+description = "A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all."
+features = []
+
+# Spacing and clash rules stated over positions rather than solids. The
+# point of the profile is that asking a spatial question must not pull in
+# a mesh: axiolid-spatial depends on core alone, and this pins that.
+expected_internal = [
+    "axiolid-core",
+    "axiolid-spatial",
+]
+
+# Exhaustive. Most importantly axiolid-mesh: a point-proximity checker that
+# starts compiling discrete geometry has silently changed shape.
+forbidden_internal = [
+    "axiolid",
+    "axiolid-backend-cpu",
+    "axiolid-backend-gpu",
+    "axiolid-brep",
+    "axiolid-brep-audit",
+    "axiolid-capi",
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-curve",
+    "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
+    "axiolid-evaluate",
+    "axiolid-exact-compile-contract",
+    "axiolid-field",
+    "axiolid-field-ops",
+    "axiolid-guarantees",
+    "axiolid-heal",
+    "axiolid-linear",
+    "axiolid-linear-intersection",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-boolean-contract",
+    "axiolid-mesh-compile",
+    "axiolid-mesh-compile-contract",
+    "axiolid-mesh-contracts",
+    "axiolid-mesh-section-contract",
+    "axiolid-model",
+    "axiolid-nurbs",
+    "axiolid-overlay",
+    "axiolid-predicates",
+    "axiolid-primitive",
+    "axiolid-profile",
+    "axiolid-ray-mesh",
+    "axiolid-reference",
+    "axiolid-surface",
+    "axiolid-tessellation-contract",
+    "axiolid-topology",
+]
+
+[[profile]]
+name = "linear-data"
+manifest = "tests/consumers/linear-data/Cargo.toml"
+description = "Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm."
+features = []
+
+# The representation WITHOUT its query layer. Storing and exchanging an
+# alignment must not require compiling the intersection algorithm, which
+# is what separates this profile from linear-intersection-minimal.
+expected_internal = [
+    "axiolid-core",
+    "axiolid-linear",
+]
+
+# Exhaustive. axiolid-linear-intersection in particular: if it appears, the
+# representation has stopped being usable on its own.
+forbidden_internal = [
+    "axiolid",
+    "axiolid-backend-cpu",
+    "axiolid-backend-gpu",
+    "axiolid-brep",
+    "axiolid-brep-audit",
+    "axiolid-capi",
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-curve",
+    "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
+    "axiolid-evaluate",
+    "axiolid-exact-compile-contract",
+    "axiolid-field",
+    "axiolid-field-ops",
+    "axiolid-guarantees",
+    "axiolid-heal",
+    "axiolid-linear-intersection",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-boolean-contract",
+    "axiolid-mesh-compile",
+    "axiolid-mesh-compile-contract",
+    "axiolid-mesh-contracts",
+    "axiolid-mesh-section-contract",
+    "axiolid-model",
+    "axiolid-nurbs",
+    "axiolid-overlay",
+    "axiolid-predicates",
+    "axiolid-primitive",
+    "axiolid-profile",
+    "axiolid-ray-mesh",
+    "axiolid-reference",
+    "axiolid-spatial",
+    "axiolid-surface",
+    "axiolid-tessellation-contract",
+    "axiolid-topology",
+]
+
+[[profile]]
+name = "full"
+manifest = "tests/consumers/full/Cargo.toml"
+description = "The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against."
+features = []
+
+# The ceiling. Narrow profiles assert what a focused application AVOIDS
+# compiling; this one records what the project costs when nothing is
+# avoided, so growth at the top is visible rather than silent.
+expected_internal = [
+    "axiolid",
+    "axiolid-backend-cpu",
+    "axiolid-backend-gpu",
+    "axiolid-brep",
+    "axiolid-brep-audit",
+    "axiolid-construct",
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-curve",
+    "axiolid-curve-evaluate-contract",
+    "axiolid-evaluate",
+    "axiolid-guarantees",
+    "axiolid-heal",
+    "axiolid-linear",
+    "axiolid-measure",
+    "axiolid-mesh",
+    "axiolid-mesh-boolean-contract",
+    "axiolid-mesh-compile-contract",
+    "axiolid-mesh-contracts",
+    "axiolid-mesh-section-contract",
+    "axiolid-model",
+    "axiolid-nurbs",
+    "axiolid-overlay",
+    "axiolid-predicates",
+    "axiolid-primitive",
+    "axiolid-profile",
+    "axiolid-ray-mesh",
+    "axiolid-reference",
+    "axiolid-spatial",
+    "axiolid-surface",
+    "axiolid-tessellation-contract",
+    "axiolid-topology",
+]
+
+# Anything not reachable even from the full facade. A crate leaving this
+# list means it became reachable from the maximal build.
+forbidden_internal = [
+    "axiolid-capi",
+    "axiolid-dispatch",
+    "axiolid-exact-compile-contract",
+    "axiolid-field",
+    "axiolid-field-ops",
+    "axiolid-linear-intersection",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-compile",
+]

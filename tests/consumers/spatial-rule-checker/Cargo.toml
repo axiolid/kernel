@@ -1,0 +1,12 @@
+[package]
+name = "axiolid-consumer-spatial-rule-checker"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root so feature unification cannot hide a dependency.
+[workspace]
+
+[dependencies]
+axiolid-core = { path = "../../../crates/foundation/core", default-features = false }
+axiolid-spatial = { path = "../../../crates/algorithms/query/spatial", default-features = false }

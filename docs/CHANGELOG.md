@@ -4,6 +4,14 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- Four closure profiles the design document named but never
+  implemented: `core-only`, `linear-data`, `spatial-rule-checker`,
+  and `full`, each with an isolated fixture and a mutation probe
+  proving its gate can fail
+  ([#11](https://github.com/axiolid/kernel/issues/11)). Eleven
+  profiles now gate CI, from a 3-package floor to the maximal
+  facade build.
+
 ### Fixed
 
 - Splitting a solid and re-uniting the pieces returns ONE solid again,

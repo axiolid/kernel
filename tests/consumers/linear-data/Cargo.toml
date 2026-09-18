@@ -1,0 +1,12 @@
+[package]
+name = "axiolid-consumer-linear-data"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root so feature unification cannot hide a dependency.
+[workspace]
+
+[dependencies]
+axiolid-core = { path = "../../../crates/foundation/core", default-features = false }
+axiolid-linear = { path = "../../../crates/representations/analytic/linear", default-features = false }

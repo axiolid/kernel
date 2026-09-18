@@ -1,0 +1,13 @@
+[package]
+name = "axiolid-consumer-full"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root so feature unification cannot hide a dependency.
+[workspace]
+
+[dependencies]
+# The maximal supported closure: every facade feature at once. This is the
+# UPPER bound the narrow profiles are measured against.
+axiolid = { path = "../../../crates/facade/axiolid", features = ["full"] }
