@@ -42,3 +42,24 @@ A `.gitignore` rule does NOT apply to a file already tracked, so fixing
 the pattern alone changes nothing: the path must be untracked first with
 `git rm -r --cached <dir>` (index only -- leaves files on disk).
 
+
+## Measuring what a profile costs
+
+scripts/closure-bench.py measures every profile here: resolved
+package count, cold-build median, and target/ size. It is the
+repeatable form of the ADR 0036 spot check (kernel#12).
+
+```bash
+python3 scripts/closure-bench.py --reps 3
+```
+
+It measures the NOISE FLOOR first, by rebuilding one profile
+repeatedly, and prints it. A gap smaller than that floor is not a
+result -- on this box the two smallest profiles are
+indistinguishable from each other, and the harness says so rather
+than ranking them.
+
+Each profile gets its own CARGO_TARGET_DIR under /mnt/backup, wiped
+before every run, so builds are genuinely cold and no consumer
+target/ is ever created inside the repo.
+

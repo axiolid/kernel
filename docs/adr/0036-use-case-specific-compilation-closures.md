@@ -234,3 +234,31 @@ then injects `axiolid-model` and requires the closure check to reject the graph.
   selects the broader `parametric-curves` closure, including surface values.
 - Full solid construction should use the application facade or the exact CAD
   packages documented by the other profiles; it is not part of `2d-curves`.
+
+### Measured again, repeatably (2026-09-18, kernel#12)
+
+The numbers above were a spot check on two profiles. `scripts/closure-bench.py`
+now measures every declared profile, and reports a noise floor so a
+difference can be called a result or not. Dev profile, 3 reps, cold
+target dir per profile, cargo 1.88.0, axiolid 0.3.0:
+
+| Profile | Packages | Cold build | `target/` |
+|---|---:|---:|---:|
+| `2d-curves` | 5 | 2.41 s | 47 MB |
+| `mesh-rule-checker` | 6 | 2.65 s | 74 MB |
+| `linear-intersection-minimal` | 7 | 2.37 s | 47 MB |
+| `parametric-curves` | 16 | 3.21 s | 120 MB |
+| `cad-exact` | 20 | 4.30 s | 185 MB |
+| `rust-facade-application` | 64 | 6.49 s | 660 MB |
+| `c-abi-profile` | 65 | 7.40 s | 856 MB |
+
+Measured noise floor: 2.6% of a 2.39 s median.
+
+The spread is real and large at the ends: 13x in package count and 18x
+in `target/` size between the smallest profile and `c-abi-profile`.
+But `2d-curves` and `linear-intersection-minimal` differ by 1.7%,
+BELOW the floor -- they are indistinguishable here, not ranked. This
+restates the original finding: closure profiles separate a big
+consumer from a small one; they do not usefully separate two small
+ones. Disk size, unlike wall time, does separate cleanly at every step.
+

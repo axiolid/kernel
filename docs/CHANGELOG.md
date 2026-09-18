@@ -6,6 +6,13 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `scripts/closure-bench.py` measures every closure profile:
+  resolved package count, cold-build median over N reps, and
+  `target/` size, with a measured noise floor so a gap below it is
+  reported as not-a-result rather than ranked
+  ([#12](https://github.com/axiolid/kernel/issues/12)). ADR 0036
+  gains the full seven-profile table.
+
 - The facade documents and tests the exactness guarantee: no public
   entry point turns exact geometry into a mesh unless the caller asked
   and supplied a tolerance
