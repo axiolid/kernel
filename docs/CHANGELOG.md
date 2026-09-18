@@ -4,6 +4,13 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- The native STATIC symbol-mutation probe now proves something on
+  every platform: the C consumer promotes implicit declarations to
+  errors (`/we4013` on MSVC, `-Werror=implicit-function-declaration`
+  elsewhere) and links eagerly on Mach-O, so a removed C ABI symbol
+  cannot build quietly on macOS or Windows
+  ([#56](https://github.com/axiolid/kernel/issues/56)).
+
 - Four closure profiles the design document named but never
   implemented: `core-only`, `linear-data`, `spatial-rule-checker`,
   and `full`, each with an isolated fixture and a mutation probe

@@ -189,6 +189,23 @@ def expect_consumer_failure(
         raise RuntimeError(f"mutated consumer unexpectedly built: {consumer.name}")
 
 
+def assert_strict_undeclared_call(consumer: Path) -> None:
+    """The symbol mutation only proves anything if calling an undeclared
+    function is a hard error.
+
+    MSVC reports C4013 and older GCC/Clang report a warning, so without an
+    explicit promotion the mutated consumer still compiles and links and the
+    gate passes while proving nothing (kernel#56). Assert the flags are
+    present rather than trusting that every CI toolchain errors by default.
+    """
+    text = (consumer / "CMakeLists.txt").read_text(encoding="utf-8")
+    for needed in ("/we4013", "-Werror=implicit-function-declaration"):
+        if needed not in text:
+            raise RuntimeError(
+                f"consumer must promote implicit declarations to errors: {needed} missing"
+            )
+
+
 def assert_package_mutations(
     consumer: Path,
     package_root: Path,
@@ -364,6 +381,7 @@ def main() -> int:
                     f"{source!r}, {installed!r}, {packaged!r}"
                 )
             if args.mutations:
+                assert_strict_undeclared_call(consumer)
                 assert_package_mutations(
                     consumer,
                     package_root,
