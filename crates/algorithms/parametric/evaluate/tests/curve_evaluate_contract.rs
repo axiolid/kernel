@@ -3,7 +3,7 @@
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::{
     Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Ellipse3, Intrinsic2,
-    Intrinsic3, Line3,
+    Intrinsic3, Line3, Polyline3,
 };
 use axiolid_curve_evaluate_contract::{
     conformance, CurveEvaluator, CurveMeasure, DistanceConvention,
@@ -380,4 +380,99 @@ fn a_non_finite_parameter_is_refused_as_a_measure() {
             .is_err());
         assert!(e.frame_at(&ellipse, CurveMeasure::Parameter(bad)).is_err());
     }
+}
+
+/// A polyline's arc length is an exact finite sum, so distance works.
+///
+/// The reporter's example (kernel#107): segments of 5 and 12, so a
+/// distance of 5 lands exactly on the interior vertex. No integral
+/// and no iteration are involved.
+#[test]
+fn a_polyline_is_evaluable_by_distance() {
+    let e = ReferenceCurveEvaluator::new();
+    let curve = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(3.0, 4.0, 0.0),
+            Point3::new(3.0, 4.0, 12.0),
+        ],
+        closed: false,
+    });
+    assert_eq!(
+        e.distance_convention(&curve),
+        DistanceConvention::ArcLength3d
+    );
+    let at_vertex = e
+        .point_at(&curve, CurveMeasure::Distance(5.0))
+        .expect("5 m along a 5 + 12 polyline is exactly the vertex");
+    assert_eq!(at_vertex, Point3::new(3.0, 4.0, 0.0));
+}
+
+/// A distance landing on a seam reads the OUTGOING heading.
+///
+/// At an interior vertex the tangent is two-valued. Leaving that to
+/// chance would silently pick one of two headings, so the convention
+/// is pinned: the curve is about to travel +z, not +x/+y.
+#[test]
+fn a_seam_reports_the_outgoing_tangent() {
+    let e = ReferenceCurveEvaluator::new();
+    let curve = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(3.0, 4.0, 0.0),
+            Point3::new(3.0, 4.0, 12.0),
+        ],
+        closed: false,
+    });
+    let tangent = e
+        .tangent_at(&curve, CurveMeasure::Distance(5.0))
+        .expect("the seam resolves to the outgoing segment");
+    assert_eq!(tangent, Vec3::new(0.0, 0.0, 1.0));
+}
+
+/// A repeated point has no direction, so it is refused, not skipped.
+///
+/// Skipping a zero-length segment would silently change the
+/// parameterisation; normalising its zero tangent would invent a
+/// heading. The whole curve is ill-defined, so even a distance that
+/// stops short of the repeat is refused.
+#[test]
+fn a_zero_length_segment_is_refused() {
+    let e = ReferenceCurveEvaluator::new();
+    let curve = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+        ],
+        closed: false,
+    });
+    assert!(e.point_at(&curve, CurveMeasure::Distance(0.5)).is_err());
+    assert!(e.point_at(&curve, CurveMeasure::Distance(1.5)).is_err());
+}
+
+/// A closed polyline's wrap segment is length, but does not wrap.
+///
+/// The closing segment counts toward the total, so a unit square is
+/// 4 long rather than 3. Distance past the end is refused rather
+/// than wrapped around, so a caller cannot silently lap the curve.
+#[test]
+fn a_closed_polyline_counts_the_wrap_but_does_not_lap() {
+    let e = ReferenceCurveEvaluator::new();
+    let square = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+        ],
+        closed: true,
+    });
+    // 3.5 is on the closing segment, half way back to the start.
+    let on_wrap = e
+        .point_at(&square, CurveMeasure::Distance(3.5))
+        .expect("the wrap segment is evaluable");
+    assert_eq!(on_wrap, Point3::new(0.0, 0.5, 0.0));
+    assert!(e.point_at(&square, CurveMeasure::Distance(4.5)).is_err());
 }

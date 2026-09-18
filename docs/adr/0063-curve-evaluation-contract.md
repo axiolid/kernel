@@ -56,7 +56,7 @@ report which distance they measure:
 | `Elevated` | `PlanDistance` | authored against plan distance |
 | `Ellipse` | `Unsupported` | needs elliptic integrals |
 | `BSpline` | `Unsupported` | needs numeric inversion |
-| `Polyline` | `Unsupported` | needs cumulative traversal |
+| `Polyline` | `ArcLength3d` | exact finite sum (see addendum, kernel#107) |
 
 A non-unit `direction` is the trap worth naming: import adapters
 preserve it, so treating distance as the parameter scales every
@@ -116,10 +116,11 @@ different questions and both are kept.
 
 - A consumer can name curve evaluation without linking an engine, which
   is what unblocks `IfcLinearPlacement` in `openbimrs/ifc`.
-- `Ellipse`, `BSpline` and `Polyline` refuse by name at a distance API.
-  They remain fully evaluable through `evaluate3` at their native
-  parameter; only the DISTANCE question is refused. Closing that gap
-  means arc-length reparameterisation, which is its own decision.
+- `Ellipse` and `BSpline` refuse by name at a distance API. They remain
+  fully evaluable through `evaluate3` at their native parameter; only
+  the DISTANCE question is refused. Closing that gap means arc-length
+  reparameterisation, which is its own decision. `Polyline` was in this
+  list until kernel#107 — see the addendum.
 - The closure profiles `c-abi-profile`, `cad-exact`,
   `parametric-curves` and `rust-facade-application` grow by exactly one
   contract crate. Acknowledged deliberately in
@@ -197,7 +198,8 @@ arc length has no closed form:
 | `Line`, `Circle` | exact | yes |
 | `Intrinsic` | exact (identity) | yes, same value |
 | `Elevated` | exact, plan distance | yes, same value |
-| `Ellipse`, `BSpline`, `Polyline` | refused | yes |
+| `Polyline` | exact (finite sum) | yes |
+| `Ellipse`, `BSpline` | refused | yes |
 
 So a refused DISTANCE no longer means a curve is unreachable through the
 contract; only that one method of measurement is unavailable for it.
@@ -215,3 +217,41 @@ contract; only that one method of measurement is unavailable for it.
 
 Landed before the crate was published, so no consumer saw the bare
 `Scalar` signature.
+
+## Addendum: polyline distance (kernel#107)
+
+The original table grouped `Polyline` with `Ellipse` and `BSpline` as
+having "no closed-form arc length". That was right for two of the three
+and wrong for the third.
+
+A polyline's arc length is a finite sum of segment lengths, not an
+integral. Locating a distance is a running sum until the interval is
+found, then one linear interpolation. The only transcendental involved
+is the per-segment `sqrt`, which `Line` already relies on and reports as
+`ArcLength3d` — so refusing a sequence of lines while accepting each
+line individually was not defensible on exactness grounds.
+
+`Ellipse` and `BSpline` stay refused: the first needs an incomplete
+elliptic integral of the second kind, the second needs quadrature plus
+Newton inversion with a tolerance and convergence policy attached. That
+remains a real design decision and is deliberately out of scope here.
+
+### Conventions this pins
+
+Each of these has a plausible-looking wrong answer, so each is stated
+rather than left to be discovered:
+
+- **Seam.** At a vertex the tangent is two-valued. A distance landing
+  exactly on a vertex reads the OUTGOING segment's heading. This falls
+  out of `polyline_span`'s `floor`, which sends an integral parameter to
+  the segment starting there — not out of the comparison in the running
+  sum, where `<` and `<=` produce the same parameter.
+- **Degenerate segments.** A repeated point gives a zero-length segment
+  and a zero tangent. It is refused rather than skipped: skipping would
+  silently change the parameterisation, and normalising a zero vector
+  would invent a heading.
+- **Closed polylines.** The wrap segment from the last point back to the
+  first is real length and counts toward the total. Distance does NOT
+  lap: a value past the total is refused rather than wrapped, because a
+  caller asking beyond the end is more likely to have a bug than to want
+  a second lap.

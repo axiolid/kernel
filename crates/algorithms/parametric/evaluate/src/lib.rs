@@ -16,6 +16,7 @@ pub mod curve;
 pub mod frenet;
 pub mod intrinsic_relation;
 mod nurbs;
+pub mod polyline_length;
 pub mod provider;
 pub mod surface;
 

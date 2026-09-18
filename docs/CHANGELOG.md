@@ -4,6 +4,17 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `Polyline` reports `ArcLength3d` instead of `Unsupported`: its arc
+  length is an exact finite sum of segment lengths, so a distance maps
+  to a parameter by a running sum and one linear interpolation
+  ([#107](https://github.com/axiolid/kernel/issues/107)). `Ellipse` and
+  `BSpline` stay refused. A distance landing on a vertex reads the
+  outgoing tangent; a zero-length segment is refused rather than
+  normalised; a closed polyline counts its wrap segment but does not
+  lap past the total length.
+
 ### Added
 
 - Breaking-change policy with a mechanical gate. `docs/contributing/breaking-changes.md`

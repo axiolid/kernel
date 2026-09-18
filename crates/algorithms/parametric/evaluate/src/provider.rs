@@ -13,6 +13,7 @@ use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConv
 
 use crate::arc_length::{elevated_point, elevated_tangent};
 use crate::frenet::{frenet_point, frenet_tangent};
+use crate::polyline_length::polyline_parameter;
 
 /// Reference curve evaluator.
 ///
@@ -107,12 +108,20 @@ fn finite_value(at: CurveMeasure) -> GeomResult<Scalar> {
 ///   grade the true 3D length exceeds the plan distance by 0.125 m per
 ///   100 m, and quietly conflating the two would misplace an object by
 ///   that much.
-/// - `Ellipse`, `BSpline` and `Polyline` have no closed-form arc length
-///   (the ellipse needs an elliptic integral), so distance is refused
-///   rather than approximated behind an exact-looking signature.
+/// - `Polyline` has an exact arc length: a finite sum of segment
+///   lengths, located by a running sum and one linear interpolation. Its
+///   only transcendental is the same per-segment `sqrt` that `Line`
+///   already reports as `ArcLength3d`, so refusing the sequence while
+///   accepting each element was not defensible (kernel#107). Seam,
+///   degenerate-segment and closed-wrap behaviour is pinned in
+///   `polyline_length`.
+/// - `Ellipse` and `BSpline` have no closed-form arc length (the ellipse
+///   needs an elliptic integral, the spline needs quadrature plus
+///   numeric inversion), so distance is refused rather than approximated
+///   behind an exact-looking signature.
 fn convention_for(curve: &Curve3) -> DistanceConvention {
     match curve {
-        Curve3::Intrinsic(_) | Curve3::Line(_) | Curve3::Circle(_) => {
+        Curve3::Intrinsic(_) | Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
             DistanceConvention::ArcLength3d
         }
         Curve3::Elevated(_) => DistanceConvention::PlanDistance,
@@ -145,6 +154,8 @@ fn parameter_for(curve: &Curve3, distance: Scalar) -> GeomResult<Scalar> {
             }
             Ok(distance / c.radius)
         }
+        // Running sum over segment lengths; exact, no iteration.
+        Curve3::Polyline(p) => polyline_parameter(p, distance),
         _ => Err(unsupported()),
     }
 }
@@ -171,7 +182,7 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             // Native arc-length families: straight through, no conversion.
             Curve3::Intrinsic(i) => frenet_point(i, distance),
             Curve3::Elevated(e) => elevated_point(e, distance),
-            Curve3::Line(_) | Curve3::Circle(_) => {
+            Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
                 crate::curve::evaluate3(curve, parameter_for(curve, distance)?)
             }
             _ => Err(unsupported()),
@@ -184,7 +195,7 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             CurveMeasure::Distance(distance) => match curve {
                 Curve3::Intrinsic(i) => frenet_tangent(i, distance)?,
                 Curve3::Elevated(e) => elevated_tangent(e, distance)?,
-                Curve3::Line(_) | Curve3::Circle(_) => {
+                Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
                     crate::curve::derivative3(curve, parameter_for(curve, distance)?)?
                 }
                 _ => return Err(unsupported()),
