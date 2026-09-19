@@ -15,8 +15,15 @@ mesh-boolean = ["dep:axiolid-core", "dep:axiolid-mesh", "dep:axiolid-mesh-contra
 mesh-section = ["dep:axiolid-core", "dep:axiolid-mesh", "dep:axiolid-mesh-contracts", "dep:axiolid-mesh-section-contract"]
 pointcloud-reconstruction = ["dep:axiolid-pointcloud", "dep:axiolid-pointcloud-reconstruction-contract"]
 
+# Scope each dispatched provider call to a caller-owned CPU pool instead of
+# rayon's process-global one. Separate from the provider's own threading:
+# this bounds whatever parallelism a provider already does, and costs
+# nothing when no provider threads.
+parallel = ["dep:axiolid-backend-cpu", "axiolid-backend-cpu/parallel"]
+
 [dependencies]
 axiolid-contracts.workspace = true
+axiolid-backend-cpu = { workspace = true, optional = true }
 axiolid-core = { workspace = true, optional = true }
 axiolid-mesh = { workspace = true, optional = true }
 axiolid-mesh-contracts = { workspace = true, optional = true }
@@ -32,9 +39,10 @@ role = "execution.dispatch"
 domain = "providers"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-mesh", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-pointcloud", "axiolid-pointcloud-reconstruction-contract", "axiolid-pointcloud-reconstruction-sdf"]
+allowed-internal-dependencies = ["axiolid-backend-cpu", "axiolid-contracts", "axiolid-core", "axiolid-mesh", "axiolid-mesh-boolean-contract", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-pointcloud", "axiolid-pointcloud-reconstruction-contract", "axiolid-pointcloud-reconstruction-sdf"]
 
 [dev-dependencies]
+rayon.workspace = true
 axiolid-pointcloud-reconstruction-sdf.workspace = true
 axiolid-mesh.workspace = true
 axiolid-pointcloud.workspace = true

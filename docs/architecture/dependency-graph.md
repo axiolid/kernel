@@ -166,6 +166,7 @@ graph TD
     axiolid_decompose --> axiolid_mesh_boolean_boolmesh
     axiolid_decompose --> axiolid_mesh_boolean_contract
     axiolid_decompose --> axiolid_reference
+    axiolid_dispatch --> axiolid_backend_cpu
     axiolid_dispatch --> axiolid_contracts
     axiolid_dispatch --> axiolid_core
     axiolid_dispatch --> axiolid_mesh

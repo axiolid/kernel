@@ -4,6 +4,15 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshBooleanRegistry::with_execution` scopes every dispatched
+  provider call to a caller-owned CPU pool instead of rayon's
+  process-global one, behind `axiolid-dispatch`'s new `parallel`
+  feature. The facade's `parallel` now reaches it, so the feature
+  bounds real provider work rather than only adding rayon
+  ([#109](https://github.com/axiolid/kernel/issues/109)).
+
 - Mesh booleans are byte-reproducible across runs. Two independent
   sources of run-to-run drift are fixed: `HashMap` iteration order in
   `boolean45`, and `Rc::as_ptr` heap-address tie-breaks in the ear-clip

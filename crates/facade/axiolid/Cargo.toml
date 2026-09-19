@@ -85,7 +85,11 @@ application = ["discrete", "dispatch-mesh-boolean", "dispatch-mesh-section", "po
 # optimized paths are selected at runtime, never by building the whole crate for
 # one host CPU.
 cpu = ["dep:axiolid-backend-cpu"]
-parallel = ["cpu", "axiolid-backend-cpu/parallel"]
+# `axiolid-dispatch?/parallel` uses the weak-dependency form deliberately:
+# it scopes dispatched provider work to the caller's pool WHEN dispatch is
+# already in the build, and does not drag dispatch into a build that
+# deliberately excluded it.
+parallel = ["cpu", "axiolid-backend-cpu/parallel", "axiolid-dispatch?/parallel"]
 simd = ["cpu", "axiolid-backend-cpu/simd"]
 gpu = ["graph-compile", "dep:axiolid-backend-gpu"]
 

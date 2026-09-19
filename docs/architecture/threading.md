@@ -90,20 +90,17 @@ revisited, re-run the table above before turning it back on.
 ## Where the scoping lives, and why
 
 `MeshBooleanRegistry::with_execution` (in `axiolid-dispatch`, gated behind
-that crate's own `parallel` feature) is the DESIGNED seam for this, and it
-is **not implemented yet** (see
-[#109](https://github.com/axiolid/kernel/issues/109)). The intent is to wrap
-every dispatched provider call in a `CpuExecution`'s local rayon pool via
-`ThreadPool::install`, so any provider's internal rayon work runs inside that
-scoped pool instead of the ambient global one.
+that crate's own `parallel` feature) wraps every dispatched provider call
+in a `CpuExecution`'s local rayon pool via `ThreadPool::install`, so any
+provider's internal rayon work runs inside that scoped pool instead of the
+ambient global one.
 
-What ships today is the layer below it: `CpuExecution::install` is public
-under `axiolid-backend-cpu`'s `parallel` feature, so an application can build
-a context and scope its own provider calls by hand. Dispatch does not do it
-for you.
+`CpuExecution::install` is the layer below, public under
+`axiolid-backend-cpu`'s `parallel` feature, for callers that want to
+scope work they run directly rather than through dispatch.
 
-This is orthogonal to the decision above: it would bound whatever
-parallelism a provider does use, which is a policy question for
+This is orthogonal to the decision above and is supported: it bounds
+whatever parallelism a provider does use, which is a policy question for
 the embedding application. It is useful regardless of `boolmesh`'s own
 feature state -- and with that feature off, it costs nothing.
 
@@ -129,7 +126,7 @@ registered, not just `boolmesh`.
 
 ## Usage
 
-What works today: build a context and scope your own calls.
+What works today: build a context and scope your own calls directly.
 
 ```rust,ignore
 use axiolid_backend_cpu::CpuExecutionBuilder;
@@ -148,8 +145,7 @@ Requires `axiolid-backend-cpu`'s `parallel` feature. Without it,
 `install` does not exist and provider work runs against rayon's
 process-global pool.
 
-The dispatch-level form below is the intended design and is **not
-implemented** ([#109](https://github.com/axiolid/kernel/issues/109)):
+The dispatch-level form scopes every registered provider at once:
 
 ```rust,ignore
 use axiolid_backend_cpu::CpuExecutionBuilder;
@@ -163,14 +159,13 @@ let execution = CpuExecutionBuilder::new()
 
 let mut registry = MeshBooleanRegistry::new().with_execution(execution);
 registry.register(0, BoolmeshBoolean::new());
-// Intended: every `registry.boolean(...)` / `registry.subtract_many(...)`
-// call would scope its dispatched provider's rayon work to 4 threads.
+// Every `registry.boolean(...)` / `registry.subtract_many(...)` call now
+// scopes its dispatched provider's rayon work to 4 threads.
 ```
 
-Would require a `parallel` feature on `axiolid-dispatch`. That feature,
-and `with_execution` itself, do not exist today: providers run against
-rayon's process-global pool unless the caller scopes them with
-`CpuExecution::install` as shown above.
+Requires `axiolid-dispatch`'s `parallel` feature, which the facade enables
+via its own `parallel`. Without it, `with_execution` does not exist and
+providers run against rayon's process-global pool.
 
 ## Measured evidence (what this does and does not fix)
 

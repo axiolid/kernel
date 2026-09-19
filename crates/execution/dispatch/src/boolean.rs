@@ -23,6 +23,11 @@ struct RegisteredBoolean {
 #[derive(Debug, Clone, Default)]
 pub struct MeshBooleanRegistry {
     providers: Vec<RegisteredBoolean>,
+    /// Caller-owned CPU context. Every dispatched provider call runs inside
+    /// its pool, so a provider's internal rayon work is bounded by the
+    /// embedding application's policy rather than the process-global pool.
+    #[cfg(feature = "parallel")]
+    execution: Option<axiolid_backend_cpu::CpuExecution>,
 }
 
 impl MeshBooleanRegistry {
@@ -30,7 +35,21 @@ impl MeshBooleanRegistry {
     pub const fn new() -> Self {
         Self {
             providers: Vec::new(),
+            #[cfg(feature = "parallel")]
+            execution: None,
         }
+    }
+
+    /// Scope every dispatched provider call to `execution`'s local pool.
+    ///
+    /// This bounds whatever parallelism a provider already does; it does not
+    /// make a single-threaded provider concurrent. With no provider threading
+    /// it costs nothing but the `install` call.
+    #[cfg(feature = "parallel")]
+    #[must_use]
+    pub fn with_execution(mut self, execution: axiolid_backend_cpu::CpuExecution) -> Self {
+        self.execution = Some(execution);
+        self
     }
 
     /// Register an implementation. Higher priorities run first.
@@ -87,7 +106,7 @@ impl MeshBooleanRegistry {
         &self,
         options: &ExecutionOptions,
         elements: usize,
-        execute: impl Fn(&dyn MeshBoolean) -> GeomResult<BooleanOutcome>,
+        execute: impl Fn(&dyn MeshBoolean) -> GeomResult<BooleanOutcome> + Sync,
     ) -> GeomResult<BooleanOutcome> {
         let mut last_retryable = None;
         let mut over_budget = None;
@@ -107,7 +126,7 @@ impl MeshBooleanRegistry {
                 over_budget = Some(GeomError::BudgetExceeded { resource: "memory" });
                 continue;
             }
-            match execute(entry.provider.as_ref()) {
+            match self.run_scoped(&execute, entry.provider.as_ref()) {
                 Ok(outcome) => return Ok(outcome),
                 Err(error @ (GeomError::Unsupported { .. } | GeomError::Unavailable { .. })) => {
                     last_retryable = Some(error);
@@ -121,6 +140,32 @@ impl MeshBooleanRegistry {
                 backend: BackendId::new("mesh-boolean-registry"),
                 operation: Operation::MeshBoolean,
             }))
+    }
+
+    /// Run one provider call, inside the configured pool when there is one.
+    ///
+    /// `CpuExecution::install` already falls through to a direct call when
+    /// the context was built single-threaded, so a configured context with
+    /// one worker costs nothing extra here.
+    #[cfg(feature = "parallel")]
+    fn run_scoped(
+        &self,
+        execute: &(impl Fn(&dyn MeshBoolean) -> GeomResult<BooleanOutcome> + Sync),
+        provider: &dyn MeshBoolean,
+    ) -> GeomResult<BooleanOutcome> {
+        match &self.execution {
+            Some(execution) => execution.install(|| execute(provider)),
+            None => execute(provider),
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn run_scoped(
+        &self,
+        execute: &impl Fn(&dyn MeshBoolean) -> GeomResult<BooleanOutcome>,
+        provider: &dyn MeshBoolean,
+    ) -> GeomResult<BooleanOutcome> {
+        execute(provider)
     }
 
     /// Execute according to device policy with narrow fallback semantics.
@@ -475,5 +520,107 @@ mod tests {
                 operation: Operation::MeshBoolean,
             } if backend == BackendId::new("mesh-boolean-registry")
         ));
+    }
+
+    /// Records the rayon pool width it observes while running.
+    ///
+    /// `current_num_threads` reports the pool the call is INSIDE, so a
+    /// provider dispatched through a scoped registry must see the
+    /// configured width rather than the process-global one.
+    #[cfg(feature = "parallel")]
+    #[derive(Debug, Default)]
+    struct PoolWidthBoolean {
+        seen: std::sync::Mutex<Vec<usize>>,
+    }
+
+    #[cfg(feature = "parallel")]
+    impl Backend for PoolWidthBoolean {
+        fn descriptor(&self) -> BackendDescriptor {
+            BackendDescriptor {
+                id: BackendId::new("pool-width"),
+                target: ExecutionTarget::PortableCpu,
+            }
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    impl MeshBoolean for PoolWidthBoolean {
+        fn boolean(
+            &self,
+            subject: &TriMesh,
+            _tool: &TriMesh,
+            _operation: BooleanOperator,
+            _options: &ExecutionOptions,
+        ) -> GeomResult<BooleanOutcome> {
+            self.seen
+                .lock()
+                .expect("poisoned")
+                .push(rayon::current_num_threads());
+            Ok(BooleanOutcome::new(
+                subject.clone(),
+                BooleanEvidence::default(),
+            ))
+        }
+    }
+
+    /// The configured pool must actually wrap the provider call.
+    ///
+    /// Asserting the OBSERVED width, not just that a context was stored:
+    /// a registry that accepted the context and ignored it would pass any
+    /// weaker check. 3 is chosen to differ from this machine core count.
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn dispatch_runs_inside_the_configured_pool() {
+        use axiolid_backend_cpu::CpuExecutionBuilder;
+        use std::num::NonZeroUsize;
+        use std::sync::Arc;
+
+        let execution = CpuExecutionBuilder::new()
+            .threads(NonZeroUsize::new(3).expect("nonzero"))
+            .build()
+            .expect("cpu execution");
+        let provider = Arc::new(PoolWidthBoolean::default());
+        let mut registry = MeshBooleanRegistry::new().with_execution(execution);
+        registry.register_arc(0, provider.clone());
+
+        let cube = admissible_cube();
+        let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+        registry
+            .boolean(&cube, &cube, BooleanOperator::Union, &options)
+            .expect("dispatch");
+
+        let widths = provider.seen.lock().expect("poisoned").clone();
+        assert_eq!(
+            widths,
+            vec![3],
+            "provider must run inside the 3-worker pool"
+        );
+    }
+
+    /// Negative control: without `with_execution` the provider sees the
+    /// ambient pool, so the assertion above is testing the scoping and not
+    /// some constant rayon happens to return.
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn an_unscoped_registry_does_not_see_the_configured_width() {
+        use std::sync::Arc;
+
+        let provider = Arc::new(PoolWidthBoolean::default());
+        let mut registry = MeshBooleanRegistry::new();
+        registry.register_arc(0, provider.clone());
+
+        let cube = admissible_cube();
+        let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+        registry
+            .boolean(&cube, &cube, BooleanOperator::Union, &options)
+            .expect("dispatch");
+
+        let widths = provider.seen.lock().expect("poisoned").clone();
+        assert_eq!(widths.len(), 1, "one dispatch");
+        assert_eq!(
+            widths[0],
+            rayon::current_num_threads(),
+            "unscoped dispatch must observe the ambient pool"
+        );
     }
 }

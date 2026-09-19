@@ -512,9 +512,13 @@ manifest = "tests/consumers/full/Cargo.toml"
 description = "The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against."
 features = []
 
-# The ceiling. Narrow profiles assert what a focused application AVOIDS
-# compiling; this one records what the project costs when nothing is
-# avoided, so growth at the top is visible rather than silent.
+# `axiolid-dispatch` is RESOLVED but never LINKED here: `parallel` names
+# `axiolid-dispatch?/parallel`, which makes cargo resolve the optional
+# package even though `full` does not enable `application`. Recorded so
+# the gate stays honest about what cargo resolves.
+#
+# The ceiling: narrow profiles assert what a focused application AVOIDS
+# compiling; this one records the cost when nothing is avoided.
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -524,6 +528,7 @@ expected_internal = [
     "axiolid-construct",
     "axiolid-contracts",
     "axiolid-core",
+    "axiolid-dispatch",
     "axiolid-curve",
     "axiolid-curve-evaluate-contract",
     "axiolid-evaluate",
@@ -554,7 +559,6 @@ expected_internal = [
 # list means it became reachable from the maximal build.
 forbidden_internal = [
     "axiolid-capi",
-    "axiolid-dispatch",
     "axiolid-exact-compile-contract",
     "axiolid-field",
     "axiolid-field-ops",

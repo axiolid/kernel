@@ -16,7 +16,7 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `core-only` | 1 | The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable. |
 | `spatial-rule-checker` | 2 | A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all. |
 | `linear-data` | 2 | Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm. |
-| `full` | 32 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
+| `full` | 33 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
 
 ## linear-intersection-minimal
 
@@ -246,6 +246,7 @@ Compiles exactly these internal packages:
 - `axiolid-core`
 - `axiolid-curve`
 - `axiolid-curve-evaluate-contract`
+- `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-guarantees`
 - `axiolid-heal`
@@ -269,4 +270,4 @@ Compiles exactly these internal packages:
 - `axiolid-tessellation-contract`
 - `axiolid-topology`
 
-And must never acquire any of 8 forbidden packages, including `axiolid-capi`, `axiolid-dispatch`, `axiolid-exact-compile-contract`.
+And must never acquire any of 7 forbidden packages, including `axiolid-capi`, `axiolid-exact-compile-contract`, `axiolid-field`.
