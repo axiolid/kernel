@@ -4,6 +4,12 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- The ray-index cache carries the same `application` gate as the only
+  method that uses it, so a facade build with `ray-mesh` and `spatial`
+  but without `application` no longer compiles a cache nothing can
+  reach. Found by the new `full` closure profile
+  ([#11](https://github.com/axiolid/kernel/issues/11)).
+
 - The native STATIC symbol-mutation probe now proves something on
   every platform: the C consumer promotes implicit declarations to
   errors (`/we4013` on MSVC, `-Werror=implicit-function-declaration`

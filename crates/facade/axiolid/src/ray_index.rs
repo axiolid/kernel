@@ -14,8 +14,11 @@
 //! then serve a stale index and return hits for geometry that no longer
 //! exists. Digesting costs ~1.2% of a build and ~0.01% of a full scan.
 
+#[cfg(feature = "application")]
 use ahash::AHasher;
+#[cfg(feature = "application")]
 use std::hash::{Hash, Hasher};
+#[cfg(feature = "application")]
 use std::sync::RwLock;
 
 use axiolid_core::Aabb;
@@ -96,17 +99,20 @@ impl<'m> MeshRayIndex<'m> {
     }
 }
 
+#[cfg(feature = "application")]
 /// Entries retained. Each holds one BVH over a mesh, so this bounds
 /// memory: an unbounded map would leak an index per distinct mesh ever
 /// cast against, which for a caller streaming meshes is every mesh.
 const CAPACITY: usize = 8;
 
+#[cfg(feature = "application")]
 /// Casts against a mesh before its index is built.
 ///
 /// 1 means "build on the second cast". Building on the first would
 /// penalise the one-shot caller the scanning API exists to serve.
 const WARMUP_CASTS: u32 = 1;
 
+#[cfg(feature = "application")]
 struct Entry {
     digest: u64,
     /// Margin the bounds were padded by. A later call with a LARGER
@@ -120,6 +126,7 @@ struct Entry {
     touched: u64,
 }
 
+#[cfg(feature = "application")]
 /// Ray index cache. Not part of the public API surface: it changes only
 /// how `nearest_mesh_hit` finds its answer, never what that answer is.
 #[derive(Default)]
@@ -127,12 +134,14 @@ pub(crate) struct RayIndexCache {
     inner: RwLock<Inner>,
 }
 
+#[cfg(feature = "application")]
 #[derive(Default)]
 struct Inner {
     entries: Vec<Entry>,
     clock: u64,
 }
 
+#[cfg(feature = "application")]
 /// Content digest of the geometry a ray can hit.
 ///
 /// Positions are hashed by bit pattern: two meshes that differ only by
@@ -200,6 +209,7 @@ fn build_bvh_with_margin(mesh: &TriMesh, margin: f64) -> Bvh<usize> {
     Bvh::build(items)
 }
 
+#[cfg(feature = "application")]
 impl RayIndexCache {
     /// Nearest hit, using a cached broad phase once one exists.
     ///
@@ -306,12 +316,14 @@ fn accelerated(
 // an application must NOT share or copy indices: the clone starts cold
 // and rebuilds what it needs. Sharing would let one clone observe
 // another's evictions.
+#[cfg(feature = "application")]
 impl Clone for RayIndexCache {
     fn clone(&self) -> Self {
         Self::default()
     }
 }
 
+#[cfg(feature = "application")]
 impl std::fmt::Debug for RayIndexCache {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entries = self.inner.read().map(|i| i.entries.len()).unwrap_or(0);
@@ -349,6 +361,7 @@ mod ray_index_tests {
         TriMesh::new(positions, indices)
     }
 
+    #[cfg(feature = "application")]
     /// The cache changes HOW the answer is found, never WHAT it is.
     /// Casts repeatedly so the comparison spans cold, warming and warm
     /// states -- a test that stopped at one cast would never exercise
@@ -402,6 +415,7 @@ mod ray_index_tests {
         TriMesh::new(positions, indices)
     }
 
+    #[cfg(feature = "application")]
     #[test]
     fn mutating_the_mesh_does_not_serve_a_stale_index() {
         let cache = RayIndexCache::default();
@@ -435,6 +449,7 @@ mod ray_index_tests {
         );
     }
 
+    #[cfg(feature = "application")]
     /// The fold is XOR-based, so it must not be symmetric in x/y/z:
     /// without the rotations, swapping two coordinates would give the
     /// same key and a moved vertex could go unnoticed.
@@ -504,6 +519,7 @@ mod ray_index_tests {
         }
     }
 
+    #[cfg(feature = "application")]
     /// The cache path shares the broad phase, so it had the same
     /// grazing-ray gap: a ray passing within tolerance of a triangle
     /// but outside its exact bounds. Pinned separately from the handle
@@ -534,6 +550,7 @@ mod ray_index_tests {
         }
     }
 
+    #[cfg(feature = "application")]
     /// The cache must not grow without bound: a caller streaming meshes
     /// would otherwise retain a BVH for every one it ever cast against.
     #[test]
