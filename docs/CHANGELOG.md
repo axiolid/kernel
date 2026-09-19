@@ -4,6 +4,12 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- The threading page no longer documents dispatch-level pool
+  scoping as shipped behaviour. `MeshBooleanRegistry::with_execution`
+  and a `parallel` feature on `axiolid-dispatch` do not exist; the
+  supported mechanism today is `CpuExecution::install`
+  ([#109](https://github.com/axiolid/kernel/issues/109)).
+
 - The ray-index cache carries the same `application` gate as the only
   method that uses it, so a facade build with `ray-mesh` and `spatial`
   but without `application` no longer compiles a cache nothing can

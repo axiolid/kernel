@@ -90,13 +90,20 @@ revisited, re-run the table above before turning it back on.
 ## Where the scoping lives, and why
 
 `MeshBooleanRegistry::with_execution` (in `axiolid-dispatch`, gated behind
-this crate's own `parallel` feature) wraps every dispatched provider call
-in a `CpuExecution`'s local rayon pool via `ThreadPool::install`, so any
-provider's internal rayon work runs inside that scoped pool instead of the
-ambient global one.
+that crate's own `parallel` feature) is the DESIGNED seam for this, and it
+is **not implemented yet** (see
+[#109](https://github.com/axiolid/kernel/issues/109)). The intent is to wrap
+every dispatched provider call in a `CpuExecution`'s local rayon pool via
+`ThreadPool::install`, so any provider's internal rayon work runs inside that
+scoped pool instead of the ambient global one.
 
-This is orthogonal to the decision above and remains supported: it bounds
-whatever parallelism a provider does use, which is a policy question for
+What ships today is the layer below it: `CpuExecution::install` is public
+under `axiolid-backend-cpu`'s `parallel` feature, so an application can build
+a context and scope its own provider calls by hand. Dispatch does not do it
+for you.
+
+This is orthogonal to the decision above: it would bound whatever
+parallelism a provider does use, which is a policy question for
 the embedding application. It is useful regardless of `boolmesh`'s own
 feature state -- and with that feature off, it costs nothing.
 
@@ -111,8 +118,9 @@ axiolid-backend-cpu (execution)
 
 That is not an arbitrary rule. `providers` implement a narrow contract
 (`MeshBoolean`, ...) and are dispatched BY the `execution` layer
-(`axiolid-dispatch`); `execution` selects among, orders, and now scopes
-providers. A provider depending on execution would point the dependency
+(`axiolid-dispatch`); `execution` selects among and orders
+providers, and is where scoping belongs. A provider depending on execution
+would point the dependency
 arrow backwards -- the layer that is supposed to be swappable underneath
 dispatch would instead reach up into the thing dispatching it. Fixing it
 at the dispatch layer instead is also strictly more useful: the SAME
@@ -121,7 +129,29 @@ registered, not just `boolmesh`.
 
 ## Usage
 
-```rust
+What works today: build a context and scope your own calls.
+
+```rust,ignore
+use axiolid_backend_cpu::CpuExecutionBuilder;
+use std::num::NonZeroUsize;
+
+let execution = CpuExecutionBuilder::new()
+    .threads(NonZeroUsize::new(4).unwrap())
+    .build()?;
+
+// Any provider work inside this closure runs on the context's own pool
+// rather than rayon's process-global one.
+let result = execution.install(|| provider.subtract_many(&subject, &tools, &options));
+```
+
+Requires `axiolid-backend-cpu`'s `parallel` feature. Without it,
+`install` does not exist and provider work runs against rayon's
+process-global pool.
+
+The dispatch-level form below is the intended design and is **not
+implemented** ([#109](https://github.com/axiolid/kernel/issues/109)):
+
+```rust,ignore
 use axiolid_backend_cpu::CpuExecutionBuilder;
 use axiolid_dispatch::MeshBooleanRegistry;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -133,13 +163,14 @@ let execution = CpuExecutionBuilder::new()
 
 let mut registry = MeshBooleanRegistry::new().with_execution(execution);
 registry.register(0, BoolmeshBoolean::new());
-// Every `registry.boolean(...)` / `registry.subtract_many(...)` call now
-// scopes its dispatched provider's rayon work to 4 threads.
+// Intended: every `registry.boolean(...)` / `registry.subtract_many(...)`
+// call would scope its dispatched provider's rayon work to 4 threads.
 ```
 
-Requires `axiolid-dispatch`'s `parallel` feature. Without it,
-`with_execution` does not exist and dispatch is unchanged from before this
-work: providers run against rayon's process-global pool, same as always.
+Would require a `parallel` feature on `axiolid-dispatch`. That feature,
+and `with_execution` itself, do not exist today: providers run against
+rayon's process-global pool unless the caller scopes them with
+`CpuExecution::install` as shown above.
 
 ## Measured evidence (what this does and does not fix)
 
