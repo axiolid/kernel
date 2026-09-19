@@ -61,17 +61,23 @@ pub fn triangulate(
 
     #[cfg(not(feature = "parallel"))]
     {
-        let mut ts = vec![];
-        let mut ns = vec![];
-        let mut rs = vec![];
+        let faces = b45.hid_per_f.len() - 1;
+        // Most faces are already triangles, so one triangle per face is the
+        // right first guess: it removes the early regrowth without
+        // over-reserving on meshes that do need splitting.
+        let mut ts = Vec::with_capacity(faces);
+        let mut ns = Vec::with_capacity(faces);
+        let mut rs = Vec::with_capacity(faces);
 
-        for fid in 0..b45.hid_per_f.len() - 1 {
+        for fid in 0..faces {
             let hid = b45.hid_per_f[fid] as usize;
             let t = process_face(b45, fid, eps);
             let r = b45.rs[hid];
             let n = b45.ns[fid];
-            rs.extend(vec![r; t.len()]);
-            ns.extend(vec![n; t.len()]);
+            // `std::iter::repeat_n` borrows the value instead of building a
+            // throwaway `Vec` per face just to extend from it.
+            rs.extend(std::iter::repeat_n(r, t.len()));
+            ns.extend(std::iter::repeat_n(n, t.len()));
             ts.extend(t);
         }
         update_reference(mp, mq, &mut rs);
@@ -128,13 +134,11 @@ fn assemble_halfs(hs: &[Half], hid_f: &[i32], fid: usize) -> Vec<Vec<usize>> {
 
 fn single_triangulate(b45: &Boolean45, hid: usize) -> Vec<Vec3u> {
     let mut idcs = [hid, hid + 1, hid + 2];
-    let mut tails = vec![];
-    let mut heads = vec![];
-    for id in idcs.iter() {
-        tails.push(b45.hs[*id].tail);
-        heads.push(b45.hs[*id].head);
-    }
-    if heads[0] == tails[2] {
+    // Only the first head and the last tail decide the winding, so read them
+    // directly. This runs once per already-triangular face -- the dominant
+    // face shape by two orders of magnitude -- so the two throwaway `Vec`s
+    // this replaces were the single largest allocation source in the solve.
+    if b45.hs[idcs[0]].head == b45.hs[idcs[2]].tail {
         idcs.swap(1, 2);
     }
 

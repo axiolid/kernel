@@ -4,6 +4,11 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- Mesh booleans allocate 62% less: 43,028 -> 16,194 allocations on a
+  6,912-triangle grouped subtraction (6 -> 2 per triangle). Wall clock
+  is unchanged within noise; this buys allocator headroom and a lower
+  scratch ceiling, not speed.
+
 ### Added
 
 - `MeshBooleanRegistry::with_execution` scopes every dispatched
