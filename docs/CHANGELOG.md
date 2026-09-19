@@ -4,6 +4,13 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- Planar-mask dilation and erosion decompose the Euclidean
+  structuring element into one contiguous span per row, dropping the
+  per-cell cost from O(steps^2) to O(steps): 1.8-2.0x faster on
+  128x128 and 256x256 masks. Results are bit-identical, gated by a
+  180-case differential test against the previous windowed form
+  ([#21](https://github.com/axiolid/kernel/issues/21)).
+
 - Mesh booleans allocate 62% less: 43,028 -> 16,194 allocations on a
   6,912-triangle grouped subtraction (6 -> 2 per triangle). Wall clock
   is unchanged within noise; this buys allocator headroom and a lower

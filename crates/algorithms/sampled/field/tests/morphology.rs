@@ -198,3 +198,117 @@ fn largest_free_span_respects_occupancy_and_the_search_window() {
         .unwrap();
     assert!((free.length() - 3.0).abs() < 1e-9);
 }
+
+/// Direct transcription of the pre-optimization nested-window morphology.
+///
+/// Kept as the differential ORACLE for the row-span implementation in
+/// `morphology.rs`. The fast path decomposes the Euclidean disc into one
+/// contiguous span per row; this tests every offset explicitly. They must
+/// agree bit for bit, because the span form is an exact rewrite of the
+/// membership test, not an approximation of the disc.
+fn windowed_reference(
+    bits: &[bool],
+    width: usize,
+    height: usize,
+    reach_squared: f64,
+    steps: usize,
+    dilate: bool,
+) -> Vec<bool> {
+    let mut out = vec![false; width * height];
+    let steps = steps as isize;
+    for y in 0..height {
+        for x in 0..width {
+            let mut value = !dilate;
+            'window: for dy in -steps..=steps {
+                for dx in -steps..=steps {
+                    if (dx * dx + dy * dy) as f64 > reach_squared {
+                        continue;
+                    }
+                    let nx = x as isize + dx;
+                    let ny = y as isize + dy;
+                    let neighbor =
+                        if nx < 0 || ny < 0 || nx as usize >= width || ny as usize >= height {
+                            false
+                        } else {
+                            bits[ny as usize * width + nx as usize]
+                        };
+                    if dilate && neighbor {
+                        value = true;
+                        break 'window;
+                    }
+                    if !dilate && !neighbor {
+                        value = false;
+                        break 'window;
+                    }
+                }
+            }
+            out[y * width + x] = value;
+        }
+    }
+    out
+}
+
+/// The row-span morphology must equal the windowed oracle everywhere.
+///
+/// Sweeps grid size, radius, and pattern density, and checks BOTH
+/// operations. Sizes and radii are chosen so discs land on, inside, and
+/// across the border, since border handling is where the two forms could
+/// most plausibly diverge.
+#[test]
+fn row_span_morphology_matches_the_windowed_reference() {
+    let frame = fixtures::z_up_frame();
+    let mut checked = 0;
+    for n in [7usize, 16, 23] {
+        for radius in [1.0f64, 1.5, 2.0, 3.0, 4.5] {
+            for stride in [2usize, 3, 5] {
+                for fill in [false, true] {
+                    let config = fixtures::config(frame, Vec3::new(n as f64, n as f64, 4.0), 1.0);
+                    let mut mask = PlanarMask::empty(n, n).unwrap();
+                    let mut raw = vec![false; n * n];
+                    // Two shapes per case. The sparse dot grid exercises dilation;
+                    // the dense block exercises EROSION, which on a sparse mask
+                    // short-circuits on the first unset neighbour and never
+                    // reaches the border logic. `fill` inverts the roles so both
+                    // branches are actually decided by the structuring element.
+                    for y in 0..n {
+                        for x in 0..n {
+                            let set = if fill {
+                                // Solid except a punched hole, so erosion has both
+                                // an interior to keep and an edge to eat inward.
+                                !(x >= n / 2 && y >= n / 2 && (x + y) % 5 == 0)
+                            } else {
+                                y % stride == 0 && x % (stride + 1) == 0
+                            };
+                            if set {
+                                mask.set(x, y, true).unwrap();
+                                raw[y * n + x] = true;
+                            }
+                        }
+                    }
+                    // Mirrors `radius_in_cells` for a unit cell size.
+                    let steps = radius.ceil() as usize;
+                    for dilate in [true, false] {
+                        let got = if dilate {
+                            mask.dilate(&config, radius)
+                        } else {
+                            mask.erode(&config, radius)
+                        }
+                        .unwrap();
+                        let want = windowed_reference(&raw, n, n, radius * radius, steps, dilate);
+                        for y in 0..n {
+                            for x in 0..n {
+                                assert_eq!(
+                                got.get(x, y),
+                                Some(want[y * n + x]),
+                                "n={n} radius={radius} stride={stride} dilate={dilate} at ({x},{y})"
+                            );
+                            }
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 180, "the sweep must actually run every case");
+}

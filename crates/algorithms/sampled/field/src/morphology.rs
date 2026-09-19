@@ -138,29 +138,59 @@ impl PlanarMask {
         }
         let reach = radius / config.cell_size();
         let reach_squared = reach * reach;
+
+        // The Euclidean structuring element is the same disc for every cell, so
+        // compute its half-width per row ONCE instead of re-testing
+        // `dx*dx + dy*dy` at every cell. Each row `dy` contributes the span
+        // `dx in -half..=half` where `half = floor(sqrt(reach^2 - dy^2))`,
+        // which turns the inner test into a contiguous range walk and drops
+        // the per-cell cost from O(steps^2) to O(steps).
+        //
+        // This is the identical set of offsets the nested test accepted --
+        // `dx*dx <= reach^2 - dy^2` is exactly `|dx| <= sqrt(reach^2 - dy^2)`
+        // for integers -- so the mask produced is bit-identical, not an
+        // approximation of it.
+        let steps_isize = steps as isize;
+        let half_widths: Vec<isize> = (-steps_isize..=steps_isize)
+            .map(|dy| {
+                let remaining = reach_squared - (dy * dy) as Scalar;
+                if remaining < 0.0 {
+                    -1
+                } else {
+                    remaining.sqrt().floor() as isize
+                }
+            })
+            .collect();
+
         let mut out = Self::empty(self.width, self.height)?;
         for y in 0..self.height {
             for x in 0..self.width {
                 let mut value = !dilate;
-                'window: for dy in -(steps as isize)..=(steps as isize) {
-                    for dx in -(steps as isize)..=(steps as isize) {
-                        // Euclidean structuring element, not a square kernel.
-                        if (dx * dx + dy * dy) as Scalar > reach_squared {
-                            continue;
+                'window: for (index, dy) in (-steps_isize..=steps_isize).enumerate() {
+                    let half = half_widths[index];
+                    if half < 0 {
+                        continue;
+                    }
+                    let ny = y as isize + dy;
+                    // Erosion treats outside-the-field as unset, so a mask
+                    // touching the border erodes inward rather than pretending
+                    // the world continues. A row wholly outside the grid is
+                    // therefore all-unset: it cannot satisfy dilation, and it
+                    // immediately fails erosion.
+                    if ny < 0 || ny as usize >= self.height {
+                        if !dilate {
+                            value = false;
+                            break 'window;
                         }
+                        continue;
+                    }
+                    let row = ny as usize * self.width;
+                    for dx in -half..=half {
                         let nx = x as isize + dx;
-                        let ny = y as isize + dy;
-                        // Erosion treats outside-the-field as unset, so a mask
-                        // touching the border erodes inward rather than
-                        // pretending the world continues.
-                        let neighbor = if nx < 0
-                            || ny < 0
-                            || nx as usize >= self.width
-                            || ny as usize >= self.height
-                        {
+                        let neighbor = if nx < 0 || nx as usize >= self.width {
                             false
                         } else {
-                            self.bits[ny as usize * self.width + nx as usize]
+                            self.bits[row + nx as usize]
                         };
                         if dilate && neighbor {
                             value = true;
