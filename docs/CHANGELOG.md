@@ -4,6 +4,12 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+- Mesh booleans are byte-reproducible across runs. Two independent
+  sources of run-to-run drift are fixed: `HashMap` iteration order in
+  `boolean45`, and `Rc::as_ptr` heap-address tie-breaks in the ear-clip
+  comparators, which clipped equal-cost ears in a different order each
+  run ([#108](https://github.com/axiolid/kernel/issues/108)).
+
 - The threading page no longer documents dispatch-level pool
   scoping as shipped behaviour. `MeshBooleanRegistry::with_execution`
   and a `parallel` feature on `axiolid-dispatch` do not exist; the

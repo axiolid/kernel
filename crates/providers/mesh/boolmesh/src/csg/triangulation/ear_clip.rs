@@ -300,7 +300,10 @@ struct EvPtrMaxPosX(EvPtr, Rect);
 impl Eq for EvPtrMinCost {}
 impl PartialEq for EvPtrMinCost {
     fn eq(&self, other: &Self) -> bool {
-        self.0.borrow().cost == other.0.borrow().cost && Rc::ptr_eq(&self.0, &other.0)
+        // Must agree with `Ord` below: identity is the stable vertex index,
+        // not the heap address (kernel#108). A `BTreeSet` whose `Eq` and
+        // `Ord` disagree silently loses or duplicates entries.
+        self.0.borrow().cost == other.0.borrow().cost && self.0.borrow().idx == other.0.borrow().idx
     }
 }
 impl PartialOrd for EvPtrMinCost {
@@ -316,9 +319,11 @@ impl Ord for EvPtrMinCost {
             .partial_cmp(&other.0.borrow().cost)
             .unwrap_or(Ordering::Equal)
             .then_with(|| {
-                let ptr1 = Rc::as_ptr(&self.0) as usize;
-                let ptr2 = Rc::as_ptr(&other.0) as usize;
-                ptr1.cmp(&ptr2)
+                // Tie-break on the stable vertex index, NOT on `Rc::as_ptr`.
+                // Heap addresses vary between runs, so an address tie-break
+                // clipped equal-cost ears in a different order each time and
+                // made the triangulation nondeterministic (kernel#108).
+                self.0.borrow().idx.cmp(&other.0.borrow().idx)
             })
     }
 }
@@ -326,7 +331,9 @@ impl Ord for EvPtrMinCost {
 impl Eq for EvPtrMaxPosX {}
 impl PartialEq for EvPtrMaxPosX {
     fn eq(&self, other: &Self) -> bool {
-        self.0.borrow().pos.x == other.0.borrow().pos.x && Rc::ptr_eq(&self.0, &other.0)
+        // Identity is the stable vertex index, matching `Ord` (kernel#108).
+        self.0.borrow().pos.x == other.0.borrow().pos.x
+            && self.0.borrow().idx == other.0.borrow().idx
     }
 }
 impl PartialOrd for EvPtrMaxPosX {
@@ -344,9 +351,9 @@ impl Ord for EvPtrMaxPosX {
             .partial_cmp(&self.0.borrow().pos.x)
             .unwrap_or(Ordering::Equal)
             .then_with(|| {
-                let ptr1 = Rc::as_ptr(&self.0) as usize;
-                let ptr2 = Rc::as_ptr(&other.0) as usize;
-                ptr1.cmp(&ptr2)
+                // Stable index tie-break, same reason as `EvPtrMinCost`
+                // above (kernel#108).
+                self.0.borrow().idx.cmp(&other.0.borrow().idx)
             })
     }
 }

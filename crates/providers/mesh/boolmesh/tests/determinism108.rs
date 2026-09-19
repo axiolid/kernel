@@ -47,12 +47,12 @@ fn same_input_same_bytes_within_one_process() {
 
 /// The probe shape: ONE boolean against a fused multi-component tool.
 ///
-/// Committed failing-but-ignored (kernel#108): `subtract_many` is stable,
-/// but a single boolean against a DISCONNECTED tool permutes connectivity
-/// run to run. Positions are byte-identical; only `Half` ordering drifts,
-/// and it is already present in `triangulate` output.
+/// Regression test for kernel#108. This permuted connectivity run to run
+/// while `subtract_many` stayed stable: positions were byte-identical and
+/// only `Half` ordering drifted. Two independent causes, both fixed —
+/// `HashMap` iteration in `boolean45`, and `Rc::as_ptr` tie-breaks in the
+/// ear-clip comparators. Removing either one alone makes this fail again.
 #[test]
-#[ignore = "known defect, see axiolid/kernel#108"]
 fn fused_multicomponent_tool_is_stable() {
     let p = BoolmeshBoolean::new();
     let o = ExecutionOptions::new(Tolerance::MILLIMETRE);

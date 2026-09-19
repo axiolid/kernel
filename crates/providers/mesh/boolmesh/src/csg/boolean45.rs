@@ -5,7 +5,7 @@ use crate::csg::boolean03::Boolean03;
 use crate::csg::bounds::BBox;
 use crate::csg::OpType;
 use crate::csg::{face_of, Half, Manifold, Real, Tref, Vec3};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::mem;
 
 fn duplicate_verts(inc: &[i32], vt_r: &[i32], ps_p: &[Vec3], ps_r: &mut [Vec3], vid: usize) {
@@ -200,9 +200,9 @@ struct EdgePt {
 /// them as one value keeps the two maps' relationship explicit.
 struct EdgePoints<'a> {
     /// New vertices lying on an existing halfedge.
-    on_edge: &'a mut HashMap<usize, Vec<EdgePt>>,
+    on_edge: &'a mut BTreeMap<usize, Vec<EdgePt>>,
     /// New vertices interior to a face pair.
-    on_face: &'a mut HashMap<(usize, usize), Vec<EdgePt>>,
+    on_face: &'a mut BTreeMap<(usize, usize), Vec<EdgePt>>,
 }
 
 fn add_new_edge_verts(
@@ -322,7 +322,7 @@ fn append_partial_edges(
     ps_p: &[Vec3],
     ps_r: &[Vec3], // the vert pos of mfd_r, already fulfilled so far
     out: &mut ResultEdges,
-    pt_p: &mut HashMap<usize, Vec<EdgePt>>, //
+    pt_p: &mut BTreeMap<usize, Vec<EdgePt>>, //
     whole_flag: &mut [bool], // a flag to find out a halfedge from mfd_p is entirely usable in mfd_r
 ) -> Result<(), String> {
     for (hid_p, pt) in pt_p {
@@ -399,7 +399,7 @@ fn append_new_edges(
     ps_r: &[Vec3],    // the vert pos of mfd_r, already fulfilled so far
     fid_pq2r: &[i32], //
     nf_p: usize,      // num of faces in mfd_p
-    pt_new: &mut HashMap<(usize, usize), Vec<EdgePt>>,
+    pt_new: &mut BTreeMap<(usize, usize), Vec<EdgePt>>,
     out: &mut ResultEdges,
 ) -> Result<(), String> {
     for ((fid_p, fid_q), pt_init) in pt_new.iter_mut() {
@@ -580,9 +580,9 @@ pub fn boolean45(
         duplicate_verts(&w.i21, &vid_21r, &b03.v21, &mut ps_r, i);
     }
 
-    let mut pt_p = HashMap::new();
-    let mut pt_q = HashMap::new();
-    let mut pt_new = HashMap::new();
+    let mut pt_p = BTreeMap::new();
+    let mut pt_q = BTreeMap::new();
+    let mut pt_new = BTreeMap::new();
     add_new_edge_verts(
         &b03.p1q2,
         &w.i12,
