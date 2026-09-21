@@ -124,14 +124,40 @@ def main() -> None:
             "--quiet",
             "--exclude-lockfile",
         ]
+        # The facade compiles nothing without a capability feature by design
+        # (kernel#9), so verifying its tarball with default features would hit
+        # its own `compile_error!`. It is packaged separately with `standard`
+        # -- the migration target its diagnostic recommends -- so the tarball
+        # is still verified rather than merely skipped.
+        FACADE = "axiolid"
+        facade_publishable = any(p["name"] == FACADE for p in publishable)
         for package in excluded:
             command.extend(["--exclude", package["name"]])
+        if facade_publishable:
+            command.extend(["--exclude", FACADE])
         if args.allow_dirty:
             command.append("--allow-dirty")
         command.extend(["--config", str(patch_config)])
         environment = os.environ.copy()
         environment["CARGO_TARGET_DIR"] = str(patched_target)
         subprocess.run(command, cwd=ROOT, env=environment, check=True)
+
+        if facade_publishable:
+            facade_command = [
+                CARGO,
+                "package",
+                "--locked",
+                "--quiet",
+                "--exclude-lockfile",
+                "-p",
+                FACADE,
+                "--features",
+                "standard",
+            ]
+            if args.allow_dirty:
+                facade_command.append("--allow-dirty")
+            facade_command.extend(["--config", str(patch_config)])
+            subprocess.run(facade_command, cwd=ROOT, env=environment, check=True)
 
         expected = {
             f'{package["name"]}-{package["version"]}.crate' for package in publishable
