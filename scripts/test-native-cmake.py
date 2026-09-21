@@ -204,6 +204,17 @@ def assert_strict_undeclared_call(consumer: Path) -> None:
             raise RuntimeError(
                 f"consumer must promote implicit declarations to errors: {needed} missing"
             )
+    # The Mach-O eager-resolution flag is asserted for the same reason, and it
+    # needs asserting MORE than the others: no Linux run exercises it, so
+    # deleting it leaves every local and ubuntu CI job green while the macOS
+    # gate quietly stops proving anything. That is the exact shape of the
+    # original kernel#56 blind spot, so it is checked by text rather than by
+    # a platform that happens to be running.
+    if "-undefined,error" not in text:
+        raise RuntimeError(
+            "consumer must ask Mach-O to resolve undefined symbols eagerly: "
+            "-undefined,error missing (no non-Apple job can catch this)"
+        )
 
 
 def assert_package_mutations(
