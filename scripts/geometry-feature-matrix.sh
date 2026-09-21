@@ -11,7 +11,20 @@ step() {
     printf 'ok\n'
 }
 
-step "axiolid facade: core only" cargo check -q -p axiolid --no-default-features
+# A featureless facade must REFUSE to build (kernel#9). Asserting the failure,
+# not tolerating it: if this ever succeeds, `default = []` has been undone or
+# the diagnostic has been dropped, and consumers are silently paying for
+# geometry again.
+printf '%-46s' "axiolid facade: no features refuses"
+if cargo check -q -p axiolid --no-default-features >/dev/null 2>&1; then
+    printf 'FAIL (a featureless facade built; the compile_error is gone)\n'
+    fail=1
+else
+    printf 'ok\n'
+fi
+
+# `standard` is the migration target the diagnostic names, so it has to work.
+step "axiolid facade: standard bundle" cargo check -q -p axiolid --no-default-features --features standard
 
 features=(
     mesh profiles curves surfaces topology primitives model
@@ -19,14 +32,17 @@ features=(
     contracts mesh-contracts mesh-boolean mesh-section graph-compile
     dispatch-mesh-boolean dispatch-mesh-section generate
     cpu parallel simd gpu
-    discrete parametric advanced full
+    standard discrete parametric advanced full
 )
 for feature in "${features[@]}"; do
     step "axiolid facade feature: ${feature}" \
         cargo check -q -p axiolid --no-default-features --features "$feature"
 done
 
-step "axiolid facade: defaults" cargo test -q -p axiolid
+# `standard` is what a consumer gets by following the migration note, so its
+# tests are the ones that stand in for "the default build" now that the real
+# default compiles nothing.
+step "axiolid facade: standard tests" cargo test -q -p axiolid --no-default-features --features standard
 step "axiolid facade: all features" cargo test -q -p axiolid --all-features
 
 step "common contracts" cargo test -q -p axiolid-contracts

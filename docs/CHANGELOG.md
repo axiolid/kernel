@@ -4,6 +4,17 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: the `axiolid` facade now defaults to no features
+  (`default = []`). A consumer names the capability they need and compiles
+  only that; the previous default is available in one line as
+  `features = ["standard"]`. Building with no capability feature raises a
+  `compile_error!` that names the task-to-feature mapping, the bundles, and
+  the provider-vs-contract distinction, so the failure explains itself
+  instead of surfacing as "method not found" at every call site
+  ([#9](https://github.com/axiolid/kernel/issues/9)).
+
 - Planar-mask dilation and erosion decompose the Euclidean
   structuring element into one contiguous span per row, dropping the
   per-cell cost from O(steps^2) to O(steps): 1.8-2.0x faster on

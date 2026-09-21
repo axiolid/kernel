@@ -10,7 +10,13 @@ homepage.workspace = true
 readme.workspace = true
 
 [features]
-default = ["mesh", "cpu", "integration"]
+# Pay-for-what-you-use: naming no feature compiles no geometry (kernel#9).
+# `src/lib.rs` turns that into a `compile_error!` naming the options, because
+# an empty facade otherwise fails as "method not found" at every call site.
+#
+# `standard` is exactly the pre-0.4 default, so migrating is one line.
+default = []
+standard = ["mesh", "cpu", "integration"]
 integration = ["contracts"]
 
 # Representation capabilities. These features are additive.

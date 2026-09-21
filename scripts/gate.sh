@@ -43,7 +43,15 @@ step "semver mutation probe" scripts/probe_semver_gate.sh
 isolated_targets="$(python3 scripts/isolated-build-targets.py)" || { echo "cannot derive isolated build targets"; exit 1; }
 [ -n "$isolated_targets" ] || { echo "isolated build target list is empty"; exit 1; }
 for c in $isolated_targets; do
-  step "isolated build -p $c" cargo build -p "$c"
+  # The facade compiles nothing without a capability feature by design
+  # (kernel#9), so "builds standalone" means "builds standalone once a
+  # consumer names what they want". `standard` is the migration target the
+  # crate's own diagnostic recommends, so it is what gets proven here.
+  if [ "$c" = "axiolid" ]; then
+    step "isolated build -p $c (standard)" cargo build -p "$c" --features standard
+  else
+    step "isolated build -p $c" cargo build -p "$c"
+  fi
 done
 echo
 [ "$fail" -eq 0 ] && echo "GATE PASSED" || echo "GATE FAILED"

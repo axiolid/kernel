@@ -2,10 +2,12 @@
 
 //! Feature-gated facade for Axiolid geometry.
 //!
-//! The default build is intentionally small: core values, meshes, and the
-//! portable CPU backend shell. Exact curves/surfaces/topology, algorithms,
-//! parallel scheduling, and GPU adapters are opt-in. Leaf crates remain public
-//! for consumers that want an even narrower dependency graph.
+//! Nothing is compiled unless it is asked for: `default = []`, so a consumer
+//! names the capability they need and pays for that alone (kernel#9). Building
+//! with no feature at all raises a `compile_error!` listing the options rather
+//! than leaving an empty crate whose every call site fails as "not found".
+//! `standard` reproduces the pre-0.4 default (`mesh + cpu + integration`) for
+//! consumers who want the old behaviour in one line.
 //!
 //! # Exact geometry is the primary currency
 //!
@@ -23,6 +25,69 @@
 //!   approximation cannot later be mistaken for an exact value.
 //!
 //! `tests/exact_primary.rs` holds this to account (kernel#36).
+
+// No capability feature is enabled, so this crate would compile to an empty
+// facade and every call site would fail with a confusing "not found in this
+// scope" error instead of naming the real cause (kernel#9). Fail loudly here.
+//
+// The guard lists ONE feature per capability family rather than every
+// feature: each family entry is implied by its own bundle, so a consumer who
+// enabled `brep` (which implies `surfaces` -> `curves` -> `linear`) already
+// satisfies it. Listing leaves instead would make this fire spuriously.
+#[cfg(not(any(
+    feature = "mesh",
+    feature = "linear",
+    feature = "predicates",
+    feature = "profiles",
+    feature = "curves",
+    feature = "primitives",
+    feature = "overlay",
+    feature = "field",
+    feature = "pointcloud",
+    feature = "contracts",
+    feature = "cpu",
+)))]
+compile_error!(
+    r#"the `axiolid` facade has no capability features enabled, so it exports nothing.
+
+As of 0.4 `default = []`: this crate is pay-for-what-you-use and compiles only
+the geometry you name. Add at least one feature in Cargo.toml.
+
+MIGRATING FROM <=0.3 (default was `mesh + cpu + integration`):
+    axiolid = { version = "0.4", features = ["standard"] }
+
+PICK BY TASK -- narrowest feature that does the job:
+    triangle meshes, no operations .. "mesh"
+    line/plane/ray intersection ..... "linear-intersection"
+    volume, area, centroid .......... "measure"
+    ray casting against a mesh ...... "ray-mesh"
+    boolean union/difference ........ "application"
+    planar section / contours ....... "application"
+    NURBS curves and surfaces ....... "nurbs"
+    exact B-rep topology ............ "brep"
+    tessellate exact -> mesh ........ "tessellation"
+    point clouds to mesh ............ "pointcloud-provider"
+    2D fields, morphology ........... "field-ops"
+    mesh repair / healing ........... "heal"
+
+BUNDLES -- use when you want breadth over a minimal build:
+    "standard" ... the pre-0.4 default: mesh + cpu + integration
+    "discrete" ... mesh stack: booleans, sections, measure, spatial, generate
+    "parametric" . exact stack: curves, surfaces, topology, NURBS
+    "advanced" ... discrete + parametric + heal
+    "full" ....... everything, including parallel/simd/gpu adapters
+
+IMPORTANT -- features are ADDITIVE and imply their prerequisites, so name the
+capability you need, not its dependencies. "brep" already pulls surfaces,
+curves and linear; adding them by hand only widens your build.
+
+Operations that dispatch to a provider (booleans, sections) need BOTH a
+contract and a registered provider. "application" is the supported
+combination; "mesh-boolean" alone gives you the trait with nothing behind it.
+
+Full matrix: `cargo metadata` on this crate, or docs/architecture/closure-profiles.md
+for the exact crate set each profile compiles."#
+);
 
 /// Versioned description of the compiled downstream surface.
 #[cfg(feature = "integration")]
