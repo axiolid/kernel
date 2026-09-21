@@ -144,6 +144,94 @@ def install_source_package(
     )
 
 
+def diagnose_unexpected_build(
+    consumer: Path,
+    build: Path,
+    build_type: str,
+    env: dict[str, str],
+    build_log: str,
+) -> str:
+    """Explain WHY a mutation that should have failed compiled anyway.
+
+    A mutation gate that reports only "unexpectedly built" cannot be debugged
+    from a CI log, and kernel#56 has now survived one fix attempt because the
+    failure carried no evidence: the diagnosis has to be inferred from a
+    platform nobody working on it can reach. This gathers, on the failure path
+    only, the three things that discriminate between the plausible causes.
+
+    1. Whether the mutation reached the sources that were compiled. If the
+       original symbol is still present, the copied tree was not mutated (or a
+       stale tree was built) and no linker theory is needed.
+    2. Whether the C++ target was actually built. An undeclared call is a hard
+       error in C++ regardless of flags, so a genuinely mutated C++ target that
+       links proves the mutation never reached the compiler.
+    3. The compile and link commands, recovered by re-running the build
+       verbosely, so the actual flags in effect on that toolchain are visible
+       rather than assumed from the CMakeLists.
+    """
+    lines = ["", "--- kernel#56 mutation diagnostic ---"]
+
+    lines.append("sources in the tree that was built:")
+    for name in ("main.c", "main.cpp"):
+        source = consumer / name
+        if not source.exists():
+            lines.append(f"  {name}: MISSING")
+            continue
+        text = source.read_text(encoding="utf-8")
+        original = text.count("axiolid_v0_4_version")
+        removed = text.count("axiolid_v0_4_removed_symbol")
+        state = "MUTATED" if removed and not original else "NOT MUTATED"
+        if original and removed:
+            state = "PARTIALLY MUTATED"
+        lines.append(
+            f"  {name}: {state} (original={original} removed={removed})"
+        )
+
+    lines.append("artifacts produced:")
+    produced = sorted(
+        path.name
+        for path in build.rglob("*")
+        if path.is_file() and os.access(path, os.X_OK) and "consumer" in path.name
+    )
+    lines.append(f"  {produced or 'none matching *consumer*'}")
+
+    # The captured log is from a non-verbose build, so it shows what was
+    # compiled but not with which flags. Re-running verbosely after a clean is
+    # the only way to recover the actual command lines from a remote runner.
+    lines.append("verbose rebuild (command lines in effect on this toolchain):")
+    verbose = subprocess.run(
+        [
+            "cmake",
+            "--build",
+            str(build),
+            "--config",
+            build_type,
+            "--clean-first",
+            "--verbose",
+        ],
+        env=env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    interesting = [
+        line
+        for line in verbose.stdout.splitlines()
+        if any(
+            token in line
+            for token in ("main.c", "main.cpp", "-o ", "undefined", "4013", "Werror")
+        )
+    ]
+    lines.extend(f"  {line.strip()}" for line in interesting[-40:] or ["  (none)"])
+    lines.append(f"verbose rebuild exit: {verbose.returncode}")
+
+    lines.append("original build log (tail):")
+    lines.extend(f"  {line}" for line in build_log.splitlines()[-25:])
+    lines.append("--- end diagnostic ---")
+    return "\n".join(lines)
+
+
 def expect_consumer_failure(
     consumer: Path,
     build: Path,
@@ -186,7 +274,10 @@ def expect_consumer_failure(
         stderr=subprocess.STDOUT,
     )
     if built.returncode == 0:
-        raise RuntimeError(f"mutated consumer unexpectedly built: {consumer.name}")
+        raise RuntimeError(
+            f"mutated consumer unexpectedly built: {consumer.name}\n"
+            + diagnose_unexpected_build(consumer, build, build_type, env, built.stdout)
+        )
 
 
 def assert_strict_undeclared_call(consumer: Path) -> None:
