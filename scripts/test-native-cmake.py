@@ -308,6 +308,52 @@ def assert_strict_undeclared_call(consumer: Path) -> None:
         )
 
 
+# Whether removing the static runtime-link closure can be *proved* to break a
+# consumer on this platform.
+#
+# On Linux the closure is "dl;pthread;m" and on Windows it is "kernel32.lib;
+# ntdll.lib;..." -- Rust's std references those symbols unconditionally, so
+# deleting the declaration makes the link fail and the mutation is meaningful.
+#
+# On macOS the closure is "-framework CoreFoundation;-framework Security".
+# Those are declared defensively for the whole library, but the object files a
+# small consumer actually pulls out of the archive do not reference them, and
+# libSystem already supplies the dl/pthread/m equivalents. So the link succeeds
+# without the declaration and the mutation proves nothing -- which is why every
+# macOS STATIC job failed with "mutated consumer unexpectedly built" while
+# Linux and Windows passed (kernel#56).
+#
+# This is a property of the platform's link model, not a defect in the package,
+# so the mutation is replaced by a declaration check rather than deleted.
+RUNTIME_LINKS_ARE_OPTIONAL = sys.platform == "darwin"
+
+
+def assert_runtime_links_declared(package_root: Path) -> None:
+    """Assert the static target still declares a runtime-link closure.
+
+    Used where the removal mutation cannot discriminate. Weaker than proving a
+    consumer breaks, and deliberately so: asserting the declaration exists
+    still catches a packaging change that drops it entirely, which is the
+    failure the mutation was written to catch. Stated rather than skipped so
+    the reduced guarantee is visible in the output.
+    """
+    targets = package_root / "lib/cmake/Axiolid/AxiolidTargets.cmake"
+    text = targets.read_text(encoding="utf-8")
+    match = re.search(
+        r'^  INTERFACE_LINK_LIBRARIES "([^"]*)"$', text, flags=re.MULTILINE
+    )
+    if match is None:
+        raise RuntimeError(
+            "static target declares no INTERFACE_LINK_LIBRARIES: a consumer "
+            "would have to guess the runtime-link closure"
+        )
+    if not match.group(1).strip():
+        raise RuntimeError(
+            "static target declares an empty runtime-link closure: "
+            f"{match.group(0)!r}"
+        )
+
+
 def assert_package_mutations(
     consumer: Path,
     package_root: Path,
@@ -378,7 +424,7 @@ def assert_package_mutations(
             raise RuntimeError(
                 "static package declares no runtime-link closure to test"
             )
-        if mutated != original:
+        if mutated != original and not RUNTIME_LINKS_ARE_OPTIONAL:
             targets.write_text(mutated, encoding="utf-8")
             expect_consumer_failure(
                 consumer,
@@ -390,6 +436,9 @@ def assert_package_mutations(
                 configure_may_fail=False,
             )
             mutations.append("runtime links")
+        elif mutated != original:
+            assert_runtime_links_declared(package_root)
+            mutations.append("runtime links declared")
     print(f"native package mutations rejected: {', '.join(mutations)}")
 
 
