@@ -123,3 +123,55 @@ fn surface_centroid_stays_on_the_solid_at_large_coordinates() {
     let rel = ((props.area - want_area) / want_area).abs();
     assert!(rel < 1e-7, "surface area relative error {rel:.3e}");
 }
+
+/// Thin features stay accurate at survey coordinates.
+///
+/// A 1e-6 m plate at base 1e7 is the worst realistic conditioning case for
+/// the divergence-theorem sum: the enclosed volume is fifteen
+/// orders of magnitude smaller than the coordinates forming it.
+///
+/// This exists because a proposed "improvement" -- re-basing per-triangle
+/// instead of per-mesh -- was measured and found to be WORSE here by six
+/// orders of magnitude (9.3e-10 against production's 1.4e-16). Per-mesh
+/// re-basing shrinks all three operands of `a . (b x c)`; the per-triangle
+/// form leaves `a` at full world magnitude. The bound below would catch
+/// that regression.
+#[test]
+fn thin_plates_stay_accurate_at_survey_coordinates() {
+    for &base in &[0.0f64, 1.0e3, 1.0e5, 1.0e6, 1.0e7] {
+        for &thickness in &[1.0e-2f64, 1.0e-4, 1.0e-6] {
+            let plate = plate(base, thickness);
+            let measured = volume_properties(&plate, Tolerance::METRE)
+                .expect("a closed plate is volume-usable")
+                .signed_volume
+                .abs();
+            let relative = ((measured - thickness) / thickness).abs();
+            assert!(
+                relative < 1.0e-12,
+                "a {thickness:.0e} m plate at origin {base:e} measured with \
+                 relative error {relative:.3e}"
+            );
+        }
+    }
+}
+
+/// A 1x1 plate of the given thickness, corner at (base, base, 0).
+fn plate(base: f64, thickness: f64) -> TriMesh {
+    let p = |dx: f64, dy: f64, dz: f64| Point3::new(base + dx, base + dy, dz);
+    TriMesh::new(
+        vec![
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(1.0, 1.0, 0.0),
+            p(0.0, 1.0, 0.0),
+            p(0.0, 0.0, thickness),
+            p(1.0, 0.0, thickness),
+            p(1.0, 1.0, thickness),
+            p(0.0, 1.0, thickness),
+        ],
+        vec![
+            0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7,
+            6, 3, 0, 4, 3, 4, 7,
+        ],
+    )
+}

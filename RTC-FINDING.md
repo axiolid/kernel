@@ -93,20 +93,6 @@ model.
 limit, keep these probes as regression tests, and revisit only if a real
 workload produces a failure that these probes do not cover.
 
-The cheap follow-up, **now measured rather than suggested**: have the volume
-sum re-base per-triangle instead of per-mesh. Same divergence-theorem
-identity, but each term is formed from edge-sized quantities:
-
-```
-REBASE base=1e7  t=1e-2  per_mesh=6.913e0  per_triangle=4.042e-8
-REBASE base=1e7  t=1e-4  per_mesh=1.614e5  per_triangle=8.244e-6
-REBASE base=1e7  t=1e-6  per_mesh=2.965e8  per_triangle=1.193e-3
-```
-
-Up to **eleven orders of magnitude** better, contained entirely inside one
-function with no public API change. This is the whole remedy the RTC
-programme would have been built to deliver, and it does not need a
-coordinate-frame facility to get it.
 
 ## Reproducing
 
@@ -114,3 +100,41 @@ coordinate-frame facility to get it.
 cargo test -p axiolid-predicates --test survey_scale -- --nocapture
 cargo test -p axiolid-mesh-boolean-boolmesh --test survey_scale -- --nocapture
 ```
+
+## Correction: the per-triangle follow-up was measured against the wrong baseline
+
+An earlier revision of this document recommended re-basing the volume sum
+per-triangle instead of per-mesh, citing an eleven-orders-of-magnitude
+improvement. **That recommendation was wrong and is withdrawn.**
+
+The comparison used `boolmesh/tests/support.rs::volume` as the "per_mesh"
+baseline. That helper sums about the WORLD origin. Production
+`volume_properties` has summed about a local origin since the RTC fix
+(`fix(measure): sum mass properties about a local origin`), so the numbers
+compared a per-triangle variant against code that no longer exists in the
+measurement path.
+
+Measured against production directly, on the same thin-plate fixtures:
+
+```
+PLATE base=1e7 t=1e-2 production=0.000e0    per_triangle=9.313e-10
+PLATE base=1e7 t=1e-4 production=1.355e-16  per_triangle=5.069e-10
+PLATE base=1e7 t=1e-6 production=0.000e0    per_triangle=1.563e-10
+WORST                 production=1.355e-16  per_triangle=9.313e-10
+```
+
+Production is exact or within one ULP at every magnitude and thickness
+tested. The per-triangle variant is **worse at every non-zero magnitude**,
+by up to six orders of magnitude.
+
+Why: per-mesh re-basing subtracts a nearby origin once, so every coordinate
+entering the cross product is already edge-sized. The per-triangle variant
+still forms `a . (ab x ac)` with `a` at full world magnitude -- it shrinks
+two operands and leaves the third large. Per-mesh re-basing shrinks all
+three.
+
+**There is no remaining measurement defect to fix.** The thin-plate error
+reported in the step-1 probe belongs to the test helper, not to any shipped
+code path. The conclusion of this document stands unchanged and is now
+stronger: do not build the RTC facility, and do not change
+`volume_properties` either.
