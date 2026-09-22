@@ -53,7 +53,9 @@ pub use axiolid_predicates::{
     orient3d_filter, two_diff, two_product, two_sum, StaticFilter,
 };
 pub use boolean::ScalarBoolean;
-pub use convex_hull::{minimum_area_rectangle, strict_convex_hull, OrientedRectangle2};
+pub use convex_hull::{
+    minimum_area_rectangle, side_lengths, strict_convex_hull, OrientedRectangle2,
+};
 pub use intersection::{
     assemble_polylines, intersection_segments, EdgeKey, IntersectionCurve, IntersectionSegment,
     NodeKey, Operand, Polyline,

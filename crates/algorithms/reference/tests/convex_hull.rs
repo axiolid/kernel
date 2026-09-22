@@ -1,5 +1,5 @@
 use axiolid_core::Point2;
-use axiolid_reference::{minimum_area_rectangle, strict_convex_hull};
+use axiolid_reference::{minimum_area_rectangle, side_lengths, strict_convex_hull};
 
 fn p(x: f64, y: f64) -> Point2 {
     Point2::new(x, y)
@@ -23,7 +23,65 @@ fn rectangle_has_expected_dimensions() {
     let points = [p(0., 0.), p(3., 0.), p(3., 2.), p(0., 2.)];
     let rectangle = minimum_area_rectangle(&points).unwrap();
     assert_eq!(rectangle.area(), 6.0);
-    assert_eq!(rectangle.side_lengths(), [3.0, 2.0]);
+    assert_eq!(side_lengths(&rectangle), [2.0, 3.0]);
+}
+
+/// The rectangle really encloses the input, corner for corner.
+///
+/// `minimum_area_rectangle` now returns the shared `Rectangle2` instead of a
+/// local four-corner struct. Checking the area alone would not notice a
+/// rectangle built from the right dimensions in the wrong place, which is the
+/// mistake the origin-plus-edge-vectors form makes easy to introduce.
+#[test]
+fn rectangle_encloses_its_input_points() {
+    // Deliberately offset from the origin AND rotated. An axis-aligned box at
+    // the origin cannot distinguish a correctly placed rectangle from one
+    // built at the origin by mistake, because there both are the same answer.
+    let points = [p(11., 10.), p(14., 14.), p(10., 17.), p(7., 13.)];
+    let rectangle = minimum_area_rectangle(&points).unwrap();
+
+    let corners = rectangle.corners();
+    for point in points {
+        let hit = corners
+            .iter()
+            .any(|corner| (*corner - point).length() < 1e-9);
+        assert!(hit, "{point:?} is not a corner of {corners:?}");
+    }
+}
+
+/// A rotated square still yields its own area, not its axis-aligned bounds.
+///
+/// The diamond's axis-aligned box has twice the area, so this fails loudly if
+/// the caliper ever collapses to an `Aabb2`.
+#[test]
+fn rotated_input_keeps_the_oriented_area() {
+    let diamond = [p(1., 0.), p(2., 1.), p(1., 2.), p(0., 1.)];
+    let rectangle = minimum_area_rectangle(&diamond).unwrap();
+    assert!(
+        (rectangle.area() - 2.0).abs() < 1e-9,
+        "expected the rotated square's own area, got {}",
+        rectangle.area()
+    );
+}
+
+/// The caliper keeps the SMALLEST enclosing rectangle, not merely a valid one.
+///
+/// Every hull edge yields an enclosing rectangle, so a search that kept the
+/// largest still returns something plausible-looking with the right corners.
+/// Only comparing against the alternatives catches an inverted comparison.
+#[test]
+fn rectangle_is_minimal_across_every_hull_edge() {
+    // An obtuse triangle, chosen because its three hull edges give genuinely
+    // different rectangles: 12, 14.4 and 12.414. A right triangle is useless
+    // here -- all three of its edges give exactly 12, so keeping the largest
+    // would pass.
+    let triangle = [p(0., 0.), p(6., 0.), p(5., 2.)];
+    let rectangle = minimum_area_rectangle(&triangle).unwrap();
+    assert!(
+        (rectangle.area() - 12.0).abs() < 1e-9,
+        "expected the minimal 12, got {}",
+        rectangle.area()
+    );
 }
 
 #[test]

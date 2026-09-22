@@ -19,6 +19,14 @@ All notable changes to Axiolid are documented in this file.
 
 ### Changed
 
+- `minimum_area_rectangle` returns the shared `axiolid_core::Rectangle2`
+  instead of a local four-corner struct with a cached area. The edge-vector
+  form keeps the parallelogram property by construction, where four
+  independently stored corners could be edited into a non-parallelogram and a
+  cached area could disagree with them. `OrientedRectangle2` remains as an
+  alias, and side lengths moved to a `side_lengths` free function, sorted
+  shortest-first so the result does not depend on which hull edge the caliper
+  stopped on.
 - **BREAKING**: `Mat4` is now `glam::DMat4`, a general 4x4 matrix, instead of
   an alias for the affine `Transform3`. The old alias could not represent a
   perspective projection despite its name, so homogeneous division was

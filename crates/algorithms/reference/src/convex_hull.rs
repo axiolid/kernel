@@ -1,27 +1,29 @@
 //! Deterministic 2D convex hulls and oriented bounding rectangles.
 use crate::orient2d;
 use axiolid_contracts::{GeomError, GeomResult, Sign};
-use axiolid_core::{Point2, Scalar};
+use axiolid_core::{Point2, Rectangle2, Scalar};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OrientedRectangle2 {
-    corners: [Point2; 4],
-    area: Scalar,
-    sides: [Scalar; 2],
-}
-impl OrientedRectangle2 {
-    #[must_use]
-    pub fn corners(self) -> [Point2; 4] {
-        self.corners
-    }
-    #[must_use]
-    pub fn area(self) -> Scalar {
-        self.area
-    }
-    #[must_use]
-    pub fn side_lengths(self) -> [Scalar; 2] {
-        self.sides
-    }
+/// The oriented rectangle this module used to define itself.
+///
+/// Kept as an alias rather than a distinct type: it stored four corners plus a
+/// cached area and side pair, which is the same rectangle `Rectangle2` models
+/// as an origin and two edge vectors, and having two spellings of one concept
+/// forced every caller to convert. The edge-vector form is also the one that
+/// cannot drift -- four independently stored corners can be edited into a
+/// non-parallelogram, and the cached area can disagree with them.
+pub type OrientedRectangle2 = Rectangle2;
+
+/// Side lengths of an oriented rectangle, shortest edge first.
+///
+/// A free function rather than an inherent method because `Rectangle2` lives
+/// in `axiolid-core`, which holds data and no algorithms. Ordering is fixed so
+/// the result does not depend on which hull edge the caliper happened to stop
+/// on.
+#[must_use]
+pub fn side_lengths(rectangle: &Rectangle2) -> [Scalar; 2] {
+    let mut sides = [rectangle.x.length(), rectangle.y.length()];
+    sides.sort_by(|left, right| left.total_cmp(right));
+    sides
 }
 
 pub fn strict_convex_hull(points: &[Point2]) -> GeomResult<Vec<usize>> {
@@ -63,7 +65,11 @@ pub fn strict_convex_hull(points: &[Point2]) -> GeomResult<Vec<usize>> {
 
 pub fn minimum_area_rectangle(points: &[Point2]) -> GeomResult<OrientedRectangle2> {
     let hull = strict_convex_hull(points)?;
-    let mut best: Option<OrientedRectangle2> = None;
+    let mut best: Option<Rectangle2> = None;
+    // Tracked beside the rectangle because `Rectangle2` deliberately stores no
+    // cached area: recomputing it per candidate is a multiply, and a cached
+    // field is one more thing that can disagree with the geometry.
+    let mut best_area: Option<Scalar> = None;
     for i in 0..hull.len() {
         let a = points[hull[i]];
         let b = points[hull[(i + 1) % hull.len()]];
@@ -88,18 +94,12 @@ pub fn minimum_area_rectangle(points: &[Point2]) -> GeomResult<OrientedRectangle
         }
         let sides = [uhi - ulo, vhi - vlo];
         let area = sides[0] * sides[1];
-        let make = |x, y| u * x + v * y;
-        let rectangle = OrientedRectangle2 {
-            corners: [
-                make(ulo, vlo),
-                make(uhi, vlo),
-                make(uhi, vhi),
-                make(ulo, vhi),
-            ],
-            area,
-            sides,
-        };
-        if best.as_ref().is_none_or(|current| area < current.area) {
+        // Origin plus two edge vectors, rather than four corners: the
+        // parallelogram property then holds by construction instead of being
+        // an invariant four separately stored points could violate.
+        let rectangle = Rectangle2::new(u * ulo + v * vlo, u * sides[0], v * sides[1]);
+        if best_area.is_none_or(|current| area < current) {
+            best_area = Some(area);
             best = Some(rectangle);
         }
     }
