@@ -16,9 +16,9 @@ axiolid-predicates.workspace = true
 
 [package.metadata.axiolid]
 architecture-version = 1
-layer = "representations"
-role = "representation.region"
-domain = "region.arrangement"
+layer = "algorithms"
+role = "algorithm.planar"
+domain = "planar.arrangement"
 public = true
 format-neutral = true
 allowed-internal-dependencies = ["axiolid-core", "axiolid-guarantees", "axiolid-predicates"]

@@ -31,7 +31,7 @@ use support::{boxx, volume};
 /// without losing a slab of volume.
 #[test]
 fn origin_scale_booleans_are_accurate_to_a_few_ulp() {
-    let provider = BoolmeshBoolean::default();
+    let provider = BoolmeshBoolean;
     let options = ExecutionOptions::new(Tolerance::METRE);
     let host = boxx(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0);
 

@@ -12,7 +12,8 @@
 //!
 //! When the shapes are apart it also reports **how far** apart, because that
 //! is the question a rule check asks: not "do these collide" but "is there
-//! enough clearance". [`axiolid_inspect`]'s mesh clearance answers the same
+//! enough clearance". The `axiolid-inspect` crate's mesh clearance answers
+//! the same
 //! question for triangle soups; this answers it for convex shapes without
 //! building an index.
 //!
