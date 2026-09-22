@@ -14,6 +14,26 @@
 //! nothing to a union, but silently discarding it hides the difference between
 //! "this mesh is edge-on" and "this mesh is empty".
 //! The count is therefore reported in [`ProjectionEvidence`].
+//!
+//! # A projection is geometry, not a footprint
+//!
+//! [`project_mesh`] answers exactly one question: which points of the plane
+//! does this mesh cover. It does not decide *which* mesh to project, *which*
+//! plane counts as the reference, or which parts of a building should have
+//! been included. Those are the questions that turn a projection into a
+//! footprint, a shadow, a clash silhouette, or a formwork outline, and they
+//! have different answers per consumer.
+//!
+//! Concretely, two downstream users asking for "the footprint" will disagree
+//! about overhangs, balconies, and structure below grade. A kernel that picked
+//! one of those answers would be wrong for the other user and would hide the
+//! choice inside a function whose name implied there was nothing to choose.
+//! The same split applies elsewhere in this kernel: a clearance query reports
+//! a distance and refuses to call it adequate.
+//!
+//! So the mechanical half lives here -- project, union, preserve holes, report
+//! evidence -- and the naming, plane selection, and inclusion rules live with
+//! the consumer that has a reason to prefer one rule over another.
 
 use axiolid_core::{PlaneFrame, Point2, Tolerance};
 use axiolid_mesh::TriangleMeshView;

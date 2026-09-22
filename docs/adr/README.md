@@ -50,3 +50,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0047](./0047-absorb-mesh-boolean.md) | Absorb the mesh boolean into the provider crate |
 | [0048](./0048-coplanar-seam-merging.md) | Coplanar seam merging across chained booleans |
 | [0065](./0065-ownership-replaces-mutable-mirror-types.md) | Ownership replaces read-only/mutable type pairs |
+| [0066](./0066-domain-interpretations-stay-downstream.md) | Domain interpretations stay downstream of the kernel |

@@ -5,7 +5,7 @@
 
 use axiolid_core::{FrameError, Point2, Point3, Tolerance, Vec3};
 use axiolid_mesh::TriMesh;
-use axiolid_overlay::{total_area, Polygon, Ring};
+use axiolid_overlay::{total_area, union_soup, Polygon, Ring};
 use axiolid_project::{intersect_prism, project_mesh, Plane, ProjectionError};
 
 fn tol() -> Tolerance {
@@ -221,4 +221,100 @@ fn an_out_of_range_index_is_refused() {
     );
     let error = project_mesh(&broken, Plane::ground(), tol()).expect_err("index 9 does not exist");
     assert_eq!(error, ProjectionError::IndexOutOfRange);
+}
+
+/// Two conflicting "footprint" rules compose over one projection (ADR 0066).
+///
+/// The kernel deliberately ships no `Footprint` type, because the word does
+/// not denote a fixed set of points: consumers disagree about whether an
+/// overhang counts. This test stands in for those consumers and shows the
+/// disagreement is expressible downstream, without either rule living in the
+/// kernel and without re-running the geometry.
+///
+/// If a future change pushed one inclusion rule into `project_mesh`, one of
+/// these two expectations would become unreachable -- which is exactly the
+/// failure the ADR exists to prevent.
+#[test]
+fn conflicting_inclusion_rules_compose_over_one_projection() {
+    // A 2x1 slab at z = 0 with a 1x1 overhang at z = 1, offset in +x.
+    let base = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+    let overhang = TriMesh::new(
+        vec![
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(2.0, 0.0, 1.0),
+            Point3::new(2.0, 1.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+
+    let plane = Plane::ground();
+    let base_projection = project_mesh(&base, plane, tol()).expect("base projects");
+    let overhang_projection = project_mesh(&overhang, plane, tol()).expect("overhang projects");
+
+    // Rule A -- "structure touching the ground": the overhang is excluded.
+    let excluding = total_area(&base_projection.polygons);
+    assert!(
+        (excluding - 1.0).abs() < 1e-9,
+        "grounded-only rule should see 1.0, saw {excluding}"
+    );
+
+    // Rule B -- "anything covering the site": the overhang is included. Both
+    // rules read the same projections and differ only in what they combine.
+    //
+    // Unioned rather than area-summed. `total_area` adds polygon areas, so
+    // summing would double-count wherever parts overlap and would report 2.0
+    // even for an overhang sitting directly above the base. A footprint is the
+    // area covered, not the area of material.
+    let combined: Vec<Ring> = base_projection
+        .polygons
+        .iter()
+        .chain(overhang_projection.polygons.iter())
+        .map(|polygon| polygon.outer.clone())
+        .collect();
+    let merged = union_soup(&combined, tol()).expect("projections union");
+    let including = total_area(&merged);
+    assert!(
+        (including - 2.0).abs() < 1e-9,
+        "covering rule should see 2.0, saw {including}"
+    );
+
+    // The point of the ADR: the geometry is identical, the answers are not.
+    assert!(
+        including > excluding,
+        "the two rules must be able to disagree"
+    );
+
+    // And an overhang stacked directly above the base adds no covered area,
+    // which is what makes this a union and not a sum.
+    let stacked = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+            Point3::new(0.0, 1.0, 1.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+    let stacked_projection = project_mesh(&stacked, plane, tol()).expect("stack projects");
+    let overlapping: Vec<Ring> = base_projection
+        .polygons
+        .iter()
+        .chain(stacked_projection.polygons.iter())
+        .map(|polygon| polygon.outer.clone())
+        .collect();
+    let overlapped = union_soup(&overlapping, tol()).expect("overlap unions");
+    let covered = total_area(&overlapped);
+    assert!(
+        (covered - 1.0).abs() < 1e-9,
+        "stacked geometry covers 1.0, not 2.0; saw {covered}"
+    );
 }
