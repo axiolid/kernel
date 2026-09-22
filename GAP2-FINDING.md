@@ -82,3 +82,45 @@ boolean kernels, and it fixes the measure and the mesh too.
    origin scale, documented degradation at 1e6+, so the limit is stated
    rather than discovered by a user with a site survey in national grid
    coordinates.
+
+---
+
+## Resolution (follow-up commit)
+
+The RTC/local-origin fix landed in `axiolid-measure`, not in the boolean.
+
+`volume_properties` and `surface_properties` now sum about a local origin
+(the mesh's first vertex) instead of the world origin. Volume and centroid are
+translation-invariant, so this changes nothing mathematically and everything
+numerically.
+
+### Measured, 0.1 m box at origin 1e7
+
+| quantity | before | after |
+|---|---|---|
+| volume relative error | 2.5e-1 (25%) | 7.5e-9 |
+| centroid drift | 8.16e6 m | < 1e-6 m |
+
+The residual 7.5e-9 is the input's own representable-grid floor: at 1e7 the
+spacing between adjacent f64 values is ~1.9e-9 m, so a 0.1 m box's corners
+cannot be placed more precisely than that. The test asserts against that
+computed floor rather than a hardcoded constant, so it stays honest at other
+magnitudes instead of encoding one fixture's luck.
+
+### What was NOT broken
+
+`second_moments` is documented as being *about the origin* — its value
+legitimately depends on the origin, so re-basing it would change the contract
+rather than its conditioning. Left alone deliberately.
+
+`surface_properties` was not actually broken either. Mutation testing showed
+its centroid test stays green with the world origin restored, because surface
+weights are areas (~1e-2) rather than volumes and the cancellation is far
+milder. The re-basing there is precautionary and is documented as such in the
+test, so nobody later reads it as evidence of a fixed bug.
+
+### Gate quality
+
+Mutation-verified: reverting `base` to `Point3::ZERO` turns both volume tests
+red and restoring it turns them green, so the gate provably detects the defect
+it was written for rather than passing vacuously.

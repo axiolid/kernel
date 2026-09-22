@@ -35,9 +35,14 @@ pub fn surface_properties<M: TriangleMeshView + ?Sized>(
     if !health.is_surface_usable() || health.degenerate_triangles != 0 {
         return Err(MeshMeasureError::MeshNotSurfaceUsable(health));
     }
-    let (mut area, mut weighted) = (0.0, Point3::ZERO);
+    // Area uses edge differences, which are already local and well
+    // conditioned. The centroid is not: it accumulates absolute positions,
+    // so at large coordinates it loses the same precision `volume_properties`
+    // did. Re-base it the same way.
+    let base = mesh.position(0);
+    let (mut area, mut weighted) = (0.0f64, Vec3::ZERO);
     for i in 0..mesh.triangle_count() {
-        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize));
+        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize) - base);
         let weight = (b - a).cross(c - a).length() * 0.5;
         area += weight;
         weighted += (a + b + c) * (weight / 3.0);
@@ -47,7 +52,8 @@ pub fn surface_properties<M: TriangleMeshView + ?Sized>(
     }
     Ok(SurfaceProperties {
         area,
-        centroid: weighted / area,
+        // Shift the local-frame centroid back to world coordinates.
+        centroid: base + (weighted / area),
     })
 }
 
@@ -59,9 +65,22 @@ pub fn volume_properties<M: TriangleMeshView + ?Sized>(
     if !health.is_closed_two_manifold() {
         return Err(MeshMeasureError::MeshNotVolumeUsable(health));
     }
-    let (mut volume, mut weighted) = (0.0, Point3::ZERO);
+    // Sum about a local origin rather than the world origin.
+    //
+    // Volume and centroid are translation-invariant, so re-basing the operands
+    // changes nothing mathematically -- but it changes the conditioning
+    // completely. Evaluating `a . (b x c)` about the world origin scales every
+    // term with the CUBE of the distance to it, so a 0.1 m box on a national
+    // grid at 1e7 forms terms of order 1e21 whose cancellation has to produce
+    // 1e-3. That measured 25% volume error and a centroid 8160 km off the
+    // solid: a rule check reading either got a confidently wrong number.
+    //
+    // The first vertex is the local origin. Any point near the geometry works;
+    // this one is free and always on the mesh.
+    let base = mesh.position(0);
+    let (mut volume, mut weighted) = (0.0f64, Vec3::ZERO);
     for i in 0..mesh.triangle_count() {
-        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize));
+        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize) - base);
         let tetra = a.dot(b.cross(c)) / 6.0;
         volume += tetra;
         weighted += (a + b + c) * (tetra / 4.0);
@@ -71,7 +90,9 @@ pub fn volume_properties<M: TriangleMeshView + ?Sized>(
     }
     Ok(VolumeProperties {
         signed_volume: volume,
-        centroid: weighted / volume,
+        // The sum ran in local coordinates, so the centroid comes back
+        // relative to `base`. Shift it home.
+        centroid: base + (weighted / volume),
     })
 }
 
