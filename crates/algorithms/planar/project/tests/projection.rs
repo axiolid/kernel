@@ -5,7 +5,7 @@
 
 use axiolid_core::{FrameError, Point2, Point3, Tolerance, Vec3};
 use axiolid_mesh::TriMesh;
-use axiolid_overlay::{total_area, union_soup, Polygon, Ring};
+use axiolid_overlay::{polygon_area, total_area, union_soup, Polygon, Ring};
 use axiolid_project::{intersect_prism, project_mesh, Plane, ProjectionError};
 
 fn tol() -> Tolerance {
@@ -317,4 +317,68 @@ fn conflicting_inclusion_rules_compose_over_one_projection() {
         (covered - 1.0).abs() < 1e-9,
         "stacked geometry covers 1.0, not 2.0; saw {covered}"
     );
+}
+
+/// A projection is reachable as `Polygon2`, and the conversion is lossy.
+///
+/// `project_mesh` returns overlay's `Polygon` rather than the foundation's
+/// `Polygon2` because a projection can have holes and `Polygon2` models a
+/// simple polygon. This pins both halves of that reasoning: the bridge exists,
+/// and taking it costs the hole.
+///
+/// Written as a test rather than a doc line because "the conversion is lossy"
+/// is the kind of claim that quietly stops being true.
+#[test]
+fn a_projection_converts_to_polygon2_but_an_outline_drops_the_hole() {
+    // The annulus from `a_through_hole_survives_projection`: 4x4 outer with a
+    // 2x2 hole, so covered area is 16 - 4 = 12 while the outline encloses 16.
+    let mesh = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(4.0, 4.0, 0.0),
+            Point3::new(0.0, 4.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(3.0, 1.0, 0.0),
+            Point3::new(3.0, 3.0, 0.0),
+            Point3::new(1.0, 3.0, 0.0),
+        ],
+        vec![
+            0, 1, 5, 0, 5, 4, // bottom band
+            1, 2, 6, 1, 6, 5, // right band
+            2, 3, 7, 2, 7, 6, // top band
+            3, 0, 4, 3, 4, 7, // left band
+        ],
+    );
+
+    let result = project_mesh(&mesh, Plane::ground(), tol()).expect("valid projection");
+    let polygon = result
+        .polygons
+        .first()
+        .expect("the annulus projects to one polygon");
+    assert!(polygon.has_holes(), "the fixture is meant to have a hole");
+
+    // The polygon knows its true covered area, hole subtracted.
+    assert!(
+        (polygon_area(polygon) - 12.0).abs() < 1e-9,
+        "covered area is 12, got {}",
+        polygon_area(polygon)
+    );
+
+    // The outline is a Polygon2, and it has filled the hole in. 16, not 12.
+    let outline = polygon.outline();
+    assert!(
+        (outline.area() - 16.0).abs() < 1e-9,
+        "the outline encloses 16, got {}",
+        outline.area()
+    );
+    assert!(
+        outline.area() > polygon_area(polygon),
+        "if these ever agree the conversion stopped being lossy and the \
+         return type should be revisited"
+    );
+
+    // Round-tripping a ring through Polygon2 is, by contrast, exact.
+    let restored = Ring::from(outline.clone());
+    assert_eq!(restored, polygon.outer, "ring round trip must not drift");
 }

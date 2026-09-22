@@ -15,7 +15,7 @@ pub use offset::{
 };
 pub use region::{Region, RegionEvidence};
 
-use axiolid_core::{Frame2, Point2, Tolerance};
+use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
 use i_overlay::core::{fill_rule::FillRule as BackendFill, overlay_rule::OverlayRule};
 use i_overlay::float::single::SingleFloatOverlay;
 
@@ -37,10 +37,61 @@ pub enum OverlayOperation {
 pub struct Ring {
     pub points: Vec<Point2>,
 }
+
+/// A `Ring` is a closed boundary and so is [`Polygon2`]; converting between
+/// them moves the points and nothing else.
+///
+/// The two exist separately because they are reached from different places:
+/// `Polygon2` is a foundation value type usable without this crate, while
+/// `Ring` is what the overlay backend consumes. Making them the same type
+/// would drag the planar boolean vocabulary into `axiolid-core`.
+impl From<Polygon2> for Ring {
+    fn from(polygon: Polygon2) -> Self {
+        Self {
+            points: polygon.vertices,
+        }
+    }
+}
+
+impl From<Ring> for Polygon2 {
+    fn from(ring: Ring) -> Self {
+        Self::new(ring.points)
+    }
+}
+
+impl From<&Ring> for Polygon2 {
+    fn from(ring: &Ring) -> Self {
+        Self::new(ring.points.clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polygon {
     pub outer: Ring,
     pub holes: Vec<Ring>,
+}
+
+impl Polygon {
+    /// The outer boundary as a [`Polygon2`], discarding any holes.
+    ///
+    /// Named `outline` rather than offered as a `From` impl because the
+    /// conversion is lossy and the loss is silent: an annulus and a filled
+    /// disc have the same outline, so a caller that reaches for this to
+    /// compute area gets the wrong answer with no error. `Polygon2` models a
+    /// simple polygon and cannot represent a hole, which is exactly why this
+    /// has to be an explicit request rather than an implicit coercion.
+    ///
+    /// Use [`polygon_area`] when the holes matter.
+    pub fn outline(&self) -> Polygon2 {
+        Polygon2::from(&self.outer)
+    }
+
+    /// Whether the polygon has inner boundaries that [`outline`] would drop.
+    ///
+    /// [`outline`]: Polygon::outline
+    pub fn has_holes(&self) -> bool {
+        !self.holes.is_empty()
+    }
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverlayInput {
