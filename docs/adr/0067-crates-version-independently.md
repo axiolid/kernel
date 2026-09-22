@@ -65,8 +65,6 @@ Each crate carries its own literal version and moves independently.
 
 **Follow-ups / risks to watch**
 
-- Per-crate changelogs and an assembly step for the docs site are not done yet;
-  `docs/CHANGELOG.md` remains the single source until they are.
 - Nothing yet detects that a crate's source changed but its version did not.
   Until that exists, choosing which crates to bump is a manual judgement, and a
   missed bump ships a fix nobody can depend on.
@@ -74,7 +72,12 @@ Each crate carries its own literal version and moves independently.
 ## Relation to existing code
 
 - `crates/**/Cargo.toml` — literal `version` per manifest.
+- `crates/**/CHANGELOG.md` — one per publishable crate, Keep-a-Changelog.
 - `Cargo.toml` — `[workspace.package] version` now seeds new crates only;
   `[workspace.dependencies]` still carries the requirement dependents use.
 - `scripts/publish-workspace.py` — `version_already_published` gates the
   expensive verification.
+- `scripts/prepare-crate-release.py` — bumps one crate's version and rolls its
+  own changelog; refuses a bump its own caret compatibility would break.
+- `scripts/assemble-crate-changelogs.py` — renders `docs/reference/changelog.md`
+  from every crate's dated releases; `--check` gates drift in `scripts/gate.sh`.

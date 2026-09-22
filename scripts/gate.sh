@@ -33,8 +33,10 @@ step "C ABI header and smoke" scripts/check-capi.sh
 step "capi soname mutation probe" scripts/probe_capi_soname.sh
 step "native CMake/package integration" scripts/check-native-packaging.sh
 step "release script tests" python3 -m unittest scripts.test_release_scripts
+step "crate release script tests" python3 -m unittest scripts.test_crate_release
 step "release publish plan" python3 scripts/publish-workspace.py
 step "release package preflight" python3 scripts/verify-packages.py
+step "per-crate changelog assembly" python3 scripts/assemble-crate-changelogs.py --check
 step "semver policy" python3 scripts/check-semver.py
 step "semver mutation probe" scripts/probe_semver_gate.sh
 # Derived from `cargo metadata`, never hand-maintained: a new publishable

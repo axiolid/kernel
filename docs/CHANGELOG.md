@@ -17,6 +17,10 @@ All notable changes to Axiolid are documented in this file.
   re-exports it, so the most reusable 3D primitive no longer requires
   depending on field sampling to reach.
 
+### Added
+
+- Every publishable crate now has its own `CHANGELOG.md`, and `docs/reference/changelog.md` assembles them for the docs site ([ADR 0067](/adr/0067-crates-version-independently)). `scripts/prepare-crate-release.py` bumps one crate and rolls its own changelog; it refuses a bump Cargo's own caret rule would treat as breaking, since that is a workspace-wide event handled by `prepare-release.py` instead. `scripts/assemble-crate-changelogs.py --check` gates drift between the two.
+
 ### Changed
 
 - Debug native packages build with `line-tables-only` debug info. Full DWARF
