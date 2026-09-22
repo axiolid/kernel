@@ -6,7 +6,7 @@ members = [
     "crates/representations/analytic/curve",
     "crates/representations/analytic/surface",
     "crates/representations/analytic/primitive",
-    "crates/representations/region/arrangement",
+    "crates/algorithms/planar/arrangement",
     "crates/representations/region/profile",
     "crates/representations/topology",
     "crates/representations/fixtures",
@@ -34,6 +34,7 @@ members = [
     "crates/algorithms/planar/project",
     "crates/algorithms/planar/route",
     "crates/algorithms/planar/triangulate",
+    "crates/algorithms/query/collide",
     "crates/algorithms/query/intersection/linear",
     "crates/algorithms/query/intersection/ray-mesh",
     "crates/algorithms/query/spatial",
@@ -88,7 +89,7 @@ axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.0" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.0" }
 axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.0" }
-axiolid-arrangement = { path = "crates/representations/region/arrangement", version = "0.3.0" }
+axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.0" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.0" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.0" }
 axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.3.0", default-features = false }
@@ -96,6 +97,7 @@ axiolid-surface = { path = "crates/representations/analytic/surface", version = 
 axiolid-topology = { path = "crates/representations/topology", version = "0.3.0" }
 axiolid-brep = { path = "crates/representations/brep", version = "0.3.0" }
 axiolid-tessellation-contract = { path = "crates/contracts/operations/tessellate", version = "0.3.0" }
+axiolid-collide = { path = "crates/algorithms/query/collide", version = "0.3.0" }
 axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.3.0" }
 axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.0" }
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.0" }

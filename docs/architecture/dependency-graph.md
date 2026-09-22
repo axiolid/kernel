@@ -9,12 +9,14 @@ graph TD
     accTitle: Axiolid internal package dependency graph
     accDescr: Each arrow points from a package to another internal package it depends on.
     axiolid["axiolid\nfacade"]
+    axiolid_arrangement["axiolid-arrangement\nalgorithm.planar"]
     axiolid_backend_cpu["axiolid-backend-cpu\nexecution.context"]
     axiolid_backend_gpu["axiolid-backend-gpu\nexecution.context"]
     axiolid_benchmark["axiolid-benchmark\ntool.benchmark"]
     axiolid_brep["axiolid-brep\nrepresentation.composed"]
     axiolid_brep_audit["axiolid-brep-audit\nalgorithm.repair"]
     axiolid_capi["axiolid-capi\nfacade.native-c"]
+    axiolid_collide["axiolid-collide\nalgorithm.query"]
     axiolid_construct["axiolid-construct\nalgorithm.construction"]
     axiolid_contracts["axiolid-contracts\ncontract.common"]
     axiolid_core["axiolid-core\nfoundation.values"]
@@ -62,6 +64,7 @@ graph TD
     axiolid_surface["axiolid-surface\nrepresentation.atomic"]
     axiolid_tessellation_contract["axiolid-tessellation-contract\ncontract.operation"]
     axiolid_topology["axiolid-topology\nrepresentation.topology"]
+    axiolid_triangulate["axiolid-triangulate\nalgorithm.planar"]
     xtask["xtask\ntool.architecture"]
     axiolid --> axiolid_backend_cpu
     axiolid --> axiolid_backend_gpu
@@ -101,6 +104,9 @@ graph TD
     axiolid --> axiolid_surface
     axiolid --> axiolid_tessellation_contract
     axiolid --> axiolid_topology
+    axiolid_arrangement --> axiolid_core
+    axiolid_arrangement --> axiolid_guarantees
+    axiolid_arrangement --> axiolid_predicates
     axiolid_backend_gpu --> axiolid_contracts
     axiolid_backend_gpu --> axiolid_core
     axiolid_backend_gpu --> axiolid_mesh
@@ -126,6 +132,7 @@ graph TD
     axiolid_brep_audit --> axiolid_surface
     axiolid_brep_audit --> axiolid_topology
     axiolid_capi --> axiolid
+    axiolid_collide --> axiolid_core
     axiolid_construct --> axiolid_brep
     axiolid_construct --> axiolid_brep_audit
     axiolid_construct --> axiolid_contracts
@@ -350,4 +357,7 @@ graph TD
     axiolid_tessellation_contract --> axiolid_mesh
     axiolid_tessellation_contract --> axiolid_model
     axiolid_topology --> axiolid_core
+    axiolid_triangulate --> axiolid_core
+    axiolid_triangulate --> axiolid_guarantees
+    axiolid_triangulate --> axiolid_predicates
 ```

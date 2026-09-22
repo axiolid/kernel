@@ -5,7 +5,7 @@ Branch `feat/geom-capability-layer`, worktree `/mnt/backup/wt/kernel-geom`.
 ## Goal
 
 Close the three audited gaps against ifc-lite, and add the convex-collision
-+ spatial-index layer that lets downstream apps express Solibri-style rules.
++ spatial-index layer that lets downstream apps express model-checking rules.
 
 ## Hard constraint: a concurrent session shares this repo
 

@@ -1,0 +1,22 @@
+[package]
+name = "axiolid-collide"
+description = "Convex collision queries: separating axis, overlap, and separation distance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.query"
+domain = "query.collide"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core"]

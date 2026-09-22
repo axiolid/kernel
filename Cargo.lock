@@ -205,6 +205,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-collide"
+version = "0.3.0"
+dependencies = [
+ "axiolid-core",
+]
+
+[[package]]
 name = "axiolid-construct"
 version = "0.3.0"
 dependencies = [
