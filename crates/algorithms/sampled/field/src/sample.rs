@@ -11,28 +11,12 @@ use crate::{
     SurfaceHit,
 };
 
-/// A neutral triangle in the same space as the field frame's origin and axes.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Triangle3 {
-    /// First corner.
-    pub a: Point3,
-    /// Second corner.
-    pub b: Point3,
-    /// Third corner.
-    pub c: Point3,
-}
-
-impl Triangle3 {
-    /// Construct a triangle without validating it; validation happens at sampling.
-    pub const fn new(a: Point3, b: Point3, c: Point3) -> Self {
-        Self { a, b, c }
-    }
-
-    /// Unnormalized right-handed normal.
-    pub fn normal(&self) -> Vec3 {
-        (self.b - self.a).cross(self.c - self.a)
-    }
-}
+// Re-exported rather than redefined: this crate used to carry its own
+// `Triangle3`, which made the most reusable 3D primitive in the kernel
+// reachable only by depending on field sampling. The type now lives in
+// `axiolid_core` beside the other primitives, and this alias keeps the
+// existing `axiolid_field_ops::Triangle3` path working for consumers.
+pub use axiolid_core::Triangle3;
 
 /// The scalar reference provider for triangle coverage.
 ///

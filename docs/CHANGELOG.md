@@ -4,6 +4,14 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `axiolid-core` gained the bounded 3D primitives the kernel was missing:
+  `Rectangle3`, `Box3` (oriented, unlike the axis-aligned `Aabb`), and
+  `Polygon3`. `Triangle3` moved here from `axiolid-field-ops`, which
+  re-exports it, so the most reusable 3D primitive no longer requires
+  depending on field sampling to reach.
+
 ### Changed
 
 - **BREAKING**: the `axiolid` facade now defaults to no features

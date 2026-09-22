@@ -10,6 +10,7 @@ pub mod bounds;
 pub mod operation;
 pub mod plane_frame;
 pub mod primitives;
+pub mod primitives3;
 pub mod scalar;
 pub mod space_frame;
 
@@ -20,5 +21,6 @@ pub use primitives::{
     Frame2, Frame3, Interval, Mat3, Mat4, Plane3, Point2, Point3, Ray3, Transform2, Transform3,
     Vec2, Vec3,
 };
+pub use primitives3::{Box3, Polygon3, Rectangle3, Triangle3};
 pub use scalar::{Scalar, Tolerance, ToleranceError};
 pub use space_frame::SpaceFrame;
