@@ -131,6 +131,19 @@ def build(target: str, profile: str, target_dir: Path) -> Path:
     ]
     if profile == "release":
         command.append("--release")
+    else:
+        # Full DWARF puts the debug static library over the verifier's
+        # 128 MiB per-member budget: measured 171.7 MB, of which 141 MB is
+        # debug sections -- the code is only 30 MB. Line tables keep file and
+        # line numbers in backtraces, which is what a debug package is for,
+        # and bring it to 74.7 MB.
+        #
+        # Fixed here rather than by raising the budget: the verifier reads
+        # each member fully into memory to hash it, so that limit is a
+        # decompression-bomb guard on untrusted input, not a packaging
+        # preference. Raising it to fit our own artifact would weaken a
+        # security control to avoid an unnecessary 141 MB of type descriptions.
+        env["CARGO_PROFILE_DEV_DEBUG"] = "line-tables-only"
     run(*command, env=env)
     return target_dir / target / ("release" if profile == "release" else "debug")
 
@@ -274,6 +287,7 @@ def package(args: argparse.Namespace) -> Path:
             zip_archive(stage, archive, epoch)
         else:
             tar_archive(stage, archive, epoch)
+    assert_within_verification_budget(archive)
     checksum = sha256(archive)
     archive.with_suffix(archive.suffix + ".sha256").write_text(
         f"{checksum}  {archive.name}\n"
@@ -292,6 +306,56 @@ def parse_args() -> argparse.Namespace:
         help="local testing only; recorded in manifest",
     )
     return parser.parse_args()
+
+
+def assert_within_verification_budget(archive: Path) -> None:
+    """Fail at packaging time, not at verification time.
+
+    The debug static library grew past the verifier's per-member budget and
+    CI failed with "archive exceeds verification size budget" -- a message
+    from the consumer of the artifact, pointing at no cause. It stayed broken
+    on every commit for days because the failure named a symptom.
+
+    This checks the same limits the verifier applies, at the point where the
+    size is decided, and reports which member is oversized and by how much.
+    The constants are duplicated deliberately: importing them would couple the
+    producer to the verifier's module layout, and a drift between the two is
+    caught by `tests/native/test_package_budget.py`.
+    """
+    max_member = 128 * 1024 * 1024
+    max_total = 256 * 1024 * 1024
+
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as bundle:
+            sizes = [
+                (info.filename, info.file_size)
+                for info in bundle.infolist()
+                if not info.is_dir()
+            ]
+    else:
+        with tarfile.open(archive, "r:gz") as bundle:
+            sizes = [
+                (member.name, member.size)
+                for member in bundle.getmembers()
+                if member.isfile()
+            ]
+
+    total = 0
+    for name, size in sizes:
+        total += size
+        if size > max_member:
+            raise SystemExit(
+                f"{archive.name}: member {name} is "
+                f"{size / 1e6:.1f} MB, over the "
+                f"{max_member / 1e6:.0f} MB verification budget. "
+                "Debug builds use line-tables-only for this reason; "
+                "check that the profile override still applies."
+            )
+    if total > max_total:
+        raise SystemExit(
+            f"{archive.name}: {total / 1e6:.1f} MB total, over the "
+            f"{max_total / 1e6:.0f} MB verification budget."
+        )
 
 
 def main() -> int:

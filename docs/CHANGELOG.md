@@ -19,6 +19,17 @@ All notable changes to Axiolid are documented in this file.
 
 ### Changed
 
+- Debug native packages build with `line-tables-only` debug info. Full DWARF
+  put the static library at 171.7 MB against the verifier's 128 MiB
+  per-member budget, of which 141 MB was debug sections; line tables keep
+  file and line numbers in backtraces at 74.7 MB. Packaging now checks the
+  budget itself and names the oversized member, rather than leaving the
+  failure to surface later as an unexplained verification error.
+- `overlay::Polygon` gained `outline()` and `has_holes()`, and `Ring`
+  converts to and from `axiolid_core::Polygon2`. `project_mesh` still returns
+  `overlay::Polygon`: a projection can have holes and `Polygon2` models a
+  simple polygon, so the narrowing is offered as an explicit, documented
+  request instead of a silent coercion.
 - `minimum_area_rectangle` returns the shared `axiolid_core::Rectangle2`
   instead of a local four-corner struct with a cached area. The edge-vector
   form keeps the parallelogram property by construction, where four
