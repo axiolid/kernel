@@ -160,6 +160,22 @@ def assert_registry_clean_archive(
         )
 
 
+def version_already_published(name: str, version: str) -> bool:
+    """Whether `name@version` already exists on the registry.
+
+    Distinct from `require_matching_checksum`, which also compares bytes: that
+    comparison needs a locally built archive, and building it is exactly the
+    cost this check avoids. A published version cannot be replaced, so its
+    presence alone justifies skipping.
+
+    `registry_checksum` returns False or None when the crate or version is
+    absent, and those cases mean "do the full path" -- never assume published
+    on an unclear answer, or a crate would be silently dropped from a release.
+    """
+    checksum = registry_checksum(name, version)
+    return not (checksum is False or checksum is None)
+
+
 def require_matching_checksum(name: str, version: str, local_checksum: str) -> bool:
     remote_checksum = registry_checksum(name, version)
     if remote_checksum is False or remote_checksum is None:
@@ -285,6 +301,18 @@ def publish(
 ) -> None:
     name = package["name"]
     version = package["version"]
+    # Cheap check first. Verifying a crate packages it twice -- once to build
+    # the archive, once to prove the publish reproduces the same bytes -- and
+    # each packaging compiles the crate. Doing that for every crate on every
+    # release is what made a version bump take hours, even for crates whose
+    # version was already on the registry and whose upload was then skipped.
+    #
+    # Registry versions are immutable, so if this exact version exists there is
+    # nothing to upload and nothing a byte comparison could change. Skip before
+    # the expensive work rather than after it.
+    if version_already_published(name, version):
+        print(f"SKIP {name} {version}: version already on the registry", flush=True)
+        return
     archive = prepare_archive(package, target, environment, args)
     assert_registry_clean_archive(archive, name, version, internal_names)
     archive = reproduce_publish_dry_run(package, archive, environment)

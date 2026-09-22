@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-inspect"
 description = "Mesh queries: clearance, containment, ray casting, and genus"
-version.workspace = true
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
