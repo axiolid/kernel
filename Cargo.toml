@@ -6,6 +6,7 @@ members = [
     "crates/representations/analytic/curve",
     "crates/representations/analytic/surface",
     "crates/representations/analytic/primitive",
+    "crates/representations/region/arrangement",
     "crates/representations/region/profile",
     "crates/representations/topology",
     "crates/representations/fixtures",
@@ -87,6 +88,7 @@ axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.0" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.0" }
 axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.0" }
+axiolid-arrangement = { path = "crates/representations/region/arrangement", version = "0.3.0" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.0" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.0" }
 axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.3.0", default-features = false }

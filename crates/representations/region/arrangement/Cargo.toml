@@ -1,0 +1,24 @@
+[package]
+name = "axiolid-arrangement"
+description = "Editable planar subdivision with persistent half-edge topology"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-guarantees.workspace = true
+axiolid-predicates.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "representations"
+role = "representation.region"
+domain = "region.arrangement"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core", "axiolid-guarantees", "axiolid-predicates"]
