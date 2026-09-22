@@ -6,7 +6,7 @@
 //!
 //! # What this is for
 //!
-//! [`axiolid_overlay`] answers "what is the union of these polygons" in one
+//! The `axiolid-overlay` crate answers "what is the union of these polygons" in one
 //! shot: polygons in, polygons out, no structure retained. That is the right
 //! shape for a query, and the wrong shape for editing. A caller who moves one
 //! vertex has to rebuild everything and then re-derive which output polygon
