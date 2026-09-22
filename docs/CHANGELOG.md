@@ -6,6 +6,11 @@ All notable changes to Axiolid are documented in this file.
 
 ### Added
 
+- `axiolid-core` gained the bounded 2D primitives the kernel was missing:
+  `Aabb2`, `Rectangle2` (rotatable, with `from_aabb`), `Triangle2`, and
+  `Polygon2`. Signed-area accessors carry the winding rather than discarding
+  it, and the shoelace sums are rebased to the first vertex so a polygon in
+  georeferenced coordinates does not lose precision to cancellation.
 - `axiolid-core` gained the bounded 3D primitives the kernel was missing:
   `Rectangle3`, `Box3` (oriented, unlike the axis-aligned `Aabb`), and
   `Polygon3`. `Triangle3` moved here from `axiolid-field-ops`, which
@@ -13,6 +18,13 @@ All notable changes to Axiolid are documented in this file.
   depending on field sampling to reach.
 
 ### Changed
+
+- **BREAKING**: `Mat4` is now `glam::DMat4`, a general 4x4 matrix, instead of
+  an alias for the affine `Transform3`. The old alias could not represent a
+  perspective projection despite its name, so homogeneous division was
+  unavailable under the one type whose name implied it. Code that wanted the
+  affine meaning should name `Transform3`; the differing API surface makes
+  that a compile error rather than a silent behaviour change.
 
 - **BREAKING**: the `axiolid` facade now defaults to no features
   (`default = []`). A consumer names the capability they need and compiles
