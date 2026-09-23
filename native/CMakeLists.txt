@@ -92,6 +92,15 @@ if(WIN32)
     IMPORTED_IMPLIB_RELWITHDEBINFO "${_artifact_root}/release/${_shared_implib_name}"
     IMPORTED_IMPLIB_MINSIZEREL "${_artifact_root}/release/${_shared_implib_name}"
   )
+elseif(APPLE)
+  # The dylib's install name is `@rpath/libaxiolid_capi.dylib` (set in
+  # axiolid-capi/build.rs so apps can relocate it). dyld resolves `@rpath`
+  # ONLY through the consumer's own LC_RPATH entries, and CMake adds none
+  # for an imported target -- unlike ELF, where it writes a build-tree
+  # RUNPATH. So the package supplies one: the dylib's own directory (#113).
+  # A consumer that relocates the dylib overrides this with its own rpath.
+  set_property(TARGET axiolid_shared APPEND PROPERTY INTERFACE_LINK_OPTIONS
+    "LINKER:-rpath,${_artifact_root}/$<IF:$<CONFIG:Debug>,debug,release>")
 endif()
 
 add_library(axiolid_static STATIC IMPORTED GLOBAL)

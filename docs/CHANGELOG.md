@@ -4,6 +4,24 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- macOS SHARED consumers load `libaxiolid_capi.dylib` again
+  ([#113](https://github.com/axiolid/kernel/issues/113)). Its install name
+  is rpath-relative, and dyld resolves that only through the consumer's
+  own `LC_RPATH`, which CMake does not add for an imported target. The
+  shared target now supplies one pointing at the dylib's directory, in
+  both the source tree and the installed package. Relocating apps still
+  override it with their own rpath. A macOS-only mutation removes the
+  option and requires the consumer to fail at load with dyld's
+  `no LC_RPATH` reason, not just any failure.
+- Native release archives attach to every release, not only `v0.1.1`.
+  The package version was pinned at 0.1.1 and the attach job refused any
+  other tag, so no release since v0.1.1 carried native archives. The
+  archive now takes the workspace version, so tag, crates.io version and
+  archive name agree, and the release-set check requires every archive
+  to match the tag.
+
 ## [0.3.0] - 2026-09-23
 
 A minor bump because it carries a breaking change, and pre-1.0 Cargo

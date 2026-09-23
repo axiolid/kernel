@@ -145,6 +145,35 @@ class NativePackagingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify.verify_files(renamed, allow_dirty=False)
 
+    def test_package_version_follows_the_workspace(self) -> None:
+        # One number per release: tag, crates.io and archive name agree.
+        import tomllib
+
+        with (ROOT / "Cargo.toml").open("rb") as manifest:
+            workspace = tomllib.load(manifest)["workspace"]["package"]["version"]
+        self.assertEqual(pack.VERSION, workspace)
+
+    def test_package_version_must_be_semver_and_bound_to_root(self) -> None:
+        def with_version(value, *, rename_root: bool) -> dict[str, bytes]:
+            old = "axiolid-native-v0.1.1-"
+            new = f"axiolid-native-v{value}-" if rename_root else old
+            files = {n.replace(old, new, 1): p for n, p in self.manifest_files().items()}
+            name = next(n for n in files if n.endswith("/manifest.json"))
+            manifest = json.loads(files[name])
+            manifest["package_version"] = value
+            files[name] = json.dumps(manifest).encode()
+            return files
+
+        # Root renamed to agree, so ONLY the version rule can refuse these.
+        for bad in ("0.1", "v0.3.0", "0.3.0-rc1", "", 3):
+            with self.assertRaisesRegex(ValueError, "unsupported native package version", msg=repr(bad)):
+                verify.verify_files(with_version(bad, rename_root=True), allow_dirty=False)
+        # A well-formed version accepted when the root agrees ...
+        verify.verify_files(with_version("0.3.0", rename_root=True), allow_dirty=False)
+        # ... and refused when it does not.
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            verify.verify_files(with_version("0.3.0", rename_root=False), allow_dirty=False)
+
     def test_build_type_default_is_top_level_only(self) -> None:
         cmake = (ROOT / "native/CMakeLists.txt").read_text()
         guard = "if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)"

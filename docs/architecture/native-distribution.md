@@ -38,9 +38,9 @@ cmake --install build/native --config Release --prefix "$PWD/dist/axiolid"
 Extract only after verification, then point CMake at its root:
 
 ```sh
-sha256sum -c axiolid-native-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-python3 scripts/verify-native-package.py axiolid-native-v0.1.1-x86_64-unknown-linux-gnu.tar.gz --extract-to /opt
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/axiolid-native-v0.1.1-x86_64-unknown-linux-gnu
+sha256sum -c axiolid-native-v0.3.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+python3 scripts/verify-native-package.py axiolid-native-v0.3.0-x86_64-unknown-linux-gnu.tar.gz --extract-to /opt
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/axiolid-native-v0.3.0-x86_64-unknown-linux-gnu
 cmake --build build --config Release
 ```
 
@@ -69,7 +69,7 @@ Other triples, MinGW, 32-bit processes, and ARM macOS are not claimed by v0.4. T
 
 ## Archive contract and integrity
 
-Each `axiolid-native-v0.1.1-<target>` archive contains:
+Each `axiolid-native-v<version>-<target>` archive contains (`<version>` is the workspace version, the same as the release tag and the crates.io version):
 
 - `include/axiolid.h`;
 - shared, static, and platform import libraries;

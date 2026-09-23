@@ -18,7 +18,23 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.1"
+
+
+def workspace_version() -> str:
+    """The native package ships with the crates, so it carries their version.
+
+    One number per release: the GitHub release tag, the crates.io version
+    and the native archive name all agree, and the release-set verifier
+    checks that. (Before 0.3.0 the archive was pinned at 0.1.1 regardless
+    of the workspace version, so no release after 0.1.1 could attach it.)
+    """
+    import tomllib
+
+    with (ROOT / "Cargo.toml").open("rb") as manifest:
+        return tomllib.load(manifest)["workspace"]["package"]["version"]
+
+
+VERSION = workspace_version()
 SUPPORTED_TARGETS = {
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",

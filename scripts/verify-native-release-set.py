@@ -34,6 +34,10 @@ def main() -> int:
     parser.add_argument(
         "--source-commit", help="Required exact commit for every archive"
     )
+    parser.add_argument(
+        "--version",
+        help="Required package version for every archive (the release tag without 'v')",
+    )
     args = parser.parse_args()
     verify = load_verifier()
     archives = sorted(
@@ -60,6 +64,11 @@ def main() -> int:
                     f"release target {target} was built with {manifest['profile']} profile"
                 )
             commits.add(manifest["source_commit"])
+            if args.version and manifest["package_version"] != args.version:
+                raise ValueError(
+                    f"{archive.name} is package version {manifest['package_version']}, "
+                    f"release is {args.version}"
+                )
             if target in found:
                 raise ValueError(f"duplicate release target: {target}")
             found[target] = archive
