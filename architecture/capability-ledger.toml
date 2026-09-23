@@ -1,0 +1,1189 @@
+# Capability ledger: Axiolid against OCCT and CGAL, geometry only.
+#
+# One [[capability]] per geometry capability found in either reference
+# library. Read it with `cargo xtask gaps list|show <id>`; `cargo xtask
+# gaps check` (run by scripts/gate.sh) keeps it honest.
+#
+# Rules for editing:
+# - A landing that changes a row's level updates it in the SAME commit.
+# - `level` is implemented | narrow | absent. `narrow` means a named subset
+#   works and everything else is refused by name; the summary says which.
+# - `evidence` paths are workspace-relative, optionally `path::symbol`. The
+#   gate checks the file exists and the symbol is defined in it. Rows that
+#   are not absent must cite at least one.
+# - `occt` / `cgal` are paths inside the pinned reference trees below:
+#   where to read a mature implementation, not code to port.
+# - `issue` is a key from [[issue]]; the issue's number is recorded there.
+#   `blocked_by` mirrors GitHub's native issue dependencies; `gaps next`
+#   skips an issue until every blocker's rows are implemented.
+#
+# Grades came from reading public functions and tests at `cb8d203`; see
+# docs/research/geometry-capability-comparison-occt-cgal.md.
+
+[reference.occt]
+repository = "https://github.com/Open-Cascade-SAS/OCCT"
+commit = "7d2efad9c8a9a57ea96c4c8587134b34dd503cd8"
+
+[reference.cgal]
+repository = "https://github.com/CGAL/cgal"
+tag = "v6.2.1"
+commit = "28811b671a12b5caa9e3688569dadbc6b3728fe6"
+
+
+[[issue]]
+key = "surface-intersection"
+title = "General curve/surface and surface/surface intersection, including tangent and overlapping cases"
+priority = "High"
+effort = "High"
+number = 119
+
+[[issue]]
+key = "curved-boolean"
+title = "Exact B-rep boolean for solids with curved faces"
+priority = "High"
+effort = "High"
+number = 120
+blocked_by = ["surface-intersection"]
+
+[[issue]]
+key = "fillet-chamfer-chains"
+title = "Fillet and chamfer over edge chains and networks, constant and variable radius"
+priority = "Medium"
+effort = "High"
+number = 121
+blocked_by = ["surface-intersection", "curved-boolean"]
+
+[[issue]]
+key = "sweep-loft-breadth"
+title = "Exact sweep along arbitrary curves and loft through arbitrary sections"
+priority = "Medium"
+effort = "High"
+number = 122
+
+[[issue]]
+key = "offset-draft"
+title = "Solid offset, shell and thicken over curved faces, and draft angle"
+priority = "Medium"
+effort = "High"
+number = 123
+blocked_by = ["surface-intersection"]
+
+[[issue]]
+key = "surface-filling"
+title = "Surface filling: Coons, Gordon and plate surfaces through boundary curves"
+priority = "Low"
+effort = "Medium"
+number = 124
+
+[[issue]]
+key = "curved-mass-properties"
+title = "Exact mass properties and distance over curved B-rep faces"
+priority = "Medium"
+effort = "Medium"
+number = 125
+blocked_by = ["surface-intersection"]
+
+[[issue]]
+key = "delaunay-3d"
+title = "3D Delaunay and constrained 3D Delaunay triangulation"
+priority = "Medium"
+effort = "High"
+number = 126
+
+[[issue]]
+key = "tet-meshing"
+title = "Tetrahedral volume meshing with quality bounds"
+priority = "Low"
+effort = "High"
+number = 127
+blocked_by = ["delaunay-3d"]
+
+[[issue]]
+key = "voronoi-alpha"
+title = "Voronoi and power diagrams, alpha shapes and alpha wrapping"
+priority = "Low"
+effort = "Medium"
+number = 128
+
+[[issue]]
+key = "mesh-hole-subdivision"
+title = "Mesh hole filling with fairing, and subdivision surfaces"
+priority = "Medium"
+effort = "Medium"
+number = 129
+
+[[issue]]
+key = "mesh-geodesic-param"
+title = "Mesh geodesics and UV parameterisation"
+priority = "Low"
+effort = "High"
+number = 130
+
+[[issue]]
+key = "mesh-segmentation-shape"
+title = "Mesh segmentation, skeletonisation and shape detection (planes, cylinders)"
+priority = "Low"
+effort = "High"
+number = 131
+
+[[issue]]
+key = "mesh-deformation"
+title = "Mesh deformation with fixed handles"
+priority = "Low"
+effort = "Medium"
+number = 132
+
+[[issue]]
+key = "pointset-processing"
+title = "Point-set processing: normals, outliers, smoothing, simplification and plane fitting"
+priority = "Medium"
+effort = "Medium"
+number = 133
+
+[[issue]]
+key = "straight-skeleton"
+title = "Straight skeleton and mitred polygon offset"
+priority = "Medium"
+effort = "Medium"
+number = 134
+
+[[issue]]
+key = "polygon-partition-simplify"
+title = "Polygon partition, polyline simplification and snap rounding"
+priority = "Low"
+effort = "Medium"
+number = 135
+
+[[issue]]
+key = "bounding-volumes-3d"
+title = "3D oriented bounding box and minimum enclosing sphere"
+priority = "Low"
+effort = "Low"
+number = 118
+
+[[issue]]
+key = "numeric-substrate"
+title = "Shared numeric substrate: root finding, quadrature, least squares and optimisation"
+priority = "Medium"
+effort = "Medium"
+number = 136
+
+[[issue]]
+key = "shape-healing-brep"
+title = "B-rep shape healing: sewing, tolerance repair and small-feature removal"
+priority = "Medium"
+effort = "High"
+number = 137
+
+[[issue]]
+key = "hidden-line-drawing"
+title = "Hidden-line removal and 2D projection drawings of solids"
+priority = "Low"
+effort = "High"
+number = 138
+
+[[issue]]
+key = "medial-axis-hatching"
+title = "2D medial axis, bisectors and hatching"
+priority = "Low"
+effort = "Medium"
+number = 139
+
+[[issue]]
+key = "exact-profile-breadth"
+title = "Exact-mode extrusion/revolve/sweep for arbitrary and composite profiles, not just rectangle/circle"
+priority = "Medium"
+effort = "Medium"
+number = 111
+
+[[capability]]
+id = "A1"
+area = "foundations"
+name = "exact/filtered predicates (orient, incircle, insphere)"
+level = "implemented"
+summary = "orient2d/orient3d/incircle/insphere with adaptive exact fallback via expansion arithmetic; general for any finite f64 input"
+evidence = ["crates/algorithms/predicates/src/orient3.rs::orient3d", "crates/algorithms/predicates/src/orientation.rs::orient2d", "crates/algorithms/predicates/src/sphere.rs::incircle", "crates/algorithms/predicates/tests/orient3d.rs"]
+occt = []
+cgal = ["Kernel_23", "Filtered_kernel"]
+
+[[capability]]
+id = "A2"
+area = "foundations"
+name = "exact number types / arbitrary precision"
+level = "narrow"
+summary = "Only error-free-transformation \"expansion\" arithmetic (Shewchuk-style adaptive f64 expansions) for predicate signs; no general arbitrary-precision rational/integer type usable outside predicates"
+evidence = ["crates/algorithms/predicates/src/expansion.rs::two_sum"]
+occt = []
+cgal = ["Number_types", "CGAL_Core", "Algebraic_foundations", "Algebraic_kernel_d"]
+
+[[capability]]
+id = "A3"
+area = "foundations"
+name = "tolerance model"
+level = "implemented"
+summary = "Explicit Tolerance{linear, angular} struct, validated, no silent default; used pervasively as an explicit parameter"
+evidence = ["crates/foundation/core/src/scalar.rs::new"]
+occt = ["src/FoundationClasses/TKernel/Precision", "src/ModelingAlgorithms/TKTopAlgo/BRepLib"]
+cgal = []
+
+[[capability]]
+id = "A4"
+area = "foundations"
+name = "transforms, frames, bounding boxes"
+level = "implemented"
+summary = "Orthonormal SpaceFrame/PlaneFrame (validated, right-handed), Aabb with union/gap/intersects; general"
+evidence = ["crates/foundation/core/src/space_frame.rs::world", "crates/foundation/core/src/bounds.rs"]
+occt = ["src/FoundationClasses/TKMath/gp", "src/FoundationClasses/TKMath/Bnd", "src/ModelingData/TKGeomBase/BndLib"]
+cgal = ["Kernel_23", "Bounding_volumes"]
+
+[[capability]]
+id = "A5"
+area = "foundations"
+name = "linear algebra / root finding / optimisation / integration"
+level = "narrow"
+summary = "No standalone math crate; root-finding (bisection) and Gauss-Legendre quadrature exist only inline inside curve-evaluation code, and a dense linear solve exists only inline inside curve interpolation/loft fitting — none exposed as a reusable general numeric-kernel API"
+evidence = ["crates/algorithms/parametric/evaluate/src/curve.rs", "crates/algorithms/parametric/evaluate/src/arc_length.rs", "crates/algorithms/parametric/nurbs/src/fit.rs::solve", "crates/algorithms/parametric/evaluate/tests/arc_length.rs"]
+occt = ["src/FoundationClasses/TKMath/math", "src/FoundationClasses/TKMath/MathRoot", "src/FoundationClasses/TKMath/MathOpt", "src/FoundationClasses/TKMath/MathInteg", "src/FoundationClasses/TKMath/PLib"]
+cgal = ["QP_solver"]
+issue = "numeric-substrate"
+
+[[capability]]
+id = "B1"
+area = "curves-surfaces"
+name = "analytic curves (line, conics) + eval/derivs"
+level = "implemented"
+summary = "Line2/3, Circle2/3, Ellipse2/3 types with general closed-form jet evaluation"
+evidence = ["crates/representations/analytic/curve/src/linear.rs", "crates/representations/analytic/curve/src/conic.rs::Circle2", "crates/algorithms/parametric/evaluate/src/curve.rs", "crates/representations/analytic/curve/tests/vocabulary.rs"]
+occt = ["src/ModelingData/TKG3d/Geom", "src/ModelingData/TKG2d/Geom2d", "src/FoundationClasses/TKMath/ElCLib"]
+cgal = ["Circular_kernel_2"]
+
+[[capability]]
+id = "B2"
+area = "curves-surfaces"
+name = "B-spline/NURBS curves: eval, knot ops, degree elev, split"
+level = "implemented"
+summary = "eval, knot insertion/removal, degree elevation (exact) and reduction (bounded/refusable), split -- all general for arbitrary degree/knot-vector B-splines including rational"
+evidence = ["crates/algorithms/parametric/nurbs/src/degree.rs::elevate_degree3", "crates/algorithms/parametric/nurbs/src/transform.rs::split2", "crates/algorithms/parametric/nurbs/tests/split.rs"]
+occt = ["src/FoundationClasses/TKMath/BSplCLib", "src/ModelingData/TKG3d/Geom"]
+cgal = []
+
+[[capability]]
+id = "B3"
+area = "curves-surfaces"
+name = "analytic surfaces (plane,cyl,cone,sphere,torus)"
+level = "implemented"
+summary = "Plane, Cylinder, EllipticalCylinder, Cone, Sphere, Torus all present as exact types with evaluation"
+evidence = ["crates/representations/analytic/surface/src/elementary.rs::Plane", "crates/representations/analytic/surface/tests/vocabulary.rs"]
+occt = ["src/ModelingData/TKG3d/Geom", "src/FoundationClasses/TKMath/ElSLib"]
+cgal = ["Circular_kernel_3"]
+
+[[capability]]
+id = "B4"
+area = "curves-surfaces"
+name = "NURBS surfaces: eval, knot ops, iso-curves"
+level = "narrow"
+summary = "BSplineSurface eval exists generally; knot-vector ops (insert/remove/elevate) for surfaces are not exposed as exported crate API the way curve ops are (crate exports curve knot-ops insert_knot2/3, but no surface-level knot insertion/removal function found in nurbs/src/lib.rs public exports); ..."
+evidence = ["crates/algorithms/parametric/nurbs/src/lib.rs", "crates/representations/analytic/surface/src/spline.rs::BSplineSurface", "crates/algorithms/parametric/evaluate/src/surface.rs", "crates/representations/analytic/surface/tests/vocabulary.rs"]
+occt = ["src/FoundationClasses/TKMath/BSplSLib", "src/ModelingData/TKG3d/Geom"]
+cgal = []
+
+[[capability]]
+id = "B5"
+area = "curves-surfaces"
+name = "swept/revolved/extruded/offset SURFACES as types"
+level = "narrow"
+summary = "A Revolution helper struct exists but is pub(crate) (private, used internally by the NURBS revolution-profile module), not a public exported analytic-surface type; curve OFFSET (not surface offset) is exact-only for the helix special case and refused otherwise"
+evidence = ["crates/algorithms/parametric/nurbs/src/revolution_profile.rs::Revolution", "crates/algorithms/parametric/evaluate/src/intrinsic_relation.rs", "crates/algorithms/parametric/evaluate/tests/intrinsic_relation.rs::a_helix_offset_lands_on_the_normal_offset_of_the_base"]
+occt = ["src/ModelingData/TKG3d/Geom"]
+cgal = []
+issue = "sweep-loft-breadth"
+
+[[capability]]
+id = "B6"
+area = "curves-surfaces"
+name = "point inversion / projection on curve & surface"
+level = "implemented"
+summary = "Newton-style bounded projection for curves (project_curve2/3) and surfaces (project_surface_certified/invert_surface_certified), general within declared budgets, not certified global minimum (documented)"
+evidence = ["crates/algorithms/parametric/nurbs/src/curve_projection.rs::project_curve2", "crates/algorithms/parametric/nurbs/src/certified_surface_inversion.rs::invert_surface_certified"]
+occt = ["src/ModelingData/TKGeomBase/Extrema", "src/ModelingData/TKGeomBase/ProjLib", "src/ModelingAlgorithms/TKGeomAlgo/GeomAPI"]
+cgal = []
+
+[[capability]]
+id = "B7"
+area = "curves-surfaces"
+name = "curve-curve / curve-surface / surface-surface extrema"
+level = "narrow"
+summary = "Extrema exist only as a side effect of certified intersection/distance routines (distance_curve2/3_certified) for bounded parameter boxes; no general dedicated extrema API decoupled from intersection"
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_curve_distance.rs::distance_curve2_certified"]
+occt = ["src/ModelingData/TKGeomBase/Extrema"]
+cgal = []
+issue = "surface-intersection"
+
+[[capability]]
+id = "B8"
+area = "curves-surfaces"
+name = "curve-curve intersection (2D & 3D)"
+level = "narrow"
+summary = "Certified intersection exists for NURBS curve pairs with explicit transverse/degeneracy classification and bounded work budgets -- general for regular transverse cases, refuses/returns unresolved on tangential or unbounded-work cases; separately a simple linear line/segment intersection exists ..."
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_curve_intersection.rs::intersect_curve2_certified", "crates/algorithms/query/intersection/linear/src/line_line.rs", "crates/algorithms/query/intersection/linear/tests/line_line.rs", "crates/algorithms/query/intersection/linear/tests/segment_segment.rs"]
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/IntCurve", "src/ModelingAlgorithms/TKGeomAlgo/Geom2dInt", "src/ModelingData/TKGeomBase/IntAna2d"]
+cgal = ["Intersections_2", "Intersections_3"]
+issue = "surface-intersection"
+
+[[capability]]
+id = "B9"
+area = "curves-surfaces"
+name = "curve-surface intersection"
+level = "narrow"
+summary = "Certified bounded curve/surface intersection exists with the same budgeted/refusal design as B8"
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_curve_surface_intersection.rs::intersect_curve_surface_certified"]
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/IntCurveSurface"]
+cgal = []
+issue = "surface-intersection"
+
+[[capability]]
+id = "B10"
+area = "curves-surfaces"
+name = "surface-surface intersection (analytic + general)"
+level = "narrow"
+summary = "Explicitly documented as narrow by the source itself: both inputs must be single-span polynomial affine patches with continuous clamped axes; general patch pairs are bounded and conservatively returned as unresolved candidates rather than passed through heuristic marching"
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_surface_surface_intersection.rs::intersect_surface_surface_certified", "crates/execution/compile/tests/surface_curve_sweep.rs"]
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/IntPatch", "src/ModelingAlgorithms/TKGeomAlgo/IntWalk", "src/ModelingAlgorithms/TKGeomAlgo/GeomInt", "src/ModelingAlgorithms/TKGeomAlgo/IntPolyh"]
+cgal = []
+issue = "surface-intersection"
+
+[[capability]]
+id = "B11"
+area = "curves-surfaces"
+name = "approximation/interpolation (fit curve/surface to points)"
+level = "narrow"
+summary = "Only INTERPOLATION (curve passes exactly through points, chord-length parameterised, C2 cubic) and section-based lofting exist; no least-squares APPROXIMATION to a tolerance for scattered points"
+evidence = ["crates/algorithms/parametric/nurbs/src/fit.rs::interpolate_curve3"]
+occt = ["src/ModelingData/TKGeomBase/AppDef", "src/ModelingData/TKGeomBase/AppCont", "src/ModelingData/TKGeomBase/Approx", "src/ModelingAlgorithms/TKGeomAlgo/GeomAPI"]
+cgal = []
+
+[[capability]]
+id = "B12"
+area = "curves-surfaces"
+name = "surface filling / plate / Coons / Gordon"
+level = "absent"
+summary = "No Coons/Gordon/Plate filling code found anywhere in the workspace"
+evidence = []
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/GeomFill", "src/ModelingAlgorithms/TKGeomAlgo/GeomPlate", "src/ModelingAlgorithms/TKGeomAlgo/Plate"]
+cgal = []
+issue = "surface-filling"
+
+[[capability]]
+id = "B13"
+area = "curves-surfaces"
+name = "continuity/conversion (to Bezier, to BSpline, reparam)"
+level = "implemented"
+summary = "Bezier-segment decomposition of B-splines is a general, exact, reused primitive (used by degree elevation/reduction itself)"
+evidence = ["crates/algorithms/parametric/nurbs/src/transform.rs::bezier_segments2"]
+occt = ["src/ModelingData/TKGeomBase/GeomConvert", "src/FoundationClasses/TKMath/Convert"]
+cgal = []
+
+[[capability]]
+id = "B14"
+area = "curves-surfaces"
+name = "2D constraint solving (tangent circles/lines, Apollonius)"
+level = "absent"
+summary = "No GccAna/Apollonius/tangency-solving code found"
+evidence = []
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/GccAna", "src/ModelingAlgorithms/TKGeomAlgo/Geom2dGcc"]
+cgal = ["Apollonius_graph_2"]
+
+[[capability]]
+id = "B15"
+area = "curves-surfaces"
+name = "local properties: curvature, normals, inflections"
+level = "implemented"
+summary = "General regular-surface differential analysis (first/second fundamental forms, Gaussian/mean/principal curvature) with degeneracy refusal; curve curvature via CurvatureLaw for intrinsic curves"
+evidence = ["crates/algorithms/parametric/nurbs/src/surface_analysis.rs::analyze_surface", "crates/representations/analytic/curve/src/intrinsic.rs::CurvatureLaw", "crates/representations/analytic/curve/tests/intrinsic.rs"]
+occt = ["src/ModelingData/TKGeomBase/GeomLProp", "src/ModelingData/TKGeomBase/LProp", "src/ModelingAlgorithms/TKGeomAlgo/LocalAnalysis"]
+cgal = ["Jet_fitting_3", "Ridges_3"]
+
+[[capability]]
+id = "B16"
+area = "curves-surfaces"
+name = "laws / helix / fair curves"
+level = "narrow"
+summary = "CurvatureLaw (constant/polynomial/sinusoid/composite/piecewise) exists and drives Intrinsic3 curves including true helices (closed-form offset); no fair-curve (minimum-energy/spline-fairing) algorithm found"
+evidence = ["crates/representations/analytic/curve/src/intrinsic.rs::CurvatureLaw", "crates/representations/analytic/curve/src/intrinsic3.rs", "crates/algorithms/parametric/evaluate/tests/intrinsic_relation.rs::a_helix_offset_lands_on_the_normal_offset_of_the_base"]
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/Law", "src/ModelingAlgorithms/TKHelix/HelixGeom", "src/ModelingAlgorithms/TKGeomAlgo/FairCurve"]
+cgal = []
+
+[[capability]]
+id = "C1"
+area = "brep"
+name = "B-rep data structure (vertex/edge/wire/face/shell/solid)"
+level = "implemented"
+summary = "Full append-only typed arena BRep<Curve3,Curve2,Surface> generic over geometry, with vertex/edge/loop/face/shell/solid; general"
+evidence = ["crates/representations/brep/src/lib.rs", "crates/representations/topology/src/brep.rs::BRep", "crates/representations/brep/tests/contracts.rs", "crates/representations/topology/tests/audit.rs"]
+occt = ["src/ModelingData/TKBRep/TopoDS", "src/ModelingData/TKBRep/BRep", "src/ModelingData/TKBRep/BRepGraph"]
+cgal = ["HalfedgeDS", "Combinatorial_map", "Linear_cell_complex"]
+
+[[capability]]
+id = "C2"
+area = "brep"
+name = "validity checking of B-rep"
+level = "implemented"
+summary = "audit_brep/BRepHealth catches dangling references, open/empty loops, unpaired edge uses, overused edges, false closure claims -- general structural validator, deliberately excludes geometric self-intersection checks (documented as separate concern)"
+evidence = ["crates/representations/topology/src/audit.rs::BRepHealth", "crates/representations/topology/tests/audit.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepCheck"]
+cgal = ["BGL"]
+
+[[capability]]
+id = "C3"
+area = "brep"
+name = "primitives (box,cyl,cone,sphere,torus,wedge)"
+level = "narrow"
+summary = "Primitive enum covers Block, Sphere, Cylinder, Cone, Pyramid only -- no Torus, no Wedge as primitive-solid variants (Torus exists only as an analytic surface type, B3, not as a closed primitive solid)"
+evidence = ["crates/representations/analytic/primitive/src/solid.rs::Primitive", "crates/algorithms/reference/src/tessellate.rs", "crates/algorithms/reference/tests/primitive.rs", "crates/representations/analytic/primitive/tests/values.rs"]
+occt = ["src/ModelingAlgorithms/TKPrim/BRepPrim", "src/ModelingAlgorithms/TKPrim/BRepPrimAPI"]
+cgal = []
+
+[[capability]]
+id = "C4"
+area = "brep"
+name = "extrude/revolve (prism, revol) exact"
+level = "narrow"
+summary = "Exact extrusion and exact revolution both exist but are restricted to specific profile families (rectangle/polygon/certain contour types), not general arbitrary-profile extrude/revolve; source itself titles the module \"Exact revolution for the profile families exact extrusion already covers\""
+evidence = ["crates/algorithms/construction/construct/src/extrude_exact.rs::extrude_polygon_rings", "crates/algorithms/construction/construct/src/revolve_exact.rs", "crates/algorithms/construction/construct/tests/exact_extrusion.rs", "crates/algorithms/construction/construct/tests/revolve_exact.rs"]
+occt = ["src/ModelingAlgorithms/TKPrim/BRepSweep", "src/ModelingAlgorithms/TKPrim/BRepPrimAPI"]
+cgal = ["Straight_skeleton_extrusion_2"]
+issue = "exact-profile-breadth"
+
+[[capability]]
+id = "C5"
+area = "brep"
+name = "sweep/pipe along curve (exact)"
+level = "narrow"
+summary = "General sweep module exists (sweep.rs) but exact sweep is limited to specific directrix families; there is a separate \"surface_curve_sweep\" compile-time test suggesting only certain curve/surface combinations are exact-supported"
+evidence = ["crates/algorithms/construction/construct/src/sweep.rs", "crates/execution/compile/src/directrix.rs", "crates/algorithms/construction/construct/tests/sweeps.rs", "crates/execution/compile/tests/surface_curve_sweep.rs"]
+occt = ["src/ModelingAlgorithms/TKBool/BRepFill", "src/ModelingAlgorithms/TKOffset/BRepOffsetAPI"]
+cgal = []
+issue = "sweep-loft-breadth"
+
+[[capability]]
+id = "C6"
+area = "brep"
+name = "loft / thru-sections"
+level = "narrow"
+summary = "loft_surface in the NURBS fit module requires sections to already agree in degree and control-point count (\"reconciling mismatched sections means knot merging and degree elevation... doing it implicitly would hide a shape change\") -- refuses mismatched section families rather than reconciling them"
+evidence = ["crates/algorithms/parametric/nurbs/src/fit.rs::loft_surface", "crates/algorithms/parametric/nurbs/tests/lofting.rs"]
+occt = ["src/ModelingAlgorithms/TKOffset/BRepOffsetAPI"]
+cgal = []
+issue = "sweep-loft-breadth"
+
+[[capability]]
+id = "C7"
+area = "brep"
+name = "point classification in solid/face"
+level = "implemented"
+summary = "Winding-number-based exact inside/outside classification against a closed triangle mesh, using certified orient3d, general (any closed mesh); explicitly returns None (not a silent guess) for ray-degenerate ties"
+evidence = ["crates/algorithms/query/inspect/src/containment.rs::winding_number", "crates/algorithms/query/inspect/tests/queries.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepClass", "src/ModelingAlgorithms/TKTopAlgo/BRepClass3d", "src/ModelingAlgorithms/TKGeomAlgo/TopClass"]
+cgal = ["Polygon_mesh_processing"]
+
+[[capability]]
+id = "C8"
+area = "brep"
+name = "B-rep tessellation with tolerance"
+level = "implemented"
+summary = "tessellate in execution/compile drives faceting of the full BRep with explicit chord/tolerance budgets; large dedicated test suite (2288 lines)"
+evidence = ["crates/execution/compile/src/brep.rs::tessellate", "crates/execution/compile/tests/brep_tessellation.rs"]
+occt = ["src/ModelingAlgorithms/TKMesh/BRepMesh"]
+cgal = []
+
+[[capability]]
+id = "C9"
+area = "brep"
+name = "B-rep booleans (general, incl. curved)"
+level = "narrow"
+summary = "Two tiers exist: (1) exact boolean over general planar-faced polyhedra (boolean_polyhedra_exact, convex or non-convex, any orientation) -- general for planar-faced solids only, refuses curved faces entirely; (2) a mesh-level (tessellated) boolean provider (boolmesh, absorbed from an external crate) ..."
+evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/src/boolean_exact.rs::boolean_prisms_exact", "crates/providers/mesh/boolmesh/src/lib.rs", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs"]
+occt = ["src/ModelingAlgorithms/TKBO/BOPAlgo", "src/ModelingAlgorithms/TKBO/BRepAlgoAPI", "src/ModelingAlgorithms/TKBool/TopOpeBRep", "src/ModelingAlgorithms/TKBool/TopOpeBRepBuild"]
+cgal = []
+issue = "curved-boolean"
+
+[[capability]]
+id = "C10"
+area = "brep"
+name = "fillet (constant/variable radius, edge networks)"
+level = "narrow"
+summary = "Constant-radius fillet limited to a single straight vertical edge of an exact prism (module doc: \"Chamfer and fillet on a straight vertical edge of an exact prism\"); variable/tapered-radius fillet exists but only for the same single-corner-of-a-polygon-profile family; explicitly refuses curved ..."
+evidence = ["crates/algorithms/construction/construct/src/feature.rs::fillet_extruded_profile", "crates/algorithms/construction/construct/src/fillet_variable.rs::TaperedFillet", "crates/algorithms/construction/construct/tests/fillet.rs", "crates/algorithms/construction/construct/tests/fillet_variable.rs"]
+occt = ["src/ModelingAlgorithms/TKFillet/ChFi3d", "src/ModelingAlgorithms/TKFillet/BRepFilletAPI"]
+cgal = []
+issue = "fillet-chamfer-chains"
+
+[[capability]]
+id = "C11"
+area = "brep"
+name = "chamfer"
+level = "narrow"
+summary = "Same single-straight-edge restriction as C10; general polygon-corner chamfer exists for prism profiles only, no curved-edge or edge-network chamfer"
+evidence = ["crates/algorithms/construction/construct/src/feature.rs::chamfer_extruded_profile", "crates/algorithms/construction/construct/tests/chamfer.rs", "crates/algorithms/construction/construct/tests/chamfer_polygon.rs"]
+occt = ["src/ModelingAlgorithms/TKFillet/ChFi3d"]
+cgal = []
+issue = "fillet-chamfer-chains"
+
+[[capability]]
+id = "C12"
+area = "brep"
+name = "offset / shell / thicken"
+level = "narrow"
+summary = "Solid offset/shelling module exists (offset.rs, \"Solid offset and shelling (#78)\") but scoped to solids constructible by the same exact-extrusion/polyhedron machinery -- no evidence of general curved-face offset/thicken across arbitrary B-rep"
+evidence = ["crates/algorithms/construction/construct/src/offset.rs", "crates/algorithms/construction/construct/tests/offset.rs"]
+occt = ["src/ModelingAlgorithms/TKOffset/BRepOffset", "src/ModelingAlgorithms/TKOffset/BRepOffsetAPI"]
+cgal = []
+issue = "offset-draft"
+
+[[capability]]
+id = "C13"
+area = "brep"
+name = "draft angle"
+level = "absent"
+summary = "No draft-angle code found anywhere in the workspace"
+evidence = []
+occt = ["src/ModelingAlgorithms/TKOffset/Draft", "src/ModelingAlgorithms/TKOffset/BRepOffsetAPI"]
+cgal = []
+issue = "offset-draft"
+
+[[capability]]
+id = "C14"
+area = "brep"
+name = "features (holes, ribs, local ops, split)"
+level = "narrow"
+summary = "Only corner-local features (fillet/chamfer on a polygon corner) exist under a feature.rs module; no hole, rib, boss, or general split/local-modification operations found"
+evidence = ["crates/algorithms/construction/construct/src/feature.rs"]
+occt = ["src/ModelingAlgorithms/TKFeat/BRepFeat", "src/ModelingAlgorithms/TKFeat/LocOpe"]
+cgal = []
+
+[[capability]]
+id = "C15"
+area = "brep"
+name = "shape healing / fixing"
+level = "narrow"
+summary = "Healing exists for triangle MESHES (weld vertices, unify orientation, drop degenerate elements, orient outward -- opt-in RepairPlan, no blanket \"fix everything\") and for B-rep it is AUDIT-only (C2): no B-rep-level repair/fixing (e.g. gap closing, edge merging on a BRep) found, only mesh repair"
+evidence = ["crates/algorithms/repair/heal/src/repair.rs::RepairAction", "crates/algorithms/repair/heal/tests/mesh.rs", "crates/algorithms/repair/heal/tests/orient_outward.rs", "crates/algorithms/repair/heal/tests/self_intersection.rs"]
+occt = ["src/ModelingAlgorithms/TKShHealing/ShapeFix", "src/ModelingAlgorithms/TKShHealing/ShapeAnalysis", "src/ModelingAlgorithms/TKShHealing/ShapeUpgrade"]
+cgal = []
+issue = "shape-healing-brep"
+
+[[capability]]
+id = "C16"
+area = "brep"
+name = "hidden-line removal / projection drawing"
+level = "absent"
+summary = "No HLR/hidden-line-removal/silhouette-extraction algorithm found; the only \"silhouette\" hits are unrelated code comments (tessellation-consistency and mesh-decimation comments)"
+evidence = ["crates/algorithms/reference/src/tessellate.rs", "crates/algorithms/planar/project/src/lib.rs", "crates/algorithms/discrete/decimate/src/collapse.rs"]
+occt = ["src/ModelingAlgorithms/TKHLR/HLRBRep", "src/ModelingAlgorithms/TKHLR/Contap"]
+cgal = []
+issue = "hidden-line-drawing"
+
+[[capability]]
+id = "C17"
+area = "brep"
+name = "mass properties exact (B-rep)"
+level = "narrow"
+summary = "Exact (non-tessellated) mass-properties computation exists but refuses any non-planar face: module doc states \"Only planar faces are supported. A cylindrical or spherical face needs a surface integral this module does not implement\""
+evidence = ["crates/algorithms/query/measure/src/exact.rs", "crates/algorithms/query/measure/tests/mass_properties.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepGProp", "src/ModelingData/TKGeomBase/GProp"]
+cgal = []
+issue = "curved-mass-properties"
+
+[[capability]]
+id = "C18"
+area = "brep"
+name = "B-rep distance / extrema between shapes"
+level = "narrow"
+summary = "Only floating-point metric proximity/closest-point witnesses between primitive shapes exist (ClosestPoints3); module doc states these \"construct floating-point witnesses only\" and that certified topological classification is a separate, unimplemented-here concern; no general certified ..."
+evidence = ["crates/algorithms/query/measure/src/proximity.rs::ClosestPoints3", "crates/algorithms/query/measure/tests/proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepExtrema"]
+cgal = []
+issue = "curved-mass-properties"
+
+[[capability]]
+id = "C19"
+area = "brep"
+name = "medial axis / bisector 2D"
+level = "absent"
+summary = "No medial-axis or straight-skeleton implementation; \"bisector\" hits found are all local per-corner angle-bisector geometry used inside fillet/chamfer construction, not a medial-axis/skeleton algorithm"
+evidence = ["crates/algorithms/construction/construct/src/feature.rs", "crates/algorithms/construction/construct/src/fillet_variable.rs", "crates/algorithms/construction/construct/src/section_lower.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/MAT2d", "src/ModelingAlgorithms/TKTopAlgo/Bisector"]
+cgal = ["Straight_skeleton_2"]
+issue = "medial-axis-hatching"
+
+[[capability]]
+id = "C20"
+area = "brep"
+name = "2D hatching"
+level = "absent"
+summary = "No hatching implementation found; the one text hit for \"hatch\" is an unrelated code comment (\"standard escape hatch\")"
+evidence = ["crates/facade/axiolid/tests/pay_for_what_you_use.rs"]
+occt = ["src/ModelingAlgorithms/TKGeomAlgo/Hatch", "src/ModelingAlgorithms/TKGeomAlgo/Geom2dHatch"]
+cgal = []
+issue = "medial-axis-hatching"
+
+[[capability]]
+id = "D1"
+area = "mesh"
+name = "mesh data structure (halfedge/surface mesh)"
+level = "narrow"
+summary = "TriMesh/PolygonMesh are index-buffer structures with derived EdgeAdjacency, not a persistent halfedge/DCEL mesh type; the only true halfedge DCEL in the repo is 2D (axiolid-arrangement), not a 3D mesh."
+evidence = ["crates/representations/discrete/mesh/src/lib.rs", "crates/representations/discrete/mesh/src/adjacency.rs::build", "crates/representations/discrete/mesh/tests/adjacency.rs::a_boundary_edge_is_used_once"]
+occt = ["src/FoundationClasses/TKMath/Poly"]
+cgal = ["Surface_mesh", "Polyhedron", "HalfedgeDS"]
+
+[[capability]]
+id = "D2"
+area = "mesh"
+name = "mesh booleans / corefinement"
+level = "implemented"
+summary = "Robust (non-exact-arithmetic) manifold boolean over general triangle meshes, absorbed own code (ADR 0047); separate from exact path (see D3)."
+evidence = ["crates/providers/mesh/boolmesh/src/provider.rs", "crates/providers/mesh/boolmesh/tests/analytic_boxes.rs", "crates/providers/mesh/boolmesh/tests/differential_corpus.rs::bounds_do_not_lose_features_across_scales"]
+occt = []
+cgal = ["PMP_Boolean_operations", "Nef_3"]
+
+[[capability]]
+id = "D3"
+area = "mesh"
+name = "exact polyhedral booleans (Nef)"
+level = "narrow"
+summary = "boolean_polyhedra_exact handles general planar-faced solids (convex or non-convex) for union/intersection/difference, constructing intersection coordinates in f64 (not exact rational/interval arithmetic despite the name); curved faces refused. No Nef-style open/half-space set representation (no ..."
+evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs"]
+occt = []
+cgal = ["Nef_3", "Nef_2", "Nef_S2"]
+issue = "curved-boolean"
+
+[[capability]]
+id = "D4"
+area = "mesh"
+name = "self-intersection detection"
+level = "implemented"
+summary = "General triangle-triangle test via BVH broad phase + narrow phase; reports intersecting pairs."
+evidence = ["crates/algorithms/repair/heal/src/intersect.rs::self_intersections", "crates/algorithms/repair/heal/tests/self_intersection.rs"]
+occt = ["src/ModelingAlgorithms/TKBO/BOPAlgo"]
+cgal = ["Polygon_mesh_processing"]
+
+[[capability]]
+id = "D5"
+area = "mesh"
+name = "mesh repair (stitch, orient, degenerate, holes)"
+level = "narrow"
+summary = "Opt-in RepairAction enum: WeldVertices, UnifyOrientation, DropDegenerateElements, OrientOutward. Deliberately no \"repair everything\" mode; each action applies only where safe and reports skipped when not applicable. Hole filling is a SEPARATE capability (see D6), not part of heal."
+evidence = ["crates/algorithms/repair/heal/src/repair.rs::RepairAction", "crates/algorithms/repair/heal/tests/mesh.rs", "crates/algorithms/repair/heal/tests/orient_outward.rs"]
+occt = []
+cgal = ["PMP_Mesh_repair", "Polygon_repair"]
+
+[[capability]]
+id = "D6"
+area = "mesh"
+name = "hole filling / fairing"
+level = "absent"
+summary = "No fill_hole/triangulate_hole/fairing function found anywhere in the workspace; heal addresses welding/orientation/degenerate removal, not boundary closure. Convex-decomposition's \"cap\" (D18/decompose) closes a PLANAR cut cross-section only, not an arbitrary boundary hole — different problem."
+evidence = []
+occt = []
+cgal = ["PMP_Mesh_repair"]
+issue = "mesh-hole-subdivision"
+
+[[capability]]
+id = "D7"
+area = "mesh"
+name = "isotropic remeshing / refinement / smoothing"
+level = "narrow"
+summary = "Uniform/edge-length subdivision (4-way split) with optional surface-aware vertex placement when a source B-rep surface is known; separately, boundary-fixed Laplacian smoothing. No isotropic *remeshing* (target-edge-length equalization via edge flip/collapse/split combined) — only pure refinement ..."
+evidence = ["crates/algorithms/discrete/refine/src/lib.rs::refine", "crates/algorithms/discrete/refine/tests/refine.rs", "crates/algorithms/discrete/refine/src/smooth.rs::smooth"]
+occt = []
+cgal = ["PMP_Remeshing", "Tetrahedral_remeshing"]
+
+[[capability]]
+id = "D8"
+area = "mesh"
+name = "simplification / decimation"
+level = "implemented"
+summary = "Edge-collapse decimation with caller bound on deviation; rejects collapses that would invert a triangle, create non-manifold edges, or open the boundary."
+evidence = ["crates/algorithms/discrete/decimate/src/collapse.rs::decimate", "crates/algorithms/discrete/decimate/tests/decimation.rs::decimation_reduces_and_reports_its_deviation"]
+occt = []
+cgal = ["Surface_mesh_simplification"]
+
+[[capability]]
+id = "D9"
+area = "mesh"
+name = "subdivision surfaces"
+level = "absent"
+summary = "No Catmull-Clark/Loop subdivision scheme found. The 4-way triangle split in refine is geometric subdivision-for-refinement, not a limit-surface subdivision scheme (no smoothing masks, no valence-based weighting)."
+evidence = []
+occt = []
+cgal = ["Subdivision_method_3"]
+issue = "mesh-hole-subdivision"
+
+[[capability]]
+id = "D10"
+area = "mesh"
+name = "parameterization (UV unwrap)"
+level = "absent"
+summary = "No UV/parameterization crate; region/profile is 2D construction profiles (extrusion sketches), unrelated to mesh UV unwrapping."
+evidence = []
+occt = []
+cgal = ["Surface_mesh_parameterization"]
+issue = "mesh-geodesic-param"
+
+[[capability]]
+id = "D11"
+area = "mesh"
+name = "geodesics / shortest path on mesh"
+level = "absent"
+summary = "No geodesic-distance or mesh-surface shortest-path algorithm. axiolid-route (F8) computes visibility/shortest path in a 2D polygon plane, not on a 3D mesh surface."
+evidence = []
+occt = []
+cgal = ["Surface_mesh_shortest_path", "Heat_method_3"]
+issue = "mesh-geodesic-param"
+
+[[capability]]
+id = "D12"
+area = "mesh"
+name = "segmentation / skeletonization"
+level = "absent"
+summary = "No mesh segmentation or (3D) skeletonization code found; only unrelated 2D \"route\"/navigation code and mesh connected-component decomposition (component::decompose, which is D18-adjacent, not segmentation by feature/region)."
+evidence = []
+occt = []
+cgal = ["Surface_mesh_segmentation", "Surface_mesh_skeletonization"]
+issue = "mesh-segmentation-shape"
+
+[[capability]]
+id = "D13"
+area = "mesh"
+name = "deformation"
+level = "absent"
+summary = "No mesh deformation (ARAP, cage, skinning) code found."
+evidence = []
+occt = []
+cgal = ["Surface_mesh_deformation"]
+issue = "mesh-deformation"
+
+[[capability]]
+id = "D14"
+area = "mesh"
+name = "mesh measures (area/volume/centroid/moments)"
+level = "implemented"
+summary = "MeshMeasure computes area, signed volume, volume centroid, and second moments in one pass; refuses non-closed/non-manifold input for volume/moments (open shell still gets area)."
+evidence = ["crates/algorithms/query/measure/src/mesh_measure.rs::measure", "crates/algorithms/query/measure/tests/mass_properties.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepGProp"]
+cgal = ["Polygon_mesh_processing"]
+
+[[capability]]
+id = "D15"
+area = "mesh"
+name = "mesh distance (Hausdorff), inside test, ray cast"
+level = "narrow"
+summary = "Inside test (winding number, exact via orient3d) and ray cast (BVH-accelerated nearest hit) are IMPL and general. Mesh-to-mesh proximity/clearance (mesh_proximity.rs) is a min-gap/clash measure, not a full two-sided Hausdorff distance metric — reports nearest gap, \"clash\" as 0.0, out-of-range as ..."
+evidence = ["crates/algorithms/query/inspect/src/containment.rs::winding_number", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs::nearest_hit", "crates/algorithms/query/measure/src/mesh_proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
+occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepExtrema"]
+cgal = ["Polygon_mesh_processing"]
+
+[[capability]]
+id = "D16"
+area = "mesh"
+name = "mesh plane section / slicing"
+level = "implemented"
+summary = "ScalarSection/MeshPlaneSection produce closed plane-local contours from source-topology stitching of outward-oriented closed solids; explicitly fails closed on coplanar overlap and open/non-manifold input (no region nesting claimed)."
+evidence = ["crates/algorithms/reference/src/section.rs::ScalarSection", "crates/contracts/operations/mesh-section/src/conformance.rs"]
+occt = ["src/ModelingAlgorithms/TKBO/BRepAlgoAPI"]
+cgal = ["PMP_Boolean_operations"]
+
+[[capability]]
+id = "D17"
+area = "mesh"
+name = "mesh clipping/splitting by plane or mesh"
+level = "narrow"
+summary = "Plane-splitting exists via convex-decomposition's clip-and-cap machinery (D18) and via the exact-B-rep offset/solid path; general clip/split of an arbitrary mesh by an arbitrary cutting *mesh* (not just a plane) is not a standalone general operation — relies on the boolean provider (D2) for ..."
+evidence = ["crates/algorithms/discrete/decompose/src/lib.rs"]
+occt = ["src/ModelingAlgorithms/TKBO/BRepAlgoAPI"]
+cgal = ["PMP_Boolean_operations"]
+
+[[capability]]
+id = "D18"
+area = "mesh"
+name = "convex decomposition"
+level = "implemented"
+summary = "Strategy::Exact (recursive plane split to zero concavity, to tolerance) and Strategy::Approximate (bounded concavity); reports which strategy actually applied and the concavity achieved. Requires closed two-manifold solid input (refused otherwise) — this is the format precondition, not a narrowing ..."
+evidence = ["crates/algorithms/discrete/decompose/src/lib.rs::Strategy", "crates/algorithms/discrete/decompose/tests/decompose.rs::a_reflex_solid_is_split_into_convex_parts"]
+occt = []
+cgal = ["Convex_decomposition_3"]
+
+[[capability]]
+id = "D19"
+area = "mesh"
+name = "approximation (VSA) / shape detection (RANSAC, regions)"
+level = "absent"
+summary = "No variational shape approximation or RANSAC/region-growing shape-detection code found anywhere in the workspace."
+evidence = []
+occt = []
+cgal = ["Surface_mesh_approximation", "Shape_detection"]
+issue = "mesh-segmentation-shape"
+
+[[capability]]
+id = "D20"
+area = "mesh"
+name = "topology queries (genus, homotopy, cycles)"
+level = "narrow"
+summary = "Genus only, via Euler characteristic; refuses meshes with boundary, non-manifold edges, non-orientable characteristic, or more than one connected component (must call per-component). No homotopy/cycle-basis queries."
+evidence = ["crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
+occt = []
+cgal = ["Surface_mesh_topology"]
+
+[[capability]]
+id = "E1"
+area = "triangulation"
+name = "2D Delaunay / constrained Delaunay"
+level = "implemented"
+summary = "Constrained Delaunay triangulation with certified incircle/orient2d predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints."
+evidence = ["crates/algorithms/planar/triangulate/src/build.rs::triangulate", "crates/algorithms/planar/triangulate/src/recover.rs"]
+occt = ["src/ModelingAlgorithms/TKMesh/BRepMesh"]
+cgal = ["Triangulation_2"]
+
+[[capability]]
+id = "E2"
+area = "triangulation"
+name = "2D quality meshing (Ruppert/Chew)"
+level = "narrow"
+summary = "Quality/refine/triangulate_refined implement Ruppert-style refinement with an explicit Steiner-point budget; reports RefineOutcome::Capped when the angle bound is not reached rather than silently returning a worse mesh — a correct and deliberate refusal for inputs with small input angles (Ruppert ..."
+evidence = ["crates/algorithms/planar/triangulate/src/refine.rs::refine"]
+occt = []
+cgal = ["Mesh_2"]
+
+[[capability]]
+id = "E3"
+area = "triangulation"
+name = "3D Delaunay / regular triangulation"
+level = "absent"
+summary = "No tetrahedralization/3D Delaunay code found anywhere in the workspace."
+evidence = []
+occt = []
+cgal = ["Triangulation_3"]
+issue = "delaunay-3d"
+
+[[capability]]
+id = "E4"
+area = "triangulation"
+name = "3D constrained Delaunay"
+level = "absent"
+summary = "Depends on E3, which is absent."
+evidence = []
+occt = []
+cgal = ["Constrained_triangulation_3"]
+issue = "delaunay-3d"
+
+[[capability]]
+id = "E5"
+area = "triangulation"
+name = "volume (tetrahedral) meshing"
+level = "absent"
+summary = "No tet-mesh generator; no TetMesh type exists in representations."
+evidence = []
+occt = []
+cgal = ["Mesh_3", "Tetrahedral_remeshing"]
+issue = "tet-meshing"
+
+[[capability]]
+id = "E6"
+area = "triangulation"
+name = "surface meshing of implicit/smooth surfaces"
+level = "narrow"
+summary = "axiolid-levelset extracts a surface mesh from a signed scalar field via marching-cubes-family extraction (see G5); \"meshing of an implicit surface\" and \"isosurface extraction\" are the same underlying capability here, so this row and G5 report the same evidence. No dedicated Delaunay-refinement ..."
+evidence = ["crates/algorithms/sampled/levelset/src/lib.rs", "crates/algorithms/sampled/levelset/tests/extract.rs::a_surface_reaching_the_bounds_still_closes"]
+occt = []
+cgal = ["Surface_mesher", "Mesh_3"]
+
+[[capability]]
+id = "E7"
+area = "triangulation"
+name = "alpha shapes / alpha wrap"
+level = "absent"
+summary = "No alpha-shape or alpha-wrap code found."
+evidence = []
+occt = []
+cgal = ["Alpha_shapes_2", "Alpha_shapes_3", "Alpha_wrap_2", "Alpha_wrap_3"]
+issue = "voronoi-alpha"
+
+[[capability]]
+id = "E8"
+area = "triangulation"
+name = "Voronoi / power diagrams"
+level = "absent"
+summary = "No Voronoi diagram, power diagram, Apollonius, or segment-Delaunay-graph code found."
+evidence = []
+occt = []
+cgal = ["Voronoi_diagram_2", "Apollonius_graph_2", "Segment_Delaunay_graph_2"]
+issue = "voronoi-alpha"
+
+[[capability]]
+id = "E9"
+area = "triangulation"
+name = "periodic / hyperbolic / spherical triangulations"
+level = "absent"
+summary = "No such structures found."
+evidence = []
+occt = []
+cgal = ["Periodic_2_triangulation_2", "Periodic_3_triangulation_3", "Hyperbolic_triangulation_2", "Triangulation_on_sphere_2"]
+
+[[capability]]
+id = "E10"
+area = "triangulation"
+name = "d-dimensional triangulations/hulls"
+level = "absent"
+summary = "Only 2D triangulation and 2D/3D convex hull exist (G1); no generalized d-dimensional kernel."
+evidence = []
+occt = []
+cgal = ["Triangulation", "Convex_hull_d", "Kernel_d"]
+
+[[capability]]
+id = "F1"
+area = "planar"
+name = "polygon booleans (exact)"
+level = "narrow"
+summary = "Two backends: a certified integer-predicate polygon path (exact for straight-edge polygons, with holes) via axiolid-overlay::Region::{union,intersection,difference}, and an arc-aware path (arc_overlay) that wraps the cavalier_contours crate (a third-party dependency, not Axiolid's own ..."
+evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay"]
+occt = []
+cgal = ["Boolean_set_operations_2", "Nef_2"]
+
+[[capability]]
+id = "F2"
+area = "planar"
+name = "polygon offset (straight/rounded)"
+level = "narrow"
+summary = "offset_polygons/stroke_polyline in overlay crate, and Region::dilate/Region::erode (disc-expansion form). No standalone straight-skeleton-based offset (see F3, ABSENT) — offset here is the Minkowski-disc form (rounded corners only by construction; no mitred/beveled straight-skeleton offset variant)."
+evidence = ["crates/algorithms/planar/overlay/src/offset.rs::offset_polygons", "crates/algorithms/planar/overlay/src/region.rs::dilate"]
+occt = ["src/ModelingAlgorithms/TKOffset/BRepOffsetAPI"]
+cgal = ["Straight_skeleton_2", "Minkowski_sum_2"]
+issue = "straight-skeleton"
+
+[[capability]]
+id = "F3"
+area = "planar"
+name = "straight skeleton"
+level = "absent"
+summary = "No straight-skeleton implementation found anywhere in the workspace (searched directly, 0 hits)."
+evidence = []
+occt = []
+cgal = ["Straight_skeleton_2"]
+issue = "straight-skeleton"
+
+[[capability]]
+id = "F4"
+area = "planar"
+name = "arrangements of curves (segments, arcs, conics, Bezier)"
+level = "narrow"
+summary = "axiolid-arrangement is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — Vertex/HalfEdge/Face store Point2 positions with no curve type. Arcs are handled only inside the separate, non-incremental arc_overlay boolean path (F1/F2), not as arrangement edges; conics and Bezier ..."
+evidence = ["crates/algorithms/planar/arrangement/src/lib.rs::Arrangement", "crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one"]
+occt = []
+cgal = ["Arrangement_on_surface_2"]
+
+[[capability]]
+id = "F5"
+area = "planar"
+name = "envelopes / lower envelope"
+level = "absent"
+summary = "No lower/upper envelope algorithm found; all \"envelope\" hits in the codebase refer to unrelated navigation/traversal \"clearance envelope\" (agent radius/height/slope) concepts in axiolid-field, not the CGAL curve-envelope sense."
+evidence = ["crates/algorithms/sampled/field/src/navigate.rs"]
+occt = []
+cgal = ["Envelope_2", "Envelope_3"]
+
+[[capability]]
+id = "F6"
+area = "planar"
+name = "Minkowski sum 2D"
+level = "narrow"
+summary = "No standalone 2D-specific Minkowski sum; the general axiolid-minkowski crate operates on 3D planar-faced solids (see H2) via convex-hull-of-pairwise-sums for convex operands and decompose+pairwise+boolean for non-convex. 2D callers would have to lift into 3D or use Region::dilate for the disc-only ..."
+evidence = ["crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum", "crates/algorithms/discrete/minkowski/tests/minkowski.rs::the_sum_of_two_boxes_is_a_box_with_summed_extents"]
+occt = []
+cgal = ["Minkowski_sum_2"]
+
+[[capability]]
+id = "F7"
+area = "planar"
+name = "polygon partition (convex/monotone)"
+level = "absent"
+summary = "No convex or monotone polygon partition algorithm found; the CDT-based triangulation (E1) fully partitions into triangles but that is a different, finer-grained capability."
+evidence = []
+occt = []
+cgal = ["Partition_2"]
+issue = "polygon-partition-simplify"
+
+[[capability]]
+id = "F8"
+area = "planar"
+name = "visibility / shortest path in polygon"
+level = "implemented"
+summary = "axiolid-route computes visibility graphs and shortest paths constrained to stay inside a polygon (with holes)."
+evidence = ["crates/algorithms/planar/route/src/lib.rs", "crates/algorithms/planar/route/tests/route.rs"]
+occt = []
+cgal = ["Visibility_2"]
+
+[[capability]]
+id = "F9"
+area = "planar"
+name = "snap rounding"
+level = "absent"
+summary = "No snap-rounding algorithm found."
+evidence = []
+occt = []
+cgal = ["Snap_rounding_2"]
+issue = "polygon-partition-simplify"
+
+[[capability]]
+id = "F10"
+area = "planar"
+name = "polyline simplification"
+level = "absent"
+summary = "No Douglas-Peucker/Ramer or Visvalingam-Whyatt implementation found."
+evidence = []
+occt = []
+cgal = ["Polyline_simplification_2"]
+issue = "polygon-partition-simplify"
+
+[[capability]]
+id = "F11"
+area = "planar"
+name = "sweep-line segment intersection"
+level = "narrow"
+summary = "Only pairwise segment-segment and line-line intersection exist (axiolid-intersection-linear), certified via predicates; there is no Bentley-Ottmann-style sweep-line algorithm to report all intersections among a set of N segments in better-than-quadratic time — a caller needing that must call the ..."
+evidence = ["crates/algorithms/query/intersection/linear/src/segment_segment.rs", "crates/algorithms/query/intersection/linear/tests/segment_segment.rs"]
+occt = []
+cgal = ["Surface_sweep_2", "Intersections_2"]
+
+[[capability]]
+id = "G1"
+area = "point-sets"
+name = "convex hull 2D/3D"
+level = "implemented"
+summary = "3D: convex_hull builds a closed outward-oriented TriMesh by incremental insertion, every visibility decision through certified orient3d, typed refusals for <4 points / all-collinear / all-coplanar. 2D hull exists in axiolid-reference."
+evidence = ["crates/algorithms/construction/construct/src/hull.rs::convex_hull", "crates/algorithms/construction/construct/tests/convex_hull.rs", "crates/algorithms/reference/src/convex_hull.rs", "crates/algorithms/reference/tests/convex_hull.rs"]
+occt = []
+cgal = ["Convex_hull_2", "Convex_hull_3"]
+
+[[capability]]
+id = "G2"
+area = "point-sets"
+name = "bounding volumes (min sphere, OBB, min rect)"
+level = "narrow"
+summary = "2D only: minimum-area oriented rectangle and strict 2D convex hull. No 3D OBB, no minimum enclosing circle/sphere."
+evidence = ["crates/providers/mesh/boolmesh/tests/reconstruction.rs"]
+occt = ["src/FoundationClasses/TKMath/Bnd"]
+cgal = ["Bounding_volumes", "Optimal_bounding_box"]
+issue = "bounding-volumes-3d"
+
+[[capability]]
+id = "G3"
+area = "point-sets"
+name = "point set processing (normals, outliers, smoothing, simplify)"
+level = "absent"
+summary = "PointCloud (in representations/discrete/pointcloud) is a plain data container (points/normals/colours/intensities, with caller-supplied normals) with no processing algorithms — no normal estimation, outlier removal, smoothing, or simplification/subsampling function exists."
+evidence = ["crates/representations/discrete/pointcloud/src/lib.rs::PointCloud"]
+occt = []
+cgal = ["Point_set_processing_3"]
+issue = "pointset-processing"
+
+[[capability]]
+id = "G4"
+area = "point-sets"
+name = "surface reconstruction (Poisson, AF, scale-space)"
+level = "narrow"
+summary = "Reconstruction exists via a custom SDF-based method (nearest-neighbour-driven signed-distance field, then G5's level-set extraction) — not Poisson, not advancing-front, not scale-space. This is a legitimate reconstruction pipeline but a single, different algorithm family from all three CGAL ..."
+evidence = ["crates/providers/pointcloud/sdf/src/lib.rs", "crates/providers/pointcloud/sdf/tests/reconstruct.rs", "crates/contracts/operations/pointcloud-reconstruction/src/contract.rs"]
+occt = []
+cgal = ["Poisson_surface_reconstruction_3", "Advancing_front_surface_reconstruction", "Scale_space_reconstruction_3"]
+
+[[capability]]
+id = "G5"
+area = "point-sets"
+name = "isosurface extraction (marching cubes, dual contouring)"
+level = "implemented"
+summary = "Level-set surface extraction from a signed scalar field (marching-cubes family); closes correctly even when the surface reaches the sample-grid bounds."
+evidence = ["crates/algorithms/sampled/levelset/src/lib.rs", "crates/algorithms/sampled/levelset/tests/extract.rs::a_surface_reaching_the_bounds_still_closes"]
+occt = []
+cgal = ["Isosurfacing_3"]
+
+[[capability]]
+id = "G6"
+area = "point-sets"
+name = "PCA / plane fitting"
+level = "absent"
+summary = "No PCA or least-squares plane-fitting function found anywhere in the workspace; fit.rs in axiolid-nurbs only fits B-spline curves/surfaces through explicit points (interpolation, not PCA)."
+evidence = ["crates/algorithms/parametric/nurbs/src/fit.rs"]
+occt = []
+cgal = ["Principal_component_analysis"]
+issue = "pointset-processing"
+
+[[capability]]
+id = "G7"
+area = "point-sets"
+name = "kd-tree / k-NN / range search"
+level = "narrow"
+summary = "PointIndex provides exact k-NN and radius search, but via a UNIFORM GRID, not a kd-tree — the crate's own docs state this is deliberate (\"every query has the same radius and cell arithmetic beats tree descent\") and that no tree-based point index is provided; a caller with widely varying query radii ..."
+evidence = ["crates/algorithms/query/spatial/src/points.rs::PointIndex", "crates/algorithms/query/spatial/tests/points.rs", "crates/algorithms/query/spatial/tests/nearest.rs", "crates/algorithms/query/spatial/src/lib.rs"]
+occt = ["src/FoundationClasses/TKMath/BVH"]
+cgal = ["Spatial_searching"]
+
+[[capability]]
+id = "G8"
+area = "point-sets"
+name = "AABB tree / box intersection"
+level = "implemented"
+summary = "Bvh over bounded objects (triangles/solids), adapts to geometry distribution, used by clash/ray-cast/healing; also implements box-pair broad-phase queries."
+evidence = ["crates/algorithms/query/spatial/src/bvh.rs::Bvh", "crates/algorithms/query/spatial/tests/bvh.rs"]
+occt = ["src/FoundationClasses/TKMath/BVH", "src/FoundationClasses/TKMath/Bnd"]
+cgal = ["AABB_tree", "Box_intersection_d"]
+
+[[capability]]
+id = "H1"
+area = "spatial"
+name = "BVH / spatial index"
+level = "narrow"
+summary = "Bvh for objects (general, IMPL — same as G8) and PointIndex for points (uniform grid, not an orthtree/adaptive octree — see G7's narrowing, which applies here too). No adaptive Orthtree-equivalent structure exists."
+evidence = ["crates/algorithms/query/spatial/src/bvh.rs::Bvh", "crates/algorithms/query/spatial/src/points.rs::PointIndex"]
+occt = ["src/FoundationClasses/TKMath/BVH"]
+cgal = ["AABB_tree", "Orthtree"]
+
+[[capability]]
+id = "H2"
+area = "spatial"
+name = "3D Minkowski sum"
+level = "narrow"
+summary = "Exact for convex-convex pairs (hull of pairwise vertex sums) and for non-convex via decompose+pairwise-sum+boolean-union with an explicit pairwise-sum budget (4096) that refuses rather than runs unbounded work. Minkowski DIFFERENCE additionally requires the SUBJECT to be convex — refused by name ..."
+evidence = ["crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum", "crates/algorithms/discrete/minkowski/tests/minkowski.rs::a_non_convex_sum_differs_from_treating_the_operand_as_convex"]
+occt = []
+cgal = ["Minkowski_sum_3"]
+
+[[capability]]
+id = "H3"
+area = "spatial"
+name = "convex collision / distance (GJK/SAT)"
+level = "narrow"
+summary = "Full SAT (separating axis theorem) distance/intersection for convex shapes, by deliberate design choice (documented reasoning: SAT over GJK for the model-checking use case). Deliberately does NOT report penetration depth (documented refusal — a caller wanting EPA/penetration depth for physics is ..."
+evidence = ["crates/algorithms/query/collide/src/lib.rs::distance", "crates/algorithms/query/collide/src/sat.rs::separation", "crates/algorithms/query/collide/tests/collide.rs"]
+occt = []
+cgal = ["Polytope_distance_d"]
+
+[[capability]]
+id = "H4"
+area = "spatial"
+name = "Frechet / curve distances"
+level = "absent"
+summary = "No Frechet distance or other curve-distance metric found anywhere in the workspace."
+evidence = []
+occt = []
+cgal = ["Frechet_distance"]
+
+[[capability]]
+id = "H5"
+area = "spatial"
+name = "interpolation / barycentric coords"
+level = "narrow"
+summary = "Barycentric coordinates exist only as an internal by-product of ray/triangle intersection (RayHit::barycentric) and of attribute-blend interpolation inside the mesh boolean provider (boolmesh/src/attributes.rs::barycentric) — neither is exposed as a general-purpose, reusable barycentric-coordinate ..."
+evidence = ["crates/providers/mesh/boolmesh/src/attributes.rs::barycentric", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs", "crates/algorithms/query/intersection/ray-mesh/tests/nearest_hit.rs", "crates/providers/mesh/boolmesh/tests/boolean_attributes.rs"]
+occt = []
+cgal = ["Interpolation", "Barycentric_coordinates_2", "Barycentric_coordinates_3"]

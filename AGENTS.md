@@ -13,6 +13,7 @@ Read the closest nested `AGENTS.md` for directory-specific rules. Preserve the p
 - `docs/adr/`: durable architecture decisions; ADR 0035 owns the current package topology.
 - `docs/architecture/`: current and generated crate/dependency maps.
 - `docs/research/`: prior-art evidence.
+- `architecture/capability-ledger.toml`: every geometry capability OCCT and CGAL have, graded against Axiolid, with reference paths and tracking issues. **Start here when choosing capability work:** `cargo xtask gaps` prints what is ready, by priority; `cargo xtask gaps show <row | issue-key | #number>` gives the evidence and the OCCT/CGAL packages to read. You do not need either library checked out.
 - `scripts/`: feature, release, conformance, and mutation-verified architecture gates.
 
 ## Commands

@@ -119,7 +119,7 @@ export default defineConfig({
           { text: "Roadmap", link: "/ROADMAP" },
           { text: "Changelog", link: "/CHANGELOG" },
           { text: "Per-crate changelog", link: "/reference/changelog" },
-          { text: "Research", link: "/research/geometry-kernel-capability-comparison" },
+          { text: "Research", link: "/research/geometry-capability-comparison-occt-cgal" },
           { text: "Licensing", link: "/guide/licensing" },
           { text: "Contributing", link: "/guide/contributing" },
           { text: "Where things go", link: "/contributing/where-things-go" },

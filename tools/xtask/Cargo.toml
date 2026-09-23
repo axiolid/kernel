@@ -10,7 +10,12 @@ publish = false
 cargo_metadata.workspace = true
 cbindgen.workspace = true
 rustc_lexer.workspace = true
+serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+# Already in the lock via cbindgen: the capability ledger is too wide a
+# schema (22 issues, 95 rows, nested arrays) for a hand parser to stay
+# correct, unlike the fixed-shape closure profiles.
+toml = "0.9"
 
 [package.metadata.axiolid]
 architecture-version = 1

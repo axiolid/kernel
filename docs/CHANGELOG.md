@@ -4,6 +4,15 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- A capability ledger, `architecture/capability-ledger.toml`, grading 95
+  geometry capabilities from OCCT and CGAL against Axiolid, with evidence,
+  reference packages at pinned commits and tracking issues (#111,
+  #118-#139). `cargo xtask gaps` prints ready work by priority, and
+  `gaps show` gives one row or issue. `gaps check` runs in the gate and a
+  mutation probe proves each of its rules can fail.
+
 ### Fixed
 
 - macOS SHARED consumers load `libaxiolid_capi.dylib` again

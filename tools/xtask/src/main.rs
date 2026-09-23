@@ -1,5 +1,6 @@
 mod architecture;
 mod ffi;
+mod gaps;
 
 use std::env;
 
@@ -7,12 +8,30 @@ fn usage() -> ! {
     eprintln!("usage: cargo xtask architecture <check|list|graph|docs>");
     eprintln!("       cargo xtask architecture closure <check|docs|explain <profile>>");
     eprintln!("       cargo xtask ffi <header|check>");
+    eprintln!(
+        "       cargo xtask gaps [next|list [--open] [--area <a>]|show <id|issue-key>|check]"
+    );
     std::process::exit(2);
 }
 
 fn main() {
     let mut args = env::args().skip(1);
     let command = args.next();
+    if command.as_deref() == Some("gaps") {
+        let rest: Vec<String> = args.collect();
+        let result = match rest.first().map(String::as_str) {
+            None | Some("next") => gaps::next(),
+            Some("list") => gaps::list(&rest[1..]),
+            Some("show") => match rest.get(1) {
+                Some(target) => gaps::show(target),
+                None => usage(),
+            },
+            Some("check") => gaps::check(),
+            _ => usage(),
+        };
+        finish("gaps", result);
+        return;
+    }
     if command.as_deref() == Some("ffi") {
         let result = match args.next().as_deref() {
             Some("header") => ffi::header(),

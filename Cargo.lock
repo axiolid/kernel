@@ -1832,7 +1832,9 @@ dependencies = [
  "cargo_metadata",
  "cbindgen",
  "rustc_lexer",
+ "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

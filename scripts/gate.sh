@@ -17,6 +17,8 @@ step "closure mutation probe" scripts/probe_closure_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
 step "capability evidence" python3 scripts/check-capabilities.py
 step "capability evidence mutation probe" scripts/probe_capabilities_gate.sh
+step "capability ledger (gaps)" cargo xtask gaps check
+step "capability ledger mutation probe" scripts/probe_gaps_gate.sh
 step "integration contract" scripts/check-integration-contract.sh
 step "integration contract mutation" python3 scripts/probe_integration_contract_gate.py
 step "downstream probe unit tests" python3 -m unittest tests/downstream/test_downstream_consumers.py

@@ -141,4 +141,4 @@ Use the evidence nearest the implementation:
 3. Feature-isolation and layering gates.
 4. Benchmark reports for performance statements.
 
-The [research comparison](./research/geometry-kernel-capability-comparison.md) is useful context, but it is not a capability declaration.
+The [OCCT and CGAL comparison](./research/geometry-capability-comparison-occt-cgal.md) grades every capability against those libraries and names what is missing; `cargo xtask gaps` prints its live state. It is useful context, not a capability declaration.
