@@ -298,7 +298,7 @@ def expect_load_failure(
     consumer: Path,
     build: Path,
     build_type: str,
-    package_root: Path,
+    extra: list[str],
     env: dict[str, str],
 ) -> None:
     """Build must SUCCEED and running must fail to load the library.
@@ -312,7 +312,7 @@ def expect_load_failure(
         [
             "cmake", "-S", str(consumer), "-B", str(build),
             f"-DCMAKE_BUILD_TYPE={build_type}", "-DAXIOLID_LINKAGE=SHARED",
-            f"-DAXIOLID_PACKAGE_ROOT={package_root}",
+            *extra,
         ],
         env=env,
     )
@@ -497,26 +497,35 @@ def assert_package_mutations(
             assert_runtime_links_declared(package_root)
             mutations.append("runtime links declared")
     if linkage == "SHARED" and sys.platform == "darwin":
-        # kernel#113: the dylib's install name is `@rpath/...`, so a consumer
-        # loads it only through an LC_RPATH the package supplies. Drop that
-        # link option and the consumer must fail -- otherwise the green
-        # SHARED job proves nothing about the fix.
-        no_rpath = work / "mutation-no-rpath-package"
-        shutil.copytree(package_root, no_rpath)
-        targets = no_rpath / "lib/cmake/Axiolid/AxiolidTargets.cmake"
-        original = targets.read_text(encoding="utf-8")
+        # kernel#113: the dylib's install name is `@rpath/...`, and the
+        # SOURCE-TREE target supplies the consumer's LC_RPATH (the installed
+        # package gets one from CMake unaided -- verified by the equivalence
+        # run above). Remove it from a copy of native/ and the consumer must
+        # fail at load with dyld's reason, or the green job proves nothing.
+        mutated_native = work / "mutation-no-rpath-tree" / "native"
+        shutil.copytree(ROOT / "native", mutated_native)
+        cmake_lists = mutated_native / "CMakeLists.txt"
+        original = cmake_lists.read_text(encoding="utf-8")
         mutated = re.sub(
-            r"^\s*set_property\(TARGET Axiolid::axiolid_shared APPEND PROPERTY INTERFACE_LINK_OPTIONS\n[^\n]*\n",
+            r"^\s*set_property\(TARGET axiolid_shared APPEND PROPERTY INTERFACE_LINK_OPTIONS\n[^\n]*\n",
             "",
             original,
             count=1,
             flags=re.MULTILINE,
         )
         if mutated == original:
-            raise RuntimeError("macOS shared package declares no rpath to test")
-        targets.write_text(mutated, encoding="utf-8")
+            raise RuntimeError("macOS source-tree target declares no rpath to test")
+        cmake_lists.write_text(mutated, encoding="utf-8")
         expect_load_failure(
-            consumer, work / "mutation-rpath-build", build_type, no_rpath, env
+            consumer,
+            work / "mutation-rpath-build",
+            build_type,
+            [
+                f"-DAXIOLID_SOURCE_TREE={mutated_native.parent}",
+                f"-DAXIOLID_SOURCE_ROOT={ROOT}",
+                f"-DAXIOLID_CARGO_TARGET_DIR={env['CARGO_TARGET_DIR']}",
+            ],
+            env,
         )
         mutations.append("rpath")
     print(f"native package mutations rejected: {', '.join(mutations)}")

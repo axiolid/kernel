@@ -15,16 +15,6 @@ set_target_properties(Axiolid::axiolid_shared PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include"
 )
 @SHARED_IMPLIB_PROPERTY@
-if(APPLE)
-  # The dylib's install name is rpath-relative (see axiolid-capi/build.rs);
-  # dyld resolves it only through the consumer's LC_RPATH, which CMake does
-  # not add for an imported target. Point it at the installed dylib's
-  # directory so a plain find_package() consumer runs (#113). Relocating
-  # apps override it. (No at-signs here: the packager rejects any left over
-  # after template substitution.)
-  set_property(TARGET Axiolid::axiolid_shared APPEND PROPERTY INTERFACE_LINK_OPTIONS
-    "LINKER:-rpath,${PACKAGE_PREFIX_DIR}/lib")
-endif()
 
 add_library(Axiolid::axiolid_static STATIC IMPORTED)
 set_target_properties(Axiolid::axiolid_static PROPERTIES
