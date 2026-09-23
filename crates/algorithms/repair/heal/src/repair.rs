@@ -24,6 +24,8 @@ pub struct RepairPlan {
     pub actions: Vec<RepairAction>,
 }
 
+use axiolid_mesh::AttributeFate;
+
 /// Audit report returned with repaired geometry.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepairReport {
@@ -31,4 +33,9 @@ pub struct RepairReport {
     pub applied: Vec<RepairAction>,
     /// Repairs requested but not applicable.
     pub skipped: Vec<RepairAction>,
+    /// What happened to each named attribute channel, in input order.
+    ///
+    /// Every input channel appears exactly once, so a caller can tell a
+    /// channel that survived from one that never existed (#114).
+    pub attribute_fates: Vec<(String, AttributeFate)>,
 }

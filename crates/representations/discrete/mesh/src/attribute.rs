@@ -103,6 +103,10 @@ pub enum AttributeFate {
 }
 
 /// Why a channel could not be carried through an operation.
+///
+/// Non-exhaustive: new operations find new reasons, and adding one must not
+/// break every caller that reports them.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DropReason {
     /// The operation created vertices and the channel forbids derivation.
@@ -117,4 +121,11 @@ pub enum DropReason {
     /// the provider's limit separately keeps a capability gap from reading
     /// as a property of the data.
     ProviderLimitation,
+    /// Vertices the operation merged carried different values.
+    ///
+    /// A per-vertex channel holds one value per position, so a seam -- two
+    /// coincident vertices with different UVs, say -- cannot survive a weld
+    /// without keeping one side's value for both. Dropping by name is the
+    /// honest answer; a corner-indexed channel is the lossless one.
+    ConflictingValues,
 }

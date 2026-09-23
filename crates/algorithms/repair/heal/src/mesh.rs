@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 
 use axiolid_core::{Scalar, Tolerance};
 use axiolid_measure::volume_properties;
-use axiolid_mesh::{EdgeAdjacency, TriMesh};
+use axiolid_mesh::{AttributeFate, DropReason, EdgeAdjacency, TriMesh};
 
 use crate::diagnosis::{Defect, DefectKind, Diagnosis};
 use crate::repair::{RepairAction, RepairPlan, RepairReport};
@@ -231,12 +231,13 @@ impl Repair<TriMesh> for MeshHealer {
         }
         let mut out = mesh.clone();
         let mut report = RepairReport::default();
+        let mut dropped = Vec::new();
         // Actions run in the caller's order. The plan is ordered on
         // purpose: welding before orientation gives orientation a
         // connected mesh to work with, and the reverse does not.
         for &action in &plan.actions {
             let changed = match action {
-                RepairAction::WeldVertices => weld(&mut out, tolerance),
+                RepairAction::WeldVertices => weld(&mut out, tolerance, &mut dropped),
                 RepairAction::DropDegenerateElements => drop_degenerate(&mut out, tolerance),
                 RepairAction::UnifyOrientation => unify_orientation(&mut out),
                 RepairAction::OrientOutward => orient_outward(&mut out, tolerance),
@@ -247,6 +248,21 @@ impl Repair<TriMesh> for MeshHealer {
                 report.skipped.push(action);
             }
         }
+        // No repair creates a vertex or derives a value, so a channel that
+        // was not dropped is carried unchanged: renumbered, never blended.
+        report.attribute_fates = mesh
+            .attributes
+            .iter()
+            .map(|channel| {
+                let fate = dropped
+                    .iter()
+                    .find(|(name, _)| *name == channel.name)
+                    .map_or(AttributeFate::Preserved, |(_, reason)| {
+                        AttributeFate::Dropped(*reason)
+                    });
+                (channel.name.clone(), fate)
+            })
+            .collect();
         Ok((out, report))
     }
 }
@@ -256,15 +272,15 @@ impl Repair<TriMesh> for MeshHealer {
 /// Positions are compacted rather than left orphaned: a welded mesh that
 /// still carries unreferenced vertices reports the same duplicate defects
 /// on the next diagnosis, which would make the repair look ineffective.
-fn weld(mesh: &mut TriMesh, tolerance: Tolerance) -> bool {
+fn weld(mesh: &mut TriMesh, tolerance: Tolerance, dropped: &mut Vec<(String, DropReason)>) -> bool {
     let groups = coincident_groups(mesh, tolerance);
     if groups.is_empty() {
         return false;
     }
     let mut remap: Vec<u32> = (0..mesh.positions.len() as u32).collect();
-    for (representative, duplicates) in groups {
-        for d in duplicates {
-            remap[d as usize] = representative;
+    for (representative, duplicates) in &groups {
+        for &d in duplicates {
+            remap[d as usize] = *representative;
         }
     }
     let mut keep: Vec<u32> = Vec::new();
@@ -276,9 +292,11 @@ fn weld(mesh: &mut TriMesh, tolerance: Tolerance) -> bool {
         }
     }
     mesh.positions = keep.iter().map(|&i| mesh.positions[i as usize]).collect();
+    let before = mesh.indices.clone();
     for index in &mut mesh.indices {
         *index = compact[remap[*index as usize] as usize];
     }
+    crate::carry::weld(mesh, &groups, &keep, &before, dropped);
     // Welding can collapse a triangle to a line; those are degenerate now,
     // but removing them is a different action the caller did not request.
     true
@@ -289,15 +307,18 @@ fn drop_degenerate(mesh: &mut TriMesh, tolerance: Tolerance) -> bool {
     let limit = tolerance.linear() * tolerance.linear();
     let count = mesh.indices.len() / 3;
     let mut kept = Vec::with_capacity(mesh.indices.len());
+    let mut kept_triangles = Vec::with_capacity(count);
     for t in 0..count {
         if area(mesh, t).is_some_and(|a| a > limit) {
             kept.extend_from_slice(&mesh.indices[t * 3..t * 3 + 3]);
+            kept_triangles.push(t);
         }
     }
     if kept.len() == mesh.indices.len() {
         return false;
     }
     mesh.indices = kept;
+    crate::carry::keep_triangles(mesh, &kept_triangles);
     true
 }
 
@@ -348,6 +369,7 @@ fn unify_orientation(mesh: &mut TriMesh) -> bool {
                     // same way round a shared edge, which is inconsistent.
                     if corners(mesh, n).into_iter().any(|(c, d)| c == a && d == b) {
                         mesh.indices.swap(n * 3 + 1, n * 3 + 2);
+                        crate::carry::flip_triangle(mesh, n);
                         flipped = true;
                     }
                     visited[n] = true;
@@ -395,8 +417,9 @@ fn orient_outward(mesh: &mut TriMesh, tolerance: Tolerance) -> bool {
     if properties.signed_volume >= 0.0 {
         return false;
     }
-    for triangle in mesh.indices.chunks_exact_mut(3) {
-        triangle.swap(1, 2);
+    for t in 0..mesh.indices.len() / 3 {
+        mesh.indices.swap(t * 3 + 1, t * 3 + 2);
+        crate::carry::flip_triangle(mesh, t);
     }
     true
 }

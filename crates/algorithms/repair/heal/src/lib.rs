@@ -5,6 +5,7 @@
 //! Healing never runs inside another algorithm. Callers diagnose first, choose
 //! a narrow [`RepairPlan`], and retain the resulting [`RepairReport`] for audit.
 
+mod carry;
 pub mod diagnose;
 pub mod diagnosis;
 pub mod intersect;

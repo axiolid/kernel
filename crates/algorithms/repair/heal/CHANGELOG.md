@@ -8,3 +8,8 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Fixed
+
+- Repairs keep attribute channels and normals in step with the geometry they rewrite (#114). Weld compacts per-vertex channels and normals; a seam drops the channel by name, a hard edge switches normals to corner-indexed. Dropping or flipping triangles moves corner-indexed normals with them.
+- `RepairReport::attribute_fates` names every input channel's fate.

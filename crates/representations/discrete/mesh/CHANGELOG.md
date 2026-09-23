@@ -8,3 +8,8 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- `DropReason::ConflictingValues`: merged vertices carried different values, so a per-vertex channel could not keep both (#114).
+- `DropReason` is now `#[non_exhaustive]`, so future reasons are not breaking.
