@@ -523,7 +523,11 @@ def assert_package_mutations(
             [
                 f"-DAXIOLID_SOURCE_TREE={mutated_native.parent}",
                 f"-DAXIOLID_SOURCE_ROOT={ROOT}",
-                f"-DAXIOLID_CARGO_TARGET_DIR={env['CARGO_TARGET_DIR']}",
+                # An EMPTY target dir, so the dylib does not exist when CMake
+                # configures -- the fresh-build condition #113 fails under.
+                # CI evidence (run 35859346486): with the dylib already built,
+                # CMake added the LC_RPATH itself and the mutation survived.
+                f"-DAXIOLID_CARGO_TARGET_DIR={work / 'mutation-rpath-cargo'}",
             ],
             env,
         )

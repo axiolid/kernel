@@ -95,10 +95,11 @@ if(WIN32)
 elseif(APPLE)
   # The dylib's install name is `@rpath/libaxiolid_capi.dylib` (set in
   # axiolid-capi/build.rs so apps can relocate it). dyld resolves `@rpath`
-  # only through the consumer's LC_RPATH (#113). Observed in CI (otool -l):
-  # a consumer of the INSTALLED package gets an LC_RPATH to its lib/ from
-  # CMake without help, but a consumer of this source-tree target gets none
-  # and fails at load. So only this target supplies the dylib's directory.
+  # only through the consumer's LC_RPATH (#113). Observed in CI (otool -l,
+  # link.txt): CMake adds that LC_RPATH itself when the dylib EXISTS at
+  # configure time -- always true for the installed package -- but on a
+  # fresh build cargo has not produced it yet, so the consumer gets none and
+  # fails at load. So this target supplies the dylib's directory itself.
   set_property(TARGET axiolid_shared APPEND PROPERTY INTERFACE_LINK_OPTIONS
     "LINKER:-rpath,${_artifact_root}/$<IF:$<CONFIG:Debug>,debug,release>")
 endif()
