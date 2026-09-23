@@ -20,7 +20,7 @@
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Interval, Point2, Scalar, Vec2};
 use axiolid_curve::{Circle2, Curve2, Line2};
-use axiolid_profile::{Contour, ContourProfile, ProfileSegment, SectionProfile};
+use axiolid_profile::{Contour, ContourProfile, ProfileSegment, RectangleProfile, SectionProfile};
 
 use crate::BACKEND_ID;
 
@@ -224,6 +224,84 @@ fn checked_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<Scalar
     if value.abs() >= limit {
         return Err(GeomError::Degenerate(format!(
             "{what} slope {value} rad is too steep to leave a flange"
+        )));
+    }
+    Ok(value)
+}
+
+/// Lower a rectangle -- rounded, hollow, or both -- into an exact contour.
+///
+/// Corner radii become exact quarter arcs through the same router the
+/// structural sections use, so a rounded corner extrudes to a cylinder wall
+/// rather than a fan of chords. A hollow rectangle's inner boundary comes
+/// back as a hole, built counter-clockwise like the outer ring; the extruder
+/// re-orients holes itself.
+///
+/// Refuses, rather than clamps, a radius that is negative, non-finite, or
+/// wider than the half-extent it rounds, and an inner radius on a filled
+/// rectangle.
+///
+/// Also refuses a hollow section whose corners leave no wall. Two rounded
+/// rectangles nest exactly when their support functions do; along the corner
+/// diagonal that requires `outer - inner < (2 + sqrt 2) * thickness`. Past
+/// that the inner corner reaches the outer arc and the profile crosses itself.
+pub fn rectangle_contour(rectangle: &RectangleProfile) -> GeomResult<ContourProfile> {
+    positive(rectangle.x, "rectangle x extent")?;
+    positive(rectangle.y, "rectangle y extent")?;
+    let (hx, hy) = (rectangle.x / 2.0, rectangle.y / 2.0);
+    let outer_radius = corner_radius(rectangle.outer_radius, hx.min(hy), "outer")?;
+    let outer = route(&box_corners(hx, hy, outer_radius))?;
+    let Some(thickness) = rectangle.thickness else {
+        if rectangle.inner_radius.is_some() {
+            return Err(GeomError::InvalidInput(
+                "an inner corner radius needs a hollow rectangle".to_owned(),
+            ));
+        }
+        return Ok(ContourProfile {
+            outer,
+            holes: Vec::new(),
+        });
+    };
+    positive(thickness, "rectangle wall thickness")?;
+    if 2.0 * thickness >= rectangle.x.min(rectangle.y) {
+        return Err(GeomError::Degenerate(format!(
+            "wall thickness {thickness} leaves no opening in {} x {}",
+            rectangle.x, rectangle.y
+        )));
+    }
+    let (ix, iy) = (hx - thickness, hy - thickness);
+    let inner_radius = corner_radius(rectangle.inner_radius, ix.min(iy), "inner")?;
+    let wall_limit = (2.0 + core::f64::consts::SQRT_2) * thickness;
+    if outer_radius - inner_radius >= wall_limit {
+        return Err(GeomError::Degenerate(format!(
+            "outer radius {outer_radius} minus inner radius {inner_radius} must stay \
+             below {wall_limit} or the {thickness}-thick wall vanishes at the corners"
+        )));
+    }
+    let hole = route(&box_corners(ix, iy, inner_radius))?;
+    Ok(ContourProfile {
+        outer,
+        holes: vec![hole],
+    })
+}
+
+/// Counter-clockwise corners of an origin-centred box, all rounded alike.
+fn box_corners(hx: Scalar, hy: Scalar, radius: Scalar) -> [Corner; 4] {
+    let radius = Some(radius);
+    [
+        rounded(-hx, -hy, radius),
+        rounded(hx, -hy, radius),
+        rounded(hx, hy, radius),
+        rounded(-hx, hy, radius),
+    ]
+}
+
+/// Validate a stated corner radius; `None` is a sharp corner.
+fn corner_radius(radius: Option<Scalar>, limit: Scalar, which: &str) -> GeomResult<Scalar> {
+    let value = radius.unwrap_or(0.0);
+    if !value.is_finite() || value < 0.0 || value > limit {
+        return Err(GeomError::InvalidInput(format!(
+            "{which} corner radius must lie in [0, {limit}], got {value}"
         )));
     }
     Ok(value)

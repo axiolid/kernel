@@ -99,11 +99,19 @@ fn revolve_rectangle(
     axis_direction: Vec3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    if rectangle.outer_radius.is_some() || rectangle.inner_radius.is_some() {
-        return Err(unsupported("rounded rectangle exact revolution"));
-    }
     if rectangle.thickness.is_some() {
         return Err(unsupported("hollow rectangle exact revolution"));
+    }
+    if rectangle.outer_radius.is_some() || rectangle.inner_radius.is_some() {
+        // Rounded corners revolve into tori, which the general contour
+        // revolver already builds; the dedicated path below only knows
+        // straight edges.
+        return revolve_via_contour(
+            &Profile::Rectangle(*rectangle),
+            axis_origin,
+            axis_direction,
+            tolerance,
+        );
     }
     if !rectangle.x.is_finite()
         || !rectangle.y.is_finite()

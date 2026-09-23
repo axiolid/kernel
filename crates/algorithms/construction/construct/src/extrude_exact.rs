@@ -17,7 +17,7 @@ use crate::center_line_exact::center_line_contour;
 use crate::contour_lower::{contour_to_arc_ring, orient_arc_ring};
 use crate::extrude_arc::extrude_arc_rings;
 use crate::profile_lower::{lower_composite, lower_derived};
-use crate::section_lower::section_contour;
+use crate::section_lower::{rectangle_contour, section_contour};
 use crate::BACKEND_ID;
 
 #[derive(Debug)]
@@ -125,7 +125,10 @@ fn extrude_rectangle(
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     if rectangle.outer_radius.is_some() || rectangle.inner_radius.is_some() {
-        return Err(unsupported("rounded rectangle extrusion"));
+        // Rounded corners are exact quarter arcs, so the contour path builds
+        // them as cylinder walls; the dedicated path below only knows
+        // straight edges.
+        return extrude_contour(&rectangle_contour(rectangle)?, offset, tolerance);
     }
     if !rectangle.x.is_finite()
         || !rectangle.y.is_finite()
@@ -1239,6 +1242,7 @@ fn add_ellipse_cap_loop(
 pub fn profile_to_contour(profile: &Profile, tolerance: Tolerance) -> GeomResult<ContourProfile> {
     match profile {
         Profile::Contour(contour) => Ok(contour.clone()),
+        Profile::Rectangle(rectangle) => rectangle_contour(rectangle),
         Profile::Section(section) => section_contour(section),
         Profile::CenterLine(center_line) => center_line_contour(center_line, tolerance),
         Profile::Derived { basis, transform } => {

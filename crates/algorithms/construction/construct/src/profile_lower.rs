@@ -122,11 +122,16 @@ fn lower_rectangle(
     transform: &Transform2,
     tolerance: Tolerance,
 ) -> GeomResult<Profile> {
-    if rectangle.thickness.is_some() {
-        return Err(unsupported("derived profile over a hollow rectangle"));
-    }
-    if rectangle.outer_radius.is_some() || rectangle.inner_radius.is_some() {
-        return Err(unsupported("derived profile over a rounded rectangle"));
+    if rectangle.thickness.is_some()
+        || rectangle.outer_radius.is_some()
+        || rectangle.inner_radius.is_some()
+    {
+        // Rounded corners and a hollow core both lower to an exact contour.
+        // Transforming THAT keeps each arc an arc under a similarity and
+        // refuses the ellipse a shear would make, through the same check
+        // every other contour goes through.
+        let contour = crate::section_lower::rectangle_contour(rectangle)?;
+        return lower_derived(&Profile::Contour(contour), transform, tolerance);
     }
     if !rectangle.x.is_finite()
         || !rectangle.y.is_finite()

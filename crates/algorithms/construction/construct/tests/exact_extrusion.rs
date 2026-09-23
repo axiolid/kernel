@@ -168,21 +168,16 @@ fn axial_circle_extrusion_preserves_cylinder_and_distinct_seam_charts() {
 
 #[test]
 fn exact_extrusion_refuses_families_whose_supports_are_not_populated() {
-    let rounded = Profile::Rectangle(RectangleProfile {
-        x: 2.0,
-        y: 1.0,
-        thickness: None,
-        outer_radius: Some(0.1),
-        inner_radius: None,
-    });
+    // A rounded rectangle used to sit in this list. It now extrudes exactly
+    // through the contour path (kernel#111); see tests/rounded_rectangle.rs.
     let annulus = Profile::Circle(CircleProfile {
         radius: 1.0,
         thickness: Some(0.2),
     });
-    for (profile, family) in [
-        (rounded, "rounded rectangle extrusion"),
-        (annulus, "annular circle extrusion"),
-    ] {
+    // A list rather than one case: every family that still refuses belongs
+    // here, and a list keeps adding the next one a one-line change.
+    let cases = vec![(annulus, "annular circle extrusion")];
+    for (profile, family) in cases {
         let error = extrude_profile_exact(&profile, Vec3::Z, 1.0, Tolerance::METRE)
             .expect_err("unsupported exact family must refuse");
         assert!(matches!(
