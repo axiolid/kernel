@@ -213,4 +213,11 @@ pub enum DropReason {
     /// without keeping one side's value for both. Dropping by name is the
     /// honest answer; a corner-indexed channel is the lossless one.
     ConflictingValues,
+    /// Inputs being combined define the same channel name with a different
+    /// width or blend, so no single channel can hold them all.
+    ///
+    /// Combining two `"uv"` channels, one 2-wide and one 3-wide, would have
+    /// to invent a component or discard one; dropping by name is the honest
+    /// answer.
+    IncompatibleChannels,
 }

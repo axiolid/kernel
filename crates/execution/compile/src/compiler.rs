@@ -11,11 +11,13 @@ use axiolid_contracts::{
 use axiolid_core::{PlaneFrame, Point3, Scalar, Tolerance, Transform3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::MeshBoolean;
-use axiolid_mesh_compile_contract::MeshCompiler;
+use axiolid_mesh_compile_contract::{CompileOutcome, MeshCompiler};
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 use axiolid_construct::extrude::extrude_profile;
 use axiolid_construct::profile::profile_rings;
+
+use crate::channels::{self, Built};
 
 /// Scalar reference compiler.
 ///
@@ -88,7 +90,7 @@ enum Step {
 ///
 /// A transformed instance changes the local chord budget. Keying only by node
 /// would incorrectly reuse a coarse source mesh for a larger instance.
-type Cache = std::collections::HashMap<EvalKey, TriMesh>;
+type Cache = std::collections::HashMap<EvalKey, Built>;
 
 impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// Resolve a node handle, blaming the graph rather than panicking.
@@ -254,7 +256,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         root: NodeId,
         options: &ExecutionOptions,
         cache: &mut Cache,
-    ) -> GeomResult<TriMesh> {
+    ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, options.tolerance());
         let mut stack = vec![Step::Enter(root_key)];
         while let Some(step) = stack.pop() {
@@ -278,8 +280,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         continue;
                     }
                     let local_options = options.clone().with_tolerance(key.tolerance());
-                    let mesh = self.build(graph, key, &local_options, cache)?;
-                    cache.insert(key, mesh);
+                    let built = self.build(graph, key, &local_options, cache)?;
+                    cache.insert(key, built);
                 }
             }
         }
@@ -353,36 +355,43 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         key: EvalKey,
         options: &ExecutionOptions,
         cache: &Cache,
-    ) -> GeomResult<TriMesh> {
+    ) -> GeomResult<Built> {
         let id = key.id;
         let node = self.node(graph, id)?;
         match node {
-            GeometryNode::TriMesh(mesh) => Ok(mesh.clone()),
-            GeometryNode::PolygonMesh(mesh) => self.compile_authored_triangles(mesh),
+            GeometryNode::TriMesh(mesh) => Ok(Built::leaf(mesh.clone())),
+            GeometryNode::PolygonMesh(mesh) => {
+                self.compile_authored_triangles(mesh).map(Built::leaf)
+            }
             GeometryNode::Instance(instance) => {
                 let source_tolerance =
                     instance_local_tolerance(instance.transform, options.tolerance())?;
                 let source = self.cached(cache, instance.source, source_tolerance)?;
-                Ok(transform_mesh(source, instance.transform))
+                Ok(channels::transform(source, instance.transform))
             }
             GeometryNode::Collection(members) => {
-                let mut merged = TriMesh::default();
-                for &member in members {
-                    append_mesh(
-                        &mut merged,
-                        self.cached(cache, member, options.tolerance())?,
-                    );
-                }
-                Ok(merged)
+                let members = members
+                    .iter()
+                    .map(|&member| self.cached(cache, member, options.tolerance()))
+                    .collect::<GeomResult<Vec<_>>>()?;
+                Ok(channels::merge(&members))
             }
+            GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left,
+                right,
+                operator,
+            }) => self.build_boolean(graph, *left, *right, *operator, options, cache),
             GeometryNode::SolidOperation(operation) => {
-                self.build_solid(graph, operation, options, cache)
+                self.build_solid(graph, operation, options).map(Built::leaf)
             }
-            GeometryNode::BRep(brep) => crate::brep::tessellate(brep, graph, options.tolerance()),
+            GeometryNode::BRep(brep) => {
+                crate::brep::tessellate(brep, graph, options.tolerance()).map(Built::leaf)
+            }
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
                 axiolid_reference::primitive::tessellate_primitive(primitive, options.tolerance())
+                    .map(Built::leaf)
             }
             other => Err(GeomError::Unsupported {
                 backend: self.descriptor().id,
@@ -397,7 +406,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         cache: &'c Cache,
         id: NodeId,
         tolerance: Tolerance,
-    ) -> GeomResult<&'c TriMesh> {
+    ) -> GeomResult<&'c Built> {
         cache.get(&EvalKey::new(id, tolerance)).ok_or_else(|| {
             GeomError::InvalidInput(format!(
                 "dependency {id:?} was not evaluated first at tolerance {tolerance:?}"
@@ -405,13 +414,54 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         })
     }
 
-    /// Extrusion and boolean; every other solid family is explicitly refused.
+    /// A boolean, with the operands' channel fates composed onto the
+    /// provider's (#115): a channel lost upstream stays reported lost.
+    fn build_boolean(
+        &self,
+        graph: &GeometryGraph,
+        left: NodeId,
+        right: NodeId,
+        operator: axiolid_core::BooleanOperator,
+        options: &ExecutionOptions,
+        cache: &Cache,
+    ) -> GeomResult<Built> {
+        let subject = self.cached(cache, left, options.tolerance())?;
+        let bounded_tool = match self.node(graph, right)? {
+            GeometryNode::HalfSpace(hs) => Some(axiolid_construct::half_space::for_subject(
+                &subject.mesh,
+                *hs,
+                options.tolerance(),
+            )?),
+            _ => None,
+        };
+        // A bounded half-space is built here from the subject, so it has no
+        // upstream fates of its own.
+        let (tool, tool_fates) = match bounded_tool.as_ref() {
+            Some(tool) => (tool, None),
+            None => {
+                let built = self.cached(cache, right, options.tolerance())?;
+                (&built.mesh, Some(&built.fates))
+            }
+        };
+        let outcome = self
+            .boolean
+            .boolean(&subject.mesh, tool, operator, options)?;
+        Ok(channels::after_boolean(
+            outcome.mesh,
+            &subject.fates,
+            tool_fates,
+            outcome.evidence.attribute_fates,
+        ))
+    }
+
+    /// Every non-boolean solid family; unsupported ones are explicitly
+    /// refused. Booleans go through [`Self::build_boolean`], which needs the
+    /// operands' cached fates.
     fn build_solid(
         &self,
         graph: &GeometryGraph,
         operation: &SolidOperation,
         options: &ExecutionOptions,
-        cache: &Cache,
     ) -> GeomResult<TriMesh> {
         match operation {
             SolidOperation::Extrusion {
@@ -588,36 +638,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 )?;
                 Ok(mesh)
             }
-            SolidOperation::Boolean {
-                left,
-                right,
-                operator,
-            } => {
-                let subject = self.cached(cache, *left, options.tolerance())?;
-                let right_node = self.node(graph, *right)?;
-                let bounded_tool = if let GeometryNode::HalfSpace(hs) = right_node {
-                    Some(axiolid_construct::half_space::for_subject(
-                        subject,
-                        *hs,
-                        options.tolerance(),
-                    )?)
-                } else {
-                    None
-                };
-                let tool = if let Some(tool) = bounded_tool.as_ref() {
-                    tool
-                } else {
-                    self.cached(cache, *right, options.tolerance())?
-                };
-                // The compiler produces a mesh graph, so it takes the mesh and
-                // drops the evidence here. A caller wanting boolean diagnostics
-                // calls the registry directly; threading evidence through every
-                // DAG node would change the compile contract, which is a
-                // separate decision from fixing the boolean contract.
-                self.boolean
-                    .boolean(subject, tool, *operator, options)
-                    .map(|outcome| outcome.mesh)
-            }
+            // Routed to `build_boolean` by `build`; unreachable here.
+            SolidOperation::Boolean { .. } => Err(GeomError::InvalidInput(
+                "boolean must be built through build_boolean".into(),
+            )),
             // Naming the capability lets a caller register a provider for it
             // rather than guess. `Unsupported` names only the operation, which
             // collapses revolution, swept disk, fixed-reference sweep and the
@@ -703,37 +727,6 @@ fn unsupported_operation(node: &GeometryNode) -> Operation {
     }
 }
 
-/// Apply an affine transform to every position.
-///
-/// Normals are dropped rather than transformed: a correct normal transform is
-/// the inverse transpose, and silently applying the point transform would
-/// produce subtly wrong shading under non-uniform scale.
-fn transform_mesh(mesh: &TriMesh, transform: Transform3) -> TriMesh {
-    let positions = mesh
-        .positions
-        .iter()
-        .map(|&p| transform.transform_point3(p))
-        .collect();
-    let mut out = TriMesh::new(positions, mesh.indices.clone());
-    if transform.matrix3.determinant() < 0.0 {
-        // A mirroring transform reverses orientation; restore outward winding
-        // so the result still satisfies the boolean provider's precondition.
-        for triangle in out.indices.chunks_exact_mut(3) {
-            triangle.swap(1, 2);
-        }
-    }
-    out
-}
-
-/// Concatenate `source` into `target`, rebasing indices.
-fn append_mesh(target: &mut TriMesh, source: &TriMesh) {
-    let offset = target.positions.len() as u32;
-    target.positions.extend_from_slice(&source.positions);
-    target
-        .indices
-        .extend(source.indices.iter().map(|&i| i + offset));
-}
-
 impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
     /// Bounded by the peak mesh size, which is data-dependent, so the honest
     /// answer is unbounded rather than an invented constant.
@@ -750,6 +743,21 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
         self.evaluate(graph, root, options, &mut cache)
+            .map(|built| built.mesh)
+    }
+
+    /// Every channel on the result, and every channel an input had that the
+    /// result lost, is reported with its fate (#115).
+    fn compile_mesh_reported(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<CompileOutcome> {
+        self.admit_budget(options)?;
+        let mut cache = Cache::new();
+        let built = self.evaluate(graph, root, options, &mut cache)?;
+        Ok(CompileOutcome::tracked(built.mesh, built.fates.into_vec()))
     }
 
     /// Overriding the `_into` seam gives both call shapes one shared cache,
@@ -765,7 +773,7 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
         destination.reserve(roots.len());
         let mut cache = Cache::new();
         for &root in roots {
-            destination.push(self.evaluate(graph, root, options, &mut cache)?);
+            destination.push(self.evaluate(graph, root, options, &mut cache)?.mesh);
         }
         Ok(())
     }

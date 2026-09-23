@@ -16,6 +16,7 @@ caret rule for `0.x` versions.
 - `AttributeChannel::corner_indexed`, `is_corner_indexed`, `value_count`, `at_corner` (reads either addressing, `None` for an unmapped corner), and `AttributeChannel::UNMAPPED` for triangles that carry no value.
 - `validate_structure` checks corner channels: whole tuples, one entry per corner, entries in range, and each triangle fully mapped or fully unmapped. New `MeshValidationError` variants name the channel.
 - `DropReason::ConflictingValues`: merged vertices carried different values, so a per-vertex channel could not keep both (#114).
+- `DropReason::IncompatibleChannels`: inputs being combined define one channel name with a different width or blend (#115).
 
 ### Changed
 

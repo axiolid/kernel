@@ -3,6 +3,7 @@
 //! Scalar reference `MeshCompiler`.
 
 mod brep;
+mod channels;
 mod directrix;
 
 use axiolid_contracts::BackendId;

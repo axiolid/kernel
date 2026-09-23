@@ -1,5 +1,6 @@
 //! Complete graph compilation capability.
 
+use crate::CompileOutcome;
 use axiolid_mesh::TriMesh;
 use axiolid_model::{GeometryGraph, NodeId};
 
@@ -34,6 +35,22 @@ pub trait MeshCompiler: Backend {
         root: NodeId,
         options: &ExecutionOptions,
     ) -> GeomResult<TriMesh>;
+
+    /// Compile one root and report what happened to each attribute channel.
+    ///
+    /// The default wraps [`Self::compile_mesh`] and reports
+    /// [`CompileOutcome::attribute_fates`] as `None` (not tracked). A
+    /// compiler that carries channels overrides this so a caller can tell a
+    /// dropped channel from one that was never there.
+    fn compile_mesh_reported(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<CompileOutcome> {
+        self.compile_mesh(graph, root, options)
+            .map(CompileOutcome::untracked)
+    }
 
     /// Compile roots into a caller-provided buffer.
     ///

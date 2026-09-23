@@ -23,6 +23,14 @@ supported extrusion roots and must never delegate to mesh compilation.
 No default tolerance or chord budget. The caller supplies both, because
 acceptable error depends on source units and downstream use.
 
+**Channels ride with the geometry (#115).** The cache holds
+`channels::Built` (mesh + per-channel fates), not a bare `TriMesh`, so every
+node kind must say what it did to each channel. `Instance` and `Collection`
+never create surface points and so never derive a value; do not rebuild a
+mesh from positions and indices on those paths -- that is the #115 bug. New
+graph paths go through `channels::{transform, merge, after_boolean}` or wrap
+a freshly made mesh in `Built::leaf`. Gate: `tests/graph_channels.rs`.
+
 Curve flattening is **not owned here**. `segment_points`, `circle_rings`, and
 `ellipse_rings` all delegate to `axiolid_reference::curve::flatten2` (ADR 0018),
 which subdivides adaptively on measured sagitta. The old private
