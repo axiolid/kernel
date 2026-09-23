@@ -38,53 +38,121 @@ pub enum Blend {
     None,
 }
 
-/// Per-vertex values under a caller-chosen name.
+/// Per-vertex or per-corner values under a caller-chosen name.
 ///
-/// `values.len()` must equal the mesh's vertex count. The invariant is
-/// checked by [`crate::TriMesh::validate_structure`] rather than enforced
-/// at construction, matching how this crate treats dirty imported data:
-/// representable, then validated at a trust boundary.
+/// Per-vertex (the default, `corner_indices: None`): one tuple per position.
+///
+/// Per-corner (`corner_indices: Some`): one index into `values` for every
+/// triangle corner, mirroring [`crate::NormalAttribute::indices`]. This is
+/// how source formats store texture coordinates: a box corner shared by
+/// three faces carries a different UV in each (#112). Positions stay shared,
+/// so the mesh's adjacency and closure do not depend on attribute seams.
+///
+/// Invariants are checked by [`crate::TriMesh::validate_structure`] rather
+/// than enforced at construction, matching how this crate treats dirty
+/// imported data: representable, then validated at a trust boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttributeChannel {
     /// Caller-chosen identifier, unique within a mesh.
     pub name: String,
-    /// One scalar tuple per vertex, `width` entries each.
+    /// Scalar tuples, `width` entries each: one per vertex, or the pool the
+    /// corner indices point into.
     pub values: Vec<Scalar>,
     /// Number of scalars per vertex. `2` for a UV, `1` for an id.
     pub width: usize,
     /// How values may be combined when a vertex is created.
     pub blend: Blend,
+    /// Optional per-corner tuple indices, one per entry of the mesh's
+    /// `indices`. `None` means the channel is per-vertex.
+    ///
+    /// A triangle whose three entries are all [`Self::UNMAPPED`] carries no
+    /// value -- real files texture only some faces. A triangle mixing
+    /// mapped and unmapped corners is invalid: it would have a value at
+    /// some corners and nothing to interpolate towards at the others.
+    pub corner_indices: Option<Vec<u32>>,
 }
 
 impl AttributeChannel {
-    /// Build a channel from flat values.
+    /// Corner-index marker for a triangle that carries no value.
+    pub const UNMAPPED: u32 = u32::MAX;
+
+    /// Build a per-vertex channel from flat values.
     pub fn new(name: impl Into<String>, values: Vec<Scalar>, width: usize, blend: Blend) -> Self {
         Self {
             name: name.into(),
             values,
             width,
             blend,
+            corner_indices: None,
         }
     }
 
-    /// Number of vertices this channel covers.
+    /// Build a per-corner channel: `corner_indices[c]` selects the tuple for
+    /// triangle corner `c`, or is [`Self::UNMAPPED`].
+    pub fn corner_indexed(
+        name: impl Into<String>,
+        values: Vec<Scalar>,
+        width: usize,
+        blend: Blend,
+        corner_indices: Vec<u32>,
+    ) -> Self {
+        Self {
+            corner_indices: Some(corner_indices),
+            ..Self::new(name, values, width, blend)
+        }
+    }
+
+    /// Whether values are addressed per triangle corner.
+    pub fn is_corner_indexed(&self) -> bool {
+        self.corner_indices.is_some()
+    }
+
+    /// Number of tuples in `values`.
     ///
     /// Returns `0` for a zero width rather than dividing by it, so a
     /// malformed channel is inspectable instead of panicking.
-    pub fn vertex_count(&self) -> usize {
+    pub fn value_count(&self) -> usize {
         if self.width == 0 {
             return 0;
         }
         self.values.len() / self.width
     }
 
-    /// The tuple for one vertex, or `None` when out of range.
+    /// Number of vertices a per-vertex channel covers.
+    ///
+    /// The same as [`Self::value_count`]; kept for per-vertex callers, where
+    /// a tuple IS a vertex.
+    pub fn vertex_count(&self) -> usize {
+        self.value_count()
+    }
+
+    /// The tuple at a `values` index, or `None` when out of range.
+    ///
+    /// For a per-vertex channel the index is a vertex. For a per-corner one
+    /// it is an entry of `corner_indices`; use [`Self::at_corner`] to go
+    /// from a mesh corner to its value.
     pub fn get(&self, vertex: usize) -> Option<&[Scalar]> {
         if self.width == 0 {
             return None;
         }
         let start = vertex.checked_mul(self.width)?;
         self.values.get(start..start + self.width)
+    }
+
+    /// The tuple at triangle corner `corner` of a mesh whose index buffer is
+    /// `mesh_indices`, whichever way the channel is addressed.
+    ///
+    /// `None` for an unmapped corner or any out-of-range index. That makes
+    /// "no value here" a result the caller has to handle, never a zero.
+    pub fn at_corner(&self, mesh_indices: &[u32], corner: usize) -> Option<&[Scalar]> {
+        let slot = match &self.corner_indices {
+            Some(corners) => *corners.get(corner)?,
+            None => *mesh_indices.get(corner)?,
+        };
+        if slot == Self::UNMAPPED {
+            return None;
+        }
+        self.get(slot as usize)
     }
 }
 

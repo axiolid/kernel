@@ -28,6 +28,14 @@ pub(crate) fn weld(
 ) {
     let mut kept = Vec::with_capacity(mesh.attributes.len());
     for channel in core::mem::take(&mut mesh.attributes) {
+        if channel.is_corner_indexed() {
+            // Corner indices address the channel's own values, not
+            // positions, so renumbering positions leaves them valid. This
+            // is also why a seam never conflicts here: each side of it is
+            // already a separate value (#112).
+            kept.push(channel);
+            continue;
+        }
         if conflicts(groups, |v| channel.get(v as usize)) {
             // Coincident vertices carrying different values are a seam. One
             // value per position cannot hold both, and keeping either one
@@ -69,15 +77,16 @@ pub(crate) fn weld(
 
 /// Keep only the listed triangles' corner data, in the given order.
 pub(crate) fn keep_triangles(mesh: &mut TriMesh, kept: &[usize]) {
-    if let Some(indices) = mesh.normals.as_mut().and_then(|n| n.indices.as_mut()) {
+    let select = |corners: &mut Vec<u32>| {
         let next: Vec<u32> = kept
             .iter()
-            .filter_map(|&t| indices.get(t * 3..t * 3 + 3))
+            .filter_map(|&t| corners.get(t * 3..t * 3 + 3))
             .flatten()
             .copied()
             .collect();
-        *indices = next;
-    }
+        *corners = next;
+    };
+    for_each_corner_buffer(mesh, select);
 }
 
 /// Reverse one triangle's corner data to match `indices.swap(t*3+1, t*3+2)`.
@@ -86,9 +95,25 @@ pub(crate) fn keep_triangles(mesh: &mut TriMesh, kept: &[usize]) {
 /// winding repair says the triangle's order was wrong, not that its authored
 /// normals were, and the healer has no evidence either way.
 pub(crate) fn flip_triangle(mesh: &mut TriMesh, t: usize) {
+    for_each_corner_buffer(mesh, |corners| {
+        if t * 3 + 2 < corners.len() {
+            corners.swap(t * 3 + 1, t * 3 + 2);
+        }
+    });
+}
+
+/// Apply one edit to every buffer indexed by triangle corner.
+///
+/// The single place that knows which buffers those are. A repair that
+/// edits corners calls this, so adding a new per-corner buffer to the mesh
+/// means adding it here once, not in every repair.
+fn for_each_corner_buffer(mesh: &mut TriMesh, mut edit: impl FnMut(&mut Vec<u32>)) {
     if let Some(indices) = mesh.normals.as_mut().and_then(|n| n.indices.as_mut()) {
-        if t * 3 + 2 < indices.len() {
-            indices.swap(t * 3 + 1, t * 3 + 2);
+        edit(indices);
+    }
+    for channel in &mut mesh.attributes {
+        if let Some(corners) = channel.corner_indices.as_mut() {
+            edit(corners);
         }
     }
 }

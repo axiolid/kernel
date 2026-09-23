@@ -114,7 +114,9 @@ impl TriMesh {
                     name: channel.name.clone(),
                 });
             }
-            if channel.vertex_count() != self.positions.len()
+            if let Some(corners) = &channel.corner_indices {
+                validate_corner_channel(channel, corners, self.indices.len())?;
+            } else if channel.vertex_count() != self.positions.len()
                 || channel.values.len() % channel.width != 0
             {
                 return Err(MeshValidationError::AttributeCount {
@@ -138,4 +140,55 @@ impl TriMesh {
             .chunks_exact(3)
             .map(|triangle| [triangle[0], triangle[1], triangle[2]])
     }
+}
+
+/// Check one corner-indexed channel against the mesh's corner count.
+///
+/// Order matters for the error a caller sees: shape first (whole tuples,
+/// one entry per corner), then each entry's range, then the per-triangle
+/// all-or-nothing rule. A malformed buffer is named as malformed rather
+/// than as whichever triangle happens to trip first.
+fn validate_corner_channel(
+    channel: &AttributeChannel,
+    corners: &[u32],
+    corner_count: usize,
+) -> Result<(), MeshValidationError> {
+    if channel.values.len() % channel.width != 0 {
+        return Err(MeshValidationError::AttributeRaggedValues {
+            name: channel.name.clone(),
+            values: channel.values.len(),
+            width: channel.width,
+        });
+    }
+    if corners.len() != corner_count {
+        return Err(MeshValidationError::AttributeCornerCount {
+            name: channel.name.clone(),
+            expected: corner_count,
+            actual: corners.len(),
+        });
+    }
+    let value_count = channel.value_count();
+    if let Some(&index) = corners
+        .iter()
+        .find(|&&index| index != AttributeChannel::UNMAPPED && index as usize >= value_count)
+    {
+        return Err(MeshValidationError::AttributeCornerIndexOutOfRange {
+            name: channel.name.clone(),
+            index,
+            value_count,
+        });
+    }
+    for (triangle, entries) in corners.chunks_exact(3).enumerate() {
+        let unmapped = entries
+            .iter()
+            .filter(|&&index| index == AttributeChannel::UNMAPPED)
+            .count();
+        if unmapped != 0 && unmapped != 3 {
+            return Err(MeshValidationError::AttributePartiallyMapped {
+                name: channel.name.clone(),
+                triangle,
+            });
+        }
+    }
+    Ok(())
 }

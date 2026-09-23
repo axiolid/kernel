@@ -35,6 +35,40 @@ pub enum MeshValidationError {
         /// The repeated name.
         name: String,
     },
+    /// A corner-indexed channel's `values` is not whole tuples.
+    AttributeRaggedValues {
+        /// Channel name.
+        name: String,
+        /// Scalars found.
+        values: usize,
+        /// Declared tuple width.
+        width: usize,
+    },
+    /// A corner-indexed channel does not have one entry per triangle corner.
+    AttributeCornerCount {
+        /// Channel name.
+        name: String,
+        /// Triangle corners in the mesh.
+        expected: usize,
+        /// Corner entries in the channel.
+        actual: usize,
+    },
+    /// A corner index points past the channel's values.
+    AttributeCornerIndexOutOfRange {
+        /// Channel name.
+        name: String,
+        /// The offending index.
+        index: u32,
+        /// Tuples available.
+        value_count: usize,
+    },
+    /// A triangle has some corners mapped and some unmapped.
+    AttributePartiallyMapped {
+        /// Channel name.
+        name: String,
+        /// The triangle.
+        triangle: usize,
+    },
 }
 
 impl fmt::Display for MeshValidationError {
@@ -74,6 +108,34 @@ impl fmt::Display for MeshValidationError {
             Self::AttributeDuplicateName { name } => {
                 write!(f, "attribute channel name {name} is used more than once")
             }
+            Self::AttributeRaggedValues {
+                name,
+                values,
+                width,
+            } => write!(
+                f,
+                "attribute channel {name} has {values} scalars, not a multiple of width {width}"
+            ),
+            Self::AttributeCornerCount {
+                name,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "attribute channel {name} has {actual} corner indices, mesh has {expected} corners"
+            ),
+            Self::AttributeCornerIndexOutOfRange {
+                name,
+                index,
+                value_count,
+            } => write!(
+                f,
+                "attribute channel {name} corner index {index} exceeds {value_count} values"
+            ),
+            Self::AttributePartiallyMapped { name, triangle } => write!(
+                f,
+                "attribute channel {name} maps only some corners of triangle {triangle}"
+            ),
         }
     }
 }

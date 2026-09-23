@@ -8,3 +8,7 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- Test pinning that a corner-indexed channel is reported like any other (#112). Behaviour unchanged: the channel is dropped as `ProviderLimitation`.

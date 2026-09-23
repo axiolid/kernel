@@ -9,6 +9,10 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Repairs carry corner-indexed channels: weld leaves them untouched (they index values, not positions, so a seam is lossless), dropping and flipping triangles move their entries (#112).
+
 ### Fixed
 
 - Repairs keep attribute channels and normals in step with the geometry they rewrite (#114). Weld compacts per-vertex channels and normals; a seam drops the channel by name, a hard edge switches normals to corner-indexed. Dropping or flipping triangles moves corner-indexed normals with them.

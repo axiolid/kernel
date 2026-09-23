@@ -50,7 +50,7 @@ Indices that answer *which candidates*, never *what the intersection is*.
 | Capability | Support | Optional | Notes |
 | --- | :---: | --- | --- |
 | Scalars, frames, transforms, bounds, tolerance | 🟢 | `core` | `axiolid-core`. The vocabulary everything else is written in. |
-| Triangle and polygon meshes | 🟢 | `mesh` | `TriMesh`, `PolygonMesh`, named attribute channels, zero-copy views. N-gons stay N-gons until you triangulate. |
+| Triangle and polygon meshes | 🟢 | `mesh` | `TriMesh`, `PolygonMesh`, named attribute channels (per vertex or per triangle corner), zero-copy views. N-gons stay N-gons until you triangulate. |
 | Point clouds | 🟢 | `pointcloud` | `PointCloud`: positions plus optional normal, colour, intensity. No topology, no adjacency, no source-format types. |
 | Layered scalar fields (2.5D grid) | 🟢 | `field` | `LayeredField`, row-major cells with a validated configuration. |
 | Curves and surfaces | 🟢 | `curves`, `surfaces` | Neutral value types. Representation is not an evaluator claim — see the algorithms table. |

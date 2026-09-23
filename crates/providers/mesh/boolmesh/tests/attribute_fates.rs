@@ -92,3 +92,35 @@ fn a_subject_without_channels_reports_nothing() {
 
     assert!(outcome.evidence.attribute_fates.is_empty());
 }
+
+/// A corner-indexed channel is named like any other (#112).
+///
+/// Addressing is not a reason to go quiet: the cut drops it for the same
+/// reason it drops a per-vertex channel, and says so.
+#[test]
+fn a_corner_indexed_channel_is_reported_too() {
+    let mut subject = boxx(0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.0);
+    let tool = boxx(1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 0.0);
+
+    let corners = subject.indices.len() as u32;
+    subject.attributes.push(AttributeChannel::corner_indexed(
+        "uv",
+        (0..corners).flat_map(|c| [f64::from(c), 0.0]).collect(),
+        2,
+        Blend::Linear,
+        (0..corners).collect(),
+    ));
+    subject.validate_structure().expect("valid operand");
+
+    let outcome = BoolmeshBoolean::new()
+        .boolean(&subject, &tool, BooleanOperator::Difference, &options())
+        .expect("difference");
+
+    assert_eq!(
+        outcome.evidence.attribute_fates,
+        vec![(
+            "uv".to_owned(),
+            AttributeFate::Dropped(DropReason::ProviderLimitation)
+        )]
+    );
+}

@@ -196,3 +196,89 @@ fn unifying_orientation_flips_corner_normals_with_the_triangle() {
         );
     }
 }
+
+/// A UV seam as #112 stores it: shared positions, corner-indexed values.
+fn seamed_quad() -> TriMesh {
+    let mut mesh = split_quad();
+    // Corners 0..3 use values 0..3, corners 3..6 use 3..6: every corner has
+    // its own UV, including the two corners each on vertex twins 1/3, 2/4.
+    let uvs: Vec<f64> = (0..6).flat_map(|c| [f64::from(c), 0.5]).collect();
+    mesh.attributes.push(AttributeChannel::corner_indexed(
+        "uv",
+        uvs,
+        2,
+        Blend::Linear,
+        (0..6).collect(),
+    ));
+    mesh
+}
+
+#[test]
+fn weld_keeps_a_corner_indexed_seam_lossless() {
+    let mesh = seamed_quad();
+    let (out, report) = run(&mesh, vec![RepairAction::WeldVertices]);
+    assert_eq!(out.positions.len(), 4, "the weld itself happened");
+    // Unlike a per-vertex channel on the same geometry, nothing conflicts:
+    // each side of the seam is already its own value.
+    assert_eq!(
+        report.attribute_fates,
+        vec![("uv".to_owned(), AttributeFate::Preserved)]
+    );
+    let channel = &out.attributes[0];
+    for corner in 0..6 {
+        assert_eq!(
+            channel.at_corner(&out.indices, corner),
+            mesh.attributes[0].at_corner(&mesh.indices, corner),
+            "corner {corner}"
+        );
+    }
+}
+
+#[test]
+fn corner_channels_follow_dropped_and_flipped_triangles() {
+    let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    let mut mesh = TriMesh::new(
+        vec![
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(0.0, 1.0, 0.0),
+            p(0.0, 0.0, 1.0),
+        ],
+        // Inward-wound tetrahedron, plus a zero-area triangle appended.
+        vec![0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2, 0, 1, 1],
+    );
+    let uvs: Vec<f64> = (0..15).flat_map(|c| [f64::from(c), 0.0]).collect();
+    mesh.attributes.push(AttributeChannel::corner_indexed(
+        "uv",
+        uvs,
+        2,
+        Blend::Linear,
+        (0..15).collect(),
+    ));
+    let (out, report) = run(
+        &mesh,
+        vec![
+            RepairAction::DropDegenerateElements,
+            RepairAction::OrientOutward,
+        ],
+    );
+    assert_eq!(
+        report.applied,
+        vec![
+            RepairAction::DropDegenerateElements,
+            RepairAction::OrientOutward
+        ]
+    );
+    // Every surviving corner still reads the UV its (position, triangle)
+    // pair had before: a UV is tagged by its original corner number, and
+    // that corner's position must still be the one it sits on.
+    let channel = &out.attributes[0];
+    for corner in 0..out.indices.len() {
+        let uv = channel.at_corner(&out.indices, corner).expect("mapped");
+        let original = uv[0] as usize;
+        assert_eq!(
+            out.indices[corner], mesh.indices[original],
+            "corner {corner}"
+        );
+    }
+}
