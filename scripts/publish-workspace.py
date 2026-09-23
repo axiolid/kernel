@@ -32,6 +32,18 @@ ROOT = Path(__file__).resolve().parents[1]
 CARGO = os.environ.get("CARGO", "cargo")
 USER_AGENT = "axiolid-release-workflow/1.0"
 
+# The facade compiles nothing with default features by design (kernel#9):
+# its `compile_error!` fires. Package, dry-run and publish all VERIFY the
+# tarball by compiling it, so they must ask for a real feature set. Uses
+# `standard`, the migration target the diagnostic names -- the same choice
+# verify-packages.py makes, so preflight and publish verify identically.
+# Features only affect verification: the uploaded archive is unchanged.
+VERIFY_FEATURES = {"axiolid": ["--features", "standard"]}
+
+
+def verify_features(name: str) -> list[str]:
+    return VERIFY_FEATURES.get(name, [])
+
 
 def metadata() -> dict:
     result = subprocess.run(
@@ -227,7 +239,7 @@ def reproduce_publish_dry_run(
     expected_checksum = archive_checksum(archive)
     archive.unlink()
     result = subprocess.run(
-        [CARGO, "publish", "-p", name, "--locked", "--dry-run", "--quiet"],
+        [CARGO, "publish", "-p", name, "--locked", "--dry-run", "--quiet", *verify_features(name)],
         cwd=ROOT,
         env=environment,
         text=True,
@@ -262,7 +274,7 @@ def prepare_archive(
     for attempt in range(1, args.max_attempts + 1):
         archive.unlink(missing_ok=True)
         result = subprocess.run(
-            [CARGO, "package", "-p", name, "--locked", "--quiet"],
+            [CARGO, "package", "-p", name, "--locked", "--quiet", *verify_features(name)],
             cwd=ROOT,
             env=environment,
             text=True,
@@ -324,7 +336,7 @@ def publish(
 
     for attempt in range(1, args.max_attempts + 1):
         result = subprocess.run(
-            [CARGO, "publish", "-p", name, "--locked"],
+            [CARGO, "publish", "-p", name, "--locked", *verify_features(name)],
             cwd=ROOT,
             env=environment,
             text=True,
