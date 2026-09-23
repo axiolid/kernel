@@ -230,6 +230,15 @@ pub fn refine(
     let mut out = TriMesh::new(positions, indices);
     out.normals = None;
 
+    // With no vertex created (zero levels, or no triangles to split) the
+    // geometry is the input's, so its channels and normals are still exact
+    // and are returned, not merely reported as surviving. Before this the
+    // report said `Preserved` while the mesh came back without the channel.
+    if vertices_added == 0 {
+        out.normals = mesh.normals.clone();
+        out.attributes = mesh.attributes.clone();
+    }
+
     // A refinement creates vertices, so a channel survives only if its own
     // blend rule permits deriving a value. Unlike a boolean cut, the new
     // vertex HAS a preimage: it sits on a known edge between two vertices,
@@ -239,10 +248,12 @@ pub fn refine(
         .iter()
         .map(|channel| {
             let fate = match channel.blend {
+                // Checked first: nothing was derived, so even a channel that
+                // forbids derivation came through untouched.
+                _ if vertices_added == 0 => AttributeFate::Preserved,
                 axiolid_mesh::Blend::None => {
                     AttributeFate::Dropped(axiolid_mesh::DropReason::NotBlendable)
                 }
-                _ if vertices_added == 0 => AttributeFate::Preserved,
                 _ => AttributeFate::Dropped(axiolid_mesh::DropReason::ProviderLimitation),
             };
             (channel.name.clone(), fate)

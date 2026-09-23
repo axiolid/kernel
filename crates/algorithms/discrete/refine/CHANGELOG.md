@@ -8,3 +8,7 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Fixed
+
+- A refinement that creates no vertex returns the input's channels and normals. It previously reported them `Preserved` and returned a mesh without them.
