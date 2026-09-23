@@ -280,6 +280,20 @@ def expect_consumer_failure(
         )
 
 
+def macos_load_commands(build: Path) -> str:
+    """otool evidence for the rpath mutation's diagnostic (kernel#113)."""
+    out = []
+    for exe in sorted(build.rglob("axiolid-cmake-consumer")):
+        for flags in (["-L"], ["-l"]):
+            r = subprocess.run(["otool", *flags, str(exe)], text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            out.append(f"$ otool {flags[0]} {exe}\n{r.stdout}")
+    link = build / "CMakeFiles/axiolid-cmake-consumer.dir/link.txt"
+    if link.is_file():
+        out.append(f"$ cat {link}\n{link.read_text()}")
+    return "\n".join(out)
+
+
 def expect_load_failure(
     consumer: Path,
     build: Path,
@@ -312,7 +326,10 @@ def expect_load_failure(
         stderr=subprocess.STDOUT,
     )
     if tested.returncode == 0:
-        raise RuntimeError("rpath mutation: consumer still loaded the dylib")
+        raise RuntimeError(
+            "rpath mutation: consumer still loaded the dylib\n"
+            + macos_load_commands(build)
+        )
     if "no LC_RPATH" not in tested.stdout:
         raise RuntimeError(
             "rpath mutation failed for a reason other than the missing rpath:\n"

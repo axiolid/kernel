@@ -147,10 +147,12 @@ class NativePackagingTests(unittest.TestCase):
 
     def test_package_version_follows_the_workspace(self) -> None:
         # One number per release: tag, crates.io and archive name agree.
-        import tomllib
-
-        with (ROOT / "Cargo.toml").open("rb") as manifest:
-            workspace = tomllib.load(manifest)["workspace"]["package"]["version"]
+        # Read independently of the packager (no tomllib: Python 3.10 in CI).
+        text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+        section = text.split("[workspace.package]", 1)[1].split("\n[", 1)[0]
+        workspace = next(
+            line.split('"')[1] for line in section.splitlines() if line.startswith("version = ")
+        )
         self.assertEqual(pack.VERSION, workspace)
 
     def test_package_version_must_be_semver_and_bound_to_root(self) -> None:

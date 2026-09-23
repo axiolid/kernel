@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,11 +28,15 @@ def workspace_version() -> str:
     and the native archive name all agree, and the release-set verifier
     checks that. (Before 0.3.0 the archive was pinned at 0.1.1 regardless
     of the workspace version, so no release after 0.1.1 could attach it.)
-    """
-    import tomllib
 
-    with (ROOT / "Cargo.toml").open("rb") as manifest:
-        return tomllib.load(manifest)["workspace"]["package"]["version"]
+    Regex, not tomllib: CI runs this on ubuntu-22.04's Python 3.10, which
+    has no tomllib. Same pattern as prepare-release.py, which owns the bump.
+    """
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version = "(\d+\.\d+\.\d+)"$', text)
+    if match is None:
+        raise SystemExit("Cargo.toml: no [workspace.package] version found")
+    return match.group(1)
 
 
 VERSION = workspace_version()
@@ -375,6 +380,11 @@ def assert_within_verification_budget(archive: Path) -> None:
 
 
 def main() -> int:
+    # The release job needs the version without building anything, and must
+    # read it the same way packaging does.
+    if sys.argv[1:] == ["--print-version"]:
+        print(VERSION)
+        return 0
     try:
         archive = package(parse_args())
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
