@@ -6,11 +6,15 @@
 #
 # Rules for editing:
 # - A landing that changes a row's level updates it in the SAME commit.
-# - `level` is implemented | narrow | absent. `narrow` means a named subset
+# - `level` is implemented | narrow | scoped | absent. `scoped` means
+#   deliberately not built (a designed refusal, or out of scope with no
+#   consumer) and requires `scope_rationale`; `gaps` does not list it as
+#   open work.
+# - `narrow` means a named subset
 #   works and everything else is refused by name; the summary says which.
 # - `evidence` paths are workspace-relative, optionally `path::symbol`. The
-#   gate checks the file exists and the symbol is defined in it. Rows that
-#   are not absent must cite at least one.
+#   gate checks the file exists and the symbol is defined in it. Narrow and
+#   implemented rows must cite at least one.
 # - `occt` / `cgal` are paths inside the pinned reference trees below:
 #   where to read a mature implementation, not code to port.
 # - `issue` is a key from [[issue]]; the issue's number is recorded there.
@@ -111,6 +115,7 @@ title = "Mesh hole filling with fairing, and subdivision surfaces"
 priority = "Medium"
 effort = "Medium"
 number = 129
+blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "mesh-geodesic-param"
@@ -118,6 +123,7 @@ title = "Mesh geodesics and UV parameterisation"
 priority = "Low"
 effort = "High"
 number = 130
+blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "mesh-segmentation-shape"
@@ -125,6 +131,7 @@ title = "Mesh segmentation, skeletonisation and shape detection (planes, cylinde
 priority = "Low"
 effort = "High"
 number = 131
+blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "mesh-deformation"
@@ -196,6 +203,153 @@ priority = "Medium"
 effort = "Medium"
 number = 111
 
+[[issue]]
+key = "halfedge-mesh"
+title = "Halfedge mesh representation with O(1) adjacency for 3D surface meshes"
+priority = "High"
+effort = "Medium"
+number = 140
+
+[[issue]]
+key = "surface-knot-ops"
+title = "Surface knot removal, degree elevation and iso-curve extraction"
+priority = "Medium"
+effort = "Low"
+number = 141
+
+[[issue]]
+key = "torus-wedge-primitives"
+title = "Torus and wedge B-rep primitive solids"
+priority = "Medium"
+effort = "Low"
+number = 142
+
+[[issue]]
+key = "barycentric-coords"
+title = "Public barycentric and mean-value coordinates"
+priority = "Low"
+effort = "Low"
+number = 143
+
+[[issue]]
+key = "mesh-topology-invariants"
+title = "Mesh genus with boundaries and components, and a homology cycle basis"
+priority = "Low"
+effort = "Low"
+number = 144
+
+[[issue]]
+key = "minkowski-2d"
+title = "2D Minkowski sum for non-convex polygons"
+priority = "Medium"
+effort = "Medium"
+number = 145
+
+[[issue]]
+key = "segment-sweep"
+title = "Bentley-Ottmann sweep for many-segment intersection"
+priority = "Medium"
+effort = "Medium"
+number = 146
+
+[[issue]]
+key = "frechet-distance"
+title = "Discrete and continuous Frechet distance between polylines"
+priority = "Low"
+effort = "Low"
+number = 147
+
+[[issue]]
+key = "mesh-hausdorff"
+title = "Two-sided mesh Hausdorff distance with a certified error bound"
+priority = "Medium"
+effort = "Medium"
+number = 148
+
+[[issue]]
+key = "isotropic-remeshing"
+title = "Isotropic remeshing: split, collapse, flip and tangential relaxation"
+priority = "Medium"
+effort = "Medium"
+number = 149
+blocked_by = ["halfedge-mesh"]
+
+[[issue]]
+key = "curve-surface-fitting"
+title = "Least-squares curve and surface fitting to points"
+priority = "Medium"
+effort = "Medium"
+number = 150
+blocked_by = ["numeric-substrate"]
+
+[[issue]]
+key = "fair-curves"
+title = "Fair curves: minimum-energy interpolation and batten curves"
+priority = "Low"
+effort = "Medium"
+number = 151
+blocked_by = ["numeric-substrate"]
+
+[[issue]]
+key = "form-features"
+title = "Form features: holes, pockets, slots and ribs on B-rep solids"
+priority = "Medium"
+effort = "High"
+number = 152
+blocked_by = ["curved-boolean"]
+
+[[issue]]
+key = "smooth-surface-meshing"
+title = "Surface meshing of smooth and implicit surfaces with quality bounds"
+priority = "Low"
+effort = "High"
+number = 153
+blocked_by = ["delaunay-3d"]
+
+[[issue]]
+key = "exact-number-type"
+title = "Exact rational or algebraic number type for constructions"
+priority = "Medium"
+effort = "High"
+number = 154
+needs_decision = "adopt an exact-rational crate or build one; #120 will want the same type"
+
+[[issue]]
+key = "arc-polygon-booleans"
+title = "Exact polygon booleans with circular arcs, independent of cavalier_contours"
+priority = "Medium"
+effort = "High"
+number = 155
+needs_decision = "absorb cavalier_contours (as boolmesh, ADR 0047) or write an exact arc overlay"
+
+[[issue]]
+key = "mesh-mesh-clip"
+title = "Clip and split a triangle mesh by another mesh"
+priority = "Medium"
+effort = "Medium"
+number = 156
+
+[[issue]]
+key = "curved-arrangement-2d"
+title = "2D arrangements of circular arcs and conic curves"
+priority = "Low"
+effort = "High"
+number = 157
+
+[[issue]]
+key = "minkowski-3d-nonconvex"
+title = "3D Minkowski sum and difference for non-convex solids"
+priority = "Low"
+effort = "High"
+number = 158
+
+[[issue]]
+key = "apollonius-constructions"
+title = "Apollonius and tangent-circle constructions"
+priority = "Low"
+effort = "Low"
+number = 159
+
 [[capability]]
 id = "A1"
 area = "foundations"
@@ -210,6 +364,7 @@ cgal = ["Kernel_23", "Filtered_kernel"]
 id = "A2"
 area = "foundations"
 name = "exact number types / arbitrary precision"
+issue = "exact-number-type"
 level = "narrow"
 summary = "Only error-free-transformation \"expansion\" arithmetic (Shewchuk-style adaptive f64 expansions) for predicate signs; no general arbitrary-precision rational/integer type usable outside predicates"
 evidence = ["crates/algorithms/predicates/src/expansion.rs::two_sum"]
@@ -281,9 +436,10 @@ cgal = ["Circular_kernel_3"]
 id = "B4"
 area = "curves-surfaces"
 name = "NURBS surfaces: eval, knot ops, iso-curves"
+issue = "surface-knot-ops"
 level = "narrow"
-summary = "BSplineSurface eval exists generally; knot-vector ops (insert/remove/elevate) for surfaces are not exposed as exported crate API the way curve ops are (crate exports curve knot-ops insert_knot2/3, but no surface-level knot insertion/removal function found in nurbs/src/lib.rs public exports); ..."
-evidence = ["crates/algorithms/parametric/nurbs/src/lib.rs", "crates/representations/analytic/surface/src/spline.rs::BSplineSurface", "crates/algorithms/parametric/evaluate/src/surface.rs", "crates/representations/analytic/surface/tests/vocabulary.rs"]
+summary = "Surface evaluation and knot insertion in u and v (insert_surface_knot_u/v, tested) and parameter reversal exist. Missing for surfaces, though present for curves: knot removal, degree elevation and reduction, and iso-parameter curve extraction."
+evidence = ["crates/algorithms/parametric/nurbs/src/surface_transform.rs::insert_surface_knot_u", "crates/algorithms/parametric/nurbs/tests/surface_insertion.rs", "crates/algorithms/parametric/nurbs/src/degree.rs::elevate_degree3"]
 occt = ["src/FoundationClasses/TKMath/BSplSLib", "src/ModelingData/TKG3d/Geom"]
 cgal = []
 
@@ -356,6 +512,7 @@ issue = "surface-intersection"
 id = "B11"
 area = "curves-surfaces"
 name = "approximation/interpolation (fit curve/surface to points)"
+issue = "curve-surface-fitting"
 level = "narrow"
 summary = "Only INTERPOLATION (curve passes exactly through points, chord-length parameterised, C2 cubic) and section-based lofting exist; no least-squares APPROXIMATION to a tolerance for scattered points"
 evidence = ["crates/algorithms/parametric/nurbs/src/fit.rs::interpolate_curve3"]
@@ -387,6 +544,7 @@ cgal = []
 id = "B14"
 area = "curves-surfaces"
 name = "2D constraint solving (tangent circles/lines, Apollonius)"
+issue = "apollonius-constructions"
 level = "absent"
 summary = "No GccAna/Apollonius/tangency-solving code found"
 evidence = []
@@ -407,6 +565,7 @@ cgal = ["Jet_fitting_3", "Ridges_3"]
 id = "B16"
 area = "curves-surfaces"
 name = "laws / helix / fair curves"
+issue = "fair-curves"
 level = "narrow"
 summary = "CurvatureLaw (constant/polynomial/sinusoid/composite/piecewise) exists and drives Intrinsic3 curves including true helices (closed-form offset); no fair-curve (minimum-energy/spline-fairing) algorithm found"
 evidence = ["crates/representations/analytic/curve/src/intrinsic.rs::CurvatureLaw", "crates/representations/analytic/curve/src/intrinsic3.rs", "crates/algorithms/parametric/evaluate/tests/intrinsic_relation.rs::a_helix_offset_lands_on_the_normal_offset_of_the_base"]
@@ -437,6 +596,7 @@ cgal = ["BGL"]
 id = "C3"
 area = "brep"
 name = "primitives (box,cyl,cone,sphere,torus,wedge)"
+issue = "torus-wedge-primitives"
 level = "narrow"
 summary = "Primitive enum covers Block, Sphere, Cylinder, Cone, Pyramid only -- no Torus, no Wedge as primitive-solid variants (Torus exists only as an analytic surface type, B3, not as a closed primitive solid)"
 evidence = ["crates/representations/analytic/primitive/src/solid.rs::Primitive", "crates/algorithms/reference/src/tessellate.rs", "crates/algorithms/reference/tests/primitive.rs", "crates/representations/analytic/primitive/tests/values.rs"]
@@ -555,6 +715,7 @@ issue = "offset-draft"
 id = "C14"
 area = "brep"
 name = "features (holes, ribs, local ops, split)"
+issue = "form-features"
 level = "narrow"
 summary = "Only corner-local features (fillet/chamfer on a polygon corner) exist under a feature.rs module; no hole, rib, boss, or general split/local-modification operations found"
 evidence = ["crates/algorithms/construction/construct/src/feature.rs"]
@@ -631,6 +792,7 @@ issue = "medial-axis-hatching"
 id = "D1"
 area = "mesh"
 name = "mesh data structure (halfedge/surface mesh)"
+issue = "halfedge-mesh"
 level = "narrow"
 summary = "TriMesh/PolygonMesh are index-buffer structures with derived EdgeAdjacency, not a persistent halfedge/DCEL mesh type; the only true halfedge DCEL in the repo is 2D (axiolid-arrangement), not a 3D mesh."
 evidence = ["crates/representations/discrete/mesh/src/lib.rs", "crates/representations/discrete/mesh/src/adjacency.rs::build", "crates/representations/discrete/mesh/tests/adjacency.rs::a_boundary_edge_is_used_once"]
@@ -672,11 +834,12 @@ cgal = ["Polygon_mesh_processing"]
 id = "D5"
 area = "mesh"
 name = "mesh repair (stitch, orient, degenerate, holes)"
-level = "narrow"
+level = "scoped"
 summary = "Opt-in RepairAction enum: WeldVertices, UnifyOrientation, DropDegenerateElements, OrientOutward. Deliberately no \"repair everything\" mode; each action applies only where safe and reports skipped when not applicable. Hole filling is a SEPARATE capability (see D6), not part of heal."
 evidence = ["crates/algorithms/repair/heal/src/repair.rs::RepairAction", "crates/algorithms/repair/heal/tests/mesh.rs", "crates/algorithms/repair/heal/tests/orient_outward.rs"]
 occt = []
 cgal = ["PMP_Mesh_repair", "Polygon_repair"]
+scope_rationale = "Each repair is an opt-in RepairAction that reports what it changed or skipped. A repair-everything mode would change geometry the caller never asked to change; hole filling is tracked separately (D6)."
 
 [[capability]]
 id = "D6"
@@ -693,6 +856,7 @@ issue = "mesh-hole-subdivision"
 id = "D7"
 area = "mesh"
 name = "isotropic remeshing / refinement / smoothing"
+issue = "isotropic-remeshing"
 level = "narrow"
 summary = "Uniform/edge-length subdivision (4-way split) with optional surface-aware vertex placement when a source B-rep surface is known; separately, boundary-fixed Laplacian smoothing. No isotropic *remeshing* (target-edge-length equalization via edge flip/collapse/split combined) — only pure refinement ..."
 evidence = ["crates/algorithms/discrete/refine/src/lib.rs::refine", "crates/algorithms/discrete/refine/tests/refine.rs", "crates/algorithms/discrete/refine/src/smooth.rs::smooth"]
@@ -778,6 +942,7 @@ cgal = ["Polygon_mesh_processing"]
 id = "D15"
 area = "mesh"
 name = "mesh distance (Hausdorff), inside test, ray cast"
+issue = "mesh-hausdorff"
 level = "narrow"
 summary = "Inside test (winding number, exact via orient3d) and ray cast (BVH-accelerated nearest hit) are IMPL and general. Mesh-to-mesh proximity/clearance (mesh_proximity.rs) is a min-gap/clash measure, not a full two-sided Hausdorff distance metric — reports nearest gap, \"clash\" as 0.0, out-of-range as ..."
 evidence = ["crates/algorithms/query/inspect/src/containment.rs::winding_number", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs::nearest_hit", "crates/algorithms/query/measure/src/mesh_proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
@@ -798,6 +963,7 @@ cgal = ["PMP_Boolean_operations"]
 id = "D17"
 area = "mesh"
 name = "mesh clipping/splitting by plane or mesh"
+issue = "mesh-mesh-clip"
 level = "narrow"
 summary = "Plane-splitting exists via convex-decomposition's clip-and-cap machinery (D18) and via the exact-B-rep offset/solid path; general clip/split of an arbitrary mesh by an arbitrary cutting *mesh* (not just a plane) is not a standalone general operation — relies on the boolean provider (D2) for ..."
 evidence = ["crates/algorithms/discrete/decompose/src/lib.rs"]
@@ -829,6 +995,7 @@ issue = "mesh-segmentation-shape"
 id = "D20"
 area = "mesh"
 name = "topology queries (genus, homotopy, cycles)"
+issue = "mesh-topology-invariants"
 level = "narrow"
 summary = "Genus only, via Euler characteristic; refuses meshes with boundary, non-manifold edges, non-orientable characteristic, or more than one connected component (must call per-component). No homotopy/cycle-basis queries."
 evidence = ["crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
@@ -849,11 +1016,12 @@ cgal = ["Triangulation_2"]
 id = "E2"
 area = "triangulation"
 name = "2D quality meshing (Ruppert/Chew)"
-level = "narrow"
+level = "scoped"
 summary = "Quality/refine/triangulate_refined implement Ruppert-style refinement with an explicit Steiner-point budget; reports RefineOutcome::Capped when the angle bound is not reached rather than silently returning a worse mesh — a correct and deliberate refusal for inputs with small input angles (Ruppert ..."
 evidence = ["crates/algorithms/planar/triangulate/src/refine.rs::refine"]
 occt = []
 cgal = ["Mesh_2"]
+scope_rationale = "Refusing is the correct result: Ruppert refinement cannot reach an angle bound below the smallest input angle, so `RefineOutcome::Capped` names that instead of returning a worse mesh. CGAL's Mesh_2 has the same limit."
 
 [[capability]]
 id = "E3"
@@ -892,6 +1060,7 @@ issue = "tet-meshing"
 id = "E6"
 area = "triangulation"
 name = "surface meshing of implicit/smooth surfaces"
+issue = "smooth-surface-meshing"
 level = "narrow"
 summary = "axiolid-levelset extracts a surface mesh from a signed scalar field via marching-cubes-family extraction (see G5); \"meshing of an implicit surface\" and \"isosurface extraction\" are the same underlying capability here, so this row and G5 report the same evidence. No dedicated Delaunay-refinement ..."
 evidence = ["crates/algorithms/sampled/levelset/src/lib.rs", "crates/algorithms/sampled/levelset/tests/extract.rs::a_surface_reaching_the_bounds_still_closes"]
@@ -924,26 +1093,29 @@ issue = "voronoi-alpha"
 id = "E9"
 area = "triangulation"
 name = "periodic / hyperbolic / spherical triangulations"
-level = "absent"
+level = "scoped"
 summary = "No such structures found."
 evidence = []
 occt = []
 cgal = ["Periodic_2_triangulation_2", "Periodic_3_triangulation_3", "Hyperbolic_triangulation_2", "Triangulation_on_sphere_2"]
+scope_rationale = "Periodic, hyperbolic and spherical triangulations are research structures (crystals, cosmology, hyperbolic geometry) with no consumer in building or product geometry."
 
 [[capability]]
 id = "E10"
 area = "triangulation"
 name = "d-dimensional triangulations/hulls"
-level = "absent"
+level = "scoped"
 summary = "Only 2D triangulation and 2D/3D convex hull exist (G1); no generalized d-dimensional kernel."
 evidence = []
 occt = []
 cgal = ["Triangulation", "Convex_hull_d", "Kernel_d"]
+scope_rationale = "Triangulations and hulls above three dimensions have no consumer in a 3D geometry kernel. The 2D and 3D cases are covered (E1, G1)."
 
 [[capability]]
 id = "F1"
 area = "planar"
 name = "polygon booleans (exact)"
+issue = "arc-polygon-booleans"
 level = "narrow"
 summary = "Two backends: a certified integer-predicate polygon path (exact for straight-edge polygons, with holes) via axiolid-overlay::Region::{union,intersection,difference}, and an arc-aware path (arc_overlay) that wraps the cavalier_contours crate (a third-party dependency, not Axiolid's own ..."
 evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay"]
@@ -976,6 +1148,7 @@ issue = "straight-skeleton"
 id = "F4"
 area = "planar"
 name = "arrangements of curves (segments, arcs, conics, Bezier)"
+issue = "curved-arrangement-2d"
 level = "narrow"
 summary = "axiolid-arrangement is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — Vertex/HalfEdge/Face store Point2 positions with no curve type. Arcs are handled only inside the separate, non-incremental arc_overlay boolean path (F1/F2), not as arrangement edges; conics and Bezier ..."
 evidence = ["crates/algorithms/planar/arrangement/src/lib.rs::Arrangement", "crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one"]
@@ -986,16 +1159,18 @@ cgal = ["Arrangement_on_surface_2"]
 id = "F5"
 area = "planar"
 name = "envelopes / lower envelope"
-level = "absent"
+level = "scoped"
 summary = "No lower/upper envelope algorithm found; all \"envelope\" hits in the codebase refer to unrelated navigation/traversal \"clearance envelope\" (agent radius/height/slope) concepts in axiolid-field, not the CGAL curve-envelope sense."
 evidence = ["crates/algorithms/sampled/field/src/navigate.rs"]
 occt = []
 cgal = ["Envelope_2", "Envelope_3"]
+scope_rationale = "Lower and upper envelopes serve computational-geometry research and motion planning; no Axiolid consumer needs them. Reopen when one does."
 
 [[capability]]
 id = "F6"
 area = "planar"
 name = "Minkowski sum 2D"
+issue = "minkowski-2d"
 level = "narrow"
 summary = "No standalone 2D-specific Minkowski sum; the general axiolid-minkowski crate operates on 3D planar-faced solids (see H2) via convex-hull-of-pairwise-sums for convex operands and decompose+pairwise+boolean for non-convex. 2D callers would have to lift into 3D or use Region::dilate for the disc-only ..."
 evidence = ["crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum", "crates/algorithms/discrete/minkowski/tests/minkowski.rs::the_sum_of_two_boxes_is_a_box_with_summed_extents"]
@@ -1049,6 +1224,7 @@ issue = "polygon-partition-simplify"
 id = "F11"
 area = "planar"
 name = "sweep-line segment intersection"
+issue = "segment-sweep"
 level = "narrow"
 summary = "Only pairwise segment-segment and line-line intersection exist (axiolid-intersection-linear), certified via predicates; there is no Bentley-Ottmann-style sweep-line algorithm to report all intersections among a set of N segments in better-than-quadratic time — a caller needing that must call the ..."
 evidence = ["crates/algorithms/query/intersection/linear/src/segment_segment.rs", "crates/algorithms/query/intersection/linear/tests/segment_segment.rs"]
@@ -1091,11 +1267,12 @@ issue = "pointset-processing"
 id = "G4"
 area = "point-sets"
 name = "surface reconstruction (Poisson, AF, scale-space)"
-level = "narrow"
+level = "scoped"
 summary = "Reconstruction exists via a custom SDF-based method (nearest-neighbour-driven signed-distance field, then G5's level-set extraction) — not Poisson, not advancing-front, not scale-space. This is a legitimate reconstruction pipeline but a single, different algorithm family from all three CGAL ..."
 evidence = ["crates/providers/pointcloud/sdf/src/lib.rs", "crates/providers/pointcloud/sdf/tests/reconstruct.rs", "crates/contracts/operations/pointcloud-reconstruction/src/contract.rs"]
 occt = []
 cgal = ["Poisson_surface_reconstruction_3", "Advancing_front_surface_reconstruction", "Scale_space_reconstruction_3"]
+scope_rationale = "Reconstruction exists (signed distance, then level-set extraction). Poisson, advancing-front and scale-space are alternative methods, not missing capability; add one when a consumer's input shows the current method failing."
 
 [[capability]]
 id = "G5"
@@ -1122,11 +1299,12 @@ issue = "pointset-processing"
 id = "G7"
 area = "point-sets"
 name = "kd-tree / k-NN / range search"
-level = "narrow"
+level = "scoped"
 summary = "PointIndex provides exact k-NN and radius search, but via a UNIFORM GRID, not a kd-tree — the crate's own docs state this is deliberate (\"every query has the same radius and cell arithmetic beats tree descent\") and that no tree-based point index is provided; a caller with widely varying query radii ..."
 evidence = ["crates/algorithms/query/spatial/src/points.rs::PointIndex", "crates/algorithms/query/spatial/tests/points.rs", "crates/algorithms/query/spatial/tests/nearest.rs", "crates/algorithms/query/spatial/src/lib.rs"]
 occt = ["src/FoundationClasses/TKMath/BVH"]
 cgal = ["Spatial_searching"]
+scope_rationale = "A uniform grid, by design: callers query at one radius, where cell arithmetic beats tree descent (crate docs). Reopen with a consumer whose query radii vary widely."
 
 [[capability]]
 id = "G8"
@@ -1142,16 +1320,18 @@ cgal = ["AABB_tree", "Box_intersection_d"]
 id = "H1"
 area = "spatial"
 name = "BVH / spatial index"
-level = "narrow"
+level = "scoped"
 summary = "Bvh for objects (general, IMPL — same as G8) and PointIndex for points (uniform grid, not an orthtree/adaptive octree — see G7's narrowing, which applies here too). No adaptive Orthtree-equivalent structure exists."
 evidence = ["crates/algorithms/query/spatial/src/bvh.rs::Bvh", "crates/algorithms/query/spatial/src/points.rs::PointIndex"]
 occt = ["src/FoundationClasses/TKMath/BVH"]
 cgal = ["AABB_tree", "Orthtree"]
+scope_rationale = "The object BVH is general. Point search is the grid of G7 for the same reason; an adaptive orthtree is only worth it for widely varying query radii, and no consumer has them."
 
 [[capability]]
 id = "H2"
 area = "spatial"
 name = "3D Minkowski sum"
+issue = "minkowski-3d-nonconvex"
 level = "narrow"
 summary = "Exact for convex-convex pairs (hull of pairwise vertex sums) and for non-convex via decompose+pairwise-sum+boolean-union with an explicit pairwise-sum budget (4096) that refuses rather than runs unbounded work. Minkowski DIFFERENCE additionally requires the SUBJECT to be convex — refused by name ..."
 evidence = ["crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum", "crates/algorithms/discrete/minkowski/tests/minkowski.rs::a_non_convex_sum_differs_from_treating_the_operand_as_convex"]
@@ -1162,16 +1342,18 @@ cgal = ["Minkowski_sum_3"]
 id = "H3"
 area = "spatial"
 name = "convex collision / distance (GJK/SAT)"
-level = "narrow"
+level = "scoped"
 summary = "Full SAT (separating axis theorem) distance/intersection for convex shapes, by deliberate design choice (documented reasoning: SAT over GJK for the model-checking use case). Deliberately does NOT report penetration depth (documented refusal — a caller wanting EPA/penetration depth for physics is ..."
 evidence = ["crates/algorithms/query/collide/src/lib.rs::distance", "crates/algorithms/query/collide/src/sat.rs::separation", "crates/algorithms/query/collide/tests/collide.rs"]
 occt = []
 cgal = ["Polytope_distance_d"]
+scope_rationale = "SAT, chosen over GJK for model checking (documented). Penetration depth is a physics-engine quantity and is refused by name; clearance and overlap, which the kernel's callers need, are reported."
 
 [[capability]]
 id = "H4"
 area = "spatial"
 name = "Frechet / curve distances"
+issue = "frechet-distance"
 level = "absent"
 summary = "No Frechet distance or other curve-distance metric found anywhere in the workspace."
 evidence = []
@@ -1182,6 +1364,7 @@ cgal = ["Frechet_distance"]
 id = "H5"
 area = "spatial"
 name = "interpolation / barycentric coords"
+issue = "barycentric-coords"
 level = "narrow"
 summary = "Barycentric coordinates exist only as an internal by-product of ray/triangle intersection (RayHit::barycentric) and of attribute-blend interpolation inside the mesh boolean provider (boolmesh/src/attributes.rs::barycentric) — neither is exposed as a general-purpose, reusable barycentric-coordinate ..."
 evidence = ["crates/providers/mesh/boolmesh/src/attributes.rs::barycentric", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs", "crates/algorithms/query/intersection/ray-mesh/tests/nearest_hit.rs", "crates/providers/mesh/boolmesh/tests/boolean_attributes.rs"]

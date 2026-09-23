@@ -19,8 +19,8 @@ record the reason in an ADR — never to silence a failing gate.
 ## Capability ledger (what to build next)
 
 `capability-ledger.toml` grades every geometry capability found in OCCT and
-CGAL against Axiolid (implemented, narrow or absent), with evidence paths,
-reference packages at pinned commits, and the tracking issue.
+CGAL against Axiolid (implemented, narrow, scoped or absent), with evidence
+paths, reference packages at pinned commits, and the tracking issue.
 `reference-packages.toml` lists every package path in those pinned trees.
 
 ```bash
@@ -33,6 +33,11 @@ A landing that changes a row's level edits the row in the same commit. The
 gate (`cargo xtask gaps check`) rejects evidence that no longer resolves,
 reference paths outside the pinned trees, and dangling issue keys. It does
 not judge whether a grade is true; review does.
+
+`scoped` rows are deliberately not built and carry a `scope_rationale`.
+Reopening one is a maintainer decision: argue against the rationale in an
+issue first. An issue with `needs_decision` is listed apart by `gaps`; ask
+the maintainer, do not pick an option and start coding.
 
 Re-pinning OCCT or CGAL means regenerating `reference-packages.toml` from the
 new tree and re-checking every row's reference paths. The OCCT/CGAL sources

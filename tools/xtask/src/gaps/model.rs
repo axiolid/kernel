@@ -55,6 +55,10 @@ pub struct Issue {
     /// Issue keys that must close first (mirrors GitHub "blocked by").
     #[serde(default)]
     pub blocked_by: Vec<String>,
+    /// A maintainer decision (adopt vs build, fork a dependency) is needed
+    /// before code; `gaps next` lists it apart from startable work.
+    #[serde(default)]
+    pub needs_decision: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -62,6 +66,10 @@ pub struct Issue {
 pub enum Level {
     Absent,
     Narrow,
+    /// Deliberately not raised to `implemented`: either the narrowing is the
+    /// design (a documented refusal), or the capability is out of scope for a
+    /// geometry kernel with no consumer asking. Needs `scope_rationale`.
+    Scoped,
     Implemented,
 }
 
@@ -70,8 +78,14 @@ impl Level {
         match self {
             Level::Absent => "absent",
             Level::Narrow => "narrow",
+            Level::Scoped => "scoped",
             Level::Implemented => "implemented",
         }
+    }
+
+    /// Work remains: not implemented and not deliberately scoped out.
+    pub fn is_open(self) -> bool {
+        matches!(self, Level::Absent | Level::Narrow)
     }
 }
 
@@ -91,6 +105,9 @@ pub struct Capability {
     pub cgal: Vec<String>,
     #[serde(default)]
     pub issue: Option<String>,
+    /// Why a `scoped` row stays as it is. Required for, and only for, `scoped`.
+    #[serde(default)]
+    pub scope_rationale: Option<String>,
 }
 
 impl Ledger {

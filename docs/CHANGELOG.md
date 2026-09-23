@@ -12,6 +12,11 @@ All notable changes to Axiolid are documented in this file.
   #118-#139). `cargo xtask gaps` prints ready work by priority, and
   `gaps show` gives one row or issue. `gaps check` runs in the gate and a
   mutation probe proves each of its rules can fail.
+- Capability grade `scoped`, for rows deliberately not raised to
+  implemented (a designed refusal, or out of scope with no consumer). It
+  requires a written rationale, which the gate enforces; nine rows use it.
+  Every other open row now has an issue (#140-#159), with blockers mirrored
+  from GitHub and two issues marked as needing a maintainer decision.
 
 ### Fixed
 

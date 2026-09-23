@@ -6,7 +6,7 @@ pub fn list(args: &[String]) -> Result<()> {
     let open_only = args.iter().any(|a| a == "--open");
     let area = flag_value(args, "--area");
     for row in &ledger.capability {
-        if open_only && row.level == Level::Implemented {
+        if open_only && !row.level.is_open() {
             continue;
         }
         if area.is_some_and(|area| row.area != area) {
@@ -37,6 +37,9 @@ pub fn show(target: &str) -> Result<()> {
     println!("{}  {}", issue.key, issue.title);
     println!("  tracked: {}", issue_ref(issue.number));
     println!("  priority: {}  effort: {}", issue.priority, issue.effort);
+    if let Some(decision) = &issue.needs_decision {
+        println!("  needs decision: {decision}");
+    }
     for row in ledger
         .capability
         .iter()
@@ -53,7 +56,7 @@ fn open_rows<'a>(ledger: &'a Ledger, key: &str) -> Vec<&'a str> {
     ledger
         .capability
         .iter()
-        .filter(|row| row.issue.as_deref() == Some(key) && row.level != Level::Implemented)
+        .filter(|row| row.issue.as_deref() == Some(key) && row.level.is_open())
         .map(|row| row.id.as_str())
         .collect()
 }
@@ -71,6 +74,7 @@ pub fn next() -> Result<()> {
         )
     });
     let mut blocked = Vec::new();
+    let mut undecided = Vec::new();
     println!("Ready now, highest priority and lowest effort first:");
     for issue in issues {
         let rows = open_rows(&ledger, &issue.key);
@@ -87,7 +91,22 @@ pub fn next() -> Result<()> {
             blocked.push((issue, waiting));
             continue;
         }
+        if let Some(decision) = &issue.needs_decision {
+            undecided.push((issue, decision));
+            continue;
+        }
         print_issue_line(issue, &rows);
+    }
+    if !undecided.is_empty() {
+        println!();
+        println!("Needs a maintainer decision before code (ask, do not pick):");
+        for (issue, decision) in undecided {
+            println!(
+                "  {:<27} {:<7} {decision}",
+                issue.key,
+                issue_ref(issue.number)
+            );
+        }
     }
     if !blocked.is_empty() {
         println!();
@@ -104,16 +123,34 @@ pub fn next() -> Result<()> {
     let untracked: Vec<&str> = ledger
         .capability
         .iter()
-        .filter(|row| row.level != Level::Implemented && row.issue.is_none())
+        .filter(|row| row.level.is_open() && row.issue.is_none())
         .map(|row| row.id.as_str())
         .collect();
     println!();
-    println!(
-        "Open but untracked ({}): {}",
-        untracked.len(),
-        untracked.join(" ")
-    );
-    println!("  narrow rows that work for their named subset; file an issue before widening one.");
+    if untracked.is_empty() {
+        println!("Open but untracked: none; every open row has an issue.");
+    } else {
+        println!(
+            "Open but untracked ({}): {}",
+            untracked.len(),
+            untracked.join(" ")
+        );
+        println!("  file an issue before starting one of these.");
+    }
+    let scoped: Vec<&str> = ledger
+        .capability
+        .iter()
+        .filter(|row| row.level == Level::Scoped)
+        .map(|row| row.id.as_str())
+        .collect();
+    if !scoped.is_empty() {
+        println!(
+            "Scoped, deliberately not built ({}): {}",
+            scoped.len(),
+            scoped.join(" ")
+        );
+        println!("  read the row's scope_rationale before reopening one.");
+    }
     println!();
     println!("Detail: cargo xtask gaps show <issue-key | row-id>");
     Ok(())
@@ -139,6 +176,9 @@ fn print_row(ledger: &Ledger, row: &Capability) {
         row.area
     );
     println!("  {}", row.summary);
+    if let Some(rationale) = &row.scope_rationale {
+        println!("  scoped because: {rationale}");
+    }
     println!("  tracked: {}", tracking(ledger, row));
     if !row.evidence.is_empty() {
         println!("  axiolid:");
@@ -176,7 +216,7 @@ fn reference_url(ledger: &Ledger, library: &str, path: &str) -> String {
 fn tracking(ledger: &Ledger, row: &Capability) -> String {
     match row.issue.as_deref().and_then(|key| ledger.issue(key)) {
         Some(issue) => format!("{} {}", issue_ref(issue.number), issue.key),
-        None if row.level == Level::Implemented => "-".to_owned(),
+        None if !row.level.is_open() => "-".to_owned(),
         None => "untracked".to_owned(),
     }
 }

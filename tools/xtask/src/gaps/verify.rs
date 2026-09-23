@@ -24,10 +24,15 @@ pub fn check() -> Result<()> {
     let open = ledger
         .capability
         .iter()
-        .filter(|row| row.level != Level::Implemented)
+        .filter(|row| row.level.is_open())
+        .count();
+    let scoped = ledger
+        .capability
+        .iter()
+        .filter(|row| row.level == Level::Scoped)
         .count();
     println!(
-        "capability ledger ok: {} capabilities ({open} open), {} issues",
+        "capability ledger ok: {} capabilities ({open} open, {scoped} scoped), {} issues",
         ledger.capability.len(),
         ledger.issue.len()
     );
@@ -99,8 +104,9 @@ pub fn validate(ledger: &Ledger, packages: &model::ReferencePackages, root: &Pat
         if row.summary.trim().is_empty() {
             errors.push(format!("{id}: empty summary"));
         }
-        // A claim of capability must point at code. `absent` needs none.
-        if row.level != Level::Absent && row.evidence.is_empty() {
+        // A claim of capability must point at code. `absent` needs none;
+        // `scoped` may cite what exists but need not (out-of-scope rows).
+        if matches!(row.level, Level::Narrow | Level::Implemented) && row.evidence.is_empty() {
             errors.push(format!(
                 "{id}: level `{}` cites no evidence",
                 row.level.as_str()
@@ -122,13 +128,28 @@ pub fn validate(ledger: &Ledger, packages: &model::ReferencePackages, root: &Pat
             }
             Some(key) => {
                 used_issues.insert(key.as_str());
-                if row.level == Level::Implemented {
+                if !row.level.is_open() {
                     errors.push(format!(
-                        "{id}: implemented but still assigned to issue `{key}`; remove `issue`"
+                        "{id}: {} but still assigned to issue `{key}`; remove `issue`",
+                        row.level.as_str()
                     ));
                 }
             }
             None => {}
+        }
+        let rationale = row
+            .scope_rationale
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty());
+        match (row.level == Level::Scoped, rationale) {
+            (true, false) => errors.push(format!(
+                "{id}: scoped needs a non-empty scope_rationale saying why it is not built"
+            )),
+            (false, true) => errors.push(format!(
+                "{id}: scope_rationale on a `{}` row; only scoped rows carry one",
+                row.level.as_str()
+            )),
+            _ => {}
         }
     }
     for key in issue_keys.difference(&used_issues) {

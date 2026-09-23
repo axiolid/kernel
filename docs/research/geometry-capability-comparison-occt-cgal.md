@@ -71,20 +71,26 @@ column was graded from source and tests, never from names or docs:
 
 - **implemented:** a general algorithm with tests.
 - **narrow:** implemented for a named subset; the row says which.
+- **scoped:** deliberately not raised further. Either the narrowing is the
+  design (a documented refusal), or it is a specialist structure with no
+  consumer. The ledger records why for each, and the gate requires it.
 - **contract only:** a type, trait or refusal with no algorithm behind it.
 - **absent:** nothing found.
 
-| Area | Rows | implemented | narrow | absent |
-| --- | ---: | ---: | ---: | ---: |
-| A. Foundations | 5 | 3 | 2 | 0 |
-| B. Curves and surfaces | 16 | 6 | 8 | 2 |
-| C. B-rep | 20 | 4 | 12 | 4 |
-| D. Polygon meshes | 20 | 6 | 7 | 7 |
-| E. Triangulations | 10 | 1 | 2 | 7 |
-| F. 2D | 11 | 1 | 5 | 5 |
-| G. Point sets | 8 | 3 | 3 | 2 |
-| H. Spatial and misc | 5 | 0 | 4 | 1 |
-| **Total** | **95** | **24** | **43** | **28** |
+The first grading found 24 implemented, 43 narrow and 28 absent. Nine were
+then reclassified as scoped after review; the table below is current.
+
+| Area | Rows | implemented | narrow | scoped | absent |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A. Foundations | 5 | 3 | 2 | 0 | 0 |
+| B. Curves and surfaces | 16 | 6 | 8 | 0 | 2 |
+| C. B-rep | 20 | 4 | 12 | 0 | 4 |
+| D. Polygon meshes | 20 | 6 | 6 | 1 | 7 |
+| E. Triangulations | 10 | 1 | 1 | 3 | 5 |
+| F. 2D | 11 | 1 | 5 | 1 | 4 |
+| G. Point sets | 8 | 3 | 1 | 2 | 2 |
+| H. Spatial and misc | 5 | 0 | 2 | 2 | 1 |
+| **Total** | **95** | **24** | **37** | **9** | **25** |
 
 No row graded **contract only**: every capability Axiolid names has an
 algorithm behind it, even where that algorithm is narrow.
@@ -106,7 +112,7 @@ algorithm behind it, even where that algorithm is narrow.
 | B1 | analytic curves (line, conics) + eval/derivs | O:Geom,Geom2d,ElCLib C:Circular_kernel_2 | implemented | Line2/3, Circle2/3, Ellipse2/3 types with general closed-form jet evaluation Evidence: `crates/representations/analytic/curve/src/linear.rs`, `src/conic.rs::Circle2/Circle3/Ellipse2/Ellipse3`, evaluation in `crates/algorithms/parametric/evaluate/src/curve.rs` |
 | B2 | B-spline/NURBS curves: eval, knot ops, degree elev, split | O:BSplCLib,Geom C:- | implemented | eval, knot insertion/removal, degree elevation (exact) and reduction (bounded/refusable), split -- all general for arbitrary degree/knot-vector B-splines including rational Evidence: `crates/algorithms/parametric/nurbs/src/degree.rs::elevate_degree3` (exact), `reduce_degree3`/`remove_knot3` (bounded, return `BoundedResult` deviation, refuse via `GeomError` when tolerance can't be met), `src/transform.rs::split2/split3` |
 | B3 | analytic surfaces (plane,cyl,cone,sphere,torus) | O:Geom,ElSLib C:Circular_kernel_3(partly) | implemented | Plane, Cylinder, EllipticalCylinder, Cone, Sphere, Torus all present as exact types with evaluation Evidence: `crates/representations/analytic/surface/src/elementary.rs::Plane/Cylinder/Cone/Sphere/Torus`, eval in `src/evaluate.rs` |
-| B4 | NURBS surfaces: eval, knot ops, iso-curves | O:BSplSLib,Geom C:- | narrow | `BSplineSurface` eval exists generally; knot-vector ops (insert/remove/elevate) for surfaces are not exposed as exported crate API the way curve ops are (crate exports curve knot-ops `insert_knot2/3`, but no surface-level knot insertion/removal function found in `nurbs/src/lib.rs` public exports); iso-curve extraction not found as a named function Evidence: `crates/representations/analytic/surface/src/spline.rs::BSplineSurface`, eval via `crates/algorithms/parametric/evaluate/src/surface.rs` (jet) |
+| B4 | NURBS surfaces: eval, knot ops, iso-curves | O:BSplSLib,Geom C:- | narrow | Surface evaluation and knot insertion in u and v (insert_surface_knot_u/v, tested) and parameter reversal exist. Missing for surfaces, though present for curves: knot removal, degree elevation and reduction, and iso-parameter curve extraction. |
 | B5 | swept/revolved/extruded/offset SURFACES as types | O:Geom (SurfaceOfRevolution, OffsetSurface...) C:- | narrow | A `Revolution` helper struct exists but is `pub(crate)` (private, used internally by the NURBS revolution-profile module), not a public exported analytic-surface type; curve OFFSET (not surface offset) is exact-only for the helix special case and refused otherwise Evidence: `crates/algorithms/parametric/nurbs/src/revolution_profile.rs::Revolution` (private struct, line 234) |
 | B6 | point inversion / projection on curve & surface | O:Extrema,ProjLib,GeomAPI C:- | implemented | Newton-style bounded projection for curves (`project_curve2/3`) and surfaces (`project_surface_certified`/`invert_surface_certified`), general within declared budgets, not certified global minimum (documented) Evidence: `crates/algorithms/parametric/nurbs/src/curve_projection.rs::project_curve2/project_curve3`, `src/certified_surface_inversion.rs::invert_surface_certified` |
 | B7 | curve-curve / curve-surface / surface-surface extrema | O:Extrema C:- | narrow | Extrema exist only as a side effect of certified intersection/distance routines (`distance_curve2/3_certified`) for bounded parameter boxes; no general dedicated extrema API decoupled from intersection Evidence: `crates/algorithms/parametric/nurbs/src/certified_curve_distance.rs::distance_curve2_certified/distance_curve3_certified` |
@@ -153,7 +159,7 @@ algorithm behind it, even where that algorithm is narrow.
 | D2 | mesh booleans / corefinement | C:PMP_Boolean_operations,Nef_3 O:-(BOP on B-rep) | implemented | Robust (non-exact-arithmetic) manifold boolean over general triangle meshes, absorbed own code (ADR 0047); separate from exact path (see D3). Evidence: `crates/providers/mesh/boolmesh/src/provider.rs::BoolmeshProvider` (implements `MeshBoolean`) tested by `crates/providers/mesh/boolmesh/tests/analytic_boxes.rs` and `tests/differential_corpus.rs::bounds_do_not_lose_features_across_scales`. |
 | D3 | exact polyhedral booleans (Nef) | C:Nef_3,Nef_2,Nef_S2 O:- | narrow | `boolean_polyhedra_exact` handles general planar-faced solids (convex or non-convex) for union/intersection/difference, constructing intersection coordinates in f64 (not exact rational/interval arithmetic despite the name); curved faces refused. No Nef-style open/half-space set representation (no unbounded regions, no 2D/spherical Nef). Evidence: `crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact` tested by `crates/algorithms/construction/construct/tests/boolean_polyhedra.rs`. Doc (`docs/capabilities.md` line ~120) confirms: "The production mesh boolean constructs intersection coordinates in f64". |
 | D4 | self-intersection detection | C:PMP(self_intersections) O:BOPAlgo_CheckerSI | implemented | General triangle-triangle test via BVH broad phase + narrow phase; reports intersecting pairs. Evidence: `crates/algorithms/repair/heal/src/intersect.rs::self_intersections` (or equivalent fn) tested by `crates/algorithms/repair/heal/tests/self_intersection.rs`. |
-| D5 | mesh repair (stitch, orient, degenerate, holes) | C:PMP_Mesh_repair,Polygon_repair O:- | narrow | Opt-in `RepairAction` enum: `WeldVertices`, `UnifyOrientation`, `DropDegenerateElements`, `OrientOutward`. Deliberately no "repair everything" mode; each action applies only where safe and reports `skipped` when not applicable. Hole filling is a SEPARATE capability (see D6), not part of `heal`. Evidence: `crates/algorithms/repair/heal/src/repair.rs::RepairAction,RepairPlan,RepairReport` tested by `crates/algorithms/repair/heal/tests/mesh.rs`, `tests/orient_outward.rs`. |
+| D5 | mesh repair (stitch, orient, degenerate, holes) | C:PMP_Mesh_repair,Polygon_repair O:- | **scoped** | Opt-in `RepairAction` enum: `WeldVertices`, `UnifyOrientation`, `DropDegenerateElements`, `OrientOutward`. Deliberately no "repair everything" mode; each action applies only where safe and reports `skipped` when not applicable. Hole filling is a SEPARATE capability (see D6), not part of `heal`. Evidence: `crates/algorithms/repair/heal/src/repair.rs::RepairAction,RepairPlan,RepairReport` tested by `crates/algorithms/repair/heal/tests/mesh.rs`, `tests/orient_outward.rs`. |
 | D6 | hole filling / fairing | C:PMP (triangulate_hole, fair) O:- | **absent** | No `fill_hole`/`triangulate_hole`/fairing function found anywhere in the workspace; `heal` addresses welding/orientation/degenerate removal, not boundary closure. Convex-decomposition's "cap" (D18/decompose) closes a PLANAR cut cross-section only, not an arbitrary boundary hole — different problem. Evidence: grep for fair/hole_fill/fill_hole across crates: 0 hits (excluding decompose's cut-capping). |
 | D7 | isotropic remeshing / refinement / smoothing | C:PMP_Remeshing,Tetrahedral_remeshing O:- | narrow | Uniform/edge-length subdivision (4-way split) with optional surface-aware vertex placement when a source B-rep surface is known; separately, boundary-fixed Laplacian smoothing. No isotropic *remeshing* (target-edge-length equalization via edge flip/collapse/split combined) — only pure refinement (splitting, monotonic triangle growth) and pure smoothing, run independently. Evidence: `crates/algorithms/discrete/refine/src/lib.rs::refine` tested by `crates/algorithms/discrete/refine/tests/refine.rs` |
 | D8 | simplification / decimation | C:Surface_mesh_simplification O:- | implemented | Edge-collapse decimation with caller bound on deviation; rejects collapses that would invert a triangle, create non-manifold edges, or open the boundary. Evidence: `crates/algorithms/discrete/decimate/src/collapse.rs::decimate` tested by `crates/algorithms/discrete/decimate/tests/decimation.rs::decimation_reduces_and_reports_its_deviation`. |
@@ -175,15 +181,15 @@ algorithm behind it, even where that algorithm is narrow.
 | Row | Capability | Reference (O: OCCT, C: CGAL) | Axiolid | Scope, refusals, evidence |
 | --- | --- | --- | --- | --- |
 | E1 | 2D Delaunay / constrained Delaunay | C:Triangulation_2 O:BRepMesh (internal) | implemented | Constrained Delaunay triangulation with certified `incircle`/`orient2d` predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints. Evidence: `crates/algorithms/planar/triangulate/src/build.rs::triangulate` (re-exported from `src/lib.rs`) — see also `src/recover.rs` |
-| E2 | 2D quality meshing (Ruppert/Chew) | C:Mesh_2 O:- | narrow | `Quality`/`refine`/`triangulate_refined` implement Ruppert-style refinement with an explicit Steiner-point budget; reports `RefineOutcome::Capped` when the angle bound is not reached rather than silently returning a worse mesh — a correct and deliberate refusal for inputs with small input angles (Ruppert does not terminate universally), but this means the angle guarantee is conditional, matching CGAL's own caveat, so this is genuinely close to IMPL but is marked NARROW because the crate itself documents the guarantee as conditional/capped rather than unconditional. Evidence: `crates/algorithms/planar/triangulate/src/refine.rs::refine,triangulate_refined,Quality,RefineOutcome` (re-exported `src/lib.rs`). |
+| E2 | 2D quality meshing (Ruppert/Chew) | C:Mesh_2 O:- | **scoped** | `Quality`/`refine`/`triangulate_refined` implement Ruppert-style refinement with an explicit Steiner-point budget; reports `RefineOutcome::Capped` when the angle bound is not reached rather than silently returning a worse mesh — a correct and deliberate refusal for inputs with small input angles (Ruppert does not terminate universally), but this means the angle guarantee is conditional, matching CGAL's own caveat, so this is genuinely close to IMPL but is marked NARROW because the crate itself documents the guarantee as conditional/capped rather than unconditional. Evidence: `crates/algorithms/planar/triangulate/src/refine.rs::refine,triangulate_refined,Quality,RefineOutcome` (re-exported `src/lib.rs`). |
 | E3 | 3D Delaunay / regular triangulation | C:Triangulation_3 O:- | **absent** | No tetrahedralization/3D Delaunay code found anywhere in the workspace. Evidence: grep for tetrahedr/delaunay_3/Triangulation3: 0 relevant hits (only unrelated "tet" substring matches in orient3d predicate files). |
 | E4 | 3D constrained Delaunay | C:Constrained_triangulation_3 O:- | **absent** | Depends on E3, which is absent. Evidence: (same search as E3) |
 | E5 | volume (tetrahedral) meshing | C:Mesh_3,Tetrahedral_remeshing O:- (TKXMesh stub) | **absent** | No tet-mesh generator; no `TetMesh` type exists in `representations`. Evidence: grep for TetMesh/tet_mesh/volume_mesh: 0 hits. |
 | E6 | surface meshing of implicit/smooth surfaces | C:Surface_mesher,Mesh_3 O:- | narrow | `axiolid-levelset` extracts a surface mesh from a signed scalar field via marching-cubes-family extraction (see G5); "meshing of an implicit surface" and "isosurface extraction" are the same underlying capability here, so this row and G5 report the same evidence. No dedicated Delaunay-refinement surface mesher (CGAL `Mesh_3`/`Surface_mesher` style) with a guaranteed approximation-error bound exists. Evidence: `crates/algorithms/sampled/levelset/src/lib.rs` tested by `crates/algorithms/sampled/levelset/tests/extract.rs::a_surface_reaching_the_bounds_still_closes`. |
 | E7 | alpha shapes / alpha wrap | C:Alpha_shapes_2/3,Alpha_wrap_2/3 O:- | **absent** | No alpha-shape or alpha-wrap code found. Evidence: grep for alpha_shape/AlphaShape/alpha_wrap: 0 hits. |
 | E8 | Voronoi / power diagrams | C:Voronoi_diagram_2,Apollonius,Segment_Delaunay_graph O:- | **absent** | No Voronoi diagram, power diagram, Apollonius, or segment-Delaunay-graph code found. Evidence: grep for voronoi/Voronoi: 0 hits. |
-| E9 | periodic / hyperbolic / spherical triangulations | C:Periodic_*,Hyperbolic_*,Triangulation_on_sphere_2 O:- | **absent** | No such structures found. Evidence: not directly searched beyond general triangulation source review |
-| E10 | d-dimensional triangulations/hulls | C:Triangulation,Convex_hull_d,Kernel_d O:- | **absent** | Only 2D triangulation and 2D/3D convex hull exist (G1); no generalized d-dimensional kernel. Evidence: see G1 evidence |
+| E9 | periodic / hyperbolic / spherical triangulations | C:Periodic_*,Hyperbolic_*,Triangulation_on_sphere_2 O:- | **scoped** | No such structures found. Evidence: not directly searched beyond general triangulation source review |
+| E10 | d-dimensional triangulations/hulls | C:Triangulation,Convex_hull_d,Kernel_d O:- | **scoped** | Only 2D triangulation and 2D/3D convex hull exist (G1); no generalized d-dimensional kernel. Evidence: see G1 evidence |
 
 ### F. 2D polygons and arrangements
 
@@ -193,7 +199,7 @@ algorithm behind it, even where that algorithm is narrow.
 | F2 | polygon offset (straight/rounded) | C:Straight_skeleton_2,Minkowski_sum_2 O:BRepOffsetAPI_MakeOffset | narrow | `offset_polygons`/`stroke_polyline` in overlay crate, and `Region::dilate`/`Region::erode` (disc-expansion form). No standalone straight-skeleton-based offset (see F3, ABSENT) — offset here is the Minkowski-disc form (rounded corners only by construction; no mitred/beveled straight-skeleton offset variant). Evidence: `crates/algorithms/planar/overlay/src/offset.rs::offset_polygons,stroke_polyline` |
 | F3 | straight skeleton | C:Straight_skeleton_2 O:- | **absent** | No straight-skeleton implementation found anywhere in the workspace (searched directly, 0 hits). Evidence: grep for straight_skeleton/StraightSkeleton: 0 hits. |
 | F4 | arrangements of curves (segments, arcs, conics, Bezier) | C:Arrangement_on_surface_2 O:- | narrow | `axiolid-arrangement` is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — `Vertex`/`HalfEdge`/`Face` store `Point2` positions with no curve type. Arcs are handled only inside the separate, non-incremental `arc_overlay` boolean path (F1/F2), not as arrangement edges; conics and Bezier curves are not supported anywhere. Evidence: `crates/algorithms/planar/arrangement/src/lib.rs::Arrangement` (straight edges only) tested by `crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one`. |
-| F5 | envelopes / lower envelope | C:Envelope_2/3 O:- | **absent** | No lower/upper envelope algorithm found; all "envelope" hits in the codebase refer to unrelated navigation/traversal "clearance envelope" (agent radius/height/slope) concepts in `axiolid-field`, not the CGAL curve-envelope sense. Evidence: grep for envelope: all hits are `TraversalEnvelope` in `crates/algorithms/sampled/field/src/navigate.rs`, unrelated capability. |
+| F5 | envelopes / lower envelope | C:Envelope_2/3 O:- | **scoped** | No lower/upper envelope algorithm found; all "envelope" hits in the codebase refer to unrelated navigation/traversal "clearance envelope" (agent radius/height/slope) concepts in `axiolid-field`, not the CGAL curve-envelope sense. Evidence: grep for envelope: all hits are `TraversalEnvelope` in `crates/algorithms/sampled/field/src/navigate.rs`, unrelated capability. |
 | F6 | Minkowski sum 2D | C:Minkowski_sum_2 O:- | narrow | No standalone 2D-specific Minkowski sum; the general `axiolid-minkowski` crate operates on 3D planar-faced solids (see H2) via convex-hull-of-pairwise-sums for convex operands and decompose+pairwise+boolean for non-convex. 2D callers would have to lift into 3D or use `Region::dilate` for the disc-only special case (F2). No 2D polygon+polygon Minkowski sum function exists. Evidence: `crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum,minkowski_sum_with` (3D only) tested by `crates/algorithms/discrete/minkowski/tests/minkowski.rs::the_sum_of_two_boxes_is_a_box_with_summed_extents`. |
 | F7 | polygon partition (convex/monotone) | C:Partition_2 O:- | **absent** | No convex or monotone polygon partition algorithm found; the CDT-based triangulation (E1) fully partitions into triangles but that is a different, finer-grained capability. Evidence: not found in `overlay`/`triangulate`/`arrangement` source. |
 | F8 | visibility / shortest path in polygon | C:Visibility_2 O:- | implemented | `axiolid-route` computes visibility graphs and shortest paths constrained to stay inside a polygon (with holes). Evidence: `crates/algorithms/planar/route/src/lib.rs` tested by `crates/algorithms/planar/route/tests/route.rs`. |
@@ -208,19 +214,19 @@ algorithm behind it, even where that algorithm is narrow.
 | G1 | convex hull 2D/3D | C:Convex_hull_2/3 O:- | implemented | 3D: `convex_hull` builds a closed outward-oriented `TriMesh` by incremental insertion, every visibility decision through certified `orient3d`, typed refusals for <4 points / all-collinear / all-coplanar. 2D hull exists in `axiolid-reference`. Evidence: `crates/algorithms/construction/construct/src/hull.rs::convex_hull` tested by `crates/algorithms/construction/construct/tests/convex_hull.rs` |
 | G2 | bounding volumes (min sphere, OBB, min rect) | C:Bounding_volumes,Optimal_bounding_box O:Bnd_OBB | narrow | 2D only: minimum-area oriented rectangle and strict 2D convex hull. No 3D OBB, no minimum enclosing circle/sphere. Evidence: `crates/algorithms/reference/src/convex_hull.rs::minimum_area_rectangle` |
 | G3 | point set processing (normals, outliers, smoothing, simplify) | C:Point_set_processing_3 O:- | **absent** | `PointCloud` (in `representations/discrete/pointcloud`) is a plain data container (points/normals/colours/intensities, with caller-supplied normals) with no processing algorithms — no normal estimation, outlier removal, smoothing, or simplification/subsampling function exists. Evidence: `crates/representations/discrete/pointcloud/src/lib.rs::PointCloud` (fields/accessors only, no `estimate_normals`/`remove_outliers`/`simplify` found). |
-| G4 | surface reconstruction (Poisson, AF, scale-space) | C:Poisson_*,Advancing_front_*,Scale_space_* O:- | narrow | Reconstruction exists via a custom SDF-based method (nearest-neighbour-driven signed-distance field, then G5's level-set extraction) — not Poisson, not advancing-front, not scale-space. This is a legitimate reconstruction pipeline but a single, different algorithm family from all three CGAL variants named in the row. Evidence: `crates/providers/pointcloud/sdf/src/lib.rs` tested by `crates/providers/pointcloud/sdf/tests/reconstruct.rs` |
+| G4 | surface reconstruction (Poisson, AF, scale-space) | C:Poisson_*,Advancing_front_*,Scale_space_* O:- | **scoped** | Reconstruction exists via a custom SDF-based method (nearest-neighbour-driven signed-distance field, then G5's level-set extraction) — not Poisson, not advancing-front, not scale-space. This is a legitimate reconstruction pipeline but a single, different algorithm family from all three CGAL variants named in the row. Evidence: `crates/providers/pointcloud/sdf/src/lib.rs` tested by `crates/providers/pointcloud/sdf/tests/reconstruct.rs` |
 | G5 | isosurface extraction (marching cubes, dual contouring) | C:Isosurfacing_3 O:- | implemented | Level-set surface extraction from a signed scalar field (marching-cubes family); closes correctly even when the surface reaches the sample-grid bounds. Evidence: `crates/algorithms/sampled/levelset/src/lib.rs` tested by `crates/algorithms/sampled/levelset/tests/extract.rs::a_surface_reaching_the_bounds_still_closes`. |
 | G6 | PCA / plane fitting | C:Principal_component_analysis O:- | **absent** | No PCA or least-squares plane-fitting function found anywhere in the workspace; `fit.rs` in `axiolid-nurbs` only fits B-spline curves/surfaces through explicit points (interpolation, not PCA). Evidence: grep for fn plane_fit/least_squares_plane/fit_plane/fn pca: 0 hits |
-| G7 | kd-tree / k-NN / range search | C:Spatial_searching O:BVH(nearest), NCollection_UBTree | narrow | `PointIndex` provides exact k-NN and radius search, but via a UNIFORM GRID, not a kd-tree — the crate's own docs state this is deliberate ("every query has the same radius and cell arithmetic beats tree descent") and that no tree-based point index is provided; a caller with widely varying query radii or highly non-uniform point density does not get the adaptive behaviour a kd-tree/octree would give. Evidence: `crates/algorithms/query/spatial/src/points.rs::PointIndex` tested by `crates/algorithms/query/spatial/tests/points.rs` and `tests/nearest.rs` |
+| G7 | kd-tree / k-NN / range search | C:Spatial_searching O:BVH(nearest), NCollection_UBTree | **scoped** | `PointIndex` provides exact k-NN and radius search, but via a UNIFORM GRID, not a kd-tree — the crate's own docs state this is deliberate ("every query has the same radius and cell arithmetic beats tree descent") and that no tree-based point index is provided; a caller with widely varying query radii or highly non-uniform point density does not get the adaptive behaviour a kd-tree/octree would give. Evidence: `crates/algorithms/query/spatial/src/points.rs::PointIndex` tested by `crates/algorithms/query/spatial/tests/points.rs` and `tests/nearest.rs` |
 | G8 | AABB tree / box intersection | C:AABB_tree,Box_intersection_d O:BVH,Bnd | implemented | `Bvh` over bounded objects (triangles/solids), adapts to geometry distribution, used by clash/ray-cast/healing; also implements box-pair broad-phase queries. Evidence: `crates/algorithms/query/spatial/src/bvh.rs::Bvh` tested by `crates/algorithms/query/spatial/tests/bvh.rs`. |
 
 ### H. Spatial search and miscellany
 
 | Row | Capability | Reference (O: OCCT, C: CGAL) | Axiolid | Scope, refusals, evidence |
 | --- | --- | --- | --- | --- |
-| H1 | BVH / spatial index | C:AABB_tree,Orthtree O:BVH | narrow | `Bvh` for objects (general, IMPL — same as G8) and `PointIndex` for points (uniform grid, not an orthtree/adaptive octree — see G7's narrowing, which applies here too). No adaptive Orthtree-equivalent structure exists. Evidence: `crates/algorithms/query/spatial/src/bvh.rs::Bvh` |
+| H1 | BVH / spatial index | C:AABB_tree,Orthtree O:BVH | **scoped** | `Bvh` for objects (general, IMPL — same as G8) and `PointIndex` for points (uniform grid, not an orthtree/adaptive octree — see G7's narrowing, which applies here too). No adaptive Orthtree-equivalent structure exists. Evidence: `crates/algorithms/query/spatial/src/bvh.rs::Bvh` |
 | H2 | 3D Minkowski sum | C:Minkowski_sum_3 O:- | narrow | Exact for convex-convex pairs (hull of pairwise vertex sums) and for non-convex via decompose+pairwise-sum+boolean-union with an explicit pairwise-sum budget (4096) that refuses rather than runs unbounded work. Minkowski DIFFERENCE additionally requires the SUBJECT to be convex — refused by name for a non-convex subject (erosion via vertex-wise containment is only valid when the subject is convex). Curved operands refused (planar-faced solids only). Evidence: `crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum,minkowski_sum_with,minkowski_difference_with` tested by `crates/algorithms/discrete/minkowski/tests/minkowski.rs::a_non_convex_sum_differs_from_treating_the_operand_as_convex`, `erosion_refuses_a_non_convex_subject`. |
-| H3 | convex collision / distance (GJK/SAT) | C:Polytope_distance_d O:- | narrow | Full SAT (separating axis theorem) distance/intersection for convex shapes, by deliberate design choice (documented reasoning: SAT over GJK for the model-checking use case). Deliberately does NOT report penetration depth (documented refusal — a caller wanting EPA/penetration depth for physics is told to use a physics engine instead). This is IMPL for "convex collision/distance" as literally asked, but the row also implies GJK-class capability which is a named, explicit non-goal; marking NARROW to flag the documented penetration-depth gap. Evidence: `crates/algorithms/query/collide/src/lib.rs::distance,intersects,boxes_intersect,contains_point` |
+| H3 | convex collision / distance (GJK/SAT) | C:Polytope_distance_d O:- | **scoped** | Full SAT (separating axis theorem) distance/intersection for convex shapes, by deliberate design choice (documented reasoning: SAT over GJK for the model-checking use case). Deliberately does NOT report penetration depth (documented refusal — a caller wanting EPA/penetration depth for physics is told to use a physics engine instead). This is IMPL for "convex collision/distance" as literally asked, but the row also implies GJK-class capability which is a named, explicit non-goal; marking NARROW to flag the documented penetration-depth gap. Evidence: `crates/algorithms/query/collide/src/lib.rs::distance,intersects,boxes_intersect,contains_point` |
 | H4 | Frechet / curve distances | C:Frechet_distance O:- | **absent** | No Frechet distance or other curve-distance metric found anywhere in the workspace. Evidence: grep for frechet/Frechet: 0 hits. |
 | H5 | interpolation / barycentric coords | C:Interpolation,Barycentric_coordinates_2/3 O:- | narrow | Barycentric coordinates exist only as an internal by-product of ray/triangle intersection (`RayHit::barycentric`) and of attribute-blend interpolation inside the mesh boolean provider (`boolmesh/src/attributes.rs::barycentric`) — neither is exposed as a general-purpose, reusable barycentric-coordinate or interpolation API for arbitrary points against arbitrary polygons/triangles. NURBS curve/surface interpolation (`fit.rs::interpolate_curve3`) is a different capability (curve fitting, not barycentric coordinates). Evidence: `crates/algorithms/query/intersection/ray-mesh/src/lib.rs::RayHit::barycentric` (field, computed in `intersect_triangle`) tested by `crates/algorithms/query/intersection/ray-mesh/tests/nearest_hit.rs` |
 
@@ -263,31 +269,51 @@ Every gap cluster is a GitHub issue in the [Geometry breadth](https://github.com
 gate-checked version of this table is `architecture/capability-ledger.toml`;
 `cargo xtask gaps` prints it ordered by priority.
 
-| Issue | Work | Rows |
-| --- | --- | --- |
-| [#111](https://github.com/axiolid/kernel/issues/111) | Exact-mode extrusion/revolve/sweep for arbitrary and composite profiles, not just rectangle/circle | C4 |
-| [#118](https://github.com/axiolid/kernel/issues/118) | 3D oriented bounding box and minimum enclosing sphere | G2 |
-| [#119](https://github.com/axiolid/kernel/issues/119) | General curve/surface and surface/surface intersection, including tangent and overlapping cases | B7, B8, B9, B10 |
-| [#120](https://github.com/axiolid/kernel/issues/120) | Exact B-rep boolean for solids with curved faces | C9, D3 |
-| [#121](https://github.com/axiolid/kernel/issues/121) | Fillet and chamfer over edge chains and networks, constant and variable radius | C10, C11 |
-| [#122](https://github.com/axiolid/kernel/issues/122) | Exact sweep along arbitrary curves and loft through arbitrary sections | C5, C6, B5 |
-| [#123](https://github.com/axiolid/kernel/issues/123) | Solid offset, shell and thicken over curved faces, and draft angle | C12, C13 |
-| [#124](https://github.com/axiolid/kernel/issues/124) | Surface filling: Coons, Gordon and plate surfaces through boundary curves | B12 |
-| [#125](https://github.com/axiolid/kernel/issues/125) | Exact mass properties and distance over curved B-rep faces | C17, C18 |
-| [#126](https://github.com/axiolid/kernel/issues/126) | 3D Delaunay and constrained 3D Delaunay triangulation | E3, E4 |
-| [#127](https://github.com/axiolid/kernel/issues/127) | Tetrahedral volume meshing with quality bounds | E5 |
-| [#128](https://github.com/axiolid/kernel/issues/128) | Voronoi and power diagrams, alpha shapes and alpha wrapping | E7, E8 |
-| [#129](https://github.com/axiolid/kernel/issues/129) | Mesh hole filling with fairing, and subdivision surfaces | D6, D9 |
-| [#130](https://github.com/axiolid/kernel/issues/130) | Mesh geodesics and UV parameterisation | D10, D11 |
-| [#131](https://github.com/axiolid/kernel/issues/131) | Mesh segmentation, skeletonisation and shape detection (planes, cylinders) | D12, D19 |
-| [#132](https://github.com/axiolid/kernel/issues/132) | Mesh deformation with fixed handles | D13 |
-| [#133](https://github.com/axiolid/kernel/issues/133) | Point-set processing: normals, outliers, smoothing, simplification and plane fitting | G3, G6 |
-| [#134](https://github.com/axiolid/kernel/issues/134) | Straight skeleton and mitred polygon offset | F3, F2 |
-| [#135](https://github.com/axiolid/kernel/issues/135) | Polygon partition, polyline simplification and snap rounding | F7, F9, F10 |
-| [#136](https://github.com/axiolid/kernel/issues/136) | Shared numeric substrate: root finding, quadrature, least squares and optimisation | A5 |
-| [#137](https://github.com/axiolid/kernel/issues/137) | B-rep shape healing: sewing, tolerance repair and small-feature removal | C15 |
-| [#138](https://github.com/axiolid/kernel/issues/138) | Hidden-line removal and 2D projection drawings of solids | C16 |
-| [#139](https://github.com/axiolid/kernel/issues/139) | 2D medial axis, bisectors and hatching | C19, C20 |
+| Issue | Work | Rows | Waits on |
+| --- | --- | --- | --- |
+| [#111](https://github.com/axiolid/kernel/issues/111) | Exact-mode extrusion/revolve/sweep for arbitrary and composite profiles, not just rectangle/circle | C4 | - |
+| [#118](https://github.com/axiolid/kernel/issues/118) | 3D oriented bounding box and minimum enclosing sphere | G2 | - |
+| [#119](https://github.com/axiolid/kernel/issues/119) | General curve/surface and surface/surface intersection, including tangent and overlapping cases | B7, B8, B9, B10 | - |
+| [#120](https://github.com/axiolid/kernel/issues/120) | Exact B-rep boolean for solids with curved faces | C9, D3 | #119 |
+| [#121](https://github.com/axiolid/kernel/issues/121) | Fillet and chamfer over edge chains and networks, constant and variable radius | C10, C11 | #119, #120 |
+| [#122](https://github.com/axiolid/kernel/issues/122) | Exact sweep along arbitrary curves and loft through arbitrary sections | B5, C5, C6 | - |
+| [#123](https://github.com/axiolid/kernel/issues/123) | Solid offset, shell and thicken over curved faces, and draft angle | C12, C13 | #119 |
+| [#124](https://github.com/axiolid/kernel/issues/124) | Surface filling: Coons, Gordon and plate surfaces through boundary curves | B12 | - |
+| [#125](https://github.com/axiolid/kernel/issues/125) | Exact mass properties and distance over curved B-rep faces | C17, C18 | #119 |
+| [#126](https://github.com/axiolid/kernel/issues/126) | 3D Delaunay and constrained 3D Delaunay triangulation | E3, E4 | - |
+| [#127](https://github.com/axiolid/kernel/issues/127) | Tetrahedral volume meshing with quality bounds | E5 | #126 |
+| [#128](https://github.com/axiolid/kernel/issues/128) | Voronoi and power diagrams, alpha shapes and alpha wrapping | E7, E8 | - |
+| [#129](https://github.com/axiolid/kernel/issues/129) | Mesh hole filling with fairing, and subdivision surfaces | D6, D9 | #140 |
+| [#130](https://github.com/axiolid/kernel/issues/130) | Mesh geodesics and UV parameterisation | D10, D11 | #140 |
+| [#131](https://github.com/axiolid/kernel/issues/131) | Mesh segmentation, skeletonisation and shape detection (planes, cylinders) | D12, D19 | #140 |
+| [#132](https://github.com/axiolid/kernel/issues/132) | Mesh deformation with fixed handles | D13 | - |
+| [#133](https://github.com/axiolid/kernel/issues/133) | Point-set processing: normals, outliers, smoothing, simplification and plane fitting | G3, G6 | - |
+| [#134](https://github.com/axiolid/kernel/issues/134) | Straight skeleton and mitred polygon offset | F2, F3 | - |
+| [#135](https://github.com/axiolid/kernel/issues/135) | Polygon partition, polyline simplification and snap rounding | F7, F9, F10 | - |
+| [#136](https://github.com/axiolid/kernel/issues/136) | Shared numeric substrate: root finding, quadrature, least squares and optimisation | A5 | - |
+| [#137](https://github.com/axiolid/kernel/issues/137) | B-rep shape healing: sewing, tolerance repair and small-feature removal | C15 | - |
+| [#138](https://github.com/axiolid/kernel/issues/138) | Hidden-line removal and 2D projection drawings of solids | C16 | - |
+| [#139](https://github.com/axiolid/kernel/issues/139) | 2D medial axis, bisectors and hatching | C19, C20 | - |
+| [#140](https://github.com/axiolid/kernel/issues/140) | Halfedge mesh representation with O(1) adjacency for 3D surface meshes | D1 | - |
+| [#141](https://github.com/axiolid/kernel/issues/141) | Surface knot removal, degree elevation and iso-curve extraction | B4 | - |
+| [#142](https://github.com/axiolid/kernel/issues/142) | Torus and wedge B-rep primitive solids | C3 | - |
+| [#143](https://github.com/axiolid/kernel/issues/143) | Public barycentric and mean-value coordinates | H5 | - |
+| [#144](https://github.com/axiolid/kernel/issues/144) | Mesh genus with boundaries and components, and a homology cycle basis | D20 | - |
+| [#145](https://github.com/axiolid/kernel/issues/145) | 2D Minkowski sum for non-convex polygons | F6 | - |
+| [#146](https://github.com/axiolid/kernel/issues/146) | Bentley-Ottmann sweep for many-segment intersection | F11 | - |
+| [#147](https://github.com/axiolid/kernel/issues/147) | Discrete and continuous Frechet distance between polylines | H4 | - |
+| [#148](https://github.com/axiolid/kernel/issues/148) | Two-sided mesh Hausdorff distance with a certified error bound | D15 | - |
+| [#149](https://github.com/axiolid/kernel/issues/149) | Isotropic remeshing: split, collapse, flip and tangential relaxation | D7 | #140 |
+| [#150](https://github.com/axiolid/kernel/issues/150) | Least-squares curve and surface fitting to points | B11 | #136 |
+| [#151](https://github.com/axiolid/kernel/issues/151) | Fair curves: minimum-energy interpolation and batten curves | B16 | #136 |
+| [#152](https://github.com/axiolid/kernel/issues/152) | Form features: holes, pockets, slots and ribs on B-rep solids | C14 | #120 |
+| [#153](https://github.com/axiolid/kernel/issues/153) | Surface meshing of smooth and implicit surfaces with quality bounds | E6 | #126 |
+| [#154](https://github.com/axiolid/kernel/issues/154) | Exact rational or algebraic number type for constructions | A2 | a decision |
+| [#155](https://github.com/axiolid/kernel/issues/155) | Exact polygon booleans with circular arcs, independent of cavalier_contours | F1 | a decision |
+| [#156](https://github.com/axiolid/kernel/issues/156) | Clip and split a triangle mesh by another mesh | D17 | - |
+| [#157](https://github.com/axiolid/kernel/issues/157) | 2D arrangements of circular arcs and conic curves | F4 | - |
+| [#158](https://github.com/axiolid/kernel/issues/158) | 3D Minkowski sum and difference for non-convex solids | H2 | - |
+| [#159](https://github.com/axiolid/kernel/issues/159) | Apollonius and tangent-circle constructions | B14 | - |
 
 ## Where Axiolid is ahead
 
