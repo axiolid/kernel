@@ -11,6 +11,7 @@ use axiolid_mesh_boolean_contract::{
     symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
 };
 
+use crate::attributes::{carry, FaceSource};
 use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 
 /// Mesh boolean backed by `boolmesh` (pure Rust, `glam`-only, MPL-2.0).
@@ -312,9 +313,15 @@ impl BoolmeshBoolean {
             }
         };
 
-        let result = from_boolean_mesh(&output);
+        let mut result = from_boolean_mesh(&output);
         check_result(&result, operation)?;
-        let evidence = evidence_for(subject, &[tool], &result, 1);
+        let sources: Vec<FaceSource> = output
+            .src
+            .iter()
+            .map(|&(operand, triangle)| FaceSource { operand, triangle })
+            .collect();
+        let fates = carry(subject, tool, &mut result, &sources);
+        let evidence = evidence_for(subject, &[tool], &result, 1).with_attribute_fates(fates);
         Ok(BooleanOutcome::new(result, evidence))
     }
 }
@@ -356,9 +363,9 @@ fn evidence_for(
     // `boolmesh` does not report coincident-face encounters, so claiming
     // detection would be a lie. Left false until a provider can answer.
     .with_coincident_faces(false)
-    // A cut creates vertices with no preimage in either operand, and
-    // `boolmesh` returns positions and indices only. Naming each channel
-    // as dropped is what makes the loss an answer rather than a silence.
+    // Default fate, for the paths that do not carry channels: the analytic
+    // box path, the grouped and tree batch paths, and an empty result. The
+    // pairwise boolean replaces these with what `carry` measured (#116).
     .with_attribute_fates(
         subject
             .attributes

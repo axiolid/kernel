@@ -62,9 +62,10 @@ fn dedupe_edge(
         // Separate topological unit needs no new faces to be split
         let new_vert = ps.len();
         ps.push(ps[head]);
-        // Duplicate per-face data if present
-        ns.push(ns[head]);
-        rs.push(rs[head]);
+        // No face is created here, so no per-face entry either: `ns`/`rs` must
+        // stay one-per-face (#116). Upstream pushed `ns[head]`/`rs[head]`,
+        // indexing face arrays with a VERTEX id -- Manifold's DedupeEdge pushes
+        // only per-vertex data at this point.
         // Rewire the entire star around NextHalfedge(current) to new_vert
         let start = next_of(cur);
         let mut e = start;
@@ -91,9 +92,6 @@ fn dedupe_edge(
         // Split the pinched vert the previous split created.
         let new_vert = ps.len();
         ps.push(ps[head]);
-        // Duplicate per-face data if present
-        ns.push(ns[head]);
-        rs.push(rs[head]);
         let bgn = next_of(curr);
         let mut e = bgn;
         loop {

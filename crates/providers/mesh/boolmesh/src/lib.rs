@@ -15,6 +15,7 @@
 //! project had not already accepted -- but the headers must survive
 //! refactoring.
 
+mod attributes;
 mod box_detect;
 mod cellular;
 mod convert;

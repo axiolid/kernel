@@ -1,10 +1,9 @@
 //! A boolean must report what happened to attribute channels.
 //!
 //! Before this, a channel simply vanished: the caller compared `is_some()`
-//! before and after to discover the loss, and got no reason for it. The cut
-//! genuinely cannot preserve per-vertex data -- new vertices along the seam
-//! have no preimage in either operand -- so the contract is not preservation
-//! but disclosure.
+//! before and after to discover the loss, and got no reason for it. The
+//! contract is disclosure: every channel is named with its fate. Since #116
+//! the pairwise boolean carries channels (#116); these tests pin the fates.
 
 mod support;
 
@@ -19,9 +18,9 @@ fn options() -> ExecutionOptions {
     ExecutionOptions::new(Tolerance::METRE)
 }
 
-/// A dropped channel is named, with the reason it could not survive.
+/// A label channel crossing a cut is carried under its `Nearest` rule.
 #[test]
-fn a_dropped_channel_is_reported_rather_than_silently_lost() {
+fn a_nearest_channel_is_carried_and_reported() {
     let mut subject = boxx(0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.0);
     let tool = boxx(1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 0.0);
 
@@ -41,11 +40,8 @@ fn a_dropped_channel_is_reported_rather_than_silently_lost() {
 
     assert_eq!(
         outcome.evidence.attribute_fates,
-        vec![(
-            "source_entity".to_owned(),
-            AttributeFate::Dropped(DropReason::ProviderLimitation)
-        )],
-        "the channel must be named as dropped, with a reason"
+        vec![("source_entity".to_owned(), AttributeFate::Interpolated)],
+        "the channel must be named, with its fate"
     );
 }
 
@@ -95,10 +91,10 @@ fn a_subject_without_channels_reports_nothing() {
 
 /// A corner-indexed channel is named like any other (#112).
 ///
-/// Addressing is not a reason to go quiet: the cut drops it for the same
-/// reason it drops a per-vertex channel, and says so.
+/// Addressing is not a reason to go quiet: it is carried and named like
+/// any other channel.
 #[test]
-fn a_corner_indexed_channel_is_reported_too() {
+fn a_corner_indexed_channel_is_carried_too() {
     let mut subject = boxx(0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 0.0);
     let tool = boxx(1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 0.0);
 
@@ -118,9 +114,6 @@ fn a_corner_indexed_channel_is_reported_too() {
 
     assert_eq!(
         outcome.evidence.attribute_fates,
-        vec![(
-            "uv".to_owned(),
-            AttributeFate::Dropped(DropReason::ProviderLimitation)
-        )]
+        vec![("uv".to_owned(), AttributeFate::Interpolated)]
     );
 }

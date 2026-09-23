@@ -7,7 +7,7 @@ pub mod hmesh;
 
 use super::hmesh::Hmesh;
 use crate::csg::collider::{morton_code, MortonCollider, PlanarGrid, K_NO_CODE};
-use crate::csg::{next_of, Half, Real, Vec3, Vec3u, K_PRECISION};
+use crate::csg::{next_of, Half, Real, Tref, Vec3, Vec3u, K_PRECISION};
 use bounds::BBox;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -35,6 +35,15 @@ pub struct Manifold {
     /// query about as well as a tree does.
     pub planar_grid: PlanarGrid,
     pub coplanar: Vec<i32>, // indices of coplanar faces
+    /// The caller's triangle each face came from.
+    ///
+    /// `new` welds vertices, drops triangles the weld collapsed, and
+    /// `new_impl` Morton-sorts the faces, so face `f` here is generally NOT
+    /// input triangle `f`. `Tref::fid` indexes faces of THIS structure;
+    /// composing it with `face_src` is how a result triangle is traced back
+    /// to the triangle -- and therefore the attribute values -- the caller
+    /// supplied (#116).
+    pub face_src: Vec<usize>,
 }
 
 impl Manifold {
@@ -67,20 +76,28 @@ impl Manifold {
             }
         }
 
-        // remove collapsed triangles
-        let idx = idx
+        // remove collapsed triangles, remembering which input triangle each
+        // survivor was
+        let (idx, kept): (Vec<_>, Vec<_>) = idx
             .chunks(3)
             .map(|i| Vec3u::new(rmap[i[0]], rmap[i[1]], rmap[i[2]]))
-            .filter(|&is| is.x != is.y && is.y != is.z && is.z != is.x)
-            .collect::<Vec<_>>();
+            .enumerate()
+            .filter(|(_, is)| is.x != is.y && is.y != is.z && is.z != is.x)
+            .map(|(t, is)| (is, t))
+            .unzip();
 
-        Self::new_impl(weld, idx)
+        let mut mfd = Self::new_impl(weld, idx)?;
+        // `new_impl` recorded positions in ITS input; lift them to ours.
+        for src in &mut mfd.face_src {
+            *src = kept[*src];
+        }
+        Ok(mfd)
     }
 
     pub fn new_impl(ps: Vec<Vec3>, idx: Vec<Vec3u>) -> Result<Self, String> {
         let bb = BBox::new(None, &ps);
         let (mut f_bb, mut f_mt) = compute_face_morton(&ps, &idx, &bb);
-        let hm = sort_faces(&ps, &idx, &mut f_bb, &mut f_mt)?;
+        let (hm, face_src) = sort_faces(&ps, &idx, &mut f_bb, &mut f_mt)?;
         let hs = (0..hm.nh)
             .map(|i| Half::new(hm.tail[i], hm.head[i], hm.twin[i]))
             .collect::<Vec<_>>();
@@ -104,6 +121,7 @@ impl Manifold {
             collider,
             planar_grid,
             coplanar,
+            face_src,
         };
 
         if !mfd.is_manifold() {
@@ -174,7 +192,7 @@ fn sort_faces(
     idx: &[Vec3u],
     face_bboxes: &mut Vec<BBox>,
     face_morton: &mut Vec<u32>,
-) -> Result<Hmesh, String> {
+) -> Result<(Hmesh, Vec<usize>), String> {
     let mut map = (0..face_morton.len()).collect::<Vec<_>>();
     // Morton codes are u32 keys and the permutation is rebuilt from scratch,
     // so equal-key order is not observable: the unstable sort is free here.
@@ -182,7 +200,10 @@ fn sort_faces(
     *face_bboxes = map.iter().map(|&i| face_bboxes[i]).collect::<Vec<_>>();
     *face_morton = map.iter().map(|&i| face_morton[i]).collect::<Vec<_>>();
 
-    Hmesh::new(pos, &map.iter().map(|&i| idx[i]).collect::<Vec<_>>())
+    // `Hmesh::new` keeps face order, so sorted face `f` is `idx[map[f]]`:
+    // `map` IS the face-to-input record, and costs nothing extra to keep.
+    let hm = Hmesh::new(pos, &map.iter().map(|&i| idx[i]).collect::<Vec<_>>())?;
+    Ok((hm, map))
 }
 
 fn compute_coplanar_idx(ps: &[Vec3], ns: &[Vec3], hs: &[Half], tol: Real) -> Vec<i32> {
@@ -241,7 +262,7 @@ fn compute_coplanar_idx(ps: &[Vec3], ns: &[Vec3], hs: &[Half], tol: Real) -> Vec
     res
 }
 
-pub fn cleanup_unused_verts(ps: &mut Vec<Vec3>, hs: &mut Vec<Half>) {
+pub fn cleanup_unused_verts(ps: &mut Vec<Vec3>, hs: &mut Vec<Half>, rs: &mut Vec<Tref>) {
     let bb = BBox::new(None, ps);
     let mt = ps.iter().map(|p| morton_code(p, &bb)).collect::<Vec<_>>();
 
@@ -273,6 +294,16 @@ pub fn cleanup_unused_verts(ps: &mut Vec<Vec3>, hs: &mut Vec<Half>) {
     new2old.truncate(nv);
 
     *ps = new2old.iter().map(|&i| ps[i]).collect();
+    // A removed face is three default halfedges, so faces are kept or
+    // dropped whole; its ref goes with it, keeping `rs` face-parallel.
+    if rs.len() * 3 == hs.len() {
+        *rs = hs
+            .chunks(3)
+            .zip(rs.iter())
+            .filter(|(face, _)| face[0].pair().is_some())
+            .map(|(_, r)| *r)
+            .collect();
+    }
     *hs = hs.iter().filter(|h| h.pair().is_some()).cloned().collect();
 }
 

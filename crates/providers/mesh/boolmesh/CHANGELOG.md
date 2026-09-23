@@ -11,4 +11,8 @@ caret rule for `0.x` versions.
 
 ### Added
 
-- Test pinning that a corner-indexed channel is reported like any other (#112). Behaviour unchanged: the channel is dropped as `ProviderLimitation`.
+- The pairwise boolean carries attribute channels (#116). Each result triangle's source triangle is tracked through the CSG core, so a corner that is a source corner copies its value and a corner on a cut is derived in its source triangle under the channel's `Blend`. Output is corner-indexed; faces from a tool without the channel are `UNMAPPED`. Fates: `Preserved` when nothing was derived, `Interpolated` otherwise, `Dropped(NotBlendable)` for a `Blend::None` channel a cut needs. The analytic box path and the grouped/tree batch paths still drop channels (`ProviderLimitation`).
+
+### Fixed
+
+- `dedupe_edge` pushed per-face data indexed by a vertex id when pinching a vertex, desynchronising face normals and provenance from the faces (inherited from upstream; Manifold pushes only per-vertex data there). The `ProviderLimitation` comment claiming the boolean returns positions only, stale since ADR 0047, is corrected.

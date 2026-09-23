@@ -62,6 +62,10 @@ pub(crate) use manifold::Manifold;
 pub(crate) struct BooleanMesh {
     pub ps: Vec<Vec3>,
     pub tris: Vec<Vec3u>,
+    /// Origin of each triangle, index-parallel with `tris`: operand
+    /// (`0` = P, `1` = Q) and the triangle's index in the mesh the caller
+    /// passed to `Manifold::new`.
+    pub src: Vec<(u8, usize)>,
 }
 
 /// Boolean of two closed, oriented manifolds.
@@ -113,6 +117,9 @@ pub(crate) fn compute_boolean(
         b45.nv_from_q,
         eps,
     );
+    // Face-parallel invariant: one `Tref` per face. Simplification appends
+    // faces only through `dedupe_edge`, which appends refs in step.
+    debug_assert_eq!(trg.rs.len() * 3, trg.hs.len(), "rs must stay face-parallel");
 
     // Validate BEFORE cleanup: `cleanup_unused_verts` renumbers `tail` and
     // `head` but leaves `pair` addressing the pre-cleanup half-edge order,
@@ -123,7 +130,7 @@ pub(crate) fn compute_boolean(
         return Err("The input mesh is not manifold".into());
     }
 
-    cleanup_unused_verts(&mut b45.ps, &mut trg.hs);
+    cleanup_unused_verts(&mut b45.ps, &mut trg.hs, &mut trg.rs);
 
     // Preserves the signal the provider matches on: upstream reached this
     // through `edge_topology`, which refuses an empty position matrix.
@@ -141,5 +148,15 @@ pub(crate) fn compute_boolean(
             .map(|hs| Vec3u::new(hs[0].tail, hs[1].tail, hs[2].tail))
             .collect(),
         ps: b45.ps,
+        // Lift each `Tref` (a face of the operand's `Manifold`) to the
+        // triangle the caller passed in.
+        src: trg
+            .rs
+            .iter()
+            .map(|r| {
+                let m = if r.mid == 0 { mp } else { mq };
+                (r.mid as u8, m.face_src[r.fid])
+            })
+            .collect(),
     })
 }
