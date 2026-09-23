@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### Added
 
 - Repairs carry corner-indexed channels: weld leaves them untouched (they index values, not positions, so a seam is lossless), dropping and flipping triangles move their entries (#112).

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### Fixed
 
 - A refinement that creates no vertex returns the input's channels and normals. It previously reported them `Preserved` and returned a mesh without them.

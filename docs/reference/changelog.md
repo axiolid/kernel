@@ -4,4 +4,118 @@
 
 Every publishable crate versions and publishes independently ([ADR 0067](/adr/0067-crates-version-independently)); this page collects each crate's own `CHANGELOG.md`, newest release first per crate. Workspace-wide narrative — breaking bumps and coordinated releases — stays in the [top-level changelog](/CHANGELOG).
 
-No crate has a dated release yet under independent versioning; every crate's history to date lives in the top-level changelog.
+## axiolid-construct
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- Exact extrusion of rounded rectangles (`IfcRoundedRectangleProfileDef`)
+  and of hollow rectangles with outer and inner corner radii
+  (`IfcRectangleHollowProfileDef`). Each corner is an exact quarter arc that
+  extrudes to a cylinder wall. `section_lower::rectangle_contour` builds the
+  contour through the same router the structural sections use
+  ([#111](https://github.com/axiolid/kernel/issues/111)).
+- Exact full-turn revolution of a filled rounded rectangle; each corner
+  sweeps a torus.
+- Rounded and hollow rectangles are accepted as the basis of a derived
+  profile, with the same similarity check every other contour goes through.
+
+### Changed
+
+- Invalid rectangle radii are refused instead of clamped: negative,
+  non-finite, wider than the half-extent, an inner radius on a filled
+  rectangle, and a hollow section whose corners leave no wall.
+
+
+## axiolid-heal
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- Repairs carry corner-indexed channels: weld leaves them untouched (they index values, not positions, so a seam is lossless), dropping and flipping triangles move their entries (#112).
+
+### Fixed
+
+- Repairs keep attribute channels and normals in step with the geometry they rewrite (#114). Weld compacts per-vertex channels and normals; a seam drops the channel by name, a hard edge switches normals to corner-indexed. Dropping or flipping triangles moves corner-indexed normals with them.
+- `RepairReport::attribute_fates` names every input channel's fate.
+
+
+## axiolid-mesh
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- `AttributeFate::then`: the fate of a channel through two sequential steps (dropped wins and keeps the first reason; any interpolation interpolates).
+- Corner-indexed attribute channels (#112): `AttributeChannel::corner_indices`, one entry per triangle corner, mirroring `NormalAttribute::indices`. Source formats store texture coordinates this way; positions stay shared, so UV seams no longer force a choice between splitting vertices (breaking closure) and smearing values.
+- `AttributeChannel::corner_indexed`, `is_corner_indexed`, `value_count`, `at_corner` (reads either addressing, `None` for an unmapped corner), and `AttributeChannel::UNMAPPED` for triangles that carry no value.
+- `validate_structure` checks corner channels: whole tuples, one entry per corner, entries in range, and each triangle fully mapped or fully unmapped. New `MeshValidationError` variants name the channel.
+- `DropReason::ConflictingValues`: merged vertices carried different values, so a per-vertex channel could not keep both (#114).
+- `DropReason::IncompatibleChannels`: inputs being combined define one channel name with a different width or blend (#115).
+
+### Changed
+
+- **Breaking** (minor slot pre-1.0, ADR 0067): `AttributeChannel` gains the public field `corner_indices`, so struct-literal construction must add `corner_indices: None`; `AttributeChannel::new` is unaffected. `DropReason` is now `#[non_exhaustive]`, so an exhaustive `match` on it needs a wildcard arm. No caller in this workspace or in openbim does either.
+
+
+## axiolid-mesh-boolean-boolmesh
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- The pairwise boolean carries attribute channels (#116). Each result triangle's source triangle is tracked through the CSG core, so a corner that is a source corner copies its value and a corner on a cut is derived in its source triangle under the channel's `Blend`. Output is corner-indexed; faces from a tool without the channel are `UNMAPPED`. Fates: `Preserved` when nothing was derived, `Interpolated` otherwise, `Dropped(NotBlendable)` for a `Blend::None` channel a cut needs. Every path carries channels (#116, completed): the analytic box path (sources recovered by plane lookup), grouped `subtract_many` (fused cutters keep theirs), tree `union_many` (each solid conformed to the first's channel set) and the empty result.
+
+### Fixed
+
+- A result corner was sampled in its RECORDED source triangle, but simplification merges coplanar faces, so a result face can span several source triangles: corners were extrapolated (weights down to -0.65), wrong for piecewise data such as atlas UVs or per-face ids. Each corner is now located in the coplanar source region by a point just inside its face, which also picks the right side of a seam.
+- `dedupe_edge` pushed per-face data indexed by a vertex id when pinching a vertex, desynchronising face normals and provenance from the faces (inherited from upstream; Manifold pushes only per-vertex data there). The `ProviderLimitation` comment claiming the boolean returns positions only, stale since ADR 0047, is corrected.
+
+
+## axiolid-mesh-boolean-contract
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- `merge_fates`: compose per-channel fates across sequential steps (#116).
+
+### Fixed
+
+- Composed evidence reported only the last step's attribute fates: `BooleanEvidence::absorb` (the `subtract_many`/`union_many` defaults) and `symmetric_difference_via_composition` now compose them, so a channel a middle step derived or dropped is reported that way.
+
+
+## axiolid-mesh-compile
+
+### 0.3.0 - 2026-09-23
+
+### Fixed
+
+- `Instance` and `Collection` nodes no longer drop attribute channels and normals (#115). Both used to rebuild the mesh from positions and indices only, so a textured item lost its `uv` channel as soon as a product had a second item or was instanced — silently.
+  - `Instance` carries channels through unchanged and now transforms normals by the inverse transpose instead of dropping them. Under a mirroring transform, corner-indexed channels and normals swap corners with the triangle.
+  - `Collection` merges channels by name. A channel on only some members becomes corner-indexed, with the other members' triangles `UNMAPPED`; a channel on every member as per-vertex stays per-vertex. Members defining one name with a different width or blend drop it as `DropReason::IncompatibleChannels`.
+  - Booleans keep the provider's channel fates, composed onto what each operand already went through, instead of discarding the evidence.
+
+### Added
+
+- `ReferenceMeshCompiler` implements `MeshCompiler::compile_mesh_reported`: the compiled mesh plus each channel's fate on its way to the root (worst over parallel members, sequential through booleans).
+
+
+## axiolid-mesh-compile-contract
+
+### 0.3.0 - 2026-09-23
+
+### Added
+
+- `CompileOutcome` and the provided method `MeshCompiler::compile_mesh_reported` (#115): a compiled mesh with the fate of each attribute channel. The default wraps `compile_mesh` and reports `attribute_fates: None` ("not tracked", not "nothing dropped"), so existing implementations compile unchanged.
+
+
+## axiolid-refine
+
+### 0.3.0 - 2026-09-23
+
+### Fixed
+
+- A refinement that creates no vertex returns the input's channels and normals. It previously reported them `Preserved` and returned a mesh without them.

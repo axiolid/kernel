@@ -4,6 +4,18 @@ All notable changes to Axiolid are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
+A minor bump because it carries a breaking change, and pre-1.0 Cargo
+treats the minor field as the major. Nothing outside this workspace
+depends on Axiolid yet, so the break costs nothing to take now and
+paying it honestly keeps the version an accurate claim.
+
+Note on the gate: at 0.3.0 every crate's bump already admits breakage,
+so `scripts/check-semver.py` reports "nothing to check" rather than
+verifying anything. That is correct but weak — the gate regains its
+teeth at the next patch release against a published 0.3.0 baseline.
+
 ### Added
 
 - `axiolid-core` gained the bounded 2D primitives the kernel was missing:
@@ -138,18 +150,6 @@ All notable changes to Axiolid are documented in this file.
   ([#36](https://github.com/axiolid/kernel/issues/36)). Audited rather
   than assumed - `tests/exact_primary.rs` pins it, and both a removed
   plane count and a weakened `requires_exact_brep` make it fail.
-
-## [0.3.0] - 2026-09-18
-
-A minor bump because it carries a breaking change, and pre-1.0 Cargo
-treats the minor field as the major. Nothing outside this workspace
-depends on Axiolid yet, so the break costs nothing to take now and
-paying it honestly keeps the version an accurate claim.
-
-Note on the gate: at 0.3.0 every crate's bump already admits breakage,
-so `scripts/check-semver.py` reports "nothing to check" rather than
-verifying anything. That is correct but weak — the gate regains its
-teeth at the next patch release against a published 0.3.0 baseline.
 
 ### Added
 

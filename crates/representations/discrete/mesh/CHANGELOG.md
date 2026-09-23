@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### Added
 
 - `AttributeFate::then`: the fate of a channel through two sequential steps (dropped wins and keeps the first reason; any interpolation interpolates).
