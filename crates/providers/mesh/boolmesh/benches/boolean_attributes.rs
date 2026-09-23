@@ -76,4 +76,51 @@ fn main() {
         let input = a.triangle_count() + b.triangle_count();
         println!("{n},{input},{tris},{plain:.2},{uv:.2}");
     }
+    println!("analytic_cutters,plain_ms,uv_ms");
+    for k in [4, 16, 64] {
+        println!(
+            "{k},{:.3},{:.3}",
+            analytic_ms(k, false),
+            analytic_ms(k, true)
+        );
+    }
+}
+
+/// Analytic box path (wall minus a row of openings), best of 5, ms.
+fn analytic_ms(n_cut: usize, uv: bool) -> f64 {
+    let wall = dense_box(0.0, 2.0, 1);
+    let opts = ExecutionOptions::new(Tolerance::METRE);
+    let mut tools: Vec<TriMesh> = (0..n_cut)
+        .map(|i| {
+            let x = -0.9 + 1.8 * (i as f64 + 0.5) / n_cut as f64;
+            dense_box_at([x, 0.0, 0.0], [0.9 / n_cut as f64, 3.0, 0.5])
+        })
+        .collect();
+    let wall = if uv { with_uv(wall) } else { wall };
+    if uv {
+        tools = tools.into_iter().map(with_uv).collect();
+    }
+    let mut best = f64::MAX;
+    for _ in 0..5 {
+        let t = Instant::now();
+        BoolmeshBoolean::new()
+            .subtract_boxes_analytic(&wall, &tools, &opts, 10_000_000)
+            .expect("ok")
+            .expect("boxes");
+        best = best.min(t.elapsed().as_secs_f64() * 1e3);
+    }
+    best
+}
+
+/// An axis-aligned box (12 triangles) with centre `c` and size `s`.
+fn dense_box_at(c: [f64; 3], s: [f64; 3]) -> TriMesh {
+    let mut m = dense_box(0.0, 2.0, 1);
+    for p in &mut m.positions {
+        *p = Point3::new(
+            c[0] + p.x * s[0] / 2.0,
+            c[1] + p.y * s[1] / 2.0,
+            c[2] + p.z * s[2] / 2.0,
+        );
+    }
+    m
 }

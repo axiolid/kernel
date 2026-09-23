@@ -7,7 +7,7 @@ use axiolid_core::BooleanOperator;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_contracts::SolidRequirements;
 
-use crate::{BooleanEvidence, BooleanOutcome};
+use crate::{merge_fates, BooleanEvidence, BooleanOutcome};
 
 /// Mesh boolean provider.
 ///
@@ -184,6 +184,11 @@ where
     )?;
 
     let mut evidence = difference.evidence;
+    // The result's channels came through union then difference: compose
+    // those fates. The difference alone would report `Preserved` for values
+    // the union already derived.
+    evidence.attribute_fates =
+        merge_fates(&union.evidence.attribute_fates, evidence.attribute_fates);
     evidence.subject_triangles = subject.triangle_count();
     evidence.tool_triangles = tool.triangle_count();
     evidence.sub_operations = 3;

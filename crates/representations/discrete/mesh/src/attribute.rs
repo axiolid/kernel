@@ -170,6 +170,23 @@ pub enum AttributeFate {
     Dropped(DropReason),
 }
 
+impl AttributeFate {
+    /// The fate of a channel that went through `self`, then `next`.
+    ///
+    /// For composed operations (batches, symmetric difference): once dropped
+    /// always dropped, and the FIRST reason is kept -- it is the step that
+    /// lost the data. Otherwise any interpolation makes the whole
+    /// interpolated; only preserved-then-preserved stays preserved.
+    #[must_use]
+    pub fn then(self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Dropped(reason), _) | (_, Self::Dropped(reason)) => Self::Dropped(reason),
+            (Self::Preserved, Self::Preserved) => Self::Preserved,
+            _ => Self::Interpolated,
+        }
+    }
+}
+
 /// Why a channel could not be carried through an operation.
 ///
 /// Non-exhaustive: new operations find new reasons, and adding one must not

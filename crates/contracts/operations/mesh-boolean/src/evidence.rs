@@ -6,7 +6,7 @@
 //! This module closes that gap with the same mental model: *what did the kernel
 //! actually do to my geometry?*
 
-use axiolid_mesh::{AttributeFate, TriMesh};
+use axiolid_mesh::{AttributeFate, DropReason, TriMesh};
 
 /// Counters describing one boolean evaluation.
 ///
@@ -162,6 +162,7 @@ impl BooleanEvidence {
         // result is not purely a general-solver product and must not claim to
         // be.
         self.analytic_path |= other.analytic_path;
+        self.attribute_fates = merge_fates(&self.attribute_fates, other.attribute_fates);
         // Worst case wins: a composed result is only as well conditioned as
         // its least well conditioned sub-operation. Taking the last or the
         // best would let a clean final step mask a degenerate earlier one.
@@ -171,6 +172,35 @@ impl BooleanEvidence {
             (None, b) => b,
         };
     }
+}
+
+/// Compose per-channel fates across two sequential steps.
+///
+/// Keyed by name, in `earlier`'s order. A channel `earlier` tracked that
+/// `later` does not mention was not on `later`'s input, so it was lost
+/// there: dropped, keeping any earlier reason. When `earlier` is empty (the
+/// first step of a fold over an evidence seeded without fates) `later` is
+/// taken as is.
+///
+/// Public so providers composing their own batch paths merge identically.
+pub fn merge_fates(
+    earlier: &[(String, AttributeFate)],
+    later: Vec<(String, AttributeFate)>,
+) -> Vec<(String, AttributeFate)> {
+    if earlier.is_empty() {
+        return later;
+    }
+    earlier
+        .iter()
+        .map(|(name, fate)| {
+            let next = later
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, f)| f.clone())
+                .unwrap_or(AttributeFate::Dropped(DropReason::ProviderLimitation));
+            (name.clone(), fate.clone().then(next))
+        })
+        .collect()
 }
 
 /// A boolean result: the mesh plus what was done to produce it.

@@ -6,12 +6,12 @@ use axiolid_contracts::{
     ExecutionTarget, GeomError, GeomResult, ScratchRequirement,
 };
 use axiolid_core::BooleanOperator;
-use axiolid_mesh::{AttributeFate, TriMesh};
+use axiolid_mesh::{AttributeChannel, AttributeFate, Blend, DropReason, TriMesh};
 use axiolid_mesh_boolean_contract::{
-    symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
+    merge_fates, symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
 };
 
-use crate::attributes::{carry, FaceSource};
+use crate::attributes::{carry, sources_by_plane, FaceSource};
 use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 
 /// Mesh boolean backed by `boolmesh` (pure Rust, `glam`-only, MPL-2.0).
@@ -84,7 +84,7 @@ impl BoolmeshBoolean {
             cutters.push(b);
         }
 
-        let Some(result) = crate::cellular::subtract_boxes(&host, &cutters, max_cells) else {
+        let Some(mut result) = crate::cellular::subtract_boxes(&host, &cutters, max_cells) else {
             return Ok(None);
         };
 
@@ -94,7 +94,10 @@ impl BoolmeshBoolean {
         check_result(&result, BooleanOperator::Difference)?;
 
         let tool_refs: Vec<&TriMesh> = tools.iter().collect();
-        let evidence = evidence_for(subject, &tool_refs, &result, 1).with_analytic_path(true);
+        let fates = carry_analytic(subject, tools, &mut result);
+        let evidence = evidence_for(subject, &tool_refs, &result, 1)
+            .with_analytic_path(true)
+            .with_attribute_fates(fates);
         Ok(Some(BooleanOutcome::new(result, evidence)))
     }
 }
@@ -302,8 +305,12 @@ impl BoolmeshBoolean {
             // translate it back into the empty solid the contract specifies
             // rather than surfacing a backend quirk as a geometry error.
             Err(reason) if is_empty_result(&reason) => {
-                let empty = TriMesh::new(Vec::new(), Vec::new());
-                let evidence = evidence_for(subject, &[tool], &empty, 1);
+                let mut empty = TriMesh::new(Vec::new(), Vec::new());
+                // Zero faces carry every channel vacuously: nothing lost,
+                // nothing derived. Keeps a union/fold over it consistent.
+                let fates = carry(subject, tool, &mut empty, &[]);
+                let evidence =
+                    evidence_for(subject, &[tool], &empty, 1).with_attribute_fates(fates);
                 return Ok(BooleanOutcome::new(empty, evidence));
             }
             Err(reason) => {
@@ -363,9 +370,9 @@ fn evidence_for(
     // `boolmesh` does not report coincident-face encounters, so claiming
     // detection would be a lie. Left false until a provider can answer.
     .with_coincident_faces(false)
-    // Default fate, for the paths that do not carry channels: the analytic
-    // box path, the grouped and tree batch paths, and an empty result. The
-    // pairwise boolean replaces these with what `carry` measured (#116).
+    // Fallback fate, overwritten by every path that carries channels (all
+    // of them since #116). What remains here is the answer when no
+    // provenance exists: the `carry` refusal path, and nothing else.
     .with_attribute_fates(
         subject
             .attributes
@@ -386,6 +393,76 @@ fn evidence_for(
     }
 }
 
+/// Carry channels through the analytic box path.
+///
+/// The cellular result is rebuilt, not cut, so it has no `Tref`s. Every face
+/// lies in a host face (as is) or a cutter face (reversed); plane lookup
+/// recovers the source, and the pairwise sampler does the rest. The cutters
+/// are fused so the sampler sees one tool, as in the general path.
+fn carry_analytic(
+    subject: &TriMesh,
+    tools: &[TriMesh],
+    result: &mut TriMesh,
+) -> Vec<(String, AttributeFate)> {
+    let members: Vec<&TriMesh> = tools.iter().collect();
+    let tool = crate::grouping::fuse_with_channels(&members, &subject.attributes);
+    match sources_by_plane(result, &[(subject, 1.0), (&tool, -1.0)]) {
+        Some(sources) => carry(subject, &tool, result, &sources),
+        // A face with no source means the construction is not what the
+        // lookup assumes: attach nothing rather than a wrong value.
+        None => dropped_fates(subject, DropReason::ProviderLimitation),
+    }
+}
+
+/// Every subject channel as dropped, with `reason` (`NotBlendable` wins for
+/// a `Blend::None` channel regardless: that is the data's own answer).
+fn dropped_fates(subject: &TriMesh, reason: DropReason) -> Vec<(String, AttributeFate)> {
+    subject
+        .attributes
+        .iter()
+        .map(|c| {
+            let r = match c.blend {
+                Blend::None => DropReason::NotBlendable,
+                _ => reason,
+            };
+            (c.name.clone(), AttributeFate::Dropped(r))
+        })
+        .collect()
+}
+
+/// Per-channel fates, in the subject's channel order.
+type Fates = Vec<(String, AttributeFate)>;
+
+/// Every subject channel `Preserved`: the starting point a composed path
+/// merges each step's fates onto.
+fn seed_fates(subject: &TriMesh) -> Fates {
+    subject
+        .attributes
+        .iter()
+        .map(|c| (c.name.clone(), AttributeFate::Preserved))
+        .collect()
+}
+
+/// `mesh` carrying exactly `template`'s channels: its own where one matches
+/// (name, width, blend), an all-`UNMAPPED` channel where none does.
+///
+/// Union is symmetric but channel reporting is keyed on the first operand,
+/// so a tree node's left child must carry every channel the batch reports
+/// on -- whichever solid it came from. Unmapped keeps the absence honest.
+fn conform(mesh: &TriMesh, template: &[AttributeChannel]) -> TriMesh {
+    let mut out = mesh.clone();
+    out.attributes = crate::grouping::fuse_with_channels(&[mesh], template).attributes;
+    out
+}
+
+/// Remove every channel whose composed fate is `Dropped`.
+fn strip_dropped(mesh: &mut TriMesh, fates: &[(String, AttributeFate)]) {
+    mesh.attributes.retain(|c| {
+        !fates
+            .iter()
+            .any(|(n, f)| n == &c.name && matches!(f, AttributeFate::Dropped(_)))
+    });
+}
 /// Smallest relative overlap between the subject and any tool.
 ///
 /// Measured from operand bounds, not from the result: the result cannot show
@@ -458,6 +535,9 @@ impl BoolmeshBoolean {
 
         let mut current = subject.clone();
         let mut sub_operations = 0;
+        // Seeded Preserved: the subject enters untouched, and each step's
+        // fates compose onto this (`merge_fates`).
+        let mut fates = seed_fates(subject);
         for group in &groups {
             // The only real poll point: between groups. Cancelling here returns
             // no mesh at all rather than a partially cut one.
@@ -465,16 +545,19 @@ impl BoolmeshBoolean {
             sub_operations += 1;
             // A single-member group gains nothing from fusing, so skip the
             // copy and subtract the tool directly.
-            if let [only] = group.as_slice() {
-                current = self.difference(&current, &tools[*only], options)?.mesh;
-                continue;
-            }
-            let members: Vec<&TriMesh> = group.iter().map(|&i| &tools[i]).collect();
-            let fused = crate::grouping::fuse(&members);
-            current = self.difference(&current, &fused, options)?.mesh;
+            let step = if let [only] = group.as_slice() {
+                self.difference(&current, &tools[*only], options)?
+            } else {
+                let members: Vec<&TriMesh> = group.iter().map(|&i| &tools[i]).collect();
+                let fused = crate::grouping::fuse_with_channels(&members, &subject.attributes);
+                self.difference(&current, &fused, options)?
+            };
+            fates = merge_fates(&fates, step.evidence.attribute_fates);
+            current = step.mesh;
         }
         let borrowed: Vec<&TriMesh> = tools.iter().collect();
-        let evidence = evidence_for(subject, &borrowed, &current, sub_operations);
+        let evidence =
+            evidence_for(subject, &borrowed, &current, sub_operations).with_attribute_fates(fates);
         Ok(BooleanOutcome::new(current, evidence))
     }
 
@@ -547,7 +630,14 @@ impl BoolmeshBoolean {
             return Ok(BooleanOutcome::new(empty, evidence));
         }
 
-        let mut level: Vec<TriMesh> = solids.to_vec();
+        // Every solid carries solids[0]'s channel set, so a channel the
+        // result keeps is defined (or explicitly unmapped) on every piece.
+        // Each node carries the fates of the path that built it.
+        let template = &solids[0].attributes;
+        let mut level: Vec<(TriMesh, Fates)> = solids
+            .iter()
+            .map(|s| (conform(s, template), seed_fates(&solids[0])))
+            .collect();
         let mut sub_operations = 0;
         while level.len() > 1 {
             // Every pair at one level is independent: no pair reads another
@@ -556,6 +646,15 @@ impl BoolmeshBoolean {
             // cannot pay for itself -- there is no coordination inside the
             // level, only a join at the end of it.
             let mut pairs = level.chunks_exact(2);
+            let step = |pair: &[(TriMesh, Fates)]| -> GeomResult<(TriMesh, Fates)> {
+                let out = self.union(&pair[0].0, &pair[1].0, options)?;
+                // Both halves' histories, then this union.
+                let history = merge_fates(&pair[0].1, pair[1].1.clone());
+                Ok((
+                    out.mesh,
+                    merge_fates(&history, out.evidence.attribute_fates),
+                ))
+            };
 
             // Cancellation is polled ONCE per level rather than per pair.
             // Under rayon the pairs are not ordered, so a per-pair poll
@@ -565,26 +664,24 @@ impl BoolmeshBoolean {
             options.check_cancelled()?;
 
             #[cfg(feature = "parallel-batch")]
-            let mut next: Vec<TriMesh> = {
+            let mut next: Vec<(TriMesh, Fates)> = {
                 use rayon::prelude::*;
                 // `par_iter` over an indexed slice, NOT `par_bridge`: the
                 // bridge does not preserve order, which would permute the
                 // level and silently change the tree's shape from run to
                 // run. An indexed parallel iterator collects positionally,
                 // so the output is identical to the sequential path.
-                let chunks: Vec<&[TriMesh]> = pairs.clone().collect();
-                let merged: Result<Vec<TriMesh>, GeomError> = chunks
-                    .par_iter()
-                    .map(|pair| Ok(self.union(&pair[0], &pair[1], options)?.mesh))
-                    .collect();
+                let chunks: Vec<&[(TriMesh, Fates)]> = pairs.clone().collect();
+                let merged: Result<Vec<(TriMesh, Fates)>, GeomError> =
+                    chunks.par_iter().map(|pair| step(pair)).collect();
                 merged?
             };
 
             #[cfg(not(feature = "parallel-batch"))]
-            let mut next: Vec<TriMesh> = {
+            let mut next: Vec<(TriMesh, Fates)> = {
                 let mut acc = Vec::with_capacity(level.len().div_ceil(2));
                 for pair in pairs.clone() {
-                    acc.push(self.union(&pair[0], &pair[1], options)?.mesh);
+                    acc.push(step(pair)?);
                 }
                 acc
             };
@@ -602,13 +699,17 @@ impl BoolmeshBoolean {
             level = next;
         }
 
-        let result = level.into_iter().next().expect("non-empty input");
+        let (mut result, fates) = level.into_iter().next().expect("non-empty input");
+        // A channel some step dropped is not on the result, or only partly:
+        // strip it so the mesh never carries a channel its fate calls lost.
+        strip_dropped(&mut result, &fates);
         let borrowed: Vec<&TriMesh> = solids.iter().collect();
         // Evidence names the first operand as the subject and the rest as
         // tools, matching how a caller reads a batch: one solid grown by the
         // others. The reduction order is an implementation detail.
         let (subject, tools) = borrowed.split_first().expect("non-empty input");
-        let evidence = evidence_for(subject, tools, &result, sub_operations);
+        let evidence =
+            evidence_for(subject, tools, &result, sub_operations).with_attribute_fates(fates);
         Ok(BooleanOutcome::new(result, evidence))
     }
 

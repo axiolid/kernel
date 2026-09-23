@@ -19,7 +19,7 @@
 //! CORRECT because each group is verified disjoint before fusing.
 
 use axiolid_core::Aabb;
-use axiolid_mesh::TriMesh;
+use axiolid_mesh::{AttributeChannel, TriMesh};
 
 /// Concatenate meshes into one, rebasing indices.
 ///
@@ -39,6 +39,42 @@ pub(crate) fn fuse(meshes: &[&TriMesh]) -> TriMesh {
     TriMesh::new(positions, indices)
 }
 
+/// [`fuse`], carrying the channels named in `template`.
+///
+/// Each output channel is corner-indexed over the concatenated triangles.
+/// A member with a matching channel (name, width, blend) contributes its
+/// values; a member without one contributes `UNMAPPED` triangles. Channels
+/// no template names are not carried -- the batch reports on the subject's.
+pub(crate) fn fuse_with_channels(meshes: &[&TriMesh], template: &[AttributeChannel]) -> TriMesh {
+    let mut out = fuse(meshes);
+    for want in template {
+        let mut values = Vec::new();
+        let mut corners = Vec::with_capacity(out.indices.len());
+        for m in meshes {
+            let found = m
+                .attributes
+                .iter()
+                .find(|c| c.name == want.name && c.width == want.width && c.blend == want.blend);
+            for corner in 0..m.indices.len() {
+                match found.and_then(|c| c.at_corner(&m.indices, corner)) {
+                    Some(v) => {
+                        corners.push((values.len() / want.width) as u32);
+                        values.extend_from_slice(v);
+                    }
+                    None => corners.push(AttributeChannel::UNMAPPED),
+                }
+            }
+        }
+        out.attributes.push(AttributeChannel::corner_indexed(
+            want.name.clone(),
+            values,
+            want.width,
+            want.blend,
+            corners,
+        ));
+    }
+    out
+}
 /// Partition tool indices into groups whose bounds are mutually disjoint.
 ///
 /// Greedy first-fit coloring over the AABB overlap graph. Tools are visited in
