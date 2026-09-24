@@ -101,3 +101,29 @@ Two readings matter more than which crate won:
 
 The predicates in `axiolid-reference` stay as they are. The new layer
 reuses their filter pattern; it does not replace them.
+
+## Implementation (#154)
+
+Landed as `axiolid-exact`, a separate crate so `axiolid-predicates` keeps
+no big-integer dependency. Three findings from building it:
+
+- **One expression, two tiers.** Sign questions are written once against
+  an `Arith` trait and run first as `Interval`, then as `Dyadic`. There is
+  no hand-written fast path that could drift from the exact one.
+- **Dyadic, not integer-on-a-grid.** The benchmark cleared denominators
+  onto one integer grid per case. The crate instead keeps each value as
+  `mantissa * 2^k`; every finite `f64` is exact in that form, including
+  subnormals, so there is no per-case grid to choose.
+- **Structure beats evaluation where it is provable.** The two hits of one
+  line on one circle are ordered by which root they are. Evaluating
+  `t1 - t2` for them instead subtracts two intervals that never certify
+  a zero, and escalated on every call (896 ns vs 63 ns per classify-and-
+  order in the bench).
+
+Measured (`cargo bench -p axiolid-exact`, 100k cases, Xeon w7-3565X):
+random crossings 253 ns per side-of-line query with 0% escalation;
+crossings placed exactly on the query line 972 ns with 100% escalation,
+so the exact tier costs about 4x the filtered path. Tests: 23, including
+an exhaustive comparison against an independent fixed-point square-root
+oracle with the exact number of zeros pinned. The mutation probe
+(`scripts/probe_exact_mutants.py`) kills all 14 mutants.

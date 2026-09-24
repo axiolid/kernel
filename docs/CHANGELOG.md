@@ -21,6 +21,11 @@ All notable changes to Axiolid are documented in this file.
   layer, benchmarked in `docs/research/exact-arithmetic-bench/`) and
   ADR 0069 (arc booleans: keep `cavalier_contours` for now, exact path
   later).
+- `axiolid-exact` 0.1.0 (#154, ADR 0068): exact constructions over `f64`
+  input. An outward-rounded interval filter decides almost every case;
+  exact big-integer arithmetic (`num-bigint`) runs only when it cannot.
+  Includes `(a + b*sqrt(c)) / d` signs and ordering across radicands,
+  exact segment crossings and line/circle hits with exact tangency.
 
 ### Fixed
 

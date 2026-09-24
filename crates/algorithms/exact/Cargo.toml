@@ -1,0 +1,28 @@
+[package]
+name = "axiolid-exact"
+description = "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-guarantees.workspace = true
+num-bigint.workspace = true
+
+[[bench]]
+name = "exact"
+harness = false
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.reference"
+domain = "reference.exact"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core", "axiolid-guarantees"]

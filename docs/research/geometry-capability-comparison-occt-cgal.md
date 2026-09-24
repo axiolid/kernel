@@ -82,7 +82,7 @@ then reclassified as scoped after review; the table below is current.
 
 | Area | Rows | implemented | narrow | scoped | absent |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| A. Foundations | 5 | 3 | 2 | 0 | 0 |
+| A. Foundations | 5 | 4 | 1 | 0 | 0 |
 | B. Curves and surfaces | 16 | 6 | 8 | 0 | 2 |
 | C. B-rep | 20 | 4 | 12 | 0 | 4 |
 | D. Polygon meshes | 20 | 6 | 6 | 1 | 7 |
@@ -90,7 +90,7 @@ then reclassified as scoped after review; the table below is current.
 | F. 2D | 11 | 1 | 5 | 1 | 4 |
 | G. Point sets | 8 | 3 | 1 | 2 | 2 |
 | H. Spatial and misc | 5 | 0 | 2 | 2 | 1 |
-| **Total** | **95** | **24** | **37** | **9** | **25** |
+| **Total** | **95** | **25** | **36** | **9** | **25** |
 
 No row graded **contract only**: every capability Axiolid names has an
 algorithm behind it, even where that algorithm is narrow.
@@ -100,7 +100,7 @@ algorithm behind it, even where that algorithm is narrow.
 | Row | Capability | Reference (O: OCCT, C: CGAL) | Axiolid | Scope, refusals, evidence |
 | --- | --- | --- | --- | --- |
 | A1 | exact/filtered predicates (orient, incircle, insphere) | C:Kernel_23,Filtered_kernel O:- (OCCT uses tolerances) | implemented | orient2d/orient3d/incircle/insphere with adaptive exact fallback via expansion arithmetic; general for any finite f64 input Evidence: `crates/algorithms/predicates/src/orient3.rs::orient3d` (dispatches to `orient3_dyadic`/expansion on filter failure), `src/orientation.rs::orient2d`, `src/sphere.rs::incircle/insphere` |
-| A2 | exact number types / arbitrary precision | C:Number_types,CGAL_Core,Algebraic_* O:- | narrow | Only error-free-transformation "expansion" arithmetic (Shewchuk-style adaptive f64 expansions) for predicate signs; no general arbitrary-precision rational/integer type usable outside predicates Evidence: `crates/algorithms/predicates/src/expansion.rs::two_sum/two_diff/two_product` |
+| A2 | exact number types / arbitrary precision | C:Number_types,CGAL_Core,Algebraic_* O:- | implemented | `axiolid-exact` (#154): an outward-rounded interval filter over exact big-integer dyadic arithmetic, one expression evaluated in both tiers; signs and order of (a + b*sqrt(c))/d across radicands; exact segment crossings and line/circle hits. Division-free, so no rational type; one square root per value.
 | A3 | tolerance model | O:Precision,BRepLib tolerances C:- | implemented | Explicit `Tolerance{linear, angular}` struct, validated, no silent default; used pervasively as an explicit parameter Evidence: `crates/foundation/core/src/scalar.rs::Tolerance::new/eq` |
 | A4 | transforms, frames, bounding boxes | O:gp,Bnd,BndLib C:Kernel_23,Bounding_volumes | implemented | Orthonormal `SpaceFrame`/`PlaneFrame` (validated, right-handed), `Aabb` with union/gap/intersects; general Evidence: `crates/foundation/core/src/space_frame.rs::SpaceFrame::world`, `src/bounds.rs::Aabb::{intersects,gap,union}` |
 | A5 | linear algebra / root finding / optimisation / integration | O:math,MathRoot,MathOpt,MathInteg,PLib C:Solver_interface(excluded),QP_solver | narrow | No standalone math crate; root-finding (bisection) and Gauss-Legendre quadrature exist only inline inside curve-evaluation code, and a dense linear solve exists only inline inside curve interpolation/loft fitting — none exposed as a reusable general numeric-kernel API Evidence: `crates/algorithms/parametric/evaluate/src/curve.rs` (bisection, comment "Why bisection rather than a closed-form segment count"), `crates/algorithms/parametric/evaluate/src/arc_length.rs::` (Gauss-Legendre quadrature), `crates/algorithms/parametric/nurbs/src/fit.rs::solve` (private Gaussian-elimination-style solver for interpolation only) |
@@ -308,8 +308,7 @@ gate-checked version of this table is `architecture/capability-ledger.toml`;
 | [#151](https://github.com/axiolid/kernel/issues/151) | Fair curves: minimum-energy interpolation and batten curves | B16 | #136 |
 | [#152](https://github.com/axiolid/kernel/issues/152) | Form features: holes, pockets, slots and ribs on B-rep solids | C14 | #120 |
 | [#153](https://github.com/axiolid/kernel/issues/153) | Surface meshing of smooth and implicit surfaces with quality bounds | E6 | #126 |
-| [#154](https://github.com/axiolid/kernel/issues/154) | Exact rational or algebraic number type for constructions | A2 | a decision |
-| [#155](https://github.com/axiolid/kernel/issues/155) | Exact polygon booleans with circular arcs, independent of cavalier_contours | F1 | a decision |
+| [#155](https://github.com/axiolid/kernel/issues/155) | Exact polygon booleans with circular arcs, independent of cavalier_contours | F1 | - |
 | [#156](https://github.com/axiolid/kernel/issues/156) | Clip and split a triangle mesh by another mesh | D17 | - |
 | [#157](https://github.com/axiolid/kernel/issues/157) | 2D arrangements of circular arcs and conic curves | F4 | - |
 | [#158](https://github.com/axiolid/kernel/issues/158) | 3D Minkowski sum and difference for non-convex solids | H2 | - |

@@ -307,19 +307,11 @@ number = 153
 blocked_by = ["delaunay-3d"]
 
 [[issue]]
-key = "exact-number-type"
-title = "Exact rational or algebraic number type for constructions"
-priority = "Medium"
-effort = "High"
-number = 154
-
-[[issue]]
 key = "arc-polygon-booleans"
 title = "Exact polygon booleans with circular arcs, independent of cavalier_contours"
 priority = "Medium"
 effort = "High"
 number = 155
-blocked_by = ["exact-number-type"]
 
 [[issue]]
 key = "mesh-mesh-clip"
@@ -363,10 +355,9 @@ cgal = ["Kernel_23", "Filtered_kernel"]
 id = "A2"
 area = "foundations"
 name = "exact number types / arbitrary precision"
-issue = "exact-number-type"
-level = "narrow"
-summary = "Only error-free-transformation \"expansion\" arithmetic (Shewchuk-style adaptive f64 expansions) for predicate signs; no general arbitrary-precision rational/integer type usable outside predicates"
-evidence = ["crates/algorithms/predicates/src/expansion.rs::two_sum"]
+level = "implemented"
+summary = "axiolid-exact: outward-rounded Interval filter over Dyadic (num-bigint mantissa times 2^k) exact arithmetic, one SignExpr run in both tiers; Root2 decides signs and order of (a + b*sqrt(c))/d across radicands; exact constructions for segment crossings and line/circle hits. Division-free by design (no rational type); nested algebraic numbers beyond one square root per value are not provided."
+evidence = ["crates/algorithms/exact/src/dyadic.rs::Dyadic", "crates/algorithms/exact/src/interval.rs::Interval", "crates/algorithms/exact/src/root.rs::sign_two_roots", "crates/algorithms/exact/src/certify.rs::certify"]
 occt = []
 cgal = ["Number_types", "CGAL_Core", "Algebraic_foundations", "Algebraic_kernel_d"]
 
