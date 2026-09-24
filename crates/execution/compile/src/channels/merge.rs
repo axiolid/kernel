@@ -43,7 +43,11 @@ pub(crate) fn merge(members: &[&Built]) -> Built {
         }
     }
     mesh.normals = merge_normals(members, &vertex_offsets);
-    Built { mesh, fates }
+    Built {
+        mesh,
+        fates,
+        closure: super::combined_closure(members.iter().copied()),
+    }
 }
 
 /// Every channel name, in first-seen order.

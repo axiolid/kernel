@@ -7,7 +7,7 @@ mod contract;
 mod outcome;
 
 pub use contract::MeshCompiler;
-pub use outcome::CompileOutcome;
+pub use outcome::{CompileOutcome, MeshClosure};
 
 pub const CAPABILITY_ID: axiolid_contracts::CapabilityId =
     axiolid_contracts::capability_ids::GRAPH_TO_MESH;

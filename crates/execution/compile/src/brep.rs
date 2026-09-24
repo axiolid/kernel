@@ -9,9 +9,12 @@
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
 use axiolid_mesh::TriMesh;
+use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
 use std::collections::{HashMap, HashSet};
+
+use crate::planar::{earcut_projected, newell_normal, plane_axes};
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -126,14 +129,21 @@ fn check_mesh_budget(mesh: &TriMesh) -> GeomResult<()> {
 
 /// Tessellate one faceted B-rep into a triangle mesh.
 ///
-/// Only the outer shell contributes surface; void shells are interior
-/// boundaries whose removal is a boolean, not a tessellation, so emitting
-/// them here would produce a mesh with stray inside-out geometry.
+/// With a solid, only its outer shell contributes surface; void shells are
+/// interior boundaries whose removal is a boolean, not a tessellation, so
+/// emitting them here would produce a mesh with stray inside-out geometry.
+/// The result is [`MeshClosure::Solid`].
+///
+/// Without a solid -- a surface model, e.g. IFC `IfcShellBasedSurfaceModel`
+/// -- every shell is tessellated as authored and the result is
+/// [`MeshClosure::Surface`], open or closed alike (#161). Promoting a shell
+/// to a solid here would claim a volume the source never declared, so the
+/// flag travels with the mesh and volume readers refuse it.
 pub fn tessellate(
     brep: &BRep<NodeId>,
     graph: &axiolid_model::GeometryGraph,
     tolerance: axiolid_core::Tolerance,
-) -> GeomResult<TriMesh> {
+) -> GeomResult<(TriMesh, MeshClosure)> {
     check_tessellation_input_budget(brep)?;
     // Structure before geometry. A dangling handle or an open loop
     // produces a mesh that looks plausible and is wrong, so the
@@ -145,22 +155,33 @@ pub fn tessellate(
         )));
     }
 
-    let solid = brep
+    let (shells, closure): (Vec<&axiolid_topology::Shell>, MeshClosure) = match brep
         .solids()
         .first()
-        .ok_or_else(|| GeomError::InvalidInput("brep has no solid".to_string()))?;
-    let shell = brep
-        .shells()
-        .get(solid.outer.index())
-        .ok_or_else(|| GeomError::InvalidInput("outer shell missing".to_string()))?;
-    if shell.faces.is_empty() {
+    {
+        Some(solid) => {
+            let shell = brep
+                .shells()
+                .get(solid.outer.index())
+                .ok_or_else(|| GeomError::InvalidInput("outer shell missing".to_string()))?;
+            (vec![shell], MeshClosure::Solid)
+        }
+        None if !brep.shells().is_empty() => (brep.shells().iter().collect(), MeshClosure::Surface),
+        None => {
+            return Err(GeomError::InvalidInput(
+                "brep has neither a solid nor a shell".to_string(),
+            ))
+        }
+    };
+    if shells.iter().any(|shell| shell.faces.is_empty()) {
         return Err(GeomError::InvalidInput(
-            "outer shell has no faces".to_string(),
+            "a tessellated shell has no faces".to_string(),
         ));
     }
+    let shell_faces = || shells.iter().flat_map(|shell| shell.faces.iter());
 
     let mut expanded_work = 0_usize;
-    for &(face_id, _) in &shell.faces {
+    for &(face_id, _) in shell_faces() {
         consume_tessellation_work(&mut expanded_work, 1)?;
         let face = brep
             .faces()
@@ -186,7 +207,7 @@ pub fn tessellate(
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
         std::collections::HashMap::new();
     let mut total_curved_records = 0_usize;
-    for &(face_id, shell_sense) in &shell.faces {
+    for &(face_id, shell_sense) in shell_faces() {
         let face = brep
             .faces()
             .get(face_id.index())
@@ -204,7 +225,7 @@ pub fn tessellate(
         )?;
         check_mesh_budget(&mesh)?;
     }
-    Ok(mesh)
+    Ok((mesh, closure))
 }
 
 /// Triangulate one face and append it to the mesh.
@@ -271,13 +292,13 @@ fn append_face(
     rings.swap(0, outer_index);
 
     for ring in &rings {
-        if plane_axes(newell_normal(ring)).is_none() {
+        if plane_axes(newell_normal(ring.iter().map(|&(_, p)| p))).is_none() {
             return Err(GeomError::Degenerate(
                 "planar face bound has zero or non-finite area".into(),
             ));
         }
     }
-    let normal = newell_normal(&rings[0]);
+    let normal = newell_normal(rings[0].iter().map(|&(_, p)| p));
     let (u, v) = plane_axes(normal).ok_or_else(|| {
         GeomError::Degenerate("planar face outer bound has no stable plane".into())
     })?;
@@ -297,9 +318,7 @@ fn append_face(
         }
     }
 
-    let mut earcutter = earcut::Earcut::new();
-    let mut indices: Vec<usize> = Vec::new();
-    earcutter.earcut(flat.iter().copied(), &hole_starts, &mut indices);
+    let indices = earcut_projected(&flat, &hole_starts);
     if indices.is_empty() || indices.len() % 3 != 0 {
         return Err(GeomError::Degenerate(format!(
             "face triangulation produced {} indices for {} vertices",
@@ -382,42 +401,6 @@ fn loop_points(
         points.reverse();
     }
     Ok(points)
-}
-
-/// Newell normal: correct for concave and non-planar-ish polygons alike.
-///
-/// A cross product of the first two edges fails when they are collinear,
-/// which is common at the start of an exported ring.
-fn newell_normal(ring: &[(axiolid_topology::VertexId, Vec3)]) -> Vec3 {
-    let mut normal = Vec3::ZERO;
-    for index in 0..ring.len() {
-        let current = ring[index].1;
-        let next = ring[(index + 1) % ring.len()].1;
-        normal.x += (current.y - next.y) * (current.z + next.z);
-        normal.y += (current.z - next.z) * (current.x + next.x);
-        normal.z += (current.x - next.x) * (current.y + next.y);
-    }
-    normal
-}
-
-/// Orthonormal in-plane axes for a normal, or None when it is degenerate.
-fn plane_axes(normal: Vec3) -> Option<(Vec3, Vec3)> {
-    let length = normal.length();
-    if !length.is_finite() || length <= f64::EPSILON {
-        return None;
-    }
-    let n = normal / length;
-    // Pick the axis least aligned with n so the cross product stays stable.
-    let helper = if n.x.abs() <= n.y.abs() && n.x.abs() <= n.z.abs() {
-        Vec3::X
-    } else if n.y.abs() <= n.z.abs() {
-        Vec3::Y
-    } else {
-        Vec3::Z
-    };
-    let u = n.cross(helper).normalize();
-    let v = n.cross(u);
-    Some((u, v))
 }
 
 /// Whether an exact support surface is planar.
@@ -1139,9 +1122,7 @@ fn append_curved_face(
         }
     }
     let flat: Vec<[Scalar; 2]> = boundary.uv.iter().map(|p| [p.x, p.y]).collect();
-    let mut earcutter = earcut::Earcut::new();
-    let mut indices: Vec<usize> = Vec::new();
-    earcutter.earcut(flat.iter().copied(), &boundary.hole_starts, &mut indices);
+    let indices = earcut_projected(&flat, &boundary.hole_starts);
     if indices.is_empty() || indices.len() % 3 != 0 {
         return Err(GeomError::Degenerate(format!(
             "curved face trim triangulation produced {} indices for {} points",

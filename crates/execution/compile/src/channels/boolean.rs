@@ -38,5 +38,10 @@ pub(crate) fn after_boolean(
     for (name, fate) in composed {
         fates.record(&name, fate);
     }
-    Built { mesh, fates }
+    // Callers refuse surface operands, so a boolean result bounds a solid.
+    Built {
+        mesh,
+        fates,
+        closure: axiolid_mesh_compile_contract::MeshClosure::Solid,
+    }
 }

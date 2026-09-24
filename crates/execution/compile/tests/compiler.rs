@@ -188,56 +188,9 @@ fn authored_triangle_faces_compile_without_retriangulation() {
     assert_eq!(mesh.indices, vec![0, 1, 2, 2, 1, 3]);
 }
 
-#[test]
-fn polygon_faces_still_require_a_tessellation_provider() {
-    let mut b = GeometryGraphBuilder::new();
-    let polygon = b
-        .push(GeometryNode::PolygonMesh(PolygonMesh {
-            positions: vec![
-                Point3::new(0.0, 0.0, 0.0),
-                Point3::new(1.0, 0.0, 0.0),
-                Point3::new(1.0, 1.0, 0.0),
-                Point3::new(0.0, 1.0, 0.0),
-            ],
-            faces: vec![PolygonFace {
-                outer: vec![0, 1, 2, 3],
-                holes: Vec::new(),
-            }],
-        }))
-        .unwrap();
-    let graph = b.finish(vec![polygon]).unwrap();
-
-    assert!(matches!(
-        compiler().compile_mesh(&graph, polygon, &options()),
-        Err(GeomError::Unsupported {
-            operation: Operation::Tessellation,
-            ..
-        })
-    ));
-}
-
-#[test]
-fn polygon_faces_with_holes_still_require_a_tessellation_provider() {
-    let mut b = GeometryGraphBuilder::new();
-    let polygon = b
-        .push(GeometryNode::PolygonMesh(PolygonMesh {
-            positions: vec![Point3::ZERO; 6],
-            faces: vec![PolygonFace {
-                outer: vec![0, 1, 2],
-                holes: vec![vec![3, 4, 5]],
-            }],
-        }))
-        .unwrap();
-    let graph = b.finish(vec![polygon]).unwrap();
-
-    assert!(matches!(
-        compiler().compile_mesh(&graph, polygon, &options()),
-        Err(GeomError::Unsupported {
-            operation: Operation::Tessellation,
-            ..
-        })
-    ));
-}
+// N-gon and holed polygon faces triangulate (#160); their tests, including
+// the refusals that replaced the blanket `Unsupported`, live in
+// `tests/authored_polygons.rs`.
 
 #[test]
 fn malformed_authored_triangle_indices_are_rejected() {
