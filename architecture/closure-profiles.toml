@@ -215,6 +215,7 @@ expected_internal = [
     "axiolid-curve",
     "axiolid-curve-evaluate-contract",
     "axiolid-evaluate",
+    "axiolid-exact",
     "axiolid-guarantees",
     "axiolid-linear",
     "axiolid-nurbs",

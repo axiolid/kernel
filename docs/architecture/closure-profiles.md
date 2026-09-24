@@ -10,7 +10,7 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `mesh-rule-checker` | 4 | A rule checker over discrete meshes: mesh values, spatial acceleration, measurement. |
 | `2d-curves` | 3 | A 2D plan-geometry application: curves, affine transforms, and application-owned unit conversion without solids or CSG. |
 | `parametric-curves` | 8 | A parametric application: curve/surface values plus scalar evaluation, without the reference umbrella. |
-| `cad-exact` | 12 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
+| `cad-exact` | 13 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
 | `rust-facade-application` | 32 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
 | `c-abi-profile` | 33 | Versioned native boundary over the supported portable application provider bundle. |
 | `core-only` | 1 | The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable. |
@@ -96,6 +96,7 @@ Compiles exactly these internal packages:
 - `axiolid-curve`
 - `axiolid-curve-evaluate-contract`
 - `axiolid-evaluate`
+- `axiolid-exact`
 - `axiolid-guarantees`
 - `axiolid-linear`
 - `axiolid-nurbs`

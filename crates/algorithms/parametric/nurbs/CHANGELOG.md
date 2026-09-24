@@ -8,3 +8,16 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- Exact intersection of analytic curves (#119): `exact_curve_surface_intersection`
+  (line, circle or ellipse against plane, cylinder, elliptical cylinder, cone,
+  sphere or torus) and `exact_curve_curve_intersection2`/`3` (lines, circles,
+  ellipses). The equations become integer polynomials in the line parameter or
+  the conic's half-angle parameter, solved with `axiolid-exact`: each hit, its
+  multiplicity (2 = touching) and "the curve lies on the surface" are exact
+  decisions, and a hit at a conic's half-angle singularity (`theta = pi`) is
+  reported as `Antipode`. A cone counts only its modelled nappe; a line on the
+  cone through its apex is refused as `PartialOverlap`. Points are rounded to
+  `f64` for output only. B-spline operands stay on the certified tier.

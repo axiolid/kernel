@@ -271,6 +271,7 @@ dependencies = [
  "axiolid-core",
  "axiolid-curve",
  "axiolid-evaluate",
+ "axiolid-exact",
  "axiolid-guarantees",
  "axiolid-predicates",
  "axiolid-surface",

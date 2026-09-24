@@ -36,6 +36,11 @@ All notable changes to Axiolid are documented in this file.
   plus a twelve-fault mutation probe. A bounding-box broad phase keeps the
   cost close to linear in edge count (two overlapping 256-edge rings: 7 ms,
   was 779 ms before it).
+- Exact analytic curve intersection (#119): lines, circles and ellipses
+  against each other and against planes, cylinders, cones, spheres and tori,
+  with hits, tangency and containment decided exactly on `axiolid-exact`
+  polynomials (`axiolid-nurbs`). Checked against a sampling oracle on 600
+  random scenes and a six-fault mutation probe.
 - Curved coaxial booleans (#120): `boolean_arc_prisms_exact` now returns
   solids with round through-openings and solids that start above the
   ground plane, instead of refusing them.

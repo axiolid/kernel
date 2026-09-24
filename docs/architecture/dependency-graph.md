@@ -290,6 +290,7 @@ graph TD
     axiolid_nurbs --> axiolid_core
     axiolid_nurbs --> axiolid_curve
     axiolid_nurbs --> axiolid_evaluate
+    axiolid_nurbs --> axiolid_exact
     axiolid_nurbs --> axiolid_guarantees
     axiolid_nurbs --> axiolid_oracle
     axiolid_nurbs --> axiolid_predicates
