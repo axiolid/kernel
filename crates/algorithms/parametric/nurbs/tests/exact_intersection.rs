@@ -810,3 +810,213 @@ fn a_degenerate_frame_axis_is_refused() {
         }
     }
 }
+
+// --- exact decisions (#119) ---------------------------------------------------
+//
+// Each case below holds EXACTLY for the given doubles, and each was
+// misjudged by the earlier `f64` comparisons (measured before the fix).
+// Axes are kept at their integer lengths so the exact claim is checkable.
+
+/// A plane exactly tangent to a sphere along an oblique normal.
+///
+/// Normal (3, 2, 6) has length 7; the plane through 7 * (3, 2, 6) / 7 * r
+/// ... is built directly: origin (3, 2, 6), normal (3, 2, 6), radius 7.
+/// `r^2 |n|^2 = (n . o)^2` holds exactly. In `f64` the unit-normal
+/// distance came out below 7 and the pair was reported as a circle of
+/// radius about 1e-7.
+#[test]
+fn an_oblique_tangent_plane_is_a_touch_not_a_tiny_circle() {
+    for (n, len) in [
+        ([3.0, 2.0, 6.0], 7.0),
+        ([2.0, 3.0, 6.0], 7.0),
+        ([1.0, 4.0, 8.0], 9.0),
+    ] {
+        for k in [1.0, 0.5, 3.0] {
+            let normal = Vec3::new(n[0], n[1], n[2]);
+            let sphere = Surface::Sphere(Sphere {
+                frame: frame(Point3::ZERO, Vec3::Z),
+                radius: k * len,
+            });
+            let plane = Surface::Plane(Plane {
+                frame: frame_keeping_axis_length(Point3::ZERO + normal * k, normal),
+            });
+            assert_eq!(
+                exact_surface_intersection(&sphere, &plane),
+                Err(ExactIntersectionRefusal::NotRegularCurve),
+                "normal {n:?} scale {k}"
+            );
+        }
+    }
+}
+
+/// A plane exactly parallel to a cylinder axis, both given obliquely.
+///
+/// Axis (-3, -3, -3) and normal (-3, 1, 2) have dot product exactly zero.
+/// In `f64` the normalised cosine was 2.8e-17, so the pair was treated as
+/// an oblique cut and returned an ellipse with a major semi-axis of about
+/// 3.6e16 instead of the two rulings.
+#[test]
+fn an_exactly_parallel_oblique_plane_gives_rulings_not_a_huge_ellipse() {
+    for (axis, normal) in [
+        (Vec3::new(-3.0, -3.0, -3.0), Vec3::new(-3.0, 1.0, 2.0)),
+        (Vec3::new(1.0, 2.0, 2.0), Vec3::new(2.0, 1.0, -2.0)),
+        (Vec3::new(3.0, 1.0, 1.0), Vec3::new(1.0, -2.0, -1.0)),
+    ] {
+        assert_eq!(axis.dot(normal), 0.0, "fixture must be exactly parallel");
+        let cylinder = Surface::Cylinder(Cylinder {
+            frame: frame_keeping_axis_length(Point3::ZERO, axis),
+            radius: 1.0,
+        });
+        let plane = Surface::Plane(Plane {
+            frame: frame_keeping_axis_length(Point3::ZERO, normal),
+        });
+        let curve = exact_surface_intersection(&cylinder, &plane)
+            .unwrap_or_else(|e| panic!("axis {axis:?}: {e:?}"));
+        assert_eq!(curve.derivation, Derivation::CylinderPlaneParallelRulings);
+        assert_eq!(
+            curve.branches.len(),
+            2,
+            "a plane through the axis cuts two rulings"
+        );
+    }
+}
+
+/// A plane exactly perpendicular to an oblique cylinder axis.
+///
+/// Normal = 2 * axis. In `f64` the normalised cosine came out as
+/// 0.9999999999999996, so the section was classed as an oblique ellipse
+/// rather than the circle it is.
+#[test]
+fn an_exactly_perpendicular_oblique_plane_gives_a_circle() {
+    for axis in [
+        Vec3::new(-3.0, -3.0, -1.0),
+        Vec3::new(1.0, 2.0, 2.0),
+        Vec3::new(2.0, 3.0, 6.0),
+    ] {
+        for k in [2.0, 3.0, -1.0] {
+            let cylinder = Surface::Cylinder(Cylinder {
+                frame: frame_keeping_axis_length(Point3::ZERO, axis),
+                radius: 1.5,
+            });
+            let plane = Surface::Plane(Plane {
+                frame: frame_keeping_axis_length(Point3::ZERO, axis * k),
+            });
+            let curve = exact_surface_intersection(&cylinder, &plane)
+                .unwrap_or_else(|e| panic!("axis {axis:?} k {k}: {e:?}"));
+            assert_eq!(
+                curve.derivation,
+                Derivation::CylinderPlanePerpendicularCircle,
+                "axis {axis:?} k {k}"
+            );
+            match &curve.branches[0] {
+                Curve3::Circle(c) => assert!((c.radius - 1.5).abs() < 1e-12),
+                other => panic!("expected a circle, got {other:?}"),
+            }
+        }
+    }
+}
+
+/// A plane tilted from perpendicular by less than `f64` can show in a
+/// normalised cosine is still an ellipse, not a circle.
+#[test]
+fn a_barely_tilted_plane_is_still_an_ellipse() {
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame_keeping_axis_length(Point3::ZERO, Vec3::Z),
+        radius: 1.0,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::ZERO, Vec3::new(1e-9, 0.0, 1.0)),
+    });
+    let curve = exact_surface_intersection(&cylinder, &plane).unwrap();
+    assert_eq!(curve.derivation, Derivation::CylinderPlaneObliqueEllipse);
+}
+
+/// A plane tangent to a cylinder along an oblique normal shares one ruling.
+#[test]
+fn an_oblique_tangent_plane_shares_one_ruling() {
+    // Axis z, normal (3, 4, 0) (length 5), plane through (3, 4, 0) * k:
+    // distance 5k, radius 5k, exactly.
+    // Scales whose products with 3, 4 and 5 are exact doubles.
+    for k in [1.0, 0.25, 7.0] {
+        let cylinder = Surface::Cylinder(Cylinder {
+            frame: frame_keeping_axis_length(Point3::ZERO, Vec3::Z),
+            radius: 5.0 * k,
+        });
+        let normal = Vec3::new(3.0, 4.0, 0.0);
+        let plane = Surface::Plane(Plane {
+            frame: frame_keeping_axis_length(Point3::ZERO + normal * k, normal),
+        });
+        let curve = exact_surface_intersection(&cylinder, &plane).unwrap();
+        assert_eq!(curve.branches.len(), 1, "scale {k}");
+    }
+}
+
+/// Tangency is judged on the doubles actually given. `0.2 * 3` rounds up
+/// to 0.6000000000000001, so a plane through (0.2 * 3, 0.2 * 4, 0) with
+/// radius 0.2 * 5 lies about 2e-16 outside the cylinder: those numbers
+/// describe a plane that misses, and saying so is the exact answer.
+#[test]
+fn a_nearly_tangent_plane_is_judged_on_its_actual_doubles() {
+    let k = 0.2;
+    let normal = Vec3::new(3.0, 4.0, 0.0);
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame_keeping_axis_length(Point3::ZERO, Vec3::Z),
+        radius: 5.0 * k,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::ZERO + normal * k, normal),
+    });
+    assert_eq!(
+        exact_surface_intersection(&cylinder, &plane),
+        Err(ExactIntersectionRefusal::Disjoint)
+    );
+}
+
+/// A plane off parallel to the axis by far less than any float threshold
+/// still cuts an ellipse (a very long one), not rulings. Its normal is
+/// (1, 0, 2^-45): the dot product with the axis is exactly 2^-45.
+#[test]
+fn a_plane_barely_off_parallel_cuts_an_ellipse_not_rulings() {
+    let tilt = 2f64.powi(-45);
+    let cylinder = Surface::Cylinder(Cylinder {
+        frame: frame_keeping_axis_length(Point3::ZERO, Vec3::Z),
+        radius: 1.0,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::ZERO, Vec3::new(1.0, 0.0, tilt)),
+    });
+    let result = exact_surface_intersection(&cylinder, &plane).expect("an ellipse");
+    assert_eq!(result.derivation, Derivation::CylinderPlaneObliqueEllipse);
+    match result.single() {
+        Curve3::Ellipse(e) => {
+            let (minor, major) = (
+                e.semi_axis_x.min(e.semi_axis_y),
+                e.semi_axis_x.max(e.semi_axis_y),
+            );
+            assert!((minor - 1.0).abs() < 1e-12, "minor {minor}");
+            assert!(major > 1e12, "major {major} must reflect the tiny tilt");
+        }
+        other => panic!("expected an ellipse, got {other:?}"),
+    }
+}
+
+/// A plane perpendicular to a cone's axis cuts a circle, decided exactly
+/// even when the axis is an unnormalised oblique vector like (1, 2, 2).
+#[test]
+fn a_plane_perpendicular_to_an_oblique_cone_axis_cuts_a_circle() {
+    let axis = Vec3::new(1.0, 2.0, 2.0);
+    let cone = Surface::Cone(Cone {
+        frame: frame_keeping_axis_length(Point3::ZERO, axis),
+        radius: 1.0,
+        semi_angle: std::f64::consts::FRAC_PI_6,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::ZERO + axis, axis * 3.0),
+    });
+    let result = exact_surface_intersection(&cone, &plane).expect("a circle");
+    assert!(
+        matches!(result.single(), Curve3::Circle(_)),
+        "got {:?}",
+        result.single()
+    );
+}

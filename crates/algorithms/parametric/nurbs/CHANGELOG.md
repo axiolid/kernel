@@ -21,3 +21,12 @@ caret rule for `0.x` versions.
   reported as `Antipode`. A cone counts only its modelled nappe; a line on the
   cone through its apex is refused as `PartialOverlap`. Points are rounded to
   `f64` for output only. B-spline operands stay on the certified tier.
+
+### Fixed
+
+- `exact_surface_intersection` decides tangent, parallel and perpendicular
+  cases exactly (#119). In `f64` a plane exactly tangent to a sphere along
+  a normal like (3, 2, 6) came out as a circle of radius about 1e-7, an
+  exactly perpendicular oblique plane cut a cylinder in a near-circular
+  ellipse, and an exactly parallel one produced a huge ellipse instead of
+  rulings. Only output coordinates are rounded now.

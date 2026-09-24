@@ -47,6 +47,9 @@ All notable changes to Axiolid are documented in this file.
 
 ### Fixed
 
+- Exact surface intersection no longer mistakes an exact tangency,
+  parallel or perpendicular case for a nearby float answer (#119): a
+  tangent sphere/plane pair used to yield a circle of radius 1e-7.
 - Arc-aware booleans (`arc_overlay`, and `boolean_arc_prisms_exact` on top
   of it) no longer depend on drawing units. The backend's thresholds are
   fixed in drawing units, so a 5 um gap survived a union drawn in

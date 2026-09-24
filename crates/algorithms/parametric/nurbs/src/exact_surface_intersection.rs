@@ -12,7 +12,82 @@
 
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::{Circle3, Curve3, Ellipse3};
+use axiolid_exact::{Arith, Dyadic};
+use axiolid_guarantees::Sign;
 use axiolid_surface::{Cylinder, Plane, Sphere, Surface};
+
+// --- exact decisions ---------------------------------------------------------
+//
+// Which closed form applies (tangent or crossing, parallel or oblique,
+// perpendicular or tilted) is a sign question about the operands' own
+// doubles. It is decided here in exact dyadic arithmetic, so a tangency
+// that holds exactly for the given numbers is never mistaken for a tiny
+// crossing, and vice versa. The constructed curves are still `f64`: their
+// sizes are rounded once, from exact numerators where that is cheap.
+
+type D3 = [Dyadic; 3];
+
+/// An exact copy of a vector; `None` when a component is not finite.
+fn exact3(v: Vec3) -> Option<D3> {
+    Some([
+        Dyadic::try_from_f64(v.x)?,
+        Dyadic::try_from_f64(v.y)?,
+        Dyadic::try_from_f64(v.z)?,
+    ])
+}
+
+fn edot(a: &D3, b: &D3) -> Dyadic {
+    a[0].mul(&b[0]).add(&a[1].mul(&b[1])).add(&a[2].mul(&b[2]))
+}
+
+fn esub(a: &D3, b: &D3) -> D3 {
+    [a[0].sub(&b[0]), a[1].sub(&b[1]), a[2].sub(&b[2])]
+}
+
+fn ecross_is_zero(a: &D3, b: &D3) -> bool {
+    let c = [
+        a[1].mul(&b[2]).sub(&a[2].mul(&b[1])),
+        a[2].mul(&b[0]).sub(&a[0].mul(&b[2])),
+        a[0].mul(&b[1]).sub(&a[1].mul(&b[0])),
+    ];
+    c.iter().all(|v| esign(v) == Sign::Zero)
+}
+
+fn esign(v: &Dyadic) -> Sign {
+    v.sign().expect("dyadic signs are always decided")
+}
+
+/// `r^2 |n|^2 - (n . (c - o))^2`, exactly: positive when the point `c` lies
+/// closer than `r` to the plane through `o` with (non-unit) normal `n`,
+/// zero when exactly at distance `r`. Also returns `|n|^2`.
+fn within_radius(
+    radius: Scalar,
+    normal: Vec3,
+    point: Point3,
+    plane_origin: Point3,
+) -> Result<(Dyadic, Dyadic), ExactIntersectionRefusal> {
+    let bad = ExactIntersectionRefusal::DegenerateFrame;
+    let n = exact3(normal).ok_or(bad.clone())?;
+    let c = exact3(point).ok_or(bad.clone())?;
+    let o = exact3(plane_origin).ok_or(bad.clone())?;
+    let r = Dyadic::try_from_f64(radius).ok_or(bad.clone())?;
+    let nn = edot(&n, &n);
+    if esign(&nn) == Sign::Zero {
+        return Err(bad);
+    }
+    let nd = edot(&n, &esub(&c, &o));
+    Ok((r.square().mul(&nn).sub(&nd.square()), nn))
+}
+
+/// `numerator / nn` rounded once, for a size whose square is known exactly.
+fn rounded_square(numerator: &Dyadic, nn: &Dyadic) -> Result<Scalar, ExactIntersectionRefusal> {
+    let value = numerator.to_f64() / nn.to_f64();
+    if value > 0.0 && value.is_finite() {
+        Ok(value)
+    } else {
+        Err(ExactIntersectionRefusal::DegenerateFrame)
+    }
+}
 
 /// Why an elementary pair has no exact closed-form intersection curve here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,16 +267,16 @@ fn sphere_plane(
     let unit_normal = normal / normal_squared.sqrt();
     let centre = sphere.frame.origin;
     let signed_distance = unit_normal.dot(centre - plane.frame.origin);
-    let radius_squared = sphere.radius * sphere.radius - signed_distance * signed_distance;
-    if radius_squared <= 0.0 {
-        // Strictly outside, or exactly tangent. A tangent touch is a point,
-        // not a curve, so both refuse rather than degenerate to radius 0.
-        return Err(if radius_squared == 0.0 {
-            ExactIntersectionRefusal::NotRegularCurve
-        } else {
-            ExactIntersectionRefusal::Disjoint
-        });
+    // Tangent or not is decided exactly; in `f64` a plane exactly tangent
+    // along a normal like (3, 2, 6) came out as a circle of radius 1e-7.
+    let (numerator, nn) = within_radius(sphere.radius, normal, centre, plane.frame.origin)?;
+    match esign(&numerator) {
+        Sign::Positive => {}
+        // Exactly tangent: a touch is a point, not a curve.
+        Sign::Zero => return Err(ExactIntersectionRefusal::NotRegularCurve),
+        _ => return Err(ExactIntersectionRefusal::Disjoint),
     }
+    let radius_squared = rounded_square(&numerator, &nn)?;
     let section_centre = centre - unit_normal * signed_distance;
     let frame = frame_from_normal(section_centre, unit_normal)?;
     Ok(ExactIntersectionCurve {
@@ -234,14 +309,35 @@ fn cylinder_plane(
     }
     let axis = cylinder.frame.z / axis_squared.sqrt();
     let normal = plane.frame.z / normal_squared.sqrt();
-    // cos(theta) between axis and plane normal. Sign only reflects axis
-    // orientation, so the magnitude carries the geometry.
-    let cosine = axis.dot(normal).abs();
-    if cosine == 0.0 {
+    // Parallel and perpendicular are decided exactly on the given axes: in
+    // `f64` an axis (-3, -3, -3) against a normal (-3, 1, 2), whose dot
+    // product is exactly zero, gave cos = 2.8e-17 and a 10^16-long ellipse.
+    let bad = ExactIntersectionRefusal::DegenerateFrame;
+    let exact_axis = exact3(cylinder.frame.z).ok_or(bad.clone())?;
+    let exact_normal = exact3(plane.frame.z).ok_or(bad.clone())?;
+    let along = edot(&exact_axis, &exact_normal);
+    if esign(&along) == Sign::Zero {
         // Plane parallel to the axis: the section is a pair of rulings, one
         // ruling when the plane is tangent, or empty. Each is an exact line,
         // so this is derived rather than refused.
         return cylinder_plane_parallel(cylinder, plane, axis, normal);
+    }
+    let perpendicular = ecross_is_zero(&exact_axis, &exact_normal);
+    // cos(theta) between axis and plane normal, from the exact dot product
+    // rounded once. A tilted plane keeps a cosine below 1 even when its
+    // tilt is below `f64` resolution, so it is still reported as the
+    // ellipse it is.
+    let cosine = if perpendicular {
+        1.0
+    } else {
+        let scale = (edot(&exact_axis, &exact_axis).to_f64()
+            * edot(&exact_normal, &exact_normal).to_f64())
+        .sqrt();
+        (along.to_f64().abs() / scale).min(1.0_f64.next_down())
+    };
+    // Non-zero exactly, but it can round to zero or NaN for extreme inputs.
+    if cosine.is_nan() || cosine <= 0.0 {
+        return Err(bad);
     }
     // The section centre is where the cylinder axis pierces the plane.
     let axis_origin = cylinder.frame.origin;
@@ -258,7 +354,7 @@ fn cylinder_plane(
             cylinder.radius,
             cosine,
         )?],
-        derivation: if cosine == 1.0 {
+        derivation: if perpendicular {
             Derivation::CylinderPlanePerpendicularCircle
         } else {
             Derivation::CylinderPlaneObliqueEllipse
@@ -538,8 +634,13 @@ fn cone_plane(
     // Angle between the plane and the axis, from the axis/normal angle.
     let plane_axis_angle = alignment.asin();
     let semi = cone.semi_angle.abs();
-    if alignment == 1.0 {
-        // Perpendicular plane: a circle, via the coaxial profile path.
+    let perpendicular = match (exact3(axis), exact3(normal)) {
+        (Some(a), Some(n)) => ecross_is_zero(&a, &n),
+        _ => return Err(ExactIntersectionRefusal::DegenerateFrame),
+    };
+    if perpendicular {
+        // Perpendicular plane (decided exactly): a circle, via the coaxial
+        // profile path.
         return crate::revolution_profile::coaxial_revolution_intersection(
             &Surface::Cone(*cone),
             &Surface::Plane(*plane),
@@ -566,10 +667,18 @@ fn cylinder_plane_parallel(
     normal: Vec3,
 ) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
     let distance = normal.dot(cylinder.frame.origin - plane.frame.origin);
-    let squared = cylinder.radius * cylinder.radius - distance * distance;
-    if squared < 0.0 {
-        return Err(ExactIntersectionRefusal::Disjoint);
-    }
+    // Two rulings, one (tangent) or none, decided exactly.
+    let (numerator, nn) = within_radius(
+        cylinder.radius,
+        plane.frame.z,
+        cylinder.frame.origin,
+        plane.frame.origin,
+    )?;
+    let tangent_plane = match esign(&numerator) {
+        Sign::Positive => false,
+        Sign::Zero => true,
+        _ => return Err(ExactIntersectionRefusal::Disjoint),
+    };
     // `axis` and `normal` are unit and perpendicular here, so their cross
     // product is already unit: no second normalisation is needed.
     let tangent = axis.cross(normal);
@@ -577,9 +686,13 @@ fn cylinder_plane_parallel(
     if !foot.is_finite() || !tangent.is_finite() {
         return Err(ExactIntersectionRefusal::DegenerateFrame);
     }
-    let half_chord = squared.sqrt();
+    let half_chord = if tangent_plane {
+        0.0
+    } else {
+        rounded_square(&numerator, &nn)?.sqrt()
+    };
     let mut branches = Vec::new();
-    let offsets: &[Scalar] = if half_chord == 0.0 {
+    let offsets: &[Scalar] = if tangent_plane {
         &[0.0]
     } else {
         &[half_chord, -half_chord]

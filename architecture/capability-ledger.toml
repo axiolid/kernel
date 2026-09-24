@@ -485,8 +485,8 @@ id = "B10"
 area = "curves-surfaces"
 name = "surface-surface intersection (analytic + general)"
 level = "narrow"
-summary = "Explicitly documented as narrow by the source itself: both inputs must be single-span polynomial affine patches with continuous clamped axes; general patch pairs are bounded and conservatively returned as unresolved candidates rather than passed through heuristic marching"
-evidence = ["crates/algorithms/parametric/nurbs/src/certified_surface_surface_intersection.rs::intersect_surface_surface_certified", "crates/execution/compile/tests/surface_curve_sweep.rs"]
+summary = "Two tiers. Analytic: exact_surface_intersection derives closed-form curves for plane/plane, sphere/plane, cylinder/plane (circle, ellipse, rulings), sphere/sphere, cylinder/cylinder special cases and coaxial surfaces of revolution; since #119 its case decisions (tangent, parallel, perpendicular) are exact sign tests on the given doubles, only output coordinates are rounded. NURBS: certified tracing only for single-span polynomial affine patches; general patch pairs return unresolved candidates rather than heuristic marching. Refused by name: non-coaxial sphere/cylinder, cone and torus pairs other than coaxial, unequal crossing cylinders, parabola/hyperbola sections, and general curved-patch tracing."
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_surface_surface_intersection.rs::intersect_surface_surface_certified", "crates/algorithms/parametric/nurbs/src/exact_surface_intersection.rs::exact_surface_intersection", "crates/algorithms/parametric/nurbs/tests/exact_intersection.rs", "crates/execution/compile/tests/surface_curve_sweep.rs"]
 occt = ["src/ModelingAlgorithms/TKGeomAlgo/IntPatch", "src/ModelingAlgorithms/TKGeomAlgo/IntWalk", "src/ModelingAlgorithms/TKGeomAlgo/GeomInt", "src/ModelingAlgorithms/TKGeomAlgo/IntPolyh"]
 cgal = []
 issue = "surface-intersection"
@@ -1352,3 +1352,4 @@ summary = "Barycentric coordinates exist only as an internal by-product of ray/t
 evidence = ["crates/providers/mesh/boolmesh/src/attributes.rs::barycentric", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs", "crates/algorithms/query/intersection/ray-mesh/tests/nearest_hit.rs", "crates/providers/mesh/boolmesh/tests/boolean_attributes.rs"]
 occt = []
 cgal = ["Interpolation", "Barycentric_coordinates_2", "Barycentric_coordinates_3"]
+
