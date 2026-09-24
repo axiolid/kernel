@@ -9,15 +9,6 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Fixed
-
-- `extrude` (and so `extrude_profile` and the reference mesh compiler) wound
-  a solid inside-out when the extrusion direction pointed below the profile
-  plane (`direction.z < 0`), e.g. an opening body extruded downward from its
-  lintel (#166). The signed volume was `-area * depth`, so any boolean using
-  the solid refused it as inside-out. Such a solid is now outward-oriented
-  with the same magnitude, for outer and hole loops alike.
-
 ### Added
 
 - `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
@@ -35,8 +26,16 @@ caret rule for `0.x` versions.
   is extruded from its own base height. Stepped spans are still refused;
   disconnected results go through the `_solids` variants.
 
+## [0.3.1] - 2026-09-24
+
 ### Fixed
 
+- `extrude` (and so `extrude_profile` and the reference mesh compiler) wound
+  a solid inside-out when the extrusion direction pointed below the profile
+  plane (`direction.z < 0`), e.g. an opening body extruded downward from its
+  lintel (#166). The signed volume was `-area * depth`, so any boolean using
+  the solid refused it as inside-out. Such a solid is now outward-oriented
+  with the same magnitude, for outer and hole loops alike.
 - `half_space::bounded_half_space_in_frame` now places the boundary at the
   authored frame's origin, projected onto the clip plane (#164). It used to
   take only the frame's axes and anchor the boundary at the clip plane's
