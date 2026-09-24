@@ -52,25 +52,85 @@ pub struct ArcOverlayResult {
     pub evidence: ArcOverlayEvidence,
 }
 
-/// Convert a neutral ring into a backend polyline.
-fn to_backend(ring: &ArcRing) -> Polyline {
-    let mut line: Polyline = Polyline::new_closed();
-    for vertex in &ring.vertices {
-        line.add(vertex.point.x, vertex.point.y, vertex.bulge);
+/// The backend's native position epsilon (`PlineBooleanOptions::new`).
+///
+/// Its other thresholds are fixed relative to this one: 1e-5 and 1e-3 in
+/// debug self-validation, 1e-8 in its default fuzzy comparisons.
+const BACKEND_POS_EPS: f64 = 1e-5;
+
+/// Power-of-two factor that maps the caller's linear tolerance onto the
+/// backend's native epsilon.
+///
+/// The backend hard-codes its thresholds in drawing units, so the same
+/// scene gave different answers in millimetres and metres. Scaling the
+/// geometry keeps every one of those thresholds at a fixed ratio to the
+/// caller's tolerance, which setting a single option cannot: overriding
+/// only `pos_equal_eps` trips the backend's own debug consistency checks.
+/// A power of two makes the round trip bit-exact; the effective tolerance
+/// is within a factor of sqrt(2) of the requested one.
+///
+/// The scale is capped so the scaled drawing stays within
+/// [`MAX_BACKEND_EXTENT`]. Beyond that, f64 no longer resolves the
+/// backend's finest (1e-8) comparisons and it fails its own consistency
+/// checks. A tolerance finer than the input's extent allows is therefore
+/// honoured only down to `extent * 1e-5 / MAX_BACKEND_EXTENT`, about 1e-11
+/// of the extent. That is still far below anything the audit gate after
+/// the boolean accepts.
+///
+/// `Tolerance::ZERO` asks for no scale-derived tolerance; the backend
+/// then runs at its native thresholds (factor 1), as before.
+fn backend_scale(tolerance: Tolerance, extent: f64) -> f64 {
+    let linear = tolerance.linear();
+    if linear <= 0.0 || !extent.is_finite() {
+        return 1.0;
     }
-    line
+    let mut exponent = (BACKEND_POS_EPS / linear).log2().round();
+    if extent > 0.0 {
+        exponent = exponent.min((MAX_BACKEND_EXTENT / extent).log2().floor());
+    }
+    2f64.powi(exponent.clamp(-1000.0, 1000.0) as i32)
 }
 
-/// Convert a backend polyline back into a neutral ring.
+/// Largest coordinate magnitude handed to the backend after scaling.
+///
+/// Its finest comparison is 1e-8 absolute; f64 resolves that only while
+/// magnitudes stay below about 1e-8 / 2^-52 = 4.5e7. 1e6 leaves a margin.
+const MAX_BACKEND_EXTENT: f64 = 1e6;
+
+/// Largest absolute coordinate across both operands.
+fn extent(rings: [&ArcRing; 2]) -> f64 {
+    rings
+        .iter()
+        .flat_map(|ring| ring.vertices.iter())
+        .map(|vertex| vertex.point.x.abs().max(vertex.point.y.abs()))
+        .fold(0.0, f64::max)
+}
+
+/// Convert a neutral ring into a backend polyline, scaled by `scale`.
+///
+/// Bulges are dimensionless (`tan(theta/4)`), so only points scale.
+fn to_backend(ring: &ArcRing, scale: f64) -> Result<Polyline, OverlayError> {
+    let mut line: Polyline = Polyline::new_closed();
+    for vertex in &ring.vertices {
+        let (x, y) = (vertex.point.x * scale, vertex.point.y * scale);
+        if !x.is_finite() || !y.is_finite() {
+            return Err(OverlayError::NonFinitePoint);
+        }
+        line.add(x, y, vertex.bulge);
+    }
+    Ok(line)
+}
+
+/// Convert a backend polyline back into a neutral ring, undoing `scale`.
 ///
 /// The bulge is carried across unchanged: both sides use the same
 /// convention, where a vertex owns the bulge of the edge leaving it.
-fn from_backend(line: &Polyline) -> ArcRing {
+fn from_backend(line: &Polyline, scale: f64) -> ArcRing {
     let mut vertices = Vec::with_capacity(line.vertex_count());
     for index in 0..line.vertex_count() {
         let vertex = line.at(index);
         vertices.push(ArcVertex::bulged(
-            Point2::new(vertex.x, vertex.y),
+            Point2::new(vertex.x / scale, vertex.y / scale),
             vertex.bulge,
         ));
     }
@@ -134,35 +194,39 @@ pub fn arc_overlay(
     // Operands are normalised to counter-clockwise first. The backend
     // reads subtraction from winding, so a clockwise operand would
     // invert the meaning of Not without reporting an error.
-    let subject_line = to_backend(&oriented(subject.clone(), true));
-    let clip_line = to_backend(&oriented(clip.clone(), true));
+    let scale = backend_scale(tolerance, extent([subject, clip]));
+    let subject_line = to_backend(&oriented(subject.clone(), true), scale)?;
+    let clip_line = to_backend(&oriented(clip.clone(), true), scale)?;
     let result = subject_line.boolean(&clip_line, operator);
 
-    let mut regions: Vec<ArcPolygon> = result
-        .pos_plines
-        .iter()
-        .map(|entry| ArcPolygon {
-            outer: oriented(from_backend(&entry.pline), true),
+    let mut regions: Vec<ArcPolygon> = Vec::with_capacity(result.pos_plines.len());
+    // Outers in backend coordinates, kept for hole containment below.
+    let mut outer_lines = Vec::with_capacity(result.pos_plines.len());
+    for entry in &result.pos_plines {
+        regions.push(ArcPolygon {
+            outer: oriented(from_backend(&entry.pline, scale), true),
             holes: Vec::new(),
-        })
-        .collect();
+        });
+        outer_lines.push(&entry.pline);
+    }
 
     // Negative loops are holes. Each is attached to the region that
     // contains it; with a single outer that is unambiguous, and with
     // several the containing one is found by point-in-ring.
     for entry in &result.neg_plines {
-        let hole = oriented(from_backend(&entry.pline), false);
-        let Some(probe) = hole.vertices.first().map(|vertex| vertex.point) else {
+        if entry.pline.vertex_count() == 0 {
             continue;
-        };
-        // Containment uses the backend's arc-aware winding number: a
-        // straight-edge point-in-polygon test would misjudge points
-        // near a bulged edge, which is exactly where holes sit.
-        let owner = regions.iter_mut().find(|region| {
-            to_backend(&region.outer).winding_number(Vector2::new(probe.x, probe.y)) != 0
-        });
-        if let Some(region) = owner {
-            region.holes.push(hole);
+        }
+        let probe = entry.pline.at(0);
+        let hole = oriented(from_backend(&entry.pline, scale), false);
+        // Containment uses the backend's arc-aware winding number, in the
+        // backend's own coordinates: a straight-edge point-in-polygon test
+        // would misjudge points near a bulged edge, where holes sit.
+        let owner = outer_lines
+            .iter()
+            .position(|line| line.winding_number(Vector2::new(probe.x, probe.y)) != 0);
+        if let Some(index) = owner {
+            regions[index].holes.push(hole);
         } else if let Some(region) = regions.first_mut() {
             region.holes.push(hole);
         }

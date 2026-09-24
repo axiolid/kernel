@@ -213,3 +213,64 @@ fn operand_winding_does_not_change_the_answer() {
         );
     }
 }
+
+/// The same scene drawn in millimetres and in metres, each with its own
+/// one-micrometre tolerance, must give the same answer.
+///
+/// The backend compares positions with a fixed epsilon (1e-5 in drawing
+/// units) unless told otherwise: 10 nm in millimetres but 10 um in metres.
+/// Features between 1 um and 10 um then vanished in metres only.
+fn scaled(ring: &ArcRing, factor: f64) -> ArcRing {
+    let mut out = ring.clone();
+    for vertex in &mut out.vertices {
+        vertex.point = Point2::new(vertex.point.x * factor, vertex.point.y * factor);
+    }
+    out
+}
+
+/// Net area in square millimetres, from millimetre and metre drawings.
+fn area_in_both_units(a: &ArcRing, b: &ArcRing, op: OverlayOperation) -> (f64, f64) {
+    let mm = arc_overlay(a, b, op, Tolerance::MILLIMETRE).expect("mm overlay");
+    let m =
+        arc_overlay(&scaled(a, 1e-3), &scaled(b, 1e-3), op, Tolerance::METRE).expect("m overlay");
+    (net_area(&mm), net_area(&m) * 1e6)
+}
+
+#[test]
+fn a_five_micrometre_gap_survives_a_union_in_any_unit() {
+    // Two unit squares (mm) 5 um apart: above the 1 um tolerance, so the
+    // union keeps the gap and its area is 1 + 0.995.
+    let left = rect(0.0, 0.0, 1.0, 1.0);
+    let right = rect(1.005, 0.0, 2.0, 1.0);
+    let (mm, m) = area_in_both_units(&left, &right, OverlayOperation::Union);
+    assert!((mm - 1.995).abs() < 1e-9, "mm drawing: {mm}");
+    assert!((m - 1.995).abs() < 1e-9, "m drawing lost the gap: {m}");
+}
+
+#[test]
+fn a_five_micrometre_overlap_survives_an_intersection_in_any_unit() {
+    // Overlap strip 5 um x 1 mm = 0.005 mm^2, above tolerance.
+    let left = rect(0.0, 0.0, 1.0, 1.0);
+    let right = rect(0.995, 0.0, 2.0, 1.0);
+    let (mm, m) = area_in_both_units(&left, &right, OverlayOperation::Intersection);
+    assert!((mm - 0.005).abs() < 1e-9, "mm drawing: {mm}");
+    assert!((m - 0.005).abs() < 1e-9, "m drawing lost the overlap: {m}");
+}
+
+#[test]
+fn a_disc_crossing_an_edge_by_micrometres_cuts_the_same_area_in_any_unit() {
+    // Disc r = 0.5 mm whose centre sits 4 um outside a 10 mm wall's top
+    // edge. The removed area is the circular segment below the edge:
+    // r^2 acos(d/r) - d sqrt(r^2 - d^2), with d = 0.004.
+    let wall = rect(0.0, 0.0, 10.0, 10.0);
+    let disc = disc(5.0, 10.004, 0.5);
+    let (r, d) = (0.5_f64, 0.004_f64);
+    let segment = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let expected = 100.0 - segment;
+    let (mm, m) = area_in_both_units(&wall, &disc, OverlayOperation::Difference);
+    assert!(
+        (mm - expected).abs() < 1e-9,
+        "mm drawing: {mm} vs {expected}"
+    );
+    assert!((m - expected).abs() < 1e-9, "m drawing: {m} vs {expected}");
+}
