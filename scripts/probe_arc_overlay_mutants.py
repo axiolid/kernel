@@ -29,6 +29,20 @@ MUTANTS = [
     ("difference keeps clip outside", "exact_arc.rs",
      "        (Op::Difference, S::Inside) if !subject => Some(true),",
      "        (Op::Difference, S::Outside) if !subject => Some(true),"),
+    # Broad phase (bounding boxes): a box that misses part of its edge
+    # skips a real crossing or a real shared edge.
+    ("arc box ignores the bulge", "exact_arc/edge.rs",
+     "    Bounds::around(&[from, to], bulge.abs() * chord / 2.0)",
+     "    Bounds::around(&[from, to], 0.0)"),
+    ("arc box uses the half sagitta", "exact_arc/edge.rs",
+     "    Bounds::around(&[from, to], bulge.abs() * chord / 2.0)",
+     "    Bounds::around(&[from, to], bulge.abs() * chord / 4.0)"),
+    ("box overlap test wrong on y", "exact_arc/edge.rs",
+     "self.y0 <= other.y1 && other.y0 <= self.y1",
+     "self.y0 <= other.y1 && other.y0 <= self.y0"),
+    ("link index window too narrow", "exact_arc.rs",
+     "            .take_while(|entry| entry.0 <= hi)",
+     "            .take_while(|entry| entry.0 < lo)"),
 ]
 
 def run():
@@ -57,3 +71,4 @@ for name, rel, old, new in MUTANTS:
         survivors.append(name)
 print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
 sys.exit(1 if survivors else 0)
+

@@ -206,6 +206,11 @@ impl XPoint {
     pub(crate) fn approx(&self) -> Point2 {
         self.approx
     }
+
+    /// Sound enclosures of `x` and `y`, as `(lo, hi)` pairs.
+    pub(crate) fn enclosures(&self) -> ((f64, f64), (f64, f64)) {
+        ((self.bx.lo(), self.bx.hi()), (self.by.lo(), self.by.hi()))
+    }
 }
 
 /// A sign question about exact points.
@@ -412,26 +417,9 @@ fn quick(pred: &Pred<'_>) -> Option<Sign> {
 /// Never for points built by this module: every radicand is checked
 /// non-negative before a point carrying it is made, so the exact tier
 /// always has a real value to decide.
-pub static COUNTS: [std::sync::atomic::AtomicUsize; 12] =
-    [const { std::sync::atomic::AtomicUsize::new(0) }; 12];
 pub(crate) fn sign(pred: Pred<'_>) -> Sign {
     if let Some(sign) = quick(&pred) {
         return sign;
-    }
-    let k = match &pred {
-        Pred::Orient(..) => 0,
-        Pred::Dot(..) => 1,
-        Pred::OnCircle(..) => 2,
-        Pred::DiffX(..) => 3,
-        Pred::DiffY(..) => 4,
-        Pred::Tangents { .. } => 5,
-    };
-    COUNTS[k].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if matches!(
-        axiolid_exact::filter(&pred),
-        axiolid_guarantees::Certified::Uncertain { .. }
-    ) {
-        COUNTS[6 + k].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     certify(&pred).expect("predicates over constructed points are always defined")
 }

@@ -96,6 +96,29 @@ ring is a hole of the smallest outer containing it.
   result pieces leaving one vertex along the same tangent (curves touching
   tangentially exactly at a result vertex) are ranked equal; rings stay
   closed, but how touching rings are grouped is not specified.
-- **Performance work left.** Edge pairs are all tested (with box rejects);
-  a sweep or grid would help large rings. The tower allocates per
-  operation; a small-vector coefficient store would cut most of that.
+- **Broad phase (added after landing).** Each edge carries a padded
+  `f64` bounding box: the chord's box grown by the sagitta
+  `|bulge| * |chord| / 2`, which holds any arc, minor or major. Edge pairs
+  whose boxes are apart skip the exact crossing test, shared-edge checks
+  skip edges whose box cannot hold the sample, and linking looks up
+  candidate pieces in a list sorted by the lower `x` bound of their start
+  enclosure. Boxes only skip work; every decision is still exact. Measured
+  (release, alternating runs, two rounds):
+
+  | Scene | Before | After |
+  | --- | ---: | ---: |
+  | Disc crossing a rectangle | 152 us | 100 us |
+  | Round opening in a rounded wall | 120-133 us | 69-76 us |
+  | Disc through a wall end's corners | 1.02 ms | 0.75 ms |
+  | 512 arc edges vs a disc | 16.6 ms | 8.0 ms |
+  | Two 64-edge wavy rings | 53 ms | 1.9 ms |
+  | Two 256-edge wavy rings | 779 ms | 6.4-7.0 ms |
+  | Two 1024-edge wavy rings | (not run) | 32-33 ms |
+  | 4096-edge comb vs a local disc | 51-55 ms | 17 ms |
+
+  Growth is now close to linear in edge count; what remains per call is
+  per-edge setup (exact circle coefficients, monotone splitting, piece
+  samples), not pair tests.
+- **Performance work left.** The tower allocates per operation; a
+  small-vector coefficient store would cut most of that. Per-edge exact
+  setup could be deferred to edges whose box meets the other operand.

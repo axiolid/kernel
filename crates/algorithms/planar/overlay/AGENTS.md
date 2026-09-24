@@ -28,5 +28,9 @@ Planar booleans and offsets over validated regions.
   tessellated operands on random grid-snapped and decimal scenes.
 - `python3 scripts/probe_arc_overlay_mutants.py`: every listed fault must
   fail the suite.
-- `cargo bench -p axiolid-overlay --bench arc_overlay`: per-call cost and
-  scaling with edge count; quote it when claiming a speed change.
+- `cargo bench -p axiolid-overlay --bench arc_overlay`: per-call cost;
+  `SCALE=1` runs the edge-count scaling scenes instead. Quote it when
+  claiming a speed change.
+- Bounding boxes (`edge.rs::Bounds`) only skip work and must contain the
+  whole edge. Changing how they are built needs the mutation probe: the
+  oracle tests include major arcs and many-edge rings for this.

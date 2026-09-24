@@ -18,8 +18,13 @@ caret rule for `0.x` versions.
   are rounded to `f64` once, in the output, and edges shorter than the
   tolerance after rounding are merged. The public API is unchanged.
 - `cavalier_contours` is no longer a dependency. The arc path costs about
-  90 to 150 us per boolean on typical sections instead of about 1 us
+  70 to 100 us per boolean on typical sections instead of about 1 us
   (`benches/arc_overlay.rs`).
+- `arc_overlay` skips edge pairs whose padded bounding boxes are apart,
+  and links pieces through a sorted index instead of a scan. Decisions are
+  unchanged (still exact); cost now grows close to linearly with edge
+  count: two overlapping 256-edge rings went from 779 ms to 7 ms, a
+  4096-edge outline against a small disc from 53 ms to 17 ms.
 
 ### Fixed
 

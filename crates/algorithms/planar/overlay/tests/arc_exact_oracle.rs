@@ -323,6 +323,76 @@ fn tangent_and_concentric_circles() {
     check_scene(&c(0.0, 0.0, 1.0), &c(0.0, 0.0, 1.0), "same circle");
 }
 
+/// A ring of `n` alternating-bulge arcs on a circle: many short edges, so
+/// most edge pairs are far apart and only the broad phase decides that.
+fn wavy(n: usize, cx: f64, cy: f64, radius: f64, bulge: f64) -> ArcRing {
+    let step = std::f64::consts::TAU / n as f64;
+    ArcRing::new(
+        (0..n)
+            .map(|i| {
+                let t = i as f64 * step;
+                let b = if i % 2 == 0 { bulge } else { -bulge };
+                v(cx + radius * t.cos(), cy + radius * t.sin(), b)
+            })
+            .collect(),
+    )
+}
+
+/// A rectangle capped by a major arc (bulge 2, about 253 degrees). The cap
+/// reaches far beyond its chord on both sides, so a box built from the
+/// chord and the sagitta alone would miss it.
+fn mushroom(x: f64, y: f64, w: f64, h: f64) -> ArcRing {
+    ArcRing::new(vec![
+        v(x, y, 0.0),
+        v(x + w, y, 0.0),
+        v(x + w, y + h, 2.0),
+        v(x, y + h, 0.0),
+    ])
+}
+
+/// Scenes where only a few of many edge pairs can meet: the bounding-box
+/// broad phase must skip the rest without missing a crossing or a shared
+/// edge.
+#[test]
+fn many_edge_and_major_arc_scenes_match_both_oracles() {
+    let mut checked = 0;
+    for (n, dx, dy) in [(24, 1.1, 0.3), (48, 0.7, -0.4), (96, 1.9, 0.0)] {
+        let a = wavy(n, 0.0, 0.0, 2.0, 0.2);
+        let b = wavy(n / 2, dx, dy, 1.6, 0.35);
+        checked += check_scene(&a, &b, &format!("wavy {n} vs {} at ({dx}, {dy})", n / 2));
+    }
+    // A thin comb against a disc: many edges, a handful near the disc.
+    let mut pts = Vec::new();
+    for i in 0..12 {
+        let x = -3.0 + i as f64 * 0.5;
+        pts.push(Point2::new(x, 0.0));
+        pts.push(Point2::new(x + 0.2, 0.0));
+        pts.push(Point2::new(x + 0.2, 1.0));
+        pts.push(Point2::new(x + 0.3, 1.0));
+    }
+    pts.push(Point2::new(3.0, 0.0));
+    pts.push(Point2::new(3.0, -1.0));
+    pts.push(Point2::new(-3.0, -1.0));
+    let comb = ArcRing::from_points(&pts);
+    checked += check_scene(
+        &comb,
+        &ArcRing::circle(Point2::new(0.1, 0.2), 0.45),
+        "comb vs disc",
+    );
+    // Major-arc caps crossed away from their chord: at the top of the cap
+    // and at its sides, beyond the chord's ends.
+    let cap = mushroom(-0.5, -2.0, 1.0, 1.5);
+    for (cx, cy, r) in [(0.0, 0.3, 0.3), (0.6, -0.2, 0.2), (-0.62, -0.25, 0.15)] {
+        checked += check_scene(
+            &cap,
+            &ArcRing::circle(Point2::new(cx, cy), r),
+            &format!("mushroom vs disc at ({cx}, {cy}) r {r}"),
+        );
+    }
+    checked += check_scene(&cap, &wavy(32, 0.0, -0.3, 0.8, 0.3), "mushroom vs wavy");
+    assert!(checked > 10_000, "only {checked} membership checks");
+}
+
 /// The same scenes on a decimal grid (step 0.05): coordinates binary cannot
 /// hold, so constructed crossings land within rounding of vertices and
 /// output rounding has to keep every ring valid.

@@ -33,7 +33,9 @@ All notable changes to Axiolid are documented in this file.
   topological question exactly and no longer uses `cavalier_contours`.
   Checked against area identities and point membership on 270 scenes with
   shared edges, tangent and concentric circles, and decimal coordinates,
-  plus an eight-fault mutation probe.
+  plus a twelve-fault mutation probe. A bounding-box broad phase keeps the
+  cost close to linear in edge count (two overlapping 256-edge rings: 7 ms,
+  was 779 ms before it).
 - Curved coaxial booleans (#120): `boolean_arc_prisms_exact` now returns
   solids with round through-openings and solids that start above the
   ground plane, instead of refusing them.

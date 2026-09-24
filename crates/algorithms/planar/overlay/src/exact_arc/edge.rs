@@ -50,6 +50,59 @@ pub(crate) enum Carrier {
     },
 }
 
+/// A conservative axis-aligned box around an edge, in plain `f64`.
+///
+/// Only a broad-phase filter: two edges whose boxes are apart cannot meet,
+/// so their exact crossing test is skipped. Soundness needs the box to
+/// contain the whole edge, never tightness; it is padded far beyond any
+/// rounding in its own computation, so a missed pair would need an error
+/// many orders of magnitude larger than `f64` arithmetic can make.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Bounds {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+}
+
+impl Bounds {
+    fn around(points: &[Point2], grow: f64) -> Self {
+        let mut b = Self {
+            x0: f64::INFINITY,
+            y0: f64::INFINITY,
+            x1: f64::NEG_INFINITY,
+            y1: f64::NEG_INFINITY,
+        };
+        for p in points {
+            b.x0 = b.x0.min(p.x);
+            b.y0 = b.y0.min(p.y);
+            b.x1 = b.x1.max(p.x);
+            b.y1 = b.y1.max(p.y);
+        }
+        // Relative padding: every quantity above carries a relative error
+        // of a few ulps; 1e-9 of the magnitude is a million times that.
+        let scale = b.x0.abs().max(b.x1.abs()).max(b.y0.abs()).max(b.y1.abs()) + grow.abs();
+        let pad = grow.abs() + 1e-9 * scale + f64::MIN_POSITIVE;
+        Self {
+            x0: b.x0 - pad,
+            y0: b.y0 - pad,
+            x1: b.x1 + pad,
+            y1: b.y1 + pad,
+        }
+    }
+
+    /// Whether the boxes share a point. Closed: touching counts.
+    pub(crate) fn overlaps(&self, other: &Self) -> bool {
+        self.x0 <= other.x1 && other.x0 <= self.x1 && self.y0 <= other.y1 && other.y0 <= self.y1
+    }
+
+    /// Whether the box may contain a point whose coordinates lie in the
+    /// given enclosures.
+    pub(crate) fn may_hold(&self, x: (f64, f64), y: (f64, f64)) -> bool {
+        self.x0 <= x.1 && x.0 <= self.x1 && self.y0 <= y.1 && y.0 <= self.y1
+    }
+}
+
 /// One input edge.
 #[derive(Debug, Clone)]
 pub(crate) struct Edge {
@@ -58,10 +111,25 @@ pub(crate) struct Edge {
     p0f: Point2,
     d: (Dyadic, Dyadic),
     pub(crate) carrier: Carrier,
+    pub(crate) bounds: Bounds,
 }
 
 fn half(value: &Dyadic) -> Dyadic {
     value.mul(&dy(0.5))
+}
+
+/// The box of an edge from `from` to `to` with the given bulge.
+///
+/// Every point of the arc lies within the sagitta `|b| * |chord| / 2` of
+/// the chord's box, for any bulge:
+/// - a minor arc (`|b| <= 1`) stays in the band over its chord no higher
+///   than the sagitta;
+/// - a major arc stays within `|C - M| + r` of the chord midpoint `M`,
+///   and with `|C - M| = |chord| (b^2 - 1) / (4 |b|)` and
+///   `r = |chord| (1 + b^2) / (4 |b|)` that sum is the sagitta.
+fn edge_bounds(from: Point2, to: Point2, bulge: f64) -> Bounds {
+    let chord = ((to.x - from.x).powi(2) + (to.y - from.y).powi(2)).sqrt();
+    Bounds::around(&[from, to], bulge.abs() * chord / 2.0)
 }
 
 impl Edge {
@@ -103,6 +171,7 @@ impl Edge {
             p0f: from,
             d,
             carrier,
+            bounds: edge_bounds(from, to, bulge),
         }
     }
 

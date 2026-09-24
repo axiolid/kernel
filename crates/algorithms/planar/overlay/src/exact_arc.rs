@@ -324,7 +324,8 @@ fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
     let mut out = Vec::new();
     for (index, edge) in own.iter().enumerate() {
         let mut stops = vec![edge.p0.clone(), edge.p1.clone()];
-        for theirs in other {
+        // Broad phase: edges whose boxes are apart cannot meet.
+        for theirs in other.iter().filter(|t| t.bounds.overlaps(&edge.bounds)) {
             for x in crossings(edge, theirs) {
                 if !stops.iter().any(|y| same_point(y, &x)) {
                     stops.push(x);
@@ -356,7 +357,8 @@ fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
 }
 
 fn classify(piece: &Piece, other: &[Edge], parts: &[Mono]) -> Status {
-    for edge in other {
+    let (sx, sy) = piece.sample.enclosures();
+    for edge in other.iter().filter(|e| e.bounds.may_hold(sx, sy)) {
         if edge.contains(&piece.sample) {
             let theirs = tangent_of(edge);
             let dot = sign(Pred::Tangents {
@@ -429,15 +431,69 @@ fn turn_rank(at: &XPoint, din: &Tangent, d: &Tangent) -> u8 {
     }
 }
 
+/// Pieces indexed by the lower `x` bound of their start point's enclosure.
+///
+/// Equal exact points have overlapping enclosures, so a piece starting at
+/// `at` has `lo <= at.hi` and `lo >= at.lo - width`, where `width` is its
+/// own box width: a range query over sorted lower bounds widened by the
+/// largest width (`reach`) cannot miss one. Unbounded boxes make `reach`
+/// infinite and degrade the query to a scan, never to a wrong answer.
+struct StartIndex {
+    by_lo: Vec<(f64, usize)>,
+    reach: f64,
+}
+
+impl StartIndex {
+    fn new(pool: &[Option<Piece>]) -> Self {
+        let mut reach = 0.0f64;
+        let mut by_lo = Vec::with_capacity(pool.len());
+        for (index, piece) in pool.iter().enumerate() {
+            let Some(piece) = piece else { continue };
+            let ((lo, hi), _) = piece.from.enclosures();
+            let width = hi - lo;
+            reach = if width.is_nan() {
+                f64::INFINITY
+            } else {
+                reach.max(width)
+            };
+            by_lo.push((lo, index));
+        }
+        by_lo.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Self { by_lo, reach }
+    }
+
+    /// Indices of pieces that may start at `at`, ascending.
+    fn candidates(&self, at: &XPoint) -> Vec<usize> {
+        let ((lo, hi), _) = at.enclosures();
+        let floor = lo - self.reach;
+        let first = self.by_lo.partition_point(|entry| entry.0 < floor);
+        let mut out: Vec<usize> = self.by_lo[first..]
+            .iter()
+            .take_while(|entry| entry.0 <= hi)
+            .map(|entry| entry.1)
+            .collect();
+        // Ascending index keeps tie-breaking independent of box order.
+        out.sort_unstable();
+        out
+    }
+}
+
 /// Link pieces into closed rings.
 ///
 /// Two pieces leaving one vertex along the same tangent (curves touching
 /// tangentially at a vertex of the result) are ranked equal; the first is
 /// taken. Rings stay closed either way; only how touching rings are
 /// grouped could differ, which is a known limit (ADR 0070).
-fn link(mut pool: Vec<Piece>) -> Result<Vec<Vec<Piece>>, OverlayError> {
+fn link(pieces: Vec<Piece>) -> Result<Vec<Vec<Piece>>, OverlayError> {
+    let mut pool: Vec<Option<Piece>> = pieces.into_iter().map(Some).collect();
+    let index = StartIndex::new(&pool);
     let mut rings = Vec::new();
-    while let Some(first) = pool.pop() {
+    let mut cursor = pool.len();
+    while cursor > 0 {
+        cursor -= 1;
+        let Some(first) = pool[cursor].take() else {
+            continue;
+        };
         let start = first.from.clone();
         let mut ring = vec![first];
         loop {
@@ -448,7 +504,10 @@ fn link(mut pool: Vec<Piece>) -> Result<Vec<Vec<Piece>>, OverlayError> {
             let at = last.to.clone();
             let din = last.tangent.clone();
             let mut best: Option<(usize, u8)> = None;
-            for (index, cand) in pool.iter().enumerate() {
+            for candidate in index.candidates(&at) {
+                let Some(cand) = &pool[candidate] else {
+                    continue;
+                };
                 if !same_point(&cand.from, &at) {
                     continue;
                 }
@@ -459,9 +518,10 @@ fn link(mut pool: Vec<Piece>) -> Result<Vec<Vec<Piece>>, OverlayError> {
                     // Within the left or the right half, the more
                     // counter-clockwise direction comes first.
                     Some((b, best_rank)) if rank == best_rank && rank != 1 && rank != 3 => {
+                        let held = pool[b].as_ref().expect("best is unused");
                         sign(Pred::Tangents {
                             at: &at,
-                            u: &pool[b].tangent,
+                            u: &held.tangent,
                             v: &cand.tangent,
                             cross: true,
                         }) == Sign::Positive
@@ -469,14 +529,14 @@ fn link(mut pool: Vec<Piece>) -> Result<Vec<Vec<Piece>>, OverlayError> {
                     _ => false,
                 };
                 if better {
-                    best = Some((index, rank));
+                    best = Some((candidate, rank));
                 }
             }
             // With simple operands every vertex has as many kept pieces
             // leaving as arriving; a dead end means an operand crosses
             // itself.
-            let (index, _) = best.ok_or(OverlayError::SelfIntersection)?;
-            ring.push(pool.swap_remove(index));
+            let (chosen, _) = best.ok_or(OverlayError::SelfIntersection)?;
+            ring.push(pool[chosen].take().expect("chosen piece is unused"));
         }
         rings.push(ring);
     }
@@ -541,7 +601,6 @@ pub(crate) fn boolean(
     let a_parts: Vec<Mono> = a_edges.iter().flat_map(monotone).collect();
     let b_parts: Vec<Mono> = b_edges.iter().flat_map(monotone).collect();
 
-    let t0 = std::time::Instant::now();
     let mut kept = Vec::new();
     for (side, own, other, parts, ring) in [
         (Side::Subject, &a_edges, &b_edges, &b_parts, subject),
@@ -555,20 +614,7 @@ pub(crate) fn boolean(
         }
     }
 
-    let t1 = t0.elapsed();
-    let c1: Vec<usize> = point::COUNTS
-        .iter()
-        .map(|c| c.swap(0, std::sync::atomic::Ordering::Relaxed))
-        .collect();
     let rings = link(kept)?;
-    let t2 = t0.elapsed();
-    let c2: Vec<usize> = point::COUNTS
-        .iter()
-        .map(|c| c.swap(0, std::sync::atomic::Ordering::Relaxed))
-        .collect();
-    if std::env::var("ZZ").is_ok() {
-        eprintln!("split+classify {t1:?} {c1:?} | link {:?} {c2:?}", t2 - t1);
-    }
     let mut outers: Vec<(ArcRing, f64, Vec<Mono>)> = Vec::new();
     let mut holes: Vec<(ArcRing, XPoint)> = Vec::new();
     for pieces in &rings {
@@ -601,13 +647,6 @@ pub(crate) fn boolean(
                 }
             }
         }
-    }
-    if std::env::var("ZZ").is_ok() {
-        let c3: Vec<usize> = point::COUNTS
-            .iter()
-            .map(|c| c.swap(0, std::sync::atomic::Ordering::Relaxed))
-            .collect();
-        eprintln!("  nest {:?} {c3:?}", t0.elapsed());
     }
     Ok(regions)
 }
