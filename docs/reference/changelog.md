@@ -6,6 +6,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.1 - 2026-09-24
+
+### Fixed
+
+- `extrude` (and so `extrude_profile` and the reference mesh compiler) wound
+  a solid inside-out when the extrusion direction pointed below the profile
+  plane (`direction.z < 0`), e.g. an opening body extruded downward from its
+  lintel (#166). The signed volume was `-area * depth`, so any boolean using
+  the solid refused it as inside-out. Such a solid is now outward-oriented
+  with the same magnitude, for outer and hole loops alike.
+- `half_space::bounded_half_space_in_frame` now places the boundary at the
+  authored frame's origin, projected onto the clip plane (#164). It used to
+  take only the frame's axes and anchor the boundary at the clip plane's
+  origin, so a boundary frame offset within the plane cut the wrong region
+  with no error: the mesh stayed closed and correctly wound. The offset along
+  the normal is still dropped, so the sweep starts on the clip plane and
+  polarity and depth are unchanged. `ReferenceMeshCompiler` passes
+  `BoundedHalfSpace.placement.translation` as that origin, so compiled
+  bounded half-spaces now honour the placement's translation as well as its
+  rotation.
+
 ### 0.3.0 - 2026-09-23
 
 ### Added

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-24
+
 ### Fixed
 
 - `extrude` (and so `extrude_profile` and the reference mesh compiler) wound
