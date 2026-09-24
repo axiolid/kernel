@@ -140,6 +140,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.1 - 2026-09-24
+
+### Added
+
+- `PolygonMesh` faces that are not plain triangles compile (#160): n-gons,
+  concave faces and faces with holes (IFC4 `IfcIndexedPolygonalFaceWithVoids`)
+  are triangulated in their own plane, keeping the authored positions and
+  winding. Plain triangles keep their exact corner order as before. A face
+  whose corners leave its plane by more than the linear tolerance, that has
+  no area, or whose rings cross is refused with an error naming its index.
+- B-reps with shells but no solid tessellate (#161): every shell is
+  tessellated as authored and the result is reported as
+  `MeshClosure::Surface` through `compile_mesh_reported`, even when the
+  shell is closed. Collections are `Solid` only if every member is, and a
+  boolean with a surface operand is refused. Authored meshes report
+  `Solid` exactly when they are closed, consistently wound two-manifolds.
+
+### Changed
+
+- A `PolygonMesh` with non-triangular faces used to fail with
+  `GeomError::Unsupported`; it now compiles. A B-rep with no solid and no
+  shell is refused as "neither a solid nor a shell" instead of "has no
+  solid".
+
 ### 0.3.0 - 2026-09-23
 
 ### Fixed
@@ -155,6 +179,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile-contract
+
+### 0.3.1 - 2026-09-24
+
+### Added
+
+- `MeshClosure` and `CompileOutcome::closure` (#161): whether a compiled mesh
+  bounds a solid (`Solid`), is a surface model with area but no volume
+  (`Surface`), or was not reported (`Unknown`, the default for `untracked`
+  and `tracked`, so existing compilers build unchanged).
+  `CompileOutcome::solid_mesh` returns the mesh only for `Solid`, so volume
+  readers refuse a surface model instead of measuring a closed shell the
+  source never declared a solid. `with_closure` sets it.
 
 ### 0.3.0 - 2026-09-23
 
