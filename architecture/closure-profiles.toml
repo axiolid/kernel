@@ -258,6 +258,8 @@ features = []
 
 # Deliberately broad and frozen: this is the application bundle. Narrow callers
 # continue to use the leaf profiles above and must not acquire this closure.
+# `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
+# topology exactly with it (ADR 0070).
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -267,9 +269,10 @@ expected_internal = [
     "axiolid-contracts",
     "axiolid-core",
     "axiolid-curve",
-    "axiolid-dispatch",
     "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
     "axiolid-evaluate",
+    "axiolid-exact",
     "axiolid-guarantees",
     "axiolid-linear",
     "axiolid-measure",
@@ -279,8 +282,8 @@ expected_internal = [
     "axiolid-mesh-contracts",
     "axiolid-mesh-section-contract",
     "axiolid-model",
-    "axiolid-overlay",
     "axiolid-nurbs",
+    "axiolid-overlay",
     "axiolid-predicates",
     "axiolid-primitive",
     "axiolid-profile",
@@ -300,6 +303,8 @@ description = "Versioned native boundary over the supported portable application
 features = []
 
 # This closure is deliberately the Rust application bundle plus only the ABI boundary.
+# `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
+# topology exactly with it (ADR 0070).
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -310,9 +315,10 @@ expected_internal = [
     "axiolid-contracts",
     "axiolid-core",
     "axiolid-curve",
-    "axiolid-dispatch",
     "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
     "axiolid-evaluate",
+    "axiolid-exact",
     "axiolid-guarantees",
     "axiolid-linear",
     "axiolid-measure",
@@ -322,8 +328,8 @@ expected_internal = [
     "axiolid-mesh-contracts",
     "axiolid-mesh-section-contract",
     "axiolid-model",
-    "axiolid-overlay",
     "axiolid-nurbs",
+    "axiolid-overlay",
     "axiolid-predicates",
     "axiolid-primitive",
     "axiolid-profile",
@@ -519,6 +525,8 @@ features = []
 #
 # The ceiling: narrow profiles assert what a focused application AVOIDS
 # compiling; this one records the cost when nothing is avoided.
+# `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
+# topology exactly with it (ADR 0070).
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -528,10 +536,11 @@ expected_internal = [
     "axiolid-construct",
     "axiolid-contracts",
     "axiolid-core",
-    "axiolid-dispatch",
     "axiolid-curve",
     "axiolid-curve-evaluate-contract",
+    "axiolid-dispatch",
     "axiolid-evaluate",
+    "axiolid-exact",
     "axiolid-guarantees",
     "axiolid-heal",
     "axiolid-linear",

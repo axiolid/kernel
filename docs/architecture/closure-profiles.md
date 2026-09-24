@@ -11,12 +11,12 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `2d-curves` | 3 | A 2D plan-geometry application: curves, affine transforms, and application-owned unit conversion without solids or CSG. |
 | `parametric-curves` | 8 | A parametric application: curve/surface values plus scalar evaluation, without the reference umbrella. |
 | `cad-exact` | 12 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
-| `rust-facade-application` | 31 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
-| `c-abi-profile` | 32 | Versioned native boundary over the supported portable application provider bundle. |
+| `rust-facade-application` | 32 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
+| `c-abi-profile` | 33 | Versioned native boundary over the supported portable application provider bundle. |
 | `core-only` | 1 | The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable. |
 | `spatial-rule-checker` | 2 | A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all. |
 | `linear-data` | 2 | Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm. |
-| `full` | 33 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
+| `full` | 34 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
 
 ## linear-intersection-minimal
 
@@ -124,6 +124,7 @@ Compiles exactly these internal packages:
 - `axiolid-curve-evaluate-contract`
 - `axiolid-dispatch`
 - `axiolid-evaluate`
+- `axiolid-exact`
 - `axiolid-guarantees`
 - `axiolid-linear`
 - `axiolid-measure`
@@ -167,6 +168,7 @@ Compiles exactly these internal packages:
 - `axiolid-curve-evaluate-contract`
 - `axiolid-dispatch`
 - `axiolid-evaluate`
+- `axiolid-exact`
 - `axiolid-guarantees`
 - `axiolid-linear`
 - `axiolid-measure`
@@ -248,6 +250,7 @@ Compiles exactly these internal packages:
 - `axiolid-curve-evaluate-contract`
 - `axiolid-dispatch`
 - `axiolid-evaluate`
+- `axiolid-exact`
 - `axiolid-guarantees`
 - `axiolid-heal`
 - `axiolid-linear`

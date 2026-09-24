@@ -174,6 +174,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-exact"
+version = "0.1.0"
+dependencies = [
+ "axiolid-core",
+ "axiolid-guarantees",
+ "num-bigint",
+ "num-integer",
+]
+
+[[package]]
 name = "axiolid-guarantees"
 version = "0.3.0"
 
@@ -271,7 +281,8 @@ name = "axiolid-overlay"
 version = "0.3.0"
 dependencies = [
  "axiolid-core",
- "cavalier_contours",
+ "axiolid-exact",
+ "axiolid-guarantees",
  "i_overlay",
 ]
 
@@ -358,18 +369,6 @@ name = "axiolid-topology"
 version = "0.3.0"
 dependencies = [
  "axiolid-core",
-]
-
-[[package]]
-name = "cavalier_contours"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85e06038a969c5e4d93565f12b044814d3b1a48d50c4ef868d588e79956fea51"
-dependencies = [
- "ahash",
- "num-traits",
- "smallvec",
- "static_aabb2d_index",
 ]
 
 [[package]]
@@ -466,6 +465,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -503,21 +521,6 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
-
-[[package]]
-name = "smallvec"
-version = "1.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
-
-[[package]]
-name = "static_aabb2d_index"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a753368e4dd146a347d0ea692f0f8a37df18df7eee5659d36dd75eb287c6454"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "syn"
