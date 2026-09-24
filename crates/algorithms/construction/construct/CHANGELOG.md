@@ -9,13 +9,22 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
+  (#120): coaxial booleans whose result falls apart into separate pieces
+  return one solid per piece, ordered by lowest vertex (x, then y), each
+  audited on its own. An empty result is an empty list. The single-solid
+  functions keep refusing a disconnected result, so callers that expect
+  one solid are not silently handed the first piece.
+
 ### Changed
 
 - `boolean_arc_prisms_exact` runs on the exact arc overlay (ADR 0070) and
   builds results it used to refuse: a result with interior holes becomes a
   solid with through-passages (#120), and a result starting above `z = 0`
-  is extruded from its own base height. Disconnected results and stepped
-  spans are still refused.
+  is extruded from its own base height. Stepped spans are still refused;
+  disconnected results go through the `_solids` variants.
 
 ### Fixed
 

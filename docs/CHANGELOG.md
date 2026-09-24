@@ -44,9 +44,14 @@ All notable changes to Axiolid are documented in this file.
 - Curved coaxial booleans (#120): `boolean_arc_prisms_exact` now returns
   solids with round through-openings and solids that start above the
   ground plane, instead of refusing them.
+- Disconnected coaxial booleans (#120): `boolean_prisms_exact_solids` and
+  `boolean_arc_prisms_exact_solids` return one solid per separate piece,
+  in a fixed order, instead of refusing.
 
 ### Fixed
 
+- The planar overlay accepts U-shapes and combs: two collinear edges that
+  do not touch were misreported as a self-intersection.
 - Exact surface intersection no longer mistakes an exact tangency,
   parallel or perpendicular case for a nearby float answer (#119): a
   tangent sphere/plane pair used to yield a circle of radius 1e-7.

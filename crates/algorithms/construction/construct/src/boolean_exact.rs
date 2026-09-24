@@ -33,8 +33,8 @@ use axiolid_brep::{ExactBRep, FaceName, Operand, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{BooleanOperator, Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_overlay::{
-    arc_overlay, overlay, validate_arc_ring, ArcRing, FillRule, OverlayInput, OverlayOperation,
-    Polygon, Ring,
+    arc_overlay, overlay, validate_arc_ring, ArcPolygon, ArcRing, FillRule, OverlayInput,
+    OverlayOperation, Polygon, Ring,
 };
 
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
@@ -87,30 +87,86 @@ pub struct ArcPrism {
 ///
 /// Returns an exact B-rep, or a typed refusal naming why the result is not
 /// itself a prism. Never falls back to a mesh.
+///
+/// A result that falls apart into several separate solids is refused here,
+/// because one `ExactBRep` is one solid and returning just one piece would
+/// silently discard material. [`boolean_prisms_exact_solids`] returns every
+/// piece.
 pub fn boolean_prisms_exact(
     subject: &Prism,
     tool: &Prism,
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    let (bottom, top) = prism_span(subject, tool, operator, tolerance)?;
+    let polygons = prism_sections(subject, tool, operator, tolerance)?;
+    single_solid(
+        polygons,
+        "prism boolean produced an empty cross-section",
+        "exact prism boolean producing disconnected components \
+         (boolean_prisms_exact_solids returns every piece)",
+        |polygon| prism_solid(polygon, subject, tool, (bottom, top), tolerance),
+    )
+}
+
+/// Exact boolean of two coaxial prisms, one exact B-rep per separate piece.
+///
+/// Same reduction and refusals as [`boolean_prisms_exact`], except that a
+/// result which falls apart into several solids (a difference cutting a
+/// wall in two, an intersection of two separate islands) returns every
+/// piece instead of refusing, and an empty result is an empty list rather
+/// than an error.
+///
+/// Solids are ordered by the lowest vertex of their outer boundary, `x`
+/// first and then `y`, so the order is stable across runs and does not
+/// depend on the overlay's internal traversal.
+pub fn boolean_prisms_exact_solids(
+    subject: &Prism,
+    tool: &Prism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<ExactBRep>> {
+    let Some((bottom, top)) = empty_span_is_none(prism_span(subject, tool, operator, tolerance))?
+    else {
+        return Ok(Vec::new());
+    };
+    // `overlay` already orders polygons by their lowest outer vertex (its
+    // documented contract), which is the order the arc path sorts into.
+    let polygons = prism_sections(subject, tool, operator, tolerance)?;
+    polygons
+        .iter()
+        .map(|polygon| prism_solid(polygon, subject, tool, (bottom, top), tolerance))
+        .collect()
+}
+
+/// Validate both prisms and settle the height span of the result.
+///
+/// Height logic decides whether a prism can represent the answer at all,
+/// so it is settled before any planar work.
+fn prism_span(
+    subject: &Prism,
+    tool: &Prism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<(Scalar, Scalar)> {
     validate(subject, "subject")?;
     validate(tool, "tool")?;
-
-    // Height logic decides whether a prism can represent the answer at all,
-    // so it is settled before any planar work.
-    let (bottom, top) = resolve_span(
+    resolve_span(
         (subject.bottom, subject.top),
         (tool.bottom, tool.top),
         operator,
         tolerance,
-    )?;
-    let operation = match operator {
-        BooleanOperator::Intersection => OverlayOperation::Intersection,
-        BooleanOperator::Union => OverlayOperation::Union,
-        BooleanOperator::Difference => OverlayOperation::Difference,
-        _ => return Err(unsupported("unknown exact prism boolean operator")),
-    };
+    )
+}
 
+/// The planar boolean of the two cross-sections, one polygon per piece.
+fn prism_sections(
+    subject: &Prism,
+    tool: &Prism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<Polygon>> {
+    let operation = overlay_operation(operator)?;
     let frame = Frame2 {
         origin: Vec2::ZERO,
         x: Vec2::X,
@@ -133,21 +189,17 @@ pub fn boolean_prisms_exact(
         backend: BACKEND_ID,
         detail: format!("exact prism cross-section overlay failed: {error:?}"),
     })?;
+    Ok(result.polygons)
+}
 
-    if result.polygons.is_empty() {
-        return Err(GeomError::Degenerate(
-            "prism boolean produced an empty cross-section".to_owned(),
-        ));
-    }
-    // A disconnected result is several solids, and one ExactBRep is one
-    // solid. Returning just the first would silently discard material.
-    if result.polygons.len() > 1 {
-        return Err(unsupported(
-            "exact prism boolean producing disconnected components",
-        ));
-    }
-
-    let polygon = &result.polygons[0];
+/// Extrude one result piece and name its faces after the operands.
+fn prism_solid(
+    polygon: &Polygon,
+    subject: &Prism,
+    tool: &Prism,
+    (bottom, top): (Scalar, Scalar),
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
     let mut rings = Vec::with_capacity(1 + polygon.holes.len());
     rings.push(polygon.outer.points.clone());
     for hole in &polygon.holes {
@@ -184,6 +236,58 @@ pub fn boolean_prisms_exact(
     // are fragments of whichever operand supplied each bound.
     name_caps(&mut solid, subject, tool, bottom, top, tolerance);
     gate_geometry(solid, tolerance)
+}
+
+/// The one solid a single-result boolean may return.
+///
+/// Empty and multi-piece results are refused with the messages callers
+/// already match on: one `ExactBRep` is one solid, and returning just one
+/// piece would silently discard material.
+fn single_solid<T>(
+    pieces: Vec<T>,
+    empty: &'static str,
+    disconnected: &'static str,
+    build: impl FnOnce(&T) -> GeomResult<ExactBRep>,
+) -> GeomResult<ExactBRep> {
+    match pieces.as_slice() {
+        [] => Err(GeomError::Degenerate(empty.to_owned())),
+        [only] => build(only),
+        _ => Err(unsupported(disconnected)),
+    }
+}
+
+/// Map an empty height span to `None`; every other refusal stays an error.
+///
+/// For the multi-solid entry points an empty result is a valid answer (an
+/// empty list), not a failure.
+fn empty_span_is_none(span: GeomResult<(Scalar, Scalar)>) -> GeomResult<Option<(Scalar, Scalar)>> {
+    match span {
+        Ok(span) => Ok(Some(span)),
+        Err(GeomError::Degenerate(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Order boundaries by their lowest vertex, `x` then `y`.
+fn lowest_first(a: &[Point2], b: &[Point2]) -> std::cmp::Ordering {
+    let key = |ring: &[Point2]| {
+        ring.iter()
+            .copied()
+            .min_by(|p, q| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)))
+    };
+    match (key(a), key(b)) {
+        (Some(p), Some(q)) => p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)),
+        (a, b) => a.is_some().cmp(&b.is_some()),
+    }
+}
+
+fn overlay_operation(operator: BooleanOperator) -> GeomResult<OverlayOperation> {
+    match operator {
+        BooleanOperator::Intersection => Ok(OverlayOperation::Intersection),
+        BooleanOperator::Union => Ok(OverlayOperation::Union),
+        BooleanOperator::Difference => Ok(OverlayOperation::Difference),
+        _ => Err(unsupported("unknown exact prism boolean operator")),
+    }
 }
 
 fn validate(prism: &Prism, role: &'static str) -> GeomResult<()> {
@@ -283,13 +387,60 @@ fn cap_operand(
 /// # Refused
 ///
 /// A result with several disconnected regions (one `ExactBRep` is one
-/// solid) and the stepped spans [`boolean_prisms_exact`] also refuses.
+/// solid; [`boolean_arc_prisms_exact_solids`] returns every piece) and the
+/// stepped spans [`boolean_prisms_exact`] also refuses.
 pub fn boolean_arc_prisms_exact(
     subject: &ArcPrism,
     tool: &ArcPrism,
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    let span = arc_prism_span(subject, tool, operator, tolerance)?;
+    let regions = arc_prism_sections(subject, tool, operator, tolerance)?;
+    single_solid(
+        regions,
+        "arc prism boolean produced an empty cross-section",
+        "exact arc prism boolean producing disconnected components \
+         (boolean_arc_prisms_exact_solids returns every piece)",
+        |region| arc_prism_solid(region, span, tolerance),
+    )
+}
+
+/// Exact boolean of two coaxial arc prisms, one exact B-rep per piece.
+///
+/// Same reduction and refusals as [`boolean_arc_prisms_exact`], except that
+/// a result which falls apart into several solids returns every piece, and
+/// an empty result is an empty list rather than an error. Solids are
+/// ordered as in [`boolean_prisms_exact_solids`]: by the lowest vertex of
+/// their outer boundary, `x` first and then `y`.
+pub fn boolean_arc_prisms_exact_solids(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<ExactBRep>> {
+    let Some(span) = empty_span_is_none(arc_prism_span(subject, tool, operator, tolerance))? else {
+        return Ok(Vec::new());
+    };
+    let mut regions = arc_prism_sections(subject, tool, operator, tolerance)?;
+    regions.sort_by(|a, b| lowest_first(&arc_points(&a.outer), &arc_points(&b.outer)));
+    regions
+        .iter()
+        .map(|region| arc_prism_solid(region, span, tolerance))
+        .collect()
+}
+
+fn arc_points(ring: &ArcRing) -> Vec<Point2> {
+    ring.vertices.iter().map(|vertex| vertex.point).collect()
+}
+
+/// Validate both arc prisms and settle the height span of the result.
+fn arc_prism_span(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<(Scalar, Scalar)> {
     for (section, role) in [(&subject.section, "subject"), (&tool.section, "tool")] {
         validate_arc_ring(section, tolerance).map_err(|error| {
             GeomError::InvalidInput(format!("{role} arc prism section: {error:?}"))
@@ -309,21 +460,22 @@ pub fn boolean_arc_prisms_exact(
             "arc prism top must lie above its bottom".to_owned(),
         ));
     }
-
-    let (bottom, top) = resolve_span(
+    resolve_span(
         (subject.bottom, subject.top),
         (tool.bottom, tool.top),
         operator,
         tolerance,
-    )?;
+    )
+}
 
-    let operation = match operator {
-        BooleanOperator::Intersection => OverlayOperation::Intersection,
-        BooleanOperator::Union => OverlayOperation::Union,
-        BooleanOperator::Difference => OverlayOperation::Difference,
-        _ => return Err(unsupported("unknown exact prism boolean operator")),
-    };
-
+/// The exact planar boolean of the two arc sections, one region per piece.
+fn arc_prism_sections(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<ArcPolygon>> {
+    let operation = overlay_operation(operator)?;
     let result =
         arc_overlay(&subject.section, &tool.section, operation, tolerance).map_err(|error| {
             GeomError::BackendContractViolation {
@@ -331,21 +483,15 @@ pub fn boolean_arc_prisms_exact(
                 detail: format!("arc prism cross-section overlay failed: {error:?}"),
             }
         })?;
+    Ok(result.regions)
+}
 
-    if result.regions.is_empty() {
-        return Err(GeomError::Degenerate(
-            "arc prism boolean produced an empty cross-section".to_owned(),
-        ));
-    }
-    // One ExactBRep is one solid, so several regions cannot be returned
-    // without silently discarding material.
-    if result.regions.len() > 1 {
-        return Err(unsupported(
-            "exact arc prism boolean producing disconnected components",
-        ));
-    }
-
-    let region = &result.regions[0];
+/// Extrude one arc region between the result's heights.
+fn arc_prism_solid(
+    region: &ArcPolygon,
+    (bottom, top): (Scalar, Scalar),
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
     // Holes are through-openings: each becomes its own wall ring and a
     // second bound on both caps. The result may start above z = 0 (an
     // intersection with a raised tool), so the section is extruded from
