@@ -28,6 +28,7 @@
 //! 6. Counter-clockwise rings are outer boundaries; each clockwise ring is
 //!    a hole of the smallest outer that contains it.
 
+pub(crate) mod arrangement;
 mod edge;
 mod point;
 
@@ -69,6 +70,10 @@ struct Piece {
     arc: Option<(Circle, Sign)>,
     /// The original bulge when the piece is a whole input edge.
     whole_bulge: Option<f64>,
+    /// Caller-assigned identity, carried through linking unchanged.
+    tag: usize,
+    /// Whether the piece runs against the direction it was cut in.
+    flipped: bool,
 }
 
 impl Piece {
@@ -84,6 +89,8 @@ impl Piece {
             tangent,
             arc: self.arc.map(|(c, turn)| (c, turn.flip())),
             whole_bulge: self.whole_bulge.map(|b| -b),
+            tag: self.tag,
+            flipped: !self.flipped,
         }
     }
 
@@ -350,6 +357,8 @@ fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
                 tangent: tangent_of(edge),
                 arc: arc.clone(),
                 whole_bulge: (!split && arc.is_some()).then(|| ring.vertices[index].bulge),
+                tag: 0,
+                flipped: false,
             });
         }
     }
@@ -614,22 +623,36 @@ pub(crate) fn boolean(
         }
     }
 
+    Ok(assemble(kept)?
+        .into_iter()
+        .map(|(outer, holes)| (to_ring(&outer), holes.iter().map(|h| to_ring(h)).collect()))
+        .collect())
+}
+
+/// A region as linked pieces: the outer ring and its holes.
+type PieceRegion = (Vec<Piece>, Vec<Vec<Piece>>);
+
+/// Link kept pieces into rings and group them into regions.
+///
+/// Counter-clockwise rings are outer boundaries; each clockwise ring is a
+/// hole of the smallest outer that contains it. Shared by the two-operand
+/// boolean and the multi-ring subdivision so both group rings one way.
+fn assemble(kept: Vec<Piece>) -> Result<Vec<PieceRegion>, OverlayError> {
     let rings = link(kept)?;
-    let mut outers: Vec<(ArcRing, f64, Vec<Mono>)> = Vec::new();
-    let mut holes: Vec<(ArcRing, XPoint)> = Vec::new();
-    for pieces in &rings {
-        let ring = to_ring(pieces);
-        let area = arc_ring_area(&ring);
+    let mut outers: Vec<(Vec<Piece>, f64, Vec<Mono>)> = Vec::new();
+    let mut holes: Vec<(Vec<Piece>, XPoint)> = Vec::new();
+    for pieces in rings {
+        let area = arc_ring_area(&to_ring(&pieces));
         if area > 0.0 {
-            outers.push((ring, area, ring_parts(pieces)));
+            let parts = ring_parts(&pieces);
+            outers.push((pieces, area, parts));
         } else {
-            holes.push((ring, pieces[0].sample.clone()));
+            let probe = pieces[0].sample.clone();
+            holes.push((pieces, probe));
         }
     }
-    let mut regions: Vec<(ArcRing, Vec<ArcRing>)> = outers
-        .iter()
-        .map(|(ring, _, _)| (ring.clone(), Vec::new()))
-        .collect();
+    let mut regions: Vec<PieceRegion> = Vec::with_capacity(outers.len());
+    let mut owners: Vec<Vec<Vec<Piece>>> = vec![Vec::new(); outers.len()];
     for (hole, probe) in holes {
         let owner = outers
             .iter()
@@ -640,13 +663,16 @@ pub(crate) fn boolean(
         // A hole with no containing outer cannot come out of a boolean of
         // simple rings; keep it rather than lose area silently.
         match owner {
-            Some(index) => regions[index].1.push(hole),
+            Some(index) => owners[index].push(hole),
             None => {
-                if let Some(region) = regions.first_mut() {
-                    region.1.push(hole);
+                if let Some(first) = owners.first_mut() {
+                    first.push(hole);
                 }
             }
         }
+    }
+    for ((outer, _, _), holes) in outers.into_iter().zip(owners) {
+        regions.push((outer, holes));
     }
     Ok(regions)
 }

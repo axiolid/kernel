@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ArcArrangement` (#120): the plane cut by several arc rings at once.
+  Every crossing, shared boundary piece and ring membership is decided
+  exactly (the same predicates as `arc_overlay`); crossing points are
+  rounded once, into one vertex table. Each piece records the input edges
+  it came from and which rings contain the region on either side, and
+  `regions(predicate)` links the pieces bounding any membership set into
+  outer rings and holes. Faces built from one arrangement therefore share
+  vertices by index, which is what a stepped or stacked solid needs.
+
 ### Changed
 
 - `arc_overlay` is exact (ADR 0070, #155). Crossings, their order along
