@@ -26,8 +26,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def workspace_version() -> str:
-    """The single version every publishable crate in this workspace carries."""
+def publishable() -> dict[str, str]:
+    """Crates a consumer can depend on, each with its own version.
+
+    Versions are per crate (ADR 0067): each is compared against its own
+    published history, never a workspace-wide number.
+    """
     meta = json.loads(
         subprocess.run(
             ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked"],
@@ -37,26 +41,11 @@ def workspace_version() -> str:
             stdout=subprocess.PIPE,
         ).stdout
     )
-    versions = {p["version"] for p in meta["packages"] if p.get("publish") != []}
-    if len(versions) != 1:
-        raise SystemExit(
-            f"expected one workspace version, found {sorted(versions)}"
-        )
-    return versions.pop()
-
-
-def publishable() -> list[str]:
-    """Crates a consumer can depend on, so crates whose API we owe."""
-    meta = json.loads(
-        subprocess.run(
-            ["cargo", "metadata", "--format-version", "1", "--no-deps", "--locked"],
-            cwd=ROOT,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        ).stdout
-    )
-    return sorted(p["name"] for p in meta["packages"] if p.get("publish") != [])
+    return {
+        p["name"]: p["version"]
+        for p in sorted(meta["packages"], key=lambda p: p["name"])
+        if p.get("publish") != []
+    }
 
 
 def published_versions(name: str) -> list[str]:
@@ -140,21 +129,20 @@ def main() -> int:
         print("    cargo install cargo-semver-checks --version 0.44.0 --locked")
         return 1
 
-    current = workspace_version()
-    names = publishable()
+    crates = publishable()
 
     checkable: list[str] = []
     skipped: list[str] = []
     admitted: list[str] = []
     baselines: dict[str, list[str]] = {}
-    for name in names:
+    for name, current in crates.items():
         versions = published_versions(name)
         if not versions:
             skipped.append(name)
             continue
-        # Compare against the newest release STRICTLY BELOW the working
-        # version. The equal-version case is the tree against itself, which
-        # cannot fail and would make the gate decorative.
+        # Compare against the newest release STRICTLY BELOW this crate's
+        # working version. The equal-version case is the tree against
+        # itself, which cannot fail and would make the gate decorative.
         prior = [v for v in versions if parse(v) < parse(current)]
         if not prior:
             skipped.append(name)
@@ -167,7 +155,7 @@ def main() -> int:
         checkable.append(name)
 
     if args.explain:
-        print(f"workspace version: {current}")
+        print(f"publishable crates        : {len(crates)}")
         print(f"checked against crates.io : {len(checkable)}")
         print(f"unpublished, no baseline  : {len(skipped)}")
         print(f"bump already admits break : {len(admitted)}")
