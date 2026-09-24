@@ -13,6 +13,7 @@ readme.workspace = true
 axiolid-core.workspace = true
 axiolid-guarantees.workspace = true
 num-bigint.workspace = true
+num-integer.workspace = true
 
 [[bench]]
 name = "exact"

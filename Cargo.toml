@@ -112,6 +112,7 @@ axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.3.0
 cavalier_contours = "0.9.0"
 i_overlay = "4.5.2"
 num-bigint = { version = "0.5.1", default-features = false, features = ["std"] }
+num-integer = { version = "0.1.46", default-features = false, features = ["std"] }
 axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.0", default-features = false }
 axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.0" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.0", default-features = false }

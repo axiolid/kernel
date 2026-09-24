@@ -28,6 +28,7 @@ pub mod certify;
 pub mod construct;
 pub mod dyadic;
 pub mod interval;
+pub mod poly;
 pub mod root;
 pub mod tower;
 
@@ -39,5 +40,6 @@ pub use construct::{
 };
 pub use dyadic::Dyadic;
 pub use interval::Interval;
+pub use poly::{IntPoly, RealRoot};
 pub use root::{sign_root, sign_two_roots, Root2};
 pub use tower::{Nested, Tower};

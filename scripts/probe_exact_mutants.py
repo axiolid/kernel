@@ -75,6 +75,24 @@ MUTANTS = [
     ('tower: depth cap removed', 'tower.rs',
      '        if level >= MAX_DEPTH {',
      '        if false {'),
+    ('poly: Sturm chain normalised with a sign flip', 'poly.rs',
+     'r.scaled_down().coeffs.iter().map(|c| -c).collect()',
+     'r.primitive().coeffs.iter().map(|c| -c).collect()'),
+    ('poly: multiple roots not reduced', 'poly.rs',
+     '        let sf = self.square_free();\n',
+     '        let sf = self.primitive();\n'),
+    ('poly: open interval may start at a root', 'poly.rs',
+     '    let lo_is_root = poly.sign_at(&lo) == Sign::Zero;',
+     '    let lo_is_root = false;'),
+    ('poly: refinement keeps the wrong half', 'poly.rs',
+     '        if s_mid == self.poly.sign_at(&self.lo) {\n            self.lo = mid;',
+     '        if s_mid != self.poly.sign_at(&self.lo) {\n            self.lo = mid;'),
+    ('poly: equality by gcd skipped', 'poly.rs',
+     '            if roots_in(&g.sturm(), &lo, &hi) > 0 {\n                return Sign::Zero;',
+     '            if false {\n                return Sign::Zero;'),
+    ('poly: cmp_dyadic interior side flipped', 'poly.rs',
+     '            // No sign change between lo and x: root is above x.\n            Sign::Positive',
+     '            Sign::Negative'),
 ]
 
 env = {k: v for k, v in os.environ.items()
@@ -82,8 +100,13 @@ env = {k: v for k, v in os.environ.items()
 env["PATH"] = str(pathlib.Path.home() / ".cargo/bin") + ":" + env["PATH"]
 
 def tests_pass():
-    r = subprocess.run(["cargo", "test", "-q", "-p", "axiolid-exact"], cwd=K, env=env,
-                       capture_output=True, text=True)
+    try:
+        r = subprocess.run(["cargo", "test", "-q", "-p", "axiolid-exact"], cwd=K, env=env,
+                           capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        # A mutant that makes the tests hang (e.g. refining two equal roots
+        # forever) is detected, not survived.
+        return False
     return r.returncode == 0
 
 assert tests_pass(), "baseline must pass"

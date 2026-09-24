@@ -80,6 +80,23 @@ impl Dyadic {
         self.mantissa.bits()
     }
 
+    /// A nearby double, for output only; never for decisions.
+    ///
+    /// Takes the top 64 mantissa bits, so the result is within a few ulps
+    /// of the value. Overflows to an infinity and underflows to zero like
+    /// any `f64` conversion.
+    #[must_use]
+    pub fn to_f64(&self) -> f64 {
+        let bits = self.mantissa.bits();
+        let drop = bits.saturating_sub(64);
+        let top = &self.mantissa >> drop;
+        // `top` fits in an i128 comfortably (at most 64 magnitude bits).
+        let top = i128::try_from(&top).expect("at most 64 bits");
+        let exponent = self.exponent + drop as i64;
+        let exponent = exponent.clamp(-2000, 2000) as i32;
+        (top as f64) * 2f64.powi(exponent / 2) * 2f64.powi(exponent - exponent / 2)
+    }
+
     fn normalised(mut self) -> Self {
         match self.mantissa.trailing_zeros() {
             // Only zero has no trailing-zero count.
