@@ -69,7 +69,16 @@ class PublishWorkspaceTests(unittest.TestCase):
             str(Path(package["manifest_path"]).parent.resolve()): package["name"]
             for package in plan
         }
-        self.assertEqual(len(plan), 55)
+        # Every publishable crate, exactly once: a hard-coded count would
+        # only record how many crates existed when the test was written.
+        members = set(data["workspace_members"])
+        publishable = {
+            package["name"]
+            for package in data["packages"]
+            if package["id"] in members and package.get("publish") != []
+        }
+        self.assertEqual({package["name"] for package in plan}, publishable)
+        self.assertEqual(len(plan), len(publishable))
         for package in plan:
             for dependency in package["dependencies"]:
                 dependency_path = dependency.get("path")
