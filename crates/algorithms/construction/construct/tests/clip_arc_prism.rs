@@ -134,6 +134,16 @@ fn loop_points(solid: &ExactBRep, loop_index: usize) -> Vec<Point3> {
     out
 }
 
+/// `int over the unit disc of max(0, x - a) dA`, for `-1 <= a <= 1`.
+///
+/// Closed form from `int 2 sqrt(1 - x^2) dx = x sqrt(1 - x^2) + asin x`
+/// and `int 2 x sqrt(1 - x^2) dx = -(2/3) (1 - x^2)^(3/2)`. This is the
+/// material a cap at the level `x = a` of a unit-slope plane cuts off.
+fn disc_excess(a: f64) -> f64 {
+    let s = (1.0 - a * a).sqrt();
+    (2.0 / 3.0) * s.powi(3) - a * (PI / 2.0 - a * s - a.asin())
+}
+
 fn audit(solid: &ExactBRep) {
     let health = axiolid_brep_audit::geometric_audit(solid, Tolerance::METRE);
     assert!(health.is_consistent(), "{:?}", health.defects());
@@ -320,15 +330,64 @@ fn the_cut_edge_lies_on_both_the_cylinder_and_the_plane() {
 }
 
 #[test]
-fn a_plane_crossing_a_cap_inside_the_section_is_refused_by_name() {
-    // z = 0.5 + x crosses z = 0 at x = -0.5, inside the unit disc.
+fn a_plane_crossing_the_bottom_cap_keeps_the_rest_of_it() {
+    // z = 0.5 + x crosses z = 0 at x = -0.5, inside the unit disc. Kept
+    // below the plane: over x < -0.5 nothing is left, elsewhere the column
+    // runs from the floor up to the roof. The two planes and the floor
+    // meet along the line x = -0.5, so the result has the floor's fragment
+    // AND the roof as caps.
     let column = prism(disc(0.0, 0.0, 1.0), 0.0, 10.0);
-    let err = clip_arc_prism_exact(&column, &below(0.5, 1.0, 0.0), Tolerance::METRE)
-        .expect_err("a plane that crosses the bottom cap leaves two kinds of cap");
+    let solid = clip_arc_prism_exact(&column, &below(0.5, 1.0, 0.0), Tolerance::METRE)
+        .expect("a plane crossing a cap is an exact column solid");
+    audit(&solid);
+    // int over x > -0.5 of (0.5 + x) = int max(0, x + 0.5) = disc_excess(-0.5).
+    let expected = disc_excess(-0.5);
+    let got = volume_from_caps(&solid);
     assert!(
-        matches!(err, GeomError::UnsupportedInput { input, .. } if input.contains("crosses a cap")),
-        "{err:?}"
+        (got - expected).abs() < 1e-5 * expected,
+        "volume {got}, expected {expected}"
     );
+    assert!(ellipse_edges(&solid) >= 1 && sinusoid_pcurves(&solid) >= 1);
+}
+
+#[test]
+fn a_plane_crossing_the_top_cap_keeps_the_rest_of_it() {
+    // Radius-1 column from 0 to 2 under z = 1.5 + x: the roof rises above
+    // the top where x > 0.5, so there the flat top stays.
+    // V = int min(2, 1.5 + x) = 1.5 pi - int max(0, x - 0.5).
+    let column = prism(disc(0.0, 0.0, 1.0), 0.0, 2.0);
+    let solid = clip_arc_prism_exact(&column, &below(1.5, 1.0, 0.0), Tolerance::METRE)
+        .expect("a plane crossing the top cap is an exact column solid");
+    audit(&solid);
+    let expected = 1.5 * PI - disc_excess(0.5);
+    let got = volume_from_caps(&solid);
+    assert!(
+        (got - expected).abs() < 1e-5 * expected,
+        "volume {got}, expected {expected}"
+    );
+    // Both the column's own end cap (a fragment of it) and the roof.
+    use axiolid_brep::{FaceName, SweptFace};
+    let names: Vec<_> = (0..solid.topology().faces().len())
+        .filter_map(|i| solid.face_name(solid.topology().face_id_at(i).unwrap()))
+        .collect();
+    assert!(
+        names.contains(&&FaceName::swept(SweptFace::EndCap)),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&&FaceName::swept(SweptFace::StartCap)),
+        "{names:?}"
+    );
+    let caps = solid
+        .topology()
+        .faces()
+        .iter()
+        .filter(|f| {
+            matches!(&solid.surfaces()[f.surface.unwrap().index()],
+                Surface::Plane(p) if p.frame.z.z.abs() > 1e-12)
+        })
+        .count();
+    assert_eq!(caps, 3, "floor, the kept part of the top, and the roof");
 }
 
 #[test]
@@ -354,9 +413,20 @@ fn a_plane_that_keeps_everything_or_nothing_is_decided_by_the_true_range() {
     // over the disc. At height 10.4 it dips to 9.9 at x = -1 -- inside the
     // prism -- so it must cut, not be treated as clear of the top.
     let column = prism(disc(0.0, 0.0, 1.0), 0.0, 10.0);
-    let err = clip_arc_prism_exact(&column, &below(10.4, 0.5, 0.0), Tolerance::METRE)
-        .expect_err("dips through the top cap");
-    assert!(matches!(err, GeomError::UnsupportedInput { .. }), "{err:?}");
+    let dipped = clip_arc_prism_exact(&column, &below(10.4, 0.5, 0.0), Tolerance::METRE)
+        .expect("dips through the top cap: cut, not kept whole");
+    // The roof z = 10.4 + 0.5 x is below 10 where x < -0.8; the sliver
+    // removed is 0.5 * int max(0, -0.8 - x) = 0.5 * disc_excess(0.8).
+    let expected = PI * 10.0 - 0.5 * disc_excess(0.8);
+    let got = volume_from_caps(&dipped);
+    assert!(
+        (got - expected).abs() < 1e-6 * expected,
+        "{got} vs {expected}"
+    );
+    assert!(
+        sinusoid_pcurves(&dipped) >= 1,
+        "the roof really cuts the wall"
+    );
     // At 10.6 the lowest point is 10.1: clear, the whole prism is kept.
     let whole = clip_arc_prism_exact(&column, &below(10.6, 0.5, 0.0), Tolerance::METRE)
         .expect("clear of the prism");
@@ -392,28 +462,46 @@ fn the_range_includes_extremes_inside_an_arc_not_only_its_vertices() {
     // and rises 0.5 above at (0, 1): only the in-arc extremes show that a
     // plane at 10.4 dips through the top cap at 10.
     let column = prism(disc(0.0, 0.0, 1.0), 0.0, 10.0);
-    let err = clip_arc_prism_exact(&column, &below(10.4, 0.0, 0.5), Tolerance::METRE)
-        .expect_err("dips to 9.9 inside the arc");
+    let dipped = clip_arc_prism_exact(&column, &below(10.4, 0.0, 0.5), Tolerance::METRE)
+        .expect("dips to 9.9 inside the arc");
+    // Treated as clear of the top, the whole column (10 pi) would come back.
+    let expected = PI * 10.0 - 0.5 * disc_excess(0.8);
+    let got = volume_from_caps(&dipped);
     assert!(
-        matches!(err, GeomError::UnsupportedInput { input, .. } if input.contains("crosses a cap")),
-        "{err:?}"
+        (got - expected).abs() < 1e-6 * expected,
+        "{got} vs {expected}"
     );
     // The same on the kept-above side: level 0.4 at the vertices, but it
-    // dips to -0.1 inside the arc, through the bottom cap.
-    let err = clip_arc_prism_exact(&column, &above(0.4, 0.0, 0.5), Tolerance::METRE)
-        .expect_err("dips to -0.1 inside the arc");
-    assert!(matches!(err, GeomError::UnsupportedInput { .. }), "{err:?}");
+    // dips to -0.1 inside the arc, through the bottom cap. Kept above: the
+    // floor stays where the plane is below it (y < -0.8).
+    //   V = int (10 - max(0, 0.4 + 0.5 y))
+    //     = 10 pi - [int (0.4 + 0.5 y) - int_{y < -0.8} (0.4 + 0.5 y)]
+    //     = 9.6 pi - 0.5 disc_excess(0.8)
+    // (the second integral is -0.5 disc_excess(0.8) by symmetry).
+    let floored = clip_arc_prism_exact(&column, &above(0.4, 0.0, 0.5), Tolerance::METRE)
+        .expect("dips to -0.1 inside the arc");
+    let expected = PI * (10.0 - 0.4) - 0.5 * disc_excess(0.8);
+    let got = volume_from_caps(&floored);
+    assert!(
+        (got - expected).abs() < 1e-6 * expected,
+        "{got} vs {expected}"
+    );
 }
 
 #[test]
-fn keeping_the_upper_side_refuses_a_plane_through_the_bottom_cap() {
-    // z = 0.3 + 0.5 x spans -0.2 .. 0.8 over the disc: it crosses z = 0.
+fn keeping_the_upper_side_through_the_bottom_cap_keeps_part_of_the_floor() {
+    // z = 0.3 + 0.5 x spans -0.2 .. 0.8 over the disc: it crosses z = 0 at
+    // x = -0.6. Kept above: the column's floor remains where x < -0.6.
+    // V = int (10 - max(0, 0.3 + 0.5 x)) = 10 pi - 0.5 disc_excess(-0.6).
     let column = prism(disc(0.0, 0.0, 1.0), 0.0, 10.0);
-    let err = clip_arc_prism_exact(&column, &above(0.3, 0.5, 0.0), Tolerance::METRE)
-        .expect_err("crosses the bottom cap");
+    let solid = clip_arc_prism_exact(&column, &above(0.3, 0.5, 0.0), Tolerance::METRE)
+        .expect("crosses the bottom cap");
+    audit(&solid);
+    let expected = 10.0 * PI - 0.5 * disc_excess(-0.6);
+    let got = volume_from_caps(&solid);
     assert!(
-        matches!(err, GeomError::UnsupportedInput { input, .. } if input.contains("crosses a cap")),
-        "{err:?}"
+        (got - expected).abs() < 1e-6 * expected,
+        "{got} vs {expected}"
     );
 }
 

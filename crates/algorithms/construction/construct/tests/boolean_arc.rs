@@ -182,16 +182,24 @@ fn a_result_starting_above_the_ground_plane_stays_at_its_height() {
 }
 
 #[test]
-fn differing_spans_are_refused_exactly_as_on_the_polygon_path() {
-    // The height reduction is shared, so the arc path must inherit the
-    // same refusal rather than quietly accepting a stepped solid.
+fn differing_spans_give_a_stepped_solid_with_cylinder_walls() {
+    // The polygon path builds stepped unions, so the arc path must too,
+    // and keep every curved wall a `Cylinder` (volumes: `stepped_columns`).
     let short = prism(disc(0.0, 0.0, 1.0), 1.0);
     let tall = prism(disc(0.5, 0.0, 1.0), 5.0);
 
-    let error = boolean_arc_prisms_exact(&short, &tall, BooleanOperator::Union, Tolerance::METRE)
-        .expect_err("a stepped union is not a prism");
-    let text = format!("{error:?}");
-    assert!(text.contains("differing extrusion spans"), "got {text}");
+    let solid = boolean_arc_prisms_exact(&short, &tall, BooleanOperator::Union, Tolerance::METRE)
+        .expect("a stepped union is an exact solid");
+    let (_, cylinders) = surface_kinds(&solid);
+    assert!(cylinders >= 2, "both discs keep cylindrical walls");
+    for surface in solid.surfaces() {
+        assert!(
+            matches!(surface, Surface::Plane(_) | Surface::Cylinder(_)),
+            "no approximating surface: {surface:?}"
+        );
+    }
+    let health = axiolid_brep_audit::geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
 }
 
 #[test]

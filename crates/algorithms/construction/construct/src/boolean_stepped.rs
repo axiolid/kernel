@@ -1,25 +1,16 @@
-//! Stepped union of two coaxial prisms (ADR 0050 follow-up).
-//!
-//! # Why a union with differing spans is not one prism
+//! Stepped union of two coaxial prisms, as constant-section bands.
 //!
 //! [`boolean_prisms_exact`](crate::boolean_exact::boolean_prisms_exact)
-//! refuses a union whose operands span different heights, because the
-//! result is stepped: the cross-section CHANGES partway up, and a single
-//! prism carries exactly one section.
+//! builds a stepped union as ONE exact solid, ledges included (#120, ADR
+//! 0072). This module is the older, lighter answer to the same question:
+//! cut the union at every height where an operand starts or stops, and
+//! return the bands. Within a band the active operand set is constant, so
+//! each band is a genuine prism whose section is the planar union of
+//! whatever is active there.
 //!
-//! The refusal is honest but the shape is perfectly well defined. Cutting
-//! the union at every height where an operand starts or stops leaves bands,
-//! and WITHIN a band the active operand set is constant -- so each band is
-//! a genuine prism whose section is the planar union of whatever is active
-//! there. The stepped solid is that stack, and the decomposition is exact:
-//! the planar work is the same overlay the single-prism path already uses.
-//!
-//! # What this module does and does not give you
-//!
-//! It returns the BANDS. Assembling them into one `ExactBRep` additionally
-//! needs the ledge faces where the section changes, which is its own piece
-//! of work; returning the exact decomposition is the honest half that a
-//! caller can already use, and it is verifiable on its own terms.
+//! Use it when bands are what you want (per-storey quantities, say); use
+//! the boolean when you want the solid. The two agree on volume, which the
+//! tests check.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame2, Scalar, Tolerance, Vec2};

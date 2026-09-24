@@ -49,11 +49,13 @@ use axiolid_contracts::BackendId;
 /// consistent with that.
 pub const BACKEND_ID: BackendId = BackendId::new("scalar-generate");
 
+mod boolean_column;
 pub mod boolean_exact;
 mod boolean_provenance;
 pub mod boolean_stepped;
 pub mod center_line;
 pub mod center_line_exact;
+mod column;
 pub mod contour_lower;
 pub mod extrude;
 mod extrude_arc;

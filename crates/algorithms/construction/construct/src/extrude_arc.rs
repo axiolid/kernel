@@ -115,7 +115,7 @@ impl Level {
         self.height + self.gradient.dot(p)
     }
 
-    fn is_flat(&self) -> bool {
+    pub(crate) fn is_flat(&self) -> bool {
         self.gradient == Vec2::ZERO
     }
 
@@ -123,7 +123,7 @@ impl Level {
     ///
     /// `x` climbs along plan `x`, so a cap pcurve's first coordinate still
     /// grows with plan `x`; `z` is the upward normal.
-    fn sloped_frame(&self) -> GeomResult<Frame3> {
+    pub(crate) fn sloped_frame(&self) -> GeomResult<Frame3> {
         let normal = Vec3::new(-self.gradient.x, -self.gradient.y, 1.0).normalize();
         let x = Vec3::new(1.0, 0.0, self.gradient.x).normalize();
         let y = normal.cross(x);
@@ -489,7 +489,7 @@ fn add_arc_ring(
 /// axis's plan projection has the radius as its length -- so the edge spans
 /// exactly `sweep` of it, starting at the parameter of the arc's start
 /// point and running the way the arc does.
-fn sloped_arc_edge(
+pub(crate) fn sloped_arc_edge(
     arc: &ArcGeometry,
     from: Point2,
     level: Level,
@@ -553,7 +553,7 @@ fn sloped_arc_edge(
 /// Anchoring x at the start vertex makes the surface parameter u the angle
 /// measured from that vertex, so an edge interval of `0..sweep` is
 /// literally the arc and needs no offset term.
-fn circle_of(arc: &ArcGeometry, level: Scalar, start: Point3) -> GeomResult<Circle3> {
+pub(crate) fn circle_of(arc: &ArcGeometry, level: Scalar, start: Point3) -> GeomResult<Circle3> {
     let centre = Point3::new(arc.centre.x, arc.centre.y, level);
     let radial = start - centre;
     let length = radial.length();
@@ -911,7 +911,7 @@ fn arc_cap_loop(
 }
 
 /// A 2D frame whose x-axis points from the arc centre at its start.
-fn circle2_frame(arc: &ArcGeometry, start: Point2) -> Frame2 {
+pub(crate) fn circle2_frame(arc: &ArcGeometry, start: Point2) -> Frame2 {
     let radial = start - arc.centre;
     let length = radial.length();
     let x = if length == 0.0 {

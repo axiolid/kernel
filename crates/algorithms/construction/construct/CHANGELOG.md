@@ -15,8 +15,7 @@ caret rule for `0.x` versions.
   plane passes between its caps, the "column under a sloped roof" case.
   Cylindrical walls stay `Cylinder` faces trimmed by an exact `Ellipse3`
   edge with a `Sinusoid2` pcurve (ADR 0071); planar walls get sloped edges;
-  the cut cap is unnamed. A plane crossing a cap inside the section and a
-  plane parallel to the axis are refused by name.
+  the cut cap is unnamed. A plane parallel to the axis is refused by name.
 
 - `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
   (#120): coaxial booleans whose result falls apart into separate pieces
@@ -30,8 +29,21 @@ caret rule for `0.x` versions.
 - `boolean_arc_prisms_exact` runs on the exact arc overlay (ADR 0070) and
   builds results it used to refuse: a result with interior holes becomes a
   solid with through-passages (#120), and a result starting above `z = 0`
-  is extruded from its own base height. Stepped spans are still refused;
-  disconnected results go through the `_solids` variants.
+  is extruded from its own base height. Disconnected results go through
+  the `_solids` variants.
+- Stepped coaxial booleans are built, not refused (#120, ADR 0072):
+  `boolean_prisms_exact`, `boolean_arc_prisms_exact` and their `_solids`
+  variants return a union of prisms with different spans, a difference
+  whose tool stops inside the subject (notch, counterbore, blind pocket,
+  slot through the middle heights) as exact solids with their ledge faces.
+  Walls are named after the operand edge they lie on, caps and ledges
+  after the operand cap that made them. A result enclosing a cavity, and
+  pieces touching only along an edge, are refused by name.
+- `clip_arc_prism_exact` builds a plane that crosses a cap inside the
+  section: the part of the old cap that survives keeps its name, next to
+  the unnamed cut.
+- `boolean_stepped` docs: the bands are the lighter alternative to the
+  stepped solid; their volumes are checked against it.
 
 ## [0.3.1] - 2026-09-24
 

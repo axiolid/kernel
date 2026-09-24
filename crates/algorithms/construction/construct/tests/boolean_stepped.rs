@@ -1,7 +1,7 @@
 //! Stepped union: bands against closed-form volume.
 //!
-//! A stepped union is refused by the single-prism path. The decomposition
-//! is checked by TOTAL VOLUME against the inclusion-exclusion value
+//! `boolean_prisms_exact` builds a stepped union as one solid; this module
+//! returns it as bands. The decomposition is checked by TOTAL VOLUME against the inclusion-exclusion value
 //! computed independently, so a dropped or duplicated band shows up as a
 //! wrong number rather than a plausible-looking band list.
 
@@ -56,7 +56,7 @@ fn volume(bands: &[Band]) -> f64 {
 #[test]
 fn a_stepped_union_has_the_inclusion_exclusion_volume() {
     // A wide short slab with a narrow tall tower standing on it: the
-    // classic stepped shape the single-prism path refuses.
+    // classic stepped shape.
     let wide = prism(2.0, 0.0, 1.0);
     let narrow = prism(0.5, 0.0, 3.0);
     let bands = union_prisms_stepped(&wide, &narrow, Tolerance::METRE)
@@ -180,6 +180,43 @@ fn heights_within_tolerance_are_one_cut_not_a_sliver_band() {
             band.top - band.bottom > 1e-9,
             "a sliver band of thickness {} is not representable",
             band.top - band.bottom
+        );
+    }
+}
+
+#[test]
+fn the_bands_and_the_stepped_solid_hold_the_same_volume() {
+    // Two independent routes to one shape: planar overlays per band here,
+    // one arrangement plus ledge faces in `boolean_prisms_exact`. They
+    // share no assembly code, so agreement is evidence for both.
+    use axiolid_construct::boolean_exact::boolean_prisms_exact;
+    use axiolid_core::BooleanOperator;
+    let cases = [
+        (prism(2.0, 0.0, 1.0), prism(0.5, 0.0, 3.0)),
+        (
+            Prism {
+                rings: vec![rect(2.0, 0.5)],
+                bottom: 0.0,
+                top: 2.0,
+            },
+            Prism {
+                rings: vec![rect(0.5, 2.0)],
+                bottom: 1.0,
+                top: 3.0,
+            },
+        ),
+    ];
+    for (a, b) in cases {
+        let bands = union_prisms_stepped(&a, &b, Tolerance::METRE).expect("bands");
+        let solid =
+            boolean_prisms_exact(&a, &b, BooleanOperator::Union, Tolerance::METRE).expect("solid");
+        let measured = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+            .expect("planar")
+            .signed_volume;
+        let banded = volume(&bands);
+        assert!(
+            (measured - banded).abs() < 1e-9,
+            "solid {measured} vs bands {banded}"
         );
     }
 }

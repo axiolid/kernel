@@ -252,7 +252,8 @@ Two gaps named in the thesis feedback are now closed.
 `boolean_prisms_exact` refuses a union of differing spans because one
 prism cannot hold a stepped solid. `union_prisms_stepped` returns the
 band decomposition instead: the result is a list of constant-section
-prisms, which is what the shape actually is.
+prisms, which is what the shape actually is. (Since ADR 0072 the boolean
+builds the stepped solid itself; the bands remain as a lighter view.)
 
 The cut heights are the operand bounds, deduplicated within tolerance so
 near-equal heights give one cut rather than a sliver band no solid can

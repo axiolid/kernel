@@ -17,27 +17,31 @@
 //!
 //! # When the answer is NOT a prism
 //!
-//! The reduction only holds when the result is itself a prism:
+//! The reduction to one prism only holds when the result is itself a prism:
 //!
 //! - Intersection: always. The heights intersect to one interval.
 //! - Union: only when both operands span the same height. Otherwise the
-//!   result is stepped -- two different cross-sections at two heights -- and
-//!   a single prism cannot represent it.
+//!   result is stepped -- two different cross-sections at two heights.
 //! - Difference: only when the tool spans at least the subject's full height.
 //!   A tool ending mid-way leaves a stepped solid for the same reason.
 //!
-//! Those cases are refused rather than approximated by the nearest prism,
-//! which would silently change the geometry.
+//! Stepped results are built as column solids instead (`column`, #120):
+//! the plan is cut into cells by an exact arrangement of every operand
+//! ring, and each cell carries the heights its operands give it. The
+//! result is still exact, with ledge faces where the section changes; it
+//! is never approximated by the nearest prism. A stepped result that
+//! would enclose a cavity is refused by name.
 
 use axiolid_brep::{ExactBRep, FaceName, Operand, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{BooleanOperator, Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_overlay::{
-    arc_overlay, overlay, validate_arc_ring, ArcPolygon, ArcRing, FillRule, OverlayInput,
-    OverlayOperation, Polygon, Ring,
+    arc_overlay, overlay, validate_arc_ring, ArcPolygon, ArcRing, ArcVertex, FillRule,
+    OverlayInput, OverlayOperation, Polygon, Ring,
 };
 use axiolid_primitive::HalfSpace;
 
+use crate::boolean_column::{clip_columns, coaxial_columns, is_stepped, ColumnOperand};
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
 use axiolid_brep_audit::geometric_audit;
 
@@ -87,8 +91,9 @@ pub struct ArcPrism {
 
 /// Exact boolean of two coaxial prisms.
 ///
-/// Returns an exact B-rep, or a typed refusal naming why the result is not
-/// itself a prism. Never falls back to a mesh.
+/// Returns an exact B-rep, or a typed refusal. Never falls back to a mesh.
+/// Operands with differing spans give a stepped solid, built exactly with
+/// ledge faces where the section changes (#120).
 ///
 /// A result that falls apart into several separate solids is refused here,
 /// because one `ExactBRep` is one solid and returning just one piece would
@@ -100,6 +105,14 @@ pub fn boolean_prisms_exact(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    if let Some(solids) = prism_columns(subject, tool, operator, tolerance)? {
+        return one_solid(
+            solids,
+            "prism boolean produced an empty result",
+            "exact prism boolean producing disconnected components \
+             (boolean_prisms_exact_solids returns every piece)",
+        );
+    }
     let (bottom, top) = prism_span(subject, tool, operator, tolerance)?;
     let polygons = prism_sections(subject, tool, operator, tolerance)?;
     single_solid(
@@ -128,6 +141,9 @@ pub fn boolean_prisms_exact_solids(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<Vec<ExactBRep>> {
+    if let Some(solids) = prism_columns(subject, tool, operator, tolerance)? {
+        return Ok(solids);
+    }
     let Some((bottom, top)) = empty_span_is_none(prism_span(subject, tool, operator, tolerance))?
     else {
         return Ok(Vec::new());
@@ -389,14 +405,24 @@ fn cap_operand(
 /// # Refused
 ///
 /// A result with several disconnected regions (one `ExactBRep` is one
-/// solid; [`boolean_arc_prisms_exact_solids`] returns every piece) and the
-/// stepped spans [`boolean_prisms_exact`] also refuses.
+/// solid; [`boolean_arc_prisms_exact_solids`] returns every piece), and a
+/// stepped result that would enclose a cavity. Other stepped spans are
+/// built as in [`boolean_prisms_exact`], with cylindrical walls split at
+/// the step heights.
 pub fn boolean_arc_prisms_exact(
     subject: &ArcPrism,
     tool: &ArcPrism,
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    if let Some(solids) = arc_prism_columns(subject, tool, operator, tolerance)? {
+        return one_solid(
+            solids,
+            "arc prism boolean produced an empty result",
+            "exact arc prism boolean producing disconnected components \
+             (boolean_arc_prisms_exact_solids returns every piece)",
+        );
+    }
     let span = arc_prism_span(subject, tool, operator, tolerance)?;
     let regions = arc_prism_sections(subject, tool, operator, tolerance)?;
     single_solid(
@@ -421,6 +447,9 @@ pub fn boolean_arc_prisms_exact_solids(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> GeomResult<Vec<ExactBRep>> {
+    if let Some(solids) = arc_prism_columns(subject, tool, operator, tolerance)? {
+        return Ok(solids);
+    }
     let Some(span) = empty_span_is_none(arc_prism_span(subject, tool, operator, tolerance))? else {
         return Ok(Vec::new());
     };
@@ -453,11 +482,18 @@ pub fn boolean_arc_prisms_exact_solids(
 /// cap keeps its `StartCap`/`EndCap` name; the cut cap is unnamed, because
 /// it is a fragment of the half-space, not of the prism.
 ///
+/// A plane that crosses a cap inside the section leaves part of that cap
+/// in place and cuts the rest away: the result keeps the named fragment of
+/// the original cap beside the unnamed cut face, and the walls there end
+/// partly on the cap and partly on the cut. That shape is built by the
+/// column builder over the section split along the cap's crossing line.
+///
 /// # Refused, by name
 ///
 /// - a plane parallel to the extrusion axis (a plan cut, not a cap cut);
-/// - a plane that crosses a cap inside the section, which leaves a solid
-///   with both an original and a cut cap -- not a prism between two levels;
+/// - a plane that crosses a cap along a line that splits the kept material
+///   into separate pieces, which one `ExactBRep` cannot hold (a concave
+///   section can do this);
 /// - a plane that misses the prism on the kept side entirely (the result
 ///   is empty; this is a [`GeomError::Degenerate`], matching the other
 ///   exact booleans' empty results).
@@ -523,9 +559,7 @@ pub fn clip_arc_prism_exact(
         } else if low > prism.bottom + linear && high < prism.top - linear {
             extrude_arc_rings_between(&rings, level, Level::flat(prism.top), (false, true))?
         } else {
-            return Err(unsupported(
-                "exact arc prism clip whose plane crosses a cap inside the section",
-            ));
+            return clip_crossing(&rings[0], prism, level, keeps_above, tolerance);
         }
     } else if low >= prism.top - linear {
         flat(prism.bottom, prism.top)?
@@ -536,9 +570,7 @@ pub fn clip_arc_prism_exact(
     } else if low > prism.bottom + linear && high < prism.top - linear {
         extrude_arc_rings_between(&rings, Level::flat(prism.bottom), level, (true, false))?
     } else {
-        return Err(unsupported(
-            "exact arc prism clip whose plane crosses a cap inside the section",
-        ));
+        return clip_crossing(&rings[0], prism, level, keeps_above, tolerance);
     };
     gate_geometry(solid, tolerance)
 }
@@ -589,13 +621,101 @@ fn arc_points(ring: &ArcRing) -> Vec<Point2> {
     ring.vertices.iter().map(|vertex| vertex.point).collect()
 }
 
-/// Validate both arc prisms and settle the height span of the result.
-fn arc_prism_span(
+/// The one solid a single-result entry point may return from a column
+/// build: empty and multi-piece results are refused as elsewhere.
+fn one_solid(
+    mut solids: Vec<ExactBRep>,
+    empty: &'static str,
+    disconnected: &'static str,
+) -> GeomResult<ExactBRep> {
+    match solids.len() {
+        0 => Err(GeomError::Degenerate(empty.to_owned())),
+        1 => Ok(solids.remove(0)),
+        _ => Err(unsupported(disconnected)),
+    }
+}
+
+/// A polygon prism boolean that is not one prism (stepped spans); `None`
+/// means the single-prism path handles it.
+fn prism_columns(
+    subject: &Prism,
+    tool: &Prism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<Option<Vec<ExactBRep>>> {
+    validate(subject, "subject")?;
+    validate(tool, "tool")?;
+    if !is_stepped(
+        (subject.bottom, subject.top),
+        (tool.bottom, tool.top),
+        operator,
+        tolerance,
+    ) {
+        return Ok(None);
+    }
+    let operand = |prism: &Prism| ColumnOperand {
+        rings: prism
+            .rings
+            .iter()
+            .map(|ring| ArcRing::new(ring.iter().copied().map(ArcVertex::straight).collect()))
+            .collect(),
+        bottom: prism.bottom,
+        top: prism.top,
+    };
+    coaxial_columns(&operand(subject), &operand(tool), operator, tolerance).map(Some)
+}
+
+/// An arc prism boolean with stepped spans; `None` when it is one prism.
+fn arc_prism_columns(
     subject: &ArcPrism,
     tool: &ArcPrism,
     operator: BooleanOperator,
     tolerance: Tolerance,
-) -> GeomResult<(Scalar, Scalar)> {
+) -> GeomResult<Option<Vec<ExactBRep>>> {
+    validate_arc_prisms(subject, tool, tolerance)?;
+    if !is_stepped(
+        (subject.bottom, subject.top),
+        (tool.bottom, tool.top),
+        operator,
+        tolerance,
+    ) {
+        return Ok(None);
+    }
+    let operand = |prism: &ArcPrism| ColumnOperand {
+        rings: vec![prism.section.clone()],
+        bottom: prism.bottom,
+        top: prism.top,
+    };
+    coaxial_columns(&operand(subject), &operand(tool), operator, tolerance).map(Some)
+}
+
+/// A clip whose plane crosses a cap inside the section, built as columns.
+fn clip_crossing(
+    section: &ArcRing,
+    prism: &ArcPrism,
+    level: Level,
+    keeps_above: bool,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    let solids = clip_columns(
+        section,
+        (prism.bottom, prism.top),
+        level,
+        keeps_above,
+        tolerance,
+    )?;
+    one_solid(
+        solids,
+        "arc prism clip is empty",
+        "exact arc prism clip leaving disconnected pieces",
+    )
+}
+
+fn validate_arc_prisms(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    tolerance: Tolerance,
+) -> GeomResult<()> {
     for (section, role) in [(&subject.section, "subject"), (&tool.section, "tool")] {
         validate_arc_ring(section, tolerance).map_err(|error| {
             GeomError::InvalidInput(format!("{role} arc prism section: {error:?}"))
@@ -615,6 +735,17 @@ fn arc_prism_span(
             "arc prism top must lie above its bottom".to_owned(),
         ));
     }
+    Ok(())
+}
+
+/// Validate both arc prisms and settle the height span of the result.
+fn arc_prism_span(
+    subject: &ArcPrism,
+    tool: &ArcPrism,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> GeomResult<(Scalar, Scalar)> {
+    validate_arc_prisms(subject, tool, tolerance)?;
     resolve_span(
         (subject.bottom, subject.top),
         (tool.bottom, tool.top),
@@ -682,6 +813,8 @@ fn resolve_span(
         }
         BooleanOperator::Union => {
             // Differing spans give a stepped solid, which is not a prism.
+            // Callers route those to the column builder first; this guard
+            // keeps the single-prism path from ever flattening one.
             if !tolerance.eq(subject.0, tool.0) || !tolerance.eq(subject.1, tool.1) {
                 return Err(unsupported(
                     "exact prism union with differing extrusion spans",
@@ -713,7 +846,7 @@ fn resolve_span(
 ///
 /// The audit is cheap here because an exact analytic boolean returns a handful
 /// of faces, not a mesh: a few evaluations per edge use.
-fn gate_geometry(solid: ExactBRep, tolerance: Tolerance) -> GeomResult<ExactBRep> {
+pub(crate) fn gate_geometry(solid: ExactBRep, tolerance: Tolerance) -> GeomResult<ExactBRep> {
     let health = geometric_audit(&solid, tolerance);
     if health.is_consistent() {
         return Ok(solid);

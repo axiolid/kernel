@@ -164,13 +164,14 @@ fn an_empty_result_is_an_empty_list_not_an_error() {
 
 #[test]
 fn refusals_other_than_emptiness_are_kept() {
-    // A stepped union is still not representable piecewise.
+    // An enclosed cavity is still refused, even by the multi-solid path.
     let a = prism(rect(0.0, 0.0, 1.0, 1.0), 0.0, 1.0);
-    let taller = prism(rect(0.5, 0.0, 1.5, 1.0), 0.0, 2.0);
-    let error = boolean_prisms_exact_solids(&a, &taller, BooleanOperator::Union, Tolerance::METRE)
-        .expect_err("stepped");
+    let buried = prism(rect(0.25, 0.25, 0.75, 0.75), 0.25, 0.75);
+    let error =
+        boolean_prisms_exact_solids(&a, &buried, BooleanOperator::Difference, Tolerance::METRE)
+            .expect_err("cavity");
     assert!(
-        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("differing")),
+        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("cavity")),
         "{error:?}"
     );
     // Malformed input is still malformed.
@@ -360,4 +361,38 @@ fn arc_pieces_are_ordered_left_to_right_whatever_the_operand_order() {
         assert_eq!(lows.len(), 2);
         assert!(lows[0] < 0.0 && lows[1] > 3.0, "left first: {lows:?}");
     }
+}
+
+#[test]
+fn a_slot_cut_through_the_middle_heights_leaves_two_slabs() {
+    // A 1 x 1 x 3 block minus a wider plate at z 1..2: two separate 1 x 1 x 1
+    // slabs, one above the other. Stepped AND disconnected.
+    let block = prism(rect(0.0, 0.0, 1.0, 1.0), 0.0, 3.0);
+    let plate = prism(rect(-1.0, -1.0, 2.0, 2.0), 1.0, 2.0);
+    let solids = boolean_prisms_exact_solids(
+        &block,
+        &plate,
+        BooleanOperator::Difference,
+        Tolerance::METRE,
+    )
+    .expect("two slabs");
+    assert_eq!(solids.len(), 2);
+    for solid in &solids {
+        assert_sound(solid);
+        assert!((volume(solid) - 1.0).abs() < 1e-12, "{}", volume(solid));
+    }
+    let heights: Vec<_> = solids.iter().map(|s| (extent(s).2, extent(s).3)).collect();
+    assert!(
+        heights.contains(&(0.0, 1.0)) && heights.contains(&(2.0, 3.0)),
+        "{heights:?}"
+    );
+    // The single-solid entry point refuses rather than dropping a slab.
+    let error = boolean_prisms_exact(
+        &block,
+        &plate,
+        BooleanOperator::Difference,
+        Tolerance::METRE,
+    )
+    .expect_err("two pieces");
+    assert!(is_disconnected_refusal(&error), "{error:?}");
 }

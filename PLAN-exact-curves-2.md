@@ -86,4 +86,99 @@ Steps (each gated before the next):
    audit (pcurves lifted onto 3D curves); refusals; mutation probe.
 6. Ledger C9 + B1, changelogs, gate, push, CI, #120 comment.
 
-Status: step 1 in progress.
+Status: done, 1f4f1b5 (CI green). 14 clip tests, 11/11 mutants.
+
+
+## #120 remaining (user: "do the remaining 120 work", 2026-09-24)
+
+Issue scope: close C9/D3 to implemented, or to narrow with the refused subset
+named. Remaining refusals: stepped spans, planes crossing a cap, non-coaxial
+curved solids, cones/spheres/tori/NURBS.
+
+Key observation: every remaining VERTICAL-column case (stepped coaxial
+booleans, a plane crossing a cap, a stepped result under a roof) is one shape:
+a planar arrangement of cells, each cell carrying a stack of z-intervals
+bounded by planes (flat or sloped). Cell data depends only on which operands
+contain the cell, so it is a function of a membership bitmask. One builder
+for that shape replaces two diverging special cases.
+
+Steps (each gated before the next):
+T1. axiolid-overlay: exact N-operand arc arrangement (`arc_arrangement`):
+    split all operand edges at all crossings (exact), label each piece's left
+    and right membership masks, dedupe shared pieces, snap f64 vertices;
+    `region(pred)` links the pieces bounding {mask : pred(mask)} into
+    outer/hole rings of piece uses. Refactor `exact_arc::boolean` to share
+    the ring assembly. One vertex table => every face built from it agrees on
+    every vertex bit-for-bit (the reason not to call arc_overlay per band).
+T2. construct: column-solid builder. Input: arrangement, planes, and
+    mask -> intervals [lo plane, hi plane]. Walls per piece per maximal
+    symmetric-difference span; caps per (plane, facing) via region();
+    vertical edges split at every height met at a vertex (heights snapped
+    within tolerance, zero-length sides dropped -> triangle walls); connected
+    components -> one ExactBRep each; void shells attached to their outer.
+    Refuse by name: bands touching only along an edge (non-manifold).
+T3. Stepped coaxial booleans (arc and polygon prisms) through T2: the
+    `_solids` variants and single-solid variants stop refusing stepped spans.
+    Provenance names: walls from (operand, ring, edge), caps from the operand
+    whose bottom/top lies at that level.
+T4. clip_arc_prism_exact: a plane crossing a cap through T2 (cells split by
+    the plane's intersection lines with the top/bottom levels).
+T5. Non-coaxial curved / cones / spheres / tori / NURBS: general
+    surface-surface B-rep boolean (OCCT BOPAlgo scale). Not attempted here;
+    ledger rows stay narrow with this subset named, per the issue's scope
+    rule. Propose a follow-up issue.
+T6. Ledger C9/D3, changelogs, ADR 0072, gate, push, CI, #120 comment.
+
+Status: T1-T4 done (484c96d arrangement, ab708eb measure fix, column
+commit on top). T5 not attempted: non-coaxial curved / cones / spheres /
+tori need a general surface-surface B-rep boolean; C9 stays narrow with that
+subset named; follow-up issue proposed to the user, not filed. Cavities are
+refused until tessellation/measure read void shells.
+
+### #120 tranche 3 design notes (column builder)
+
+- Result solid = union of "column cells": plan region R_k x height interval
+  [lo_k(p), hi_k(p)] where lo/hi are flat or sloped planes (z = a + gx x + gy y).
+- Input: arrangement of all section rings (ArcArrangement), and per arrangement
+  face a list of disjoint z-intervals (bottom plane, top plane). Adjacent
+  faces with identical interval lists merge (arrangement.regions predicate).
+- Faces emitted:
+  * caps: for each distinct (plane, side) group, regions of the arrangement
+    where that plane is an interval end -> planar face with arc/line pcurves
+    (sloped plane: Ellipse2 in plane frame as in sloped_cap_loop).
+  * walls: for each arrangement edge, the two adjacent cells' interval lists
+    differ -> the vertical strip set difference (symmetric in z) along the
+    edge is a wall. Each wall strip on one side between two planes becomes
+    a face on the carrier (plane for line, cylinder for arc) bounded by
+    bottom/top curves (line/circle/ellipse) and vertical lines.
+- Vertical edges at arrangement vertices must be split at every height
+  where any incident wall or cap boundary meets that vertex -> build per
+  vertex a sorted list of distinct z values and emit vertical edges between
+  consecutive ones, shared by all walls at that vertex.
+- Mesh compiler tessellates only solids()[0].outer: build ONE shell per
+  connected component; results with an enclosed void are refused by name
+  (a stepped column with an internal cavity cannot occur for coaxial
+  prism booleans of two operands anyway -- verify).
+- Planes compared exactly? Levels come from input heights / half-space
+  planes directly (no derived values), so equality is by value equality of
+  the defining coefficients -> merge caps only when coefficients are equal.
+
+### T2 implementation decisions (column.rs)
+- Two phases: (A) abstract faces over edge keys Rim(piece, class rep plane) /
+  Vert(arr vertex, height cluster k); (B) union-find faces by edge keys ->
+  shells; each key must be used exactly twice (>2 = touching along an edge,
+  refused by name); emit one ExactBRep per outer shell.
+- Height classes per piece: planes equal (tol) at start/mid/end of the piece.
+  Vertex heights: cluster rim endpoint heights per arrangement vertex (tol).
+- Walls: per piece, symmetric difference of the two side stacks in class
+  gaps; maximal same-side runs = one face. Built on the DIRECTED piece with
+  solid on the left, always face Forward (the tested prism convention);
+  rim uses Reversed when the directed piece runs against the piece.
+- Caps: ArcArrangement::regions(pred: some block ends on plane P from that
+  side); up = Forward, down = Reversed (build_arc_rings convention).
+- Outer vs void shell: signed volume from caps only (walls vertical =>
+  n_z = 0): sum over caps of +-(h A + gx Mx + gy My), Green closed forms for
+  segments and arcs. Voids attach to the single outer shell; several outer
+  shells plus a void is refused (unreachable for 2-operand prism booleans:
+  a void needs a difference whose tool is enclosed, so one component).
+- Mesh compiler must tessellate void shells too (currently outer only).

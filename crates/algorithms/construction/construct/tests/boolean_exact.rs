@@ -148,52 +148,82 @@ fn a_wall_with_an_interior_opening_differences_exactly() {
     );
 }
 
-/// A union of prisms with differing spans is refused, not flattened.
-///
-/// The true result is stepped -- two cross-sections at two heights -- and a
-/// single prism cannot represent it. Returning the taller or shorter span
-/// would silently change the geometry.
-#[test]
-fn a_union_with_differing_spans_is_refused() {
-    let short = prism(vec![rect_ring(0.0, 0.0, 4.0, 4.0)], 0.0, 1.0);
-    let tall = prism(vec![rect_ring(2.0, 0.0, 4.0, 4.0)], 0.0, 5.0);
-
-    let error = boolean_prisms_exact(&short, &tall, BooleanOperator::Union, Tolerance::METRE)
-        .expect_err("a stepped union is not a prism");
-    assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                input: "exact prism union with differing extrusion spans",
-                ..
-            }
-        ),
-        "got {error:?}"
-    );
+/// Exact volume of a solid, from its planar faces (every face here is
+/// planar: rectangle operands).
+fn volume(brep: &axiolid_brep::ExactBRep) -> f64 {
+    axiolid_measure::exact_properties(brep, Tolerance::METRE)
+        .expect("all-planar solid is measurable")
+        .signed_volume
 }
 
-/// A tool shorter than the subject leaves a step, so difference is refused.
+/// A union of prisms with differing spans is built as the stepped solid,
+/// not flattened to either span (#120).
+///
+/// The oracle is inclusion-exclusion over boxes, from the inputs alone:
+/// a 4x4x1 slab plus a 2x4x5 tower sharing a 2x4x1 overlap.
 #[test]
-fn a_difference_with_a_short_tool_is_refused() {
-    let subject = prism(vec![rect_ring(0.0, 0.0, 10.0, 4.0)], 0.0, 3.0);
-    // Stops at z = 1.5, halfway up the subject.
-    let tool = prism(vec![rect_ring(0.0, 0.0, 2.0, 2.0)], 0.0, 1.5);
+fn a_union_with_differing_spans_is_the_stepped_solid() {
+    let short = prism(vec![rect_ring(0.0, 0.0, 4.0, 4.0)], 0.0, 1.0);
+    let tall = prism(vec![rect_ring(1.0, 0.0, 2.0, 4.0)], 0.0, 5.0);
 
-    let error = boolean_prisms_exact(
+    let solid = boolean_prisms_exact(&short, &tall, BooleanOperator::Union, Tolerance::METRE)
+        .expect("a stepped union is an exact solid");
+    let expected = 16.0 * 1.0 + 8.0 * 5.0 - 8.0 * 1.0;
+    let got = volume(&solid);
+    assert!(
+        (got - expected).abs() < 1e-9,
+        "volume {got}, expected {expected}"
+    );
+    let health = axiolid_brep_audit::geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    // Not a prism: the solid reaches both heights.
+    let top = solid
+        .topology()
+        .vertices()
+        .iter()
+        .map(|v| v.position.z)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert_eq!(top, 5.0);
+}
+
+/// A tool shorter than the subject leaves a pocket: built, not refused.
+#[test]
+fn a_difference_with_a_short_tool_leaves_a_pocket() {
+    let subject = prism(vec![rect_ring(0.0, 0.0, 10.0, 4.0)], 0.0, 3.0);
+    // Stops at z = 1.5, halfway up the subject, at a corner.
+    let tool = prism(vec![rect_ring(-4.0, -1.0, 2.0, 2.0)], 0.0, 1.5);
+
+    let solid = boolean_prisms_exact(
         &subject,
         &tool,
         BooleanOperator::Difference,
         Tolerance::METRE,
     )
-    .expect_err("a partial-height cut leaves a stepped solid");
+    .expect("a partial-height cut is an exact stepped solid");
+    let expected = 10.0 * 4.0 * 3.0 - 2.0 * 2.0 * 1.5;
+    let got = volume(&solid);
     assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                input: "exact prism difference with a tool shorter than the subject",
-                ..
-            }
-        ),
+        (got - expected).abs() < 1e-9,
+        "volume {got}, expected {expected}"
+    );
+}
+
+/// A tool buried inside the subject would leave an enclosed cavity. This
+/// kernel's consumers read only a solid's outer shell, so a cavity would be
+/// lost downstream without a trace; it is refused by name instead.
+#[test]
+fn a_difference_that_would_enclose_a_cavity_is_refused() {
+    let subject = prism(vec![rect_ring(0.0, 0.0, 10.0, 4.0)], 0.0, 3.0);
+    let buried = prism(vec![rect_ring(0.0, 0.0, 2.0, 2.0)], 1.0, 2.0);
+    let error = boolean_prisms_exact(
+        &subject,
+        &buried,
+        BooleanOperator::Difference,
+        Tolerance::METRE,
+    )
+    .expect_err("an enclosed cavity is not representable here");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("cavity")),
         "got {error:?}"
     );
 }

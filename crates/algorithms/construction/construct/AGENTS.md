@@ -43,9 +43,16 @@ not report `scalar-compile` after this split.
   What still refuses is geometry the kernel cannot represent exactly rather
   than unwritten work -- partial-turn revolution, a profile straddling the
   revolution axis, oblique circle/ellipse extrusion, non-conformal derived
-  transforms, disjoint composite members, and Boolean families beyond the
-  stepped path -- and must refuse rather than tessellate; see ADR 0020,
+  transforms, disjoint composite members, and Boolean families beyond
+  vertical columns -- and must refuse rather than tessellate; see ADR 0020,
   ADR 0023, ADR 0024, ADR 0029, and ADR 0053-0059.
+- Coaxial booleans and plane cuts that are not one prism (stepped spans,
+  a cut crossing a cap) go through `column.rs` over one exact
+  `ArcArrangement` (ADR 0072); `boolean_column.rs` adapts the entry points.
+  Every face of a column solid takes its vertices from that one
+  arrangement -- do not build bands separately and glue them, the rounded
+  crossings will not agree. Cavities are refused because tessellation
+  reads only the outer shell.
 
 ## Tests
 

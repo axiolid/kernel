@@ -87,9 +87,9 @@ sampled.
 **Follow-ups / risks to watch**
 
 - Refused by name for now: a plane that crosses a cap inside the section,
-  which needs a face with both an original and a cut cap; a plane parallel
-  to the axis, which is a plan cut and not a cap cut; and cuts of cones,
-  spheres and tori.
+  which needs a face with both an original and a cut cap (built since
+  ADR 0072); a plane parallel to the axis, which is a plan cut and not a
+  cap cut; and cuts of cones, spheres and tori.
 - Elliptical-cylinder walls use the same wave. The builder only produces
   circular cylinders today, because arc sections have circular arcs.
 

@@ -50,6 +50,12 @@ All notable changes to Axiolid are documented in this file.
 - Disconnected coaxial booleans (#120): `boolean_prisms_exact_solids` and
   `boolean_arc_prisms_exact_solids` return one solid per separate piece,
   in a fixed order, instead of refusing.
+- Stepped coaxial booleans and caps crossed by a cut (#120, ADR 0072): a
+  union of prisms with different heights, a notch, counterbore or blind
+  pocket, and a sloped plane crossing a column's top or bottom are now
+  exact solids. All are built from one exact arrangement of every input
+  ring (`ArcArrangement` in `axiolid-overlay`), so faces share vertices
+  exactly. Round walls stay cylinders.
 
 ### Fixed
 
