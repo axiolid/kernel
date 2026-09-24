@@ -37,6 +37,19 @@ pub trait Arith: Clone {
     /// Exact arithmetics always return `Some`.
     fn sign(&self) -> Option<Sign>;
 
+    /// An enclosure of `sqrt(self)`, for approximate arithmetics only.
+    ///
+    /// The interval tier uses it to evaluate nested radicals numerically,
+    /// which decides far more signs than case analysis on coefficients
+    /// (a coefficient that is exactly zero becomes an interval straddling
+    /// zero, and case analysis stops there). Exact arithmetics return
+    /// `None`: they decide by case analysis instead, never by a rounded
+    /// root. Also `None` whenever `self` might be negative, so a filter
+    /// never assigns a sign to a value that is not real.
+    fn sqrt_enclosure(&self) -> Option<Self> {
+        None
+    }
+
     /// `self * self`.
     #[must_use]
     fn square(&self) -> Self {

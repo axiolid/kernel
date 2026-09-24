@@ -24,6 +24,10 @@ pub enum ExactError {
     /// square root of a negative number). A construction that validated its
     /// inputs never reports this.
     Undefined,
+    /// More nested square roots than [`crate::tower::MAX_DEPTH`]: cost
+    /// grows exponentially with depth, so the tower refuses rather than
+    /// run unboundedly.
+    TooDeep,
 }
 
 /// Refuse NaN and infinities before any arithmetic runs.

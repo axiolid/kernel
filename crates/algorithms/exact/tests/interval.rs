@@ -150,3 +150,42 @@ fn the_filter_proves_nothing_about_a_cancelling_sum() {
     assert!(value.sign() != Some(Sign::Zero));
     assert!(value.sign().is_none() || value.sign() == exact.sign());
 }
+
+#[test]
+fn square_root_enclosures_contain_the_true_root() {
+    // lo <= sqrt(x) <= hi  <=>  lo^2 <= x <= hi^2 for non-negative bounds,
+    // and squares of doubles are exact in dyadic arithmetic. So containment
+    // is checked exactly, with no rounded root anywhere in the test.
+    let mut rng = Rng(0x0DDB_A11C_0FFE_E123);
+    let mut checked = 0;
+    for _ in 0..20_000 {
+        let value = rng.float().abs();
+        let Some(root) = Interval::point(value).sqrt_enclosure() else {
+            panic!("a non-negative point must have a root enclosure");
+        };
+        let exact = Dyadic::from_f64(value);
+        let lo = Dyadic::from_f64(root.lo());
+        let hi = Dyadic::from_f64(root.hi());
+        assert!(root.lo() >= 0.0, "a root enclosure never goes below zero");
+        assert_ne!(
+            lo.square().sub(&exact).sign(),
+            Some(Sign::Positive),
+            "lo^2 <= x for {value:e}"
+        );
+        assert_ne!(
+            hi.square().sub(&exact).sign(),
+            Some(Sign::Negative),
+            "x <= hi^2 for {value:e}"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 20_000);
+    // A radicand that might be negative has no enclosure: the filter must
+    // not give a sign to a value that may not be real.
+    let straddling = Interval::point(1.0).sub(&Interval::point(1.0));
+    assert!(straddling.sqrt_enclosure().is_none());
+    assert!(Interval::point(-4.0).sqrt_enclosure().is_none());
+    assert!(Interval::WHOLE.sqrt_enclosure().is_none());
+    // Exact tiers decide by case analysis, never by a rounded root.
+    assert!(Dyadic::from_f64(4.0).sqrt_enclosure().is_none());
+}

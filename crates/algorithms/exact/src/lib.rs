@@ -29,6 +29,7 @@ pub mod construct;
 pub mod dyadic;
 pub mod interval;
 pub mod root;
+pub mod tower;
 
 pub use arith::Arith;
 pub use certify::{certify, filter, require_finite, ExactError, SignExpr};
@@ -39,3 +40,4 @@ pub use construct::{
 pub use dyadic::Dyadic;
 pub use interval::Interval;
 pub use root::{sign_root, sign_two_roots, Root2};
+pub use tower::{Nested, Tower};

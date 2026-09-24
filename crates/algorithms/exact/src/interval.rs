@@ -141,4 +141,21 @@ impl Arith for Interval {
             hi: top.next_up(),
         }
     }
+
+    fn sqrt_enclosure(&self) -> Option<Self> {
+        // IEEE sqrt is correctly rounded, so one step outward covers the
+        // true root. A lower bound below zero is NOT clamped: the radicand
+        // might truly be negative, where the value is undefined and the
+        // exact tier says so; a clamped root would let the filter report a
+        // sign for a non-real value. Such cases fall through to the exact
+        // tier (a radicand of exactly zero, as at tangency, is one).
+        // NaN compares false, so it is refused here too.
+        if self.lo.is_nan() || self.lo < 0.0 {
+            return None;
+        }
+        Some(Self {
+            lo: self.lo.sqrt().next_down().max(0.0),
+            hi: self.hi.sqrt().next_up(),
+        })
+    }
 }
