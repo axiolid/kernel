@@ -11,6 +11,7 @@ pub mod evaluate;
 mod intrinsic;
 mod intrinsic3;
 pub mod linear;
+pub mod sinusoid;
 pub mod spline;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
@@ -19,6 +20,7 @@ pub use evaluate::CurveEvaluator;
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
+pub use sinusoid::Sinusoid2;
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
 
 /// The focused linear vocabulary, re-exported for consumers that want to name
@@ -46,6 +48,10 @@ pub enum Curve2 {
     /// length, anchored to a start frame. Carries clothoid and other
     /// transition spirals exactly, which no parametric variant can.
     Intrinsic(Intrinsic2),
+    /// The graph `v = mean + a cos(t) + b sin(t)`: the exact pcurve of a
+    /// plane's cut across a cylinder, read in the cylinder's (angle, height)
+    /// parameters. See [`Sinusoid2`] (ADR 0071).
+    Sinusoid(Sinusoid2),
 }
 
 /// Atomic three-dimensional curve values.

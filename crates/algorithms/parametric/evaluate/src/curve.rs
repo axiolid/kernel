@@ -89,6 +89,8 @@ pub fn domain2(curve: &Curve2) -> Interval {
             start: 0.0,
             end: i.length,
         },
+        // Periodic in the angle it is parameterised by, like a circle.
+        Curve2::Sinusoid(_) => full_turn(),
         // Unknown family: no domain is knowable, so claim none.
         _ => Interval {
             start: 0.0,
@@ -176,6 +178,8 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
         // (a clothoid needs Fresnel integrals), so it is quadrature over the
         // exact heading rather than a parametric formula.
         Curve2::Intrinsic(i) => crate::arc_length::intrinsic_point(i, t),
+        // The parameter is the first coordinate; closed form, no sampling.
+        Curve2::Sinusoid(w) => Ok(Point2::new(t, w.height(t))),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -199,6 +203,10 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
         // the heading it is built from is exact -- only position needs
         // quadrature, never the tangent.
         Curve2::Intrinsic(i) => crate::arc_length::intrinsic_tangent(i, t),
+        Curve2::Sinusoid(w) => {
+            let (sin, cos) = t.sin_cos();
+            Ok(Vec2::new(1.0, -w.cosine * sin + w.sine * cos))
+        }
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -218,6 +226,10 @@ pub fn second_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
         Curve2::Ellipse(e) => Ok(conic_second2(&e.frame, e.semi_axis_x, e.semi_axis_y, t)),
         Curve2::BSpline(b) => {
             de_boor_second_derivative(b, t, |p| [p.x, p.y], |c| Vec2::new(c[0], c[1]))
+        }
+        Curve2::Sinusoid(w) => {
+            let (sin, cos) = t.sin_cos();
+            Ok(Vec2::new(0.0, -w.cosine * cos - w.sine * sin))
         }
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
@@ -1319,6 +1331,9 @@ pub fn invert2(curve: &Curve2, point: Point2, tolerance: Tolerance) -> GeomResul
             let t = invert_conic_in_frame2(&e.frame, point, e.semi_axis_x, e.semi_axis_y)?;
             verify2(curve, t, point, linear)
         }
+        // A graph over its parameter: the parameter of a point IS its first
+        // coordinate, then the height is checked.
+        Curve2::Sinusoid(_) => verify2(curve, point.x, point, linear),
         _ => Err(no_closed_form_inversion()),
     }
 }

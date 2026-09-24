@@ -1,5 +1,5 @@
 use axiolid_core::{Frame2, Vec2};
-use axiolid_curve::{Circle2, Curve2, Ellipse2, Line2};
+use axiolid_curve::{Circle2, Curve2, Ellipse2, Line2, Sinusoid2};
 use axiolid_model::{
     CurveRelation, GeometryGraphBuilder, GraphError, OpenProfile, TrimSelector, TrimmingPreference,
 };
@@ -82,6 +82,41 @@ fn open_profile_rejects_malformed_atomic_trim_bases() {
 
     for curve in malformed {
         let error = wrap_trim(&mut GeometryGraphBuilder::new(), curve).unwrap_err();
+        assert!(matches!(
+            error,
+            GraphError::InvalidReferenceType {
+                expected: "bounded open curve2",
+                ..
+            }
+        ));
+    }
+}
+
+/// A cylinder-rim wave (ADR 0071) is a valid trim basis when finite, and a
+/// non-finite coefficient in any of its three terms is refused.
+#[test]
+fn open_profile_accepts_a_finite_wave_and_rejects_a_non_finite_one() {
+    let wave = Sinusoid2 {
+        mean: 1.0,
+        cosine: 0.5,
+        sine: -0.25,
+    };
+    wrap_trim(&mut GeometryGraphBuilder::new(), Curve2::Sinusoid(wave)).unwrap();
+    for bad in [
+        Sinusoid2 {
+            mean: f64::NAN,
+            ..wave
+        },
+        Sinusoid2 {
+            cosine: f64::INFINITY,
+            ..wave
+        },
+        Sinusoid2 {
+            sine: f64::NAN,
+            ..wave
+        },
+    ] {
+        let error = wrap_trim(&mut GeometryGraphBuilder::new(), Curve2::Sinusoid(bad)).unwrap_err();
         assert!(matches!(
             error,
             GraphError::InvalidReferenceType {

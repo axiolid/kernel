@@ -36,11 +36,13 @@ use axiolid_overlay::{
     arc_overlay, overlay, validate_arc_ring, ArcPolygon, ArcRing, FillRule, OverlayInput,
     OverlayOperation, Polygon, Ring,
 };
+use axiolid_primitive::HalfSpace;
 
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
 use axiolid_brep_audit::geometric_audit;
 
-use crate::extrude_arc::extrude_arc_rings_from;
+use crate::contour_lower::orient_arc_ring;
+use crate::extrude_arc::{arc_geometry, extrude_arc_rings_between, extrude_arc_rings_from, Level};
 use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
 
@@ -428,6 +430,159 @@ pub fn boolean_arc_prisms_exact_solids(
         .iter()
         .map(|region| arc_prism_solid(region, span, tolerance))
         .collect()
+}
+
+/// Cut an arc prism with a half-space: the prism's material on the kept
+/// side of a plane (#120).
+///
+/// This is the "round column under a sloped roof" case. When the plane
+/// passes cleanly through the prism -- above its bottom and below its top
+/// everywhere over the section -- the result is the same prism with one
+/// cap replaced by the cut:
+///
+/// - each cylindrical wall now ends on an ELLIPSE (the exact
+///   cylinder/plane intersection, #119), trimmed on the wall by the
+///   [`Sinusoid2`](axiolid_curve::Sinusoid2) pcurve (ADR 0071), so the wall
+///   stays a true `Cylinder` face;
+/// - each planar wall ends on a sloped straight edge;
+/// - the new cap is a planar face in the cutting plane.
+///
+/// `half_space.agreement` picks the kept side as elsewhere: `true` keeps
+/// the side the boundary normal points into. A plane tilted towards the
+/// kept side replaces the bottom cap, otherwise the top cap. The untouched
+/// cap keeps its `StartCap`/`EndCap` name; the cut cap is unnamed, because
+/// it is a fragment of the half-space, not of the prism.
+///
+/// # Refused, by name
+///
+/// - a plane parallel to the extrusion axis (a plan cut, not a cap cut);
+/// - a plane that crosses a cap inside the section, which leaves a solid
+///   with both an original and a cut cap -- not a prism between two levels;
+/// - a plane that misses the prism on the kept side entirely (the result
+///   is empty; this is a [`GeomError::Degenerate`], matching the other
+///   exact booleans' empty results).
+///
+/// A plane that keeps the whole prism returns the prism unchanged.
+pub fn clip_arc_prism_exact(
+    prism: &ArcPrism,
+    half_space: &HalfSpace,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    validate_arc_ring(&prism.section, tolerance)
+        .map_err(|error| GeomError::InvalidInput(format!("arc prism section: {error:?}")))?;
+    if !(prism.bottom.is_finite() && prism.top.is_finite()) {
+        return Err(GeomError::InvalidInput(
+            "arc prism heights must be finite".to_owned(),
+        ));
+    }
+    if prism.top <= prism.bottom {
+        return Err(GeomError::InvalidInput(
+            "arc prism top must lie above its bottom".to_owned(),
+        ));
+    }
+    let origin = half_space.boundary.origin;
+    let normal = half_space.boundary.normal;
+    if !(origin.is_finite() && normal.is_finite()) || normal.length_squared() == 0.0 {
+        return Err(GeomError::InvalidInput(
+            "half-space boundary must have a finite point and a non-zero normal".to_owned(),
+        ));
+    }
+    if normal.z == 0.0 {
+        return Err(unsupported(
+            "exact arc prism clip by a plane parallel to the extrusion axis",
+        ));
+    }
+    // z = height + gradient . (x, y) on the plane.
+    let level = Level {
+        height: normal.dot(origin) / normal.z,
+        gradient: Vec2::new(-normal.x / normal.z, -normal.y / normal.z),
+    };
+    if !(level.height.is_finite() && level.gradient.is_finite()) {
+        return Err(GeomError::Degenerate(
+            "half-space boundary is too steep to express as a height".to_owned(),
+        ));
+    }
+    // Kept side above the plane when the normal side is up and selected,
+    // or down and rejected.
+    let keeps_above = (normal.z > 0.0) == half_space.agreement;
+
+    let section = orient_arc_ring(&prism.section, true)?;
+    let (low, high) = level_range(&section, level)?;
+    let linear = tolerance.linear();
+    let rings = [section];
+    let flat = |bottom, top| {
+        extrude_arc_rings_between(&rings, Level::flat(bottom), Level::flat(top), (true, true))
+    };
+    let solid = if keeps_above {
+        if high <= prism.bottom + linear {
+            flat(prism.bottom, prism.top)?
+        } else if low >= prism.top - linear {
+            return Err(GeomError::Degenerate(
+                "arc prism clip is empty: the plane lies above the prism".to_owned(),
+            ));
+        } else if low > prism.bottom + linear && high < prism.top - linear {
+            extrude_arc_rings_between(&rings, level, Level::flat(prism.top), (false, true))?
+        } else {
+            return Err(unsupported(
+                "exact arc prism clip whose plane crosses a cap inside the section",
+            ));
+        }
+    } else if low >= prism.top - linear {
+        flat(prism.bottom, prism.top)?
+    } else if high <= prism.bottom + linear {
+        return Err(GeomError::Degenerate(
+            "arc prism clip is empty: the plane lies below the prism".to_owned(),
+        ));
+    } else if low > prism.bottom + linear && high < prism.top - linear {
+        extrude_arc_rings_between(&rings, Level::flat(prism.bottom), level, (true, false))?
+    } else {
+        return Err(unsupported(
+            "exact arc prism clip whose plane crosses a cap inside the section",
+        ));
+    };
+    gate_geometry(solid, tolerance)
+}
+
+/// Lowest and highest value of an affine level over a closed arc ring.
+///
+/// An affine function over a disc sector takes its extremes at the edge
+/// endpoints or where an arc is tangent to the level's contour lines: at
+/// the circle points in the directions `+gradient` and `-gradient`, when
+/// those lie inside the arc's sweep. Checking exactly those candidates
+/// gives the true range, not a sampled estimate.
+fn level_range(ring: &ArcRing, level: Level) -> GeomResult<(Scalar, Scalar)> {
+    let mut low = Scalar::INFINITY;
+    let mut high = Scalar::NEG_INFINITY;
+    let mut take = |p: Point2| {
+        let z = level.at(p);
+        low = low.min(z);
+        high = high.max(z);
+    };
+    let count = ring.vertices.len();
+    for index in 0..count {
+        let from = ring.vertices[index];
+        let to = ring.vertices[(index + 1) % count];
+        take(from.point);
+        if from.bulge == 0.0 || level.gradient == Vec2::ZERO {
+            continue;
+        }
+        let arc = arc_geometry(from.point, to.point, from.bulge)?;
+        let start = (from.point - arc.centre).to_angle();
+        let direction = level.gradient.to_angle();
+        for extreme in [direction, direction + core::f64::consts::PI] {
+            // Angle from the arc start to the candidate, measured the way
+            // the arc turns, in [0, 2 pi).
+            let turned = if arc.sweep > 0.0 {
+                (extreme - start).rem_euclid(core::f64::consts::TAU)
+            } else {
+                (start - extreme).rem_euclid(core::f64::consts::TAU)
+            };
+            if turned <= arc.sweep.abs() {
+                take(arc.centre + Vec2::from_angle(extreme) * arc.radius);
+            }
+        }
+    }
+    Ok((low, high))
 }
 
 fn arc_points(ring: &ArcRing) -> Vec<Point2> {

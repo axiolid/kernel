@@ -59,3 +59,31 @@ Candidates (pick by value/effort after #119):
 - #119 stays open: B-spline operands, general quadric/quadric curves.
 - Next: #120 tranche 2.
 
+
+## #120 A: arc prism cut by a sloped plane (option 1, user-approved 2026-09-24)
+
+Problem: a sloped plane cuts a cylinder wall in an ellipse. Its pcurve on the
+cylinder is v(u) = mean + a cos u + b sin u, which no Curve2 variant held
+exactly (B-spline only approximates, u is an angle).
+
+Steps (each gated before the next):
+1. axiolid-curve: `Curve2::Sinusoid(Sinusoid2 { mean, cosine, sine })`,
+   point(t) = (t, mean + cosine cos t + sine sin t). Additive
+   (#[non_exhaustive]). ADR 0071.
+2. axiolid-evaluate: domain2 (full turn), evaluate2, derivative2,
+   second_derivative2, closed-form inversion (t = p.x). Graph validation
+   accepts finite coefficients.
+3. construct: arc-prism builder takes lower/upper levels (Flat | Sloped
+   plane). Straight walls: exact Line3/Line2. Curved walls: Ellipse3 in its
+   principal frame (t = cylinder angle - const), Sinusoid2 pcurve on the
+   cylinder, Ellipse2 pcurve on the sloped cap. Flat/flat output unchanged.
+4. Public: clip an ArcPrism by a HalfSpace. Plane must clear both caps over
+   the whole section (arc interior extremes included); plane above/below the
+   whole prism -> unchanged / Degenerate; crossing a cap or vertical plane ->
+   refused by name.
+5. Tests: B-rep volume from sampled cap faces (walls vertical, so
+   V = sum of int z n_z dA over the caps) against the closed form; geometric
+   audit (pcurves lifted onto 3D curves); refusals; mutation probe.
+6. Ledger C9 + B1, changelogs, gate, push, CI, #120 comment.
+
+Status: step 1 in progress.

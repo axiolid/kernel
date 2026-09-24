@@ -41,6 +41,9 @@ All notable changes to Axiolid are documented in this file.
   with hits, tangency and containment decided exactly on `axiolid-exact`
   polynomials (`axiolid-nurbs`). Checked against a sampling oracle on 600
   random scenes and a six-fault mutation probe.
+- Sloped cuts through curved prisms (#120): `clip_arc_prism_exact` cuts a
+  column with a sloped plane exactly. The wall stays a cylinder, its cut
+  edge is an ellipse, and its trim is the new `Curve2::Sinusoid` (ADR 0071).
 - Curved coaxial booleans (#120): `boolean_arc_prisms_exact` now returns
   solids with round through-openings and solids that start above the
   ground plane, instead of refusing them.

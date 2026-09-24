@@ -55,3 +55,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0068](./0068-exact-number-type.md) | Exact numbers: num-bigint integers under an owned filtered layer |
 | [0069](./0069-arc-boolean-path.md) | Arc booleans: keep cavalier_contours, scaled; exact path later |
 | [0070](./0070-exact-arc-booleans.md) | Exact arc booleans replace cavalier_contours |
+| [0071](./0071-sinusoid-pcurves.md) | Sinusoid pcurves for plane cuts across cylinders |

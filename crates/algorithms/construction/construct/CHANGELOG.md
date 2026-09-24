@@ -11,6 +11,13 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `clip_arc_prism_exact` (#120): an arc prism cut by a half-space whose
+  plane passes between its caps, the "column under a sloped roof" case.
+  Cylindrical walls stay `Cylinder` faces trimmed by an exact `Ellipse3`
+  edge with a `Sinusoid2` pcurve (ADR 0071); planar walls get sloped edges;
+  the cut cap is unnamed. A plane crossing a cap inside the section and a
+  plane parallel to the axis are refused by name.
+
 - `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
   (#120): coaxial booleans whose result falls apart into separate pieces
   return one solid per piece, ordered by lowest vertex (x, then y), each

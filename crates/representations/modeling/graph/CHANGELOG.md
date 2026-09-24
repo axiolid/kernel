@@ -8,3 +8,8 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- A `Curve2::Sinusoid` is a valid trim basis when its three coefficients
+  are finite (ADR 0071).

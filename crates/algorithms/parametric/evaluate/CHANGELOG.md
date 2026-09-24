@@ -8,3 +8,9 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- `Curve2::Sinusoid` evaluation: point, first and second derivative, a
+  one-turn domain, and exact inversion (the parameter is the point's first
+  coordinate, then its height is checked) (ADR 0071).
