@@ -28,6 +28,11 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `overlay` no longer rejects a U-shape or comb as `SelfIntersection`.
+  The ring check treated an endpoint on the infinite line through another
+  edge as touching it, so two collinear edges that share a line without
+  meeting (the two ends of a U) were refused. A touching endpoint must now
+  lie on the edge itself. Rings that genuinely touch are still refused.
 - `arc_overlay` results no longer depend on drawing units. The arc
   backend's thresholds are fixed in drawing units, so a 5 um gap survived
   a union drawn in millimetres but vanished in metres. The drawing is now

@@ -177,3 +177,83 @@ fn rejects_self_crossing_ring() {
         Err(OverlayError::SelfIntersection)
     );
 }
+
+/// A ring with two collinear edges that do not touch (the inner walls of a
+/// U, the teeth of a comb) is simple. The self-crossing check once treated
+/// "on the same line" as "touching" and refused every such outline, so a
+/// U-shaped wall could not take part in any boolean.
+#[test]
+fn accepts_collinear_edges_that_do_not_touch() {
+    let p = Point2::new;
+    for (what, points) in [
+        (
+            "U",
+            vec![
+                p(0.0, 0.0),
+                p(3.0, 0.0),
+                p(3.0, 2.0),
+                p(2.0, 2.0),
+                p(2.0, 1.0),
+                p(1.0, 1.0),
+                p(1.0, 2.0),
+                p(0.0, 2.0),
+            ],
+        ),
+        (
+            "comb",
+            vec![
+                p(0.0, 0.0),
+                p(5.0, 0.0),
+                p(5.0, 3.0),
+                p(4.0, 3.0),
+                p(4.0, 1.0),
+                p(3.0, 1.0),
+                p(3.0, 3.0),
+                p(2.0, 3.0),
+                p(2.0, 1.0),
+                p(1.0, 1.0),
+                p(1.0, 3.0),
+                p(0.0, 3.0),
+            ],
+        ),
+    ] {
+        let mut a = input(0.0, 0.0, 1.0, 1.0);
+        a.polygons[0].outer.points = points;
+        let got = overlay(
+            &a,
+            &input(10.0, 0.0, 1.0, 1.0),
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            Tolerance::METRE,
+        );
+        assert!(got.is_ok(), "{what}: {got:?}");
+    }
+}
+
+/// The narrowing must not open the door the other way: a vertex that really
+/// lands on another edge of its own ring is still a self-intersection.
+#[test]
+fn rejects_a_vertex_touching_its_own_edge() {
+    let p = Point2::new;
+    let mut a = input(0.0, 0.0, 1.0, 1.0);
+    // The notch tip (2, 0) lies on the bottom edge (0,0)-(4,0).
+    a.polygons[0].outer.points = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 2.0),
+        p(3.0, 2.0),
+        p(2.0, 0.0),
+        p(1.0, 2.0),
+        p(0.0, 2.0),
+    ];
+    assert_eq!(
+        overlay(
+            &a,
+            &input(10.0, 0.0, 1.0, 1.0),
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            Tolerance::METRE,
+        ),
+        Err(OverlayError::SelfIntersection)
+    );
+}

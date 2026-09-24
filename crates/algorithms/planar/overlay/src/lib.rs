@@ -155,9 +155,24 @@ fn segments_intersect(a: Point2, b: Point2, c: Point2, d: Point2, epsilon: f64) 
     let ad = cross(a, b, d);
     let ca = cross(c, d, a);
     let cb = cross(c, d, b);
-    // Boundary contact is topology, not a repairable numerical nuisance.
-    (ac.abs() <= epsilon || ad.abs() <= epsilon || ca.abs() <= epsilon || cb.abs() <= epsilon)
+    // Boundary contact is topology, not a repairable numerical nuisance. A
+    // touching endpoint must lie ON the other segment, not merely on the
+    // infinite line through it: two collinear edges of a U-shape or a comb
+    // share a line without touching.
+    (ac.abs() <= epsilon && within_extent(a, b, c, epsilon))
+        || (ad.abs() <= epsilon && within_extent(a, b, d, epsilon))
+        || (ca.abs() <= epsilon && within_extent(c, d, a, epsilon))
+        || (cb.abs() <= epsilon && within_extent(c, d, b, epsilon))
         || ((ac > 0.0) != (ad > 0.0) && (ca > 0.0) != (cb > 0.0))
+}
+
+/// Whether `p` lies inside the axis-aligned box of segment `a`-`b`, widened
+/// by `epsilon`. Combined with collinearity this puts `p` on the segment.
+fn within_extent(a: Point2, b: Point2, p: Point2, epsilon: f64) -> bool {
+    p.x >= a.x.min(b.x) - epsilon
+        && p.x <= a.x.max(b.x) + epsilon
+        && p.y >= a.y.min(b.y) - epsilon
+        && p.y <= a.y.max(b.y) + epsilon
 }
 
 fn self_intersects(r: &Ring, t: Tolerance) -> bool {
