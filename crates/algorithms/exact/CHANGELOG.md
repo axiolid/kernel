@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-24
+
 ### Added
 
 - First release (ADR 0068, #154). Filtered exact arithmetic for
@@ -33,3 +35,4 @@ caret rule for `0.x` versions.
 - `Arith::from_dyadic`, `Dyadic::enclosure` (a sound `f64` interval; a point
   for values a double holds exactly), `Dyadic::approx_parts`,
   `Interval::{quotient, disjoint}`.
+

@@ -49,6 +49,13 @@ Candidates (pick by value/effort after #119):
 - #119 tranche 1 (exact analytic curve/surface and curve/curve): done
   locally; 12 tests, 6/6 mutants caught (scripts/probe_exact_curve_mutants.py).
   B8/B9 ledger rows extended, still narrow (B-spline operands).
-- Next: #119 tranche 2, exact degeneracy decisions in
-  exact_surface_intersection.rs (float `== 0.0` checks), then publish
-  axiolid-exact, then #120.
+- #119 tranche 2: done, f99e346 (gate green). Sphere/plane tangency,
+  cylinder/plane parallel/perpendicular/tangent and cone/plane
+  perpendicularity decided exactly; 37 tests, 5/5 mutants caught
+  (scripts/probe_exact_surface_mutants.py). Three of the old float
+  decisions were proven wrong on exact inputs, each now a regression test.
+- axiolid-exact 0.1.0: published to crates.io from f99e346, checksum
+  8584a50f..., tag axiolid-exact-v0.1.0; a fresh registry consumer builds.
+- #119 stays open: B-spline operands, general quadric/quadric curves.
+- Next: #120 tranche 2.
+
