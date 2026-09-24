@@ -40,7 +40,7 @@ use axiolid_overlay::{
 use crate::boolean_provenance::{name_side_fragment, OperandRings};
 use axiolid_brep_audit::geometric_audit;
 
-use crate::extrude_arc::extrude_arc_ring;
+use crate::extrude_arc::extrude_arc_rings_from;
 use crate::extrude_exact::extrude_polygon_rings_named;
 use crate::BACKEND_ID;
 
@@ -275,10 +275,15 @@ fn cap_operand(
 /// cylindrical wall stays a `Cylinder` face rather than becoming a fan of
 /// planar strips.
 ///
-/// The planar part agrees with closed-form areas to machine precision
-/// rather than being exact through integer predicates. That is a weaker
-/// claim than the polygon path makes and is stated here so a caller can
-/// choose deliberately.
+/// The planar part is the exact arc overlay (ADR 0070): every
+/// topological decision is exact for the given input, and crossing points
+/// of two curves are rounded to `f64` once, in the output. Results may
+/// carry holes (through-openings) and may start above `z = 0`.
+///
+/// # Refused
+///
+/// A result with several disconnected regions (one `ExactBRep` is one
+/// solid) and the stepped spans [`boolean_prisms_exact`] also refuses.
 pub fn boolean_arc_prisms_exact(
     subject: &ArcPrism,
     tool: &ArcPrism,
@@ -341,22 +346,14 @@ pub fn boolean_arc_prisms_exact(
     }
 
     let region = &result.regions[0];
-    // A hole needs a cap face carrying two bounds with arc loops, which
-    // the arc extruder does not build. Refusing names the gap instead of
-    // returning a solid with its opening filled in.
-    if !region.holes.is_empty() {
-        return Err(unsupported(
-            "exact arc prism boolean whose result has an interior hole",
-        ));
-    }
-    // The arc extruder builds from z = 0, so a band starting elsewhere
-    // would come back at the wrong height.
-    if bottom.abs() > tolerance.linear() {
-        return Err(unsupported(
-            "exact arc prism boolean whose result does not start at z = 0",
-        ));
-    }
-    let solid = extrude_arc_ring(&region.outer, Vec3::Z * (top - bottom))?;
+    // Holes are through-openings: each becomes its own wall ring and a
+    // second bound on both caps. The result may start above z = 0 (an
+    // intersection with a raised tool), so the section is extruded from
+    // its own base height.
+    let mut rings = Vec::with_capacity(1 + region.holes.len());
+    rings.push(region.outer.clone());
+    rings.extend(region.holes.iter().cloned());
+    let solid = extrude_arc_rings_from(&rings, bottom, Vec3::Z * (top - bottom))?;
     gate_geometry(solid, tolerance)
 }
 

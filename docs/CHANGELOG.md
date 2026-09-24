@@ -34,6 +34,9 @@ All notable changes to Axiolid are documented in this file.
   Checked against area identities and point membership on 270 scenes with
   shared edges, tangent and concentric circles, and decimal coordinates,
   plus an eight-fault mutation probe.
+- Curved coaxial booleans (#120): `boolean_arc_prisms_exact` now returns
+  solids with round through-openings and solids that start above the
+  ground plane, instead of refusing them.
 
 ### Fixed
 

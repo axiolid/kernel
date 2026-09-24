@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `boolean_arc_prisms_exact` runs on the exact arc overlay (ADR 0070) and
+  builds results it used to refuse: a result with interior holes becomes a
+  solid with through-passages (#120), and a result starting above `z = 0`
+  is extruded from its own base height. Disconnected results and stepped
+  spans are still refused.
+
 ### Fixed
 
 - `half_space::bounded_half_space_in_frame` now places the boundary at the

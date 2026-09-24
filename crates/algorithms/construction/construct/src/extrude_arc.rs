@@ -91,9 +91,18 @@ struct RingTopology {
     bottom_points: Vec<Point3>,
 }
 
-/// Extrude one arc-capable ring along `offset`, naming each wall.
-pub(crate) fn extrude_arc_ring(ring: &ArcRing, offset: Vec3) -> GeomResult<ExactBRep> {
-    extrude_arc_rings(core::slice::from_ref(ring), offset)
+/// [`extrude_arc_rings`] from the plane `z = base` instead of `z = 0`.
+///
+/// Every absolute position (vertices, circle centres, cap planes, wall
+/// frames) derives from the bottom points and the cap levels, so lifting
+/// those is the whole change; surface parameters are relative and stay as
+/// they are.
+pub(crate) fn extrude_arc_rings_from(
+    rings: &[ArcRing],
+    base: Scalar,
+    offset: Vec3,
+) -> GeomResult<ExactBRep> {
+    build_arc_rings(rings, base, offset)
 }
 
 /// Extrude an arc-capable section with holes along `offset`.
@@ -108,6 +117,10 @@ pub(crate) fn extrude_arc_ring(ring: &ArcRing, offset: Vec3) -> GeomResult<Exact
 /// its walls outward and produce a solid that is inside-out along the
 /// passage.
 pub(crate) fn extrude_arc_rings(rings: &[ArcRing], offset: Vec3) -> GeomResult<ExactBRep> {
+    build_arc_rings(rings, 0.0, offset)
+}
+
+fn build_arc_rings(rings: &[ArcRing], base: Scalar, offset: Vec3) -> GeomResult<ExactBRep> {
     if rings.is_empty() {
         return Err(GeomError::Degenerate(
             "arc extrusion needs at least one ring".to_owned(),
@@ -137,14 +150,14 @@ pub(crate) fn extrude_arc_rings(rings: &[ArcRing], offset: Vec3) -> GeomResult<E
 
     let topologies = rings
         .iter()
-        .map(|ring| add_arc_ring(&mut builder, ring, offset))
+        .map(|ring| add_arc_ring(&mut builder, ring, base, offset))
         .collect::<GeomResult<Vec<_>>>()?;
 
     let bottom_surface = builder.add_surface(Surface::Plane(Plane {
-        frame: identity_frame3(Vec3::ZERO),
+        frame: identity_frame3(Vec3::new(0.0, 0.0, base)),
     }));
     let top_surface = builder.add_surface(Surface::Plane(Plane {
-        frame: identity_frame3(offset),
+        frame: identity_frame3(Vec3::new(0.0, 0.0, base) + offset),
     }));
 
     let mut bottom_bounds = Vec::with_capacity(ring_count);
@@ -187,7 +200,7 @@ pub(crate) fn extrude_arc_rings(rings: &[ArcRing], offset: Vec3) -> GeomResult<E
             let face = if bulge == 0.0 {
                 add_planar_wall(&mut builder, ring, topology, index, offset)?
             } else {
-                add_cylindrical_wall(&mut builder, ring, topology, index, offset)?
+                add_cylindrical_wall(&mut builder, ring, topology, index, base, offset)?
             };
             builder.set_face_name(face, FaceName::swept(SweptFace::Side(ordinal)));
             ordinal = ordinal.checked_add(1).ok_or_else(|| {
@@ -203,13 +216,14 @@ pub(crate) fn extrude_arc_rings(rings: &[ArcRing], offset: Vec3) -> GeomResult<E
 fn add_arc_ring(
     builder: &mut ExactBRepBuilder,
     ring: &ArcRing,
+    base: Scalar,
     offset: Vec3,
 ) -> GeomResult<RingTopology> {
     let count = ring.vertices.len();
     let bottom_points: Vec<Point3> = ring
         .vertices
         .iter()
-        .map(|vertex| Point3::new(vertex.point.x, vertex.point.y, 0.0))
+        .map(|vertex| Point3::new(vertex.point.x, vertex.point.y, base))
         .collect();
     let bottom_vertices: Vec<VertexId> = bottom_points
         .iter()
@@ -238,8 +252,9 @@ fn add_arc_ring(
         // bottom family. The caller refuses zero height, but a silent
         // mis-binding here would be far harder to see than a refusal.
         for (is_top, vertices) in [(false, &bottom_vertices), (true, &top_vertices)] {
-            let level = if is_top { offset.z } else { 0.0 };
-            let lift = Vec3::new(0.0, 0.0, level);
+            let rise = if is_top { offset.z } else { 0.0 };
+            let level = base + rise;
+            let lift = Vec3::new(0.0, 0.0, rise);
             let curve = if bulge == 0.0 {
                 let origin = bottom_points[index] + lift;
                 Curve3::Line(Line3 {
@@ -327,6 +342,7 @@ fn add_cylindrical_wall(
     ring: &ArcRing,
     topology: &RingTopology,
     index: usize,
+    base: Scalar,
     offset: Vec3,
 ) -> GeomResult<FaceId> {
     let count = ring.vertices.len();
@@ -336,7 +352,7 @@ fn add_cylindrical_wall(
         ring.vertices[next].point,
         ring.vertices[index].bulge,
     )?;
-    let circle = circle_of(&arc, 0.0, topology.bottom_points[index])?;
+    let circle = circle_of(&arc, base, topology.bottom_points[index])?;
     let surface = builder.add_surface(Surface::Cylinder(Cylinder {
         frame: circle.frame,
         radius: arc.radius,

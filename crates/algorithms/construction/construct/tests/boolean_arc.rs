@@ -120,21 +120,65 @@ fn the_clipped_cylinder_is_a_sound_brep_of_the_closed_form_area() {
 }
 
 #[test]
-fn a_result_with_an_interior_hole_is_refused_not_filled_in() {
-    // A wide plate minus a small centred disc: the true result has an
-    // interior opening. The arc extruder cannot build a cap with two
-    // bounds, so this must REFUSE rather than return a solid plate.
+fn a_result_with_an_interior_hole_is_a_plate_with_a_round_passage() {
+    // A wide plate minus a small centred disc: the result has an interior
+    // opening. It must come back as a through-hole -- a second bound on both
+    // caps and a cylindrical passage wall -- never as a filled plate.
     let plate = prism(square(3.0), 1.0);
     let hole = prism(disc(0.0, 0.0, 0.5), 1.0);
 
-    let error =
+    let solid =
         boolean_arc_prisms_exact(&plate, &hole, BooleanOperator::Difference, Tolerance::METRE)
-            .expect_err("a holed result is not representable yet");
-    let text = format!("{error:?}");
-    assert!(
-        text.contains("interior hole"),
-        "the refusal must name the hole, got {text}"
-    );
+            .expect("a holed result is representable");
+    let health = axiolid_brep_audit::geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+
+    let faces = solid.topology().faces();
+    let caps_with_two_bounds = faces.iter().filter(|face| face.bounds.len() == 2).count();
+    assert_eq!(caps_with_two_bounds, 2, "both caps must carry the opening");
+    let (_, cylinders) = surface_kinds(&solid);
+    assert!(cylinders >= 1, "the passage wall must be cylindrical");
+    // Passage vertices sit on the hole's circle, at both cap heights.
+    let on_passage = solid
+        .topology()
+        .vertices()
+        .iter()
+        .filter(|v| {
+            let r = (v.position.x.powi(2) + v.position.y.powi(2)).sqrt();
+            (r - 0.5).abs() < 1e-9
+        })
+        .count();
+    assert!(on_passage >= 4, "only {on_passage} vertices on the passage");
+}
+
+#[test]
+fn a_result_starting_above_the_ground_plane_stays_at_its_height() {
+    // The intersection of a tall disc with a raised slab spans the slab's
+    // heights, not [0, thickness]: the extruder must build from the base.
+    let column = prism(disc(0.0, 0.0, 1.0), 10.0);
+    let slab = ArcPrism {
+        section: square(0.8),
+        bottom: 3.0,
+        top: 3.5,
+    };
+    let solid = boolean_arc_prisms_exact(
+        &column,
+        &slab,
+        BooleanOperator::Intersection,
+        Tolerance::METRE,
+    )
+    .expect("a raised intersection is representable");
+    let health = axiolid_brep_audit::geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    let heights: Vec<f64> = solid
+        .topology()
+        .vertices()
+        .iter()
+        .map(|v| v.position.z)
+        .collect();
+    let low = heights.iter().copied().fold(f64::INFINITY, f64::min);
+    let high = heights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert_eq!((low, high), (3.0, 3.5));
 }
 
 #[test]
