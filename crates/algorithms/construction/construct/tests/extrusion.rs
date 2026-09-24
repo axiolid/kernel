@@ -67,6 +67,54 @@ fn a_box_extrudes_to_its_exact_volume_with_outward_winding() {
     assert!(mesh.validate_structure().is_ok());
 }
 
+/// An extrusion direction with a NEGATIVE z component is still outward.
+///
+/// `extrude` builds its caps and side walls assuming the offset leaves the
+/// profile plane towards +z. Real building models routinely author
+/// `ExtrudedDirection = (0, 0, -1)`, e.g. an opening body hung from a lintel
+/// and extruded downward. Without compensation every triangle is wound
+/// inside-out, the signed volume is `-area * depth`, and any boolean that
+/// uses the solid refuses it (or, worse, silently inverts). The magnitude
+/// must be unchanged and the sign positive whichever way the offset points.
+#[test]
+fn a_downward_extrusion_is_still_outward() {
+    let rings = profile_rings(&rect(4.0, 0.2, None), 1e-3, Tolerance::METRE).expect("rings");
+    let (pts, tris) = triangulate(&rings).expect("triangulate");
+    for direction in [
+        Vec3::NEG_Z,
+        Vec3::new(0.0, 0.3, -1.0),
+        Vec3::new(0.5, -0.2, -1.0),
+    ] {
+        let mesh = extrude(&pts, &tris, &loops(&rings), direction, 3.0).expect("extrude");
+        let v = volume(&mesh);
+        let expected = 4.0 * 0.2 * 3.0 * direction.normalize().z.abs();
+        assert!(
+            v > 0.0,
+            "direction {direction:?}: solid must be outward-oriented, got {v}"
+        );
+        assert!(
+            (v - expected).abs() < 1e-9,
+            "direction {direction:?}: expected {expected}, got {v}"
+        );
+        assert!(mesh.validate_structure().is_ok());
+    }
+}
+
+/// A hollow section extruded downward keeps the hole subtracted, not added.
+///
+/// The inner wall faces the opposite way from the outer one, so a fix that
+/// flips only the caps or only the outer loop would still get this wrong.
+#[test]
+fn a_downward_hollow_section_loses_exactly_the_hole_volume() {
+    let rings = profile_rings(&rect(4.0, 2.0, Some(0.25)), 1e-3, Tolerance::METRE).expect("rings");
+    let (pts, tris) = triangulate(&rings).expect("triangulate");
+    let mesh = extrude(&pts, &tris, &loops(&rings), Vec3::NEG_Z, 3.0).expect("extrude");
+    let v = volume(&mesh);
+    let expected = (4.0 * 2.0 - 3.5 * 1.5) * 3.0;
+    assert!(v > 0.0, "hollow section must be outward-oriented, got {v}");
+    assert!((v - expected).abs() < 1e-9, "expected {expected}, got {v}");
+}
+
 /// A hollow section must lose exactly the hole's volume. This is the case the
 /// hand-rolled ear clipper could not do, and the reason earcut was adopted.
 #[test]

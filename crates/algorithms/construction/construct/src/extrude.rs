@@ -79,6 +79,19 @@ pub fn extrude(
         }
     }
 
+    // Every winding above assumes the offset leaves the profile plane towards
+    // +z. When it points below the plane the solid is the mirror image of that
+    // case, so every triangle is inside-out (signed volume -area*depth) and a
+    // boolean would refuse or silently invert it. Flipping each triangle once
+    // restores outward orientation for caps and walls, outer and hole loops
+    // alike. An offset IN the plane (z == 0) bounds no volume either way and
+    // is left as it was.
+    if offset.z < 0.0 {
+        for triangle in indices.chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
+
     Ok(TriMesh::new(positions, indices))
 }
 

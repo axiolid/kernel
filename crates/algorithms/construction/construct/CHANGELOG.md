@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `extrude` (and so `extrude_profile` and the reference mesh compiler) wound
+  a solid inside-out when the extrusion direction pointed below the profile
+  plane (`direction.z < 0`), e.g. an opening body extruded downward from its
+  lintel (#166). The signed volume was `-area * depth`, so any boolean using
+  the solid refused it as inside-out. Such a solid is now outward-oriented
+  with the same magnitude, for outer and hole loops alike.
+
 ### Added
 
 - `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
