@@ -634,10 +634,10 @@ id = "C8"
 area = "brep"
 name = "B-rep tessellation with tolerance"
 level = "implemented"
-summary = "tessellate in execution/compile drives faceting of the full BRep with explicit chord/tolerance budgets; large dedicated test suite (2288 lines)"
-evidence = ["crates/execution/compile/src/brep.rs::tessellate", "crates/execution/compile/tests/brep_tessellation.rs"]
+summary = "tessellate in execution/compile drives faceting of the full BRep with explicit chord/tolerance budgets; large dedicated test suite. Surface models (shells without a solid, #161) tessellate every shell and are flagged MeshClosure::Surface so volume readers refuse them. Authored polygon faces (n-gons, concave, with holes, #160) are triangulated in their own plane with the same planar path; faces off their plane beyond tolerance are refused by index."
+evidence = ["crates/execution/compile/src/brep.rs::tessellate", "crates/execution/compile/tests/brep_tessellation.rs", "crates/execution/compile/src/planar.rs::triangulate_polygon", "crates/execution/compile/tests/authored_polygons.rs", "crates/execution/compile/tests/surface_models.rs", "crates/contracts/operations/compile/src/outcome.rs::MeshClosure"]
 occt = ["src/ModelingAlgorithms/TKMesh/BRepMesh"]
-cgal = []
+cgal = ["Polygon_mesh_processing"]
 
 [[capability]]
 id = "C9"

@@ -291,28 +291,33 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .ok_or_else(|| GeomError::InvalidInput(format!("root {root:?} produced no mesh")))
     }
 
-    /// Convert authored triangular faces by preserving their exact corner order.
-    fn compile_authored_triangles(&self, mesh: &axiolid_mesh::PolygonMesh) -> GeomResult<TriMesh> {
-        if mesh
-            .faces
-            .iter()
-            .any(|face| face.outer.len() != 3 || !face.holes.is_empty())
-        {
-            return Err(GeomError::Unsupported {
-                backend: self.descriptor().id,
-                operation: Operation::Tessellation,
-            });
-        }
-
+    /// Convert an authored polygon mesh to triangles (#160).
+    ///
+    /// A plain triangle keeps its exact corner order. Any other face -- an
+    /// n-gon, a concave face, a face with holes (IFC4
+    /// `IfcIndexedPolygonalFaceWithVoids`) -- is triangulated in its own
+    /// plane by [`crate::planar::triangulate_polygon`]. Positions are kept
+    /// as authored and shared, so the output welds exactly where the input
+    /// did; no corner is moved or added.
+    ///
+    /// A face that is not planar within the linear tolerance, has no area,
+    /// or whose rings cross is refused with an error naming its index: a
+    /// non-planar n-gon has no unique triangulation, so picking one would
+    /// invent geometry.
+    fn compile_authored_polygons(
+        &self,
+        mesh: &axiolid_mesh::PolygonMesh,
+        options: &ExecutionOptions,
+    ) -> GeomResult<TriMesh> {
         let position_count = mesh.positions.len();
         if let Some(index) = mesh
             .faces
             .iter()
-            .flat_map(|face| face.outer.iter().copied())
+            .flat_map(|face| face_rings(face).flatten().copied())
             .find(|&index| index as usize >= position_count)
         {
             return Err(GeomError::InvalidInput(format!(
-                "authored triangle index {index} exceeds position count {position_count}"
+                "authored polygon index {index} exceeds position count {position_count}"
             )));
         }
 
@@ -320,30 +325,56 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         positions
             .try_reserve_exact(position_count)
             .map_err(|_| GeomError::BudgetExceeded {
-                resource: "authored triangle positions",
+                resource: "authored polygon positions",
             })?;
         positions.extend_from_slice(&mesh.positions);
 
-        let index_count = mesh
+        // A polygon with k corners (holes included) gives at most
+        // k + 2 * holes - 2 triangles; bound by corner count times three.
+        let index_bound = mesh
             .faces
-            .len()
-            .checked_mul(3)
+            .iter()
+            .try_fold(0_usize, |total, face| {
+                let corners = face_rings(face).map(Vec::len).sum::<usize>();
+                corners
+                    .checked_add(2 * face.holes.len())
+                    .and_then(|triangles| triangles.checked_mul(3))
+                    .and_then(|indices| total.checked_add(indices))
+            })
             .ok_or(GeomError::BudgetExceeded {
-                resource: "authored triangle indices",
+                resource: "authored polygon indices",
             })?;
         let mut indices = Vec::new();
         indices
-            .try_reserve_exact(index_count)
+            .try_reserve_exact(index_bound)
             .map_err(|_| GeomError::BudgetExceeded {
-                resource: "authored triangle indices",
+                resource: "authored polygon indices",
             })?;
-        for face in &mesh.faces {
-            indices.extend_from_slice(&face.outer);
+
+        let linear = options.tolerance().linear();
+        for (face_index, face) in mesh.faces.iter().enumerate() {
+            if face.outer.len() == 3 && face.holes.is_empty() {
+                indices.extend_from_slice(&face.outer);
+                continue;
+            }
+            // A repeated corner (an exporter's closing point, a doubled
+            // corner) needs no handling here: earcut drops coincident
+            // consecutive points itself (`a_repeated_closing_corner_is_not_a_triangle`).
+            let rings: Vec<&Vec<u32>> = face_rings(face).collect();
+            let points: Vec<Vec<axiolid_core::Point3>> = rings
+                .iter()
+                .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
+                .collect();
+            let views: Vec<&[axiolid_core::Point3]> = points.iter().map(Vec::as_slice).collect();
+            let local = crate::planar::triangulate_polygon(&views, linear)
+                .map_err(|refusal| crate::planar::face_error(face_index, refusal))?;
+            let corners: Vec<u32> = rings.into_iter().flatten().copied().collect();
+            indices.extend(local.into_iter().map(|corner| corners[corner]));
         }
 
         let triangles = TriMesh::new(positions, indices);
         triangles.validate_structure().map_err(|error| {
-            GeomError::InvalidInput(format!("invalid authored triangle mesh: {error}"))
+            GeomError::InvalidInput(format!("invalid authored polygon mesh: {error}"))
         })?;
         Ok(triangles)
     }
@@ -359,10 +390,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let id = key.id;
         let node = self.node(graph, id)?;
         match node {
-            GeometryNode::TriMesh(mesh) => Ok(Built::leaf(mesh.clone())),
-            GeometryNode::PolygonMesh(mesh) => {
-                self.compile_authored_triangles(mesh).map(Built::leaf)
-            }
+            GeometryNode::TriMesh(mesh) => Ok(authored_mesh(mesh.clone(), options)),
+            GeometryNode::PolygonMesh(mesh) => self
+                .compile_authored_polygons(mesh, options)
+                .map(|mesh| authored_mesh(mesh, options)),
             GeometryNode::Instance(instance) => {
                 let source_tolerance =
                     instance_local_tolerance(instance.transform, options.tolerance())?;
@@ -384,9 +415,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             GeometryNode::SolidOperation(operation) => {
                 self.build_solid(graph, operation, options).map(Built::leaf)
             }
-            GeometryNode::BRep(brep) => {
-                crate::brep::tessellate(brep, graph, options.tolerance()).map(Built::leaf)
-            }
+            GeometryNode::BRep(brep) => crate::brep::tessellate(brep, graph, options.tolerance())
+                .map(|(mesh, closure)| Built::with_closure(mesh, closure)),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
@@ -426,6 +456,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         cache: &Cache,
     ) -> GeomResult<Built> {
         let subject = self.cached(cache, left, options.tolerance())?;
+        refuse_surface_operand(subject, "subject")?;
         let bounded_tool = match self.node(graph, right)? {
             GeometryNode::HalfSpace(hs) => Some(axiolid_construct::half_space::for_subject(
                 &subject.mesh,
@@ -440,6 +471,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             Some(tool) => (tool, None),
             None => {
                 let built = self.cached(cache, right, options.tolerance())?;
+                refuse_surface_operand(built, "tool")?;
                 (&built.mesh, Some(&built.fates))
             }
         };
@@ -757,7 +789,7 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
         let built = self.evaluate(graph, root, options, &mut cache)?;
-        Ok(CompileOutcome::tracked(built.mesh, built.fates.into_vec()))
+        Ok(CompileOutcome::tracked(built.mesh, built.fates.into_vec()).with_closure(built.closure))
     }
 
     /// Overriding the `_into` seam gives both call shapes one shared cache,
@@ -808,4 +840,38 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     pub const fn boolean_provider(&self) -> &B {
         &self.boolean
     }
+}
+
+/// A face's outer ring followed by its holes.
+fn face_rings(face: &axiolid_mesh::PolygonFace) -> impl Iterator<Item = &Vec<u32>> {
+    std::iter::once(&face.outer).chain(face.holes.iter())
+}
+
+/// A boolean needs two volumes; a surface model has none (#161).
+///
+/// Refused rather than handed to the provider, which would see a closed
+/// surface model as a valid solid and return a confident, meaningless
+/// result.
+fn refuse_surface_operand(built: &Built, role: &'static str) -> GeomResult<()> {
+    if built.closure == axiolid_mesh_compile_contract::MeshClosure::Solid {
+        return Ok(());
+    }
+    Err(GeomError::InvalidInput(format!(
+        "boolean {role} is a surface model: it encloses no volume to combine"
+    )))
+}
+
+/// An authored mesh, with its closure read from its structure (#161).
+///
+/// A mesh node carries no "this is a solid" declaration the way a B-rep
+/// does, so the geometry is the only evidence: a closed, consistently
+/// wound two-manifold bounds a solid, anything else (an open face set, a
+/// single sheet) is a surface.
+fn authored_mesh(mesh: TriMesh, options: &ExecutionOptions) -> Built {
+    let closure = if axiolid_mesh::audit_mesh(&mesh, options.tolerance()).is_closed_two_manifold() {
+        axiolid_mesh_compile_contract::MeshClosure::Solid
+    } else {
+        axiolid_mesh_compile_contract::MeshClosure::Surface
+    };
+    Built::with_closure(mesh, closure)
 }

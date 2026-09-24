@@ -5,6 +5,7 @@
 mod brep;
 mod channels;
 mod directrix;
+mod planar;
 
 use axiolid_contracts::BackendId;
 

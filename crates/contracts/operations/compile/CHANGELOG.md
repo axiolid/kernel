@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshClosure` and `CompileOutcome::closure` (#161): whether a compiled mesh
+  bounds a solid (`Solid`), is a surface model with area but no volume
+  (`Surface`), or was not reported (`Unknown`, the default for `untracked`
+  and `tracked`, so existing compilers build unchanged).
+  `CompileOutcome::solid_mesh` returns the mesh only for `Solid`, so volume
+  readers refuse a surface model instead of measuring a closed shell the
+  source never declared a solid. `with_closure` sets it.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

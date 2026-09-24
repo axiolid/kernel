@@ -56,6 +56,12 @@ All notable changes to Axiolid are documented in this file.
   exact solids. All are built from one exact arrangement of every input
   ring (`ArcArrangement` in `axiolid-overlay`), so faces share vertices
   exactly. Round walls stay cylinders.
+- Authored polygon faces (#160): the reference mesh compiler triangulates
+  n-gon, concave and holed `PolygonMesh` faces instead of refusing them.
+  Non-planar faces are refused by index.
+- Surface models (#161): B-reps with shells but no solid compile to a mesh
+  flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
+  volume on it.
 
 ### Fixed
 

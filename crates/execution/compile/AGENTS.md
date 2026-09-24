@@ -31,6 +31,22 @@ mesh from positions and indices on those paths -- that is the #115 bug. New
 graph paths go through `channels::{transform, merge, after_boolean}` or wrap
 a freshly made mesh in `Built::leaf`. Gate: `tests/graph_channels.rs`.
 
+**Closure rides with the geometry too (#161).** `Built::leaf` claims a
+solid; a mesh that may not be one (a B-rep with shells but no solid, an
+authored mesh) goes through `Built::with_closure`. A surface model's mesh can
+be watertight, so never infer "solid" from a closed mesh on a B-rep path --
+only a declared solid is one. A collection is a solid only if every member
+is, and a boolean refuses a surface operand. Callers read volume through
+`CompileOutcome::solid_mesh`. Gate: `tests/surface_models.rs`.
+
+**Authored polygons are triangulated here (#160).** `PolygonMesh` faces that
+are not plain triangles (n-gons, concave, with holes) go through
+`planar::triangulate_polygon`, shared with planar B-rep faces: Newell plane,
+planarity refusal beyond the linear tolerance, earcut, and an area
+cross-check because earcut returns a partial result on crossing rings instead
+of failing. Authored positions are never moved or added. Gate:
+`tests/authored_polygons.rs`.
+
 Curve flattening is **not owned here**. `segment_points`, `circle_rings`, and
 `ellipse_rings` all delegate to `axiolid_reference::curve::flatten2` (ADR 0018),
 which subdivides adaptively on measured sagitta. The old private
@@ -57,6 +73,9 @@ flattening. This is not a test artefact -- it is a real API contract.
 
 `earcut` (ADR 0015) is owned by
 `crates/algorithms/construction/construct/src/profile.rs` and is not re-exported.
+This crate uses it directly for planar faces in `src/planar.rs` (one call
+site) and for curved-face trims in `src/brep.rs`; both check its output
+rather than trusting it.
 `axiolid_reference::triangulate_simple` audits it differentially on hole-free
 polygons in `crates/algorithms/construction/construct/tests/oracle.rs` — the
 adopted crate is verified, not trusted. This crate's graph-level integration

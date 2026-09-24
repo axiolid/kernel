@@ -16,23 +16,49 @@ pub(crate) use merge::merge;
 pub(crate) use transform::transform;
 
 use axiolid_mesh::{AttributeFate, TriMesh};
+use axiolid_mesh_compile_contract::MeshClosure;
 
-/// A node's mesh and what happened to each channel on the way to it.
-#[derive(Debug, Clone, Default)]
+/// A node's mesh, what happened to each channel on the way to it, and
+/// whether it bounds a solid (#161).
+#[derive(Debug, Clone)]
 pub(crate) struct Built {
     pub mesh: TriMesh,
     pub fates: Fates,
+    /// Never [`MeshClosure::Unknown`] inside the compiler: every node
+    /// states it.
+    pub closure: MeshClosure,
 }
 
 impl Built {
-    /// A mesh made here from source data: every channel it carries is
+    /// A solid made here from source data: every channel it carries is
     /// original.
     pub fn leaf(mesh: TriMesh) -> Self {
+        Self::with_closure(mesh, MeshClosure::Solid)
+    }
+
+    /// A mesh made here from source data, with its closure.
+    pub fn with_closure(mesh: TriMesh, closure: MeshClosure) -> Self {
         let mut fates = Fates::default();
         for channel in &mesh.attributes {
             fates.record(&channel.name, AttributeFate::Preserved);
         }
-        Self { mesh, fates }
+        Self {
+            mesh,
+            fates,
+            closure,
+        }
+    }
+}
+
+/// The closure of several parts together: a solid only if every part is.
+pub(crate) fn combined_closure<'a>(parts: impl IntoIterator<Item = &'a Built>) -> MeshClosure {
+    if parts
+        .into_iter()
+        .all(|part| part.closure == MeshClosure::Solid)
+    {
+        MeshClosure::Solid
+    } else {
+        MeshClosure::Surface
     }
 }
 
