@@ -53,6 +53,9 @@ All notable changes to Axiolid are documented in this file.
 
 ### Fixed
 
+- `axiolid-measure`: `exact_properties` honours face orientation, so an
+  exact solid that does not touch `z = 0` measures its true volume (a
+  raised unit cube measured 7/3).
 - The planar overlay accepts U-shapes and combs: two collinear edges that
   do not touch were misreported as a self-intersection.
 - Exact surface intersection no longer mistakes an exact tangency,

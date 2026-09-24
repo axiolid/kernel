@@ -83,9 +83,11 @@ fn family(surface: &Surface) -> &'static str {
 /// than over a tessellation of them. For planar faces the fan is not an
 /// approximation: a planar polygon is exactly the union of its fan triangles.
 ///
-/// Face orientation is honoured: a face marked [`Orientation::Reversed`]
-/// contributes with its winding flipped, so a correctly built solid yields a
-/// positive volume without the caller pre-normalising anything.
+/// Orientation is honoured at every level: a face marked
+/// [`Orientation::Reversed`], a reversed use of a face in its shell, and a
+/// reversed bound each flip the loop's winding, exactly as `audit_brep`
+/// reads them. A correctly built solid yields a positive volume wherever it
+/// sits, without the caller pre-normalising anything.
 ///
 /// # Errors
 ///
@@ -101,7 +103,18 @@ pub fn exact_properties(
     let mut volume_weighted = Point3::ZERO;
     let mut moments = Vec3::ZERO;
 
-    for face in topology.faces() {
+    // How each face is used by the shell that holds it. A face outside
+    // every shell (a bare face table) is taken as used forward.
+    let mut shell_sense = vec![Orientation::Forward; topology.faces().len()];
+    for shell in topology.shells() {
+        for &(face_id, sense) in &shell.faces {
+            if let Some(slot) = shell_sense.get_mut(face_id.index()) {
+                *slot = sense;
+            }
+        }
+    }
+
+    for (face_index, face) in topology.faces().iter().enumerate() {
         let surface_id = face.surface.ok_or(ExactMeasureError::MissingSurface)?;
         let surface = brep
             .surfaces()
@@ -111,17 +124,26 @@ pub fn exact_properties(
             return Err(ExactMeasureError::NonPlanarFace(family(surface)));
         }
 
+        let flip_face = (shell_sense[face_index] == Orientation::Reversed)
+            ^ (face.orientation == Orientation::Reversed);
         for bound in &face.bounds {
-            let ring = ring_positions(brep, bound.loop_id)?;
+            let mut ring = ring_positions(brep, bound.loop_id)?;
             if ring.len() < 3 {
                 continue;
             }
-            // Winding is already carried by the loop: each `EdgeUse` names
-            // its own traversal direction, and `ring_positions` walks it, so
-            // a `Reversed` face's loop already comes back wound the other
-            // way. Flipping again here would double-correct and cancel out.
-            // Verified by mutation: with an extra face-level flip, a prism
-            // still measures positive because the two negations compose.
+            // Loops are wound in the support surface's own frame; the face,
+            // its use in the shell, and the bound each flip that. This is
+            // the convention `audit_brep` checks when it pairs edge uses,
+            // so any audited closed solid measures correctly under it.
+            //
+            // Ignoring the flips looked right for years because every
+            // tested solid had its reversed faces in the plane z = 0, where
+            // `int z n_z dA` is zero whichever way the face is wound. A
+            // solid lifted off that plane exposes it
+            // (`a_raised_solid_measures_the_same_as_one_on_the_ground`).
+            if flip_face ^ (bound.orientation == Orientation::Reversed) {
+                ring.reverse();
+            }
             accumulate_fan(
                 &ring,
                 &mut area,

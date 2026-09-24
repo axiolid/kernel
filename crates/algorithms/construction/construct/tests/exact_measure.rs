@@ -151,3 +151,70 @@ fn the_exact_and_mesh_paths_agree() {
         meshed.centroid
     );
 }
+
+/// A solid that does not touch `z = 0` measures its true volume.
+///
+/// Every other prism here starts at `z = 0`, where the bottom cap adds
+/// nothing to `int z n_z dA` whichever way it is wound -- so a measure that
+/// ignored `Face::orientation` still got them right. This one sits at
+/// `2 <= z <= 3`: its bottom cap contributes `-2 * area` only when the
+/// `Reversed` face is honoured, and `+2 * area` (volume 7/3 for a unit
+/// cube, not 1) when it is not.
+#[test]
+fn a_raised_solid_measures_the_same_as_one_on_the_ground() {
+    use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
+    use axiolid_core::{BooleanOperator, Point2};
+    use axiolid_overlay::{ArcRing, ArcVertex};
+
+    let square = |half: f64| {
+        ArcRing::new(
+            [(-half, -half), (half, -half), (half, half), (-half, half)]
+                .into_iter()
+                .map(|(x, y)| ArcVertex::straight(Point2::new(x, y)))
+                .collect(),
+        )
+    };
+    let block = |bottom: f64, top: f64| ArcPrism {
+        section: square(0.5),
+        bottom,
+        top,
+    };
+    let cover = |bottom: f64, top: f64| ArcPrism {
+        section: square(1.0),
+        bottom,
+        top,
+    };
+    let at = |bottom: f64| {
+        let solid = boolean_arc_prisms_exact(
+            &block(bottom, bottom + 1.0),
+            &cover(bottom, bottom + 1.0),
+            BooleanOperator::Intersection,
+            tol(),
+        )
+        .expect("a unit cube");
+        exact_properties(&solid, tol()).expect("all-planar")
+    };
+    let ground = at(0.0);
+    let raised = at(2.0);
+    assert!(
+        (ground.signed_volume - 1.0).abs() < 1e-12,
+        "{}",
+        ground.signed_volume
+    );
+    assert!(
+        (raised.signed_volume - 1.0).abs() < 1e-12,
+        "{}",
+        raised.signed_volume
+    );
+    // Translating a solid moves its centroid by the same amount.
+    assert!(
+        (raised.centroid.z - 2.5).abs() < 1e-12,
+        "{:?}",
+        raised.centroid
+    );
+    assert!(
+        (ground.centroid.z - 0.5).abs() < 1e-12,
+        "{:?}",
+        ground.centroid
+    );
+}
