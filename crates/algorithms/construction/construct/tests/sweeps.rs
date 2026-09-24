@@ -88,6 +88,127 @@ fn a_swept_disk_on_a_straight_path_is_a_cylinder() {
     );
 }
 
+/// A path of straight legs joined by finely sampled circular bends.
+///
+/// `legs` are the unit directions of successive straight runs, each
+/// `leg_length` long; consecutive legs are joined by a circular bend of
+/// radius `bend` sampled every `step` radians. Returns the points and the
+/// exact polyline length, which is what a sweep's volume scales with.
+fn bent_path(
+    legs: &[Vec3],
+    leg_length: Scalar,
+    bend: Scalar,
+    step: Scalar,
+) -> (Vec<Point3>, Scalar) {
+    let mut points = vec![Point3::ZERO];
+    let mut here = Point3::ZERO;
+    for (i, dir) in legs.iter().enumerate() {
+        here += *dir * leg_length;
+        points.push(here);
+        let Some(next) = legs.get(i + 1) else { break };
+        // Bend in the plane of `dir` and `next`, centred on the inside.
+        let angle = dir.angle_between(*next);
+        let inward = (*next - *dir * dir.dot(*next)).normalize();
+        let centre = here + inward * bend;
+        let count = (angle / step).ceil().max(1.0) as usize;
+        for k in 1..=count {
+            let a = angle * k as Scalar / count as Scalar;
+            here = centre - inward * (bend * a.cos()) + *dir * (bend * a.sin());
+            points.push(here);
+        }
+    }
+    let length = points.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    (points, length)
+}
+
+/// Closed-form volume of the swept disk the compiler builds: its inscribed
+/// n-gon area (n from the same chord budget) times the path length.
+fn disk_volume(radius: Scalar, inner: Option<Scalar>, length: Scalar, chord: Scalar) -> Scalar {
+    let ngon = |r: Scalar| {
+        let per = 2.0
+            * (1.0 - (chord / r).min(1.0))
+                .clamp(-1.0, 1.0)
+                .acos()
+                .max(1e-9);
+        let n = (core::f64::consts::TAU / per).ceil().clamp(2.0, 4096.0);
+        0.5 * n * r * r * (core::f64::consts::TAU / n).sin()
+    };
+    (ngon(radius) - inner.map_or(0.0, ngon)) * length
+}
+
+fn assert_bent_disk(legs: &[Vec3], inner: Option<Scalar>, what: &str) {
+    let chord = 1e-4;
+    let tol = tol_for(chord);
+    let (path, length) = bent_path(legs, 3.0, 1.0, 0.02);
+    let mesh = sweep::swept_disk(&path, 0.25, inner, None, tol)
+        .unwrap_or_else(|e| panic!("{what}: a bent disk must sweep: {e}"));
+    let want = disk_volume(0.25, inner, length, chord);
+    let got = volume(&mesh, tol);
+    assert!(
+        (got - want).abs() / want < 1e-3,
+        "{what}: swept {got} vs n-gon area x path length {want}"
+    );
+}
+
+/// A pipe that starts along +X and turns onto +Y.
+///
+/// A path starting along X seeds the reference on Y. A single fixed
+/// reference is then tangent to the second leg and the sweep was refused,
+/// although a circle needs no particular orientation (axiolid/kernel#169).
+#[test]
+fn a_swept_disk_turning_onto_its_seed_axis_sweeps() {
+    assert_bent_disk(&[Vec3::X, Vec3::Y], None, "L, solid");
+    assert_bent_disk(&[Vec3::X, Vec3::Y], Some(0.1), "L, hollow");
+}
+
+/// A U: out along X, across along Y, back along -X.
+#[test]
+fn a_u_shaped_swept_disk_sweeps() {
+    assert_bent_disk(&[Vec3::X, Vec3::Y, -Vec3::X], None, "U, solid");
+    assert_bent_disk(&[Vec3::X, Vec3::Y, -Vec3::X], Some(0.1), "U, hollow");
+}
+
+/// A leg ALMOST along the seed axis is the silent case.
+///
+/// Exactly parallel is refused; off by 1e-9 it is not, and projecting the
+/// fixed reference onto that leg's normal plane leaves a residue of 1e-9
+/// whose direction is arbitrary. The ring rotates about the path between
+/// neighbouring stations, the loft connects vertex k to vertex k across the
+/// rotation, and the volume collapses with no error. A bent rebar in a real
+/// Revit model lost up to 64 % of its volume this way.
+#[test]
+fn a_leg_nearly_along_the_seed_axis_does_not_twist() {
+    let nearly_y = Vec3::new(1e-9, 1.0, 0.0).normalize();
+    assert_bent_disk(&[Vec3::X, nearly_y], None, "nearly-parallel leg");
+    assert_bent_disk(
+        &[Vec3::Z, Vec3::X, nearly_y],
+        Some(0.1),
+        "3D, nearly-parallel leg",
+    );
+}
+
+/// A helix has torsion; a rotation-minimising frame must still close the
+/// volume to the analytic value (no twist-induced shrinkage).
+#[test]
+fn a_helical_swept_disk_keeps_its_volume() {
+    let chord = 1e-4;
+    let tol = tol_for(chord);
+    let path: Vec<Point3> = (0..=400)
+        .map(|k| {
+            let a = k as Scalar * 0.02;
+            Point3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.3 * a)
+        })
+        .collect();
+    let length: Scalar = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    let mesh = sweep::swept_disk(&path, 0.25, None, None, tol).expect("helix sweeps");
+    let want = disk_volume(0.25, None, length, chord);
+    let got = volume(&mesh, tol);
+    assert!(
+        (got - want).abs() / want < 1e-3,
+        "helix: swept {got} vs {want}"
+    );
+}
+
 #[test]
 fn a_hollow_swept_disk_subtracts_its_bore() {
     let chord = 1e-6;

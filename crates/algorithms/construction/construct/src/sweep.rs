@@ -255,16 +255,92 @@ pub fn swept_disk(
         }
     }
     // A disk is just a circular profile, so the sweep reuses the shared
-    // path. The reference direction is arbitrary for a circle: any choice
-    // rotates the section about its own axis of symmetry.
+    // loft. The section needs a frame that stays perpendicular to the path,
+    // but which perpendicular does not matter for a circle. A single fixed
+    // axis is NOT enough: a leg along that axis has no perpendicular
+    // component and was refused, and a leg nearly along it projects to a
+    // residue of arbitrary direction, rotating the ring between stations
+    // so the loft connects vertex k to a rotated vertex k and the volume
+    // collapses silently (axiolid/kernel#169). The reference is therefore
+    // carried along the path by rotation-minimising frames.
     let rings = disk_rings(radius, inner_radius, tolerance)?;
-    let seed = seed_reference(path)?;
-    let frames = frames_along(path, |_| seed)?;
+    let frames = rotation_minimising_frames(path)?;
     let stations: Vec<Station> = frames
         .iter()
         .map(|f| loft::place(&rings, |p| loft::at(f, p)))
         .collect();
     loft::loft(&rings, &stations, false)
+}
+
+/// Rotation-minimising frames along a sampled path, by double reflection.
+///
+/// Wang, Jüttler, Zheng and Liu, "Computation of Rotation Minimizing
+/// Frames", ACM TOG 27(1), 2008: each step reflects the previous frame in
+/// the bisector plane of the chord, then in the plane that maps the
+/// reflected tangent onto the next tangent. Two reflections are a rotation,
+/// so the reference stays unit length and perpendicular to the tangent at
+/// every station by construction; it can never become parallel to it. The
+/// frame has fourth-order accuracy in the step, and no twist beyond what
+/// the path's own torsion forces.
+///
+/// Tangents match `frames_along` (averaged at interior samples), so a
+/// corner is mitred the same way as every other sweep family.
+fn rotation_minimising_frames(path: &[Point3]) -> GeomResult<Vec<Frame>> {
+    let seed = seed_reference(path)?;
+    let tangents = tangents_along(path)?;
+    let mut reference = seed;
+    let mut frames = Vec::with_capacity(path.len());
+    for i in 0..path.len() {
+        frames.push(Frame::from_reference(path[i], tangents[i], reference)?);
+        let Some(next) = path.get(i + 1) else { break };
+        let chord = *next - path[i];
+        let c1 = chord.dot(chord);
+        if c1 == 0.0 {
+            // A repeated sample: the frame does not move. `tangents_along`
+            // has already refused a path whose tangent vanishes here.
+            continue;
+        }
+        let reflected_ref = reference - chord * (2.0 / c1 * chord.dot(reference));
+        let reflected_tan = tangents[i] - chord * (2.0 / c1 * chord.dot(tangents[i]));
+        let fix = tangents[i + 1] - reflected_tan;
+        let c2 = fix.dot(fix);
+        reference = if c2 == 0.0 {
+            reflected_ref
+        } else {
+            reflected_ref - fix * (2.0 / c2 * fix.dot(reflected_ref))
+        };
+    }
+    Ok(frames)
+}
+
+/// Unit tangent at each sample, averaged at interior samples.
+fn tangents_along(path: &[Point3]) -> GeomResult<Vec<Vec3>> {
+    if path.len() < 2 {
+        return Err(GeomError::InvalidInput(format!(
+            "a sweep directrix needs at least two points, got {}",
+            path.len()
+        )));
+    }
+    (0..path.len())
+        .map(|i| {
+            let raw = if i == 0 {
+                path[1] - path[0]
+            } else if i + 1 == path.len() {
+                path[i] - path[i - 1]
+            } else {
+                (path[i] - path[i - 1]).normalize_or_zero()
+                    + (path[i + 1] - path[i]).normalize_or_zero()
+            };
+            let tangent = raw.normalize_or_zero();
+            if tangent == Vec3::ZERO {
+                Err(GeomError::InvalidInput(
+                    "sweep tangent must be a non-zero direction".to_owned(),
+                ))
+            } else {
+                Ok(tangent)
+            }
+        })
+        .collect()
 }
 
 /// A circular profile, hollow when `inner` is given.
