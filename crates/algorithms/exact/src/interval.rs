@@ -62,6 +62,46 @@ impl Interval {
         self.lo <= value && value <= self.hi
     }
 
+    /// `[lo, hi]` as given. Crate-private: callers must have proven the
+    /// bounds contain the value, which only this crate's code can do.
+    pub(crate) fn from_bounds(lo: f64, hi: f64) -> Self {
+        if lo.is_nan() || hi.is_nan() || lo > hi {
+            return Self::WHOLE;
+        }
+        Self { lo, hi }
+    }
+
+    /// A sound enclosure of `self / divisor`, or [`Interval::WHOLE`] when
+    /// the divisor may be zero.
+    ///
+    /// Each bound is one IEEE division (correctly rounded), widened one
+    /// step outward. Lets callers keep a cheap per-point box for values of
+    /// the form `numerator / weight`.
+    #[must_use]
+    pub fn quotient(self, divisor: Self) -> Self {
+        if divisor.lo <= 0.0 && divisor.hi >= 0.0 || divisor.lo.is_nan() || divisor.hi.is_nan() {
+            return Self::WHOLE;
+        }
+        let q = [
+            self.lo / divisor.lo,
+            self.lo / divisor.hi,
+            self.hi / divisor.lo,
+            self.hi / divisor.hi,
+        ];
+        if q.iter().any(|v| v.is_nan()) {
+            return Self::WHOLE;
+        }
+        let lo = q.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = q.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Self::outward(lo, hi)
+    }
+
+    /// Whether the two intervals share no point.
+    #[must_use]
+    pub fn disjoint(self, other: Self) -> bool {
+        self.hi < other.lo || other.hi < self.lo
+    }
+
     /// Bounds already known to be sound, widened one step outward.
     fn outward(lo: f64, hi: f64) -> Self {
         if lo.is_nan() || hi.is_nan() {
@@ -77,6 +117,10 @@ impl Interval {
 impl Arith for Interval {
     fn from_f64(value: f64) -> Self {
         Self::point(value)
+    }
+
+    fn from_dyadic(value: &crate::dyadic::Dyadic) -> Self {
+        value.enclosure()
     }
 
     fn add(&self, other: &Self) -> Self {

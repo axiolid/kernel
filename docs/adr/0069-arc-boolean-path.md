@@ -1,6 +1,6 @@
 # 0069 — Arc booleans: keep cavalier_contours, scaled; exact path later
 
-- **Status:** Accepted
+- **Status:** Accepted; the cavalier_contours part superseded by [0070](0070-exact-arc-booleans.md)
 - **Date:** 2026-09-23
 - **Deciders:** Friedrich, axiolid
 - **Relates to:** [0047](0047-absorb-mesh-boolean.md), [0050](0050-arc-aware-planar-overlay.md), [0068](0068-exact-number-type.md); issue #155

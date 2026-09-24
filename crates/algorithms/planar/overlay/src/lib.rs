@@ -2,6 +2,7 @@
 //! Validated, deterministic planar boolean overlay and offset.
 mod arc;
 mod arc_overlay;
+mod exact_arc;
 mod offset;
 mod region;
 

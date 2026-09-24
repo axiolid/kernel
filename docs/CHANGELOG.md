@@ -26,6 +26,14 @@ All notable changes to Axiolid are documented in this file.
   exact big-integer arithmetic (`num-bigint`) runs only when it cannot.
   Includes `(a + b*sqrt(c)) / d` signs and ordering across radicands,
   exact segment crossings and line/circle hits with exact tangency.
+- `axiolid-exact`: nested square roots (`Tower`), exact real roots of
+  integer polynomials (`IntPoly`, Sturm), and exact conic intersections
+  (`Conic`).
+- Exact arc booleans (#155, ADR 0070): `arc_overlay` decides every
+  topological question exactly and no longer uses `cavalier_contours`.
+  Checked against area identities and point membership on 270 scenes with
+  shared edges, tangent and concentric circles, and decimal coordinates,
+  plus an eight-fault mutation probe.
 
 ### Fixed
 

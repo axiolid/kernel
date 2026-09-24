@@ -23,3 +23,13 @@ caret rule for `0.x` versions.
   cross), `line_circle_hits` (missed, tangent or two hits, with tangency
   decided exactly), `LineHit::{cmp_param, orientation}` and
   `compare_along`.
+- `Tower` and `Nested`: values with any number of nested square roots
+  (capped at depth 6), with exact signs by recursive case analysis and an
+  interval filter through `Arith::sqrt_enclosure`.
+- `IntPoly` and `RealRoot`: exact real roots of integer polynomials by
+  square-free reduction and Sturm sequences, isolated in dyadic intervals.
+- Conics: `Conic`, exact line/conic and conic/conic intersection points
+  with multiplicity, and the side of a line a conic point lies on.
+- `Arith::from_dyadic`, `Dyadic::enclosure` (a sound `f64` interval; a point
+  for values a double holds exactly), `Dyadic::approx_parts`,
+  `Interval::{quotient, disjoint}`.

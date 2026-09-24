@@ -15,6 +15,7 @@ use num_bigint::{BigInt, Sign as BigSign};
 use axiolid_guarantees::Sign;
 
 use crate::arith::Arith;
+use crate::interval::Interval;
 
 /// An exact value `mantissa * 2^exponent`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -72,6 +73,74 @@ impl Dyadic {
     #[must_use]
     pub fn exponent(&self) -> i64 {
         self.exponent
+    }
+
+    /// A sound `f64` interval containing the value.
+    ///
+    /// The top 64 mantissa bits are taken with a floor shift (the value
+    /// lies within one unit of them), converted with one rounding, then
+    /// scaled by an exact power of two and widened two steps each way,
+    /// which covers both errors even at a binade boundary. Values whose
+    /// scaled result would leave the normal `f64` range get the whole line:
+    /// sound, and never decisive.
+    #[must_use]
+    pub fn enclosure(&self) -> Interval {
+        if self.mantissa.sign() == BigSign::NoSign {
+            return Interval::point(0.0);
+        }
+        let bits = self.mantissa.bits();
+        let drop = bits.saturating_sub(64);
+        let exponent = self.exponent + drop as i64;
+        // top < 2^64, so the result is normal iff 2^(exponent+63) is.
+        if !(-1000..=900).contains(&exponent) {
+            return Interval::WHOLE;
+        }
+        let scale = 2f64.powi(exponent as i32);
+        if drop == 0 && bits <= 53 {
+            // Nothing dropped and the mantissa fits a double: the value is
+            // exactly representable (the scale is a power of two within
+            // the normal range), so the enclosure is a point. The filter's
+            // strength depends on this: input coordinates arrive here.
+            let exact = i64::try_from(&self.mantissa).expect("at most 53 bits") as f64 * scale;
+            return Interval::from_bounds(exact, exact);
+        }
+        // BigInt >> floors (towards -infinity), so value is in
+        // [top, top + 1] * 2^exponent; with nothing dropped it is exactly
+        // top, and only the conversion to f64 rounds.
+        let top = &self.mantissa >> drop;
+        let top = i128::try_from(&top).expect("at most 65 bits");
+        let low = (top as f64) * scale;
+        let high = if drop == 0 {
+            low
+        } else {
+            ((top + 1) as f64) * scale
+        };
+        Interval::from_bounds(low.next_down().next_down(), high.next_up().next_up())
+    }
+
+    /// `(m, e)` with the value within a relative `2^-52` of `m * 2^e`,
+    /// where `m` is a double of magnitude in `[2^52, 2^53)`, or `(0, 0)`.
+    ///
+    /// Unlike [`Dyadic::to_f64`] this never overflows or underflows, so
+    /// ratios and roots of huge or tiny values stay accurate: combine the
+    /// parts first, apply the exponent last. For output only.
+    #[must_use]
+    pub fn approx_parts(&self) -> (f64, i64) {
+        let bits = self.mantissa.bits();
+        if bits == 0 {
+            return (0.0, 0);
+        }
+        let drop = bits.saturating_sub(53);
+        let top = &self.mantissa >> drop;
+        let top = i64::try_from(&top).expect("at most 53 bits");
+        let mut m = top as f64;
+        let mut e = self.exponent + drop as i64;
+        // Normalise short mantissas up to 53 bits so every caller gets the
+        // same magnitude range.
+        let lift = 53 - bits.min(53) as i64;
+        m *= 2f64.powi(lift as i32);
+        e -= lift;
+        (m, e)
     }
 
     /// Bits in the mantissa: the cost driver of every operation.
@@ -137,6 +206,10 @@ impl Arith for Dyadic {
     /// points reject them first ([`crate::require_finite`]).
     fn from_f64(value: f64) -> Self {
         Self::try_from_f64(value).expect("exact arithmetic needs finite input")
+    }
+
+    fn from_dyadic(value: &Dyadic) -> Self {
+        value.clone()
     }
 
     fn add(&self, other: &Self) -> Self {

@@ -300,6 +300,8 @@ graph TD
     axiolid_oracle --> axiolid_evaluate
     axiolid_oracle --> axiolid_surface
     axiolid_overlay --> axiolid_core
+    axiolid_overlay --> axiolid_exact
+    axiolid_overlay --> axiolid_guarantees
     axiolid_pointcloud --> axiolid_core
     axiolid_pointcloud_reconstruction_contract --> axiolid_contracts
     axiolid_pointcloud_reconstruction_contract --> axiolid_core

@@ -2,6 +2,8 @@
 
 use axiolid_guarantees::Sign;
 
+use crate::dyadic::Dyadic;
+
 /// A number system an expression can be evaluated in.
 ///
 /// Implemented by [`crate::Interval`] (fast, may be undecided) and
@@ -15,6 +17,14 @@ pub trait Arith: Clone {
     /// Non-finite input is never silently accepted: the interval tier widens
     /// it to the whole line and the exact tier panics.
     fn from_f64(value: f64) -> Self;
+
+    /// The value of an exact dyadic number: itself in the exact tier, a
+    /// sound enclosure in the interval tier ([`Dyadic::enclosure`]).
+    ///
+    /// Lets exact intermediate data (a constructed point, a normalised
+    /// coefficient) enter an expression that is then evaluated in both
+    /// tiers, so the filter still runs first.
+    fn from_dyadic(value: &Dyadic) -> Self;
 
     /// `self + other`.
     #[must_use]

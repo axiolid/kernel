@@ -11,7 +11,8 @@ readme.workspace = true
 
 [dependencies]
 axiolid-core.workspace = true
-cavalier_contours.workspace = true
+axiolid-exact.workspace = true
+axiolid-guarantees.workspace = true
 i_overlay.workspace = true
 
 [package.metadata.axiolid]
@@ -21,4 +22,8 @@ role = "algorithm.planar"
 domain = "planar.overlay"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-core"]
+allowed-internal-dependencies = ["axiolid-core", "axiolid-exact", "axiolid-guarantees"]
+
+[[bench]]
+name = "arc_overlay"
+harness = false

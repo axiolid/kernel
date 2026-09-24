@@ -590,7 +590,8 @@ name = "axiolid-overlay"
 version = "0.3.0"
 dependencies = [
  "axiolid-core",
- "cavalier_contours",
+ "axiolid-exact",
+ "axiolid-guarantees",
  "i_overlay",
 ]
 
@@ -822,18 +823,6 @@ name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
-
-[[package]]
-name = "cavalier_contours"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85e06038a969c5e4d93565f12b044814d3b1a48d50c4ef868d588e79956fea51"
-dependencies = [
- "ahash",
- "num-traits",
- "smallvec",
- "static_aabb2d_index",
-]
 
 [[package]]
 name = "cbindgen"
@@ -1588,21 +1577,6 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
-
-[[package]]
-name = "smallvec"
-version = "1.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
-
-[[package]]
-name = "static_aabb2d_index"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a753368e4dd146a347d0ea692f0f8a37df18df7eee5659d36dd75eb287c6454"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "strsim"

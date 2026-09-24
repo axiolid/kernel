@@ -87,10 +87,10 @@ then reclassified as scoped after review; the table below is current.
 | C. B-rep | 20 | 4 | 12 | 0 | 4 |
 | D. Polygon meshes | 20 | 6 | 6 | 1 | 7 |
 | E. Triangulations | 10 | 1 | 1 | 3 | 5 |
-| F. 2D | 11 | 1 | 5 | 1 | 4 |
+| F. 2D | 11 | 2 | 4 | 1 | 4 |
 | G. Point sets | 8 | 3 | 1 | 2 | 2 |
 | H. Spatial and misc | 5 | 0 | 2 | 2 | 1 |
-| **Total** | **95** | **25** | **36** | **9** | **25** |
+| **Total** | **95** | **26** | **35** | **9** | **25** |
 
 No row graded **contract only**: every capability Axiolid names has an
 algorithm behind it, even where that algorithm is narrow.
@@ -195,7 +195,7 @@ algorithm behind it, even where that algorithm is narrow.
 
 | Row | Capability | Reference (O: OCCT, C: CGAL) | Axiolid | Scope, refusals, evidence |
 | --- | --- | --- | --- | --- |
-| F1 | polygon booleans (exact) | C:Boolean_set_operations_2,Nef_2 O:(BOP on faces) | narrow | Two backends: a certified integer-predicate polygon path (exact for straight-edge polygons, with holes) via `axiolid-overlay::Region::{union,intersection,difference}`, and an arc-aware path (`arc_overlay`) that wraps the `cavalier_contours` crate (a third-party dependency, not Axiolid's own exact-predicate code) for boundaries containing circular arcs — the arc path's exactness is therefore only as good as `cavalier_contours`'s float arithmetic, not certified like the straight-edge path. No Nef-2D (open/unbounded regions). Evidence: `crates/algorithms/planar/overlay/src/region.rs::Region::union,intersection,difference` tested via `crates/algorithms/planar/overlay` test suite |
+| F1 | polygon booleans (exact) | C:Boolean_set_operations_2,Nef_2 O:(BOP on faces) | implemented | Two exact backends, both with holes: a certified integer-predicate polygon path via `axiolid-overlay::Region::{union,intersection,difference}`, and an exact arc path (`arc_overlay`, ADR 0070) whose crossings, ordering, classification, linking and nesting are exact sign decisions via `axiolid-exact`; crossing points of two curves are rounded to `f64` once, in the output. No Nef-2D (open/unbounded regions). Evidence: `crates/algorithms/planar/overlay/src/exact_arc.rs::boolean` tested by `crates/algorithms/planar/overlay/tests/arc_exact_oracle.rs` (area identities and point membership) |
 | F2 | polygon offset (straight/rounded) | C:Straight_skeleton_2,Minkowski_sum_2 O:BRepOffsetAPI_MakeOffset | narrow | `offset_polygons`/`stroke_polyline` in overlay crate, and `Region::dilate`/`Region::erode` (disc-expansion form). No standalone straight-skeleton-based offset (see F3, ABSENT) — offset here is the Minkowski-disc form (rounded corners only by construction; no mitred/beveled straight-skeleton offset variant). Evidence: `crates/algorithms/planar/overlay/src/offset.rs::offset_polygons,stroke_polyline` |
 | F3 | straight skeleton | C:Straight_skeleton_2 O:- | **absent** | No straight-skeleton implementation found anywhere in the workspace (searched directly, 0 hits). Evidence: grep for straight_skeleton/StraightSkeleton: 0 hits. |
 | F4 | arrangements of curves (segments, arcs, conics, Bezier) | C:Arrangement_on_surface_2 O:- | narrow | `axiolid-arrangement` is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — `Vertex`/`HalfEdge`/`Face` store `Point2` positions with no curve type. Arcs are handled only inside the separate, non-incremental `arc_overlay` boolean path (F1/F2), not as arrangement edges; conics and Bezier curves are not supported anywhere. Evidence: `crates/algorithms/planar/arrangement/src/lib.rs::Arrangement` (straight edges only) tested by `crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one`. |
@@ -308,7 +308,6 @@ gate-checked version of this table is `architecture/capability-ledger.toml`;
 | [#151](https://github.com/axiolid/kernel/issues/151) | Fair curves: minimum-energy interpolation and batten curves | B16 | #136 |
 | [#152](https://github.com/axiolid/kernel/issues/152) | Form features: holes, pockets, slots and ribs on B-rep solids | C14 | #120 |
 | [#153](https://github.com/axiolid/kernel/issues/153) | Surface meshing of smooth and implicit surfaces with quality bounds | E6 | #126 |
-| [#155](https://github.com/axiolid/kernel/issues/155) | Exact polygon booleans with circular arcs, independent of cavalier_contours | F1 | - |
 | [#156](https://github.com/axiolid/kernel/issues/156) | Clip and split a triangle mesh by another mesh | D17 | - |
 | [#157](https://github.com/axiolid/kernel/issues/157) | 2D arrangements of circular arcs and conic curves | F4 | - |
 | [#158](https://github.com/axiolid/kernel/issues/158) | 3D Minkowski sum and difference for non-convex solids | H2 | - |

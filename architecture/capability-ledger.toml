@@ -307,13 +307,6 @@ number = 153
 blocked_by = ["delaunay-3d"]
 
 [[issue]]
-key = "arc-polygon-booleans"
-title = "Exact polygon booleans with circular arcs, independent of cavalier_contours"
-priority = "Medium"
-effort = "High"
-number = 155
-
-[[issue]]
 key = "mesh-mesh-clip"
 title = "Clip and split a triangle mesh by another mesh"
 priority = "Medium"
@@ -1105,10 +1098,9 @@ scope_rationale = "Triangulations and hulls above three dimensions have no consu
 id = "F1"
 area = "planar"
 name = "polygon booleans (exact)"
-issue = "arc-polygon-booleans"
-level = "narrow"
-summary = "Two backends. Straight-edge polygons: a certified integer-predicate path via axiolid-overlay::Region::{union,intersection,difference}, exact, with holes. Arcs: arc_overlay wraps the third-party cavalier_contours crate, which is tolerance-based; results are within floating-point error, not exact, and since ADR 0069 independent of drawing units. An exact arc path waits on #154 (ADR 0068)."
-evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay"]
+level = "implemented"
+summary = "Two exact backends, union/intersection/difference/xor, with holes. Straight-edge polygons: integer-predicate path via axiolid-overlay::Region. Arcs: arc_overlay on the in-tree exact core (ADR 0070): crossings, their order, inside/outside/on, linking and nesting are exact sign decisions via axiolid-exact, independent of units; crossing points of two curves are rounded to f64 once, in the output. Self-intersecting operand rings are outside the contract."
+evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay", "crates/algorithms/planar/overlay/src/exact_arc.rs::boolean", "crates/algorithms/planar/overlay/tests/arc_exact_oracle.rs"]
 occt = []
 cgal = ["Boolean_set_operations_2", "Nef_2"]
 
