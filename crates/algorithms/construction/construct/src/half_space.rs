@@ -57,6 +57,11 @@ pub fn bounded_half_space(
 /// sweep still runs along the clip plane's normal, so an authored frame that
 /// is tilted relative to the clip plane still contributes only its rotation
 /// about that normal.
+///
+/// The frame's origin anchors the boundary, projected onto the clip plane: an
+/// in-plane offset from `plane.origin` moves the footprint by exactly that
+/// offset, and the component along the normal is dropped so the sweep still
+/// starts on the clip plane.
 pub fn bounded_half_space_in_frame(
     boundary: &Rings,
     plane: Plane3,
@@ -125,7 +130,15 @@ fn bounded_half_space_framed(
                         .to_owned(),
                 ));
             }
-            Frame::from_reference(plane.origin, normal, reference)?
+            // The authored origin places the footprint in the plane (#164).
+            // Anchoring at `plane.origin` instead silently moves the prism
+            // whenever the boundary frame is offset from the clip plane's own
+            // origin, which the frame's contract allows. Only the offset ALONG
+            // the normal is dropped, exactly as for the axes: the sweep still
+            // starts on the clip plane, so polarity and depth are unchanged.
+            let offset = frame.origin() - plane.origin;
+            let anchor = frame.origin() - normal * offset.dot(normal);
+            Frame::from_reference(anchor, normal, reference)?
         }
         None => {
             let reference = if normal.x.abs() < 0.9 {

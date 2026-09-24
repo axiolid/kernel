@@ -104,3 +104,32 @@ fn the_boundary_placement_orients_the_profile_not_just_the_result() {
 fn has_vertex_at(mesh: &TriMesh, want: Vec3) -> bool {
     mesh.positions.iter().any(|p| (*p - want).length() < 1e-9)
 }
+
+/// The placement's translation places the boundary, not only its rotation
+/// (#164). A consumer authoring the boundary frame away from the clip plane's
+/// origin would otherwise cut an unrelated region with no error.
+#[test]
+fn the_boundary_placement_translates_the_profile() {
+    let boundary = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(1.0, 0.0),
+        Point2::new(1.0, 1.0),
+        Point2::new(0.0, 1.0),
+    ];
+    let shift = Vec3::new(4.0, -3.0, 0.0);
+    let moved = compile_bounded_half_space(
+        &boundary,
+        Transform3::from_cols(Vec3::X, Vec3::Y, Vec3::Z, shift),
+    );
+
+    // The authored translation projected into the tilted clip plane is where
+    // profile point (0, 0) must land; x stays along the projected world x.
+    let normal = Vec3::new(0.0, 1.0, 1.0).normalize();
+    let anchor = shift - normal * shift.dot(normal);
+    assert!(
+        has_vertex_at(&moved, anchor),
+        "the authored translation must place the PROFILE: expected a vertex at \
+         {anchor:?}, got {:?}",
+        moved.positions
+    );
+}
