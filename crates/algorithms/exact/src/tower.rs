@@ -29,7 +29,7 @@
 //! agree in sign (or one is zero) that is the answer; otherwise it is
 //! `sign(a) * sign(a^2 - b^2*r)`, a value one level down. Level 0 asks the
 //! arithmetic `T` directly, so the same code runs as the interval filter
-//! and as the exact fallback (see [`crate::certify`]).
+//! and as the exact fallback (see [`crate::certify()`]).
 //!
 //! # Cost
 //!
