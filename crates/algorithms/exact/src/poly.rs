@@ -203,7 +203,7 @@ impl IntPoly {
         a.primitive()
     }
 
-    fn exact_div(&self, divisor: &Self) -> Self {
+    pub(crate) fn exact_div(&self, divisor: &Self) -> Self {
         // Polynomial long division known to be exact over the rationals;
         // done over the integers after scaling, then made primitive.
         let dd = divisor.degree().expect("non-zero divisor");
@@ -483,6 +483,37 @@ impl RealRoot {
             Sign::Positive
         } else {
             Sign::Negative
+        }
+    }
+
+    /// Exact sign of the polynomial `q` at this root.
+    ///
+    /// Zero is decided through `gcd(poly, q)`: `q` vanishes at the root iff
+    /// the gcd has a root in the isolating interval, which holds no other
+    /// root of `poly`. Otherwise the interval is refined until `q` has no
+    /// root in it, and `q`'s sign there is its sign at the root.
+    #[must_use]
+    pub fn sign_of(&self, q: &IntPoly) -> Sign {
+        if q.is_zero() {
+            return Sign::Zero;
+        }
+        if self.is_exact() {
+            return q.sign_at(&self.lo);
+        }
+        let g = self.poly.gcd(q);
+        if g.degree().unwrap_or(0) >= 1 && roots_in(&g.sturm(), &self.lo, &self.hi) > 0 {
+            return Sign::Zero;
+        }
+        let chain = q.square_free().sturm();
+        let mut r = self.clone();
+        loop {
+            if q.sign_at(&r.lo) != Sign::Zero && roots_in(&chain, &r.lo, &r.hi) == 0 {
+                return q.sign_at(&r.hi);
+            }
+            r.refine();
+            if r.is_exact() {
+                return q.sign_at(&r.lo);
+            }
         }
     }
 

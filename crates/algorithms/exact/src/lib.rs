@@ -25,6 +25,7 @@
 
 pub mod arith;
 pub mod certify;
+pub mod conic;
 pub mod construct;
 pub mod dyadic;
 pub mod interval;
@@ -34,6 +35,10 @@ pub mod tower;
 
 pub use arith::Arith;
 pub use certify::{certify, filter, require_finite, ExactError, SignExpr};
+pub use conic::{
+    conic_intersections, line_conic_hits, Conic, ConicIntersection, ConicLineHit, ConicLineHits,
+    ConicPoint,
+};
 pub use construct::{
     compare_along, crossing_orientation, crossing_orientation_filter, line_circle_hits, Branch,
     Circle, HitCount, Line, LineHit,

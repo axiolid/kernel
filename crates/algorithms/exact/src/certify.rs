@@ -28,6 +28,9 @@ pub enum ExactError {
     /// grows exponentially with depth, so the tower refuses rather than
     /// run unboundedly.
     TooDeep,
+    /// A conic whose quadratic part is identically zero (it is a line), or
+    /// a conic pair no admissible shear could separate.
+    DegenerateConic,
 }
 
 /// Refuse NaN and infinities before any arithmetic runs.
