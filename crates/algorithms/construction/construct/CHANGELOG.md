@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `half_space::bounded_half_space_in_frame` now places the boundary at the
+  authored frame's origin, projected onto the clip plane (#164). It used to
+  take only the frame's axes and anchor the boundary at the clip plane's
+  origin, so a boundary frame offset within the plane cut the wrong region
+  with no error: the mesh stayed closed and correctly wound. The offset along
+  the normal is still dropped, so the sweep starts on the clip plane and
+  polarity and depth are unchanged. `ReferenceMeshCompiler` passes
+  `BoundedHalfSpace.placement.translation` as that origin, so compiled
+  bounded half-spaces now honour the placement's translation as well as its
+  rotation.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

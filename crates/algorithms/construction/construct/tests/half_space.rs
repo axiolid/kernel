@@ -278,3 +278,55 @@ fn an_authored_in_plane_frame_orients_the_boundary() {
         "no vertex at the authored corner {want:?}; frame was not applied as written"
     );
 }
+
+/// The authored frame's origin anchors the footprint; only its offset along
+/// the clip normal is dropped (#164).
+///
+/// The frame sits at (3, -2, 5) while the clip plane passes through the
+/// origin with a +Z normal. The in-plane part (3, -2) must move every
+/// footprint vertex; the 5 along the normal must not lift the slab off the
+/// clip plane. Before the fix the boundary was anchored at the plane origin,
+/// so the footprint stayed centred on (0, 0) with no error.
+#[test]
+fn an_authored_frame_origin_places_the_boundary_in_the_plane() {
+    let offset = PlaneFrame::new(Point3::new(3.0, -2.0, 5.0), Vec3::X, Vec3::Y, tol())
+        .expect("a translated ground frame is valid");
+    let mesh = bounded_half_space_in_frame(
+        &square(1.0),
+        plane_z(),
+        offset,
+        true,
+        ClipMargin::new(1.0).unwrap(),
+        tol(),
+    )
+    .expect("a translated boundary is valid");
+
+    let near = |want: Point3| mesh.positions.iter().any(|p| (*p - want).length() < 1e-9);
+    // Profile corner (1, 1) at the in-plane anchor (3, -2), on the plane z = 0.
+    assert!(
+        near(Point3::new(4.0, -1.0, 0.0)),
+        "the footprint must follow the frame's in-plane origin: {:?}",
+        mesh.positions
+    );
+    let (min_z, max_z) = mesh
+        .positions
+        .iter()
+        .fold((Scalar::INFINITY, Scalar::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.z), hi.max(p.z))
+        });
+    assert_eq!(
+        min_z, 0.0,
+        "the sweep must start on the clip plane, not at z = 5"
+    );
+    assert!(max_z > 0.0, "agreement = true keeps the normal side");
+    // Translation is rigid, so the solid is still area x depth.
+    let unmoved = bounded_half_space(
+        &square(1.0),
+        plane_z(),
+        true,
+        ClipMargin::new(1.0).unwrap(),
+        tol(),
+    )
+    .expect("clip");
+    assert!((volume(&mesh) - volume(&unmoved)).abs() < 1e-9);
+}
