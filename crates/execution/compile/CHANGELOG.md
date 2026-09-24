@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-24
+
 ### Added
 
 - `PolygonMesh` faces that are not plain triangles compile (#160): n-gons,
