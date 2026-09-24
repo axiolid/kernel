@@ -16,10 +16,19 @@ All notable changes to Axiolid are documented in this file.
   implemented (a designed refusal, or out of scope with no consumer). It
   requires a written rationale, which the gate enforces; nine rows use it.
   Every other open row now has an issue (#140-#159), with blockers mirrored
-  from GitHub and two issues marked as needing a maintainer decision.
+  from GitHub. The two design decisions they raised are recorded as
+  ADR 0068 (exact numbers: `num-bigint` integers under an owned filtered
+  layer, benchmarked in `docs/research/exact-arithmetic-bench/`) and
+  ADR 0069 (arc booleans: keep `cavalier_contours` for now, exact path
+  later).
 
 ### Fixed
 
+- Arc-aware booleans (`arc_overlay`, and `boolean_arc_prisms_exact` on top
+  of it) no longer depend on drawing units. The backend's thresholds are
+  fixed in drawing units, so a 5 um gap survived a union drawn in
+  millimetres but vanished in metres. The drawing is now scaled so those
+  thresholds sit at the caller's tolerance (ADR 0069).
 - macOS SHARED consumers load `libaxiolid_capi.dylib` again
   ([#113](https://github.com/axiolid/kernel/issues/113)). Its install name
   is rpath-relative, and dyld resolves that only through the consumer's

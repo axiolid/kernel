@@ -52,3 +52,5 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0065](./0065-ownership-replaces-mutable-mirror-types.md) | Ownership replaces read-only/mutable type pairs |
 | [0066](./0066-domain-interpretations-stay-downstream.md) | Domain interpretations stay downstream of the kernel |
 | [0067](./0067-crates-version-independently.md) | Crates version independently |
+| [0068](./0068-exact-number-type.md) | Exact numbers: num-bigint integers under an owned filtered layer |
+| [0069](./0069-arc-boolean-path.md) | Arc booleans: keep cavalier_contours, scaled; exact path later |

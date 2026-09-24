@@ -1,0 +1,18 @@
+[package]
+name = "exact-arithmetic-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+num-bigint = "0.4"
+nb5 = { package = "num-bigint", version = "0.5.1" }
+num-rational = "0.4.2"
+num-traits = "0.2"
+dashu-int = "0.6"
+dashu-ratio = "0.6"
+
+[profile.release]
+debug = false
+
+[workspace]
