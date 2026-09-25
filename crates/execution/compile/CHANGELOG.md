@@ -9,7 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-09-25
+### Added
+
+- The reference compiler honours `ExecutionOptions::with_chord_error`
+  (#165) everywhere it flattens a curve: profile arcs, circles and ellipses,
+  sweep directrices, curved B-rep faces and edges, and CSG primitives. An
+  instance scales the budget with its transform, like the tolerance, so it
+  stays a world-space distance. Without a budget the chord error is the
+  linear tolerance, exactly as before. Measured on a 5 mm disc extruded 1 m
+  at `Tolerance::MILLIMETRE`: 10 % short by default, 2.6 % at a 0.1 mm
+  budget, 0.16 % at 10 um and 0.01 % at 1 um.
 
 ### Fixed
 
@@ -35,6 +44,11 @@ caret rule for `0.x` versions.
   its area threshold before counting edges. On two real ArchiCAD models this
   turns 505 authored-closed `IfcPolygonalFaceSet` products from `Surface`
   into `Solid`; no product that compiled before is refused.
+
+## [0.3.2] - 2026-09-25
+
+### Fixed
+
 - A directrix trimmed from a circle or ellipse ACROSS its seam sweeps the arc
   the trim names (#168). The trimmed curve runs from `start` the way
   `sense_agreement` says, wrapping past the seam if it must; the directrix

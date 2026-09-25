@@ -59,15 +59,46 @@ struct EvalKey {
     id: NodeId,
     linear_bits: u64,
     angular_bits: u64,
+    /// The chord budget in this node's local space (#165). Part of the
+    /// key because an instance scales it with its transform, and two
+    /// budgets tessellate one node differently.
+    chord_bits: u64,
+}
+
+/// The evaluation budgets that vary per node: the tolerance, and the chord
+/// budget curved geometry is flattened to (#165). Both rescale together
+/// through an instance transform.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Budget {
+    tolerance: Tolerance,
+    chord: Scalar,
+}
+
+impl Budget {
+    fn of(options: &ExecutionOptions) -> Self {
+        let tolerance = options.tolerance();
+        Self {
+            tolerance,
+            chord: options.chord_error().unwrap_or(tolerance.linear()),
+        }
+    }
 }
 
 impl EvalKey {
-    fn new(id: NodeId, tolerance: Tolerance) -> Self {
+    fn new(id: NodeId, budget: Budget) -> Self {
         let bits = |value: Scalar| if value == 0.0 { 0 } else { value.to_bits() };
         Self {
             id,
-            linear_bits: bits(tolerance.linear()),
-            angular_bits: bits(tolerance.angular()),
+            linear_bits: bits(budget.tolerance.linear()),
+            angular_bits: bits(budget.tolerance.angular()),
+            chord_bits: bits(budget.chord),
+        }
+    }
+
+    fn budget(self) -> Budget {
+        Budget {
+            tolerance: self.tolerance(),
+            chord: Scalar::from_bits(self.chord_bits),
         }
     }
 
@@ -228,12 +259,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         node: &GeometryNode,
         key: EvalKey,
     ) -> GeomResult<Vec<EvalKey>> {
-        let tolerance = key.tolerance();
-        let same = |id| EvalKey::new(id, tolerance);
+        let budget = key.budget();
+        let same = |id| EvalKey::new(id, budget);
         Ok(match node {
             GeometryNode::Instance(instance) => vec![EvalKey::new(
                 instance.source,
-                instance_local_tolerance(instance.transform, tolerance)?,
+                instance_local_budget(instance.transform, budget)?,
             )],
             GeometryNode::Collection(members) => members.iter().copied().map(same).collect(),
             GeometryNode::SolidOperation(
@@ -257,7 +288,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         options: &ExecutionOptions,
         cache: &mut Cache,
     ) -> GeomResult<Built> {
-        let root_key = EvalKey::new(root, options.tolerance());
+        let root_key = EvalKey::new(root, Budget::of(options));
         let mut stack = vec![Step::Enter(root_key)];
         while let Some(step) = stack.pop() {
             match step {
@@ -279,7 +310,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     if cache.contains_key(&key) {
                         continue;
                     }
-                    let local_options = options.clone().with_tolerance(key.tolerance());
+                    let budget = key.budget();
+                    let local_options = options
+                        .clone()
+                        .with_tolerance(budget.tolerance)
+                        .with_chord_error(budget.chord)
+                        .ok_or_else(|| {
+                            GeomError::InvalidInput(format!(
+                                "chord budget {} is not positive and finite",
+                                budget.chord
+                            ))
+                        })?;
                     let built = self.build(graph, key, &local_options, cache)?;
                     cache.insert(key, built);
                 }
@@ -395,15 +436,14 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 .compile_authored_polygons(mesh, options)
                 .map(|mesh| authored_mesh(mesh, options)),
             GeometryNode::Instance(instance) => {
-                let source_tolerance =
-                    instance_local_tolerance(instance.transform, options.tolerance())?;
-                let source = self.cached(cache, instance.source, source_tolerance)?;
+                let source_budget = instance_local_budget(instance.transform, Budget::of(options))?;
+                let source = self.cached(cache, instance.source, source_budget)?;
                 Ok(channels::transform(source, instance.transform))
             }
             GeometryNode::Collection(members) => {
                 let members = members
                     .iter()
-                    .map(|&member| self.cached(cache, member, options.tolerance()))
+                    .map(|&member| self.cached(cache, member, Budget::of(options)))
                     .collect::<GeomResult<Vec<_>>>()?;
                 Ok(channels::merge(&members))
             }
@@ -415,13 +455,18 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             GeometryNode::SolidOperation(operation) => {
                 self.build_solid(graph, operation, options).map(Built::leaf)
             }
-            GeometryNode::BRep(brep) => crate::brep::tessellate(brep, graph, options.tolerance())
-                .map(|(mesh, closure)| Built::with_closure(mesh, closure)),
+            GeometryNode::BRep(brep) => {
+                crate::brep::tessellate(brep, graph, options.tolerance(), chord_error(options))
+                    .map(|(mesh, closure)| Built::with_closure(mesh, closure))
+            }
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
-                axiolid_reference::primitive::tessellate_primitive(primitive, options.tolerance())
-                    .map(Built::leaf)
+                axiolid_reference::primitive::tessellate_primitive(
+                    primitive,
+                    chord_tolerance(options)?,
+                )
+                .map(Built::leaf)
             }
             other => Err(GeomError::Unsupported {
                 backend: self.descriptor().id,
@@ -431,15 +476,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     }
 
     /// Read an already-built dependency.
-    fn cached<'c>(
-        &self,
-        cache: &'c Cache,
-        id: NodeId,
-        tolerance: Tolerance,
-    ) -> GeomResult<&'c Built> {
-        cache.get(&EvalKey::new(id, tolerance)).ok_or_else(|| {
+    fn cached<'c>(&self, cache: &'c Cache, id: NodeId, budget: Budget) -> GeomResult<&'c Built> {
+        cache.get(&EvalKey::new(id, budget)).ok_or_else(|| {
             GeomError::InvalidInput(format!(
-                "dependency {id:?} was not evaluated first at tolerance {tolerance:?}"
+                "dependency {id:?} was not evaluated first at {budget:?}"
             ))
         })
     }
@@ -455,7 +495,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         options: &ExecutionOptions,
         cache: &Cache,
     ) -> GeomResult<Built> {
-        let subject = self.cached(cache, left, options.tolerance())?;
+        let subject = self.cached(cache, left, Budget::of(options))?;
         refuse_surface_operand(subject, "subject")?;
         let bounded_tool = match self.node(graph, right)? {
             GeometryNode::HalfSpace(hs) => Some(axiolid_construct::half_space::for_subject(
@@ -470,7 +510,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let (tool, tool_fates) = match bounded_tool.as_ref() {
             Some(tool) => (tool, None),
             None => {
-                let built = self.cached(cache, right, options.tolerance())?;
+                let built = self.cached(cache, right, Budget::of(options))?;
                 refuse_surface_operand(built, "tool")?;
                 (&built.mesh, Some(&built.fates))
             }
@@ -691,7 +731,23 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 }
 
 /// Convert a world-space tolerance into conservative instance-local space.
-fn instance_local_tolerance(transform: Transform3, tolerance: Tolerance) -> GeomResult<Tolerance> {
+/// Convert world-space budgets into conservative instance-local space.
+///
+/// The tolerance and the chord budget are both lengths, so both shrink by
+/// the transform's largest stretch: a chord within `c` of the curve in local
+/// space is within `stretch * c` of it in world space.
+fn instance_local_budget(transform: Transform3, budget: Budget) -> GeomResult<Budget> {
+    let (tolerance, stretch) = instance_local_tolerance(transform, budget.tolerance)?;
+    Ok(Budget {
+        tolerance,
+        chord: budget.chord / stretch,
+    })
+}
+
+fn instance_local_tolerance(
+    transform: Transform3,
+    tolerance: Tolerance,
+) -> GeomResult<(Tolerance, Scalar)> {
     let m = transform.matrix3;
     let sx = m.x_axis.length();
     let sy = m.y_axis.length();
@@ -717,11 +773,27 @@ fn instance_local_tolerance(transform: Transform3, tolerance: Tolerance) -> Geom
         ));
     }
     Tolerance::new(tolerance.linear() / stretch, tolerance.angular())
+        .map(|local| (local, stretch))
         .map_err(|error| GeomError::InvalidInput(error.to_string()))
 }
 
-fn chord_error(options: &ExecutionOptions) -> Scalar {
-    options.tolerance().linear()
+/// How far a chord may sit from the curve it replaces (#165).
+///
+/// The caller's `ExecutionOptions::with_chord_error`, else the linear
+/// tolerance. Kept separate from the tolerance because the tolerance is a
+/// coincidence test: at `Tolerance::MILLIMETRE` it leaves a 5 mm arc four
+/// chords per half turn, percent-level area error on a slot or a gutter.
+pub(crate) fn chord_error(options: &ExecutionOptions) -> Scalar {
+    options
+        .chord_error()
+        .unwrap_or_else(|| options.tolerance().linear())
+}
+
+/// The tolerance with the chord budget as its linear part, for providers
+/// that take one number for both (the CSG primitive tessellator).
+fn chord_tolerance(options: &ExecutionOptions) -> GeomResult<Tolerance> {
+    Tolerance::new(chord_error(options), options.tolerance().angular())
+        .map_err(|error| GeomError::InvalidInput(error.to_string()))
 }
 
 fn is_subject_bounded_half_space_boolean(

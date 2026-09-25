@@ -297,7 +297,7 @@ fn sample_periodic_trim(
     axiolid_reference::curve::flatten3(
         curve,
         axiolid_core::Interval { start: lo, end: hi },
-        options.tolerance().linear(),
+        crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
     )
 }
@@ -351,7 +351,7 @@ fn sample_curve(
     axiolid_reference::curve::flatten3(
         curve,
         domain,
-        options.tolerance().linear(),
+        crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
     )
 }
