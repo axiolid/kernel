@@ -6,6 +6,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.2 - 2026-09-25
+
+### Fixed
+
+- `sweep::swept_disk` carries its section frame along the path by
+  rotation-minimising frames (double reflection) instead of one fixed axis
+  seeded from the first segment (#169). A pipe whose later leg ran along that
+  axis was refused ("sweep reference direction must not be parallel to the
+  directrix"), and a leg NEARLY along it projected the fixed axis to a
+  residue of arbitrary direction, so the ring rotated between stations and
+  the tube's volume collapsed with no error: in a real Revit rebar model 878
+  bent bars were refused and 6,644 compiled more than 0.5 % short, up to
+  64 %. The section is a circle, so the choice of perpendicular only rotates
+  it about its own axis. `fixed_reference_sweep` is unchanged: there the
+  reference is the author's.
+
 ### 0.3.1 - 2026-09-24
 
 ### Fixed
