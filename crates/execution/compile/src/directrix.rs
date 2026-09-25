@@ -81,6 +81,17 @@ fn resolve(
                     "trimmed directrix has an empty interval".into(),
                 ));
             }
+            // A periodic basis may be trimmed ACROSS its seam: the curve runs
+            // from `a` the way `sense_agreement` says, wrapping if it must.
+            // Sorting `a` and `b` would pick the complementary arc (#168).
+            if let Some((curve, period)) = basis_curve.and_then(|c| period_of(c).map(|p| (c, p))) {
+                let mut out =
+                    sample_periodic_trim(curve, period, a, b, *sense_agreement, range, options)?;
+                if !sense_agreement {
+                    out.reverse();
+                }
+                return Ok(out);
+            }
             let selected = range.unwrap_or((a, b));
             let lo = a.min(b);
             let hi = a.max(b);
@@ -197,6 +208,98 @@ fn invert_first_point(
         }
         _ => None,
     })
+}
+
+/// Parameter period of a closed conic basis; `None` for anything else.
+fn period_of(curve: &axiolid_curve::Curve3) -> Option<Scalar> {
+    match curve {
+        axiolid_curve::Curve3::Circle(_) | axiolid_curve::Curve3::Ellipse(_) => {
+            Some(core::f64::consts::TAU)
+        }
+        _ => None,
+    }
+}
+
+/// Relative slack for "at most one period": authoring tools write a quarter
+/// bend as `(3pi/2, 2pi + 1e-15)`, and that must stay a quarter, not wrap.
+const PERIOD_SLACK: Scalar = 1e-9;
+
+/// Sample a trim of a periodic basis in its UNWRAPPED basis interval.
+///
+/// The trimmed curve runs from `a` forward (sense) or backward (against) to
+/// the next occurrence of `b`, so its basis interval is `[a, a + span]` or
+/// `[a - span, a]`, which may extend past the natural `[0, period]`; a conic
+/// evaluates the same there. Returned in increasing basis parameter; the
+/// caller reverses for `!sense`, as for every other basis.
+///
+/// A sweep `range` is read in the trimmed curve's own parameter, which is
+/// the basis parameter: each end is taken modulo the period into the
+/// unwrapped interval, so `(330, 30)`, `(330, 390)` and `(-30, 30)` degrees
+/// all name the same sub-arc of a `315 -> 45` trim. An end that lands on no
+/// point of the arc is refused, as a range outside any trim is.
+fn sample_periodic_trim(
+    curve: &axiolid_curve::Curve3,
+    period: Scalar,
+    a: Scalar,
+    b: Scalar,
+    sense: bool,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<Vec<Point3>> {
+    let travelled = if sense { b - a } else { a - b };
+    let span = if travelled > 0.0 && travelled <= period * (1.0 + PERIOD_SLACK) {
+        travelled
+    } else {
+        match travelled.rem_euclid(period) {
+            // `a` and `b` differ by whole turns: the trim is a full turn.
+            0.0 => period,
+            wrapped => wrapped,
+        }
+    };
+    let (lo, hi) = if sense { (a, a + span) } else { (a - span, a) };
+    let (lo, hi) = match range {
+        None => (lo, hi),
+        Some((start, end)) => {
+            if !(start.is_finite() && end.is_finite()) {
+                return Err(GeomError::InvalidInput(
+                    "sweep parameter range must be finite".into(),
+                ));
+            }
+            if start == end {
+                return Err(GeomError::Degenerate(
+                    "sweep parameter range is empty".into(),
+                ));
+            }
+            let slack = options.tolerance().linear();
+            let into_arc = |value: Scalar| -> GeomResult<Scalar> {
+                let shifted = lo + (value - lo).rem_euclid(period);
+                // Just below `lo`, a value wraps to just below `lo + period`:
+                // read it as `lo` rather than refuse a rounding residue.
+                let shifted = if shifted > lo + period - slack {
+                    lo
+                } else {
+                    shifted
+                };
+                if shifted > hi + slack {
+                    return Err(GeomError::InvalidInput(
+                        "sweep range exceeds trimmed directrix".into(),
+                    ));
+                }
+                Ok(shifted.min(hi))
+            };
+            let (s, e) = (into_arc(start)?, into_arc(end)?);
+            // An end ON the trim's far end maps back to `lo` when the arc is
+            // a full turn; a range is never empty by that accident.
+            let (s, e) = if s == e { (lo, hi) } else { (s, e) };
+            (s.min(e), s.max(e))
+        }
+    };
+    axiolid_reference::curve::flatten3(
+        curve,
+        axiolid_core::Interval { start: lo, end: hi },
+        options.tolerance().linear(),
+        MAX_FLATTEN_DEPTH,
+    )
 }
 
 fn as_parameter(selector: &TrimSelector) -> Option<Scalar> {
