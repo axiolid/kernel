@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-25
+
 ### Fixed
 
 - `sweep::swept_disk` carries its section frame along the path by

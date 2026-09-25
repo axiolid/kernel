@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
