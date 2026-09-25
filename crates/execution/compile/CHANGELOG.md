@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-25
+
 ### Added
 
 - The reference compiler honours `ExecutionOptions::with_chord_error`

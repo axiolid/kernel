@@ -114,13 +114,13 @@ axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.0",
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.0", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.3.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.0" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.1" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.3" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that
 # depend on axiolid-nurbs never need axiolid-oracle to exist on crates.io.
 axiolid-oracle = { path = "tools/oracle" }
-axiolid-contracts = { path = "crates/contracts/common/base", version = "0.3.0" }
+axiolid-contracts = { path = "crates/contracts/common/base", version = "0.3.1" }
 axiolid-guarantees = { path = "crates/contracts/guarantees", version = "0.3.0" }
 axiolid-mesh-contracts = { path = "crates/contracts/common/mesh", version = "0.3.0" }
 axiolid-mesh-compile-contract = { path = "crates/contracts/operations/compile", version = "0.3.1" }
