@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-25
+
 ### Fixed
 
 - A directrix trimmed from a circle or ellipse ACROSS its seam sweeps the arc
