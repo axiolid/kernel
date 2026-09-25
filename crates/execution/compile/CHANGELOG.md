@@ -25,6 +25,11 @@ caret rule for `0.x` versions.
   its area threshold before counting edges. On two real ArchiCAD models this
   turns 505 authored-closed `IfcPolygonalFaceSet` products from `Surface`
   into `Solid`; no product that compiled before is refused.
+
+## [0.3.2] - 2026-09-25
+
+### Fixed
+
 - A directrix trimmed from a circle or ellipse ACROSS its seam sweeps the arc
   the trim names (#168). The trimmed curve runs from `start` the way
   `sense_agreement` says, wrapping past the seam if it must; the directrix

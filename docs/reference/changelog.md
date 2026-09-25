@@ -156,6 +156,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.2 - 2026-09-25
+
+### Fixed
+
+- A directrix trimmed from a circle or ellipse ACROSS its seam sweeps the arc
+  the trim names (#168). The trimmed curve runs from `start` the way
+  `sense_agreement` says, wrapping past the seam if it must; the directrix
+  path used to sort the two trims and sample the complementary arc. Standalone
+  that was silently wrong geometry (a `315 -> 45` degree bend swept the 270
+  degree arc); inside a composite the ends no longer met and the sweep was
+  refused as `composite directrix has a N unit gap`. In a real Revit rebar
+  model that was 1,494 bent bars, all writing a bend as `270 -> 45`,
+  `270 -> 15` or `270 -> 360` rounded just past the seam. A full turn rounded
+  past the seam stays a full turn. A sweep `parameter_range` on such a trim is
+  read in the trim's unwrapped interval, so `(330, 30)` and `(330, 390)`
+  degrees name the same sub-arc of a `315 -> 45` trim; an end off the arc is
+  refused as before. Profiles already honoured this.
+
 ### 0.3.1 - 2026-09-24
 
 ### Added
