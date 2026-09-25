@@ -143,6 +143,7 @@ pub fn tessellate(
     brep: &BRep<NodeId>,
     graph: &axiolid_model::GeometryGraph,
     tolerance: axiolid_core::Tolerance,
+    chord_error: Scalar,
 ) -> GeomResult<(TriMesh, MeshClosure)> {
     check_tessellation_input_budget(brep)?;
     // Structure before geometry. A dangling handle or an open loop
@@ -202,6 +203,7 @@ pub fn tessellate(
         brep,
         graph,
         tolerance,
+        chord_error,
         closure,
     };
     let mut edge_cache: EdgeSamples = EdgeSamples::new();
@@ -235,6 +237,8 @@ struct FaceContext<'a> {
     brep: &'a BRep<NodeId>,
     graph: &'a axiolid_model::GeometryGraph,
     tolerance: axiolid_core::Tolerance,
+    /// How far a chord may sit from a curved face or edge (#165).
+    chord_error: Scalar,
     /// What the tessellated shells are: [`MeshClosure::Surface`] for a
     /// surface model, where a planar face that encloses no area covers
     /// nothing and is skipped (#171). In a solid it stays refused.
@@ -267,7 +271,7 @@ fn append_face(
                 welded,
                 cache,
                 total_curved_records,
-                ctx.tolerance.linear(),
+                ctx.chord_error,
                 |state| append_curved_face(state, ctx, face, surface, flip),
             );
         }
@@ -921,7 +925,7 @@ fn curved_boundary(
     face: &axiolid_topology::Face<NodeId>,
     surface: &axiolid_surface::Surface,
 ) -> GeomResult<CurvedBoundary> {
-    let (brep, graph, tolerance) = (ctx.brep, ctx.graph, ctx.tolerance);
+    let (brep, graph) = (ctx.brep, ctx.graph);
     let mut out = CurvedBoundary {
         uv: Vec::new(),
         shared: Vec::new(),
@@ -951,7 +955,7 @@ fn curved_boundary(
                 Some((vertices, _)) => vertices.len().checked_sub(1).ok_or_else(|| {
                     GeomError::Degenerate("cached edge has no segments".to_owned())
                 })?,
-                None => edge_sample_count(trim, surface, tolerance.linear())?,
+                None => edge_sample_count(trim, surface, ctx.chord_error)?,
             };
             state.reserve_face_vertices(n)?;
             let params = trim_samples(trim, n)?;

@@ -1,6 +1,6 @@
 //! Execution policy passed explicitly to every costly operation.
 
-use axiolid_core::Tolerance;
+use axiolid_core::{Scalar, Tolerance};
 
 use crate::cancel::CancellationToken;
 use crate::{BackendId, GeomError, GeomResult, Precision};
@@ -282,6 +282,7 @@ pub struct ExecutionOptions {
     residency: DataResidency,
     memory_budget_bytes: Option<usize>,
     cancellation: Option<CancellationToken>,
+    chord_error: Option<Scalar>,
 }
 
 impl ExecutionOptions {
@@ -296,6 +297,7 @@ impl ExecutionOptions {
             residency: DataResidency::HOST,
             memory_budget_bytes: None,
             cancellation: None,
+            chord_error: None,
         }
     }
 
@@ -366,6 +368,32 @@ impl ExecutionOptions {
     pub fn with_residency(mut self, value: DataResidency) -> Self {
         self.residency = value;
         self
+    }
+
+    /// Bound how far flattened curves may deviate from the exact curve.
+    ///
+    /// Curved geometry that a provider approximates with straight chords
+    /// (profile arcs, sweep directrices, curved B-rep faces) stays within this
+    /// distance of the exact curve. Without it the chord budget is the linear
+    /// tolerance, which is a coincidence tolerance and coarse for small radii:
+    /// at `Tolerance::MILLIMETRE` a 5 mm arc gets four chords per half turn.
+    /// Quantity take-off wants a tighter budget than display.
+    ///
+    /// Returns `None` for a non-finite or non-positive value. A provider may
+    /// still refuse a budget too fine to meet within its own work limits.
+    pub fn with_chord_error(mut self, value: Scalar) -> Option<Self> {
+        if !(value.is_finite() && value > 0.0) {
+            return None;
+        }
+        self.chord_error = Some(value);
+        Some(self)
+    }
+
+    /// The explicit chord budget, if one was set.
+    ///
+    /// `None` means the provider uses its default, the linear tolerance.
+    pub fn chord_error(&self) -> Option<Scalar> {
+        self.chord_error
     }
 
     /// Bound temporary allocation.

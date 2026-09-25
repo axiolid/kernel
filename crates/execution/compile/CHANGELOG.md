@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- The reference compiler honours `ExecutionOptions::with_chord_error`
+  (#165) everywhere it flattens a curve: profile arcs, circles and ellipses,
+  sweep directrices, curved B-rep faces and edges, and CSG primitives. An
+  instance scales the budget with its transform, like the tolerance, so it
+  stays a world-space distance. Without a budget the chord error is the
+  linear tolerance, exactly as before. Measured on a 5 mm disc extruded 1 m
+  at `Tolerance::MILLIMETRE`: 10 % short by default, 2.6 % at a 0.1 mm
+  budget, 0.16 % at 10 um and 0.01 % at 1 um.
+
 ### Fixed
 
 - A surface model with a face whose outer bound encloses no area
