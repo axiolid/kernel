@@ -11,6 +11,14 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- A surface model with a face whose outer bound encloses no area
+  tessellates (#171): that face covers nothing, so it is skipped instead of
+  refusing the whole model with `planar face bound has zero or non-finite
+  area`. Real Nova MEP exports write pipe-fitting end caps as bowtie quads
+  through the pipe axis (an annulus with a negative inner radius), each with
+  signed area exactly 0; 42 fittings, pumps and valves in two models were
+  refused over them. A declared solid still refuses such a face, and a
+  zero-area hole or a non-finite bound is still refused everywhere.
 - Closed authored meshes stay closed (#170). Planar faces of a
   `PolygonMesh` and of a B-rep were triangulated with earcut, which drops
   corners on a straight run and runs diagonals and hole bridges over corners

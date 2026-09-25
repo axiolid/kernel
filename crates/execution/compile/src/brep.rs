@@ -202,6 +202,7 @@ pub fn tessellate(
         brep,
         graph,
         tolerance,
+        closure,
     };
     let mut edge_cache: EdgeSamples = EdgeSamples::new();
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
@@ -234,6 +235,10 @@ struct FaceContext<'a> {
     brep: &'a BRep<NodeId>,
     graph: &'a axiolid_model::GeometryGraph,
     tolerance: axiolid_core::Tolerance,
+    /// What the tessellated shells are: [`MeshClosure::Surface`] for a
+    /// surface model, where a planar face that encloses no area covers
+    /// nothing and is skipped (#171). In a solid it stays refused.
+    closure: MeshClosure,
 }
 
 fn append_face(
@@ -291,8 +296,21 @@ fn append_face(
     })?;
     rings.swap(0, outer_index);
 
-    for ring in &rings {
+    for (index, ring) in rings.iter().enumerate() {
         if plane_axes(newell_normal(ring.iter().map(|&(_, p)| p))).is_none() {
+            // A surface model's outer bound that encloses no area adds no
+            // surface: skipping it removes nothing the file drew. Real
+            // exports (Nova pipe fittings) write each end cap as a strip of
+            // bowtie quads through the pipe axis, whose signed area cancels
+            // exactly, and every edge of such a strip is still used twice
+            // by the fitting's real faces. A solid is not skipped: a face
+            // it declares to bound a volume must enclose area, and a hole
+            // with no area is refused in both, since skipping it would
+            // leave real area of its face uncut.
+            let finite = ring.iter().all(|&(_, p)| p.is_finite());
+            if index == 0 && finite && ctx.closure == MeshClosure::Surface {
+                return Ok(());
+            }
             return Err(GeomError::Degenerate(
                 "planar face bound has zero or non-finite area".into(),
             ));

@@ -424,3 +424,108 @@ fn an_untracked_outcome_is_not_a_solid() {
     assert_eq!(outcome.closure, MeshClosure::Unknown);
     assert!(outcome.solid_mesh().is_err());
 }
+
+/// A pipe-fitting end cap as a real Nova export writes it (#171): a face
+/// whose outer bound is a bowtie quad through the axis, signed area
+/// exactly zero. Loop `#45542` of `tga_boe_ifc4_nova.ifc`, beside one
+/// real face sharing its long edge.
+fn bowtie_beside_a_real_face() -> Faces {
+    Faces::new(&[
+        [0.204698, -0.00171, 0.0465],
+        [0.195302, 0.00171, 0.0465],
+        [0.195, 0.0, 0.0465],
+        [0.205, 0.0, 0.0465],
+        [0.204698, -0.00171, 0.5],
+        [0.195302, 0.00171, 0.5],
+    ])
+}
+
+#[test]
+fn a_surface_model_skips_a_face_that_encloses_no_area() {
+    let mut f = bowtie_beside_a_real_face();
+    let bowtie = f.face(&[0, 1, 2, 3]);
+    let real = f.face(&[1, 0, 4, 5]);
+    f.shell(&[bowtie, real], false);
+    let outcome = compile(f.brep);
+    assert_eq!(outcome.closure, MeshClosure::Surface);
+    // Only the real face remains: a rectangle of the chord 0-1 times the
+    // height 0.5 - 0.0465, by hand.
+    let chord = ((0.204698f64 - 0.195302).powi(2) + (2.0f64 * 0.00171).powi(2)).sqrt();
+    let want = chord * (0.5 - 0.0465);
+    assert!(
+        (area(&outcome.mesh) - want).abs() < 1e-12,
+        "area {}, want {want}",
+        area(&outcome.mesh)
+    );
+    assert_eq!(outcome.mesh.indices.len(), 6, "the real face only");
+}
+
+#[test]
+fn a_solid_still_refuses_a_face_that_encloses_no_area() {
+    let mut f = bowtie_beside_a_real_face();
+    let bowtie = f.face(&[0, 1, 2, 3]);
+    let real = f.face(&[1, 0, 4, 5]);
+    let shell = f.shell(&[bowtie, real], false);
+    f.brep.add_solid(Solid {
+        outer: shell,
+        voids: Vec::new(),
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let root = b.push(GeometryNode::BRep(f.brep)).unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    let error = compiler()
+        .compile_mesh_reported(&graph, root, &options())
+        .expect_err("a solid face must enclose area");
+    assert!(
+        matches!(&error, GeomError::Degenerate(m) if m.contains("zero or non-finite area")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_surface_model_still_refuses_a_hole_that_encloses_no_area() {
+    // A 4 x 4 face whose hole is the bowtie pattern scaled up: skipping the
+    // hole would leave the face uncut, so it is refused, not dropped.
+    let mut f = Faces::new(&[
+        [0.0, 0.0, 0.0],
+        [4.0, 0.0, 0.0],
+        [4.0, 4.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [2.5, 1.5, 0.0],
+        [1.5, 2.5, 0.0],
+        [1.5, 2.0, 0.0],
+        [2.5, 2.0, 0.0],
+    ]);
+    let outer = f.face(&[0, 1, 2, 3]);
+    let hole_face = f.face(&[4, 5, 6, 7]);
+    let hole_loop = f.brep.faces()[hole_face.index()].bounds[0].loop_id;
+    // Move the bowtie ring onto the square face as an inner bound.
+    let mut brep = f.brep;
+    let face = brep.faces()[outer.index()].clone();
+    let holed = brep.add_face(Face {
+        surface: None,
+        bounds: vec![
+            face.bounds[0],
+            FaceBound {
+                loop_id: hole_loop,
+                orientation: Orientation::Forward,
+                outer: false,
+            },
+        ],
+        orientation: Orientation::Forward,
+    });
+    brep.add_shell(Shell {
+        faces: vec![(holed, Orientation::Forward)],
+        closed: false,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let root = b.push(GeometryNode::BRep(brep)).unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    let error = compiler()
+        .compile_mesh_reported(&graph, root, &options())
+        .expect_err("a zero-area hole leaves its face uncut");
+    assert!(
+        matches!(&error, GeomError::Degenerate(m) if m.contains("zero or non-finite area")),
+        "{error:?}"
+    );
+}
