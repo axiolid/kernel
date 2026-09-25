@@ -11,6 +11,20 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- Closed authored meshes stay closed (#170). Planar faces of a
+  `PolygonMesh` and of a B-rep were triangulated with earcut, which drops
+  corners on a straight run and runs diagonals and hole bridges over corners
+  of the same face; the neighbouring face still split that edge at the
+  corner, so the mesh cracked (T-junctions). Every edge earcut invents is now
+  split at each face corner on it, within a band of a thousandth of the
+  linear tolerance (1 um at `Tolerance::MILLIMETRE`), so export noise on
+  shared corners (1e-8 to 5e-8 m on real files) is judged the same on both
+  sides. Authored ring edges are never split, and a thin triangle whose long
+  side is authored is kept. Closure of an authored mesh is now read from its
+  index connectivity instead of `audit_mesh`, which dropped real faces below
+  its area threshold before counting edges. On two real ArchiCAD models this
+  turns 505 authored-closed `IfcPolygonalFaceSet` products from `Surface`
+  into `Solid`; no product that compiled before is refused.
 - A directrix trimmed from a circle or ellipse ACROSS its seam sweeps the arc
   the trim names (#168). The trimmed curve runs from `start` the way
   `sense_agreement` says, wrapping past the seam if it must; the directrix

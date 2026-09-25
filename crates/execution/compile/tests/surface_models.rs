@@ -340,6 +340,84 @@ fn authored_meshes_report_their_closure_from_their_structure() {
     assert_eq!(closure(open), MeshClosure::Surface);
 }
 
+/// A closed mesh with faces below the audit's area threshold is still a
+/// solid: closure is the authored connectivity, not a triangle-quality
+/// filter. `audit_mesh` drops a triangle whose doubled area is at most
+/// `linear^2`, i.e. 1e-6 m2 at `Tolerance::MILLIMETRE`. A 10 m long bar
+/// with a 0.4 mm by 0.5 mm section has end triangles of doubled area
+/// 2e-7, so the audit drops them and would report the shell as open.
+#[test]
+fn a_closed_mesh_with_faces_below_the_audit_threshold_is_a_solid() {
+    let (x, y, z) = (10.0, 4.0e-4, 5.0e-4);
+    let positions: Vec<_> = CUBE
+        .iter()
+        .map(|p| axiolid_core::Point3::new(p[0] * x, p[1] * y, p[2] * z))
+        .collect();
+    let faces = CUBE_FACES
+        .iter()
+        .map(|q| axiolid_mesh::PolygonFace {
+            outer: q.iter().map(|&i| i as u32).collect(),
+            holes: Vec::new(),
+        })
+        .collect();
+    let mut b = GeometryGraphBuilder::new();
+    let root = b
+        .push(GeometryNode::PolygonMesh(axiolid_mesh::PolygonMesh {
+            positions,
+            faces,
+        }))
+        .unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    let options = ExecutionOptions::new(axiolid_core::Tolerance::MILLIMETRE);
+    let outcome = compiler()
+        .compile_mesh_reported(&graph, root, &options)
+        .unwrap();
+    // The sliver faces are really below the audit threshold, or this test
+    // proves nothing.
+    let health = axiolid_mesh::audit_mesh(&outcome.mesh, options.tolerance());
+    assert!(
+        health.degenerate_triangles > 0,
+        "fixture must contain sub-threshold triangles: {health:?}"
+    );
+    assert_eq!(outcome.closure, MeshClosure::Solid);
+}
+
+/// Closure also requires consistent winding: one flipped face leaves every
+/// edge shared twice, but traversed the same way on its border.
+#[test]
+fn a_closed_mesh_with_one_flipped_face_is_not_a_solid() {
+    let positions: Vec<_> = CUBE
+        .iter()
+        .map(|p| axiolid_core::Point3::new(p[0], p[1], p[2]))
+        .collect();
+    let faces = CUBE_FACES
+        .iter()
+        .enumerate()
+        .map(|(i, q)| {
+            let mut outer: Vec<u32> = q.iter().map(|&i| i as u32).collect();
+            if i == 0 {
+                outer.reverse();
+            }
+            axiolid_mesh::PolygonFace {
+                outer,
+                holes: Vec::new(),
+            }
+        })
+        .collect();
+    let mut b = GeometryGraphBuilder::new();
+    let root = b
+        .push(GeometryNode::PolygonMesh(axiolid_mesh::PolygonMesh {
+            positions,
+            faces,
+        }))
+        .unwrap();
+    let graph = b.finish(vec![root]).unwrap();
+    let outcome = compiler()
+        .compile_mesh_reported(&graph, root, &options())
+        .unwrap();
+    assert_eq!(outcome.closure, MeshClosure::Surface);
+}
+
 #[test]
 fn an_untracked_outcome_is_not_a_solid() {
     let outcome = CompileOutcome::untracked(TriMesh::default());
