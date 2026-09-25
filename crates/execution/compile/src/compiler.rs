@@ -867,11 +867,31 @@ fn refuse_surface_operand(built: &Built, role: &'static str) -> GeomResult<()> {
 /// does, so the geometry is the only evidence: a closed, consistently
 /// wound two-manifold bounds a solid, anything else (an open face set, a
 /// single sheet) is a surface.
-fn authored_mesh(mesh: TriMesh, options: &ExecutionOptions) -> Built {
-    let closure = if axiolid_mesh::audit_mesh(&mesh, options.tolerance()).is_closed_two_manifold() {
+///
+/// Closure is a property of the authored connectivity, so it is read from
+/// the corner indices ([`axiolid_mesh::EdgeAdjacency`]), not from
+/// `audit_mesh`. The audit drops every triangle below an area threshold
+/// before it counts edges, and real exports carry legitimate small faces
+/// (a 1 mm reveal, the end of a thin lining); dropping them opened
+/// otherwise closed shells, so 522 authored-closed face sets on real
+/// models were reported as surfaces. Only a triangle that repeats a
+/// corner index is skipped: it covers no edge pair at all.
+fn authored_mesh(mesh: TriMesh, _options: &ExecutionOptions) -> Built {
+    let closure = if authored_mesh_is_closed(&mesh) {
         axiolid_mesh_compile_contract::MeshClosure::Solid
     } else {
         axiolid_mesh_compile_contract::MeshClosure::Surface
     };
     Built::with_closure(mesh, closure)
+}
+
+/// Every edge of the index connectivity is shared by exactly two
+/// triangles traversing it in opposite directions, the mesh has at least
+/// one such triangle, and every position is finite.
+fn authored_mesh_is_closed(mesh: &TriMesh) -> bool {
+    if mesh.indices.is_empty() || mesh.positions.iter().any(|p| !p.is_finite()) {
+        return false;
+    }
+    let adjacency = axiolid_mesh::EdgeAdjacency::build(mesh);
+    adjacency.edge_count() > 0 && adjacency.is_closed_two_manifold()
 }

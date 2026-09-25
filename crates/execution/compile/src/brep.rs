@@ -14,7 +14,7 @@ use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
 use std::collections::{HashMap, HashSet};
 
-use crate::planar::{earcut_projected, newell_normal, plane_axes};
+use crate::planar::{earcut_planar_face, earcut_projected, newell_normal, plane_axes};
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -318,7 +318,7 @@ fn append_face(
         }
     }
 
-    let indices = earcut_projected(&flat, &hole_starts);
+    let indices = earcut_planar_face(&flat, &hole_starts, ctx.tolerance.linear());
     if indices.is_empty() || indices.len() % 3 != 0 {
         return Err(GeomError::Degenerate(format!(
             "face triangulation produced {} indices for {} vertices",
