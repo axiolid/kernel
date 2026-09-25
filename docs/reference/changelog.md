@@ -65,6 +65,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   rectangle, and a hollow section whose corners leave no wall.
 
 
+## axiolid-contracts
+
+### 0.3.1 - 2026-09-25
+
+### Added
+
+- `ExecutionOptions::with_chord_error` and `ExecutionOptions::chord_error`
+  (#165): an explicit bound on how far a provider's straight chords may sit
+  from the curve they replace, separate from the linear tolerance. The
+  tolerance is a coincidence test; used as a chord budget it leaves a 5 mm
+  arc a few chords at `Tolerance::MILLIMETRE`, and small profiles mesh
+  percent-level off. `None` (the default) keeps each provider's previous
+  behaviour. A non-finite or non-positive budget is refused (`None`).
+
+
 ## axiolid-exact
 
 ### 0.1.0 - 2026-09-24
@@ -155,6 +170,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.3 - 2026-09-25
+
+### Added
+
+- The reference compiler honours `ExecutionOptions::with_chord_error`
+  (#165) everywhere it flattens a curve: profile arcs, circles and ellipses,
+  sweep directrices, curved B-rep faces and edges, and CSG primitives. An
+  instance scales the budget with its transform, like the tolerance, so it
+  stays a world-space distance. Without a budget the chord error is the
+  linear tolerance, exactly as before. Measured on a 5 mm disc extruded 1 m
+  at `Tolerance::MILLIMETRE`: 10 % short by default, 2.6 % at a 0.1 mm
+  budget, 0.16 % at 10 um and 0.01 % at 1 um.
+
+### Fixed
+
+- A surface model with a face whose outer bound encloses no area
+  tessellates (#171): that face covers nothing, so it is skipped instead of
+  refusing the whole model with `planar face bound has zero or non-finite
+  area`. Real Nova MEP exports write pipe-fitting end caps as bowtie quads
+  through the pipe axis (an annulus with a negative inner radius), each with
+  signed area exactly 0; 42 fittings, pumps and valves in two models were
+  refused over them. A declared solid still refuses such a face, and a
+  zero-area hole or a non-finite bound is still refused everywhere.
+- Closed authored meshes stay closed (#170). Planar faces of a
+  `PolygonMesh` and of a B-rep were triangulated with earcut, which drops
+  corners on a straight run and runs diagonals and hole bridges over corners
+  of the same face; the neighbouring face still split that edge at the
+  corner, so the mesh cracked (T-junctions). Every edge earcut invents is now
+  split at each face corner on it, within a band of a thousandth of the
+  linear tolerance (1 um at `Tolerance::MILLIMETRE`), so export noise on
+  shared corners (1e-8 to 5e-8 m on real files) is judged the same on both
+  sides. Authored ring edges are never split, and a thin triangle whose long
+  side is authored is kept. Closure of an authored mesh is now read from its
+  index connectivity instead of `audit_mesh`, which dropped real faces below
+  its area threshold before counting edges. On two real ArchiCAD models this
+  turns 505 authored-closed `IfcPolygonalFaceSet` products from `Surface`
+  into `Solid`; no product that compiled before is refused.
 
 ### 0.3.2 - 2026-09-25
 
