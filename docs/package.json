@@ -13,5 +13,8 @@
     "mermaid": "^11.17.2",
     "three": "^0.185.1",
     "vitepress": "2.0.0-alpha.19"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.12"
   }
 }
