@@ -152,14 +152,7 @@ fn build(stations: &[Station], axis_origin: Point3, epsilon: Scalar) -> GeomResu
             resource: "exact revolution topology",
         })?;
 
-    let axis_frame = |height: Scalar| Frame3 {
-        origin: Point3::new(axis_origin.x, height, 0.0),
-        x: Vec3::X,
-        y: Vec3::Z,
-        // The profile plane is z = 0 and the axis is local y, so the surface
-        // frames put their own z along the revolution axis.
-        z: Vec3::Y,
-    };
+    let axis_frame = |height: Scalar| frame_at(axis_origin.x, height);
 
     // One circular edge per station, plus a seam so each wall loop closes.
     let mut circles = Vec::with_capacity(count);
@@ -435,11 +428,20 @@ fn torus_wall(
 /// `axis_x` is not optional: every circle in the solid is centred on the axis,
 /// so a frame at x = 0 disagrees with them by exactly the axis offset. The
 /// audit reports that as a pcurve error equal to `|axis_x|`.
-fn frame_at(axis_x: Scalar, height: Scalar) -> Frame3 {
+///
+/// The profile plane is `z = 0` and the axis is world `y`, so each frame puts
+/// its own `z` along the axis. Its `y` is world `-z`, not `+z`: `(X, Z, Y)` is
+/// LEFT-handed, and on a left-handed frame a loop running anticlockwise in
+/// `(u, v)` runs clockwise about `S_u x S_v`. Every loop here is built
+/// anticlockwise in its parameters, so a left-handed frame turned the whole
+/// solid inside out -- consistently enough that the topological and
+/// geometric audits, which only compare faces with each other, passed it.
+/// `exact_properties` measured `-2 pi R A` for every revolution.
+pub(crate) fn frame_at(axis_x: Scalar, height: Scalar) -> Frame3 {
     Frame3 {
         origin: Point3::new(axis_x, height, 0.0),
         x: Vec3::X,
-        y: Vec3::Z,
+        y: Vec3::NEG_Z,
         z: Vec3::Y,
     }
 }

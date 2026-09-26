@@ -338,3 +338,75 @@ fn an_arc_crossing_the_tube_branch_cut_keeps_its_stated_sweep() {
         "a -270 degree seam means the end angle came from the endpoint: {tube_spans:?}"
     );
 }
+
+#[test]
+fn every_revolved_wall_faces_out_of_the_solid() {
+    // A loop anticlockwise in (u, v) runs anticlockwise about S_u x S_v, and
+    // that winding -- after the face and bound flips -- is the sense the
+    // tessellator and edge-use pairing read. The revolution frames were
+    // left-handed, so every Forward wall pointed INTO the solid; both audits
+    // compare faces with each other and passed it. Read here from the
+    // geometry alone: the annulus x in [4, 6] has its outer wall facing away
+    // from the axis and its inner wall facing towards it.
+    use axiolid_evaluate::partials;
+    use axiolid_topology::Orientation;
+
+    let section = contour(vec![
+        line(Point2::new(4.0, -1.5), Point2::new(6.0, -1.5)),
+        line(Point2::new(6.0, -1.5), Point2::new(6.0, 1.5)),
+        line(Point2::new(6.0, 1.5), Point2::new(4.0, 1.5)),
+        line(Point2::new(4.0, 1.5), Point2::new(4.0, -1.5)),
+    ]);
+    let solid = revolve(&section, 0.0);
+    let topology = solid.topology();
+    let mut walls = 0;
+    for face in topology.faces() {
+        let surface = &solid.surfaces()[face.surface.expect("surface").index()];
+        let Surface::Cylinder(cylinder) = surface else {
+            continue;
+        };
+        walls += 1;
+        let bound = &face.bounds[0];
+        let wire = &topology.loops()[bound.loop_id.index()];
+        // Shoelace over the pcurve end points: the seam loop is straight
+        // in (u, v), so its corners state it exactly.
+        let mut corners = Vec::new();
+        for (index, use_) in wire.edges.iter().enumerate() {
+            let Curve2::Line(pcurve) = &solid.curves2()[use_.pcurve.expect("pcurve").index()]
+            else {
+                panic!("a seam loop is straight in its parameters");
+            };
+            let span = solid
+                .pcurve_interval(bound.loop_id, index)
+                .expect("interval");
+            corners.push(pcurve.origin + pcurve.direction * span.start);
+        }
+        let mut twice_area = 0.0;
+        for i in 0..corners.len() {
+            twice_area += corners[i].perp_dot(corners[(i + 1) % corners.len()]);
+        }
+        let mut sense = twice_area.signum();
+        if face.orientation == Orientation::Reversed {
+            sense = -sense;
+        }
+        if bound.orientation == Orientation::Reversed {
+            sense = -sense;
+        }
+        let (su, sv) = partials(surface, 1.0, 1.0).expect("partials");
+        let normal = su.cross(sv) * sense;
+        // Away from the axis (world y through x = 0) at the probed point.
+        let point = axiolid_evaluate::surface::evaluate(surface, 1.0, 1.0).expect("point");
+        let radial = Vec3::new(point.x, 0.0, point.z).normalize();
+        let outward = if (cylinder.radius - 6.0).abs() < 1e-12 {
+            1.0
+        } else {
+            -1.0
+        };
+        assert!(
+            normal.dot(radial) * outward > 0.0,
+            "wall of radius {} faces into the solid",
+            cylinder.radius
+        );
+    }
+    assert_eq!(walls, 2, "an annular tube has two walls");
+}

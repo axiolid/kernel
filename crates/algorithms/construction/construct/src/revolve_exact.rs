@@ -26,7 +26,7 @@ use std::f64::consts::TAU;
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
-use axiolid_core::{Frame2, Frame3, Interval, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_core::{Frame2, Interval, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
 use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_surface::{Cylinder, Plane, Surface};
@@ -168,12 +168,8 @@ fn revolve_rectangle(
     // The rectangle spans y in [-half_y, half_y] around the axis origin.
     let bottom = axis_origin.y - half_y;
     let top = axis_origin.y + half_y;
-    let frame_at = |y: Scalar| Frame3 {
-        origin: Point3::new(axis_origin.x, y, 0.0),
-        x: Vec3::X,
-        y: Vec3::Z,
-        z: Vec3::Y,
-    };
+    // Right-handed, with `z` along the axis: see `revolve_contour::frame_at`.
+    let frame_at = |y: Scalar| crate::revolve_contour::frame_at(axis_origin.x, y);
     let frame2 = Frame2 {
         origin: Vec2::ZERO,
         x: Vec2::X,

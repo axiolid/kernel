@@ -45,6 +45,16 @@ caret rule for `0.x` versions.
 - `boolean_stepped` docs: the bands are the lighter alternative to the
   stepped solid; their volumes are checked against it.
 
+### Fixed
+
+- Exact revolutions are no longer built inside out (#125).
+  `revolve_profile_exact` and the contour revolution put their surface
+  frames at `(x, y, z) = (X, Z, Y)`, which is left-handed; every loop is
+  built anticlockwise in its parameters, so every `Forward` face pointed
+  into the solid. The topological and geometric audits compare faces with
+  each other and passed it; `exact_properties` measured `-2 pi R A` for
+  every Pappus fixture. The frames are now `(X, -Z, Y)`.
+
 ## [0.3.2] - 2026-09-25
 
 ### Fixed
