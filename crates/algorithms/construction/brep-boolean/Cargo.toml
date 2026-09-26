@@ -20,9 +20,11 @@ axiolid-surface.workspace = true
 axiolid-topology.workspace = true
 
 [dev-dependencies]
+axiolid-brep-audit.workspace = true
 axiolid-construct.workspace = true
 axiolid-overlay.workspace = true
 axiolid-primitive.workspace = true
+axiolid-profile.workspace = true
 
 [package.metadata.axiolid]
 architecture-version = 1
@@ -31,4 +33,4 @@ role = "algorithm.construction"
 domain = "construction.brep-boolean"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-brep", "axiolid-construct", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-measure", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-brep", "axiolid-brep-audit", "axiolid-construct", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-measure", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-surface", "axiolid-topology"]

@@ -134,6 +134,7 @@ graph TD
     axiolid_brep_audit --> axiolid_surface
     axiolid_brep_audit --> axiolid_topology
     axiolid_brep_boolean --> axiolid_brep
+    axiolid_brep_boolean --> axiolid_brep_audit
     axiolid_brep_boolean --> axiolid_construct
     axiolid_brep_boolean --> axiolid_core
     axiolid_brep_boolean --> axiolid_curve
@@ -142,6 +143,7 @@ graph TD
     axiolid_brep_boolean --> axiolid_nurbs
     axiolid_brep_boolean --> axiolid_overlay
     axiolid_brep_boolean --> axiolid_primitive
+    axiolid_brep_boolean --> axiolid_profile
     axiolid_brep_boolean --> axiolid_surface
     axiolid_brep_boolean --> axiolid_topology
     axiolid_capi --> axiolid

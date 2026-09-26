@@ -170,6 +170,10 @@ pub fn split_face(
 }
 
 /// A section edge with its exact pcurve on `surface`.
+///
+/// On a seam the start's angle is ambiguous (`0` and `2 pi` name one
+/// point), so each placement in the face's range is tried and the one whose
+/// piece runs inside the range is kept.
 fn section_piece(
     surface: &Surface,
     other: &Surface,
@@ -179,7 +183,39 @@ fn section_piece(
     hi: Point2,
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
-    let start_uv = place(surface, section.start, lo, hi, tolerance)?;
+    let first = place(surface, section.start, lo, hi, tolerance)?;
+    let slack = 1e-9 * (1.0 + lo.x.abs().max(hi.x.abs()));
+    let mut candidates = vec![first];
+    if matches!(surface, Surface::Cylinder(_)) {
+        for shift in [TAU, -TAU] {
+            let other_turn = Point2::new(first.x + shift, first.y);
+            if other_turn.x >= lo.x - slack && other_turn.x <= hi.x + slack {
+                candidates.push(other_turn);
+            }
+        }
+    }
+    let mut fallback = None;
+    for start_uv in candidates {
+        let piece = section_piece_from(surface, other, section, index, start_uv, tolerance)?;
+        let mid = evaluate2(&piece.pcurve, 0.5 * (piece.pspan.start + piece.pspan.end))
+            .map_err(|_| BooleanError::Evaluation)?;
+        if mid.x >= lo.x - slack && mid.x <= hi.x + slack {
+            return Ok(piece);
+        }
+        fallback.get_or_insert(piece);
+    }
+    fallback.ok_or(BooleanError::Evaluation)
+}
+
+/// [`section_piece`] with the start's parameters given.
+fn section_piece_from(
+    surface: &Surface,
+    other: &Surface,
+    section: &SectionEdge,
+    index: usize,
+    start_uv: Point2,
+    tolerance: Tolerance,
+) -> Result<Piece, BooleanError> {
     let (pcurve, pspan) = match (surface, &section.curve) {
         (Surface::Plane(p), curve) => {
             let f = p.frame;
@@ -585,7 +621,7 @@ fn shoelace(polygon: &[Point2]) -> Scalar {
     0.5 * area
 }
 
-fn inside_polygon(polygon: &[Point2], p: Point2) -> bool {
+pub(crate) fn inside_polygon(polygon: &[Point2], p: Point2) -> bool {
     let mut inside = false;
     for i in 0..polygon.len() {
         let (a, b) = (polygon[i], polygon[(i + 1) % polygon.len()]);

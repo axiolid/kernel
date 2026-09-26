@@ -202,6 +202,7 @@ name = "axiolid-brep-boolean"
 version = "0.1.0"
 dependencies = [
  "axiolid-brep",
+ "axiolid-brep-audit",
  "axiolid-construct",
  "axiolid-core",
  "axiolid-curve",
@@ -210,6 +211,7 @@ dependencies = [
  "axiolid-nurbs",
  "axiolid-overlay",
  "axiolid-primitive",
+ "axiolid-profile",
  "axiolid-surface",
  "axiolid-topology",
 ]
