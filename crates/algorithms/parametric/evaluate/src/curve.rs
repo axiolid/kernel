@@ -180,6 +180,11 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
         Curve2::Intrinsic(i) => crate::arc_length::intrinsic_point(i, t),
         // The parameter is the first coordinate; closed form, no sampling.
         Curve2::Sinusoid(w) => Ok(Point2::new(t, w.height(t))),
+        // Likewise, one root of a quadratic in the height (ADR 0076).
+        Curve2::QuadraticGraph(g) => g
+            .height(t)
+            .map(|v| Point2::new(t, v))
+            .ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -207,6 +212,10 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             let (sin, cos) = t.sin_cos();
             Ok(Vec2::new(1.0, -w.cosine * sin + w.sine * cos))
         }
+        Curve2::QuadraticGraph(g) => g
+            .slope(t)
+            .map(|slope| Vec2::new(1.0, slope))
+            .ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -231,6 +240,10 @@ pub fn second_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             let (sin, cos) = t.sin_cos();
             Ok(Vec2::new(0.0, -w.cosine * cos - w.sine * sin))
         }
+        Curve2::QuadraticGraph(g) => g
+            .bend(t)
+            .map(|bend| Vec2::new(0.0, bend))
+            .ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,
@@ -257,6 +270,14 @@ pub fn jet2(curve: &Curve2, t: Scalar) -> GeomResult<CurveJet<Point2, Vec2>> {
     })
 }
 
+/// A quadratic-graph parameter where its root does not exist, diverges, or
+/// has a vertical tangent: outside the spans the curve was built for.
+fn outside_graph(t: Scalar) -> GeomError {
+    GeomError::Degenerate(format!(
+        "quadratic section graph has no regular point at t = {t}"
+    ))
+}
+
 // --- 3D evaluation ----------------------------------------------------------
 
 /// Position on a 3D curve.
@@ -273,6 +294,8 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         // graph's existing relation machinery -- trim, composite, sweep
         // directrix -- work on a torsion curve without special-casing it.
         Curve3::Intrinsic(i) => crate::frenet::frenet_point(i, t),
+        // The carrier along its section graph (ADR 0076).
+        Curve3::RuledSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -296,6 +319,7 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         }
         // Arc-length parameterised, so the derivative is the UNIT tangent.
         Curve3::Intrinsic(i) => crate::frenet::frenet_tangent(i, t),
+        Curve3::RuledSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -316,6 +340,7 @@ pub fn second_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::BSpline(b) => {
             de_boor_second_derivative(b, t, |p| [p.x, p.y, p.z], |c| Vec3::new(c[0], c[1], c[2]))
         }
+        Curve3::RuledSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,

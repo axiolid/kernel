@@ -457,10 +457,10 @@ pub(crate) fn coaxial_revolution_intersection(
             radius: point.rho,
         }));
     }
-    Ok(ExactIntersectionCurve {
+    Ok(ExactIntersectionCurve::whole(
         branches,
-        derivation: Derivation::CoaxialRevolutionCircles,
-    })
+        Derivation::CoaxialRevolutionCircles,
+    ))
 }
 
 /// Build an orthonormal frame whose `z` is the given unit axis.

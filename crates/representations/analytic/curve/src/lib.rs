@@ -11,6 +11,7 @@ pub mod evaluate;
 mod intrinsic;
 mod intrinsic3;
 pub mod linear;
+pub mod quadric_section;
 pub mod sinusoid;
 pub mod spline;
 
@@ -20,6 +21,7 @@ pub use evaluate::CurveEvaluator;
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
+pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use sinusoid::Sinusoid2;
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
 
@@ -52,6 +54,10 @@ pub enum Curve2 {
     /// plane's cut across a cylinder, read in the cylinder's (angle, height)
     /// parameters. See [`Sinusoid2`] (ADR 0071).
     Sinusoid(Sinusoid2),
+    /// One root of `a(t) v^2 + b(t) v + c(t) = 0` as a graph over `t`: the
+    /// exact pcurve of a quadric's cut across a cylinder or cone. See
+    /// [`QuadraticGraph2`] (ADR 0076).
+    QuadraticGraph(QuadraticGraph2),
 }
 
 /// Atomic three-dimensional curve values.
@@ -75,4 +81,7 @@ pub enum Curve3 {
     /// A planar curve paired with an elevation law: the exact composition an
     /// alignment centreline is authored as. See [`Elevated3`].
     Elevated(Elevated3),
+    /// A quadric's cut across a cylinder or cone: the carrier evaluated along
+    /// a [`QuadraticGraph2`]. See [`RuledSection3`] (ADR 0076).
+    RuledSection(RuledSection3),
 }

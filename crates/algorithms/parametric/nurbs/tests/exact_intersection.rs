@@ -467,7 +467,7 @@ fn equal_radius_cylinders_on_crossing_axes_cut_two_ellipses() {
 }
 
 #[test]
-fn unequal_radius_crossing_cylinders_refuse_because_the_curve_is_not_planar() {
+fn unequal_radius_crossing_cylinders_meet_in_a_ruled_section() {
     let first = Surface::Cylinder(Cylinder {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         radius: 2.0,
@@ -477,12 +477,16 @@ fn unequal_radius_crossing_cylinders_refuse_because_the_curve_is_not_planar() {
         radius: 1.2,
     });
 
-    // This is a genuine space quartic: sampled points have a third
-    // singular value of 2.83, so no plane contains them. There is no
-    // exact conic to return, and fitting one would be a lie.
+    // A genuine space quartic: no plane contains it, so no conic is
+    // returned. It is exact as a root branch of a quadratic over the
+    // carrier's angle instead (ADR 0076); `ruled_section.rs` checks the
+    // points. The thinner pipe pierces the wider: two closed loops.
+    let curve = exact_surface_intersection(&first, &second).expect("a ruled section");
+    assert_eq!(curve.derivation, Derivation::RuledQuadricSection);
     assert_eq!(
-        exact_surface_intersection(&first, &second),
-        Err(ExactIntersectionRefusal::NotRegularCurve)
+        curve.branches.len(),
+        4,
+        "two loops, each a plus and a minus piece"
     );
 }
 
@@ -649,23 +653,24 @@ fn a_coaxial_torus_and_sphere_meet_in_two_circles() {
 }
 
 #[test]
-fn an_offset_sphere_and_cylinder_are_refused_rather_than_approximated() {
+fn an_offset_sphere_and_cylinder_meet_in_a_ruled_section_not_a_circle() {
     let sphere = Surface::Sphere(Sphere {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         radius: 5.0,
     });
     // Axis shifted sideways: the shared rotational symmetry is gone and
-    // the intersection is a space quartic, not a circle.
+    // the intersection is a space quartic, not a circle. It is returned
+    // as a ruled section on the cylinder, never as a plausible circle.
     let cylinder = Surface::Cylinder(Cylinder {
         frame: frame(Point3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         radius: 3.0,
     });
-
-    assert_eq!(
-        exact_surface_intersection(&sphere, &cylinder),
-        Err(ExactIntersectionRefusal::UnsupportedPair),
-        "a non-coaxial pair must refuse, never return a plausible circle"
-    );
+    let curve = exact_surface_intersection(&sphere, &cylinder).expect("a ruled section");
+    assert_eq!(curve.derivation, Derivation::RuledQuadricSection);
+    assert!(curve
+        .branches
+        .iter()
+        .all(|branch| matches!(branch, Curve3::RuledSection(_))));
 }
 
 #[test]

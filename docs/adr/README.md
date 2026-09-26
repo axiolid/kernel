@@ -60,3 +60,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0073](./0073-curved-face-mass-properties.md) | Exact mass properties over curved faces by Green's theorem |
 | [0074](./0074-certified-boundary-distance.md) | Certified boundary distance by branch and bound |
 | [0075](./0075-general-brep-boolean.md) | General B-rep boolean: our own general-fuse pipeline |
+| [0076](./0076-ruled-quadric-sections.md) | Ruled quadric sections: exact quartic intersection curves |

@@ -11,6 +11,10 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Evaluation, first and second derivatives of `Curve2::QuadraticGraph` and
+  `Curve3::RuledSection` (#119, ADR 0076); a parameter outside the graph's
+  spans is refused, not extrapolated.
+
 - `Curve2::Sinusoid` evaluation: point, first and second derivative, a
   one-turn domain, and exact inversion (the parameter is the point's first
   coordinate, then its height is checked) (ADR 0071).

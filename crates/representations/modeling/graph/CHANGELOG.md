@@ -11,5 +11,8 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- A `Curve2::QuadraticGraph` with finite coefficients is accepted as a
+  trim basis (#119).
+
 - A `Curve2::Sinusoid` is a valid trim basis when its three coefficients
   are finite (ADR 0071).

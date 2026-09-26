@@ -62,6 +62,13 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- Exact ruled quadric sections (#119, ADR 0076): where a quadric crosses a
+  cylinder or cone off any shared axis -- a pipe tee, a column piercing a
+  dome off-centre, an oblique cut through a cone -- the intersection is
+  derived exactly as a root branch of a quadratic over the carrier's angle,
+  with its loops and branch ends decided by exact root isolation. Checked
+  on 120 random cylinder pairs against a dense scan and a 10-fault mutation
+  probe.
 - Certified B-rep distance (#125, ADR 0074): `boundary_distance` returns an
   interval certain to contain the distance between two exact B-reps'
   boundaries, and `boundary_clearance` compares it with a limit, answering

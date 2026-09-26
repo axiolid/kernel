@@ -10,7 +10,7 @@
 //! than falling back to approximation. Each derivation states the identity
 //! it relies on, so a reader can check the algebra rather than trust it.
 
-use axiolid_core::{Frame3, Point3, Scalar, Vec3};
+use axiolid_core::{Frame3, Interval, Point3, Scalar, Vec3};
 use axiolid_curve::{Circle3, Curve3, Ellipse3};
 use axiolid_exact::{Arith, Dyadic};
 use axiolid_guarantees::Sign;
@@ -138,9 +138,38 @@ pub struct ExactIntersectionCurve {
     pub branches: Vec<Curve3>,
     /// Which closed-form identity produced `branches`.
     pub derivation: Derivation,
+    /// The parameter span each branch exists on, aligned with `branches`:
+    /// `None` for a curve defined on its whole natural domain (a line, a
+    /// full circle or ellipse), `Some` for a piece of a ruled section
+    /// (ADR 0076), which exists only where its discriminant is not
+    /// negative. Two pieces over one span join at both ends into a loop.
+    pub spans: Vec<Option<Interval>>,
 }
 
 impl ExactIntersectionCurve {
+    /// Branches on their whole natural domains.
+    pub(crate) fn whole(branches: Vec<Curve3>, derivation: Derivation) -> Self {
+        let spans = vec![None; branches.len()];
+        Self {
+            branches,
+            derivation,
+            spans,
+        }
+    }
+
+    /// Branches with explicit spans.
+    pub(crate) fn with_spans(
+        branches: Vec<Curve3>,
+        spans: Vec<Option<Interval>>,
+        derivation: Derivation,
+    ) -> Self {
+        Self {
+            branches,
+            derivation,
+            spans,
+        }
+    }
+
     /// The sole branch, when the caller expects exactly one.
     ///
     /// Panics when there are several: a caller that assumes one branch and
@@ -178,6 +207,11 @@ pub enum Derivation {
     /// Two coaxial surfaces of revolution meet in circles perpendicular to
     /// the shared axis, found by intersecting their meridian profiles.
     CoaxialRevolutionCircles,
+    /// A quadric substituted into a ruled carrier (cylinder, elliptical
+    /// cylinder, or a cone cut by a plane) is quadratic in the ruling
+    /// parameter at every angle; the curve is a root branch of that
+    /// quadratic (ADR 0076).
+    RuledQuadricSection,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -187,6 +221,27 @@ pub enum Derivation {
 /// a caller that needs those cases must use the certified numeric analysis
 /// and decide for itself what to do with an unproven region.
 pub fn exact_surface_intersection(
+    first: &Surface,
+    second: &Surface,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    match closed_form(first, second) {
+        Ok(curve) => Ok(curve),
+        // Apart, or a frame that cannot be read: final either way.
+        Err(
+            refusal @ (ExactIntersectionRefusal::Disjoint
+            | ExactIntersectionRefusal::DegenerateFrame),
+        ) => Err(refusal),
+        // No conic or line for this pair: a cylinder or cone cut by a
+        // quadric is still exact as a ruled section (ADR 0076).
+        Err(refusal) => match crate::ruled_section::ruled_section(first, second)? {
+            Some(curve) => Ok(curve),
+            None => Err(refusal),
+        },
+    }
+}
+
+/// The pairs with a line, circle or ellipse in closed form.
+fn closed_form(
     first: &Surface,
     second: &Surface,
 ) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
@@ -240,6 +295,7 @@ fn plane_plane(
         return Err(ExactIntersectionRefusal::DegenerateFrame);
     }
     Ok(ExactIntersectionCurve {
+        spans: vec![None],
         branches: vec![Curve3::Line(axiolid_curve::Line3 {
             origin,
             direction: unit_direction,
@@ -280,6 +336,7 @@ fn sphere_plane(
     let section_centre = centre - unit_normal * signed_distance;
     let frame = frame_from_normal(section_centre, unit_normal)?;
     Ok(ExactIntersectionCurve {
+        spans: vec![None],
         branches: vec![Curve3::Circle(Circle3 {
             frame,
             radius: radius_squared.sqrt(),
@@ -347,6 +404,7 @@ fn cylinder_plane(
         return Err(ExactIntersectionRefusal::DegenerateFrame);
     }
     Ok(ExactIntersectionCurve {
+        spans: vec![None],
         branches: vec![cylinder_section_curve(
             centre,
             axis,
@@ -475,6 +533,7 @@ fn sphere_sphere(
     let centre = first.frame.origin + axis * along;
     let frame = frame_from_normal(centre, axis)?;
     Ok(ExactIntersectionCurve {
+        spans: vec![None],
         branches: vec![Curve3::Circle(Circle3 {
             frame,
             radius: squared.sqrt(),
@@ -549,10 +608,10 @@ fn cylinder_cylinder(
             cosine,
         )?);
     }
-    Ok(ExactIntersectionCurve {
+    Ok(ExactIntersectionCurve::whole(
         branches,
-        derivation: Derivation::CylinderCylinderSteinmetzEllipses,
-    })
+        Derivation::CylinderCylinderSteinmetzEllipses,
+    ))
 }
 
 /// Cylinders with parallel axes meet in lines parallel to those axes.
@@ -588,6 +647,7 @@ fn parallel_cylinders(
     if squared <= 0.0 {
         // Tangent cylinders share exactly one line.
         return Ok(ExactIntersectionCurve {
+            spans: vec![None],
             branches: vec![Curve3::Line(axiolid_curve::Line3 {
                 origin: base,
                 direction: axis,
@@ -604,10 +664,10 @@ fn parallel_cylinders(
             direction: axis,
         }));
     }
-    Ok(ExactIntersectionCurve {
+    Ok(ExactIntersectionCurve::whole(
         branches,
-        derivation: Derivation::ParallelCylinderLines,
-    })
+        Derivation::ParallelCylinderLines,
+    ))
 }
 
 /// A plane cuts a cone in a conic whose kind follows the tilt.
@@ -706,8 +766,8 @@ fn cylinder_plane_parallel(
             direction: axis,
         }));
     }
-    Ok(ExactIntersectionCurve {
+    Ok(ExactIntersectionCurve::whole(
         branches,
-        derivation: Derivation::CylinderPlaneParallelRulings,
-    })
+        Derivation::CylinderPlaneParallelRulings,
+    ))
 }

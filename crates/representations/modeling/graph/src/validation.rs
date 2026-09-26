@@ -133,6 +133,7 @@ fn curve2_is_structurally_valid_trim_basis(curve: &Curve2) -> bool {
         }
         Curve2::BSpline(spline) => bspline_is_structurally_valid_2d(spline),
         Curve2::Sinusoid(wave) => wave.is_finite(),
+        Curve2::QuadraticGraph(graph) => graph.is_finite(),
         _ => false,
     }
 }

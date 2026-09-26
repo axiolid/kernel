@@ -31,6 +31,7 @@ mod periodic;
 mod periodic_surface;
 mod projection;
 mod revolution_profile;
+mod ruled_section;
 mod surface_analysis;
 mod surface_projection;
 mod surface_transform;
