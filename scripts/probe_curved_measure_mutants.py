@@ -16,6 +16,7 @@ import pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 F = "crates/algorithms/query/measure/src/exact_face.rs"
+D = "crates/algorithms/query/measure/src/exact_domain.rs"
 E = "crates/algorithms/query/measure/src/exact.rs"
 R = "crates/algorithms/construction/construct/src/revolve_contour.rs"
 UNIT = ["-p", "axiolid-measure", "--features", "exact", "--lib"]
@@ -28,15 +29,15 @@ MUTANTS = [
     ('volume field 1/4 not 1/3', F, '        w / 3.0,\n', '        w / 4.0,\n', SOLIDS),
     ('first moment reads y for x', F, '        p.x * w / 4.0,\n', '        p.y * w / 4.0,\n', SOLIDS),
     ('second moment reads x for z', F, '        p.z * p.z * w / 5.0,\n', '        p.x * p.x * w / 5.0,\n', SOLIDS),
-    ('green sign dropped', F, '(-tangent.x, inner_along_v(surface, reference, point, &floor)?)', '(tangent.x, inner_along_v(surface, reference, point, &floor)?)', SOLIDS),
+    ('green sign dropped', F, '                        -tangent.x,\n                        inner_along_v(surface, reference, point, &floor)?,', '                        tangent.x,\n                        inner_along_v(surface, reference, point, &floor)?,', SOLIDS),
     ('tube form sign dropped', F, '(tangent.y, inner_along_u(surface, reference, point, &floor)?)', '(-tangent.y, inner_along_u(surface, reference, point, &floor)?)', UNIT),
     ('tube winding ignored', F, '    let along_v = boundary.wraps[1];', '    let along_v = false;', UNIT),
-    ('loop winding counted backwards', F, '            periods(shift.x, chart.u_period),', '            periods(-shift.x, chart.u_period),', UNIT),
-    ('pole taken on the wrong side', F, '.filter(|pole| (*pole > boundary.anchor.y) == upward)', '.filter(|pole| (*pole > boundary.anchor.y) != upward)', UNIT),
+    ('loop winding counted backwards', D, '            periods(shift.x, chart.u_period),', '            periods(-shift.x, chart.u_period),', UNIT),
+    ('pole taken on the wrong side', D, '.filter(|pole| (*pole > boundary.anchor.y) == upward)', '.filter(|pole| (*pole > boundary.anchor.y) != upward)', UNIT),
     ('pole ignored, reference at the loop', F, '    } else if boundary.winding[0] != 0 {\n        pole_on_domain_side(&chart, &boundary)?', '    } else if false {\n        pole_on_domain_side(&chart, &boundary)?', UNIT),
-    ('unbounded winding accepted', F, '            "face boundary winds around a surface with no pole on the domain side",\n        ))', '            "face boundary winds around a surface with no pole on the domain side",\n        )).or(Ok(boundary.anchor.y))', UNIT),
-    ('reversed bound read forward', F, '        let reversed = bound.orientation == Orientation::Reversed;', '        let reversed = false;', UNIT),
-    ('seam periods not unwrapped', F, "            period.map_or(0.0, |period| (gap / period).round() * period)", "            period.map_or(0.0, |_| 0.0)", BOTH),
+    ('unbounded winding accepted', D, '            "face boundary winds around a surface with no pole on the domain side",\n        ))', '            "face boundary winds around a surface with no pole on the domain side",\n        )).or(Ok(boundary.anchor.y))', UNIT),
+    ('reversed bound read forward', D, '        let reversed = bound.orientation == Orientation::Reversed;', '        let reversed = false;', UNIT),
+    ('seam periods not unwrapped', D, "            period.map_or(0.0, |period| (gap / period).round() * period)", "            period.map_or(0.0, |_| 0.0)", BOTH),
     ('face flip ignored on curved faces', E, '        let sign = if flip_face { -1.0 } else { 1.0 };', '        let sign = 1.0;', SOLIDS),
     ('curve-bounded plane fanned', E, '            if !matches!(curve, Curve3::Line(_)) {\n                return Ok(false);', '            if false {\n                return Ok(false);', SOLIDS),
     ('planar hole area added', E, '        *area += (b - a).cross(c - a) * 0.5;', '        *area += ((b - a).cross(c - a) * 0.5).abs();', PLANAR),

@@ -20,7 +20,7 @@ MUTANTS = [
     ('trig range misses the peak', D, '    if reaches(peak) {\n        hi = amplitude;\n    }', '', BOTH),
     ('projection gap one-sided', D, '        best = best.max(b_lo - a_hi).max(a_lo - b_hi);', '        best = best.max(b_lo - a_hi);', BOTH),
     ('normal cone ignores spread', D, '    let angle = spread + aperture + 1e-9;', '    let angle = aperture + 1e-9;', BOTH),
-    ('cone apex pruned', D, "            if !apex.is_finite() || (apex >= lo.y.min(hi.y) - 1e-9 && apex <= lo.y.max(hi.y) + 1e-9) {\n                return None;\n            }", '', UNIT),
+    ('cone apex pruned', D, "            if !apex.is_finite() || (apex >= lo.y.min(hi.y) - 1e-9 && apex <= lo.y.max(hi.y) + 1e-9)\n            {\n                return None;\n            }", '', UNIT),
     ('witness without certification', D, '        let witness = if inside {', '        let witness = if true {', BOTH),
     ('outside patch kept as inside', D, '                        Some(false) => return Ok(None),', '                        Some(false) => inside = true,', BOTH),
     ('pole winding dropped', M, '            if pole > q.y {\n                total += winding;\n            }', '', UNIT),

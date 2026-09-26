@@ -13,6 +13,7 @@ discriminant is never zero there; touching surfaces are pinned instead by
 import pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+X = "crates/algorithms/parametric/nurbs/src/exact_surface_intersection.rs"
 R = "crates/algorithms/parametric/nurbs/src/ruled_section.rs"
 Q = "crates/representations/analytic/curve/src/quadric_section.rs"
 T = "crates/algorithms/parametric/nurbs/src/torus_section.rs"
@@ -30,7 +31,7 @@ MUTANTS = [
     ('nappe side inverted', R, '            Some(sn == Sign::Zero || (sn == sb))', '            Some(sn == Sign::Zero || (sn != sb))', RULED),
     ('root at pi ignored', R, '        for (start, end) in spans(&breaks, &good, at_pi_ok, vanishes) {', '        for (start, end) in spans(&breaks, &good, at_pi_ok, false) {', RULED),
     ('wrap span dropped', R, '        out.push((last.2, first.2 + core::f64::consts::TAU));', '', RULED),
-    ('apex plane accepted', R, '        if curve_carrier.slope != 0.0 && is_zero(&nappe_trig) {\n            return Ok(None);\n        }', '', RULED),
+    ('apex rulings on the other nappe', X, '    let z = axis * slope.signum();', '    let z = -axis * slope.signum();', RULED),
     ('other cone keeps both nappes', R, '        out.push((h0, linear(&sz, a1)));', '', RULED),
     ('carrier cone keeps both nappes', R, "        out.push((constant(d(c.radius)?), constant(d(c.semi_angle.tan())?)));", '', RULED),
     ('sign of a ignored on nappes', R, "                    (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive)", "                    (_, Sign::Negative)", RULED),

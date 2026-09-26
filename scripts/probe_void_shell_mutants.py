@@ -17,7 +17,7 @@ TESS = ["-p", "axiolid-mesh-compile", "--test", "brep_tessellation"]
 CAV = ["-p", "axiolid-construct", "--test", "column_cavities"]
 
 MUTANTS = [
-    ('voids not tessellated', B, '                check_void_closed(brep, shell)?;\n                shells.push(shell);', '                check_void_closed(brep, shell)?;', TESS),
+    ('voids not tessellated', B, '                    check_void_closed(brep, shell)?;\n                    shells.push((shell, true));', '                    check_void_closed(brep, shell)?;', TESS),
     ('open void accepted', B, '    if shell.faces.is_empty() || uses.values().any(|&count| count != 2) {', '    if shell.faces.is_empty() {', TESS),
     ('outward void kept outward', B, '    if volume > 0.0 {\n        for triangle', '    if volume > 0.0 && false {\n        for triangle', TESS),
     ('void flipped into material', B, '    if volume > 0.0 {\n        for triangle', '    if volume < 0.0 {\n        for triangle', TESS),
