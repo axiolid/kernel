@@ -819,6 +819,41 @@ mod tests {
     }
 
     #[test]
+    fn a_face_domain_answers_for_every_turn_of_an_angle() {
+        // A hemisphere's curved face covers every angle. A point on it must
+        // be inside whether its angle is stated as -0.2, 2 pi - 0.2 or
+        // 4 pi - 0.2: inversion may return any of them. (A pole adds its
+        // own crossing, so this face alone would not show a wrong
+        // whole-period shift; `brep-boolean/tests/face_domain.rs` checks a
+        // wall without one.)
+        use crate::exact_domain::FaceDomain;
+        let solid = capped(
+            Surface::Sphere(Sphere {
+                frame: WORLD,
+                radius: 1.0,
+            }),
+            1.0,
+            true,
+        );
+        let face = solid.topology().face_id_at(0).unwrap();
+        let domain = FaceDomain::new(&solid, face, Tolerance::METRE)
+            .unwrap()
+            .expect("a classifiable face");
+        for u in [-0.2, TAU - 0.2, 2.0 * TAU - 0.2, -TAU - 0.2] {
+            assert_eq!(
+                domain.contains(axiolid_core::Point2::new(u, 0.7)).unwrap(),
+                Some(true),
+                "angle {u}"
+            );
+            assert_eq!(
+                domain.contains(axiolid_core::Point2::new(u, -0.7)).unwrap(),
+                Some(false),
+                "angle {u} below the rim"
+            );
+        }
+    }
+
+    #[test]
     fn a_lone_circle_on_a_cylinder_bounds_nothing() {
         // A cylinder has no pole: one loop round it leaves the domain open
         // towards infinity. Measuring it would invent a top.

@@ -41,6 +41,12 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- `FaceDomain` and the certified distance read a point on a periodic face
+  with a negative angle as outside it (#167): the whole-period shifts tried
+  had the wrong sign, so `-0.2` was tried at `-0.2 - 2 pi`, not at
+  `2 pi - 0.2`. Faces reaching a pole hid it, since the pole adds its own
+  crossing.
+
 - A planar face with a hole reported the hole's area added to its own: the
   fan summed triangle magnitudes. Areas are now summed as vectors, so a hole
   subtracts (a 4 x 4 plate with a 2 x 2 hole read 20 per cap, not 12).

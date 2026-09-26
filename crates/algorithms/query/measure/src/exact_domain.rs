@@ -475,8 +475,9 @@ impl<'a> Domain<'a> {
         }
     }
 
-    /// Shifts of the first coordinate by whole periods that can meet the
-    /// boundary.
+    /// Whole-period shifts `s` of the first coordinate for which the span
+    /// `[lo, hi]`, moved to `[lo - s, hi - s]`, can meet the boundary's own
+    /// range `[min, max]`: `s` in `[lo - max, hi - min]`.
     fn shifts(&self, lo: Scalar, hi: Scalar) -> Vec<Scalar> {
         let Some(period) = self.period else {
             return vec![0.0];
@@ -485,8 +486,8 @@ impl<'a> Domain<'a> {
             (Scalar::INFINITY, Scalar::NEG_INFINITY),
             |(min, max), arc| (min.min(arc.a.x.min(arc.b.x)), max.max(arc.a.x.max(arc.b.x))),
         );
-        let first = ((min - hi) / period).floor() as i64;
-        let last = ((max - lo) / period).ceil() as i64;
+        let first = ((lo - max) / period).floor() as i64;
+        let last = ((hi - min) / period).ceil() as i64;
         (first..=last).map(|k| k as Scalar * period).collect()
     }
 
