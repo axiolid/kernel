@@ -29,6 +29,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.88.0
+      - name: Cache Rust build
+        # Dependencies only (rust-cache drops workspace artifacts). Saved from
+        # main alone, so a branch or pull request can read the cache but never
+        # write into it; a release builds cold, because its archives ship.
+        if: github.event_name != 'release'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: consumers-${{ matrix.os }}
+          workspaces: ". -> target/downstream-ci"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -54,6 +64,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.88.0
+      - name: Cache Rust build
+        # Dependencies only (rust-cache drops workspace artifacts). Saved from
+        # main alone, so a branch or pull request can read the cache but never
+        # write into it; a release builds cold, because its archives ship.
+        if: github.event_name != 'release'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: cmake-${{ matrix.os }}-${{ matrix.build_type }}
+          workspaces: ". -> target/native-ci"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify source/package CMake equivalence
         run: python scripts/test-native-cmake.py --build-type ${{ matrix.build_type }} --linkage ${{ matrix.linkage }} --mutations
       - name: Exercise immutable source pin
@@ -90,6 +110,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.88.0
+      - name: Cache Rust build
+        # Dependencies only (rust-cache drops workspace artifacts). Saved from
+        # main alone, so a branch or pull request can read the cache but never
+        # write into it; a release builds cold, because its archives ship.
+        if: github.event_name != 'release'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: cmake-windows-11-arm-${{ matrix.build_type }}
+          workspaces: ". -> target/native-ci"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify source/package CMake equivalence
         run: python scripts/test-native-cmake.py --build-type ${{ matrix.build_type }} --linkage ${{ matrix.linkage }} --mutations
       - name: Package host release artifact
@@ -118,6 +148,16 @@ jobs:
         with:
           toolchain: 1.88.0
           targets: aarch64-unknown-linux-gnu
+      - name: Cache Rust build
+        # Dependencies only (rust-cache drops workspace artifacts). Saved from
+        # main alone, so a branch or pull request can read the cache but never
+        # write into it; a release builds cold, because its archives ship.
+        if: github.event_name != 'release'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: cross-aarch64-linux
+          workspaces: ". -> target/native-ci"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cross linker
         run: sudo apt-get update && sudo -S -p '' apt-get install --yes gcc-aarch64-linux-gnu
       - name: Build and package cross target
