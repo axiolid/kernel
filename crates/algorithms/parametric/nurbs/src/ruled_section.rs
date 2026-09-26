@@ -339,8 +339,49 @@ fn quadric(surface: &Surface) -> Result<Option<Quadric>, ExactIntersectionRefusa
             let m = madd(&mscale(&outer(&x, &x), &b2), &mscale(&outer(&y, &y), &a2));
             centred(m, &o, a2.mul(&b2).neg())
         }
+        Surface::Cone(c) => {
+            // With d = p - o and h = d . Z: radial^2 = (r + s h)^2, i.e.
+            // d^T (I - (1 + s^2) Z Z^T) d - 2 r s Z . d - r^2 = 0. Both
+            // nappes; the modelled one is selected by `nappes`.
+            let (o, z) = (d3(c.frame.origin)?, d3(c.frame.z)?);
+            let (r, sl) = (d(c.radius)?, d(c.semi_angle.tan())?);
+            let m = madd(
+                &identity(&int(1)),
+                &mscale(&outer(&z, &z), &int(1).add(&sl.square()).neg()),
+            );
+            let mut quadric = centred(m, &o, r.square().neg());
+            let rs = r.mul(&sl);
+            quadric.q = add3(&quadric.q, &scale(&z, &rs.neg()));
+            quadric.k = quadric.k.add(&int(2).mul(&rs).mul(&dot(&z, &o)));
+            quadric
+        }
         _ => return Ok(None),
     }))
+}
+
+/// Conditions `h0(u) + h1(u) v >= 0` a point must meet to lie on the
+/// modelled nappe of each cone taking part: the carrier's own radius
+/// `r + s v`, and the other cone's `r' + s' Z' . (P - O')`.
+fn nappes(
+    carrier_surface: &Surface,
+    other: &Surface,
+    a0: &TrigVec,
+    a1: &TrigVec,
+) -> Result<Vec<(ETrig, ETrig)>, ExactIntersectionRefusal> {
+    let constant = |value: Dyadic| [value, zero(), zero(), zero(), zero()];
+    let mut out = Vec::new();
+    if let Surface::Cone(c) = carrier_surface {
+        out.push((constant(d(c.radius)?), constant(d(c.semi_angle.tan())?)));
+    }
+    if let Surface::Cone(c) = other {
+        let (o, z) = (d3(c.frame.origin)?, d3(c.frame.z)?);
+        let (r, sl) = (d(c.radius)?, d(c.semi_angle.tan())?);
+        let sz = scale(&z, &sl);
+        let mut h0 = linear(&sz, a0);
+        h0[0] = h0[0].add(&r).sub(&dot(&sz, &o));
+        out.push((h0, linear(&sz, a1)));
+    }
+    Ok(out)
 }
 
 /// Angles in `(-pi, pi)` where an exact half-angle polynomial vanishes, in
@@ -432,8 +473,8 @@ pub(crate) fn ruled_section(
     first: &Surface,
     second: &Surface,
 ) -> Result<Option<ExactIntersectionCurve>, ExactIntersectionRefusal> {
-    // A cylinder carries in preference to a cone: a cone carrier is only in
-    // scope against a plane (see the module docs).
+    // A cylinder carries in preference to a cone, so a cone's nappe is
+    // decided as the other operand where it can be.
     let pick = |carrier_surface: &Surface, other: &Surface| {
         matches!(
             (carrier_surface, other),
@@ -443,7 +484,11 @@ pub(crate) fn ruled_section(
                     | Surface::Sphere(_)
                     | Surface::Cylinder(_)
                     | Surface::EllipticalCylinder(_)
-            ) | (Surface::Cone(_), Surface::Plane(_))
+                    | Surface::Cone(_)
+            ) | (
+                Surface::Cone(_),
+                Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_)
+            )
         )
     };
     let (carrier_surface, other) = if pick(first, second) {
@@ -494,6 +539,11 @@ pub(crate) fn ruled_section(
     let mut branches = Vec::new();
     let mut spans_out = Vec::new();
 
+    if is_zero(&a) && matches!(other, Surface::Cone(_)) {
+        // A cone whose generators all run parallel to the carrier's rulings
+        // in the quadratic term: not a graph this path splits by nappe.
+        return Ok(None);
+    }
     if is_zero(&a) {
         // Linear in v (a plane): v = -c / b wherever b != 0, and on a cone
         // only on the modelled nappe, r + s v >= 0, i.e. (r b - s c) b >= 0.
@@ -559,37 +609,109 @@ pub(crate) fn ruled_section(
             spans_out.push(Some(Interval::new(start, end)));
         }
     } else {
+        // Every polynomial below is its trigonometric value times
+        // (1 + t^2)^k with the same k where they are compared, so signs and
+        // roots are those of the values themselves.
         // D (1 + t^2)^4 = B^2 - 4 A C.
         let discriminant = psub(&pmul(&tb, &tb), &pmul(&trig_scale_poly(&ta, 4), &tc));
         let d_poly = IntPoly::from_dyadic(&discriminant);
         if d_poly.is_zero() {
             return Err(ExactIntersectionRefusal::NotRegularCurve);
         }
-        let d_pi = {
-            let (ap, bp, cp) = (at_pi(&a), at_pi(&b), at_pi(&c));
-            bp.square().sub(&int(4).mul(&ap).mul(&cp))
-        };
-        let positive = |t: &Dyadic| Some(sign_at(&d_poly, t) == Sign::Positive);
-        let found = spans(
-            &[discriminant.clone()],
-            &positive,
-            d_pi.sign() == Some(Sign::Positive),
-            d_pi.sign() == Some(Sign::Zero),
-        );
-        if found.is_empty() {
-            // No positive span: either apart, or touching at isolated
-            // points, which is not a regular curve.
-            return Err(if angle_roots(&discriminant).is_empty() {
-                ExactIntersectionRefusal::Disjoint
-            } else {
-                ExactIntersectionRefusal::NotRegularCurve
-            });
+        let a_poly = IntPoly::from_dyadic(&ta);
+        // A nappe condition h0 + h1 v >= 0 along v = (-b + sign sqrt D) / 2a
+        // has the sign of a * (P + sign Q sqrt D) with
+        // P = 2 a h0 - b h1 and Q = h1, all scaled to (1 + t^2)^4.
+        let conditions: Vec<(Vec<Dyadic>, Vec<Dyadic>, ETrig, ETrig)> =
+            nappes(carrier_surface, other, &a0, &a1)?
+                .into_iter()
+                .map(|(h0, h1)| {
+                    let (h0t, h1t) = (in_half_angle(&h0), in_half_angle(&h1));
+                    let p = psub(&trig_scale_poly(&pmul(&ta, &h0t), 2), &pmul(&tb, &h1t));
+                    (p, h1t, h0, h1)
+                })
+                .collect();
+        let mut breaks = vec![discriminant.clone()];
+        if !is_const(&a) {
+            breaks.push(ta.clone());
         }
-        for (start, end) in found {
-            for branch in [Branch::Plus, Branch::Minus] {
+        for (p, q, _, _) in &conditions {
+            breaks.push(psub(&pmul(p, p), &pmul(&pmul(q, q), &discriminant)));
+        }
+        // Values at u = pi, exactly, for the span through it.
+        let (ap, bp, cp) = (at_pi(&a), at_pi(&b), at_pi(&c));
+        let d_pi = bp.square().sub(&int(4).mul(&ap).mul(&cp));
+        let conditions_pi: Vec<(Dyadic, Dyadic)> = conditions
+            .iter()
+            .map(|(_, _, h0, h1)| {
+                let (h0p, h1p) = (at_pi(h0), at_pi(h1));
+                (int(2).mul(&ap).mul(&h0p).sub(&bp.mul(&h1p)), h1p)
+            })
+            .collect();
+        let vanishes = d_pi.sign() == Some(Sign::Zero)
+            || ap.sign() == Some(Sign::Zero)
+            || conditions_pi
+                .iter()
+                .any(|(p, q)| p.square().sub(&q.square().mul(&d_pi)).sign() == Some(Sign::Zero));
+        // Whether a branch holds at one point, from exact values there.
+        let holds =
+            |branch: Branch, a_s: Sign, d_v: &Dyadic, cond: &[(Dyadic, Dyadic)]| -> Option<bool> {
+                if d_v.sign()? != Sign::Positive || a_s == Sign::Zero {
+                    return Some(false);
+                }
+                for (p, q) in cond {
+                    let q = match branch {
+                        Branch::Plus => q.clone(),
+                        Branch::Minus => q.neg(),
+                    };
+                    let s = axiolid_exact::sign_root(p, &q, d_v)?;
+                    // The condition's sign is sign(a) * s: negative when the
+                    // two signs are strictly opposite.
+                    let opposite = matches!(
+                        (a_s, s),
+                        (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive)
+                    );
+                    if opposite {
+                        return Some(false);
+                    }
+                }
+                Some(true)
+            };
+        let mut any = false;
+        for branch in [Branch::Plus, Branch::Minus] {
+            let positive = |t: &Dyadic| {
+                let d_v = poly_value(&discriminant, t);
+                let a_s = sign_at(&a_poly, t);
+                let cond: Vec<(Dyadic, Dyadic)> = conditions
+                    .iter()
+                    .map(|(p, q, _, _)| (poly_value(p, t), poly_value(q, t)))
+                    .collect();
+                holds(branch, a_s, &d_v, &cond)
+            };
+            let at_pi_ok = holds(
+                branch,
+                ap.sign().unwrap_or(Sign::Zero),
+                &d_pi,
+                &conditions_pi,
+            ) == Some(true);
+            for (start, end) in spans(&breaks, &positive, at_pi_ok, vanishes) {
+                any = true;
                 branches.push(piece(branch));
                 spans_out.push(Some(Interval::new(start, end)));
             }
+        }
+        if !any {
+            // No span: apart, touching at isolated points, or meeting only
+            // on the nappes the operands do not model.
+            return Err(
+                if angle_roots(&discriminant).is_empty() && d_pi.sign() != Some(Sign::Positive) {
+                    ExactIntersectionRefusal::Disjoint
+                } else if conditions.is_empty() {
+                    ExactIntersectionRefusal::NotRegularCurve
+                } else {
+                    ExactIntersectionRefusal::Disjoint
+                },
+            );
         }
     }
 
@@ -601,6 +723,18 @@ pub(crate) fn ruled_section(
         spans_out,
         Derivation::RuledQuadricSection,
     )))
+}
+
+/// Exact value of a dyadic-coefficient polynomial at `t`.
+fn poly_value(poly: &[Dyadic], t: &Dyadic) -> Dyadic {
+    poly.iter()
+        .rev()
+        .fold(zero(), |acc, coefficient| acc.mul(t).add(coefficient))
+}
+
+/// Whether a trigonometric polynomial is constant.
+fn is_const(a: &ETrig) -> bool {
+    a[1..].iter().all(|c| c.sign() == Some(Sign::Zero))
 }
 
 fn trig_scale_poly(p: &[Dyadic], s: i64) -> Vec<Dyadic> {

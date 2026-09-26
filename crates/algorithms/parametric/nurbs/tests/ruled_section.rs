@@ -349,3 +349,172 @@ fn random_cylinder_pairs_agree_with_a_dense_scan() {
     }
     assert!(met > 30, "too few meeting pairs ({met}) to mean anything");
 }
+
+/// Every piece's points lie on both surfaces -- on a cone's MODELLED nappe,
+/// since `off` for a cone vanishes only there. Points running off towards
+/// infinity (a branch whose quadratic degenerates) are skipped.
+fn check_points(first: &Surface, second: &Surface) -> usize {
+    let curve = exact_surface_intersection(first, second).expect("a ruled section");
+    assert_eq!(curve.derivation, Derivation::RuledQuadricSection);
+    let mut pieces = 0;
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        let span = span.expect("a ruled piece carries its span");
+        pieces += 1;
+        for i in 1..400 {
+            let t = span.start + (span.end - span.start) * i as f64 / 400.0;
+            let Ok(p) = evaluate3(branch, t) else {
+                continue;
+            };
+            if p.length() > 1e3 {
+                continue;
+            }
+            for surface in [first, second] {
+                let r = off(surface, p);
+                assert!(
+                    r.abs() < 1e-8,
+                    "point {p:?} at t = {t} is {r} off {surface:?}"
+                );
+            }
+        }
+    }
+    pieces
+}
+
+fn cone(origin: Point3, axis: Vec3, radius: f64, semi_angle: f64) -> Surface {
+    Surface::Cone(Cone {
+        frame: frame(origin, axis),
+        radius,
+        semi_angle,
+    })
+}
+
+#[test]
+fn a_pipe_entering_a_hopper_off_its_axis_is_exact_on_the_modelled_nappe() {
+    // A hopper opening upwards; a horizontal pipe running through its wall
+    // off the axis. The cone's other nappe (below the apex) must not
+    // contribute points.
+    let hopper = cone(Point3::ZERO, Vec3::Z, 2.0, 0.6);
+    let pipe = cylinder(Point3::new(0.4, 0.0, 1.5), Vec3::Y, 0.5);
+    assert!(check_points(&pipe, &hopper) >= 2);
+    assert!(check_points(&hopper, &pipe) >= 2);
+}
+
+#[test]
+fn a_sphere_and_an_off_axis_cone_meet_exactly() {
+    let sphere = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.7, -0.3, 2.0), Vec3::Z),
+        radius: 1.5,
+    });
+    let spire = cone(Point3::ZERO, Vec3::Z, 1.0, 0.35);
+    assert!(check_points(&spire, &sphere) >= 1);
+}
+
+#[test]
+fn two_crossing_cones_meet_exactly() {
+    let a = cone(Point3::ZERO, Vec3::Z, 1.0, 0.4);
+    let b = cone(
+        Point3::new(0.0, -3.0, 2.0),
+        Vec3::new(0.0, 1.0, 0.3),
+        0.8,
+        0.3,
+    );
+    assert!(check_points(&a, &b) >= 1);
+}
+
+/// Rulings of the cylinder that cross the cone's modelled nappe.
+fn scan_cone_hits(carrier: &Cylinder, other: &Surface) -> usize {
+    let mut hits = 0;
+    let axis = carrier.frame.z;
+    for i in 0..720 {
+        let u = -PI + 2.0 * PI * (i as f64 + 0.5) / 720.0;
+        let base = carrier.frame.origin
+            + carrier.frame.x * (carrier.radius * u.cos())
+            + carrier.frame.y * (carrier.radius * u.sin());
+        let mut last = off(other, base + axis * -30.0).signum();
+        for k in 1..=3000 {
+            let v = -30.0 + 60.0 * k as f64 / 3000.0;
+            let now = off(other, base + axis * v).signum();
+            if now != last {
+                hits += 1;
+                break;
+            }
+            last = now;
+        }
+    }
+    hits
+}
+
+#[test]
+fn random_cylinder_and_cone_pairs_agree_with_a_dense_scan() {
+    let mut rng = Lcg(0xc0e5_0119);
+    let mut met = 0;
+    for _ in 0..80 {
+        let a = Cylinder {
+            frame: frame(
+                Point3::new(
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                    rng.range(0.5, 2.5),
+                ),
+                Vec3::new(
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                    rng.range(-0.3, 0.3),
+                ),
+            ),
+            radius: rng.range(0.2, 0.8),
+        };
+        let b = cone(
+            Point3::new(rng.range(-0.5, 0.5), rng.range(-0.5, 0.5), 0.0),
+            Vec3::new(rng.range(-0.3, 0.3), rng.range(-0.3, 0.3), 1.0),
+            rng.range(0.5, 2.0),
+            rng.range(0.2, 0.8),
+        );
+        let carrier = Surface::Cylinder(a);
+        let scanned = scan_cone_hits(&a, &b);
+        match exact_surface_intersection(&carrier, &b) {
+            Ok(curve) => {
+                met += 1;
+                for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+                    let Some(span) = span else { continue };
+                    for i in 1..40 {
+                        let t = span.start + (span.end - span.start) * i as f64 / 40.0;
+                        if let Ok(p) = evaluate3(branch, t) {
+                            if p.length() > 1e3 {
+                                continue;
+                            }
+                            assert!(off(&carrier, p).abs() < 1e-7, "off carrier");
+                            assert!(off(&b, p).abs() < 1e-7, "off the cone's nappe");
+                        }
+                    }
+                }
+                assert!(scanned > 0, "a curve where the scan finds no crossing");
+            }
+            Err(ExactIntersectionRefusal::Disjoint) => {
+                assert_eq!(
+                    scanned, 0,
+                    "disjoint, but the scan crosses on {scanned} rulings"
+                );
+            }
+            Err(ExactIntersectionRefusal::NotRegularCurve) => {}
+            Err(other) => panic!("unexpected refusal {other:?}"),
+        }
+    }
+    assert!(met > 20, "too few meeting pairs ({met})");
+}
+
+#[test]
+fn a_sphere_below_a_cone_apex_meets_only_the_unmodelled_nappe() {
+    // Cone r = 1 at z = 0, semi-angle 0.35: apex at z = -1/tan(0.35),
+    // about -2.74. A sphere at z = -5 of radius 1.5 lies wholly below the
+    // apex, so it crosses only the nappe the cone does not model.
+    let spire = cone(Point3::ZERO, Vec3::Z, 1.0, 0.35);
+    let below = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(0.4, 0.0, -5.0), Vec3::Z),
+        radius: 1.5,
+    });
+    assert_eq!(
+        exact_surface_intersection(&spire, &below),
+        Err(ExactIntersectionRefusal::Disjoint)
+    );
+}

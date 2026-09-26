@@ -13,7 +13,8 @@ caret rule for `0.x` versions.
 
 - `exact_surface_intersection` derives ruled quadric sections (#119,
   ADR 0076): a cylinder or elliptical cylinder against a plane, sphere,
-  cylinder or elliptical cylinder, and a cone against a plane, when no
+  cylinder, elliptical cylinder or cone, and a cone against a plane, sphere
+  or cone (on the modelled nappes, decided exactly), when no
   line, circle or ellipse applies -- pipe tees, off-axis sphere/cylinder
   junctions, oblique cone cuts, parabolas and hyperbolas. Which spans of
   angle carry the curve is decided by exact root isolation of the

@@ -54,9 +54,17 @@ of degree at most two. The curve is the graph of one root.
   both ends into one loop; a whole-turn span gives two closed curves.
   `Derivation::RuledQuadricSection` names the identity.
 - **Scope.** Carriers: cylinder and elliptical cylinder against plane,
-  sphere, cylinder, elliptical cylinder; a cone against a plane (on the
-  modelled nappe only). The closed forms still win where they apply; the
-  ruled path runs only when they refuse.
+  sphere, cylinder, elliptical cylinder and cone; a cone against plane,
+  sphere and cone. The closed forms still win where they apply; the ruled
+  path runs only when they refuse.
+- **Nappes.** A cone's implicit equation holds both nappes, and a cone
+  carrier's parameterisation reaches the other nappe past its apex. Each
+  cone taking part adds a condition `h0(u) + h1(u) v >= 0` (the carrier's
+  `r + s v`, the other's `r' + s' Z' . (P - O')`). Along a root branch it
+  has the sign of `a (P + sign Q sqrt D)` with `P = 2 a h0 - b h1`,
+  `Q = h1`, decided exactly at each span's dyadic sample with
+  `axiolid_exact::sign_root`; its sign changes are roots of
+  `P^2 - Q^2 D`, which join the span breaks.
 
 ## Alternatives considered
 
@@ -90,9 +98,6 @@ of degree at most two. The curve is the graph of one root.
 
 **Follow-ups / risks to watch**
 
-- A cone carrier against a curved quadric needs the nappe decided along a
-  square-root branch (`alpha + beta sqrt(D)` signs); refused by name until
-  then.
 - Tori are quartic surfaces; torus pairs other than coaxial stay refused.
 - B-spline pairs stay on the certified bounded tier.
 
@@ -105,4 +110,4 @@ of degree at most two. The curve is the graph of one root.
   derivation; `exact_surface_intersection.rs`: dispatch and `spans`.
 - `crates/algorithms/parametric/nurbs/tests/ruled_section.rs`,
   `crates/algorithms/parametric/evaluate/tests/quadratic_graph.rs`:
-  oracles; `scripts/probe_ruled_section_mutants.py`: 10 faults, all caught.
+  oracles; `scripts/probe_ruled_section_mutants.py`: 13 faults, all caught.
