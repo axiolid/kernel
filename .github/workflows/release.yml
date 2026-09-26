@@ -29,8 +29,8 @@ jobs:
     name: Verify release packages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b # 1.88.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # 1.88.0
       - name: Test release tooling and publication order
         run: |
           python3 scripts/test_release_scripts.py
@@ -51,8 +51,8 @@ jobs:
       contents: read
       id-token: write # crates.io trusted publishing (OIDC)
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b # 1.88.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # 1.88.0
       - name: Publish workspace in stable dependency order
         # A crates.io trusted-publishing token lives 30 minutes, and a
         # rate-limited workspace publish can take hours. Each attempt gets a
