@@ -87,11 +87,16 @@ pub(crate) fn window(surface: &Surface, lo: Point2, hi: Point2) -> (Point2, Poin
     let (pu, pv) = periods(surface);
     let pad = 1e-6 * (1.0 + (hi - lo).length());
     let (mut a, mut b) = (lo - Point2::splat(pad), hi + Point2::splat(pad));
+    // A whole turn starts off the face's own seam angle by an irrational
+    // fraction of a radian, so the window's edge is never where a symmetric
+    // section crosses or turns; pieces are moved into the face's range
+    // afterwards.
+    let offset = 0.123_456_789_012_345_67;
     if pu && hi.x - lo.x >= TAU - 1e-9 {
-        (a.x, b.x) = (lo.x, lo.x + TAU);
+        (a.x, b.x) = (lo.x + offset, lo.x + offset + TAU);
     }
     if pv && hi.y - lo.y >= TAU - 1e-9 {
-        (a.y, b.y) = (lo.y, lo.y + TAU);
+        (a.y, b.y) = (lo.y + offset, lo.y + offset + TAU);
     }
     if matches!(surface, Surface::Sphere(_)) {
         a.y = a.y.max(-core::f64::consts::FRAC_PI_2);

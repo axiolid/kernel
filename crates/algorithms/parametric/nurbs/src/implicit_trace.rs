@@ -51,6 +51,21 @@ pub(crate) fn trace(
     domain: Cell,
     periodic: Periodic,
 ) -> Result<Vec<ImplicitCurve2>, TraceRefusal> {
+    let (curves, touches) = trace_with_touches(field, domain, periodic)?;
+    // Only isolated touching points: the surfaces touch, they do not cross.
+    if curves.is_empty() && !touches.is_empty() {
+        return Err(TraceRefusal::Singular(touches[0]));
+    }
+    Ok(curves)
+}
+
+/// [`trace`], also returning the isolated points where the zero set is a
+/// single point (the surfaces touch there without crossing).
+pub(crate) fn trace_with_touches(
+    field: &Field2,
+    domain: Cell,
+    periodic: Periodic,
+) -> Result<(Vec<ImplicitCurve2>, Vec<Point2>), TraceRefusal> {
     let du = partial(field, true);
     let dv = partial(field, false);
     let extent = (domain.hi - domain.lo).abs();
@@ -60,6 +75,18 @@ pub(crate) fn trace(
     // crossing on.
     let mut queue = split_grid(domain, 8);
     let mut all: Vec<ImplicitCell> = Vec::new();
+    // Isolated points where the surfaces touch (the field has an extremum
+    // on its zero set there): no curve runs through them, so the boxes
+    // about each, which rounding keeps from deciding, hold no cells.
+    let mut touches: Vec<(Point2, Scalar)> = Vec::new();
+    let near_touch = |touches: &[(Point2, Scalar)], cell: &Cell| {
+        touches.iter().any(|(c, r)| {
+            c.x >= cell.lo.x - r
+                && c.x <= cell.hi.x + r
+                && c.y >= cell.lo.y - r
+                && c.y <= cell.hi.y + r
+        })
+    };
     let mut work = 0usize;
     while let Some((cell, depth)) = queue.pop() {
         work += 1;
@@ -90,8 +117,19 @@ pub(crate) fn trace(
                 Err(()) => {
                     // A root on a side could not be certified simple: move
                     // the side by splitting off-centre.
+                    if near_touch(&touches, &cell) {
+                        continue;
+                    }
                     if depth > 60 {
-                        return Err(TraceRefusal::Singular(cell.centre()));
+                        // Where the sides' roots merge: an isolated touching
+                        // point is dropped, anything else refused.
+                        match critical_point(field, &cell) {
+                            Some((c, Critical::Extremum, r)) => {
+                                touches.push((c, r));
+                                continue;
+                            }
+                            _ => return Err(TraceRefusal::Singular(cell.centre())),
+                        }
                     }
                     for piece in split(cell, 0.4129) {
                         queue.push((piece, depth + 1));
@@ -99,8 +137,24 @@ pub(crate) fn trace(
                 }
             },
             None => {
+                if near_touch(&touches, &cell) {
+                    continue;
+                }
                 if (cell.hi.x - cell.lo.x) <= smallest.x && (cell.hi.y - cell.lo.y) <= smallest.y {
-                    return Err(TraceRefusal::Singular(cell.centre()));
+                    match critical_point(field, &cell) {
+                        // An isolated point where the surfaces touch: no
+                        // curve runs through it.
+                        Some((c, Critical::Extremum, r)) => {
+                            touches.push((c, r));
+                            continue;
+                        }
+                        // Two branches cross (a saddle), or worse: refused
+                        // by name. Near a crossing the field is below its
+                        // rounding within about sqrt(rounding / curvature)
+                        // of it, so where the branches run there is not
+                        // decidable in doubles.
+                        _ => return Err(TraceRefusal::Singular(cell.centre())),
+                    }
                 }
                 for piece in split(cell, 0.5) {
                     queue.push((piece, depth + 1));
@@ -108,7 +162,71 @@ pub(crate) fn trace(
             }
         }
     }
-    Ok(chain(field, all, domain, periodic))
+    Ok((
+        chain(field, all, domain, periodic),
+        touches.into_iter().map(|(c, _)| c).collect(),
+    ))
+}
+
+/// What kind of critical point of the field lies on the curve.
+enum Critical {
+    /// Indefinite Hessian: two branches cross.
+    Saddle,
+    /// Definite Hessian: an isolated point of the zero set.
+    Extremum,
+}
+
+/// The field's critical point on its zero set near `cell`, found by Newton
+/// on the gradient from the cell's centre, when it is non-degenerate: the
+/// field vanishes there to its rounding, the gradient too, and the Hessian
+/// is regular. `None` for anything else (a degenerate singularity, or two
+/// branches closer than the trace resolves), which stays a refusal.
+fn critical_point(field: &Field2, cell: &Cell) -> Option<(Point2, Critical, Scalar)> {
+    let mut p = cell.centre();
+    let size = (cell.hi - cell.lo).length().max(1e-300);
+    for _ in 0..40 {
+        let jet = field.jet(p);
+        let det = jet.uu * jet.vv - jet.uv * jet.uv;
+        if det == 0.0 || !det.is_finite() {
+            return None;
+        }
+        let g = jet.gradient;
+        let step = Point2::new(
+            (jet.vv * g.x - jet.uv * g.y) / det,
+            (jet.uu * g.y - jet.uv * g.x) / det,
+        );
+        p -= step;
+        if step.length() <= 1e-15 * (1.0 + p.length()) {
+            break;
+        }
+    }
+    // Near the cell, on the curve to its rounding, with a regular Hessian.
+    // The rounding hides the zero set within `sqrt(2 m / lambda)` of the
+    // point (m the rounding, lambda the smaller curvature); a cell within
+    // that reach is the point's.
+    let jet = field.jet(p);
+    let rounding = 64.0 * Scalar::EPSILON * field.magnitude().max(1.0);
+    let det = jet.uu * jet.vv - jet.uv * jet.uv;
+    let norm = jet.uu.abs() + jet.vv.abs() + jet.uv.abs();
+    if det.abs() <= 1e-9 * norm * norm || jet.value.abs() > 16.0 * rounding {
+        return None;
+    }
+    let trace = jet.uu + jet.vv;
+    let root = (trace * trace - 4.0 * det).max(0.0).sqrt();
+    let lambda = (0.5 * (trace.abs() - root)).abs().max(1e-300);
+    let reach = 4.0 * (2.0 * rounding / lambda).sqrt() + 8.0 * size;
+    if (p - cell.centre()).length() > reach {
+        return None;
+    }
+    Some((
+        p,
+        if det < 0.0 {
+            Critical::Saddle
+        } else {
+            Critical::Extremum
+        },
+        reach,
+    ))
 }
 
 /// How strongly a partial's bound keeps the field monotone, scaled by the

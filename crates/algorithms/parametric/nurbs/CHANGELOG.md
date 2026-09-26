@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The trace separates the singular points it meets. An isolated point
+  where the surfaces touch without crossing is dropped, with the boxes
+  about it that rounding cannot decide. A trace that finds only such
+  points answers `NotRegularCurve`, as the closed forms do for touching.
+  Branches crossing at a saddle are still refused by name: within about
+  `sqrt(rounding / curvature)` of the crossing (micrometres at metre
+  scale), where the branches run cannot be decided in doubles. Whole-turn
+  windows start an irrational fraction of a radian past `-pi`, so a
+  symmetric section's special points never sit on the window's edge.
+
 ### Added
 
 - `section_curve_curve_intersection2` (B8, #119): lines, conics,

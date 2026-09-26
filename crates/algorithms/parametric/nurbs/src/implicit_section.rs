@@ -91,6 +91,11 @@ pub fn implicit_surface_intersection(
         .collect())
 }
 
+/// Where a whole-turn window starts, past `-pi`: an irrational fraction of
+/// a radian, so the window's edge is never where a symmetric section
+/// crosses or turns.
+pub(crate) const TURN_OFFSET: Scalar = 0.123_456_789_012_345_67;
+
 /// A centre and radius holding a compact surface.
 fn ball(surface: &Surface) -> Option<(Vec3, Scalar)> {
     match surface {
@@ -103,9 +108,15 @@ fn ball(surface: &Surface) -> Option<(Vec3, Scalar)> {
 /// The window a trace needs on `carrier` to find every section with
 /// `other`.
 fn default_window(carrier: &Carrier, other: &Surface) -> Option<(Point2, Point2)> {
+    // A whole turn, starting off the round angles a symmetric input puts
+    // its special points on.
+    let o = TURN_OFFSET;
     match carrier {
-        Carrier::Torus(_) => Some((Point2::new(-PI, -PI), Point2::new(PI, PI))),
-        Carrier::Sphere { .. } => Some((Point2::new(-PI, -FRAC_PI_2), Point2::new(PI, FRAC_PI_2))),
+        Carrier::Torus(_) => Some((Point2::new(-PI + o, -PI + o), Point2::new(PI + o, PI + o))),
+        Carrier::Sphere { .. } => Some((
+            Point2::new(-PI + o, -FRAC_PI_2),
+            Point2::new(PI + o, FRAC_PI_2),
+        )),
         Carrier::Ruled(k) => {
             let (centre, radius) = ball(other)?;
             let z = k.frame.z.normalize();
@@ -125,7 +136,7 @@ fn default_window(carrier: &Carrier, other: &Surface) -> Option<(Point2, Point2)
                     return None;
                 }
             }
-            Some((Point2::new(-PI, v0), Point2::new(PI, v1)))
+            Some((Point2::new(-PI + o, v0), Point2::new(PI + o, v1)))
         }
         Carrier::Spline(b) => {
             // A little past the domain, so a section reaching its edge is
