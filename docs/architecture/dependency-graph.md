@@ -15,6 +15,7 @@ graph TD
     axiolid_benchmark["axiolid-benchmark\ntool.benchmark"]
     axiolid_brep["axiolid-brep\nrepresentation.composed"]
     axiolid_brep_audit["axiolid-brep-audit\nalgorithm.repair"]
+    axiolid_brep_boolean["axiolid-brep-boolean\nalgorithm.construction"]
     axiolid_capi["axiolid-capi\nfacade.native-c"]
     axiolid_collide["axiolid-collide\nalgorithm.query"]
     axiolid_construct["axiolid-construct\nalgorithm.construction"]
@@ -132,6 +133,17 @@ graph TD
     axiolid_brep_audit --> axiolid_evaluate
     axiolid_brep_audit --> axiolid_surface
     axiolid_brep_audit --> axiolid_topology
+    axiolid_brep_boolean --> axiolid_brep
+    axiolid_brep_boolean --> axiolid_construct
+    axiolid_brep_boolean --> axiolid_core
+    axiolid_brep_boolean --> axiolid_curve
+    axiolid_brep_boolean --> axiolid_evaluate
+    axiolid_brep_boolean --> axiolid_measure
+    axiolid_brep_boolean --> axiolid_nurbs
+    axiolid_brep_boolean --> axiolid_overlay
+    axiolid_brep_boolean --> axiolid_primitive
+    axiolid_brep_boolean --> axiolid_surface
+    axiolid_brep_boolean --> axiolid_topology
     axiolid_capi --> axiolid
     axiolid_collide --> axiolid_core
     axiolid_construct --> axiolid_brep

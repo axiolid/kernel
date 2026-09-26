@@ -31,6 +31,7 @@ members = [
     "crates/algorithms/parametric/evaluate",
     "crates/algorithms/parametric/nurbs",
     "crates/algorithms/construction/construct",
+    "crates/algorithms/construction/brep-boolean",
     "crates/algorithms/planar/overlay",
     "crates/algorithms/planar/project",
     "crates/algorithms/planar/route",
@@ -102,6 +103,7 @@ axiolid-collide = { path = "crates/algorithms/query/collide", version = "0.3.0" 
 axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.3.0" }
 axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.0" }
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.0" }
+axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.0" }
 axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.0" }
 axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.0" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.0" }

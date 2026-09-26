@@ -11,6 +11,9 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `FaceDomain` (#167): an exact face's parameter domain, answering whether
+  a point lies in the face with a certificate or not at all; a point outside
+  the domain's box in a coordinate that does not wrap is decided at once.
 - `boundary_distance` and `boundary_clearance` (#125, ADR 0074): an
   interval certain to contain the distance between the boundaries of two
   exact B-reps, with witness points on both, and a comparison with a limit

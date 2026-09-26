@@ -62,6 +62,10 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- `axiolid-brep-boolean` 0.1.0 (#167, ADR 0075 stage 1): the general exact
+  B-rep boolean begins with `section_edges` -- where two exact B-reps' faces
+  cross, as exact lines, circles and ellipses trimmed exactly to both faces
+  through curve/boundary crossings and certified face membership.
 - Exact ruled quadric sections (#119, ADR 0076): where a quadric crosses a
   cylinder or cone off any shared axis -- a pipe tee, a column piercing a
   dome off-centre, a pipe entering a hopper, an oblique cut through a

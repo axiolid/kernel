@@ -570,6 +570,22 @@ impl<'a> Domain<'a> {
     /// Whether `p` lies in the domain: `Some` when certain, `None` when it
     /// is too close to the boundary to say.
     pub(crate) fn contains(&self, p: Point2) -> Result<Option<bool>, ExactMeasureError> {
+        // Outside the domain's box in a coordinate that does not wrap is
+        // outside, certainly -- and it is where a ray cast along the box's
+        // own edge could not decide.
+        let beyond = |value: Scalar, lo: Scalar, hi: Scalar| {
+            value < lo - slack(lo) || value > hi + slack(hi)
+        };
+        let (u_wraps, v_wraps) = if self.transpose {
+            (false, self.period.is_some())
+        } else {
+            (self.period.is_some(), false)
+        };
+        if (!u_wraps && beyond(p.x, self.min.x, self.max.x))
+            || (!v_wraps && beyond(p.y, self.min.y, self.max.y))
+        {
+            return Ok(Some(false));
+        }
         let q = self.swap(p);
         let mut total: i64 = 0;
         for shift in self.shifts(q.x, q.x) {
@@ -650,5 +666,60 @@ impl<'a> Domain<'a> {
             }
         };
         self.crossing(&half, c, y0, depth + 1)
+    }
+}
+
+/// Which parameters of one exact face lie inside it, decided with a
+/// certificate or not at all.
+///
+/// The public face of the crate-private `Domain`: the pcurves of the face's loops, joined
+/// across seams and poles, split into pieces monotone in both parameters
+/// so that a ray crossing is decided from the pieces' ends. `contains`
+/// answers `Some(true)` or `Some(false)` only when certain, and `None` for
+/// a point too close to the boundary to say.
+pub struct FaceDomain<'a> {
+    domain: Domain<'a>,
+}
+
+impl<'a> FaceDomain<'a> {
+    /// The domain of `face`, or `None` when a pcurve family has no monotone
+    /// split here (a B-spline or intrinsic trim).
+    ///
+    /// # Errors
+    ///
+    /// A missing surface, a dangling handle, a boundary that encloses no
+    /// domain in the surface's parameters, or an evaluation failure.
+    pub fn new(
+        brep: &'a ExactBRep,
+        face: axiolid_topology::FaceId,
+        tolerance: axiolid_core::Tolerance,
+    ) -> Result<Option<Self>, ExactMeasureError> {
+        let topology = brep.topology();
+        let record = topology
+            .faces()
+            .get(face.index())
+            .ok_or(ExactMeasureError::DanglingReference)?;
+        let surface = record
+            .surface
+            .and_then(|id| brep.surfaces().get(id.index()))
+            .ok_or(ExactMeasureError::MissingSurface)?;
+        let linear = tolerance.linear().max(1e-12);
+        Ok(Domain::new(brep, record, surface, linear)?.map(|domain| Self { domain }))
+    }
+
+    /// Whether the parameters `at` lie in the face: `None` when too close to
+    /// its boundary to decide.
+    ///
+    /// # Errors
+    ///
+    /// A pcurve that cannot be evaluated where the decision needs it.
+    pub fn contains(&self, at: Point2) -> Result<Option<bool>, ExactMeasureError> {
+        self.domain.contains(at)
+    }
+
+    /// A box in `(u, v)` holding the whole domain.
+    #[must_use]
+    pub fn bounds(&self) -> (Point2, Point2) {
+        (self.domain.min, self.domain.max)
     }
 }

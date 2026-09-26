@@ -1,0 +1,34 @@
+[package]
+name = "axiolid-brep-boolean"
+description = "General exact B-rep booleans over analytic faces (ADR 0075)"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[dependencies]
+axiolid-brep.workspace = true
+axiolid-core.workspace = true
+axiolid-curve.workspace = true
+axiolid-evaluate.workspace = true
+axiolid-measure = { workspace = true, features = ["exact"] }
+axiolid-nurbs.workspace = true
+axiolid-surface.workspace = true
+axiolid-topology.workspace = true
+
+[dev-dependencies]
+axiolid-construct.workspace = true
+axiolid-overlay.workspace = true
+axiolid-primitive.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.construction"
+domain = "construction.brep-boolean"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-brep", "axiolid-construct", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-measure", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-surface", "axiolid-topology"]

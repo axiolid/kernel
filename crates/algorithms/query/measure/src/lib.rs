@@ -25,6 +25,8 @@ pub mod winding;
 pub use exact::{exact_properties, ExactMeasureError};
 #[cfg(feature = "exact")]
 pub use exact_distance::{boundary_clearance, boundary_distance, Clearance, DistanceBounds};
+#[cfg(feature = "exact")]
+pub use exact_domain::FaceDomain;
 pub use measure::Measure;
 pub use mesh::{
     second_moments, surface_properties, volume_properties, MeshMeasureError, SurfaceProperties,

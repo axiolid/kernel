@@ -198,6 +198,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-brep-boolean"
+version = "0.1.0"
+dependencies = [
+ "axiolid-brep",
+ "axiolid-construct",
+ "axiolid-core",
+ "axiolid-curve",
+ "axiolid-evaluate",
+ "axiolid-measure",
+ "axiolid-nurbs",
+ "axiolid-overlay",
+ "axiolid-primitive",
+ "axiolid-surface",
+ "axiolid-topology",
+]
+
+[[package]]
 name = "axiolid-capi"
 version = "0.3.0"
 dependencies = [
