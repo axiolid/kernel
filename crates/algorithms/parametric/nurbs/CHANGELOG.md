@@ -11,6 +11,21 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `section_curve_curve_intersection2` (B8, #119): lines, conics,
+  sinusoids, quadratic and angle graphs and implicit curves meet each
+  other, in any pairing. One piece is traced over its span and the other's
+  defining field has its roots isolated along it; roots on a graph's other
+  branch are filtered out.
+- `section_curve_curve_intersection3` (B8): space curves of the section
+  families meet where one crosses a surface the other lies on, kept within
+  a tolerance.
+- `extrema::minimum_distance` (B7, #119): the smallest distance between
+  points, curve spans and surface patches of any analytic or B-spline
+  family and traced sections, bracketed and certified, with witness points.
+  It is a branch and bound whose lower bounds are exact image boxes and
+  projections on the joining direction, in mean-value form so they close
+  quadratically at a closest point.
+
 - Sections of B-spline surfaces by planes, quadrics and tori (#119,
   ADR 0077). The analytic equation is read on the spline's rational Bezier
   patches as Bernstein polynomials (knot insertion, then Bernstein

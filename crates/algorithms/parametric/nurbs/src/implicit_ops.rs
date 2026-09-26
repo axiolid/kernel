@@ -325,27 +325,7 @@ pub fn section_curve_surface_intersection(
     if samples.len() == 33 && samples.iter().all(|h| h.abs() <= scale) {
         return Ok(ExactCurveIntersection::Contained);
     }
-    let d_u = partial(&own.field, true);
-    let d_v = partial(&own.field, false);
-    let h_u = partial(&other, true);
-    let h_v = partial(&other, false);
-    let mut roots: Vec<(Scalar, usize)> = Vec::new();
-    for (index, cell) in own.cells.iter().enumerate() {
-        let job = CellRoots {
-            curve: own,
-            cell,
-            other: &other,
-            d_u: &d_u,
-            d_v: &d_v,
-            h_u: &h_u,
-            h_v: &h_v,
-        };
-        let mut found = Vec::new();
-        job.roots(0.0, 1.0, 0, &mut found);
-        for (s, m) in found {
-            roots.push((index as Scalar + s, m));
-        }
-    }
+    let mut roots = roots_along(own, &other);
     roots.sort_by(|a, b| a.0.total_cmp(&b.0));
     roots.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-9);
     let mut hits = Vec::new();
@@ -376,6 +356,39 @@ pub fn section_curve_surface_intersection(
         });
     }
     Ok(ExactCurveIntersection::Points(hits))
+}
+
+/// The roots of `field` along an implicit curve, by the curve's parameter,
+/// with multiplicity 1 where the field changes sign and 2 where it only
+/// touches zero. Each cell's stretch is bounded by a box certain to hold it
+/// (the solved parameter moves at most `max |F_free| / min |F_solved|` per
+/// unit of the free one), and the field's roots are isolated with interval
+/// bounds over those boxes.
+pub(crate) fn roots_along(own: &ImplicitCurve2, other: &Field2) -> Vec<(Scalar, usize)> {
+    let d_u = partial(&own.field, true);
+    let d_v = partial(&own.field, false);
+    let h_u = partial(other, true);
+    let h_v = partial(other, false);
+    let mut roots: Vec<(Scalar, usize)> = Vec::new();
+    for (index, cell) in own.cells.iter().enumerate() {
+        let job = CellRoots {
+            curve: own,
+            cell,
+            other,
+            d_u: &d_u,
+            d_v: &d_v,
+            h_u: &h_u,
+            h_v: &h_v,
+        };
+        let mut found = Vec::new();
+        job.roots(0.0, 1.0, 0, &mut found);
+        for (s, m) in found {
+            roots.push((index as Scalar + s, m));
+        }
+    }
+    roots.sort_by(|a, b| a.0.total_cmp(&b.0));
+    roots.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-9);
+    roots
 }
 
 /// `x` moved by whole turns into `span` when that is possible.

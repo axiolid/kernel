@@ -12,7 +12,7 @@
 //! the trace over it is certified exactly as over a series field.
 
 use axiolid_core::{Scalar, Vec3};
-use axiolid_curve::{BSplineSurface, Field2, PatchField2};
+use axiolid_curve::{BSplineSurface, Curve3, Field2, PatchField2};
 use axiolid_surface::Surface;
 
 /// A homogeneous control point `(x w, y w, z w, w)`.
@@ -227,10 +227,18 @@ fn equation(point: &[Bern; 4], other: &Surface) -> Option<Bern> {
     })
 }
 
-/// `other`'s equation on the B-spline surface `b`, cell by Bezier cell;
-/// `None` for a B-spline `other`, or an unclamped or malformed `b`.
-#[allow(clippy::needless_range_loop)] // patch grid by index
-pub(crate) fn spline_section_field(b: &BSplineSurface, other: &Surface) -> Option<Field2> {
+/// Degrees, breaks and homogeneous Bezier control nets (`[iu][jv][a][b]`)
+/// of a clamped B-spline surface.
+#[allow(clippy::type_complexity)]
+fn bezier_net(
+    b: &BSplineSurface,
+) -> Option<(
+    usize,
+    usize,
+    Vec<Scalar>,
+    Vec<Scalar>,
+    Vec<Vec<Vec<Vec<H>>>>,
+)> {
     let (p, q) = (usize::from(b.u_degree), usize::from(b.v_degree));
     let rows = b.control_points.len();
     let cols = b.control_points.first()?.len();
@@ -271,10 +279,18 @@ pub(crate) fn spline_section_field(b: &BSplineSurface, other: &Surface) -> Optio
         }
     }
     let nu = net.len();
-    // Keep only non-degenerate breaks (one per segment boundary).
     if u_breaks.len() != nu + 1 || v_breaks.len() != nv + 1 {
         return None;
     }
+    Some((p, q, u_breaks, v_breaks, net))
+}
+
+/// `other`'s equation on the B-spline surface `b`, cell by Bezier cell;
+/// `None` for a B-spline `other`, or an unclamped or malformed `b`.
+#[allow(clippy::needless_range_loop)] // patch grid by index
+pub(crate) fn spline_section_field(b: &BSplineSurface, other: &Surface) -> Option<Field2> {
+    let (p, q, u_breaks, v_breaks, net) = bezier_net(b)?;
+    let (nu, nv) = (u_breaks.len() - 1, v_breaks.len() - 1);
     let mut patches = Vec::with_capacity(nu * nv);
     let (mut du, mut dv) = (0, 0);
     for iu in 0..nu {
@@ -301,4 +317,133 @@ pub(crate) fn spline_section_field(b: &BSplineSurface, other: &Surface) -> Optio
         v_degree: dv,
         patches,
     }))
+}
+
+/// The four homogeneous coordinates `(x w, y w, z w, w)` of a B-spline
+/// surface as patch fields over its Bezier cells, for bounding its image
+/// over parameter boxes.
+#[allow(clippy::needless_range_loop)]
+pub(crate) fn homogeneous_fields(b: &BSplineSurface) -> Option<[Field2; 4]> {
+    let (p, q, u_breaks, v_breaks, net) = bezier_net(b)?;
+    let (nu, nv) = (u_breaks.len() - 1, v_breaks.len() - 1);
+    let make = |k: usize| {
+        let mut patches = Vec::with_capacity(nu * nv);
+        for iu in 0..nu {
+            for jv in 0..nv {
+                let mut c = Vec::with_capacity((p + 1) * (q + 1));
+                for a in 0..=p {
+                    for bb in 0..=q {
+                        c.push(net[iu][jv][a][bb][k]);
+                    }
+                }
+                patches.push(c);
+            }
+        }
+        Field2::Patches(PatchField2 {
+            u_breaks: u_breaks.clone(),
+            v_breaks: v_breaks.clone(),
+            u_degree: p,
+            v_degree: q,
+            patches,
+        })
+    };
+    Some([make(0), make(1), make(2), make(3)])
+}
+
+/// A box `(lo, hi)` holding a B-spline curve over `[a, b]`: the control
+/// hull of each overlapping Bezier piece restricted to the range, in
+/// homogeneous coordinates divided by the weight's bounds.
+pub(crate) fn curve_hull(curve: &Curve3, a: Scalar, b: Scalar) -> Option<(Vec3, Vec3)> {
+    let Curve3::BSpline(c) = curve else {
+        return None;
+    };
+    let p = usize::from(c.degree);
+    let knots = expand(&c.knots, &c.multiplicities);
+    let control: Vec<H> = c
+        .control_points
+        .iter()
+        .enumerate()
+        .map(|(i, pt)| {
+            let w = c.weights.as_ref().map_or(1.0, |ws| ws[i]);
+            [pt.x * w, pt.y * w, pt.z * w, w]
+        })
+        .collect();
+    let (breaks, segments) = decompose(&knots, p, &control)?;
+    let mut lo = Vec3::splat(Scalar::INFINITY);
+    let mut hi = Vec3::splat(Scalar::NEG_INFINITY);
+    for (i, seg) in segments.iter().enumerate() {
+        let (k0, k1) = (breaks[i], breaks[i + 1]);
+        if k1 < a || k0 > b || k1 <= k0 {
+            continue;
+        }
+        let (s0, s1) = (
+            ((a - k0) / (k1 - k0)).clamp(0.0, 1.0),
+            ((b - k0) / (k1 - k0)).clamp(0.0, 1.0),
+        );
+        let restricted: Vec<Vec<Scalar>> = (0..4)
+            .map(|k| restrict1(&seg.iter().map(|h| h[k]).collect::<Vec<_>>(), s0, s1))
+            .collect();
+        let range = |v: &[Scalar]| {
+            let size = v.iter().fold(0.0 as Scalar, |m, x| m.max(x.abs()));
+            let pad = 32.0 * Scalar::EPSILON * size;
+            (
+                v.iter().copied().fold(Scalar::INFINITY, Scalar::min) - pad,
+                v.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max) + pad,
+            )
+        };
+        let (w_lo, w_hi) = range(&restricted[3]);
+        if w_lo <= 0.0 {
+            return None;
+        }
+        for k in 0..3 {
+            let (x_lo, x_hi) = range(&restricted[k]);
+            let q = [x_lo / w_lo, x_lo / w_hi, x_hi / w_lo, x_hi / w_hi];
+            lo[k] = lo[k].min(q.iter().copied().fold(Scalar::INFINITY, Scalar::min));
+            hi[k] = hi[k].max(q.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max));
+        }
+    }
+    lo.is_finite().then_some((lo, hi))
+}
+
+/// A Bernstein polynomial's coefficients over `[s0, s1]` of its `[0, 1]`.
+fn restrict1(c: &[Scalar], s0: Scalar, s1: Scalar) -> Vec<Scalar> {
+    let n = c.len();
+    let casteljau = |c: &[Scalar], s: Scalar, keep_left: bool| -> Vec<Scalar> {
+        let mut w = c.to_vec();
+        let mut out = vec![0.0; n];
+        if keep_left {
+            out[0] = w[0];
+        } else {
+            out[n - 1] = w[n - 1];
+        }
+        for k in 1..n {
+            for i in 0..n - k {
+                w[i] = w[i] * (1.0 - s) + w[i + 1] * s;
+            }
+            if keep_left {
+                out[k] = w[0];
+            } else {
+                out[n - 1 - k] = w[n - 1 - k];
+            }
+        }
+        out
+    };
+    if s1 <= s0 {
+        let mut w = c.to_vec();
+        for k in 1..n {
+            for i in 0..n - k {
+                w[i] = w[i] * (1.0 - s0) + w[i + 1] * s0;
+            }
+        }
+        return vec![w[0]; n];
+    }
+    let left = if s1 < 1.0 {
+        casteljau(c, s1, true)
+    } else {
+        c.to_vec()
+    };
+    if s0 <= 0.0 {
+        return left;
+    }
+    casteljau(&left, s0 / s1, false)
 }

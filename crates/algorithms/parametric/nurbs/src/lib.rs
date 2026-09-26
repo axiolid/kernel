@@ -25,6 +25,7 @@ mod curve_projection;
 mod degree;
 mod exact_curve_intersection;
 mod exact_surface_intersection;
+pub mod extrema;
 mod field;
 mod fit;
 mod implicit_ops;
@@ -36,6 +37,7 @@ mod periodic_surface;
 mod projection;
 mod revolution_profile;
 mod ruled_section;
+mod section_curves;
 mod spline_field;
 mod surface_analysis;
 mod surface_projection;
@@ -107,6 +109,9 @@ pub use periodic::{
 pub use periodic_surface::PeriodicBSplineSurface;
 pub use projection::{
     CurveProjection2, CurveProjection3, ProjectionOptions, ProjectionStatus, SurfaceProjection,
+};
+pub use section_curves::{
+    section_curve_curve_intersection2, section_curve_curve_intersection3, CurveCurveHit,
 };
 pub use surface_analysis::{analyze_surface, FundamentalForm, SurfaceDifferential};
 pub use surface_projection::project_surface;
