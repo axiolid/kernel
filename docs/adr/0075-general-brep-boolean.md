@@ -95,6 +95,29 @@ do not adopt or wrap another kernel.
 - **Stage 3:** B-spline faces, on the certified bounded intersection tier
   that already exists for NURBS pairs.
 
+**Where the stages stand (#167).**
+
+- **Stages 1 and 2 are built.** Faces lie on planes, cylinders, elliptical
+  cylinders, cones, spheres and tori, and meet in any section #119
+  constructs: lines and conics in closed form, and everything else traced
+  (ADR 0077) inside one face's parameter box. Pcurves are closed-form where
+  cheap and implicit otherwise.
+- **Stage 3 is built against analytic faces.** A B-spline face meeting an
+  analytic face is traced on the spline's Bezier patches, and on the
+  analytic face its pcurve is the space curve read back (`Curve2::Lifted`).
+- **Operands that touch are handled:**
+  - Coincident faces imprint each other's edges and keep the shared patch
+    once, by normal agreement.
+  - Sections along existing edges split only the other face.
+  - Tangent contact adds no section.
+  - Solids meeting along an edge are paired radially, so each stays
+    manifold.
+  - Faces that wind round their surface without a seam get one first.
+  - Sections through poles are cut there.
+  - Cavities go to the smallest solid around them.
+- **Refused by name:** two B-spline faces meeting each other, and sections
+  whose branches cross where the surfaces touch (a saddle; see ADR 0077).
+
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where
 both apply, which becomes a differential test.

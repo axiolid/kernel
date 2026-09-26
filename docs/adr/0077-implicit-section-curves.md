@@ -93,6 +93,81 @@ never by marching.
   - The general boolean uses it for exact pcurves of section edges on
     sphere, cone and torus faces.
 
+### B-spline surfaces (stage 3 of ADR 0075)
+
+- **`Field2` is an enum.** `Series(SeriesField2)` holds powers and
+  harmonics, on analytic carriers. `Patches(PatchField2)` holds a
+  tensor-product Bernstein polynomial per cell of a grid, on B-spline
+  carriers.
+- **Building the patch field.**
+  1. The spline is split into its rational Bezier patches by knot insertion.
+     On each, the homogeneous point `(X, W)` is a Bernstein polynomial.
+  2. The analytic surface's implicit equation is homogenised to degree `d`
+     in `(X, W)`: `W^d Q(X / W)`, a Bernstein polynomial of degree
+     `(d p, d q)`, since Bernstein products stay Bernstein. Its zero set is
+     the section wherever `W > 0`, which a B-spline's weights guarantee.
+  3. The coefficients bound the field over any box by the convex hull
+     property, after de Casteljau restriction to the box. That gives
+     tighter bounds than the series' interval arithmetic, and the same
+     certified trace runs unchanged.
+  4. The edge cells' polynomials continue past the grid, so a window may
+     reach slightly beyond the spline's domain. Traced curves are clipped
+     to the domain afterwards.
+- **`Carrier::Spline`.** `BSplineSurface` moved to `axiolid-curve`, and
+  `axiolid-surface` re-exports it unchanged. A spline carrier evaluates its
+  point and partials to second order in closed form (rational tensor
+  product). Its inverse is iterative: `evaluate::surface::locate`.
+- **Pcurves on the analytic face: `Curve2::Lifted`.** A B-spline has no
+  implicit equation to read in an analytic surface's parameters. So the
+  section's pcurve on the analytic face is the section's own space curve
+  read back through the analytic surface's closed-form inverse, sharing the
+  edge's parameter. A guide of unwrapped parameters picks the whole turn at
+  each point. Its turning points come from a dense scan of the derivative's
+  signs; that step is not certified.
+- **Refused by name:** two B-spline faces meeting each other. Neither has an
+  equation the other can be read in, and the section needs tracing in four
+  parameters.
+
+### The section families against each other and against distance (B8, B7)
+
+- **Plane curves** (`section_curve_curve_intersection2`). Every family with
+  a defining field (line, circle, ellipse, `Sinusoid2`, `QuadraticGraph2`,
+  `AngleGraph2`, `ImplicitCurve2`) is traced over its span. The other
+  curve's field has its roots isolated along the cells, and a root is kept
+  when it lies on both pieces, so a graph's other branch is filtered out.
+- **Space curves** (`section_curve_curve_intersection3`). The first curve
+  is intersected, with certification, with each surface the second lies on
+  (its carrier, a conic's plane, a line's two planes). A point is kept
+  where it lies on the second curve within the tolerance. In space the
+  question is only meaningful up to a tolerance.
+- **Extrema** (`extrema::minimum_distance`). Branch and bound over points,
+  curve spans and surface patches. The lower bounds are boxes certain to
+  hold each piece's image:
+  - affine images for lines and planes;
+  - exact harmonic ranges for conics and for cylinders, cones, spheres and
+    tori;
+  - control hulls for B-splines;
+  - certified cells mapped through the carrier for traced sections.
+
+  The upper bounds are evaluated witness points. The result brackets the
+  minimum within the accuracy asked for.
+
+### Singular points
+
+- An isolated point where the surfaces touch without crossing is a
+  non-degenerate extremum of the field on its zero set (definite Hessian).
+  The trace finds it by Newton on the gradient and drops the boxes around
+  it that rounding cannot decide: no curve runs through it. A trace that
+  finds only such points answers `NotRegularCurve`, as the closed forms do.
+- Two branches crossing at a saddle (indefinite Hessian) stay refused by
+  name. Within about `sqrt(rounding / curvature)` of the crossing, which
+  is micrometres at metre scale, the field is below its own rounding, so
+  where the branches run there is not decidable in doubles. Ending them at
+  that distance would leave gaps larger than a micrometre tolerance.
+- Windows a whole turn wide start an irrational fraction of a radian past
+  `-pi` (and past a face's own seam angle), so a symmetric section's
+  special points never sit on the window's edge.
+
 ## Alternatives considered
 
 | Option | Why not |
