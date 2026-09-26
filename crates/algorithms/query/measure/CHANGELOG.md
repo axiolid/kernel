@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `FaceDomain::contains` decides a point whose ray passes through a
+  boundary vertex or along a boundary piece, by simulation of simplicity
+  (the ray runs just right of the point), instead of answering `None`. The
+  centre of a diamond, whose every axis ray meets a corner, used to be
+  undecidable.
+
 ### Added
 
 - `FaceDomain` (#167): an exact face's parameter domain, answering whether

@@ -18,9 +18,17 @@
 //!    certified domain (`FaceDomain`). A piece inside both faces is a section
 //!    edge.
 //!
-//! Faces that meet without crossing -- coincident or tangent supports, or a
-//! section running along an existing edge -- are refused by name in this
-//! stage rather than guessed.
+//! Faces that meet without crossing are handled, not refused:
+//!
+//! - **Tangent supports** touch in a point or along a curve without
+//!   crossing, so they add no section: neither face changes sides there.
+//! - **A section along an existing edge** (the curve lies in the adjacent
+//!   face's surface too) is cut at the edge's ends and marked as lying
+//!   along that face's boundary: it splits the other face, not this one.
+//! - **Coincident supports** share a patch of surface. Each face's boundary
+//!   edges are imprinted on the other where they run inside it, so the
+//!   shared patch becomes a region of both faces; classification then sees
+//!   it on the other solid's boundary (see `crate::boolean`).
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance};
@@ -36,6 +44,7 @@ use axiolid_surface::{Plane, Surface};
 use axiolid_topology::FaceId;
 use core::f64::consts::TAU;
 
+use crate::support::same_support;
 use crate::BooleanError;
 
 /// A piece of an intersection curve lying on a face of each operand.
@@ -54,15 +63,19 @@ pub struct SectionEdge {
     pub start: Point3,
     /// The curve's point at `span.end`.
     pub end: Point3,
+    /// Whether the edge runs along a boundary edge `face_a` already has, so
+    /// it does not split `face_a`.
+    pub along_a: bool,
+    /// Whether the edge runs along a boundary edge `face_b` already has.
+    pub along_b: bool,
 }
 
 /// Every section edge between the faces of `a` and the faces of `b`.
 ///
 /// # Errors
 ///
-/// A face pair whose section is not a line, circle or ellipse, faces that
-/// touch without crossing, a section running along an existing edge, or a
-/// piece too close to a face boundary to classify.
+/// A face pair whose section is not a line, circle or ellipse, or a piece
+/// too close to a face boundary to classify.
 pub fn section_edges(
     a: &ExactBRep,
     b: &ExactBRep,
@@ -74,15 +87,17 @@ pub fn section_edges(
     for fa in 0..side_a.faces.len() {
         for fb in 0..side_b.faces.len() {
             let (sa, sb) = (side_a.surface(fa)?, side_b.surface(fb)?);
+            if same_support(sa, sb, tolerance) {
+                imprint(&side_a, fa, &side_b, fb, true, tolerance, &mut out)?;
+                imprint(&side_b, fb, &side_a, fa, false, tolerance, &mut out)?;
+                continue;
+            }
             let curve = match exact_surface_intersection(sa, sb) {
                 Ok(curve) => curve,
-                Err(ExactIntersectionRefusal::Disjoint) => continue,
-                Err(ExactIntersectionRefusal::NotRegularCurve) => {
-                    return Err(BooleanError::NotTransverse {
-                        face_a: side_a.faces[fa],
-                        face_b: side_b.faces[fb],
-                    })
-                }
+                // Apart, or touching without crossing: no section.
+                Err(
+                    ExactIntersectionRefusal::Disjoint | ExactIntersectionRefusal::NotRegularCurve,
+                ) => continue,
                 Err(_) => return Err(BooleanError::UnsupportedSection),
             };
             for (branch, span) in curve.branches.iter().zip(&curve.spans) {
@@ -94,28 +109,144 @@ pub fn section_edges(
                 {
                     return Err(BooleanError::UnsupportedSection);
                 }
-                let mut cuts = side_a.cuts(fa, branch, tolerance)?;
-                cuts.extend(side_b.cuts(fb, branch, tolerance)?);
+                let (mut cuts, along_a) = side_a.cuts(fa, branch, tolerance)?;
+                let (more, along_b) = side_b.cuts(fb, branch, tolerance)?;
+                cuts.extend(more);
                 for span in pieces(branch, cuts) {
                     let mid = evaluate3(branch, 0.5 * (span.start + span.end))
                         .map_err(|_| BooleanError::Evaluation)?;
-                    if side_a.inside(fa, mid, tolerance)? && side_b.inside(fb, mid, tolerance)? {
-                        out.push(SectionEdge {
-                            face_a: side_a.faces[fa],
-                            face_b: side_b.faces[fb],
-                            curve: branch.clone(),
-                            span,
-                            start: evaluate3(branch, span.start)
-                                .map_err(|_| BooleanError::Evaluation)?,
-                            end: evaluate3(branch, span.end)
-                                .map_err(|_| BooleanError::Evaluation)?,
-                        });
+                    if touching(sa, sb, mid, tolerance)? {
+                        continue;
                     }
+                    let at_a = side_a.locate(fa, mid, &along_a, tolerance)?;
+                    if at_a == Place::Outside {
+                        continue;
+                    }
+                    let at_b = side_b.locate(fb, mid, &along_b, tolerance)?;
+                    if at_b == Place::Outside {
+                        continue;
+                    }
+                    out.push(SectionEdge {
+                        face_a: side_a.faces[fa],
+                        face_b: side_b.faces[fb],
+                        curve: branch.clone(),
+                        span,
+                        start: evaluate3(branch, span.start)
+                            .map_err(|_| BooleanError::Evaluation)?,
+                        end: evaluate3(branch, span.end).map_err(|_| BooleanError::Evaluation)?,
+                        along_a: at_a == Place::Boundary,
+                        along_b: at_b == Place::Boundary,
+                    });
                 }
             }
         }
     }
     Ok(out)
+}
+
+/// Whether two surfaces through `point` share their tangent plane there: a
+/// line where a cylinder rests on a plane, which it touches without
+/// crossing. Analytic surfaces tangent along a whole curve lie on one side
+/// of each other, so such a stretch splits neither face.
+fn touching(
+    a: &Surface,
+    b: &Surface,
+    point: Point3,
+    tolerance: Tolerance,
+) -> Result<bool, BooleanError> {
+    let at = |s: &Surface| -> Result<axiolid_core::Vec3, BooleanError> {
+        let (u, v) = invert(s, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        Ok(normal(s, u, v)
+            .map_err(|_| BooleanError::Evaluation)?
+            .normalize())
+    };
+    Ok(at(a)?.cross(at(b)?).length() <= 1e-9)
+}
+
+/// The boundary edges of `from`'s face `face` that run inside `onto`'s face
+/// `other`, on the same surface, as section edges (`first` when `from` is
+/// the first operand).
+#[allow(clippy::too_many_arguments)]
+fn imprint(
+    from: &Side<'_>,
+    face: usize,
+    onto: &Side<'_>,
+    other: usize,
+    first: bool,
+    tolerance: Tolerance,
+    out: &mut Vec<SectionEdge>,
+) -> Result<(), BooleanError> {
+    for (curve, span) in from.edges_of(face)? {
+        let (cuts, along) = onto.cuts(other, &curve, tolerance)?;
+        for piece in pieces_within(&curve, span, cuts) {
+            let mid = evaluate3(&curve, 0.5 * (piece.start + piece.end))
+                .map_err(|_| BooleanError::Evaluation)?;
+            let at = onto.locate(other, mid, &along, tolerance)?;
+            if at == Place::Outside {
+                continue;
+            }
+            let (face_a, face_b, along_a, along_b) = if first {
+                (
+                    from.faces[face],
+                    onto.faces[other],
+                    true,
+                    at == Place::Boundary,
+                )
+            } else {
+                (
+                    onto.faces[other],
+                    from.faces[face],
+                    at == Place::Boundary,
+                    true,
+                )
+            };
+            out.push(SectionEdge {
+                face_a,
+                face_b,
+                curve: curve.clone(),
+                span: piece,
+                start: evaluate3(&curve, piece.start).map_err(|_| BooleanError::Evaluation)?,
+                end: evaluate3(&curve, piece.end).map_err(|_| BooleanError::Evaluation)?,
+                along_a,
+                along_b,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Where a point on a face's support lies relative to the face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Inside,
+    Boundary,
+    Outside,
+}
+
+/// The pieces of a bounded edge span between the cuts inside it.
+fn pieces_within(curve: &Curve3, span: Interval, cuts: Vec<Scalar>) -> Vec<Interval> {
+    let (lo, hi) = (span.start.min(span.end), span.start.max(span.end));
+    let slack = 1e-12 * (1.0 + lo.abs().max(hi.abs()));
+    let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
+    let mut inside = vec![lo, hi];
+    for cut in cuts {
+        let candidates: &[Scalar] = if periodic {
+            &[cut - TAU, cut, cut + TAU, cut + 2.0 * TAU]
+        } else {
+            &[cut]
+        };
+        for &c in candidates {
+            if c > lo + slack && c < hi - slack {
+                inside.push(c);
+            }
+        }
+    }
+    inside.sort_by(Scalar::total_cmp);
+    inside.dedup_by(|x, y| (*x - *y).abs() <= 1e-12 * (1.0 + x.abs()));
+    inside
+        .windows(2)
+        .map(|pair| Interval::new(pair[0], pair[1]))
+        .collect()
 }
 
 /// The spans between consecutive cuts: finite stretches of a line (its
@@ -193,30 +324,74 @@ impl<'a> Side<'a> {
             .ok_or(BooleanError::DanglingReference)
     }
 
-    /// Whether `point`, on the face's support, lies inside the face.
-    fn inside(
+    /// Where `point`, on the face's support, lies: on one of the edges the
+    /// curve through it runs along (`along`), or inside or outside the face.
+    fn locate(
         &self,
         face: usize,
         point: Point3,
+        along: &[(Curve3, Interval)],
         tolerance: Tolerance,
-    ) -> Result<bool, BooleanError> {
+    ) -> Result<Place, BooleanError> {
+        for (curve, span) in along {
+            if on_edge(curve, *span, point, tolerance)? {
+                return Ok(Place::Boundary);
+            }
+        }
         let (u, v) =
             invert(self.surface(face)?, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
-        self.domains[face]
+        match self.domains[face]
             .contains(Point2::new(u, v))
             .map_err(BooleanError::Measure)?
-            .ok_or(BooleanError::Undecided)
+        {
+            Some(true) => Ok(Place::Inside),
+            Some(false) => Ok(Place::Outside),
+            None => Err(BooleanError::Undecided),
+        }
     }
 
-    /// Parameters on `curve` where it crosses a boundary edge of the face.
+    /// The face's boundary edges, each once, with their curves and spans.
+    fn edges_of(&self, face: usize) -> Result<Vec<(Curve3, Interval)>, BooleanError> {
+        let topology = self.brep.topology();
+        let mut out = Vec::new();
+        let mut seen = Vec::new();
+        for bound in &topology.faces()[face].bounds {
+            let wire = topology
+                .loops()
+                .get(bound.loop_id.index())
+                .ok_or(BooleanError::DanglingReference)?;
+            for use_ in &wire.edges {
+                if seen.contains(&use_.edge) {
+                    continue;
+                }
+                seen.push(use_.edge);
+                let curve = topology.edges()[use_.edge.index()]
+                    .curve
+                    .and_then(|id| self.brep.curves3().get(id.index()))
+                    .ok_or(BooleanError::DanglingReference)?;
+                let span = self
+                    .brep
+                    .edge_interval(use_.edge)
+                    .ok_or(BooleanError::DanglingReference)?;
+                out.push((curve.clone(), span));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Parameters on `curve` where it crosses a boundary edge of the face,
+    /// and the edges it runs along (lying in the adjacent face's surface
+    /// too), which cut it at their ends.
+    #[allow(clippy::type_complexity)]
     fn cuts(
         &self,
         face: usize,
         curve: &Curve3,
         tolerance: Tolerance,
-    ) -> Result<Vec<Scalar>, BooleanError> {
+    ) -> Result<(Vec<Scalar>, Vec<(Curve3, Interval)>), BooleanError> {
         let topology = self.brep.topology();
         let mut out = Vec::new();
+        let mut along = Vec::new();
         let mut seen = Vec::new();
         for bound in &topology.faces()[face].bounds {
             let wire = topology
@@ -259,17 +434,29 @@ impl<'a> Side<'a> {
                             }
                         }
                     }
-                    // The section lies in the adjacent face's surface: it
-                    // runs along that face, or along the edge itself.
+                    // The curve lies in the adjacent face's surface as well
+                    // as this one's: where it meets the edge it runs along
+                    // it, so it is cut at the edge's ends.
                     Ok(ExactCurveIntersection::Contained) => {
-                        return Err(BooleanError::SectionAlongEdge)
+                        for t in [span.start, span.end] {
+                            let end =
+                                evaluate3(edge_curve, t).map_err(|_| BooleanError::Evaluation)?;
+                            if let Ok(s) = invert3(curve, end, tolerance) {
+                                let on =
+                                    evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
+                                if (on - end).length() <= tolerance.linear().max(1e-9) {
+                                    out.push(s);
+                                }
+                            }
+                        }
+                        along.push((edge_curve.clone(), span));
                     }
                     Ok(_) => return Err(BooleanError::UnsupportedSection),
                     Err(_) => return Err(BooleanError::UnsupportedTrim),
                 }
             }
         }
-        Ok(out)
+        Ok((out, along))
     }
 }
 
@@ -320,37 +507,6 @@ impl Side<'_> {
                 z,
             },
         }))
-    }
-}
-
-/// Whether two supports are the same surface, whatever their frames: a
-/// column's half-walls lie on one cylinder parameterised from opposite
-/// sides, and the edge between them is a seam, not a crease.
-fn same_support(a: &Surface, b: &Surface, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear().max(1e-9);
-    let parallel = |x: axiolid_core::Vec3, y: axiolid_core::Vec3| {
-        x.normalize().cross(y.normalize()).length() <= 1e-9
-    };
-    let on_axis = |o1: Point3, o2: Point3, z: axiolid_core::Vec3| {
-        (o2 - o1).cross(z.normalize()).length() <= eps
-    };
-    match (a, b) {
-        (Surface::Plane(p), Surface::Plane(q)) => {
-            parallel(p.frame.z, q.frame.z)
-                && (q.frame.origin - p.frame.origin)
-                    .dot(p.frame.z.normalize())
-                    .abs()
-                    <= eps
-        }
-        (Surface::Cylinder(p), Surface::Cylinder(q)) => {
-            (p.radius - q.radius).abs() <= eps
-                && parallel(p.frame.z, q.frame.z)
-                && on_axis(p.frame.origin, q.frame.origin, p.frame.z)
-        }
-        (Surface::Sphere(p), Surface::Sphere(q)) => {
-            (p.radius - q.radius).abs() <= eps && (p.frame.origin - q.frame.origin).length() <= eps
-        }
-        _ => a == b,
     }
 }
 

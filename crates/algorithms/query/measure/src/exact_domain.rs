@@ -435,6 +435,24 @@ impl<'a> Domain<'a> {
         if arcs.is_empty() {
             return Ok(None);
         }
+        // Where two pieces meet, their ends are the same vertex evaluated
+        // twice and may differ in the last bits. One value per vertex keeps
+        // the ray test's left/right decision at that vertex the same for
+        // both arcs.
+        let mut vertices: Vec<Point2> = Vec::new();
+        let mut snap = |p: Point2| -> Point2 {
+            let near =
+                |q: &Point2| (q.x - p.x).abs() <= slack(p.x) && (q.y - p.y).abs() <= slack(p.y);
+            if let Some(q) = vertices.iter().find(|q| near(q)) {
+                return *q;
+            }
+            vertices.push(p);
+            p
+        };
+        for arc in &mut arcs {
+            arc.a = snap(arc.a);
+            arc.b = snap(arc.b);
+        }
 
         let mut min = Point2::splat(Scalar::INFINITY);
         let mut max = Point2::splat(Scalar::NEG_INFINITY);
@@ -627,13 +645,13 @@ impl<'a> Domain<'a> {
         depth: u32,
     ) -> Result<Option<i64>, ExactMeasureError> {
         let (a, b) = (arc.a, arc.b);
-        let dx = slack(c);
-        if c < a.x.min(b.x) - dx || c > a.x.max(b.x) + dx {
+        // Simulation of simplicity: the ray runs at `x = c + epsilon`, so an
+        // end exactly at `c` lies left of it. A ray through a vertex then
+        // crosses once where the boundary passes through and not at all
+        // where it only touches, and an arc along the ray is never crossed.
+        let left = |x: Scalar| x <= c;
+        if left(a.x) == left(b.x) {
             return Ok(Some(0));
-        }
-        if (c - a.x).abs() <= dx || (c - b.x).abs() <= dx {
-            // Through an end, or along a piece parallel to the ray.
-            return Ok(None);
         }
         let weight = if b.x < a.x { 1 } else { -1 };
         let dy = slack(y0);
@@ -649,7 +667,7 @@ impl<'a> Domain<'a> {
         // Monotone: the half that spans `c` holds the crossing.
         let tm = 0.5 * (arc.t0 + arc.t1);
         let m = self.swap(self.boundary.pieces[arc.piece].at(tm)?.0);
-        let half = if (c - a.x) * (c - m.x) < 0.0 {
+        let half = if left(a.x) != left(m.x) {
             MonoArc {
                 piece: arc.piece,
                 t0: arc.t0,

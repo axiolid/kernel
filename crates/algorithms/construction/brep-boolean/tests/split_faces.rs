@@ -114,7 +114,8 @@ fn split_all(
             .iter()
             .map(|e| surface_of(other, if first { e.face_b } else { e.face_a }))
             .collect();
-        let regions = split_face(brep, face, &mine, &others, tol()).expect("split");
+        let cuts: Vec<_> = edges.iter().flat_map(|e| [e.start, e.end]).collect();
+        let regions = split_face(brep, face, &mine, &others, first, &cuts, tol()).expect("split");
         out.push((face, regions));
     }
     out

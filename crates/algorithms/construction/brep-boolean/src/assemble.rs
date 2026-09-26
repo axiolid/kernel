@@ -1,19 +1,26 @@
 //! Selection and sewing: the kept regions become the result's faces
 //! (ADR 0075, steps 5 and 6).
 //!
-//! Every kept region becomes a face on its original surface, with its
-//! original orientation. A region of the second operand kept by a
-//! difference bounds the result from the other side: its loops are
-//! reversed, which turns the face without touching its surface.
+//! Every kept region becomes a face on its original surface, its loops
+//! anticlockwise in the surface's parameters. A region facing the other way
+//! -- one of the second operand kept by a difference, or one whose face
+//! wound clockwise -- gets the opposite orientation flag, which turns the
+//! face (and the direction its edges count in) without touching its
+//! surface or its loops.
 //!
 //! Vertices are welded by position within the linear tolerance; a piece
 //! that bounds two kept faces (a section edge, or part of an original edge)
-//! becomes one edge used by both, in opposite directions. Faces joined by
-//! edges form shells; a shell enclosing positive volume is a solid, one
-//! enclosing negative volume a cavity of the solid around it.
+//! becomes one edge used by both, in opposite directions. Where solids of
+//! the result touch along an edge, four or more faces meet there: they are
+//! sorted by angle about the edge and paired across the wedges of material,
+//! so each solid keeps its own copy of the edge and the result stays
+//! manifold. Faces joined by edges form shells; a shell enclosing positive
+//! volume is a solid, one enclosing negative volume a cavity of the
+//! smallest solid around it.
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_core::{Interval, Point3, Tolerance};
+use axiolid_evaluate::surface::invert;
 use axiolid_evaluate::{derivative3, evaluate3};
 use axiolid_surface::Surface;
 use axiolid_topology::{
@@ -32,74 +39,181 @@ pub(crate) struct Kept {
     pub(crate) flip: bool,
 }
 
-fn reversed(pieces: &[Piece]) -> Vec<Piece> {
-    pieces
-        .iter()
-        .rev()
-        .map(|piece| Piece {
-            span: Interval::new(piece.span.end, piece.span.start),
-            pspan: Interval::new(piece.pspan.end, piece.pspan.start),
-            ..piece.clone()
-        })
-        .collect()
-}
-
-/// The loops of a kept region, outer first, turned if the region flips.
+/// The loops of a kept region, outer first.
 fn loops_of(kept: &Kept) -> Vec<Vec<Piece>> {
     let mut out = vec![kept.region.outer.clone()];
     out.extend(kept.region.holes.iter().cloned());
-    if kept.flip {
-        out = out.iter().map(|l| reversed(l)).collect();
-    }
     out
 }
 
-/// Positions welded into vertices, and pieces matched into edges.
-struct Welder {
-    points: Vec<Point3>,
-    /// Per edge: its two vertices, its midpoint, and its curve tangent at
-    /// the midpoint in the edge's own direction.
-    edges: Vec<(usize, usize, Point3)>,
-    eps: f64,
+/// The orientation flag a kept region's face gets.
+fn orientation_of(kept: &Kept) -> Orientation {
+    if kept.flip ^ kept.region.against {
+        match kept.orientation {
+            Orientation::Forward => Orientation::Reversed,
+            Orientation::Reversed => Orientation::Forward,
+        }
+    } else {
+        kept.orientation
+    }
 }
 
-impl Welder {
-    fn vertex(&mut self, p: Point3) -> usize {
-        if let Some(i) = self
-            .points
-            .iter()
-            .position(|q| (*q - p).length() <= self.eps)
-        {
+/// Where one piece of one kept face's loops sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Use {
+    face: usize,
+    ring: usize,
+    index: usize,
+}
+
+/// Every piece of every kept face matched to the edge it becomes.
+struct Sewing {
+    /// Welded vertex positions.
+    points: Vec<Point3>,
+    /// Per edge: its first use, which lays it.
+    edges: Vec<Use>,
+    /// Per face, per loop, per piece: the edge it lies on.
+    edge_of: Vec<Vec<Vec<usize>>>,
+    /// Per face, per loop, per piece: its welded start and end vertices.
+    ends_of: Vec<Vec<Vec<(usize, usize)>>>,
+}
+
+fn sew(kept: &[Kept], tolerance: Tolerance) -> Result<Sewing, BooleanError> {
+    let eps = tolerance.linear().max(1e-9);
+    let mut points: Vec<Point3> = Vec::new();
+    let mut vertex = |p: Point3| -> usize {
+        if let Some(i) = points.iter().position(|q| (*q - p).length() <= eps) {
             return i;
         }
-        self.points.push(p);
-        self.points.len() - 1
+        points.push(p);
+        points.len() - 1
+    };
+    // Group uses by the stretch of curve they cover: both end vertices and
+    // the midpoint.
+    let mut groups: Vec<((usize, usize, Point3), Vec<Use>)> = Vec::new();
+    let mut ends_of = Vec::with_capacity(kept.len());
+    for (face, k) in kept.iter().enumerate() {
+        let mut rings = Vec::new();
+        for (ring, pieces) in loops_of(k).iter().enumerate() {
+            let mut ends = Vec::with_capacity(pieces.len());
+            for (index, piece) in pieces.iter().enumerate() {
+                let eval =
+                    |t: f64| evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation);
+                let (a, b) = (eval(piece.span.start)?, eval(piece.span.end)?);
+                let mid = eval(0.5 * (piece.span.start + piece.span.end))?;
+                let (va, vb) = (vertex(a), vertex(b));
+                ends.push((va, vb));
+                let key = (va.min(vb), va.max(vb));
+                let at = Use { face, ring, index };
+                match groups
+                    .iter_mut()
+                    .find(|((x, y, m), _)| (*x, *y) == key && (*m - mid).length() <= eps)
+                {
+                    Some((_, uses)) => uses.push(at),
+                    None => groups.push(((key.0, key.1, mid), vec![at])),
+                }
+            }
+            rings.push(ends);
+        }
+        ends_of.push(rings);
     }
 
-    /// The edge a piece lies on, and whether the piece runs with it.
-    fn edge(&mut self, piece: &Piece) -> Result<(usize, bool), BooleanError> {
-        let eval = |t: f64| evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation);
-        let (a, b) = (eval(piece.span.start)?, eval(piece.span.end)?);
-        let mid = eval(0.5 * (piece.span.start + piece.span.end))?;
-        let (va, vb) = (self.vertex(a), self.vertex(b));
-        for (index, (s, e, m)) in self.edges.iter().enumerate() {
-            if (*m - mid).length() > self.eps {
-                continue;
-            }
-            if (*s, *e) == (va, vb) && va != vb {
-                return Ok((index, true));
-            }
-            if (*s, *e) == (vb, va) && va != vb {
-                return Ok((index, false));
-            }
-            if va == vb && *s == va && *e == vb {
-                // A closed piece: compare directions at the midpoint.
-                return Ok((index, true));
-            }
+    let mut edge_of: Vec<Vec<Vec<usize>>> = ends_of
+        .iter()
+        .map(|rings| rings.iter().map(|r| vec![usize::MAX; r.len()]).collect())
+        .collect();
+    let mut edges = Vec::new();
+    for (_, uses) in &groups {
+        let pairs = match uses.len() {
+            2 => vec![(uses[0], uses[1])],
+            n if n > 2 && n % 2 == 0 => radial_pairs(kept, uses, tolerance)?,
+            _ => return Err(BooleanError::Assembly),
+        };
+        for (x, y) in pairs {
+            let id = edges.len();
+            edges.push(x);
+            edge_of[x.face][x.ring][x.index] = id;
+            edge_of[y.face][y.ring][y.index] = id;
         }
-        self.edges.push((va, vb, mid));
-        Ok((self.edges.len() - 1, true))
     }
+    Ok(Sewing {
+        points,
+        edges,
+        edge_of,
+        ends_of,
+    })
+}
+
+/// Pair the faces meeting at one edge across the wedges of material
+/// between them, by their angle about the edge.
+fn radial_pairs(
+    kept: &[Kept],
+    uses: &[Use],
+    tolerance: Tolerance,
+) -> Result<Vec<(Use, Use)>, BooleanError> {
+    let piece_of = |u: &Use| loops_of(&kept[u.face])[u.ring][u.index].clone();
+    let first = piece_of(&uses[0]);
+    let t_mid = 0.5 * (first.span.start + first.span.end);
+    let m = evaluate3(&first.curve, t_mid).map_err(|_| BooleanError::Evaluation)?;
+    // The edge's axis, from the first use's running direction.
+    let axis = {
+        let mut d = derivative3(&first.curve, t_mid).map_err(|_| BooleanError::Evaluation)?;
+        if first.span.end < first.span.start {
+            d = -d;
+        }
+        d.normalize()
+    };
+    // Per use: the direction into its face, and whether the solid lies on
+    // the side of increasing angle.
+    let mut spokes = Vec::with_capacity(uses.len());
+    for u in uses {
+        let piece = piece_of(u);
+        let k = &kept[u.face];
+        let t = axiolid_evaluate::curve::invert3(&piece.curve, m, tolerance)
+            .map_err(|_| BooleanError::Evaluation)?;
+        let mut along = derivative3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?;
+        if piece.span.end < piece.span.start {
+            along = -along;
+        }
+        let (su, sv) = invert(&k.surface, m, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let n_uv = axiolid_evaluate::surface::normal(&k.surface, su, sv)
+            .map_err(|_| BooleanError::Evaluation)?;
+        // Loops run anticlockwise in parameters: the face lies to the left
+        // of each piece, seen from the parameter normal.
+        let into = n_uv.cross(along);
+        let into = (into - axis * into.dot(axis)).normalize();
+        let outward = match orientation_of(k) {
+            Orientation::Forward => n_uv,
+            Orientation::Reversed => -n_uv,
+        };
+        let increasing = axis.cross(into);
+        spokes.push((into, (-outward).dot(increasing) > 0.0));
+    }
+    let reference = spokes[0].0;
+    let across = axis.cross(reference);
+    let mut order: Vec<(f64, usize)> = spokes
+        .iter()
+        .enumerate()
+        .map(|(i, (d, _))| (d.dot(across).atan2(d.dot(reference)), i))
+        .collect();
+    order.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let n = order.len();
+    let start = (0..n)
+        .find(|&i| spokes[order[i].1].1)
+        .ok_or(BooleanError::Assembly)?;
+    let mut pairs = Vec::with_capacity(n / 2);
+    for step in 0..n / 2 {
+        let (i, j) = (
+            order[(start + 2 * step) % n].1,
+            order[(start + 2 * step + 1) % n].1,
+        );
+        // The next face bounds the same wedge from the other side.
+        if !spokes[i].1 || spokes[j].1 {
+            return Err(BooleanError::Assembly);
+        }
+        pairs.push((uses[i], uses[j]));
+    }
+    Ok(pairs)
 }
 
 /// Sew kept regions into an exact B-rep.
@@ -107,24 +221,9 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
     if kept.is_empty() {
         return Err(BooleanError::EmptyResult);
     }
-    let eps = tolerance.linear().max(1e-9);
+    let sewing = sew(kept, tolerance)?;
 
-    // Pass 1: which faces share edges, so shells can be told apart.
-    let mut welder = Welder {
-        points: Vec::new(),
-        edges: Vec::new(),
-        eps,
-    };
-    let mut face_edges: Vec<Vec<usize>> = Vec::with_capacity(kept.len());
-    for k in kept {
-        let mut edges = Vec::new();
-        for l in loops_of(k) {
-            for piece in &l {
-                edges.push(welder.edge(piece)?.0);
-            }
-        }
-        face_edges.push(edges);
-    }
+    // Faces joined by edges form shells.
     let mut parent: Vec<usize> = (0..kept.len()).collect();
     fn find(parent: &mut [usize], x: usize) -> usize {
         let mut r = x;
@@ -139,9 +238,9 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
         }
         r
     }
-    let mut owner: Vec<Option<usize>> = vec![None; welder.edges.len()];
-    for (face, edges) in face_edges.iter().enumerate() {
-        for &e in edges {
+    let mut owner: Vec<Option<usize>> = vec![None; sewing.edges.len()];
+    for (face, rings) in sewing.edge_of.iter().enumerate() {
+        for &e in rings.iter().flatten() {
             match owner[e] {
                 None => owner[e] = Some(face),
                 Some(other) => {
@@ -164,10 +263,10 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
         }
     }
 
-    // Pass 2: each shell on its own, measured to tell solids from cavities.
+    // Each shell on its own, measured to tell solids from cavities.
     let mut shells = Vec::with_capacity(components.len());
     for faces in &components {
-        let brep = build(kept, faces, tolerance)?;
+        let brep = build(kept, &sewing, faces, tolerance)?;
         let volume = axiolid_measure::exact_properties(&brep, tolerance)
             .map_err(BooleanError::Measure)?
             .signed_volume;
@@ -175,17 +274,37 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
     }
     let outers: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].1 > 0.0).collect();
     let voids: Vec<usize> = (0..shells.len()).filter(|&i| shells[i].1 <= 0.0).collect();
-    if !voids.is_empty() && outers.len() != 1 {
-        return Err(BooleanError::AmbiguousCavity);
+    // Each cavity belongs to the smallest solid around it. A void shell
+    // never touches an outer one, so any point on it is strictly inside or
+    // strictly outside each solid.
+    let mut owners: Vec<Vec<usize>> = vec![Vec::new(); shells.len()];
+    if !voids.is_empty() {
+        let classifiers = outers
+            .iter()
+            .map(|&outer| crate::classify::Solid::new(&shells[outer].0, tolerance))
+            .collect::<Result<Vec<_>, _>>()?;
+        for &void in &voids {
+            let face = components[void][0];
+            let point =
+                crate::classify::interior_points(&kept[face].region, &kept[face].surface)?[0];
+            let mut owner: Option<usize> = None;
+            for (slot, classifier) in classifiers.iter().enumerate() {
+                if classifier.contains(point, tolerance)?
+                    && owner.is_none_or(|best| shells[outers[slot]].1 < shells[outers[best]].1)
+                {
+                    owner = Some(slot);
+                }
+            }
+            let slot = owner.ok_or(BooleanError::AmbiguousCavity)?;
+            owners[outers[slot]].push(void);
+        }
     }
     let mut builder = ExactBRepBuilder::default();
     for &outer in &outers {
         let shell = builder.append(&shells[outer].0, false);
         let mut cavities = Vec::new();
-        if outers.len() == 1 {
-            for &void in &voids {
-                cavities.extend(builder.append(&shells[void].0, false));
-            }
+        for &void in &owners[outer] {
+            cavities.extend(builder.append(&shells[void].0, false));
         }
         builder.topology_mut().add_solid(Solid {
             outer: shell[0],
@@ -196,58 +315,58 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
 }
 
 /// One shell's faces as an exact B-rep with a single solid.
-fn build(kept: &[Kept], faces: &[usize], tolerance: Tolerance) -> Result<ExactBRep, BooleanError> {
-    let eps = tolerance.linear().max(1e-9);
+fn build(
+    kept: &[Kept],
+    sewing: &Sewing,
+    faces: &[usize],
+    tolerance: Tolerance,
+) -> Result<ExactBRep, BooleanError> {
     let mut builder = ExactBRepBuilder::default();
-    let mut welder = Welder {
-        points: Vec::new(),
-        edges: Vec::new(),
-        eps,
-    };
-    let mut vertex_ids: Vec<VertexId> = Vec::new();
-    // Per edge: its id, curve and increasing span.
-    let mut edge_ids: Vec<(EdgeId, axiolid_curve::Curve3)> = Vec::new();
+    let mut vertex_ids: Vec<Option<VertexId>> = vec![None; sewing.points.len()];
+    let mut edge_ids: Vec<Option<(EdgeId, axiolid_curve::Curve3)>> = vec![None; sewing.edges.len()];
     let mut face_ids = Vec::with_capacity(faces.len());
     for &index in faces {
         let k = &kept[index];
         let surface = builder.add_surface(k.surface.clone());
         let mut bounds = Vec::new();
-        for (loop_index, pieces) in loops_of(k).iter().enumerate() {
+        for (ring, pieces) in loops_of(k).iter().enumerate() {
             let mut uses = Vec::with_capacity(pieces.len());
             let mut intervals = Vec::with_capacity(pieces.len());
-            for piece in pieces {
-                let before = welder.edges.len();
-                let (edge, _) = welder.edge(piece)?;
-                while vertex_ids.len() < welder.points.len() {
-                    let position = welder.points[vertex_ids.len()];
-                    vertex_ids.push(builder.topology_mut().add_vertex(Vertex { position }));
+            for (at, piece) in pieces.iter().enumerate() {
+                let edge = sewing.edge_of[index][ring][at];
+                let (va, vb) = sewing.ends_of[index][ring][at];
+                for v in [va, vb] {
+                    if vertex_ids[v].is_none() {
+                        vertex_ids[v] = Some(builder.topology_mut().add_vertex(Vertex {
+                            position: sewing.points[v],
+                        }));
+                    }
                 }
-                let ascending = piece.span.end > piece.span.start;
-                let along = if edge == before {
+                let along = if let Some((_, curve)) = &edge_ids[edge] {
+                    // An edge already laid: compare directions where the
+                    // piece is halfway along.
+                    along_edge(curve, piece, tolerance)?
+                } else {
                     // A new edge, laid along its increasing span.
-                    let (s, e, _) = welder.edges[edge];
+                    let ascending = piece.span.end > piece.span.start;
                     let (start, end, span) = if ascending {
-                        (s, e, piece.span)
+                        (va, vb, piece.span)
                     } else {
-                        (e, s, Interval::new(piece.span.end, piece.span.start))
+                        (vb, va, Interval::new(piece.span.end, piece.span.start))
                     };
                     let curve = builder.add_curve3(piece.curve.clone());
                     let id = builder.topology_mut().add_edge(Edge {
-                        start: vertex_ids[start],
-                        end: vertex_ids[end],
+                        start: vertex_ids[start].ok_or(BooleanError::Assembly)?,
+                        end: vertex_ids[end].ok_or(BooleanError::Assembly)?,
                         curve: Some(curve),
                     });
                     builder.set_edge_interval(id, span);
-                    edge_ids.push((id, piece.curve.clone()));
+                    edge_ids[edge] = Some((id, piece.curve.clone()));
                     ascending
-                } else {
-                    // An edge already laid: compare directions where the
-                    // piece is halfway along.
-                    along_edge(&edge_ids[edge].1, piece, tolerance)?
                 };
                 let pcurve = builder.add_curve2(piece.pcurve.clone());
                 uses.push(EdgeUse {
-                    edge: edge_ids[edge].0,
+                    edge: edge_ids[edge].as_ref().ok_or(BooleanError::Assembly)?.0,
                     orientation: if along {
                         Orientation::Forward
                     } else {
@@ -264,14 +383,14 @@ fn build(kept: &[Kept], faces: &[usize], tolerance: Tolerance) -> Result<ExactBR
             bounds.push(FaceBound {
                 loop_id,
                 orientation: Orientation::Forward,
-                outer: loop_index == 0,
+                outer: ring == 0,
             });
         }
         face_ids.push((
             builder.topology_mut().add_face(Face {
                 surface: Some(surface),
                 bounds,
-                orientation: k.orientation,
+                orientation: orientation_of(k),
             }),
             Orientation::Forward,
         ));

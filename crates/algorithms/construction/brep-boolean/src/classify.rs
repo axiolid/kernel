@@ -15,10 +15,11 @@ use axiolid_brep::ExactBRep;
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Curve3, Line3};
 use axiolid_evaluate::curve::{derivative2, evaluate2};
-use axiolid_evaluate::surface::{evaluate, invert};
+use axiolid_evaluate::surface::{evaluate, invert, normal};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{exact_curve_surface_intersection, ExactCurveIntersection};
 use axiolid_surface::Surface;
+use axiolid_topology::Orientation;
 
 use crate::split::{Piece, Region};
 use crate::BooleanError;
@@ -61,6 +62,36 @@ impl<'a> Solid<'a> {
             .surface
             .and_then(|id| self.brep.surfaces().get(id.index()))
             .ok_or(BooleanError::DanglingReference)
+    }
+
+    /// The first of `candidates` (faces on the point's own support) whose
+    /// face contains `point`, with that face's outward normal there.
+    pub(crate) fn on_face(
+        &self,
+        point: Point3,
+        candidates: &[usize],
+        tolerance: Tolerance,
+    ) -> Result<Option<Vec3>, BooleanError> {
+        for &face in candidates {
+            let surface = self.surface(face)?;
+            let (u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+            match self.domains[face]
+                .contains(Point2::new(u, v))
+                .map_err(BooleanError::Measure)?
+            {
+                Some(true) => {
+                    let n = normal(surface, u, v).map_err(|_| BooleanError::Evaluation)?;
+                    let sign = match self.brep.topology().faces()[face].orientation {
+                        Orientation::Forward => 1.0,
+                        Orientation::Reversed => -1.0,
+                    };
+                    return Ok(Some(n * sign));
+                }
+                Some(false) => {}
+                None => return Err(BooleanError::Undecided),
+            }
+        }
+        Ok(None)
     }
 
     /// Whether `point` lies inside the solid.
@@ -120,12 +151,18 @@ impl<'a> Solid<'a> {
     }
 }
 
-/// A point strictly inside a region, on its face's surface.
+/// Points strictly inside a region, on its face's surface, best first.
 ///
-/// Stepped inwards from the middle of the longest boundary piece, a little
-/// way to the loop's left (regions run anticlockwise), then halved until it
-/// falls inside the region's sampled outline and outside its holes.
-pub(crate) fn interior_point(region: &Region, surface: &Surface) -> Result<Point3, BooleanError> {
+/// Each is stepped inwards from a point on a boundary piece (at a few
+/// fractions along it, off-centre so symmetric inputs do not put every
+/// candidate on a line of contact), a little way to the loop's left
+/// (regions run anticlockwise), then halved until it falls inside the
+/// region's sampled outline and outside its holes. A caller whose
+/// classification of one candidate is undecided tries the next.
+pub(crate) fn interior_points(
+    region: &Region,
+    surface: &Surface,
+) -> Result<Vec<Point3>, BooleanError> {
     let outline = |pieces: &[Piece]| -> Result<Vec<Point2>, BooleanError> {
         let mut out = Vec::new();
         for piece in pieces {
@@ -153,26 +190,40 @@ pub(crate) fn interior_point(region: &Region, surface: &Surface) -> Result<Point
         crate::split::inside_polygon(&outer, p)
             && holes.iter().all(|h| !crate::split::inside_polygon(h, p))
     };
-    for piece in region.outer.iter().chain(region.holes.iter().flatten()) {
-        let mid = 0.5 * (piece.pspan.start + piece.pspan.end);
-        let at = evaluate2(&piece.pcurve, mid).map_err(|_| BooleanError::Evaluation)?;
-        let mut tangent = derivative2(&piece.pcurve, mid).map_err(|_| BooleanError::Evaluation)?;
-        if piece.pspan.end < piece.pspan.start {
-            tangent = -tangent;
-        }
-        let length = tangent.length();
-        if length == 0.0 {
-            continue;
-        }
-        let left = Vec2::new(-tangent.y, tangent.x) / length;
-        let mut step = 0.25 * size;
-        for _ in 0..40 {
-            let probe = at + left * step;
-            if inside(probe) {
-                return evaluate(surface, probe.x, probe.y).map_err(|_| BooleanError::Evaluation);
+    let mut out = Vec::new();
+    for fraction in [0.382, 0.618, 0.5, 0.25, 0.75] {
+        for piece in region.outer.iter().chain(region.holes.iter().flatten()) {
+            let at_t = piece.pspan.start + fraction * (piece.pspan.end - piece.pspan.start);
+            let at = evaluate2(&piece.pcurve, at_t).map_err(|_| BooleanError::Evaluation)?;
+            let mut tangent =
+                derivative2(&piece.pcurve, at_t).map_err(|_| BooleanError::Evaluation)?;
+            if piece.pspan.end < piece.pspan.start {
+                tangent = -tangent;
             }
-            step *= 0.5;
+            let length = tangent.length();
+            if length == 0.0 {
+                continue;
+            }
+            let left = Vec2::new(-tangent.y, tangent.x) / length;
+            let mut step = 0.25 * size;
+            for _ in 0..40 {
+                let probe = at + left * step;
+                if inside(probe) {
+                    out.push(
+                        evaluate(surface, probe.x, probe.y)
+                            .map_err(|_| BooleanError::Evaluation)?,
+                    );
+                    break;
+                }
+                step *= 0.5;
+            }
+            if out.len() >= 8 {
+                return Ok(out);
+            }
         }
     }
-    Err(BooleanError::Undecided)
+    if out.is_empty() {
+        return Err(BooleanError::Undecided);
+    }
+    Ok(out)
 }

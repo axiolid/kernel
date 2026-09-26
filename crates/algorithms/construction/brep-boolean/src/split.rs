@@ -24,7 +24,7 @@
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Vec2};
 use axiolid_curve::{Curve2, Curve3, Ellipse2, Line2, Sinusoid2};
-use axiolid_evaluate::curve::{derivative2, evaluate2, invert2, invert3};
+use axiolid_evaluate::curve::{derivative2, evaluate2, invert2, invert3, second_derivative2};
 use axiolid_evaluate::evaluate3;
 use axiolid_evaluate::surface::invert;
 use axiolid_measure::FaceDomain;
@@ -68,13 +68,21 @@ pub struct Region {
     pub outer: Vec<Piece>,
     /// Holes, clockwise.
     pub holes: Vec<Vec<Piece>>,
+    /// Whether the face's own loops wind clockwise in its parameters, so
+    /// the region (always anticlockwise) faces opposite to the face's
+    /// orientation flag.
+    pub against: bool,
 }
 
 /// Split `face` of `brep` along the section edges lying on it.
 ///
 /// `sections` are the section edges on this face; `others` gives, for each,
-/// the support surface of the face on the other operand (needed for exact
-/// pcurves on a cylinder).
+/// the support surface of the face on the other operand. `first` says
+/// whether `brep` is the first operand of the sections, which picks the
+/// side whose `along_*` flag applies: a section running along one of the
+/// face's own edges splits nothing but the edge, at its ends. `cuts` are
+/// every point where the operand's edges are cut, by sections on any face:
+/// an edge is cut the same way in both faces that share it.
 ///
 /// # Errors
 ///
@@ -85,6 +93,8 @@ pub fn split_face(
     face: FaceId,
     sections: &[SectionEdge],
     others: &[Surface],
+    first: bool,
+    cuts: &[Point3],
     tolerance: Tolerance,
 ) -> Result<Vec<Region>, BooleanError> {
     let topology = brep.topology();
@@ -107,11 +117,27 @@ pub fn split_face(
     // Section pieces with exact pcurves, their starts placed in the face's
     // own parameter range.
     let mut pieces: Vec<(Piece, bool)> = Vec::new();
-    let mut ends: Vec<Point3> = Vec::new();
+    let mut ends: Vec<Point3> = cuts.to_vec();
+    // One stretch of curve can reach a face from several face pairs (a
+    // shared patch's edge is also where the neighbouring faces meet it).
+    let mut seen: Vec<&SectionEdge> = Vec::new();
     for (index, (section, other)) in sections.iter().zip(others).enumerate() {
-        let piece = section_piece(surface, other, section, index, lo, hi, tolerance)?;
         ends.push(section.start);
         ends.push(section.end);
+        let along = if first {
+            section.along_a
+        } else {
+            section.along_b
+        };
+        if along
+            || seen
+                .iter()
+                .any(|other| same_stretch(other, section, tolerance))
+        {
+            continue;
+        }
+        seen.push(section);
+        let piece = section_piece(surface, other, section, index, lo, hi, tolerance)?;
         pieces.push((piece, true));
     }
 
@@ -166,7 +192,55 @@ pub fn split_face(
         }
     }
 
-    trace(&pieces)
+    // A face whose loops wind clockwise (a region an earlier boolean turned
+    // over) is traced with its boundary reversed, so regions come out
+    // anticlockwise; they then face against the face's flag.
+    let mut swept = 0.0;
+    for (piece, section) in &pieces {
+        if !section {
+            swept += sweep(piece)?;
+        }
+    }
+    let against = swept < 0.0;
+    if against {
+        for (piece, section) in &mut pieces {
+            if !*section {
+                *piece = directed(piece, true);
+            }
+        }
+    }
+    let mut regions = trace(&pieces)?;
+    for region in &mut regions {
+        region.against = against;
+    }
+    Ok(regions)
+}
+
+/// `1/2 int (u dv - v du)` along a piece: summed over a face's loops, its
+/// sign is the loops' winding, even where a seam leaves them open.
+fn sweep(piece: &Piece) -> Result<Scalar, BooleanError> {
+    let n = 64;
+    let mut total = 0.0;
+    let mut previous =
+        evaluate2(&piece.pcurve, piece.pspan.start).map_err(|_| BooleanError::Evaluation)?;
+    for i in 1..=n {
+        let p =
+            piece.pspan.start + (piece.pspan.end - piece.pspan.start) * i as Scalar / n as Scalar;
+        let q = evaluate2(&piece.pcurve, p).map_err(|_| BooleanError::Evaluation)?;
+        total += 0.5 * (previous.x * q.y - q.x * previous.y);
+        previous = q;
+    }
+    Ok(total)
+}
+
+/// Whether two section edges are the same stretch of curve, either way.
+fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool {
+    let eps = tolerance.linear().max(1e-9);
+    let near = |p: Point3, q: Point3| (p - q).length() <= eps;
+    let mid = |e: &SectionEdge| evaluate3(&e.curve, 0.5 * (e.span.start + e.span.end));
+    let ends = (near(a.start, b.start) && near(a.end, b.end))
+        || (near(a.start, b.end) && near(a.end, b.start));
+    ends && matches!((mid(a), mid(b)), (Ok(p), Ok(q)) if near(p, q))
 }
 
 /// A section edge with its exact pcurve on `surface`.
@@ -267,19 +341,17 @@ fn section_piece_from(
             });
             (pcurve, section.span)
         }
-        (Surface::Cylinder(c), Curve3::Ellipse(_)) => {
+        (Surface::Cylinder(c), Curve3::Ellipse(ellipse)) => {
             // A plane's oblique cut: v = mean + a cos u + b sin u, with the
-            // angle itself as parameter.
-            let Surface::Plane(plane) = other else {
-                return Err(BooleanError::UnsupportedSplit);
-            };
-            let n = plane.frame.z;
+            // angle itself as parameter. The plane is the ellipse's own.
+            let _ = other;
+            let n = ellipse.frame.x.cross(ellipse.frame.y);
             let nz = n.dot(c.frame.z);
             if nz == 0.0 {
                 return Err(BooleanError::UnsupportedSplit);
             }
             let wave = Sinusoid2 {
-                mean: n.dot(plane.frame.origin - c.frame.origin) / nz,
+                mean: n.dot(ellipse.frame.origin - c.frame.origin) / nz,
                 cosine: -c.radius * n.dot(c.frame.x) / nz,
                 sine: -c.radius * n.dot(c.frame.y) / nz,
             };
@@ -441,6 +513,10 @@ struct Half {
     /// Direction leaving `from`, and direction arriving at `to`.
     leave: Scalar,
     arrive: Scalar,
+    /// Signed curvature in the running direction at `from` and at `to`,
+    /// which orders pieces leaving a vertex in the same direction.
+    bend_leave: Scalar,
+    bend_arrive: Scalar,
 }
 
 fn directed(piece: &Piece, reversed: bool) -> Piece {
@@ -476,6 +552,29 @@ fn tangent(piece: &Piece, at_start: bool) -> Result<Vec2, BooleanError> {
     Ok(d * sign)
 }
 
+/// Signed curvature of a piece in parameters at one of its ends, in the
+/// piece's running direction.
+fn bend(piece: &Piece, at_start: bool) -> Result<Scalar, BooleanError> {
+    let p = if at_start {
+        piece.pspan.start
+    } else {
+        piece.pspan.end
+    };
+    let d = derivative2(&piece.pcurve, p).map_err(|_| BooleanError::Evaluation)?;
+    let dd = second_derivative2(&piece.pcurve, p).map_err(|_| BooleanError::Evaluation)?;
+    let speed = d.length();
+    if speed == 0.0 {
+        return Err(BooleanError::Evaluation);
+    }
+    // Reversing the parameter keeps d x dd's magnitude but flips its sign.
+    let sign = if piece.pspan.end >= piece.pspan.start {
+        1.0
+    } else {
+        -1.0
+    };
+    Ok(sign * (d.x * dd.y - d.y * dd.x) / (speed * speed * speed))
+}
+
 fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
     // Weld piece ends in parameters.
     let mut vertices: Vec<Point2> = Vec::new();
@@ -495,6 +594,7 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
         let (va, vb) = (vertex(a), vertex(b));
         let leave = angle_of(tangent(piece, true)?);
         let arrive = angle_of(tangent(piece, false)?);
+        let (bend_leave, bend_arrive) = (bend(piece, true)?, bend(piece, false)?);
         halves.push(Half {
             piece: index,
             reversed: false,
@@ -502,6 +602,8 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
             to: vb,
             leave,
             arrive,
+            bend_leave,
+            bend_arrive,
         });
         if *both_ways {
             halves.push(Half {
@@ -511,6 +613,8 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
                 to: va,
                 leave: arrive + PI,
                 arrive: leave + PI,
+                bend_leave: -bend_arrive,
+                bend_arrive: -bend_leave,
             });
         }
     }
@@ -535,27 +639,55 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
             walk.push(current);
             let here = halves[current];
             // Back along the arriving piece, then the first outgoing half
-            // clockwise from there.
+            // clockwise from there. Pieces leaving in one direction are
+            // ordered a little way out, by how they bend: a piece bending
+            // left of another lies clockwise-first from `back`.
             let back = here.arrive + PI;
-            let mut best: Option<(Scalar, usize)> = None;
+            let back_bend = -here.bend_arrive;
+            let mut keyed: Vec<((Scalar, Scalar), usize)> = Vec::new();
             for (index, candidate) in halves.iter().enumerate() {
                 if candidate.from != here.to {
                     continue;
                 }
                 let is_twin = candidate.piece == here.piece && candidate.reversed != here.reversed;
-                let mut turn = (back - candidate.leave).rem_euclid(TAU);
-                if is_twin || turn < 1e-12 {
-                    turn = TAU;
-                }
-                if let Some((best_turn, _)) = best {
-                    if (turn - best_turn).abs() < 1e-9 && turn < TAU {
+                let turn = (back - candidate.leave).rem_euclid(TAU);
+                // Second order: the turn a small step out is about
+                // `turn + (back_bend - bend) * step`.
+                let delta = back_bend - candidate.bend_leave;
+                let key = if is_twin {
+                    (TAU, Scalar::INFINITY)
+                } else if !(1e-9..=TAU - 1e-9).contains(&turn) {
+                    if delta.abs() <= 1e-9 * (1.0 + back_bend.abs()) {
+                        // Leaving back along the arriving piece itself.
                         return Err(BooleanError::TangentSplit);
                     }
+                    if delta > 0.0 {
+                        (0.0, delta)
+                    } else {
+                        (TAU, delta)
+                    }
+                } else {
+                    (turn, delta)
+                };
+                keyed.push((key, index));
+            }
+            let same_turn = |x: Scalar, y: Scalar| (x - y).abs() < 1e-9;
+            let order = |x: &(Scalar, Scalar), y: &(Scalar, Scalar)| {
+                if same_turn(x.0, y.0) {
+                    x.1.total_cmp(&y.1)
+                } else {
+                    x.0.total_cmp(&y.0)
                 }
-                if best.is_none_or(|(best_turn, _)| turn < best_turn) {
-                    best = Some((turn, index));
+            };
+            keyed.sort_by(|x, y| order(&x.0, &y.0));
+            if let [(first_key, _), (second_key, _), ..] = keyed.as_slice() {
+                let same_bend = (first_key.1 - second_key.1).abs()
+                    <= 1e-9 * (1.0 + first_key.1.abs().min(1e12));
+                if same_turn(first_key.0, second_key.0) && same_bend && first_key.0 < TAU {
+                    return Err(BooleanError::TangentSplit);
                 }
             }
+            let best = keyed.first().copied();
             current = best.ok_or(BooleanError::UnclosedSplit)?.1;
         }
         loops.push(walk);
@@ -584,6 +716,7 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
         .map(|(pieces, _, _)| Region {
             outer: pieces.clone(),
             holes: Vec::new(),
+            against: false,
         })
         .collect();
     for (hole, polygon) in holes {

@@ -189,8 +189,8 @@ fn a_pipe_through_a_sloped_roof_cuts_an_ellipse() {
 fn apart_operands_have_no_section() {
     let a = solid(square(-1.0, -1.0, 1.0, 1.0), 0.0, 1.0);
     let b = solid(ArcRing::circle(Point2::new(5.0, 5.0), 0.5), 0.0, 1.0);
-    // Their floors and roofs are coplanar: refused in this stage, by name.
-    assert!(section_edges(&a, &b, tol()).is_err());
+    // Their floors and roofs are coplanar, but the faces do not overlap.
+    assert!(section_edges(&a, &b, tol()).expect("apart").is_empty());
     let c = solid(ArcRing::circle(Point2::new(5.0, 5.0), 0.5), 2.0, 3.0);
     assert!(section_edges(&a, &c, tol()).expect("apart").is_empty());
 }

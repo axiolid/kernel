@@ -176,3 +176,29 @@ fn a_box_crossed_by_a_ring_on_another_axis() {
         va - intersection,
     );
 }
+
+#[test]
+fn a_slab_through_a_box_with_two_cavities_leaves_two_solids_with_one_each() {
+    // Each cavity is cut out by the general boolean itself: a buried box
+    // and a buried pipe leave one solid with two void shells.
+    let outer = solid(square(-3.0, -1.0, 3.0, 1.0), 0.0, 2.0);
+    let buried_box = solid(square(-2.5, -0.5, -1.5, 0.5), 0.5, 1.5);
+    let r = 0.4;
+    let buried_pipe = solid(ArcRing::circle(Point2::new(2.0, 0.0), r), 0.5, 1.5);
+    let once = run(&outer, &buried_box, BooleanOperator::Difference);
+    let hollow = run(&once, &buried_pipe, BooleanOperator::Difference);
+    assert_eq!(hollow.topology().solids().len(), 1);
+    assert_eq!(hollow.topology().solids()[0].voids.len(), 2);
+    let va = 24.0 - 1.0 - PI * r * r;
+    close("hollow block", volume(&hollow), va);
+
+    // The slab x in [-0.5, 0.5] sticks out of the block on every side but
+    // x: it cuts the block in two, one cavity in each half.
+    let slab = solid(square(-0.5, -2.0, 0.5, 2.0), -1.0, 3.0);
+    let difference = run(&hollow, &slab, BooleanOperator::Difference);
+    let solids = difference.topology().solids();
+    assert_eq!(solids.len(), 2);
+    assert!(solids.iter().all(|s| s.voids.len() == 1), "{solids:?}");
+    let inside = 4.0;
+    check(&hollow, &slab, va + 16.0 - inside, inside, va - inside);
+}

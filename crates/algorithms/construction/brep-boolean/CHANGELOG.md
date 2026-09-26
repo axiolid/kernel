@@ -11,6 +11,15 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Operands that touch (#167, ADR 0075 stage 2): faces on one surface share
+  their overlap (each face's edges are imprinted on the other, and a region
+  on the other solid's boundary is kept once by normal agreement); sections
+  along an existing edge split only the other face; tangent contact adds no
+  section; pieces leaving a vertex in one direction are ordered by
+  curvature; solids meeting along an edge are paired radially around it so
+  each stays manifold. Cavities go to the smallest solid around them, in
+  results of several solids too.
+
 - `section_edges` (#167, ADR 0075 stage 1): the exact intersection curves of
   two exact B-reps' faces, each trimmed to where it lies inside both faces.
   Crossings with a boundary edge are found against the adjacent face's
