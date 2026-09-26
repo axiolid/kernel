@@ -129,8 +129,9 @@ fn check_mesh_budget(mesh: &TriMesh) -> GeomResult<()> {
 
 /// Tessellate one faceted B-rep into a triangle mesh.
 ///
-/// With a solid, its outer shell and every void shell contribute surface
-/// and the result is [`MeshClosure::Solid`]. A void is a cavity: its
+/// With solids, every solid's outer shell and void shells contribute
+/// surface and the result is [`MeshClosure::Solid`]; several disjoint solids
+/// mesh as several closed components. A void is a cavity: its
 /// triangles face into it, away from the material, so the mesh's signed
 /// volume is the outer volume less every cavity. A void can only remove
 /// material, so one authored facing the other way (the STEP convention
@@ -160,40 +161,45 @@ pub fn tessellate(
         )));
     }
 
-    let (shells, closure): (Vec<&axiolid_topology::Shell>, MeshClosure) = match brep
-        .solids()
-        .first()
-    {
-        Some(solid) => {
-            let mut shells = Vec::with_capacity(1 + solid.voids.len());
-            let shell = brep
-                .shells()
-                .get(solid.outer.index())
-                .ok_or_else(|| GeomError::InvalidInput("outer shell missing".to_string()))?;
-            shells.push(shell);
-            for void in &solid.voids {
+    // Each shell with whether it is a void. Every solid contributes: a
+    // B-rep of several disjoint solids (a composite profile whose members
+    // do not touch) meshes all of them.
+    let (shells, closure): (Vec<(&axiolid_topology::Shell, bool)>, MeshClosure) =
+        if brep.solids().is_empty() {
+            if brep.shells().is_empty() {
+                return Err(GeomError::InvalidInput(
+                    "brep has neither a solid nor a shell".to_string(),
+                ));
+            }
+            (
+                brep.shells().iter().map(|shell| (shell, false)).collect(),
+                MeshClosure::Surface,
+            )
+        } else {
+            let mut shells = Vec::new();
+            for solid in brep.solids() {
                 let shell = brep
                     .shells()
-                    .get(void.index())
-                    .ok_or_else(|| GeomError::InvalidInput("void shell missing".to_string()))?;
-                check_void_closed(brep, shell)?;
-                shells.push(shell);
+                    .get(solid.outer.index())
+                    .ok_or_else(|| GeomError::InvalidInput("outer shell missing".to_string()))?;
+                shells.push((shell, false));
+                for void in &solid.voids {
+                    let shell = brep
+                        .shells()
+                        .get(void.index())
+                        .ok_or_else(|| GeomError::InvalidInput("void shell missing".to_string()))?;
+                    check_void_closed(brep, shell)?;
+                    shells.push((shell, true));
+                }
             }
             (shells, MeshClosure::Solid)
-        }
-        None if !brep.shells().is_empty() => (brep.shells().iter().collect(), MeshClosure::Surface),
-        None => {
-            return Err(GeomError::InvalidInput(
-                "brep has neither a solid nor a shell".to_string(),
-            ))
-        }
-    };
-    if shells.iter().any(|shell| shell.faces.is_empty()) {
+        };
+    if shells.iter().any(|(shell, _)| shell.faces.is_empty()) {
         return Err(GeomError::InvalidInput(
             "a tessellated shell has no faces".to_string(),
         ));
     }
-    let shell_faces = || shells.iter().flat_map(|shell| shell.faces.iter());
+    let shell_faces = || shells.iter().flat_map(|(shell, _)| shell.faces.iter());
 
     let mut expanded_work = 0_usize;
     for &(face_id, _) in shell_faces() {
@@ -224,7 +230,7 @@ pub fn tessellate(
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
         std::collections::HashMap::new();
     let mut total_curved_records = 0_usize;
-    for (index, shell) in shells.iter().enumerate() {
+    for &(shell, void) in &shells {
         let first_index = mesh.indices.len();
         for &(face_id, shell_sense) in &shell.faces {
             let face = brep
@@ -244,8 +250,7 @@ pub fn tessellate(
             )?;
             check_mesh_budget(&mesh)?;
         }
-        // Shells after the first of a solid are its voids.
-        if closure == MeshClosure::Solid && index > 0 {
+        if void {
             face_into_cavity(&mut mesh, first_index);
         }
     }

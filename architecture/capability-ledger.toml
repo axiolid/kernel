@@ -196,11 +196,11 @@ effort = "Medium"
 number = 139
 
 [[issue]]
-key = "exact-profile-breadth"
-title = "Exact-mode extrusion/revolve/sweep for arbitrary and composite profiles, not just rectangle/circle"
+key = "partial-turn-revolution"
+title = "Exact partial-turn revolution"
 priority = "Medium"
 effort = "Medium"
-number = 111
+number = 172
 
 [[issue]]
 key = "halfedge-mesh"
@@ -590,11 +590,11 @@ id = "C4"
 area = "brep"
 name = "extrude/revolve (prism, revol) exact"
 level = "narrow"
-summary = "Exact extrusion and exact revolution both exist but are restricted to specific profile families (rectangle/polygon/certain contour types), not general arbitrary-profile extrude/revolve; source itself titles the module \"Exact revolution for the profile families exact extrusion already covers\""
-evidence = ["crates/algorithms/construction/construct/src/extrude_exact.rs::extrude_polygon_rings", "crates/algorithms/construction/construct/src/revolve_exact.rs", "crates/algorithms/construction/construct/tests/exact_extrusion.rs", "crates/algorithms/construction/construct/tests/revolve_exact.rs"]
+summary = "Exact extrusion covers every profile variant: rectangles (sharp, rounded, hollow), circles, ellipses, arbitrary contours with arcs and holes, parameterised sections, derived profiles, centre-line profiles, and composites unioned exactly over one arc arrangement (arc members, member openings, disjoint members as separate solids). Exact full-turn revolution covers every profile that lowers to a contour, circles and sections with holes included (each hole a void shell). Refused by name: partial-turn revolution, ellipse revolution, oblique circle/ellipse extrusion, and non-conformal transforms of circles."
+evidence = ["crates/algorithms/construction/construct/src/extrude_exact.rs::extrude_polygon_rings", "crates/algorithms/construction/construct/src/revolve_exact.rs", "crates/algorithms/construction/construct/src/profile_lower.rs::composite_regions", "crates/algorithms/construction/construct/tests/exact_extrusion.rs", "crates/algorithms/construction/construct/tests/revolve_exact.rs", "crates/algorithms/construction/construct/tests/revolve_holes.rs", "crates/algorithms/construction/construct/tests/composite_breadth.rs", "scripts/probe_profile_breadth_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKPrim/BRepSweep", "src/ModelingAlgorithms/TKPrim/BRepPrimAPI"]
 cgal = ["Straight_skeleton_extrusion_2"]
-issue = "exact-profile-breadth"
+issue = "partial-turn-revolution"
 
 [[capability]]
 id = "C5"

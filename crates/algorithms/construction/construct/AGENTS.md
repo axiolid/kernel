@@ -10,10 +10,11 @@ analytic B-rep arrangements; it owns no DAG, cache, execution context, or operat
 - `profile`: lower profile values to sampled rings and triangulate caps.
 - `extrude`: mesh extrusion plus exact extrusion of every `Profile` variant --
   rectangle (sharp/hollow), circle, ellipse, contour (arcs and holes), section,
-  centre-line, derived and composite. Exact output owns every 3D support,
+  centre-line, derived and composite (disjoint members as separate solids). Exact output owns every 3D support,
   pcurve, and native span.
 - `revolve`: exact full-turn revolution of any profile that lowers to a contour,
-  sweeping cylinders, cones, planar annuli and tori; `sweep`, `loft` place/stitch
+  circles and sections with holes included, sweeping cylinders, cones, planar
+  annuli and tori, with each hole a void shell; `sweep`, `loft` place/stitch
   station rings into discrete solids.
 - `center_line`: turn constant-width centre-line profiles into rings.
 - `half_space`: construct a finite clipping proxy for an unbounded half-space.
@@ -43,7 +44,7 @@ not report `scalar-compile` after this split.
   What still refuses is geometry the kernel cannot represent exactly rather
   than unwritten work -- partial-turn revolution, a profile straddling the
   revolution axis, oblique circle/ellipse extrusion, non-conformal derived
-  transforms, disjoint composite members, and Boolean families beyond
+  transforms, ellipse revolution, and Boolean families beyond
   vertical columns -- and must refuse rather than tessellate; see ADR 0020,
   ADR 0023, ADR 0024, ADR 0029, and ADR 0053-0059.
 - Coaxial booleans and plane cuts that are not one prism (stepped spans,
@@ -51,8 +52,13 @@ not report `scalar-compile` after this split.
   `ArcArrangement` (ADR 0072); `boolean_column.rs` adapts the entry points.
   Every face of a column solid takes its vertices from that one
   arrangement -- do not build bands separately and glue them, the rounded
-  crossings will not agree. Cavities are refused because tessellation
-  reads only the outer shell.
+  crossings will not agree. A cavity is a void shell of the solid around
+  it; the mesh compiler tessellates void shells facing into the cavity.
+- Composite profiles are unioned by `profile_lower::composite_regions` over
+  one `ArcArrangement`; each connected piece is built on its own and
+  `assemble::merge_solids` carries disjoint pieces as separate solids of one
+  `ExactBRep`. A revolved section's holes join as voids through
+  `ExactBRepBuilder::append`.
 
 ## Tests
 

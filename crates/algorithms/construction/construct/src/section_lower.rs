@@ -20,7 +20,9 @@
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Interval, Point2, Scalar, Vec2};
 use axiolid_curve::{Circle2, Curve2, Line2};
-use axiolid_profile::{Contour, ContourProfile, ProfileSegment, RectangleProfile, SectionProfile};
+use axiolid_profile::{
+    CircleProfile, Contour, ContourProfile, ProfileSegment, RectangleProfile, SectionProfile,
+};
 
 use crate::BACKEND_ID;
 
@@ -227,6 +229,53 @@ fn checked_slope(slope: Option<Scalar>, what: &'static str) -> GeomResult<Scalar
         )));
     }
     Ok(value)
+}
+
+/// A circle profile, and its bore when it has a wall thickness, as exact
+/// contours of four quarter arcs each (#111).
+///
+/// Four quarters, not one full turn: contour lowering refuses a segment of
+/// half a turn or more (ADR 0053), and a quarter keeps every arc's endpoints
+/// on the axes, where the seams of revolved and extruded walls sit.
+pub fn circle_contour(circle: &CircleProfile) -> GeomResult<ContourProfile> {
+    positive(circle.radius, "circle radius")?;
+    let ring = |radius: Scalar| {
+        let frame = Frame2 {
+            origin: Point2::ZERO,
+            x: Vec2::X,
+            y: Vec2::Y,
+        };
+        let quarter = core::f64::consts::FRAC_PI_2;
+        Contour::new(
+            (0..4)
+                .map(|index| ProfileSegment {
+                    curve: Curve2::Circle(Circle2 { frame, radius }),
+                    domain: Interval::new(
+                        quarter * index as Scalar,
+                        quarter * (index + 1) as Scalar,
+                    ),
+                    same_sense: true,
+                })
+                .collect(),
+        )
+    };
+    let holes = match circle.thickness {
+        None => Vec::new(),
+        Some(thickness) => {
+            positive(thickness, "circle wall thickness")?;
+            if thickness >= circle.radius {
+                return Err(GeomError::InvalidInput(format!(
+                    "circle wall thickness {thickness} leaves no bore in radius {}",
+                    circle.radius
+                )));
+            }
+            vec![ring(circle.radius - thickness)]
+        }
+    };
+    Ok(ContourProfile {
+        outer: ring(circle.radius),
+        holes,
+    })
 }
 
 /// Lower a rectangle -- rounded, hollow, or both -- into an exact contour.

@@ -11,6 +11,19 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Exact full-turn revolution of circles, hollow circles, hollow rectangles
+  and every section with holes (#111). Each hole revolves on its own and
+  joins the solid as a void shell. Verified by Pappus on every case.
+- Composite profiles are unioned by `profile_lower::composite_regions` over
+  one `ArcArrangement` (#111): members may carry arcs and their own
+  openings, a member's opening stays open unless another member fills it,
+  and members that do not touch become separate solids of one `ExactBRep`,
+  for extrusion and revolution alike. Member vertices within the linear
+  tolerance are welded first, so members authored to meet do meet.
+- `section_lower::circle_contour`: a circle profile (and its bore) as exact
+  quarter-arc contours. A circle moved off the origin by a derived profile
+  now lowers to that contour instead of being refused.
+
 - `clip_arc_prism_exact` (#120): an arc prism cut by a half-space whose
   plane passes between its caps, the "column under a sloped roof" case.
   Cylindrical walls stay `Cylinder` faces trimmed by an exact `Ellipse3`

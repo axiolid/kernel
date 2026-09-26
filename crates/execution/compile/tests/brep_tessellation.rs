@@ -518,6 +518,29 @@ fn a_void_shell_is_tessellated_as_a_cavity() {
     );
 }
 
+/// Every solid of a B-rep is tessellated, not only the first: a composite
+/// profile whose members do not touch is two solids in one B-rep (#111).
+#[test]
+fn every_solid_of_a_brep_is_tessellated() {
+    let (mut brep, first) = cube_shell(Orientation::Forward);
+    let second = add_box_shell(&mut brep, 2.0, 2.5, true);
+    brep.add_solid(Solid {
+        outer: first,
+        voids: Vec::new(),
+    });
+    brep.add_solid(Solid {
+        outer: second,
+        voids: Vec::new(),
+    });
+    let mesh = compile(brep);
+    assert_eq!(mesh.positions.len(), 16, "both solids' corners");
+    let volume = signed_volume(&mesh);
+    assert!(
+        (volume - (1.0 + 0.125)).abs() < 1e-12,
+        "both solids, got {volume}"
+    );
+}
+
 /// A void authored facing out of the cavity (the STEP convention, reversed
 /// on use) still removes material: a cavity cannot add volume.
 #[test]

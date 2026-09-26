@@ -23,14 +23,17 @@
 //! unioned rather than concatenated -- concatenating overlapping members
 //! would double-count the shared area and produce self-intersecting walls.
 //!
-//! A composite whose members are mutually DISJOINT is refused: the result is
-//! two separate solids, and `Solid` holds one outer shell plus voids, so
-//! there is nowhere honest to put the second body.
+//! The exact extrusion and revolution use [`composite_regions`], which unions
+//! the members' exact contours -- arcs and member holes included -- over one
+//! [`ArcArrangement`] (ADR 0072) and returns every connected piece. Disjoint
+//! members become separate solids in one `ExactBRep` (#111).
+//! [`lower_composite`] is the older polygon union, kept for its callers; it
+//! refuses arcs, member holes and disjoint members.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Interval, Point2, Scalar, Tolerance, Transform2, Vec2};
 use axiolid_curve::{Circle2, Curve2, Line2};
-use axiolid_overlay::{union_soup, Ring};
+use axiolid_overlay::{union_soup, ArcArrangement, ArcRing, Ring};
 use axiolid_profile::{
     CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
 };
@@ -175,9 +178,18 @@ fn lower_circle(
         ));
     };
     if transform.translation != Vec2::ZERO {
-        // The extruder places circles at the origin, so an off-origin circle
-        // has nowhere to record its centre.
-        return Err(unsupported("derived circle translated off the origin"));
+        // A circle profile sits at the origin, so an off-origin circle has
+        // nowhere to record its centre -- but its exact contour does: four
+        // quarter arcs about the moved centre (#111).
+        let contour = crate::section_lower::circle_contour(circle)?;
+        return Ok(Profile::Contour(ContourProfile {
+            outer: lower_contour(&contour.outer, transform, tolerance)?,
+            holes: contour
+                .holes
+                .iter()
+                .map(|hole| lower_contour(hole, transform, tolerance))
+                .collect::<GeomResult<Vec<_>>>()?,
+        }));
     }
     Ok(Profile::Circle(CircleProfile {
         radius: circle.radius * scale,
@@ -341,6 +353,131 @@ pub fn lower_composite(
         // Disjoint members are two separate bodies. `Solid` holds one outer
         // shell plus voids, so there is nowhere honest to put the second.
         _ => Err(unsupported("composite profile whose members are disjoint")),
+    }
+}
+
+/// One connected piece of a composite section.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositeRegion {
+    /// Outer boundary, counter-clockwise.
+    pub outer: ArcRing,
+    /// Openings, clockwise.
+    pub holes: Vec<ArcRing>,
+}
+
+/// Union a composite's members exactly and return every connected piece.
+///
+/// Each member lowers to an exact contour (rectangles of every kind,
+/// circles, sections, contours with arcs and holes, derived profiles), and
+/// the union is taken over one [`ArcArrangement`] of all their rings: a
+/// point belongs to the section when some member's outer ring contains it
+/// and none of that member's holes does. Arcs stay arcs; nothing is sampled.
+///
+/// # Errors
+///
+/// A member that does not lower to a contour (an ellipse, a nested
+/// composite), an invalid ring, or members that union to nothing.
+pub fn composite_regions(
+    members: &[Profile],
+    tolerance: Tolerance,
+) -> GeomResult<Vec<CompositeRegion>> {
+    if members.is_empty() {
+        return Err(GeomError::InvalidInput(
+            "a composite profile needs at least one member".to_owned(),
+        ));
+    }
+    let mut rings = Vec::new();
+    // Per member: its outer ring's index, and its holes' indices.
+    let mut layout = Vec::with_capacity(members.len());
+    for member in members {
+        if matches!(member, Profile::Composite(_)) {
+            return Err(unsupported("composite profile nested in a composite"));
+        }
+        let contour = crate::extrude_exact::profile_to_contour(member, tolerance)?;
+        let outer = rings.len();
+        rings.push(crate::contour_lower::contour_to_arc_ring(
+            &contour.outer,
+            tolerance,
+        )?);
+        let mut holes = Vec::with_capacity(contour.holes.len());
+        for hole in &contour.holes {
+            holes.push(rings.len());
+            rings.push(crate::contour_lower::contour_to_arc_ring(hole, tolerance)?);
+        }
+        layout.push((outer, holes));
+    }
+    weld_ring_vertices(&mut rings, tolerance);
+    let arrangement = ArcArrangement::new(&rings, tolerance).map_err(|error| {
+        GeomError::InvalidInput(format!("composite member rings are invalid: {error:?}"))
+    })?;
+    let regions = arrangement
+        .regions(|inside| {
+            layout
+                .iter()
+                .any(|(outer, holes)| inside[*outer] && !holes.iter().any(|hole| inside[*hole]))
+        })
+        .map_err(|error| {
+            GeomError::InvalidInput(format!("composite member union failed: {error:?}"))
+        })?;
+    if regions.is_empty() {
+        return Err(GeomError::Degenerate(
+            "composite profile members union to nothing".to_owned(),
+        ));
+    }
+    Ok(regions
+        .iter()
+        .map(|region| CompositeRegion {
+            outer: without_zero_pieces(arrangement.ring(&region.outer)),
+            holes: region
+                .holes
+                .iter()
+                .map(|hole| without_zero_pieces(arrangement.ring(hole)))
+                .collect(),
+        })
+        .collect())
+}
+
+/// Drop every piece whose ends round to the same point.
+///
+/// Where an arc is tangent to a line at a shared corner (a disc capping a
+/// bar of its own diameter), the arrangement can split the line at the
+/// tangency and round the split onto the corner, linking a piece of zero
+/// length. It carries no boundary, so removing the vertex that starts it
+/// leaves the same ring.
+fn without_zero_pieces(mut ring: ArcRing) -> ArcRing {
+    let mut index = 0;
+    while ring.vertices.len() > 1 && index < ring.vertices.len() {
+        let next = (index + 1) % ring.vertices.len();
+        if ring.vertices[index].point == ring.vertices[next].point {
+            ring.vertices.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+    ring
+}
+
+/// Move every ring vertex within the linear tolerance of one seen before it
+/// onto that earlier vertex.
+///
+/// Members authored to meet do not always meet in `f64`: a circle's
+/// quarter-arc end at angle `pi/2` evaluates `cos` to `6e-17`, a few ulps
+/// off the rectangle corner it was placed on. The arrangement is exact, so
+/// it keeps both points and links a zero-length piece between them. Welding
+/// first makes the shared corner one vertex, as the author meant.
+fn weld_ring_vertices(rings: &mut [ArcRing], tolerance: Tolerance) {
+    let limit = tolerance.linear();
+    let mut seen: Vec<Point2> = Vec::new();
+    for ring in rings.iter_mut() {
+        for vertex in &mut ring.vertices {
+            match seen
+                .iter()
+                .find(|point| (**point - vertex.point).length() <= limit)
+            {
+                Some(point) => vertex.point = *point,
+                None => seen.push(vertex.point),
+            }
+        }
     }
 }
 

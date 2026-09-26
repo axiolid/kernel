@@ -16,7 +16,7 @@ use axiolid_topology::{
 use crate::center_line_exact::center_line_contour;
 use crate::contour_lower::{contour_to_arc_ring, orient_arc_ring};
 use crate::extrude_arc::extrude_arc_rings;
-use crate::profile_lower::{lower_composite, lower_derived};
+use crate::profile_lower::lower_derived;
 use crate::section_lower::{rectangle_contour, section_contour};
 use crate::BACKEND_ID;
 
@@ -1056,19 +1056,37 @@ fn extrude_contour(
     extrude_arc_rings(&rings, offset)
 }
 
-/// Extrude a composite profile: union the members, then extrude the result.
+/// Extrude a composite profile: union the members exactly, then extrude
+/// each connected piece. Disjoint members come back as one solid each in
+/// one `ExactBRep` (#111).
 fn extrude_composite(
     members: &[Profile],
     offset: Vec3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    let (outer, holes) = lower_composite(members, tolerance)?;
-    // Ring 0 is the outer boundary and the rest are through-holes, which is
-    // exactly the shape `extrude_polygon_rings` already expects.
-    let mut rings = Vec::with_capacity(1 + holes.len());
-    rings.push(outer);
-    rings.extend(holes);
-    extrude_polygon_rings(&rings, offset)
+    let regions = crate::profile_lower::composite_regions(members, tolerance)?;
+    let mut pieces = Vec::with_capacity(regions.len());
+    for region in regions {
+        let mut rings = Vec::with_capacity(1 + region.holes.len());
+        rings.push(orient_arc_ring(&region.outer, true)?);
+        for hole in &region.holes {
+            rings.push(orient_arc_ring(hole, false)?);
+        }
+        // A straight-edged piece takes the polygon path, as a contour does.
+        if rings
+            .iter()
+            .all(|ring| ring.vertices.iter().all(|vertex| vertex.bulge == 0.0))
+        {
+            let polygons: Vec<Vec<Point2>> = rings
+                .iter()
+                .map(|ring| ring.vertices.iter().map(|vertex| vertex.point).collect())
+                .collect();
+            pieces.push(extrude_polygon_rings(&polygons, offset)?);
+        } else {
+            pieces.push(extrude_arc_rings(&rings, offset)?);
+        }
+    }
+    crate::assemble::merge_solids(pieces)
 }
 
 /// Extrude an ellipse profile into an elliptical-cylinder prism.
@@ -1243,6 +1261,7 @@ pub fn profile_to_contour(profile: &Profile, tolerance: Tolerance) -> GeomResult
     match profile {
         Profile::Contour(contour) => Ok(contour.clone()),
         Profile::Rectangle(rectangle) => rectangle_contour(rectangle),
+        Profile::Circle(circle) => crate::section_lower::circle_contour(circle),
         Profile::Section(section) => section_contour(section),
         Profile::CenterLine(center_line) => center_line_contour(center_line, tolerance),
         Profile::Derived { basis, transform } => {

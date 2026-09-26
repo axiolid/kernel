@@ -247,17 +247,29 @@ fn a_rounded_rectangle_revolves_into_tori_at_the_arc_centres() {
 }
 
 #[test]
-fn a_hollow_rectangle_revolution_still_refuses_by_name() {
-    let profile = Profile::Rectangle(rect(2.0, 3.0, Some(0.2), Some(0.3), None));
-    let result = revolve_profile_exact(
+fn a_hollow_rounded_rectangle_revolves_with_its_opening_as_a_void() {
+    // The opening sweeps a closed ring-shaped cavity (#111). Pappus: the
+    // section is symmetric about its centre, 5 from the axis.
+    let (x, y, t, r) = (2.0, 3.0, 0.2, 0.3);
+    let profile = Profile::Rectangle(rect(x, y, Some(t), Some(r), None));
+    let solid = revolve_profile_exact(
         &profile,
         Point3::new(-5.0, 0.0, 0.0),
         Vec3::Y,
         TAU,
         Tolerance::METRE,
-    );
+    )
+    .expect("a hollow rectangle revolves");
+    let health = geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    assert_eq!(solid.topology().solids()[0].voids.len(), 1, "one cavity");
+    let section = x * y - (4.0 - core::f64::consts::PI) * r * r - (x - 2.0 * t) * (y - 2.0 * t);
+    let expected = TAU * 5.0 * section;
+    let volume = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .expect("measurable")
+        .signed_volume;
     assert!(
-        matches!(&result, Err(GeomError::UnsupportedInput { input, .. }) if *input == "hollow rectangle exact revolution"),
-        "got {result:?}"
+        (volume - expected).abs() < 1e-10 * expected,
+        "expected {expected}, got {volume}"
     );
 }

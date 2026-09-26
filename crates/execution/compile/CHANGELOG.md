@@ -11,6 +11,9 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- Every solid of a B-rep is tessellated, not only the first (#111): a
+  composite profile whose members do not touch is several solids in one
+  B-rep.
 - A solid's void shells are tessellated (#120). They were dropped as
   "boolean intent", which silently filled every cavity of an authored
   `IfcFacetedBrepWithVoids`-style B-rep and forced the exact booleans to

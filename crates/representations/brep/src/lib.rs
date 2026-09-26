@@ -13,7 +13,7 @@ use std::fmt;
 use axiolid_core::Interval;
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_surface::Surface;
-use axiolid_topology::{audit_brep, BRep, BRepHealth, EdgeId, FaceId, LoopId};
+use axiolid_topology::{audit_brep, BRep, BRepHealth, EdgeId, FaceId, LoopId, ShellId};
 
 /// Persistent structural names for faces and edges.
 pub mod name;
@@ -228,6 +228,127 @@ impl ExactBRepBuilder {
     }
 
     /// Validate and freeze the exact B-rep result.
+    /// Copy every vertex, edge, loop, face and shell of `other` into this
+    /// builder, with its curves, surfaces, intervals and names, and return
+    /// the new handles of `other`'s shells in order.
+    ///
+    /// Solids are NOT copied: the caller says what the shells are -- the
+    /// outer shell of another solid, or a void of one already here. With
+    /// `reverse`, every face is used reversed in its shell, which turns a
+    /// solid's outer shell into the boundary of the same region seen from
+    /// outside it: a void.
+    pub fn append(&mut self, other: &ExactBRep, reverse: bool) -> Vec<ShellId> {
+        use axiolid_topology::{Edge, EdgeUse, Face, Loop, Orientation, Shell, Vertex};
+
+        let curves3: Vec<Curve3Id> = other
+            .curves3
+            .iter()
+            .map(|curve| self.add_curve3(curve.clone()))
+            .collect();
+        let curves2: Vec<Curve2Id> = other
+            .curves2
+            .iter()
+            .map(|curve| self.add_curve2(curve.clone()))
+            .collect();
+        let surfaces: Vec<SurfaceId> = other
+            .surfaces
+            .iter()
+            .map(|surface| self.add_surface(surface.clone()))
+            .collect();
+        let source = &other.topology;
+        let vertices: Vec<_> = source
+            .vertices()
+            .iter()
+            .map(|vertex| {
+                self.topology.add_vertex(Vertex {
+                    position: vertex.position,
+                })
+            })
+            .collect();
+        let mut edges = Vec::with_capacity(source.edges().len());
+        for (index, edge) in source.edges().iter().enumerate() {
+            let id = self.topology.add_edge(Edge {
+                start: vertices[edge.start.index()],
+                end: vertices[edge.end.index()],
+                curve: edge.curve.map(|curve| curves3[curve.index()]),
+            });
+            if let Some(old) = source.edge_id_at(index) {
+                if let Some(interval) = other.edge_intervals.get(&old) {
+                    self.edge_intervals.insert(id, *interval);
+                }
+                if let Some(name) = other.edge_names.get(&old) {
+                    self.edge_names.insert(id, name.clone());
+                }
+            }
+            edges.push(id);
+        }
+        let mut loops = Vec::with_capacity(source.loops().len());
+        for (index, wire) in source.loops().iter().enumerate() {
+            let id = self.topology.add_loop(Loop {
+                edges: wire
+                    .edges
+                    .iter()
+                    .map(|use_| EdgeUse {
+                        edge: edges[use_.edge.index()],
+                        orientation: use_.orientation,
+                        pcurve: use_.pcurve.map(|curve| curves2[curve.index()]),
+                    })
+                    .collect(),
+            });
+            if let Some(old) = source.loop_id_at(index) {
+                for use_index in 0..wire.edges.len() {
+                    if let Some(interval) = other.pcurve_intervals.get(&(old, use_index)) {
+                        self.pcurve_intervals.insert((id, use_index), *interval);
+                    }
+                }
+            }
+            loops.push(id);
+        }
+        let mut faces = Vec::with_capacity(source.faces().len());
+        for (index, face) in source.faces().iter().enumerate() {
+            let id = self.topology.add_face(Face {
+                surface: face.surface.map(|surface| surfaces[surface.index()]),
+                bounds: face
+                    .bounds
+                    .iter()
+                    .map(|bound| axiolid_topology::FaceBound {
+                        loop_id: loops[bound.loop_id.index()],
+                        ..*bound
+                    })
+                    .collect(),
+                orientation: face.orientation,
+            });
+            if let Some(name) = source
+                .face_id_at(index)
+                .and_then(|old| other.face_names.get(&old))
+            {
+                self.face_names.insert(id, name.clone());
+            }
+            faces.push(id);
+        }
+        source
+            .shells()
+            .iter()
+            .map(|shell| {
+                self.topology.add_shell(Shell {
+                    faces: shell
+                        .faces
+                        .iter()
+                        .map(|&(face, sense)| {
+                            let sense = match (sense, reverse) {
+                                (sense, false) => sense,
+                                (Orientation::Forward, true) => Orientation::Reversed,
+                                (Orientation::Reversed, true) => Orientation::Forward,
+                            };
+                            (faces[face.index()], sense)
+                        })
+                        .collect(),
+                    closed: shell.closed,
+                })
+            })
+            .collect()
+    }
+
     pub fn finish(self) -> Result<ExactBRep, ExactBRepError> {
         validate(&self)?;
         Ok(ExactBRep {

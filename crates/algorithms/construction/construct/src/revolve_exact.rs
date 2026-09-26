@@ -28,6 +28,7 @@ use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Interval, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3};
+use axiolid_overlay::ArcRing;
 use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_surface::{Cylinder, Plane, Surface};
 use axiolid_topology::{
@@ -76,7 +77,9 @@ pub fn revolve_profile_exact(
         Profile::Rectangle(rectangle) => {
             revolve_rectangle(rectangle, axis_origin, axis_direction, tolerance)
         }
-        Profile::Circle(_) => Err(unsupported("circle-profile exact revolution")),
+        // A circle lowers to four quarter arcs, each sweeping a torus
+        // quarter; a hollow circle's bore becomes a toroidal void (#111).
+        Profile::Circle(_) => revolve_via_contour(profile, axis_origin, axis_direction, tolerance),
         Profile::Ellipse(_) => Err(unsupported("ellipse exact revolution")),
         // Every one of these lowers to a contour, and a contour revolves.
         // The refusals they carried described a missing module, not missing
@@ -99,13 +102,13 @@ fn revolve_rectangle(
     axis_direction: Vec3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    if rectangle.thickness.is_some() {
-        return Err(unsupported("hollow rectangle exact revolution"));
-    }
-    if rectangle.outer_radius.is_some() || rectangle.inner_radius.is_some() {
-        // Rounded corners revolve into tori, which the general contour
-        // revolver already builds; the dedicated path below only knows
-        // straight edges.
+    if rectangle.thickness.is_some()
+        || rectangle.outer_radius.is_some()
+        || rectangle.inner_radius.is_some()
+    {
+        // Rounded corners revolve into tori and a hollow section's opening
+        // into a void, both of which the general contour revolver builds;
+        // the dedicated path below only knows one straight-edged ring.
         return revolve_via_contour(
             &Profile::Rectangle(*rectangle),
             axis_origin,
@@ -507,12 +510,64 @@ fn revolve_via_contour(
         ));
     }
 
-    let contour = crate::extrude_exact::profile_to_contour(profile, tolerance)?;
-    if !contour.holes.is_empty() {
-        // A hole in a revolved section makes an internal void, which is a
-        // second shell rather than a second loop on a cap.
-        return Err(unsupported("exact revolution of a section with holes"));
+    // A composite is unioned exactly first; members that do not touch
+    // revolve into separate solids of one `ExactBRep` (#111).
+    if let Profile::Composite(members) = profile {
+        let regions = crate::profile_lower::composite_regions(members, tolerance)?;
+        let mut pieces = Vec::with_capacity(regions.len());
+        for region in &regions {
+            pieces.push(revolve_region(
+                &region.outer,
+                &region.holes,
+                axis_origin,
+                tolerance,
+            )?);
+        }
+        return crate::assemble::merge_solids(pieces);
     }
-    let ring = crate::contour_lower::contour_to_arc_ring(&contour.outer, tolerance)?;
-    crate::revolve_contour::revolve_arc_ring(&ring, axis_origin, tolerance)
+
+    let contour = crate::extrude_exact::profile_to_contour(profile, tolerance)?;
+    let outer = crate::contour_lower::contour_to_arc_ring(&contour.outer, tolerance)?;
+    let holes = contour
+        .holes
+        .iter()
+        .map(|hole| crate::contour_lower::contour_to_arc_ring(hole, tolerance))
+        .collect::<GeomResult<Vec<_>>>()?;
+    revolve_region(&outer, &holes, axis_origin, tolerance)
+}
+
+/// Revolve one section a full turn: its outer ring as the solid, each hole
+/// as a void.
+fn revolve_region(
+    outer: &ArcRing,
+    holes: &[ArcRing],
+    axis_origin: Point3,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    let solid = crate::revolve_contour::revolve_arc_ring(outer, axis_origin, tolerance)?;
+    if holes.is_empty() {
+        return Ok(solid);
+    }
+    // A hole swept a full turn encloses a ring-shaped cavity: it touches
+    // neither cap, so it is a second shell, not a second loop. Each hole
+    // revolves on its own and joins the solid as a void, its faces used
+    // reversed so they face into the cavity (#111).
+    let mut builder = ExactBRepBuilder::default();
+    let outer = builder.append(&solid, false);
+    let mut voids = Vec::with_capacity(holes.len());
+    for hole in holes {
+        let cavity = crate::revolve_contour::revolve_arc_ring(hole, axis_origin, tolerance)?;
+        voids.extend(builder.append(&cavity, true));
+    }
+    let [outer] = outer[..] else {
+        return Err(GeomError::Degenerate(
+            "a revolved section must have one outer shell".to_owned(),
+        ));
+    };
+    builder.topology_mut().add_solid(Solid { outer, voids });
+    builder.finish().map_err(|error| {
+        GeomError::Degenerate(format!(
+            "revolved section with holes did not assemble: {error}"
+        ))
+    })
 }

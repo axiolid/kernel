@@ -62,6 +62,14 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- Exact profile breadth (#111): full-turn revolution of circles, hollow
+  circles and rectangles, and any section with holes (each hole a toroidal
+  cavity carried as a void shell). Composite profiles are unioned exactly
+  over one arc arrangement, so members may carry arcs and their own
+  openings, and members that do not touch become separate solids of one
+  exact B-rep. The mesh compiler tessellates every solid of a B-rep.
+  A translated circle profile lowers to an exact contour instead of being
+  refused.
 - Cavities (#120): a solid's void shells are tessellated, facing into the
   cavity, so the mesh encloses the outer volume less every cavity. A void
   authored facing the other way is turned round; an open void shell is

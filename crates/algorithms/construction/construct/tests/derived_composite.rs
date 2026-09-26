@@ -199,20 +199,22 @@ fn members_forming_a_frame_produce_a_genuine_hole() {
 }
 
 #[test]
-fn disjoint_members_are_refused_not_silently_reduced_to_one() {
-    // Two separated squares are two bodies. `Solid` holds one outer shell
-    // plus voids, so returning either square alone would silently discard
-    // the other.
+fn disjoint_members_become_separate_solids_not_one() {
+    // Two separated squares are two bodies (#111). Both come back, as two
+    // solids of one `ExactBRep`; returning either alone would silently
+    // discard the other.
     let profile = Profile::Composite(vec![
         placed(2.0, 2.0, Vec2::new(0.0, 0.0)),
         placed(2.0, 2.0, Vec2::new(10.0, 0.0)),
     ]);
-    let error = extrude_profile_exact(&profile, Vec3::Z, 1.0, Tolerance::METRE)
-        .expect_err("disjoint members are two solids");
-    assert!(
-        format!("{error:?}").contains("disjoint"),
-        "the refusal must name the disjointness, got {error:?}"
-    );
+    let solid = extrude_profile_exact(&profile, Vec3::Z, 1.0, Tolerance::METRE)
+        .expect("disjoint members are two solids");
+    assert_eq!(solid.topology().solids().len(), 2, "one solid per member");
+    assert!(geometric_audit(&solid, Tolerance::METRE).is_consistent());
+    let volume = exact_properties(&solid, Tolerance::METRE)
+        .expect("volume")
+        .signed_volume;
+    assert!((volume - 8.0).abs() < 1e-12, "both squares: {volume}");
 }
 
 #[test]
