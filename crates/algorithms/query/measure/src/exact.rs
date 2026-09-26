@@ -14,7 +14,7 @@
 //!
 //! A curved face, or a planar face with a curved edge, is integrated over its
 //! own parameter domain by Green's theorem round the face's pcurves
-//! ([`crate::exact_face`]): the exact surface and the exact trimming curves,
+//! (module `exact_face`): the exact surface and the exact trimming curves,
 //! with adaptive Gauss-Kronrod quadrature held to a relative error near
 //! machine precision. Nothing is faceted.
 //!
@@ -116,7 +116,7 @@ pub(crate) fn family(surface: &Surface) -> &'static str {
 /// cylinders, B-spline surfaces, and planar faces with an arc or ellipse on
 /// their boundary -- contributes the same cone integrals over its own
 /// parameter domain, by Green's theorem round its pcurves (see
-/// [`crate::exact_face`]). Both paths use the same fields, so a solid mixing
+/// `exact_face`). Both paths use the same fields, so a solid mixing
 /// them sums consistently.
 ///
 /// Orientation is honoured at every level: a face marked

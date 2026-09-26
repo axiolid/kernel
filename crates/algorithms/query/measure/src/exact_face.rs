@@ -60,15 +60,13 @@
 //! integrated the other way round, `oint G dv` with `G` an integral in `u`.
 
 use axiolid_brep::ExactBRep;
-use axiolid_core::{Point2, Point3, Scalar, Vec2, Vec3};
-use axiolid_curve::Curve2;
+use axiolid_core::{Point2, Scalar, Vec3};
 use axiolid_evaluate::surface::{evaluate, partials};
-use axiolid_evaluate::{derivative2, evaluate2};
 use axiolid_surface::Surface;
-use axiolid_topology::{Face, Orientation};
-use core::f64::consts::{FRAC_PI_2, TAU};
+use axiolid_topology::Face;
 
 use crate::exact::{ExactMeasureError, Sums, COMPONENTS};
+use crate::exact_domain::{assemble, chart, pole_on_domain_side};
 
 /// Relative error accepted on each Gauss-Kronrod piece.
 const RELATIVE: Scalar = 1e-13;
@@ -79,106 +77,6 @@ const MAX_PIECES: usize = 2048;
 /// Length dimension of each component, for the absolute noise floor:
 /// area, volume, three first moments, three second moments.
 const DIMENSION: [i32; COMPONENTS] = [2, 3, 4, 4, 4, 5, 5, 5];
-
-/// How a face's surface is parameterised: its periods and its poles.
-struct Chart {
-    u_period: Option<Scalar>,
-    v_period: Option<Scalar>,
-    /// `v` values where the surface collapses to one point for every `u`.
-    poles: Vec<Scalar>,
-}
-
-fn chart(surface: &Surface) -> Result<Chart, ExactMeasureError> {
-    let chart = match surface {
-        Surface::Plane(_) | Surface::BSpline(_) => Chart {
-            u_period: None,
-            v_period: None,
-            poles: Vec::new(),
-        },
-        Surface::Cylinder(_) | Surface::EllipticalCylinder(_) => Chart {
-            u_period: Some(TAU),
-            v_period: None,
-            poles: Vec::new(),
-        },
-        Surface::Cone(cone) => {
-            let slope = cone.semi_angle.tan();
-            let poles = if slope.is_finite() && slope != 0.0 {
-                vec![-cone.radius / slope]
-            } else {
-                Vec::new()
-            };
-            Chart {
-                u_period: Some(TAU),
-                v_period: None,
-                poles,
-            }
-        }
-        Surface::Sphere(_) => Chart {
-            u_period: Some(TAU),
-            v_period: None,
-            poles: vec![-FRAC_PI_2, FRAC_PI_2],
-        },
-        Surface::Torus(_) => Chart {
-            u_period: Some(TAU),
-            v_period: Some(TAU),
-            poles: Vec::new(),
-        },
-        _ => {
-            return Err(ExactMeasureError::NonPlanarFace(crate::exact::family(
-                surface,
-            )))
-        }
-    };
-    Ok(chart)
-}
-
-/// One stretch of a loop in the parameter plane.
-enum Piece<'a> {
-    /// A pcurve over `[start, end]`, shifted by whole periods.
-    Curve {
-        curve: &'a Curve2,
-        start: Scalar,
-        end: Scalar,
-        offset: Vec2,
-    },
-    /// A straight closing stretch: across a pole, or a gap within tolerance.
-    Segment { from: Point2, to: Point2 },
-}
-
-impl Piece<'_> {
-    fn span(&self) -> (Scalar, Scalar) {
-        match self {
-            Self::Curve { start, end, .. } => (*start, *end),
-            Self::Segment { .. } => (0.0, 1.0),
-        }
-    }
-
-    fn at(&self, t: Scalar) -> Result<(Point2, Vec2), ExactMeasureError> {
-        match self {
-            Self::Curve { curve, offset, .. } => {
-                let point = evaluate2(curve, t).map_err(|_| ExactMeasureError::Evaluation)?;
-                let tangent = derivative2(curve, t).map_err(|_| ExactMeasureError::Evaluation)?;
-                Ok((point + *offset, tangent))
-            }
-            Self::Segment { from, to } => Ok((*from + (*to - *from) * t, *to - *from)),
-        }
-    }
-
-    fn end_point(&self) -> Result<Point2, ExactMeasureError> {
-        Ok(self.at(self.span().1)?.0)
-    }
-}
-
-/// A face's boundary, assembled in the parameter plane.
-struct Boundary<'a> {
-    pieces: Vec<Piece<'a>>,
-    /// Net whole periods each loop winds, summed over the face.
-    winding: [i64; 2],
-    /// Whether any single loop winds in `u` / in `v`.
-    wraps: [bool; 2],
-    /// A point on the boundary, for choosing the reference line.
-    anchor: Point2,
-}
 
 /// Integrate one face's contribution to every component.
 ///
@@ -239,189 +137,6 @@ pub(crate) fn face_sums(
         }
     }
     Ok(total)
-}
-
-/// The pole the face's domain reaches, used as the reference line so the
-/// pole itself -- the boundary no loop states -- contributes zero.
-fn pole_on_domain_side(
-    chart: &Chart,
-    boundary: &Boundary<'_>,
-) -> Result<Scalar, ExactMeasureError> {
-    // A loop running +u keeps its domain on its left, towards +v.
-    let upward = match boundary.winding[0] {
-        1 => true,
-        -1 => false,
-        _ => {
-            return Err(ExactMeasureError::ParameterDomain(
-                "face boundary winds around the surface more than once",
-            ))
-        }
-    };
-    chart
-        .poles
-        .iter()
-        .copied()
-        .filter(|pole| (*pole > boundary.anchor.y) == upward)
-        .min_by(|a, b| {
-            (a - boundary.anchor.y)
-                .abs()
-                .total_cmp(&(b - boundary.anchor.y).abs())
-        })
-        .ok_or(ExactMeasureError::ParameterDomain(
-            "face boundary winds around a surface with no pole on the domain side",
-        ))
-}
-
-/// Assemble every bound's pcurves into one boundary, joining each use to the
-/// next through whole periods, across a pole, or over a gap within tolerance.
-fn assemble<'a>(
-    brep: &'a ExactBRep,
-    face: &Face<axiolid_brep::SurfaceId>,
-    surface: &Surface,
-    chart: &Chart,
-    linear: Scalar,
-) -> Result<Boundary<'a>, ExactMeasureError> {
-    let topology = brep.topology();
-    let mut pieces = Vec::new();
-    let mut winding = [0_i64; 2];
-    let mut wraps = [false; 2];
-    let mut anchor = None;
-
-    for bound in &face.bounds {
-        let wire = topology
-            .loops()
-            .get(bound.loop_id.index())
-            .ok_or(ExactMeasureError::DanglingReference)?;
-        let reversed = bound.orientation == Orientation::Reversed;
-
-        // Each use's pcurve interval already runs in the use's traversal
-        // (ADR 0024); a reversed bound walks the loop backwards.
-        let mut uses = Vec::with_capacity(wire.edges.len());
-        for (index, use_) in wire.edges.iter().enumerate() {
-            let pcurve = use_.pcurve.ok_or(ExactMeasureError::DanglingReference)?;
-            let curve = brep
-                .curves2()
-                .get(pcurve.index())
-                .ok_or(ExactMeasureError::DanglingReference)?;
-            let interval = brep
-                .pcurve_interval(bound.loop_id, index)
-                .ok_or(ExactMeasureError::DanglingReference)?;
-            let (start, end) = if reversed {
-                (interval.end, interval.start)
-            } else {
-                (interval.start, interval.end)
-            };
-            uses.push((curve, start, end));
-        }
-        if reversed {
-            uses.reverse();
-        }
-        let Some(&(first_curve, first_start, _)) = uses.first() else {
-            continue;
-        };
-
-        let loop_start =
-            evaluate2(first_curve, first_start).map_err(|_| ExactMeasureError::Evaluation)?;
-        anchor.get_or_insert(loop_start);
-        let mut offset = Vec2::ZERO;
-        let mut cursor = loop_start;
-        for (curve, start, end) in uses {
-            let raw = evaluate2(curve, start).map_err(|_| ExactMeasureError::Evaluation)?;
-            let (shift, bridge) = join(surface, chart, cursor, raw + offset, linear)?;
-            offset += shift;
-            if let Some(segment) = bridge {
-                pieces.push(segment);
-            }
-            let piece = Piece::Curve {
-                curve,
-                start,
-                end,
-                offset,
-            };
-            cursor = piece.end_point()?;
-            pieces.push(piece);
-        }
-
-        // Close the loop back onto its own start.
-        let (shift, bridge) = join(surface, chart, cursor, loop_start, linear)?;
-        if let Some(segment) = bridge {
-            pieces.push(segment);
-        }
-        // `shift` moved the start onto the end: the loop ended that many
-        // periods on from where it began.
-        let turns = [
-            periods(shift.x, chart.u_period),
-            periods(shift.y, chart.v_period),
-        ];
-        for axis in 0..2 {
-            winding[axis] += turns[axis];
-            wraps[axis] |= turns[axis] != 0;
-        }
-    }
-
-    let anchor = anchor.ok_or(ExactMeasureError::Degenerate)?;
-    Ok(Boundary {
-        pieces,
-        winding,
-        wraps,
-        anchor,
-    })
-}
-
-/// Whole periods in `shift`, which is already a multiple of `period`.
-fn periods(shift: Scalar, period: Option<Scalar>) -> i64 {
-    period.map_or(0, |period| (shift / period).round() as i64)
-}
-
-/// Join a loop that has reached `from` to the next use starting at `to`.
-///
-/// Returns the whole-period shift to apply to `to` and everything after it,
-/// and the closing segment, if one is needed. The two must be the same point
-/// on the surface; the parameter gap between them may be whole periods (a
-/// seam), a stretch along a pole, or a residue within tolerance.
-fn join<'a>(
-    surface: &Surface,
-    chart: &Chart,
-    from: Point2,
-    to: Point2,
-    linear: Scalar,
-) -> Result<(Vec2, Option<Piece<'a>>), ExactMeasureError> {
-    let there = point(surface, from)?;
-    let here = point(surface, to)?;
-    if (there - here).length() > linear {
-        return Err(ExactMeasureError::ParameterDomain(
-            "consecutive pcurves of a face loop do not meet on the surface",
-        ));
-    }
-
-    // Along a pole `u` is free: keep the stretch as it is, so its `H du`
-    // is integrated, rather than folding it into periods.
-    let on_pole = chart.poles.iter().any(|pole| {
-        (from.y - pole).abs() <= parameter_slack(*pole)
-            && (to.y - pole).abs() <= parameter_slack(*pole)
-    });
-    let shift = if on_pole {
-        Vec2::ZERO
-    } else {
-        let wrap = |gap: Scalar, period: Option<Scalar>| {
-            period.map_or(0.0, |period| (gap / period).round() * period)
-        };
-        Vec2::new(
-            wrap(from.x - to.x, chart.u_period),
-            wrap(from.y - to.y, chart.v_period),
-        )
-    };
-    let landed = to + shift;
-    let bridge = (landed != from).then_some(Piece::Segment { from, to: landed });
-    Ok((shift, bridge))
-}
-
-fn parameter_slack(value: Scalar) -> Scalar {
-    1e-9 * value.abs().max(1.0)
-}
-
-fn point(surface: &Surface, at: Point2) -> Result<Point3, ExactMeasureError> {
-    evaluate(surface, at.x, at.y).map_err(|_| ExactMeasureError::Evaluation)
 }
 
 /// `H(u, v)`: the density integrated in `v` from the reference line.
@@ -616,7 +331,23 @@ mod tests {
     /// curved face lies above the circle, so its loop runs `+u` and the
     /// disc faces down.
     fn capped(surface: Surface, r: f64, upward: bool) -> ExactBRep {
-        let disc = Surface::Plane(Plane { frame: WORLD });
+        capped_at(surface, r, upward, 0.0)
+    }
+
+    /// A frame parallel to the world's, at height `z`.
+    fn at_height(z: f64) -> Frame3 {
+        Frame3 {
+            origin: Point3::new(0.0, 0.0, z),
+            ..WORLD
+        }
+    }
+
+    /// [`capped`] with the circle and disc in the plane `z = height`; the
+    /// surface's own frame must sit there too.
+    fn capped_at(surface: Surface, r: f64, upward: bool, height: f64) -> ExactBRep {
+        let disc = Surface::Plane(Plane {
+            frame: at_height(height),
+        });
         let round = Circle2 {
             frame: Frame2 {
                 origin: Vec2::ZERO,
@@ -625,7 +356,7 @@ mod tests {
             },
             radius: r,
         };
-        capped_with(surface, r, upward, disc, round)
+        capped_with(surface, r, upward, disc, round, height)
     }
 
     /// [`capped`], with the disc on `disc` and its rim at `round` in the
@@ -636,13 +367,14 @@ mod tests {
         upward: bool,
         disc: Surface,
         round: Circle2,
+        height: f64,
     ) -> ExactBRep {
         let mut b = ExactBRepBuilder::default();
         let vertex = b.topology_mut().add_vertex(Vertex {
-            position: Point3::new(r, 0.0, 0.0),
+            position: Point3::new(r, 0.0, height),
         });
         let circle = b.add_curve3(Curve3::Circle(Circle3 {
-            frame: WORLD,
+            frame: at_height(height),
             radius: r,
         }));
         let edge = b.topology_mut().add_edge(Edge {
@@ -832,6 +564,7 @@ mod tests {
             true,
             Surface::BSpline(patch),
             rim,
+            0.0,
         );
         let props = exact_properties(&solid, Tolerance::METRE).expect("measurable");
         close("volume", props.signed_volume, 2.0 / 3.0 * PI * r.powi(3));
@@ -1022,6 +755,67 @@ mod tests {
                 "expected {exact}, got {component}"
             );
         }
+    }
+
+    #[test]
+    fn two_poles_face_each_other_across_a_certified_gap() {
+        // A hemisphere up to z = 1, and a lower hemisphere whose south pole
+        // hangs at z = 2: the nearest points are the two poles, where the
+        // domain meets its pole rather than any edge.
+        use crate::exact_distance::boundary_distance;
+        let north = capped(
+            Surface::Sphere(Sphere {
+                frame: WORLD,
+                radius: 1.0,
+            }),
+            1.0,
+            true,
+        );
+        let south = capped_at(
+            Surface::Sphere(Sphere {
+                frame: at_height(3.0),
+                radius: 1.0,
+            }),
+            1.0,
+            false,
+            3.0,
+        );
+        let bounds = boundary_distance(&north, &south, 1e-8, Tolerance::METRE).expect("bounded");
+        assert!(
+            bounds.lower <= 1.0 && 1.0 <= bounds.upper && bounds.upper - bounds.lower <= 1e-8,
+            "{bounds:?}"
+        );
+    }
+
+    #[test]
+    fn a_cone_apex_is_never_pruned_as_non_critical() {
+        // Apex at z = 1 pointing at a south pole at z = 1.5. The apex is not
+        // a smooth point, so the normal-cone test must keep patches that
+        // reach it; dropping them would lift the lower bound past 0.5.
+        use crate::exact_distance::boundary_distance;
+        let cone = capped(
+            Surface::Cone(Cone {
+                frame: WORLD,
+                radius: 1.0,
+                semi_angle: (-1.0_f64).atan(),
+            }),
+            1.0,
+            true,
+        );
+        let south = capped_at(
+            Surface::Sphere(Sphere {
+                frame: at_height(2.5),
+                radius: 1.0,
+            }),
+            1.0,
+            false,
+            2.5,
+        );
+        let bounds = boundary_distance(&cone, &south, 1e-6, Tolerance::METRE).expect("bounded");
+        assert!(
+            bounds.lower <= 0.5 && 0.5 <= bounds.upper && bounds.upper - bounds.lower <= 1e-6,
+            "{bounds:?}"
+        );
     }
 
     #[test]

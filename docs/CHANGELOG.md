@@ -62,6 +62,12 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- Certified B-rep distance (#125, ADR 0074): `boundary_distance` returns an
+  interval certain to contain the distance between two exact B-reps'
+  boundaries, and `boundary_clearance` compares it with a limit, answering
+  Below, Above or Indeterminate instead of rounding a near-limit value into
+  a verdict. Checked on closed-form fixtures (walls, caps, poles, a cone
+  apex, a torus crown, a plate with a hole) and an 11-fault mutation probe.
 - Exact profile breadth (#111): full-turn revolution of circles, hollow
   circles and rectangles, and any section with holes (each hole a toroidal
   cavity carried as a void shell). Composite profiles are unioned exactly

@@ -80,13 +80,6 @@ effort = "Medium"
 number = 124
 
 [[issue]]
-key = "curved-mass-properties"
-title = "Exact mass properties and distance over curved B-rep faces"
-priority = "Medium"
-effort = "Medium"
-number = 125
-
-[[issue]]
 key = "delaunay-3d"
 title = "3D Delaunay and constrained 3D Delaunay triangulation"
 priority = "Medium"
@@ -740,12 +733,11 @@ cgal = []
 id = "C18"
 area = "brep"
 name = "B-rep distance / extrema between shapes"
-level = "narrow"
-summary = "Only floating-point metric proximity/closest-point witnesses between primitive shapes exist (ClosestPoints3); module doc states these \"construct floating-point witnesses only\" and that certified topological classification is a separate, unimplemented-here concern; no general certified ..."
-evidence = ["crates/algorithms/query/measure/src/proximity.rs::ClosestPoints3", "crates/algorithms/query/measure/tests/proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
+level = "implemented"
+summary = "boundary_distance returns an interval certain to contain the distance between the boundaries of two exact B-reps, with witness points on both (ADR 0074): branch and bound over face patches and edge spans, lower bounds from Lipschitz spheres and exact projection ranges (planes, cylinders, elliptical cylinders, cones, spheres, tori; line/circle/ellipse edges), upper bounds only from points certified on the boundary, normal-cone pruning of non-critical patches. boundary_clearance compares with a limit and answers Below, Above or Indeterminate. Primitive/mesh witnesses (ClosestPoints3, mesh_distance) remain. Distance is between boundaries, not a containment classification; B-spline faces are bounded by their whole control net."
+evidence = ["crates/algorithms/query/measure/src/exact_distance.rs::boundary_distance", "crates/algorithms/query/measure/src/exact_domain.rs", "crates/algorithms/construction/construct/tests/boundary_distance.rs", "scripts/probe_boundary_distance_mutants.py", "crates/algorithms/query/measure/src/proximity.rs::ClosestPoints3"]
 occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepExtrema"]
 cgal = []
-issue = "curved-mass-properties"
 
 [[capability]]
 id = "C19"

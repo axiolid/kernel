@@ -8,6 +8,10 @@
 #[cfg(feature = "exact")]
 pub mod exact;
 #[cfg(feature = "exact")]
+pub mod exact_distance;
+#[cfg(feature = "exact")]
+mod exact_domain;
+#[cfg(feature = "exact")]
 mod exact_face;
 pub mod measure;
 pub mod mesh;
@@ -19,6 +23,8 @@ pub mod winding;
 
 #[cfg(feature = "exact")]
 pub use exact::{exact_properties, ExactMeasureError};
+#[cfg(feature = "exact")]
+pub use exact_distance::{boundary_clearance, boundary_distance, Clearance, DistanceBounds};
 pub use measure::Measure;
 pub use mesh::{
     second_moments, surface_properties, volume_properties, MeshMeasureError, SurfaceProperties,

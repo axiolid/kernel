@@ -11,6 +11,14 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `boundary_distance` and `boundary_clearance` (#125, ADR 0074): an
+  interval certain to contain the distance between the boundaries of two
+  exact B-reps, with witness points on both, and a comparison with a limit
+  that answers `Clearance::Below`, `Above` or `Indeterminate`. Branch and
+  bound over face patches and edge spans; lower bounds from Lipschitz
+  spheres and exact projection ranges, upper bounds only from points
+  certified on the boundary.
+
 - `exact_properties` measures curved faces (#125, ADR 0073): cylinders,
   cones, spheres, tori, elliptical cylinders, B-spline faces, and planar
   faces bounded by arcs or ellipses. Each face is integrated over its own
