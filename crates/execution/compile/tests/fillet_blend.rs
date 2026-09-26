@@ -1,9 +1,7 @@
 //! The fillet builds a real cylindrical blend (#79).
 //!
-//! Lives in `axiolid-mesh-compile` because measuring a curved-faced solid
-//! needs tessellation, and `exact_properties` integrates over planar faces
-//! only -- which is precisely what makes this feature different from the
-//! chamfer.
+//! Lives in `axiolid-mesh-compile` because it checks the tessellated
+//! result, which is what a mesh consumer of the fillet receives.
 
 use axiolid_construct::feature::{fillet_extruded_profile, EdgeSelector, FeatureSize};
 use axiolid_core::{Point2, Tolerance, Vec3};

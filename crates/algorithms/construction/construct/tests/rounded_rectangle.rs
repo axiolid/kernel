@@ -202,8 +202,8 @@ fn a_rounded_rectangle_revolves_into_tori_at_the_arc_centres() {
     // Section centred 5 from the axis. Its rounded corners sit on the inner
     // and outer walls, so their arc centres are at 5 -+ (x/2 - r) from the
     // axis: each corner sweeps a torus with THAT major radius and minor
-    // radius r. `exact_properties` refuses toroidal faces, so the check is
-    // on the surfaces themselves rather than a volume that cannot be taken.
+    // radius r. The surfaces are checked here; `curved_measure.rs` checks
+    // the volume against Pappus.
     let (x, y, r, centre) = (2.0, 3.0, 0.5, 5.0);
     let profile = Profile::Rectangle(rect(x, y, None, Some(r), None));
     let solid = revolve_profile_exact(

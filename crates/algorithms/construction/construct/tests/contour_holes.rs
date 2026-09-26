@@ -79,9 +79,8 @@ fn a_plate_with_a_round_hole_loses_exactly_the_hole_volume() {
     let radius = 1.0;
     let solid = extrude(square(2.0), vec![circle(Point2::new(0.0, 0.0), radius)]);
 
-    // `exact_properties` is planar-only, so the area comes from the exact
-    // rings via the signed-area routine the extruder itself uses to decide
-    // winding. Outer is positive, a correctly wound hole is negative, so the
+    // The area comes from the exact rings via the signed-area routine the
+    // extruder itself uses to decide winding. Outer is positive, a correctly wound hole is negative, so the
     // sum is the net section -- and a dropped or mis-wound hole changes it.
     let outer_area = arc_ring_signed_area(
         &contour_to_arc_ring(&square(2.0), Tolerance::METRE).expect("outer lowers"),

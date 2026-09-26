@@ -110,7 +110,21 @@ fn cap_volume(solid: &ExactBRep) -> f64 {
             total += sense * moment;
         }
     }
+    agrees_with_exact(solid, total);
     total
+}
+
+/// The dense cap sum and `exact_properties` share no code: one samples the
+/// cap edges, the other integrates every face over its own parameters (#125).
+/// They must agree to the sampling's error, and signed.
+fn agrees_with_exact(solid: &ExactBRep, sampled: f64) {
+    let exact = axiolid_measure::exact_properties(solid, tol())
+        .expect("a curved column solid is measurable")
+        .signed_volume;
+    assert!(
+        (exact - sampled).abs() <= 1e-6 * sampled.abs(),
+        "exact {exact} vs sampled caps {sampled}"
+    );
 }
 
 fn audit(solid: &ExactBRep) {

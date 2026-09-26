@@ -7,7 +7,7 @@ use axiolid_brep_audit::geometric_audit;
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{Tolerance, Vec3};
 use axiolid_evaluate::surface;
-use axiolid_measure::{exact_properties, ExactMeasureError};
+use axiolid_measure::exact_properties;
 use axiolid_profile::{EllipseProfile, Profile};
 use axiolid_surface::Surface;
 
@@ -55,20 +55,20 @@ fn an_ellipse_extrudes_to_an_elliptical_cylinder_wall() {
 }
 
 #[test]
-fn the_planar_measurer_refuses_the_elliptical_wall_by_name() {
-    // `exact_properties` is planar-only by design: it refuses a circular
-    // cylinder too. What matters is that it names the new surface rather
-    // than silently treating it as planar or falling into a generic arm.
-    let solid = extrude_profile_exact(&ellipse(3.0, 1.0), Vec3::Z, 2.0, Tolerance::METRE)
+fn the_elliptical_wall_is_measured_exactly() {
+    // `exact_properties` integrates the wall over its own parameters (#125):
+    // the volume is pi a b h, which a wall mistaken for a circular cylinder
+    // (radial normals) or for a plane would not give.
+    let (a, b, h) = (3.0, 1.0, 2.0);
+    let solid = extrude_profile_exact(&ellipse(a, b), Vec3::Z, h, Tolerance::METRE)
         .expect("an ellipse extrudes");
-    let error = exact_properties(&solid, Tolerance::METRE)
-        .expect_err("a curved face is not exactly integrable here");
+    let volume = exact_properties(&solid, Tolerance::METRE)
+        .expect("an elliptical cylinder is measurable")
+        .signed_volume;
+    let expected = core::f64::consts::PI * a * b * h;
     assert!(
-        matches!(
-            error,
-            ExactMeasureError::NonPlanarFace("elliptical-cylindrical")
-        ),
-        "the refusal must name the elliptical wall, got {error:?}"
+        (volume - expected).abs() < 1e-11 * expected,
+        "expected {expected}, got {volume}"
     );
 }
 
@@ -100,9 +100,7 @@ fn degenerate_semi_axes_are_refused() {
 
 #[test]
 fn the_wall_surface_matches_the_closed_form_everywhere() {
-    // `exact_properties` is planar-only and the tessellating path needs a
-    // GeometryGraph, so the surface itself is checked against its closed
-    // form: every sampled point must satisfy (x/a)^2 + (y/b)^2 = 1.
+    // The surface itself is checked against its closed form: every sampled point must satisfy (x/a)^2 + (y/b)^2 = 1.
     let (a, b, depth) = (3.0, 1.25, 2.0);
     let solid = extrude_profile_exact(&ellipse(a, b), Vec3::Z, depth, Tolerance::METRE)
         .expect("an ellipse extrudes");

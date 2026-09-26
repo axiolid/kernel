@@ -80,13 +80,12 @@ fn the_centroid_is_where_symmetry_demands() {
     );
 }
 
-/// A curved face is refused by name, not silently sampled.
-///
-/// This is the boundary that keeps the path honest: approximating a cylinder
-/// here would reintroduce the tessellation error the exact path exists to
-/// avoid, and would do it invisibly.
+/// A curved face is integrated over its own parameters, not refused and not
+/// sampled (#125): a cylinder measures `pi r^2 h` to machine precision rather
+/// than to the chord error of a tessellation. `curved_measure.rs` holds the
+/// per-family oracles.
 #[test]
-fn a_curved_face_is_refused_by_name() {
+fn a_curved_face_is_integrated_not_refused() {
     use axiolid_profile::CircleProfile;
 
     let circle = Profile::Circle(CircleProfile {
@@ -96,14 +95,20 @@ fn a_curved_face_is_refused_by_name() {
     let brep =
         extrude_profile_exact(&circle, Vec3::Z, 2.0, tol()).expect("a circle extrudes exactly");
 
-    let error =
-        exact_properties(&brep, tol()).expect_err("a cylinder is not planar and must be refused");
+    let props = exact_properties(&brep, tol()).expect("a cylinder is measurable");
+    let expected = core::f64::consts::PI * 2.0;
     assert!(
-        matches!(error, ExactMeasureError::NonPlanarFace("cylindrical")),
-        "refusal must name the cylindrical face, got: {error:?}"
+        (props.signed_volume - expected).abs() < 1e-12 * expected,
+        "expected {expected}, got {}",
+        props.signed_volume
     );
-    // The message must tell the caller what to do instead.
-    let text = error.to_string();
+}
+
+/// What cannot be integrated is still refused by name, pointing at the
+/// approximate path.
+#[test]
+fn a_refusal_names_the_approximate_path() {
+    let text = ExactMeasureError::NotConverged.to_string();
     assert!(
         text.contains("MeshMeasure"),
         "refusal should point at the approximate path, got: {text}"
@@ -216,5 +221,55 @@ fn a_raised_solid_measures_the_same_as_one_on_the_ground() {
         (ground.centroid.z - 0.5).abs() < 1e-12,
         "{:?}",
         ground.centroid
+    );
+}
+
+/// A straight-edged planar face with a hole: summed as vectors, the hole's
+/// opposite winding subtracts its area. Summing triangle magnitudes instead
+/// added it (a 4 x 4 plate with a 2 x 2 hole read 20 per cap, not 12).
+#[test]
+fn a_planar_hole_subtracts_its_area() {
+    use axiolid_core::{Interval, Point2};
+    use axiolid_curve::{Curve2, Line2};
+    use axiolid_profile::{Contour, ContourProfile, ProfileSegment};
+
+    let square = |half: f64| {
+        let corners = [
+            Point2::new(-half, -half),
+            Point2::new(half, -half),
+            Point2::new(half, half),
+            Point2::new(-half, half),
+        ];
+        Contour::new(
+            (0..4)
+                .map(|i| ProfileSegment {
+                    curve: Curve2::Line(Line2 {
+                        origin: corners[i],
+                        direction: corners[(i + 1) % 4] - corners[i],
+                    }),
+                    domain: Interval::UNIT,
+                    same_sense: true,
+                })
+                .collect(),
+        )
+    };
+    let depth = 3.0;
+    let profile = Profile::Contour(ContourProfile {
+        outer: square(2.0),
+        holes: vec![square(1.0)],
+    });
+    let brep = extrude_profile_exact(&profile, Vec3::Z, depth, tol()).expect("extrudes");
+    let props = exact_properties(&brep, tol()).expect("measurable");
+    let section = 16.0 - 4.0;
+    assert!(
+        (props.signed_volume - section * depth).abs() < 1e-12,
+        "{}",
+        props.signed_volume
+    );
+    let area = 2.0 * section + (16.0 + 8.0) * depth;
+    assert!(
+        (props.area - area).abs() < 1e-12,
+        "expected {area}, got {}",
+        props.area
     );
 }

@@ -221,6 +221,8 @@ graph TD
     axiolid_linear_intersection --> axiolid_predicates
     axiolid_measure --> axiolid_brep
     axiolid_measure --> axiolid_core
+    axiolid_measure --> axiolid_curve
+    axiolid_measure --> axiolid_evaluate
     axiolid_measure --> axiolid_mesh
     axiolid_measure --> axiolid_surface
     axiolid_measure --> axiolid_topology

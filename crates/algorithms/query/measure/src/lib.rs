@@ -7,6 +7,8 @@
 
 #[cfg(feature = "exact")]
 pub mod exact;
+#[cfg(feature = "exact")]
+mod exact_face;
 pub mod measure;
 pub mod mesh;
 pub mod mesh_measure;

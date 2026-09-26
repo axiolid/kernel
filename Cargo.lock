@@ -433,6 +433,8 @@ version = "0.3.0"
 dependencies = [
  "axiolid-brep",
  "axiolid-core",
+ "axiolid-curve",
+ "axiolid-evaluate",
  "axiolid-mesh",
  "axiolid-surface",
  "axiolid-topology",

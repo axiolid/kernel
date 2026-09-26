@@ -21,11 +21,11 @@ fn fillet_area(radius: f64) -> f64 {
 
 /// Cross-sectional area via Green's theorem over the EXACT contour.
 ///
-/// `exact_properties` is planar-only, so a filleted section cannot go through
-/// it. Integrating the contour directly keeps the arcs exact: a straight
-/// segment contributes its trapezoid and a circular arc contributes its
-/// exact sector-plus-triangle term, so the fillet material is measured rather
-/// than chord-approximated.
+/// Integrating the contour directly keeps the arcs exact: a straight segment
+/// contributes its trapezoid and a circular arc contributes its exact
+/// sector-plus-triangle term, so the fillet material is measured rather than
+/// chord-approximated. It shares no code with `exact_properties`, which
+/// [`volume_of`] checks the built solid against.
 fn contour_area(profile: &Profile) -> f64 {
     let section = match profile {
         Profile::Section(section) => section,
@@ -77,8 +77,17 @@ fn volume_of(profile: &Profile) -> f64 {
         health.defects()
     );
     // Area from the exact contour, depth from the extrusion: the solid is a
-    // prism, so this IS its volume, and it works for curved walls too.
-    contour_area(profile) * DEPTH
+    // prism, so this IS its volume, and it works for curved walls too. The
+    // built solid, fillet walls and all, must measure the same (#125).
+    let expected = contour_area(profile) * DEPTH;
+    let measured = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .expect("a section solid is measurable")
+        .signed_volume;
+    assert!(
+        (measured - expected).abs() <= 1e-11 * expected.abs(),
+        "solid measures {measured}, contour gives {expected}"
+    );
+    expected
 }
 
 fn i_section(fillet: Option<f64>) -> Profile {

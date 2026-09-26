@@ -62,9 +62,18 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- Exact mass properties over curved faces (#125, ADR 0073):
+  `exact_properties` integrates cylinders, cones, spheres, tori, elliptical
+  cylinders, B-spline faces and arc-bounded planar faces over their own
+  parameters instead of refusing them. Checked against closed forms (Pappus,
+  parallel-axis moments, hemispheres, cones, a half torus) and an 18-fault
+  mutation probe.
 
 ### Fixed
 
+- Exact revolutions were built inside out (#125): their surface frames were
+  left-handed, so every face pointed into the solid. Both audits passed it;
+  measuring the result gave `-2 pi R A`. The frames are now right-handed.
 - `axiolid-measure`: `exact_properties` honours face orientation, so an
   exact solid that does not touch `z = 0` measures its true volume (a
   raised unit cube measured 7/3).

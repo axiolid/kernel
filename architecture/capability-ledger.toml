@@ -85,7 +85,6 @@ title = "Exact mass properties and distance over curved B-rep faces"
 priority = "Medium"
 effort = "Medium"
 number = 125
-blocked_by = ["surface-intersection"]
 
 [[issue]]
 key = "delaunay-3d"
@@ -731,12 +730,11 @@ issue = "hidden-line-drawing"
 id = "C17"
 area = "brep"
 name = "mass properties exact (B-rep)"
-level = "narrow"
-summary = "Exact (non-tessellated) mass-properties computation exists but refuses any non-planar face: module doc states \"Only planar faces are supported. A cylindrical or spherical face needs a surface integral this module does not implement\""
-evidence = ["crates/algorithms/query/measure/src/exact.rs", "crates/algorithms/query/measure/tests/mass_properties.rs"]
+level = "implemented"
+summary = "exact_properties measures an ExactBRep without tessellating it: planar straight-edged faces by an exact vertex fan, every other face (cylinder, cone, sphere, torus, elliptical cylinder, B-spline, and planar faces bounded by arcs/ellipses) by Green's theorem over its own parameter domain round its pcurves, with adaptive Gauss-Kronrod held to 1e-13 relative (ADR 0073). Handles seams, poles/apexes and torus faces bounded by meridians; refuses by name a boundary that encloses no domain in its parameters, an unknown surface family, and a non-converging integral. Checked against closed forms per family and an 18-fault mutation probe."
+evidence = ["crates/algorithms/query/measure/src/exact.rs::exact_properties", "crates/algorithms/query/measure/src/exact_face.rs", "crates/algorithms/query/measure/tests/mass_properties.rs", "crates/algorithms/construction/construct/tests/curved_measure.rs", "scripts/probe_curved_measure_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepGProp", "src/ModelingData/TKGeomBase/GProp"]
 cgal = []
-issue = "curved-mass-properties"
 
 [[capability]]
 id = "C18"

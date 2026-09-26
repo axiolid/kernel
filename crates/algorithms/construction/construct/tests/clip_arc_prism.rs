@@ -103,6 +103,16 @@ fn volume_from_caps(solid: &ExactBRep) -> f64 {
             total += sense * z_moment;
         }
     }
+    // `exact_properties` shares no code with the sampled caps: it integrates
+    // the sinusoid-trimmed walls and ellipse-bounded caps over their own
+    // parameters (#125). Signed, so an inside-out result fails here.
+    let exact = axiolid_measure::exact_properties(solid, Tolerance::METRE)
+        .expect("a clipped column is measurable")
+        .signed_volume;
+    assert!(
+        (exact - total.abs()).abs() <= 1e-6 * total.abs(),
+        "exact {exact} vs sampled caps {total}"
+    );
     total.abs()
 }
 

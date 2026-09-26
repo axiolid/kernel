@@ -57,3 +57,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0070](./0070-exact-arc-booleans.md) | Exact arc booleans replace cavalier_contours |
 | [0071](./0071-sinusoid-pcurves.md) | Sinusoid pcurves for plane cuts across cylinders |
 | [0072](./0072-column-solids.md) | Column solids over one planar arrangement |
+| [0073](./0073-curved-face-mass-properties.md) | Exact mass properties over curved faces by Green's theorem |

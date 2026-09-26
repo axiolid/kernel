@@ -79,14 +79,14 @@ fn a_rectangular_contour_matches_the_dedicated_rectangle_path() {
 
     // Pappus: area 2*3 = 6, centroid at 5.
     let pappus = TAU * 5.0 * 6.0;
-    let volume =
-        axiolid_measure::exact_properties(&solid, Tolerance::METRE).map(|p| p.signed_volume);
-    if let Ok(value) = volume {
-        assert!(
-            (value - pappus).abs() < 1e-9,
-            "expected {pappus}, got {value}"
-        );
-    }
+    let value = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .expect("a revolved solid is measurable")
+        .signed_volume;
+    // Signed: a revolution built inside out measures -pappus.
+    assert!(
+        (value - pappus).abs() < 1e-9,
+        "expected {pappus}, got {value}"
+    );
 }
 
 #[test]
