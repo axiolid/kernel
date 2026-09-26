@@ -1,0 +1,96 @@
+name: Release
+
+# Publishes the workspace to crates.io. Every axiolid crate is "trusted
+# publishing only" on crates.io and trusts exactly this file name and the
+# `release` environment (which only `main` may deploy to); renaming either
+# breaks publishing until the crate settings follow. There is no registry
+# token anywhere.
+on:
+  workflow_dispatch:
+    inputs:
+      release_action:
+        description: Choose publish to upload immutable crate versions to crates.io
+        required: true
+        type: choice
+        default: verify-only
+        options:
+          - verify-only
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b # 1.88.0
+      - name: Test release tooling and publication order
+        run: |
+          python3 scripts/test_release_scripts.py
+          python3 scripts/publish-workspace.py
+      - name: Bootstrap-preflight every publishable source archive
+        run: python3 scripts/verify-packages.py
+
+  publish:
+    name: Publish to crates.io
+    needs: verify
+    if: inputs.release_action == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment:
+      name: release
+      url: https://crates.io
+    permissions:
+      contents: read
+      id-token: write # crates.io trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@2eae45db285e407f22119950686d47e1101e071b # 1.88.0
+      - name: Publish workspace in stable dependency order
+        # A crates.io trusted-publishing token lives 30 minutes, and a
+        # rate-limited workspace publish can take hours. Each attempt gets a
+        # fresh token (GitHub OIDC -> crates.io exchange, audience
+        # `crates.io`) and revokes it afterwards; publish-workspace.py skips
+        # every version already on the registry, so an attempt resumes where
+        # the last one stopped. An attempt that fails well inside its token's
+        # lifetime is a real error, not expiry, and ends the job.
+        env:
+          ENDPOINT: https://crates.io/api/v1/trusted_publishing/tokens
+          UA: axiolid-kernel-release (github.com/axiolid/kernel)
+        run: |
+          exchange() {
+            jwt="$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=crates.io" | jq -r .value)"
+            curl -sSf -X POST "$ENDPOINT" -H "User-Agent: $UA" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -n --arg jwt "$jwt" '{jwt: $jwt}')" | jq -r .token
+          }
+          revoke() {
+            curl -sS -o /dev/null -X DELETE "$ENDPOINT" -H "User-Agent: $UA" \
+              -H "Authorization: Bearer $1" || true
+          }
+          for attempt in $(seq 1 12); do
+            token="$(exchange)"
+            echo "::add-mask::$token"
+            started=$(date +%s)
+            if CARGO_REGISTRY_TOKEN="$token" python3 scripts/publish-workspace.py --execute; then
+              revoke "$token"
+              exit 0
+            fi
+            revoke "$token"
+            elapsed=$(( $(date +%s) - started ))
+            if [ "$elapsed" -lt 1500 ]; then
+              echo "::error::publish failed after ${elapsed}s, well before token expiry; not retrying"
+              exit 1
+            fi
+            echo "::notice::attempt $attempt outlived its 30-minute token; resuming with a fresh one"
+          done
+          echo "::error::publish did not finish within 12 token lifetimes"
+          exit 1
