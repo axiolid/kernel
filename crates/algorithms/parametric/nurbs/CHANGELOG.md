@@ -11,6 +11,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Sections of two B-splines are certified. Every crossing of a sub-patch
+  edge with the other sub-patch is isolated by Krawczyk's test on Bernstein
+  enclosures of the surfaces and their partials, so every component is
+  seeded; every chord of a traced curve is proven, by a parametric
+  Krawczyk test over the chord's sweeping plane, to follow one arc (a
+  chord that cannot be is halved, a curve that still cannot is re-traced
+  with shorter steps, then refused). Patches are cut to the windows first,
+  so a curve crossing a window inside one patch pair is found. B-spline
+  curve/surface crossings use the same isolation.
+
 - `spline_pair_intersection`: every component of the section of two
   B-spline surfaces within parameter windows, as `PairSection3` curves.
   Bezier sub-patch pairs are split until their normal cones are apart, so

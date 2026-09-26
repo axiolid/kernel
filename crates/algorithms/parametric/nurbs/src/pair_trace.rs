@@ -23,6 +23,7 @@
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_curve::{BSplineSurface, Carrier, PairNode, PairSection3};
 
+use crate::pair_certify::{certify_chord, in_chord, isolate, Enclosure, I};
 use crate::spline_field::bezier_net;
 
 /// A homogeneous control point.
@@ -121,35 +122,28 @@ impl Patch {
         vec![a1, a2, b1, b2]
     }
 
-    /// The patch's four edges as rational Bezier curves with their
-    /// parameter lines: `(net, fixed parameter is u?, fixed value, range)`.
+    /// The patch's four edges, as parameter lines.
     fn edges(&self) -> Vec<Edge> {
-        let p = self.p();
-        let q = self.q();
         vec![
             Edge {
-                net: self.net[0].clone(),
                 along_u: false,
                 fixed: self.lo.x,
                 from: self.lo.y,
                 to: self.hi.y,
             },
             Edge {
-                net: self.net[p].clone(),
                 along_u: false,
                 fixed: self.hi.x,
                 from: self.lo.y,
                 to: self.hi.y,
             },
             Edge {
-                net: (0..=p).map(|a| self.net[a][0]).collect(),
                 along_u: true,
                 fixed: self.lo.y,
                 from: self.lo.x,
                 to: self.hi.x,
             },
             Edge {
-                net: (0..=p).map(|a| self.net[a][q]).collect(),
                 along_u: true,
                 fixed: self.hi.y,
                 from: self.lo.x,
@@ -218,7 +212,6 @@ impl Patch {
 /// the free parameter, the other parameter `fixed`.
 #[derive(Debug, Clone)]
 struct Edge {
-    net: Vec<H>,
     along_u: bool,
     fixed: Scalar,
     from: Scalar,
@@ -226,8 +219,8 @@ struct Edge {
 }
 
 impl Edge {
-    fn uv(&self, s: Scalar) -> Point2 {
-        let free = self.from + (self.to - self.from) * s;
+    /// The parameters at free value `free`.
+    fn at(&self, free: Scalar) -> Point2 {
         if self.along_u {
             Point2::new(free, self.fixed)
         } else {
@@ -369,6 +362,47 @@ fn patches(b: &BSplineSurface) -> Option<Vec<Patch>> {
     Some(out)
 }
 
+/// The patches' parts inside `window`, each restricted to its part.
+fn clipped(patches: Vec<Patch>, window: (Point2, Point2)) -> Vec<Patch> {
+    patches
+        .into_iter()
+        .filter_map(|p| {
+            let (lo, hi) = (p.lo.max(window.0), p.hi.min(window.1));
+            if lo.x >= hi.x || lo.y >= hi.y {
+                return None;
+            }
+            if lo == p.lo && hi == p.hi {
+                return Some(p);
+            }
+            let w = p.hi - p.lo;
+            let su = ((lo.x - p.lo.x) / w.x, (hi.x - p.lo.x) / w.x);
+            let sv = ((lo.y - p.lo.y) / w.y, (hi.y - p.lo.y) / w.y);
+            let comp = |k: usize| -> Vec<Vec<Scalar>> {
+                p.net
+                    .iter()
+                    .map(|row| row.iter().map(|h| h[k]).collect())
+                    .collect()
+            };
+            let parts = [0, 1, 2, 3].map(|k| crate::pair_certify::restrict2(&comp(k), su, sv));
+            let net = (0..p.net.len())
+                .map(|a| {
+                    (0..p.net[0].len())
+                        .map(|b| {
+                            [
+                                parts[0][a][b],
+                                parts[1][a][b],
+                                parts[2][a][b],
+                                parts[3][a][b],
+                            ]
+                        })
+                        .collect()
+                })
+                .collect();
+            Some(Patch { net, lo, hi })
+        })
+        .collect()
+}
+
 /// The sub-patch pairs where the section lies, each free of closed loops.
 fn resolve(first: &[Patch], second: &[Patch]) -> Result<Vec<(Patch, Patch)>, PairRefusal> {
     let mut queue: Vec<(Patch, Patch, u32)> = Vec::new();
@@ -413,124 +447,50 @@ fn resolve(first: &[Patch], second: &[Patch]) -> Result<Vec<(Patch, Patch)>, Pai
     Ok(out)
 }
 
-/// Points where an edge of one sub-patch crosses the other sub-patch, as
-/// nodes: hull pruning down to small pieces, then Newton on three unknowns.
+/// Every point where an edge of one sub-patch crosses the other sub-patch,
+/// as nodes, each proven the only one in a box (`pair_certify::isolate`);
+/// `Unresolved` where an edge touches the other surface.
 fn edge_hits(
     edge: &Edge,
     patch: &Patch,
-    s1: &Carrier,
-    s2: &Carrier,
+    e1: &Enclosure,
+    e2: &Enclosure,
     edge_on_first: bool,
-) -> Vec<PairNode> {
-    let mut out = Vec::new();
-    let mut queue: Vec<(Vec<H>, Scalar, Scalar, Patch, u32)> =
-        vec![(edge.net.clone(), 0.0, 1.0, patch.clone(), 0)];
-    let curve_box = |net: &[H]| {
-        let mut lo = Vec3::splat(Scalar::INFINITY);
-        let mut hi = Vec3::splat(Scalar::NEG_INFINITY);
-        for h in net {
-            let p = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
-            lo = lo.min(p);
-            hi = hi.max(p);
-        }
-        let pad = 1e-12 * (1.0 + lo.abs().max(hi.abs()).max_element());
-        (lo - Vec3::splat(pad), hi + Vec3::splat(pad))
+) -> Result<Vec<PairNode>, PairRefusal> {
+    let (own, other) = if edge_on_first { (e1, e2) } else { (e2, e1) };
+    let curve = |t: Scalar| -> Option<(Point3, Vec3)> {
+        let (p, u, v) = own.at(edge.at(t))?;
+        Some((p, if edge.along_u { u } else { v }))
     };
-    let mut work = 0;
-    while let Some((net, s0, s1_, sub, depth)) = queue.pop() {
-        work += 1;
-        if work > 20_000 {
-            break;
-        }
-        let (bc, bp) = (curve_box(&net), sub.aabb());
-        if !boxes_meet(&bc, &bp) {
-            continue;
-        }
-        let small = (bc.1 - bc.0).length() + (bp.1 - bp.0).length()
-            <= 1e-3 * (1.0 + bc.0.abs().max(bc.1.abs()).max_element());
-        if small || depth > 30 {
-            // Newton on (s, u, v): C(s) = S(u, v).
-            let mut s = 0.5 * (s0 + s1_);
-            let mut uv = (sub.lo + sub.hi) * 0.5;
-            let (edge_surface, other) = if edge_on_first { (s1, s2) } else { (s2, s1) };
-            let mut ok = false;
-            for _ in 0..60 {
-                let e = edge.uv(s);
-                let je = edge_surface.jet(e.x, e.y);
-                let tangent = if edge.along_u { je.u } else { je.v } * (edge.to - edge.from);
-                let jo = other.jet(uv.x, uv.y);
-                let r = je.point - jo.point;
-                // Solve [tangent, -S_u, -S_v] (ds, du, dv) = -r.
-                let m = [
-                    [tangent.x, -jo.u.x, -jo.v.x],
-                    [tangent.y, -jo.u.y, -jo.v.y],
-                    [tangent.z, -jo.u.z, -jo.v.z],
-                ];
-                let Some(x) = solve3(m, [-r.x, -r.y, -r.z]) else {
-                    break;
-                };
-                s += x[0];
-                uv += Point2::new(x[1], x[2]);
-                if x.iter().map(|v| v.abs()).fold(0.0, Scalar::max)
-                    <= 4.0 * Scalar::EPSILON * (1.0 + s.abs() + uv.length())
-                {
-                    ok = true;
-                    break;
+    let curve_box = |a: Scalar, b: Scalar| -> Option<([I; 3], [I; 3])> {
+        let (p, q) = (edge.at(a), edge.at(b));
+        let j = own.jet(p.min(q), p.max(q))?;
+        Some((j.p, if edge.along_u { j.u } else { j.v }))
+    };
+    let t = (edge.from.min(edge.to), edge.from.max(edge.to));
+    let hits =
+        isolate(t, patch.lo, patch.hi, &curve, &curve_box, other).ok_or(PairRefusal::Unresolved)?;
+    Ok(hits
+        .into_iter()
+        .map(|(t, uv, point)| {
+            if edge_on_first {
+                PairNode {
+                    point,
+                    first: edge.at(t),
+                    second: uv,
+                }
+            } else {
+                PairNode {
+                    point,
+                    first: uv,
+                    second: edge.at(t),
                 }
             }
-            // Rounding can keep the steps above the stopping test at a
-            // root: accept a residual at rounding level.
-            if !ok && s.is_finite() && uv.is_finite() {
-                let e = edge.uv(s);
-                let p = edge_surface.jet(e.x, e.y).point;
-                ok = (p - other.jet(uv.x, uv.y).point).length() <= 1e-12 * (1.0 + p.length());
-            }
-            let inside =
-                |x: Scalar, a: Scalar, b: Scalar| x >= a.min(b) - 1e-9 && x <= a.max(b) + 1e-9;
-            if ok
-                && inside(s, 0.0, 1.0)
-                && inside(uv.x, patch.lo.x, patch.hi.x)
-                && inside(uv.y, patch.lo.y, patch.hi.y)
-            {
-                let e = edge.uv(s.clamp(0.0, 1.0));
-                let p = edge_surface.jet(e.x, e.y).point;
-                let node = if edge_on_first {
-                    PairNode {
-                        point: p,
-                        first: e,
-                        second: uv,
-                    }
-                } else {
-                    PairNode {
-                        point: p,
-                        first: uv,
-                        second: e,
-                    }
-                };
-                if !out.iter().any(|n: &PairNode| {
-                    (n.point - node.point).length() <= 1e-9 * (1.0 + p.length())
-                }) {
-                    out.push(node);
-                }
-            }
-            continue;
-        }
-        // Split whichever is larger.
-        if (bc.1 - bc.0).length() >= (bp.1 - bp.0).length() {
-            let (l, r) = casteljau(&net, 0.5);
-            let m = 0.5 * (s0 + s1_);
-            queue.push((l, s0, m, sub.clone(), depth + 1));
-            queue.push((r, m, s1_, sub, depth + 1));
-        } else {
-            for piece in sub.split() {
-                queue.push((net.clone(), s0, s1_, piece, depth + 1));
-            }
-        }
-    }
-    out
+        })
+        .collect())
 }
 
-fn solve3(m: [[Scalar; 3]; 3], r: [Scalar; 3]) -> Option<[Scalar; 3]> {
+pub(crate) fn solve3(m: [[Scalar; 3]; 3], r: [Scalar; 3]) -> Option<[Scalar; 3]> {
     let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
@@ -737,10 +697,12 @@ fn march(
                 here.first + (to.0 - here.first) * f,
                 here.second + (to.1 - here.second) * f,
             );
+            // A node already on the edge, heading out, ends where it is.
             let n = correct_on(s1, s2, at.0, at.1, bound).filter(|n| {
+                let step = n.point - here.point;
                 inside_loosely(n, w1, w2)
-                    && (n.point - here.point).dot(t) >= 0.0
-                    && (n.point - here.point).length() <= 2.0 * h
+                    && (step.length() <= 1e-12 * scale
+                        || (step.dot(t) >= 0.0 && step.length() <= 2.0 * h))
             });
             Some(n)
         };
@@ -822,21 +784,27 @@ pub(crate) fn pair_trace(
         None => (whole1, whole2),
     };
     let (p1, p2) = (
-        patches(b1).ok_or(PairRefusal::Unsupported)?,
-        patches(b2).ok_or(PairRefusal::Unsupported)?,
+        clipped(patches(b1).ok_or(PairRefusal::Unsupported)?, w1),
+        clipped(patches(b2).ok_or(PairRefusal::Unsupported)?, w2),
+    );
+    let (e1, e2) = (
+        Enclosure::surface(b1).ok_or(PairRefusal::Unsupported)?,
+        Enclosure::surface(b2).ok_or(PairRefusal::Unsupported)?,
     );
     let pairs = resolve(&p1, &p2)?;
-    // Seeds: every edge of every resolved pair against the other patch.
+    // Seeds: every crossing of an edge of a resolved pair's sub-patch with
+    // the other sub-patch. Every component crosses one (no pair holds a
+    // closed loop, and the windows' edges are sub-patch edges).
     let mut seeds: Vec<PairNode> = Vec::new();
     for (a, b) in &pairs {
         for e in a.edges() {
-            seeds.extend(edge_hits(&e, b, &s1, &s2, true));
+            seeds.extend(edge_hits(&e, b, &e1, &e2, true)?);
         }
         for e in b.edges() {
-            seeds.extend(edge_hits(&e, a, &s1, &s2, false));
+            seeds.extend(edge_hits(&e, a, &e1, &e2, false)?);
         }
     }
-    seeds.retain(|n| inside(n, w1, w2));
+    seeds.retain(|n| inside_loosely(n, w1, w2));
     let scale = {
         let mut lo = Vec3::splat(Scalar::INFINITY);
         let mut hi = Vec3::splat(Scalar::NEG_INFINITY);
@@ -847,33 +815,30 @@ pub(crate) fn pair_trace(
         (hi - lo).length().max(1e-9)
     };
     let mut out: Vec<PairSection3> = Vec::new();
-    // A seed on a curve already traced: the curve itself passes through it
-    // (chords sag, so the test is on the curve, not its polygon).
-    let covered = |out: &[PairSection3], n: &PairNode| {
-        out.iter().any(|c| {
-            c.parameter_of(n.point)
-                .and_then(|t| c.point(t))
-                .is_some_and(|p| (p - n.point).length() <= 1e-7 * scale)
-        })
-    };
+    // Certified chords: the box about each in which its arc is the only
+    // point of the section at every level.
+    let mut boxes: Vec<([I; 4], PairNode, PairNode)> = Vec::new();
     for seed in seeds {
-        if covered(&out, &seed) {
+        // On a curve already traced: then it lies in one of its chords'
+        // boxes, at a level of that chord, where the arc is the only point.
+        if boxes.iter().any(|(x, a, b)| in_chord(x, a, b, &seed)) {
             continue;
         }
-        let (forward, closed) =
-            march(&s1, &s2, seed, 1.0, w1, w2, scale).ok_or(PairRefusal::Unresolved)?;
-        let mut nodes = Vec::new();
-        if closed {
-            nodes.push(seed);
-            nodes.extend(forward);
-            nodes.push(seed);
-        } else {
-            let (backward, _) =
-                march(&s1, &s2, seed, -1.0, w1, w2, scale).ok_or(PairRefusal::Unresolved)?;
-            nodes.extend(backward.into_iter().rev());
-            nodes.push(seed);
-            nodes.extend(forward);
+        // Follow it, then prove every chord; where a chord cannot be
+        // proven the following may have strayed, so follow again with
+        // shorter steps.
+        let mut traced = None;
+        for fineness in [1.0, 0.25, 0.0625] {
+            let Some(nodes) = follow(&s1, &s2, seed, w1, w2, scale * fineness) else {
+                continue;
+            };
+            if let Some(proof) = prove(&s1, &s2, &e1, &e2, &nodes) {
+                traced = Some(proof);
+                break;
+            }
         }
+        let (nodes, proven) = traced.ok_or(PairRefusal::Unresolved)?;
+        boxes.extend(proven);
         if nodes.len() >= 2 {
             out.push(PairSection3 {
                 first: s1.clone(),
@@ -885,36 +850,90 @@ pub(crate) fn pair_trace(
     Ok(out)
 }
 
-/// A rational Bezier curve's point and derivative at `s` in `[0, 1]`.
-fn bezier_jet(net: &[H], s: Scalar) -> (Point3, Vec3) {
-    let n = net.len() - 1;
-    let (left, _) = casteljau(net, s);
-    // The point is the last left control; the derivative from the last two
-    // of the degree n - 1 level: n (P_n - P_{n-1}) in homogeneous terms.
-    let mut w = net.to_vec();
-    for k in 1..n {
-        for i in 0..=n - k {
-            for d in 0..4 {
-                w[i][d] = w[i][d] * (1.0 - s) + w[i + 1][d] * s;
-            }
-        }
+/// The nodes of the curve through `seed`, both ways to the windows' edges,
+/// or round to `seed` for a loop.
+fn follow(
+    s1: &Carrier,
+    s2: &Carrier,
+    seed: PairNode,
+    w1: (Point2, Point2),
+    w2: (Point2, Point2),
+    scale: Scalar,
+) -> Option<Vec<PairNode>> {
+    let (forward, closed) = march(s1, s2, seed, 1.0, w1, w2, scale)?;
+    let mut nodes = Vec::new();
+    if closed {
+        nodes.push(seed);
+        nodes.extend(forward);
+        nodes.push(seed);
+    } else {
+        let (backward, _) = march(s1, s2, seed, -1.0, w1, w2, scale)?;
+        nodes.extend(backward.into_iter().rev());
+        nodes.push(seed);
+        nodes.extend(forward);
     }
-    let (a, b) = (w[0], w[1]);
-    let h = left[n];
-    let point = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
-    let dh = [
-        n as Scalar * (b[0] - a[0]),
-        n as Scalar * (b[1] - a[1]),
-        n as Scalar * (b[2] - a[2]),
-        n as Scalar * (b[3] - a[3]),
-    ];
-    let derivative = (Vec3::new(dh[0], dh[1], dh[2]) - point * dh[3]) / h[3];
-    (point, derivative)
+    Some(nodes)
+}
+
+/// Every chord of `nodes` proven (`pair_certify::certify_chord`), halving
+/// a chord that cannot be at its solved middle; the nodes with the middles
+/// added, and each chord's box.
+#[allow(clippy::type_complexity)]
+fn prove(
+    s1: &Carrier,
+    s2: &Carrier,
+    e1: &Enclosure,
+    e2: &Enclosure,
+    nodes: &[PairNode],
+) -> Option<(Vec<PairNode>, Vec<([I; 4], PairNode, PairNode)>)> {
+    #[allow(clippy::too_many_arguments)]
+    fn chord(
+        s1: &Carrier,
+        s2: &Carrier,
+        e1: &Enclosure,
+        e2: &Enclosure,
+        n0: PairNode,
+        n1: PairNode,
+        depth: u32,
+        nodes: &mut Vec<PairNode>,
+        boxes: &mut Vec<([I; 4], PairNode, PairNode)>,
+    ) -> Option<()> {
+        let d = n1.point - n0.point;
+        // The section on the plane across the chord's middle.
+        let middle = correct(
+            s1,
+            s2,
+            (n0.first + n1.first) * 0.5,
+            (n0.second + n1.second) * 0.5,
+            n0.point + d * 0.5,
+            d,
+        )?;
+        if let Some(x) = certify_chord(e1, e2, &n0, &n1, (middle.first, middle.second)) {
+            boxes.push((x, n0, n1));
+            nodes.push(n1);
+            return Some(());
+        }
+        if depth >= 12 {
+            return None;
+        }
+        chord(s1, s2, e1, e2, n0, middle, depth + 1, nodes, boxes)?;
+        chord(s1, s2, e1, e2, middle, n1, depth + 1, nodes, boxes)
+    }
+    let mut out = vec![*nodes.first()?];
+    let mut boxes = Vec::new();
+    for w in nodes.windows(2) {
+        if w[0].point == w[1].point {
+            continue;
+        }
+        chord(s1, s2, e1, e2, w[0], w[1], 0, &mut out, &mut boxes)?;
+    }
+    Some((out, boxes))
 }
 
 /// Where a B-spline curve meets a B-spline surface: the curve's parameter
-/// and the point, for every crossing (hull pruning over Bezier pieces of
-/// both, then Newton on three unknowns). `None` for unclamped operands.
+/// and the point, for every crossing, each proven the only one in a box
+/// (`pair_certify::isolate`). `None` for unclamped operands or where the
+/// curve touches the surface.
 pub(crate) fn spline_curve_surface_hits(
     curve: &axiolid_curve::BSplineCurve3,
     surface: &BSplineSurface,
@@ -928,112 +947,35 @@ pub(crate) fn spline_curve_surface_hits(
             [p.x * w, p.y * w, p.z * w, w]
         })
         .collect();
-    let knots = {
-        let mut out = Vec::new();
-        for (&k, &m) in curve.knots.iter().zip(&curve.multiplicities) {
-            out.extend(core::iter::repeat_n(k, m as usize));
-        }
-        out
-    };
-    let (breaks, segments) =
-        crate::spline_field::decompose(&knots, usize::from(curve.degree), &control)?;
-    let carrier = Carrier::Spline(Box::new(surface.clone()));
-    let mut out: Vec<(Scalar, Point3)> = Vec::new();
-    for (i, seg) in segments.iter().enumerate() {
-        let (k0, k1) = (breaks[i], breaks[i + 1]);
-        if k1 <= k0 {
-            continue;
-        }
-        for patch in patches(surface)? {
-            let mut queue = vec![(seg.clone(), 0.0, 1.0, patch.clone(), 0u32)];
-            let mut work = 0;
-            while let Some((net, s0, s1, sub, depth)) = queue.pop() {
-                work += 1;
-                if work > 20_000 {
-                    break;
-                }
-                let cb = {
-                    let mut lo = Vec3::splat(Scalar::INFINITY);
-                    let mut hi = Vec3::splat(Scalar::NEG_INFINITY);
-                    for h in &net {
-                        let p = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
-                        lo = lo.min(p);
-                        hi = hi.max(p);
-                    }
-                    let pad = 1e-12 * (1.0 + lo.abs().max(hi.abs()).max_element());
-                    (lo - Vec3::splat(pad), hi + Vec3::splat(pad))
-                };
-                let pb = sub.aabb();
-                if !boxes_meet(&cb, &pb) {
-                    continue;
-                }
-                let small = (cb.1 - cb.0).length() + (pb.1 - pb.0).length()
-                    <= 1e-3 * (1.0 + cb.0.abs().max(cb.1.abs()).max_element());
-                if small || depth > 30 {
-                    let mut s = 0.5;
-                    let mut uv = (sub.lo + sub.hi) * 0.5;
-                    let mut ok = false;
-                    for _ in 0..60 {
-                        let (c, dc) = bezier_jet(seg, s0 + (s1 - s0) * s);
-                        let dc = dc * (s1 - s0);
-                        let j = carrier.jet(uv.x, uv.y);
-                        let r = c - j.point;
-                        let m = [
-                            [dc.x, -j.u.x, -j.v.x],
-                            [dc.y, -j.u.y, -j.v.y],
-                            [dc.z, -j.u.z, -j.v.z],
-                        ];
-                        let Some(x) = solve3(m, [-r.x, -r.y, -r.z]) else {
-                            break;
-                        };
-                        s += x[0];
-                        uv += Point2::new(x[1], x[2]);
-                        if x.iter().map(|v| v.abs()).fold(0.0, Scalar::max)
-                            <= 4.0 * Scalar::EPSILON * (1.0 + s.abs() + uv.length())
-                        {
-                            ok = true;
-                            break;
-                        }
-                    }
-                    // Rounding can keep the steps above the stopping
-                    // test at a root: accept a residual at rounding level.
-                    if !ok {
-                        let (c, _) = bezier_jet(seg, s0 + (s1 - s0) * s);
-                        let miss = (c - carrier.jet(uv.x, uv.y).point).length();
-                        ok = miss <= 1e-12 * (1.0 + c.length());
-                    }
-                    let local = s0 + (s1 - s0) * s;
-                    if ok
-                        && (-1e-9..=1.0 + 1e-9).contains(&local)
-                        && uv.x >= patch.lo.x - 1e-9
-                        && uv.x <= patch.hi.x + 1e-9
-                        && uv.y >= patch.lo.y - 1e-9
-                        && uv.y <= patch.hi.y + 1e-9
-                    {
-                        let t = k0 + (k1 - k0) * local.clamp(0.0, 1.0);
-                        let (p, _) = bezier_jet(seg, local.clamp(0.0, 1.0));
-                        if !out
-                            .iter()
-                            .any(|(tt, _)| (tt - t).abs() <= 1e-9 * (1.0 + t.abs()))
-                        {
-                            out.push((t, p));
-                        }
-                    }
-                    continue;
-                }
-                if (cb.1 - cb.0).length() >= (pb.1 - pb.0).length() {
-                    let (l, r) = casteljau(&net, 0.5);
-                    let m = 0.5 * (s0 + s1);
-                    queue.push((l, s0, m, sub.clone(), depth + 1));
-                    queue.push((r, m, s1, sub, depth + 1));
-                } else {
-                    for piece in sub.split() {
-                        queue.push((net.clone(), s0, s1, piece, depth + 1));
-                    }
-                }
-            }
-        }
+    let mut knots = Vec::new();
+    for (&k, &m) in curve.knots.iter().zip(&curve.multiplicities) {
+        knots.extend(core::iter::repeat_n(k, m as usize));
     }
+    let p = usize::from(curve.degree);
+    if knots.len() < 2 * (p + 1) {
+        return None;
+    }
+    let t = (knots[p], knots[knots.len() - 1 - p]);
+    let own = Enclosure::curve(&knots, p, &control)?;
+    let other = Enclosure::surface(surface)?;
+    let ((u0, u1), (v0, v1)) = surface.domain()?;
+    let at = |t: Scalar| -> Option<(Point3, Vec3)> {
+        let (p, u, _) = own.at(Point2::new(t, 0.0))?;
+        Some((p, u))
+    };
+    let span = |a: Scalar, b: Scalar| -> Option<([I; 3], [I; 3])> {
+        let j = own.jet(Point2::new(a, 0.0), Point2::new(b, 0.0))?;
+        Some((j.p, j.u))
+    };
+    let hits = isolate(
+        t,
+        Point2::new(u0, v0),
+        Point2::new(u1, v1),
+        &at,
+        &span,
+        &other,
+    )?;
+    let mut out: Vec<(Scalar, Point3)> = hits.into_iter().map(|(t, _, p)| (t, p)).collect();
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     Some(out)
 }

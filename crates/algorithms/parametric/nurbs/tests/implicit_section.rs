@@ -9,10 +9,12 @@
 //!   the traced curves cross it equals the number of sign changes of the
 //!   other surface's distance around that circle, scanned densely.
 
-use axiolid_core::{Frame3, Point3, Vec3};
+use axiolid_core::{Frame3, Point2, Point3, Vec3};
 use axiolid_curve::Curve3;
 use axiolid_evaluate::evaluate3;
-use axiolid_nurbs::{exact_surface_intersection, Derivation, ExactIntersectionRefusal};
+use axiolid_nurbs::{
+    exact_surface_intersection, implicit_surface_intersection, Derivation, ExactIntersectionRefusal,
+};
 use axiolid_surface::{Cone, Cylinder, EllipticalCylinder, Surface, Torus};
 
 const PI: f64 = std::f64::consts::PI;
@@ -474,4 +476,65 @@ fn branches_crossing_where_a_pipe_touches_a_torus_meet_at_a_vertex() {
     assert_eq!(bridges, 4);
     let bad = completeness(&t, &pipe, &curve.branches);
     assert!(bad.is_empty(), "{bad:?}");
+}
+
+#[test]
+fn bridges_into_a_crossing_stay_on_both_surfaces() {
+    // The crossing of a pipe touching a torus's tube from inside, traced on
+    // the pipe: there the torus's equation cancels large terms, rounding
+    // hides more, and the bridges into the crossing are long enough for
+    // their shape to matter.
+    let t = Surface::Torus(Torus {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::Z,
+            y: Vec3::X,
+            z: Vec3::Y,
+        },
+        major_radius: 4.0,
+        minor_radius: 1.0,
+    });
+    let c = 0.5f64.sqrt();
+    let pipe = Surface::Cylinder(Cylinder {
+        frame: Frame3 {
+            // Its heights start 8 below the torus, as a pipe from z = -8
+            // up is read.
+            origin: Point3::new(-(4.0 + c) + 0.5 * c, 0.5 * c, -8.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius: 0.5,
+    });
+    let touch = Point3::new(-(4.0 + c), c, 0.0);
+    let window = (Point2::new(0.0, 0.0), Point2::new(PI, 16.0));
+    let curves = implicit_surface_intersection(&pipe, &t, Some(window)).expect("a traced section");
+    let (mut bridges, mut at_touch, mut longest) = (0, 0, 0.0f64);
+    for s in &curves {
+        let branch = Curve3::ImplicitSection(s.clone());
+        for t_end in [0.0, s.curve.end()] {
+            if (evaluate3(&branch, t_end).unwrap() - touch).length() < 1e-12 {
+                at_touch += 1;
+            }
+        }
+        for (i, cell) in s.curve.cells.iter().enumerate() {
+            if cell.bridge.is_none() {
+                continue;
+            }
+            bridges += 1;
+            longest = longest.max((cell.to - cell.from).abs());
+            for k in 0..=100 {
+                let p = evaluate3(&branch, i as f64 + k as f64 / 100.0).unwrap();
+                for surface in [&t, &pipe] {
+                    assert!(
+                        off(surface, p).abs() < 1e-10,
+                        "bridge point {p:?} is {} off",
+                        off(surface, p)
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!((bridges, at_touch), (4, 4));
+    assert!(longest > 1e-6, "bridges of {longest} test nothing");
 }

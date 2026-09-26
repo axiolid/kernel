@@ -139,6 +139,8 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   solved by Newton from the nodes' parameters. Its rates come from the same
   system. The parameter runs one unit per chord.
 - **Finding every component** (`spline_pair_intersection`).
+  0. Each Bezier patch is first cut to the faces' windows, so the windows'
+     edges are sub-patch edges too.
   1. Pairs of rational Bezier sub-patches are split until their control
      hulls' boxes are apart (no section there), or their normal cones are
      apart. The cones hold the Bernstein coefficient vectors of the
@@ -146,27 +148,47 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   2. A pair with apart normal cones has no two parallel normals, so it
      holds no closed loop of the section: every piece of the section in it
      crosses an edge of one of the sub-patches (Sederberg and Meyers).
-  3. Each sub-patch edge is intersected with the other sub-patch (hull
-     pruning, then Newton on three unknowns). These crossings seed every
-     component.
+  3. Each sub-patch edge is intersected with the other sub-patch by
+     certified root isolation: boxes of (edge parameter, other surface's
+     parameters) are halved until Krawczyk's test proves each holds no
+     crossing or exactly one. These crossings seed every component.
   4. From each seed not already on a traced curve, the curve is followed
      both ways with steps held to a few degrees of turning, each node
      corrected onto both surfaces. It ends where it closes on itself or
      where it leaves either face's window. The last node is solved exactly
      on that window's edge.
-  5. Pairs that never separate within the depth limit are refused as
+  5. Every chord is then proven: Krawczyk's test on `S1(a) = S2(b)` and the
+     chord's plane, with the plane's level an interval over the whole
+     chord, shows a box in both surfaces' parameters holding exactly one
+     point of the section at every level. The chord's two nodes are that
+     point at its first and last level, so they lie on one arc, and the
+     arc is the curve `PairSection3` defines there. A chord that cannot be
+     proven is halved at its solved middle; a curve that still cannot be
+     is followed again with shorter steps, and after that refused.
+  6. A seed is on a curve already traced exactly when it lies in one of
+     its chords' boxes at a level of that chord.
+  7. Pairs that never separate within the depth limit are refused as
      `NotRegularCurve`: the surfaces touch there, or come closer than the
-     search resolves.
-- **What is certified.** The pruning and the loop-free test are certain.
-  The edge crossings and the following are Newton with step control, not
-  certified. Every node lies on both surfaces to rounding, whichever way
-  the steps went.
+     search resolves. So is an edge crossing that cannot be isolated (an
+     edge touching the other surface).
+- **Enclosures** (`pair_certify`). Each surface's point and first partials
+  over a parameter box are bounded by Bernstein coefficients: the point by
+  its rational control points (the weights are positive), each partial by
+  `(W X_u - W_u X) / W^2`, numerator and `W^2` bounded by their own
+  coefficients. Past the domain the edge cells' polynomials continue, and
+  the certificates evaluate points from those same polynomials. Every
+  bound is widened for the rounding of its coefficients.
+- **What is certified.** Every component is found, and every chord is
+  proven to follow one arc. The following itself is still a march; the
+  proof is what makes its result trustworthy, and a march that strayed
+  fails its proof instead of passing a wrong curve on.
 - **Pcurves.** On either spline face the pcurve is `Curve2::Lifted` on a
   spline carrier. When the lifted curve is a `PairSection` on one of its
   own surfaces, evaluation reads that surface's parameters straight from
   the solve.
 - **Curve against surface.** A B-spline curve against a B-spline surface
-  uses the same hull pruning over the Bezier pieces of both, then Newton.
+  uses the same certified root isolation, over the curve's own Bezier
+  pieces.
   The boolean uses it to cut a pair section where it crosses a spline
   face's boundary edge.
 
@@ -267,9 +289,9 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   are still refused as `NotRegularCurve`.
 - Very thin sections or nearly tangent pairs can exhaust the trace's box
   budget (400 000 boxes). That is also refused as `NotRegularCurve`.
-- Two B-splines: seeding and following are not certified (see above). A
-  certified version would isolate the edge crossings with interval Newton
-  and bound each step's corridor.
+- Two B-splines: a section tangent to a sub-patch edge cannot have that
+  crossing isolated, and is refused, though the section itself is regular.
+  Sub-patch edges lie at binary fractions, so this needs a coincidence.
 
 ## Relation to existing code
 
@@ -286,6 +308,8 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   `PairSection3`, the section of two B-splines.
 - `crates/algorithms/parametric/nurbs/src/pair_trace.rs`:
   `spline_pair_intersection` and B-spline curve/surface crossings.
+- `crates/algorithms/parametric/nurbs/src/pair_certify.rs`: enclosures,
+  chord proofs and certified crossing isolation.
 - `crates/algorithms/parametric/evaluate/src/curve.rs`: evaluation and
   inversion of the new families. Inversion now also covers the ADR 0076
   graphs.

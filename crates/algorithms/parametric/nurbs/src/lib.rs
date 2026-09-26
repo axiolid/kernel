@@ -32,6 +32,7 @@ mod implicit_ops;
 mod implicit_section;
 mod implicit_trace;
 mod intersection_curve;
+mod pair_certify;
 mod pair_trace;
 mod periodic;
 mod periodic_surface;

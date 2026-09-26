@@ -6,10 +6,12 @@
 //! difference of the two sheets changes sign, which a dense scan counts
 //! independently. Every node and every point between lies on both.
 
-use axiolid_core::Point3;
+use axiolid_core::{Point2, Point3};
 use axiolid_curve::{BSplineSurface, Curve3, KnotSpec};
 use axiolid_evaluate::evaluate3;
-use axiolid_nurbs::exact_surface_intersection;
+use axiolid_nurbs::{
+    exact_surface_intersection, spline_pair_intersection, ExactIntersectionRefusal,
+};
 use axiolid_surface::Surface;
 
 /// A bi-quadratic graph sheet over `[x0, x0 + 2] x [y0, y0 + 2]`.
@@ -202,4 +204,91 @@ fn a_spline_curve_crosses_a_spline_surface_where_a_scan_says() {
         assert!(gap(t).abs() < 1e-12, "{t}");
         assert!((evaluate3(&as_curve, t).unwrap() - hit.point).length() < 1e-12);
     }
+}
+
+/// The bowl `z = x^2 + y^2` over `[-1, 1]^2`.
+fn bowl() -> BSplineSurface {
+    let c = [1.0, -1.0, 1.0];
+    let mut b = sheet(-1.0, -1.0, [[0.0; 3]; 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            b.control_points[i][j] = Point3::new(-1.0 + i as f64, -1.0 + j as f64, c[i] + c[j]);
+        }
+    }
+    b
+}
+
+/// A flat sheet at height `z` over `[-1.2, 1.2]^2`.
+fn flat(z: f64) -> BSplineSurface {
+    let mut f = sheet(-1.2, -1.2, [[z; 3]; 3]);
+    for i in 0..3 {
+        for j in 0..3 {
+            f.control_points[i][j] = Point3::new(-1.2 + 1.2 * i as f64, -1.2 + 1.2 * j as f64, z);
+        }
+    }
+    f
+}
+
+#[test]
+fn a_small_window_inside_one_patch_pair_still_finds_its_stretch() {
+    // Two gently tilted sheets over [-1, 1]^2 whose normal cones are apart
+    // from the start, so the pair is never split: z = x / 10 against
+    // z = x^2 / 20 - y / 10, meeting along y = x^2 / 2 - x. The window
+    // x in [-0.1, 0.1] holds a stretch of it and no edge of either sheet:
+    // only the window's own edges can seed it.
+    let a = sheet(-1.0, -1.0, [[-0.1; 3], [0.0; 3], [0.1; 3]]);
+    let c = [1.0, -1.0, 1.0];
+    let mut h = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            h[i][j] = 0.05 * c[i] - 0.1 * (j as f64 - 1.0);
+        }
+    }
+    let b = sheet(-1.0, -1.0, h);
+    let w1 = (Point2::new(0.45, 0.3), Point2::new(0.55, 0.7));
+    let w2 = (Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+    let curves = spline_pair_intersection(&a, &b, Some((w1, w2))).expect("a stretch");
+    assert_eq!(curves.len(), 1);
+    let s = &curves[0];
+    for i in 0..=200 {
+        let t = s.end() * i as f64 / 200.0;
+        let (uv, _, p) = s.solve(t).unwrap();
+        assert!(uv.x >= w1.0.x - 1e-12 && uv.x <= w1.1.x + 1e-12);
+        assert!((p.y - (0.5 * p.x * p.x - p.x)).abs() < 1e-9, "{p:?}");
+    }
+    // From one side of the window to the other.
+    let ends = [s.nodes[0].first.x, s.nodes[s.nodes.len() - 1].first.x];
+    assert!(
+        (ends[0].min(ends[1]) - 0.45).abs() < 1e-12 && (ends[0].max(ends[1]) - 0.55).abs() < 1e-12,
+        "{ends:?}"
+    );
+}
+
+#[test]
+fn a_window_edge_seed_heading_out_ends_where_it_is() {
+    // The loop x^2 + y^2 = 1/2 on the bowl leaves the window u >= 0.8
+    // (x >= 0.6) through its edge: the seeds there, marched outward, end
+    // at once.
+    let (b, f) = (bowl(), flat(0.5));
+    let w1 = (Point2::new(0.8, 0.3), Point2::new(0.9, 0.7));
+    let w2 = (Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+    let curves = spline_pair_intersection(&b, &f, Some((w1, w2))).expect("a stretch");
+    assert_eq!(curves.len(), 1);
+    for i in 0..=200 {
+        let t = curves[0].end() * i as f64 / 200.0;
+        let (a, _, p) = curves[0].solve(t).unwrap();
+        assert!(a.x >= w1.0.x - 1e-12 && a.x <= w1.1.x + 1e-12);
+        assert!((p.x.hypot(p.y) - 0.5f64.sqrt()).abs() < 1e-9 && (p.z - 0.5).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn a_bowl_touching_a_flat_sheet_is_refused_not_guessed() {
+    // The bowl's lowest point touches the plane z = 0: the section is one
+    // point, where the surfaces' normals agree and no loop-free split
+    // exists.
+    assert_eq!(
+        spline_pair_intersection(&bowl(), &flat(0.0), None),
+        Err(ExactIntersectionRefusal::NotRegularCurve)
+    );
 }
