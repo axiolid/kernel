@@ -976,7 +976,16 @@ struct Half {
     /// which orders pieces leaving a vertex in the same direction.
     bend_leave: Scalar,
     bend_arrive: Scalar,
+    /// Points a small way along from `from` and back from `to`, at the
+    /// fractions of [`PROBES`]: where two pieces leave a vertex with the
+    /// same direction and bend (touching to third order or more), their
+    /// chords to these points still part.
+    probe_leave: [Point2; 3],
+    probe_arrive: [Point2; 3],
 }
+
+/// Fractions of a piece's span at which [`Half`] probes it from each end.
+const PROBES: [Scalar; 3] = [1e-4, 1e-3, 1e-2];
 
 fn directed(piece: &Piece, reversed: bool) -> Piece {
     if reversed {
@@ -1054,6 +1063,16 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
         let leave = angle_of(tangent(piece, true)?);
         let arrive = angle_of(tangent(piece, false)?);
         let (bend_leave, bend_arrive) = (bend(piece, true)?, bend(piece, false)?);
+        let (t0, t1) = (piece.pspan.start, piece.pspan.end);
+        let probe = |f: Scalar| -> Result<Point2, BooleanError> {
+            evaluate2(&piece.pcurve, t0 + (t1 - t0) * f).map_err(|_| BooleanError::Evaluation)
+        };
+        let near_start = [probe(PROBES[0])?, probe(PROBES[1])?, probe(PROBES[2])?];
+        let near_end = [
+            probe(1.0 - PROBES[0])?,
+            probe(1.0 - PROBES[1])?,
+            probe(1.0 - PROBES[2])?,
+        ];
         halves.push(Half {
             piece: index,
             reversed: false,
@@ -1063,6 +1082,8 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
             arrive,
             bend_leave,
             bend_arrive,
+            probe_leave: near_start,
+            probe_arrive: near_end,
         });
         if *both_ways {
             halves.push(Half {
@@ -1074,6 +1095,8 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
                 arrive: leave + PI,
                 bend_leave: -bend_arrive,
                 bend_arrive: -bend_leave,
+                probe_leave: near_end,
+                probe_arrive: near_start,
             });
         }
     }
@@ -1103,6 +1126,15 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
             // left of another lies clockwise-first from `back`.
             let back = here.arrive + PI;
             let back_bend = -here.bend_arrive;
+            let at = vertices[here.to];
+            // Third order: how far clockwise from the arriving piece's chord
+            // a candidate's chord turns, a small way out.
+            let chord_turns = |c: &Half| -> [Scalar; 3] {
+                [0, 1, 2].map(|k| {
+                    let (b, o) = (here.probe_arrive[k] - at, c.probe_leave[k] - at);
+                    (angle_of(b) - angle_of(o)).rem_euclid(TAU)
+                })
+            };
             let mut keyed: Vec<((Scalar, Scalar), usize)> = Vec::new();
             for (index, candidate) in halves.iter().enumerate() {
                 if candidate.from != here.to {
@@ -1117,8 +1149,14 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
                     (TAU, Scalar::INFINITY)
                 } else if !(1e-9..=TAU - 1e-9).contains(&turn) {
                     if delta.abs() <= 1e-9 * (1.0 + back_bend.abs()) {
-                        // Leaving back along the arriving piece itself.
-                        return Err(BooleanError::TangentSplit);
+                        // Leaving back along the arriving piece, bending
+                        // alike: its chord a small way out says which side.
+                        let c = chord_turns(candidate);
+                        let Some(t) = c.into_iter().find(|t| *t > 1e-12 && *t < TAU - 1e-12) else {
+                            return Err(BooleanError::TangentSplit);
+                        };
+                        keyed.push(((if t < PI { t.min(1e-10) } else { TAU }, t), index));
+                        continue;
                     }
                     if delta > 0.0 {
                         (0.0, delta)
@@ -1131,18 +1169,37 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
                 keyed.push((key, index));
             }
             let same_turn = |x: Scalar, y: Scalar| (x - y).abs() < 1e-9;
-            let order = |x: &(Scalar, Scalar), y: &(Scalar, Scalar)| {
-                if same_turn(x.0, y.0) {
-                    x.1.total_cmp(&y.1)
+            let same_bend =
+                |x: Scalar, y: Scalar| (x - y).abs() <= 1e-9 * (1.0 + x.abs().min(1e12));
+            // Tied in direction and bend: the chords a small way out, at the
+            // smallest step where they part.
+            let chords = |a: usize, b: usize| -> core::cmp::Ordering {
+                let (ca, cb) = (chord_turns(&halves[a]), chord_turns(&halves[b]));
+                for k in 0..3 {
+                    if (ca[k] - cb[k]).abs() > 1e-12 {
+                        return ca[k].total_cmp(&cb[k]);
+                    }
+                }
+                core::cmp::Ordering::Equal
+            };
+            let order = |x: &((Scalar, Scalar), usize), y: &((Scalar, Scalar), usize)| {
+                let ((xt, xb), (yt, yb)) = (x.0, y.0);
+                if !same_turn(xt, yt) {
+                    xt.total_cmp(&yt)
+                } else if !same_bend(xb, yb) {
+                    xb.total_cmp(&yb)
                 } else {
-                    x.0.total_cmp(&y.0)
+                    chords(x.1, y.1)
                 }
             };
-            keyed.sort_by(|x, y| order(&x.0, &y.0));
-            if let [(first_key, _), (second_key, _), ..] = keyed.as_slice() {
-                let same_bend = (first_key.1 - second_key.1).abs()
-                    <= 1e-9 * (1.0 + first_key.1.abs().min(1e12));
-                if same_turn(first_key.0, second_key.0) && same_bend && first_key.0 < TAU {
+            keyed.sort_by(order);
+            if let [first_entry, second_entry, ..] = keyed.as_slice() {
+                let ((ft, fb), (st, sb)) = (first_entry.0, second_entry.0);
+                if same_turn(ft, st)
+                    && same_bend(fb, sb)
+                    && ft < TAU
+                    && chords(first_entry.1, second_entry.1) == core::cmp::Ordering::Equal
+                {
                     return Err(BooleanError::TangentSplit);
                 }
             }

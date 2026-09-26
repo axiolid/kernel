@@ -15,7 +15,7 @@ use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_core::{BooleanOperator, Point2, Tolerance};
 use axiolid_measure::exact_properties;
 use axiolid_overlay::ArcRing;
-use common::{spline_box, spline_box_at, spline_box_sized};
+use common::{spline_box, spline_box_at, spline_box_grid, spline_box_sized};
 
 const PI: f64 = std::f64::consts::PI;
 const H: [[f64; 3]; 3] = [[1.0, 1.3, 1.1], [1.2, 1.8, 1.4], [0.9, 1.5, 1.2]];
@@ -326,4 +326,21 @@ fn a_spline_bump_pierces_the_spline_roof_in_a_closed_loop() {
         })
         .sum();
     check(&first, &bump, want, 1e-7);
+}
+
+#[test]
+fn a_roof_tangent_to_a_block_top_along_a_line_and_crossing_it() {
+    // The roof z = 1 + (x - 1)^3 / 2 over [0, 2]^2 (cubic in x; the
+    // Bernstein coefficients of s^3 over [-1, 1] are -1, 1, -1, 1) is
+    // tangent to the plane z = 1 along the line x = 1 and crosses it there.
+    // The block [0.5, 1.5]^2 x [0.2, 1] has that plane as its top: the
+    // section is the line of contact, traced as a second derivative's
+    // zeros (ADR 0077).
+    let c = [-1.0, 1.0, -1.0, 1.0];
+    let h: Vec<Vec<f64>> = c.iter().map(|ci| vec![1.0 + 0.5 * ci; 2]).collect();
+    let roofed = spline_box_grid(axiolid_core::Vec3::ZERO, 2.0, &h);
+    let top = block((0.5, 1.5), (0.5, 1.5), (0.2, 1.0));
+    // Under the roof where it is lower (x < 1), under the top elsewhere.
+    let want = 0.4 + 0.5 * (-(0.5f64.powi(4)) / 4.0) + 0.4;
+    check(&roofed, &top, want, 1e-9);
 }

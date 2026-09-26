@@ -11,6 +11,15 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Surfaces tangent along a whole curve (a line of contact) are traced. A
+  first or second derivative of the field crosses zero regularly on the
+  line and is traced instead; its curves are kept where the field
+  vanishes along them with its gradient, as crossing or touching by the
+  field's sign across. The field is then traced with tubes about the
+  lines left out, and branches running into a line are bridged to it at
+  a vertex. Crossing lines are sections; touching lines add none. Third
+  derivatives are tried too; contact to fifth order or more along a curve
+  stays `Undecided`.
 - Contact to higher order than a saddle (a singular Hessian: a tacnode,
   where two branches touch each other) is a vertex too. The ends are
   checked against the field's sign changes about the point, and a

@@ -121,9 +121,14 @@ do not adopt or wrap another kernel.
     vertex there (ADR 0077).
   - Contact to higher order at a point (a tacnode) is a vertex too, and a
     traced pair that only touches adds no section.
-- **Refused by name:** surfaces on a traced pair that are tangent along a
-  whole curve and cross there (`Undecided`). Tangent along a curve without
-  crossing is touching, and adds no section.
+  - Surfaces tangent along a whole curve and crossing there meet along
+    that line of contact (ADR 0077); tangent without crossing, they add
+    no section. The tangent-contact rule applies to closed forms only: a
+    traced section is never mere touching. Pieces leaving a vertex with
+    the same direction and bend (touching to third order) are ordered by
+    their chords a small way out.
+- **Refused by name:** contact to fifth order or more along a whole
+  curve (`Undecided`).
 
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where

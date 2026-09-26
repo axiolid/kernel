@@ -38,7 +38,14 @@ pub(crate) enum TraceRefusal {
     /// The zero set is only isolated points: the surfaces touch there
     /// without crossing.
     Touching(Point2),
+    /// More singular points than isolated ones come to (a whole curve of
+    /// them, where the surfaces may be tangent along it).
+    Many(Point2),
 }
+
+/// How many singular points a first trace takes before it hands over to
+/// [`along_contact`].
+const FEW: usize = 32;
 
 /// Periodicity of the box's parameters: a component leaving through one
 /// side of a periodic parameter comes back through the other.
@@ -67,12 +74,414 @@ pub(crate) fn trace_within(
     periodic: Periodic,
     budget: usize,
 ) -> Result<Vec<ImplicitCurve2>, TraceRefusal> {
-    let (curves, touches) = trace_with_touches(field, domain, periodic, budget)?;
+    let (curves, touches) =
+        match trace_with_touches(field, domain, periodic, budget, &Tubes::none(), FEW) {
+            Ok(found) => found,
+            // Undecidable pieces all along a curve: the surfaces may be
+            // tangent along it.
+            Err(TraceRefusal::Many(_)) => match along_contact(field, domain, periodic, budget) {
+                Some(found) => found?,
+                // Not a line of contact after all (a pole, a curve of
+                // touching points on the window's edge): the singular
+                // points one by one.
+                None => {
+                    trace_with_touches(field, domain, periodic, budget, &Tubes::none(), usize::MAX)?
+                }
+            },
+            Err(refusal @ (TraceRefusal::Singular(_) | TraceRefusal::Budget)) => {
+                along_contact(field, domain, periodic, budget).ok_or(refusal)??
+            }
+            Err(refusal) => return Err(refusal),
+        };
     // Only isolated touching points: the surfaces touch, they do not cross.
     if curves.is_empty() && !touches.is_empty() {
         return Err(TraceRefusal::Touching(touches[0]));
     }
     Ok(curves)
+}
+
+/// Thin tubes about curves along which the surfaces are tangent: pieces
+/// inside one are left out of a trace, since the field vanishes there to
+/// higher order and no piece can be certified. Sample points of the curves,
+/// bucketed by the tube's radius.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Tubes {
+    radius: Scalar,
+    buckets: std::collections::HashMap<(i64, i64), Vec<Point2>>,
+}
+
+impl Tubes {
+    fn none() -> Self {
+        Self::default()
+    }
+
+    fn new(radius: Scalar, points: impl Iterator<Item = Point2>) -> Self {
+        let mut buckets: std::collections::HashMap<(i64, i64), Vec<Point2>> =
+            std::collections::HashMap::new();
+        for p in points {
+            let key = ((p.x / radius).floor() as i64, (p.y / radius).floor() as i64);
+            buckets.entry(key).or_default().push(p);
+        }
+        Self { radius, buckets }
+    }
+
+    /// Whether a sample lies within the radius of the box.
+    fn near(&self, lo: Point2, hi: Point2) -> bool {
+        if self.buckets.is_empty() {
+            return false;
+        }
+        let r = self.radius;
+        let (a, b) = (lo - Point2::splat(r), hi + Point2::splat(r));
+        let key = |x: Scalar| (x / r).floor() as i64;
+        if key(b.x) - key(a.x) > 8 || key(b.y) - key(a.y) > 8 {
+            return false;
+        }
+        for i in key(a.x)..=key(b.x) {
+            for j in key(a.y)..=key(b.y) {
+                if let Some(points) = self.buckets.get(&(i, j)) {
+                    if points
+                        .iter()
+                        .any(|p| p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether a piece lies in a tube: no wider than the radius, and near
+    /// a sample.
+    fn holds(&self, cell: &Cell) -> bool {
+        let side = (cell.hi.x - cell.lo.x).max(cell.hi.y - cell.lo.y);
+        side <= self.radius && self.near(cell.lo, cell.hi)
+    }
+}
+
+/// How a curve of a second derivative's zeros sits in the field's own.
+enum Contact {
+    /// On it, the field changing sign across: the surfaces are tangent
+    /// along the curve and cross there.
+    Crossing,
+    /// On it, the field keeping its sign: tangent without crossing.
+    Touching,
+    /// Not on it throughout.
+    Not,
+}
+
+/// The field's zeros where the surfaces are tangent along whole curves.
+///
+/// Along such a curve the field vanishes with its gradient (and, where the
+/// surfaces cross, its Hessian), as `c n^2` or `c n^3` in the distance `n`
+/// across it, so no piece near it can be certified. But then every first
+/// (or second) derivative vanishes exactly on the curve, and generically
+/// one of them crosses zero there regularly (`F_uu ~ 6 c a^2 n`): its
+/// trace, certified as usual, holds the curve.
+/// Each of its curves is kept as a contact curve only where the field
+/// vanishes along the whole of it (to rounding) -- as crossing where the
+/// field changes sign across it, touching where not. The field is then
+/// traced again with thin tubes about the contact curves left out; a
+/// branch of it ending at a tube runs into a contact curve, and is bridged
+/// to it there, the contact curve cut: a vertex, as at a crossing.
+#[allow(clippy::type_complexity)]
+fn along_contact(
+    field: &Field2,
+    domain: Cell,
+    periodic: Periodic,
+    budget: usize,
+) -> Option<Result<(Vec<ImplicitCurve2>, Vec<Point2>), TraceRefusal>> {
+    let extent = (domain.hi - domain.lo).abs();
+    let size = extent.x.max(extent.y);
+    let radius = 1e-3 * size;
+    // Tangent without crossing, the field vanishes as `c n^2` and a first
+    // derivative crosses zero regularly on the curve; tangent and crossing,
+    // as `c n^3`, a second one.
+    // (A fourth-order contact, `c n^4`, needs a third derivative.)
+    let firsts = [true, false].map(|u| partial(field, u));
+    let seconds =
+        [(true, true), (false, false), (true, false)].map(|(a, b)| partial(&partial(field, a), b));
+    let thirds = [
+        (true, true, true),
+        (false, false, false),
+        (true, true, false),
+        (true, false, false),
+    ]
+    .map(|(a, b, c)| partial(&partial(&partial(field, a), b), c));
+    for g in firsts.iter().chain(&seconds).chain(&thirds) {
+        if g.magnitude() == 0.0 {
+            continue;
+        }
+        let Ok((candidates, _)) =
+            trace_with_touches(g, domain, periodic, budget, &Tubes::none(), usize::MAX)
+        else {
+            continue;
+        };
+        let (mut crossing, mut touching) = (Vec::new(), Vec::new());
+        for curve in candidates {
+            match contact(field, g, &curve, size) {
+                Contact::Crossing => crossing.push(curve),
+                Contact::Touching => touching.push(curve),
+                Contact::Not => {}
+            }
+        }
+        if crossing.is_empty() && touching.is_empty() {
+            continue;
+        }
+        // Samples of every contact curve, a quarter of the radius apart,
+        // wrapped into the window along periodic parameters.
+        let wrap = |mut p: Point2| {
+            if periodic.u {
+                p.x = domain.lo.x + (p.x - domain.lo.x).rem_euclid(TAU);
+            }
+            if periodic.v {
+                p.y = domain.lo.y + (p.y - domain.lo.y).rem_euclid(TAU);
+            }
+            p
+        };
+        let mut samples = Vec::new();
+        for curve in crossing.iter().chain(&touching) {
+            for i in 0..curve.cells.len() {
+                let (a, b) = (curve.point(i as Scalar)?, curve.point(i as Scalar + 1.0)?);
+                let n = (((b - a).length() / (0.25 * radius)).ceil() as usize).clamp(1, 100_000);
+                for k in 0..=n {
+                    samples.push(wrap(curve.point(i as Scalar + k as Scalar / n as Scalar)?));
+                }
+            }
+        }
+        let tubes = Tubes::new(radius, samples.iter().copied());
+        let (curves, mut touches) =
+            match trace_with_touches(field, domain, periodic, budget, &tubes, usize::MAX) {
+                Ok(found) => found,
+                Err(_) => return None,
+            };
+        // A branch running into a contact curve meets it at a vertex: the
+        // branch is bridged to the curve's nearest point, and the curve cut
+        // there.
+        let mut curves = curves;
+        let mut cuts: Vec<Vec<Scalar>> = vec![Vec::new(); crossing.len() + touching.len()];
+        for c in &mut curves {
+            for at_start in [true, false] {
+                let t = if at_start { 0.0 } else { c.end() };
+                let p = c.point(t)?;
+                // An end on the window's own edge is where the window cuts
+                // the branch, not a tube.
+                let edge = 1e-9 * size;
+                let on_edge = (!periodic.u
+                    && ((p.x - domain.lo.x).abs() <= edge || (p.x - domain.hi.x).abs() <= edge))
+                    || (!periodic.v
+                        && ((p.y - domain.lo.y).abs() <= edge
+                            || (p.y - domain.hi.y).abs() <= edge));
+                if on_edge {
+                    continue;
+                }
+                // Ends at a tube: pieces up to its radius were left out
+                // about the curve, so the branch stops within a few radii.
+                let (k, s, q) = nearest(crossing.iter().chain(&touching), p, periodic, size)?;
+                if (q - p).length() > 4.0 * radius {
+                    continue;
+                }
+                let g = field.jet(p).gradient;
+                let leaving = Vec2::new(-g.y, g.x);
+                let chord = q - p;
+                let cell = ImplicitCell::bridge(p, q, leaving, Vec2::new(chord.x, chord.y));
+                if at_start {
+                    c.cells.insert(0, cell.reversed());
+                } else {
+                    c.cells.push(cell);
+                }
+                cuts[k].push(s);
+            }
+        }
+        // Touching curves cut by a branch are not sections themselves.
+        let mut all = curves;
+        for (k, curve) in crossing.into_iter().enumerate() {
+            all.extend(cut_at(curve, &mut cuts[k], periodic)?);
+        }
+        if all.is_empty() {
+            if let Some(p) = touching.first().and_then(|c| c.point(0.0)) {
+                touches.push(p);
+            }
+        }
+        return Some(Ok((all, touches)));
+    }
+    None
+}
+
+/// The curve, its parameter and its point nearest `p` (up to whole turns
+/// along periodic parameters): the nearest sample, refined by golden
+/// section on the distance.
+fn nearest<'a>(
+    curves: impl Iterator<Item = &'a ImplicitCurve2>,
+    p: Point2,
+    periodic: Periodic,
+    size: Scalar,
+) -> Option<(usize, Scalar, Point2)> {
+    let turn = |q: Point2| {
+        let mut d = q - p;
+        if periodic.u {
+            d.x -= (d.x / TAU).round() * TAU;
+        }
+        if periodic.v {
+            d.y -= (d.y / TAU).round() * TAU;
+        }
+        d.length()
+    };
+    let mut best: Option<(Scalar, usize, Scalar)> = None;
+    let curves: Vec<&ImplicitCurve2> = curves.collect();
+    for (k, c) in curves.iter().enumerate() {
+        let n = 64 * c.cells.len().max(1);
+        for i in 0..=n {
+            let t = c.end() * i as Scalar / n as Scalar;
+            let Some(q) = c.point(t) else { continue };
+            let d = turn(q);
+            if best.is_none_or(|(b, _, _)| d < b) {
+                best = Some((d, k, t));
+            }
+        }
+    }
+    let (_, k, t0) = best?;
+    let c = curves[k];
+    let step = c.end() / (64 * c.cells.len().max(1)) as Scalar;
+    let (mut a, mut b) = ((t0 - step).max(0.0), (t0 + step).min(c.end()));
+    let f = |t: Scalar| c.point(t).map_or(Scalar::INFINITY, turn);
+    for _ in 0..100 {
+        let (m1, m2) = (a + 0.382 * (b - a), b - 0.382 * (b - a));
+        if f(m1) <= f(m2) {
+            b = m2;
+        } else {
+            a = m1;
+        }
+    }
+    let mut t = 0.5 * (a + b);
+    // An end of the curve (a vertex it already has) within rounding of the
+    // search is the point.
+    for end in [0.0, c.end()] {
+        if let (Some(e), Some(q)) = (c.point(end), c.point(t)) {
+            if (e - q).length() <= 1e-6 * size {
+                t = end;
+            }
+        }
+    }
+    let q = c.point(t)?;
+    // Onto the turn nearest `p`.
+    let mut shift = Point2::ZERO;
+    if periodic.u {
+        shift.x = ((p.x - q.x) / TAU).round() * TAU;
+    }
+    if periodic.v {
+        shift.y = ((p.y - q.y) / TAU).round() * TAU;
+    }
+    Some((k, t, q + shift))
+}
+
+/// A contact curve cut at the parameters where branches meet it.
+fn cut_at(
+    curve: ImplicitCurve2,
+    cuts: &mut [Scalar],
+    periodic: Periodic,
+) -> Option<Vec<ImplicitCurve2>> {
+    let n = curve.end();
+    let slack = 1e-9 * (1.0 + n);
+    cuts.sort_by(Scalar::total_cmp);
+    let inner: Vec<Scalar> = cuts
+        .iter()
+        .copied()
+        .filter(|&t| t > slack && t < n - slack)
+        .collect();
+    if inner.is_empty() {
+        return Some(vec![curve]);
+    }
+    let mut out = Vec::new();
+    match curve.closure(periodic.u, periodic.v) {
+        Some(closure) => {
+            for w in inner.windows(2) {
+                out.push(curve.sub(w[0], w[1], None)?);
+            }
+            out.push(curve.sub(inner[inner.len() - 1], inner[0], Some(closure))?);
+        }
+        None => {
+            let mut ends = vec![0.0];
+            ends.extend(inner);
+            ends.push(n);
+            for w in ends.windows(2) {
+                if w[1] - w[0] > slack {
+                    out.push(curve.sub(w[0], w[1], None)?);
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Whether the zeros of a second derivative `g` along `curve` are the
+/// field's own, and whether the field changes sign across them.
+fn contact(field: &Field2, g: &Field2, curve: &ImplicitCurve2, size: Scalar) -> Contact {
+    let n = 16 * curve.cells.len().max(1);
+    let (mut crossing, mut touching) = (0, 0);
+    for k in 0..=n {
+        let Some(p) = curve.point(curve.end() * k as Scalar / n as Scalar) else {
+            return Contact::Not;
+        };
+        let rounding = 64.0 * Scalar::EPSILON * field.scale_at(p).max(field.magnitude());
+        // On the field's zeros, to rounding (a thousandfold for the cube's
+        // cancellation).
+        if field.value(p).abs() > 1e3 * rounding {
+            return Contact::Not;
+        }
+        // Across the curve, along `g`'s gradient, far enough for the field
+        // to show its sign.
+        // Where `g` is itself singular (a vertex of its own, on a bridge)
+        // there is no direction across: the field's zero is all to check.
+        let t = curve.end() * k as Scalar / n as Scalar;
+        let on_bridge = curve
+            .cells
+            .get((t.floor() as usize).min(curve.cells.len().saturating_sub(1)))
+            .is_some_and(|c| c.bridge.is_some());
+        let grad = g.jet(p).gradient;
+        let l = grad.length();
+        let scale = g.jet(p).uu.abs() + g.jet(p).vv.abs() + g.magnitude() * Scalar::EPSILON;
+        if on_bridge || !l.is_finite() || l <= 1e-6 * scale {
+            continue;
+        }
+        let normal = grad / l;
+        let mut decided = false;
+        for step in [1e-4, 1e-3, 1e-2] {
+            let d = normal * (step * size);
+            let (a, b) = (
+                field.value(p + Point2::new(d.x, d.y)),
+                field.value(p - Point2::new(d.x, d.y)),
+            );
+            if a.abs() > 1e3 * rounding && b.abs() > 1e3 * rounding {
+                // Tangent there: the field's gradient vanishes on the curve
+                // (as `n^2` or `n`), far below its size just beside it; on
+                // a regular zero it is much the same.
+                let beside = field
+                    .jet(p + Point2::new(d.x, d.y))
+                    .gradient
+                    .length()
+                    .max(field.jet(p - Point2::new(d.x, d.y)).gradient.length());
+                if field.jet(p).gradient.length() > 0.25 * beside {
+                    return Contact::Not;
+                }
+                if (a < 0.0) != (b < 0.0) {
+                    crossing += 1;
+                } else {
+                    touching += 1;
+                }
+                decided = true;
+                break;
+            }
+        }
+        if !decided {
+            return Contact::Not;
+        }
+    }
+    match (crossing, touching) {
+        (_, 0) => Contact::Crossing,
+        (0, _) => Contact::Touching,
+        _ => Contact::Not,
+    }
 }
 
 /// [`trace`], also returning the isolated points where the zero set is a
@@ -82,6 +491,8 @@ pub(crate) fn trace_with_touches(
     domain: Cell,
     periodic: Periodic,
     budget: usize,
+    tubes: &Tubes,
+    cap: usize,
 ) -> Result<(Vec<ImplicitCurve2>, Vec<Point2>), TraceRefusal> {
     let du = partial(field, true);
     let dv = partial(field, false);
@@ -139,7 +550,7 @@ pub(crate) fn trace_with_touches(
         };
         z.reach = z.reach.max(far(&z)) * 1.000_001;
         singular.push(z);
-        Ok(())
+        many(singular, cap)
     };
     let mut work = 0usize;
     while let Some((cell, depth)) = queue.pop() {
@@ -150,7 +561,7 @@ pub(crate) fn trace_with_touches(
         if !bound(field, &du, &dv, &cell).straddles_zero() {
             continue;
         }
-        if inside_one(&singular, &cell) {
+        if inside_one(&singular, &cell) || tubes.holds(&cell) {
             continue;
         }
         let fu = bound_simple(&du, &cell);
@@ -215,6 +626,7 @@ pub(crate) fn trace_with_touches(
                                 kind,
                                 hessian,
                             });
+                            many(&singular, cap)?;
                             if inside_one(&singular, &cell) {
                                 continue;
                             }
@@ -341,6 +753,16 @@ fn bridge_degenerate(
         }
     }
     Ok(())
+}
+
+/// More singular points than `cap`: a whole curve of them, where the
+/// surfaces may be tangent along it. Refused at once, for
+/// [`along_contact`] to take over.
+fn many(singular: &[Singular], cap: usize) -> Result<(), TraceRefusal> {
+    match singular.last() {
+        Some(z) if singular.len() > cap => Err(TraceRefusal::Many(z.at)),
+        _ => Ok(()),
+    }
 }
 
 /// A singular point of the curve and the square about it that rounding

@@ -347,7 +347,7 @@ fn a_sheet_touching_a_plane_to_fourth_order_only_touches() {
 }
 
 #[test]
-fn tangency_along_a_whole_line_touches_or_is_undecided() {
+fn tangency_along_a_whole_line_touches_or_crosses() {
     // z = x^2 touches z = 0 along the line x = 0 without crossing it: no
     // section, as for any touching.
     assert_eq!(
@@ -355,8 +355,8 @@ fn tangency_along_a_whole_line_touches_or_is_undecided() {
         Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve)
     );
     // z = x^3 is tangent to z = 0 along the same line and crosses it there:
-    // every piece along the line is singular, and the trace says it cannot
-    // decide rather than guess.
+    // the field vanishes to third order along it, and the section is the
+    // line itself, traced as the zeros of a second derivative.
     let mut cubic = quartic(0.0);
     cubic.u_degree = 3;
     cubic.u_multiplicities = vec![4, 4];
@@ -368,8 +368,92 @@ fn tangency_along_a_whole_line_touches_or_is_undecided() {
                 .collect()
         })
         .collect();
+    let curves = implicit_surface_intersection(&Surface::BSpline(cubic), &ground(), None)
+        .expect("the line of contact");
+    assert_eq!(curves.len(), 1);
+    let branch = Curve3::ImplicitSection(curves[0].clone());
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for k in 0..=1000 {
+        let p = axiolid_evaluate::evaluate3(&branch, curves[0].curve.end() * k as f64 / 1000.0)
+            .unwrap();
+        assert!(p.x.abs() < 1e-12 && p.z.abs() < 1e-12, "{p:?}");
+        lo = lo.min(p.y);
+        hi = hi.max(p.y);
+    }
+    // Across the whole sheet.
+    assert!(lo < -1.0 + 1e-9 && hi > 1.0 - 1e-9, "{lo} .. {hi}");
+}
+
+#[test]
+fn a_branch_running_into_a_line_of_contact_meets_it_at_a_vertex() {
+    // z = x^3 (y - 1/2) against z = 0: the line of contact x = 0 and the
+    // regular branch y = 1/2 meet at (0, 1/2): a vertex, where the two
+    // halves of each end.
+    let cx = [-1.0, 1.0, -1.0, 1.0];
+    let cy = [-1.5, 0.5];
+    let sheet = BSplineSurface {
+        u_degree: 3,
+        v_degree: 1,
+        control_points: (0..4)
+            .map(|i| {
+                (0..2)
+                    .map(|j| {
+                        Point3::new(
+                            -1.0 + 2.0 * i as f64 / 3.0,
+                            -1.0 + 2.0 * j as f64,
+                            cx[i] * cy[j],
+                        )
+                    })
+                    .collect()
+            })
+            .collect(),
+        u_knots: vec![0.0, 1.0],
+        u_multiplicities: vec![4, 4],
+        v_knots: vec![0.0, 1.0],
+        v_multiplicities: vec![2, 2],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::PiecewiseBezier,
+        self_intersect: None,
+    };
+    let curves = implicit_surface_intersection(&Surface::BSpline(sheet), &ground(), None)
+        .expect("the line of contact and the branch");
+    let mut at_vertex = 0;
+    for c in &curves {
+        let branch = Curve3::ImplicitSection(c.clone());
+        for k in 0..=1000 {
+            let p =
+                axiolid_evaluate::evaluate3(&branch, c.curve.end() * k as f64 / 1000.0).unwrap();
+            // On the plane and on the sheet, and along one of the two lines
+            // (the bridges into the vertex, where the field is below its
+            // rounding, stray from them by a few billionths).
+            assert!(p.z.abs() < 1e-12, "{p:?}");
+            assert!((p.x.powi(3) * (p.y - 0.5)).abs() < 1e-12, "{p:?}");
+            assert!(p.x.abs() < 1e-6 || (p.y - 0.5).abs() < 1e-6, "{p:?}");
+        }
+        for t in [0.0, c.curve.end()] {
+            let p = axiolid_evaluate::evaluate3(&branch, t).unwrap();
+            if (p - Point3::new(0.0, 0.5, 0.0)).length() < 1e-9 {
+                at_vertex += 1;
+            }
+        }
+    }
+    assert_eq!((curves.len(), at_vertex), (4, 4));
+}
+
+#[test]
+fn a_sheet_touching_a_plane_along_a_line_to_fourth_order_only_touches() {
+    // z = y^4 lies on z = 0 along y = 0 and above it elsewhere: tangent to
+    // fourth order along a whole line, found through a third derivative.
+    let mut sheet = quartic(1.0);
+    for row in &mut sheet.control_points {
+        for (j, p) in row.iter_mut().enumerate() {
+            p.z = [1.0, -1.0, 1.0, -1.0, 1.0][j];
+        }
+    }
     assert_eq!(
-        implicit_surface_intersection(&Surface::BSpline(cubic), &ground(), None),
-        Err(axiolid_nurbs::ExactIntersectionRefusal::Undecided)
+        implicit_surface_intersection(&Surface::BSpline(sheet), &ground(), None),
+        Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve)
     );
 }

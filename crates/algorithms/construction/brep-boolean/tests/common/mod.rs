@@ -219,20 +219,34 @@ pub fn spline_box_at(offset: Vec3, h: [[f64; 3]; 3]) -> ExactBRep {
 /// [`spline_box_at`] over `[0, 2 step]^2`, its roof's control points `step`
 /// apart.
 pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep {
+    spline_box_grid(offset, 2.0 * step, &h.map(|row| row.to_vec()))
+}
+
+/// A box over `offset + [0, width]^2` up to a Bezier roof of any degrees:
+/// `h[i][j]` is the control height over `x = i width / p`, `y = j width / q`,
+/// `(p, q)` one less than the grid's sides.
+pub fn spline_box_grid(offset: Vec3, width: f64, h: &[Vec<f64>]) -> ExactBRep {
     use axiolid_curve::{BSplineCurve2, BSplineCurve3, BSplineSurface, KnotSpec, Line3};
     use axiolid_surface::Plane;
-    let roof_point =
-        |i: usize, j: usize| Point3::new(i as f64 * step, j as f64 * step, h[i][j]) + offset;
+    let (p, q) = (h.len() - 1, h[0].len() - 1);
+    let xy = |i: usize, j: usize| {
+        Point3::new(
+            i as f64 * width / p as f64,
+            j as f64 * width / q as f64,
+            0.0,
+        )
+    };
+    let roof_point = |i: usize, j: usize| xy(i, j) + Vec3::new(0.0, 0.0, h[i][j]) + offset;
     let roof = BSplineSurface {
-        u_degree: 2,
-        v_degree: 2,
-        control_points: (0..3)
-            .map(|i| (0..3).map(|j| roof_point(i, j)).collect())
+        u_degree: p as u16,
+        v_degree: q as u16,
+        control_points: (0..=p)
+            .map(|i| (0..=q).map(|j| roof_point(i, j)).collect())
             .collect(),
         u_knots: vec![0.0, 1.0],
-        u_multiplicities: vec![3, 3],
+        u_multiplicities: vec![p as u32 + 1, p as u32 + 1],
         v_knots: vec![0.0, 1.0],
-        v_multiplicities: vec![3, 3],
+        v_multiplicities: vec![q as u32 + 1, q as u32 + 1],
         weights: None,
         u_closed: false,
         v_closed: false,
@@ -240,11 +254,12 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
         self_intersect: None,
     };
     let curve3 = |pts: Vec<Point3>| {
+        let n = pts.len();
         Curve3::BSpline(BSplineCurve3 {
-            degree: 2,
+            degree: (n - 1) as u16,
             control_points: pts,
             knots: vec![0.0, 1.0],
-            multiplicities: vec![3, 3],
+            multiplicities: vec![n as u32, n as u32],
             weights: None,
             closed: false,
             self_intersect: None,
@@ -252,11 +267,12 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
         })
     };
     let curve2 = |pts: Vec<Vec2>| {
+        let n = pts.len();
         Curve2::BSpline(BSplineCurve2 {
-            degree: 2,
+            degree: (n - 1) as u16,
             control_points: pts,
             knots: vec![0.0, 1.0],
-            multiplicities: vec![3, 3],
+            multiplicities: vec![n as u32, n as u32],
             weights: None,
             closed: false,
             self_intersect: None,
@@ -266,11 +282,11 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
     let mut b = ExactBRepBuilder::default();
     // Vertices: bottom corners 0..4, top corners 4..8, anticlockwise from
     // (0, 0).
-    let corners = [(0usize, 0usize), (2, 0), (2, 2), (0, 2)];
+    let corners = [(0usize, 0usize), (p, 0), (p, q), (0, q)];
     let mut v = Vec::new();
     for (i, j) in corners {
         v.push(b.topology_mut().add_vertex(Vertex {
-            position: Point3::new(i as f64 * step, j as f64 * step, 0.0) + offset,
+            position: xy(i, j) + offset,
         }));
     }
     for (i, j) in corners {
@@ -287,7 +303,7 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
     let pos = |k: usize| {
         let (i, j) = corners[k % 4];
         if k < 4 {
-            Point3::new(i as f64 * step, j as f64 * step, 0.0) + offset
+            xy(i, j) + offset
         } else {
             roof_point(i, j)
         }
@@ -314,10 +330,10 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
         vertical.push(edge(&mut b, k, k + 4, c));
     }
     let rows = [
-        (0..3).map(|i| roof_point(i, 0)).collect::<Vec<_>>(),
-        (0..3).map(|j| roof_point(2, j)).collect(),
-        (0..3).map(|i| roof_point(2 - i, 2)).collect(),
-        (0..3).map(|j| roof_point(0, 2 - j)).collect(),
+        (0..=p).map(|i| roof_point(i, 0)).collect::<Vec<_>>(),
+        (0..=q).map(|j| roof_point(p, j)).collect(),
+        (0..=p).map(|i| roof_point(p - i, q)).collect(),
+        (0..=q).map(|j| roof_point(0, q - j)).collect(),
     ];
     let mut top = Vec::new();
     for k in 0..4 {
@@ -375,7 +391,8 @@ pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep 
     };
     let c2 = |k: usize| {
         let (i, j) = corners[k];
-        Vec2::new(i as f64 * step, j as f64 * step)
+        let c = xy(i, j);
+        Vec2::new(c.x, c.y)
     };
     let ring = add_loop(
         &mut b,

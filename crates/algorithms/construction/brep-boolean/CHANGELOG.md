@@ -11,6 +11,10 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Surfaces tangent along a whole curve and crossing there: the line of
+  contact is a section edge (the tangent-contact rule now applies to
+  closed forms only), and pieces leaving a vertex with the same direction
+  and bend are ordered by their chords a small way out.
 - A traced pair that only touches adds no section, as the closed forms'
   touching does. A pcurve whose trace on its face cannot be decided falls
   back to the section's own space curve read on the face, and failed

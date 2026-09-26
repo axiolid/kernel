@@ -35,7 +35,9 @@ pub fn section_field_of(carrier: &Surface, other: &Surface) -> Option<Field2> {
 pub(crate) fn refusal_of(refusal: TraceRefusal) -> ExactIntersectionRefusal {
     match refusal {
         TraceRefusal::Touching(_) => ExactIntersectionRefusal::NotRegularCurve,
-        TraceRefusal::Singular(_) | TraceRefusal::Budget => ExactIntersectionRefusal::Undecided,
+        TraceRefusal::Singular(_) | TraceRefusal::Many(_) | TraceRefusal::Budget => {
+            ExactIntersectionRefusal::Undecided
+        }
     }
 }
 

@@ -3,8 +3,9 @@ ADR 0077).
 
 Each mutant weakens one step -- bridging the branch ends to the crossing,
 the bridge's tangent at the crossing, its reversal, degenerate contact and
-its tangent, or telling touching from undecided -- and must turn a test
-red.
+its tangent, telling touching from undecided, lines of contact where the
+surfaces are tangent and cross, and ordering pieces that touch to third
+order at a vertex -- and must turn a test red.
 
 Equivalent mutants, deliberately not listed:
 - loosening the checks that the four ends lie two by two along the
@@ -25,8 +26,17 @@ Q = "crates/representations/analytic/curve/src/implicit.rs"
 S = "crates/algorithms/parametric/nurbs/src/implicit_section.rs"
 CURVE = ["-p", "axiolid-nurbs", "--test", "implicit_section"]
 SPLINE = ["-p", "axiolid-nurbs", "--test", "spline_section"]
+B = "crates/algorithms/construction/brep-boolean/src/section.rs"
+P = "crates/algorithms/construction/brep-boolean/src/split.rs"
+ROOF = ["-p", "axiolid-brep-boolean", "--test", "splines"]
 
 MUTANTS = [
+    ('lines of contact never sought', T, '    let radius = 1e-3 * size;\n    // Tangent without crossing', '    let radius = 1e-3 * size;\n    if radius > 0.0 {\n        return None;\n    }\n    // Tangent without crossing', SPLINE),
+    ('regular zeros taken for contact', T, '                if field.jet(p).gradient.length() > 0.25 * beside {', '                if false {', SPLINE),
+    ('crossing contact taken for touching', T, '                if (a < 0.0) != (b < 0.0) {\n                    crossing += 1;', '                if (a < 0.0) == (b < 0.0) {\n                    crossing += 1;', SPLINE),
+    ('branches into a contact line left loose', T, '                if (q - p).length() > 4.0 * radius {', '                if true {', SPLINE),
+    ('a traced contact dropped as touching', B, '                    if !traced && touching(sa, sb, mid, tolerance)? {', '                    if touching(sa, sb, mid, tolerance)? {', ROOF),
+    ('pieces touching to third order refused', P, '                        let Some(t) = c.into_iter().find(|t| *t > 1e-12 && *t < TAU - 1e-12)', '                        let Some(t) = None::<Scalar>', ROOF),
     ('degenerate contact always refused', T, '    if changes != ends.len() || changes % 2 != 0 {', '    if true {', CURVE),
     ('tacnode bridges arrive along their chords', T, '        let into = null.unwrap_or(Vec2::new(chord.x, chord.y));', '        let into = Vec2::new(chord.x, chord.y);', CURVE),
     ('touching read as undecided', S, '        TraceRefusal::Touching(_) => ExactIntersectionRefusal::NotRegularCurve,', '        TraceRefusal::Touching(_) => ExactIntersectionRefusal::Undecided,', SPLINE),

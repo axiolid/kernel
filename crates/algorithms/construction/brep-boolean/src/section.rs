@@ -250,7 +250,15 @@ pub fn section_edges(
                     let mid =
                         evaluate3(&piece_curve, span.start + SAMPLE * (span.end - span.start))
                             .map_err(|_| BooleanError::Evaluation)?;
-                    if touching(sa, sb, mid, tolerance)? {
+                    // Tangent contact adds no section. A traced section is
+                    // never mere touching (the trace drops touching points
+                    // and curves), so where its surfaces are tangent they
+                    // cross: it stays.
+                    let traced = matches!(
+                        piece_curve,
+                        Curve3::ImplicitSection(_) | Curve3::PairSection(_)
+                    );
+                    if !traced && touching(sa, sb, mid, tolerance)? {
                         continue;
                     }
                     let at_a = side_a.locate(fa, mid, &along_a, tolerance)?;
