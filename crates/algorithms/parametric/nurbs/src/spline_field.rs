@@ -30,7 +30,11 @@ fn expand(knots: &[Scalar], multiplicities: &[u32]) -> Vec<Scalar> {
 /// A clamped B-spline's Bezier segments (Piegl and Tiller, A5.6): the
 /// breaks between them and each segment's `p + 1` control points. `None`
 /// for an unclamped knot vector.
-fn decompose(knots: &[Scalar], p: usize, control: &[H]) -> Option<(Vec<Scalar>, Vec<Vec<H>>)> {
+pub(crate) fn decompose(
+    knots: &[Scalar],
+    p: usize,
+    control: &[H],
+) -> Option<(Vec<Scalar>, Vec<Vec<H>>)> {
     let m = knots.len() - 1;
     let n = control.len();
     if knots.len() != n + p + 1 {
@@ -230,7 +234,7 @@ fn equation(point: &[Bern; 4], other: &Surface) -> Option<Bern> {
 /// Degrees, breaks and homogeneous Bezier control nets (`[iu][jv][a][b]`)
 /// of a clamped B-spline surface.
 #[allow(clippy::type_complexity)]
-fn bezier_net(
+pub(crate) fn bezier_net(
     b: &BSplineSurface,
 ) -> Option<(
     usize,

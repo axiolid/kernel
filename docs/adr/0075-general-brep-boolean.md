@@ -102,9 +102,11 @@ do not adopt or wrap another kernel.
   constructs: lines and conics in closed form, and everything else traced
   (ADR 0077) inside one face's parameter box. Pcurves are closed-form where
   cheap and implicit otherwise.
-- **Stage 3 is built against analytic faces.** A B-spline face meeting an
-  analytic face is traced on the spline's Bezier patches, and on the
-  analytic face its pcurve is the space curve read back (`Curve2::Lifted`).
+- **Stage 3 is built.** A B-spline face meeting an analytic face is traced
+  on the spline's Bezier patches, and on the analytic face its pcurve is the
+  space curve read back (`Curve2::Lifted`). Two B-spline faces meet in a
+  section carried on both (`Curve3::PairSection`, ADR 0077), traced in both
+  faces' parameter boxes.
 - **Operands that touch are handled:**
   - Coincident faces imprint each other's edges and keep the shared patch
     once, by normal agreement.
@@ -115,8 +117,8 @@ do not adopt or wrap another kernel.
   - Faces that wind round their surface without a seam get one first.
   - Sections through poles are cut there.
   - Cavities go to the smallest solid around them.
-- **Refused by name:** two B-spline faces meeting each other, and sections
-  whose branches cross where the surfaces touch (a saddle; see ADR 0077).
+- **Refused by name:** sections whose branches cross where the surfaces
+  touch (a saddle; see ADR 0077).
 
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where

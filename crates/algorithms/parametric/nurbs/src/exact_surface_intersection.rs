@@ -223,6 +223,10 @@ pub enum Derivation {
     /// parameters, traced into certified monotone cells (ADR 0077): a torus
     /// against a cylinder, cone or torus off its axis.
     ImplicitTrace,
+    /// Two B-spline surfaces meet along curves found by splitting Bezier
+    /// sub-patch pairs until no closed loop can hide in one, seeded where
+    /// sub-patch edges cross, and followed on both surfaces (ADR 0077).
+    PairTrace,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -235,6 +239,26 @@ pub fn exact_surface_intersection(
     first: &Surface,
     second: &Surface,
 ) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    // Two B-splines: no equation for either, so the section is carried on
+    // both (ADR 0077).
+    if let (Surface::BSpline(a), Surface::BSpline(b)) = (first, second) {
+        let branches: Vec<Curve3> = crate::pair_trace::spline_pair_intersection(a, b, None)?
+            .into_iter()
+            .map(Curve3::PairSection)
+            .collect();
+        let spans = branches
+            .iter()
+            .map(|c| match c {
+                Curve3::PairSection(s) => Some(Interval::new(0.0, s.end())),
+                _ => None,
+            })
+            .collect();
+        return Ok(ExactIntersectionCurve {
+            branches,
+            derivation: Derivation::PairTrace,
+            spans,
+        });
+    }
     // A plane through a cone's apex: rulings, or only the apex (final).
     if let (Surface::Cone(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cone(c)) =
         (first, second)

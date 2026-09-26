@@ -208,9 +208,21 @@ pub fn moved(brep: &ExactBRep, m: Motion) -> ExactBRep {
 /// `z(x, y) = sum h[i][j] B_i(x / 2) B_j(y / 2)`, its boundary four quadratic
 /// B-spline edges shared with the vertical walls.
 pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
+    spline_box_at(Vec3::ZERO, h)
+}
+
+/// [`spline_box`] moved by `offset`.
+pub fn spline_box_at(offset: Vec3, h: [[f64; 3]; 3]) -> ExactBRep {
+    spline_box_sized(offset, 1.0, h)
+}
+
+/// [`spline_box_at`] over `[0, 2 step]^2`, its roof's control points `step`
+/// apart.
+pub fn spline_box_sized(offset: Vec3, step: f64, h: [[f64; 3]; 3]) -> ExactBRep {
     use axiolid_curve::{BSplineCurve2, BSplineCurve3, BSplineSurface, KnotSpec, Line3};
     use axiolid_surface::Plane;
-    let roof_point = |i: usize, j: usize| Point3::new(i as f64, j as f64, h[i][j]);
+    let roof_point =
+        |i: usize, j: usize| Point3::new(i as f64 * step, j as f64 * step, h[i][j]) + offset;
     let roof = BSplineSurface {
         u_degree: 2,
         v_degree: 2,
@@ -258,7 +270,7 @@ pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
     let mut v = Vec::new();
     for (i, j) in corners {
         v.push(b.topology_mut().add_vertex(Vertex {
-            position: Point3::new(i as f64, j as f64, 0.0),
+            position: Point3::new(i as f64 * step, j as f64 * step, 0.0) + offset,
         }));
     }
     for (i, j) in corners {
@@ -275,7 +287,7 @@ pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
     let pos = |k: usize| {
         let (i, j) = corners[k % 4];
         if k < 4 {
-            Point3::new(i as f64, j as f64, 0.0)
+            Point3::new(i as f64 * step, j as f64 * step, 0.0) + offset
         } else {
             roof_point(i, j)
         }
@@ -356,14 +368,14 @@ pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
     };
     // Bottom: plane z = 0 in world (x, y); loop anticlockwise, facing down.
     let world = Frame3 {
-        origin: Point3::ZERO,
+        origin: Point3::ZERO + offset,
         x: Vec3::X,
         y: Vec3::Y,
         z: Vec3::Z,
     };
     let c2 = |k: usize| {
         let (i, j) = corners[k];
-        Vec2::new(i as f64, j as f64)
+        Vec2::new(i as f64 * step, j as f64 * step)
     };
     let ring = add_loop(
         &mut b,
@@ -416,7 +428,7 @@ pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
             y: Vec3::Z,
             z: x.cross(Vec3::Z),
         };
-        let local = |p: Point3| Vec2::new((p - a).dot(x), p.z);
+        let local = |p: Point3| Vec2::new((p - a).dot(x), p.z - a.z);
         let length = (bb - a).length();
         let top_pts: Vec<Vec2> = rows[k].iter().map(|p| local(*p)).collect();
         let ring = add_loop(

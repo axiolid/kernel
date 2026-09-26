@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `spline_pair_intersection`: every component of the section of two
+  B-spline surfaces within parameter windows, as `PairSection3` curves.
+  Bezier sub-patch pairs are split until their normal cones are apart, so
+  no closed loop hides in one; sub-patch edge crossings seed every
+  component, and each is followed on both surfaces to the window's edge,
+  where its last node is solved exactly. `exact_surface_intersection`
+  returns it for two B-splines (`Derivation::PairTrace`).
+- `exact_curve_surface_intersection` for a B-spline curve against a
+  B-spline surface: hull pruning over the Bezier pieces of both, then
+  Newton.
+
 ### Changed
 
 - The trace separates the singular points it meets. An isolated point

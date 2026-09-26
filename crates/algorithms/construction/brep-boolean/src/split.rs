@@ -482,8 +482,36 @@ fn lifted_piece(
             major_radius: t.major_radius,
             minor_radius: t.minor_radius,
         }),
+        // A B-spline carries a section of two B-splines in its own
+        // parameters (ADR 0077).
+        Surface::BSpline(b) => axiolid_curve::Carrier::Spline(Box::new(b.clone())),
         _ => return Err(BooleanError::UnsupportedSplit),
     };
+    if let Curve3::PairSection(pair) = &section.curve {
+        let first = pair.side(&carrier).ok_or(BooleanError::UnsupportedSplit)?;
+        let (t0, t1) = (section.span.start, section.span.end);
+        let n = 4 * pair.nodes.len();
+        let mut guide = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let (a, b, _) = pair
+                .solve(t0 + (t1 - t0) * i as Scalar / n as Scalar)
+                .ok_or(BooleanError::Evaluation)?;
+            guide.push(if first { a } else { b });
+        }
+        return Ok(Piece {
+            curve: section.curve.clone(),
+            span: section.span,
+            pcurve: Curve2::Lifted(axiolid_curve::LiftedCurve2 {
+                curve: Box::new(section.curve.clone()),
+                carrier,
+                start: t0,
+                end: t1,
+                guide,
+            }),
+            pspan: section.span,
+            source: PieceSource::Section(index),
+        });
+    }
     let (pu, pv) = periods(surface);
     let n = 128;
     let (t0, t1) = (section.span.start, section.span.end);

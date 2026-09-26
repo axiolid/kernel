@@ -11,6 +11,12 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `Curve3::PairSection` (`PairSection3`, `PairNode`): the section of two
+  B-spline surfaces, carried by nodes on both and defined between them by
+  the surfaces themselves (where both meet on the plane across the chord).
+  It has `solve` (the parameters on both surfaces and the point), `rates`,
+  `second_rates`, `sub`, `reversed`, `parameter_of` and `side`, and
+  `pair_section::solve4` for the 4x4 systems behind it (ADR 0077).
 - `BSplineSurface` is defined here, and `axiolid_surface` re-exports it
   unchanged, so a traced curve can carry a B-spline carrier
   (`Carrier::Spline`). It has `BSplineSurface::jet` (point and first and

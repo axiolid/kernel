@@ -11,6 +11,8 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Face domains trimmed by pair sections of two B-splines: the section's
+  nodes are kept as breaks, where its parameter speed changes.
 - Face domains for B-spline and lifted pcurves. Turning points come from a
   dense scan of the derivative's signs with bisection, and a B-spline's
   knots are kept as breaks.

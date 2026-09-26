@@ -11,6 +11,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Two B-spline faces meeting each other: their section is traced in both
+  faces' parameter boxes and carried on both (`Curve3::PairSection`), its
+  pcurve on each read from the solve. The last refusal by face type is
+  gone; sections whose branches cross where the surfaces touch stay
+  refused by name.
 - Faces that wind round their surface without a seam edge (a dome bounded
   by its rim alone, a can by its two rims), as files may deliver them. The
   boolean first gives each a seam edge along the iso-curve where its loops

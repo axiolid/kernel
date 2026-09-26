@@ -12,6 +12,7 @@ pub mod implicit;
 mod intrinsic;
 mod intrinsic3;
 pub mod linear;
+pub mod pair_section;
 pub mod quadric_section;
 pub mod sinusoid;
 pub mod spline;
@@ -28,6 +29,7 @@ pub use implicit::{
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
+pub use pair_section::{PairNode, PairSection3};
 pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use sinusoid::Sinusoid2;
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
@@ -113,4 +115,8 @@ pub enum Curve3 {
     /// torus by a cylinder, cone or torus, and any other analytic pair with
     /// no closed form. See [`ImplicitSection3`] (ADR 0077).
     ImplicitSection(ImplicitSection3),
+    /// Where two B-spline surfaces meet, carried by nodes on both and
+    /// defined between them by the surfaces themselves. See
+    /// [`PairSection3`] (ADR 0077).
+    PairSection(PairSection3),
 }

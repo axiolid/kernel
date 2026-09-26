@@ -124,9 +124,50 @@ never by marching.
   edge's parameter. A guide of unwrapped parameters picks the whole turn at
   each point. Its turning points come from a dense scan of the derivative's
   signs; that step is not certified.
-- **Refused by name:** two B-spline faces meeting each other. Neither has an
-  equation the other can be read in, and the section needs tracing in four
-  parameters.
+
+### Two B-spline surfaces
+
+Neither surface has an equation the other can be read in, so the section
+is carried on both: `Curve3::PairSection` (`PairSection3`).
+
+- **Representation.** A chain of nodes, each a point on both surfaces with
+  its parameters on each, corrected to the last bits. Between two nodes the
+  curve is defined, not interpolated. At local parameter `s` it is where
+  both surfaces meet on the plane across the chord at `P0 + s (P1 - P0)`:
+  four equations (`S1(a) = S2(b)` and the plane) in the four parameters,
+  solved by Newton from the nodes' parameters. Its rates come from the same
+  system. The parameter runs one unit per chord.
+- **Finding every component** (`spline_pair_intersection`).
+  1. Pairs of rational Bezier sub-patches are split until their control
+     hulls' boxes are apart (no section there), or their normal cones are
+     apart. The cones hold the Bernstein coefficient vectors of the
+     normal's own polynomial, so they are certain.
+  2. A pair with apart normal cones has no two parallel normals, so it
+     holds no closed loop of the section: every piece of the section in it
+     crosses an edge of one of the sub-patches (Sederberg and Meyers).
+  3. Each sub-patch edge is intersected with the other sub-patch (hull
+     pruning, then Newton on three unknowns). These crossings seed every
+     component.
+  4. From each seed not already on a traced curve, the curve is followed
+     both ways with steps held to a few degrees of turning, each node
+     corrected onto both surfaces. It ends where it closes on itself or
+     where it leaves either face's window. The last node is solved exactly
+     on that window's edge.
+  5. Pairs that never separate within the depth limit are refused as
+     `NotRegularCurve`: the surfaces touch there, or come closer than the
+     search resolves.
+- **What is certified.** The pruning and the loop-free test are certain.
+  The edge crossings and the following are Newton with step control, not
+  certified. Every node lies on both surfaces to rounding, whichever way
+  the steps went.
+- **Pcurves.** On either spline face the pcurve is `Curve2::Lifted` on a
+  spline carrier. When the lifted curve is a `PairSection` on one of its
+  own surfaces, evaluation reads that surface's parameters straight from
+  the solve.
+- **Curve against surface.** A B-spline curve against a B-spline surface
+  uses the same hull pruning over the Bezier pieces of both, then Newton.
+  The boolean uses it to cut a pair section where it crosses a spline
+  face's boundary edge.
 
 ### The section families against each other and against distance (B8, B7)
 
@@ -182,8 +223,9 @@ never by marching.
 **Positive**
 
 - Every analytic pair's section now exists exactly, whether or not a closed
-  form does. The only exception is the singular case (touching surfaces),
-  which is refused by name.
+  form does, and so does every section involving B-splines. The only
+  exception is the singular case (touching surfaces), which is refused by
+  name.
 - One pcurve family serves every section on every analytic face, so the
   boolean needs no per-pair pcurve derivations beyond the cheap closed forms
   it already has.
@@ -207,6 +249,9 @@ never by marching.
   vertices of the section graph instead of refusing.
 - Very thin sections or nearly tangent pairs can exhaust the trace's box
   budget (400 000 boxes). That is also refused as `NotRegularCurve`.
+- Two B-splines: seeding and following are not certified (see above). A
+  certified version would isolate the edge crossings with interval Newton
+  and bound each step's corridor.
 
 ## Relation to existing code
 
@@ -219,9 +264,16 @@ never by marching.
 - `crates/algorithms/parametric/nurbs/src/implicit_section.rs`:
   `implicit_surface_intersection`, the fallback of
   `exact_surface_intersection`.
+- `crates/representations/analytic/curve/src/pair_section.rs`:
+  `PairSection3`, the section of two B-splines.
+- `crates/algorithms/parametric/nurbs/src/pair_trace.rs`:
+  `spline_pair_intersection` and B-spline curve/surface crossings.
 - `crates/algorithms/parametric/evaluate/src/curve.rs`: evaluation and
   inversion of the new families. Inversion now also covers the ADR 0076
   graphs.
 - `crates/algorithms/parametric/nurbs/tests/implicit_section.rs`: points on
   both surfaces, continuity, and completeness against a dense scan of tube
   circles.
+- `crates/algorithms/parametric/nurbs/tests/pair_section.rs`: two sheets
+  crossing (completeness against a dense scan), a closed loop inside one
+  patch pair, and a spline curve crossing a spline surface.

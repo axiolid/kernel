@@ -32,6 +32,7 @@ mod implicit_ops;
 mod implicit_section;
 mod implicit_trace;
 mod intersection_curve;
+mod pair_trace;
 mod periodic;
 mod periodic_surface;
 mod projection;
@@ -102,6 +103,7 @@ pub use intersection_curve::{
     construct_curve_surface_points, construct_surface_surface_curves,
     ConstructedCurveSurfacePoint3, ConstructedIntersectionCurve3, IntersectionCurveRefusal,
 };
+pub use pair_trace::spline_pair_intersection;
 pub use periodic::{
     curve2_seam_continuity, curve3_seam_continuity, wrap_curve2_parameter, wrap_curve3_parameter,
     PeriodicCurve2, PeriodicCurve3, SeamContinuity,

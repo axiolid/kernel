@@ -11,6 +11,9 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Evaluation, derivatives and inversion of `Curve3::PairSection`. A
+  `Curve2::Lifted` reading a pair section on one of its own B-spline
+  surfaces takes that surface's parameters straight from the solve.
 - `surface::locate`, `curve::locate2` and `curve::locate3`: parameters of
   a point, iterating where no closed form exists (B-spline surfaces and
   curves: seeded Newton, verified by the round trip). `invert`, `invert2`

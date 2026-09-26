@@ -15,7 +15,7 @@ use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_core::{BooleanOperator, Point2, Tolerance};
 use axiolid_measure::exact_properties;
 use axiolid_overlay::ArcRing;
-use common::spline_box;
+use common::{spline_box, spline_box_at, spline_box_sized};
 
 const PI: f64 = std::f64::consts::PI;
 const H: [[f64; 3]; 3] = [[1.0, 1.3, 1.1], [1.2, 1.8, 1.4], [0.9, 1.5, 1.2]];
@@ -60,14 +60,19 @@ fn check(a: &ExactBRep, b: &ExactBRep, want: f64, rel: f64) {
 }
 
 /// The roof height over `(x, y)`.
-#[allow(clippy::needless_range_loop)]
 fn roof(x: f64, y: f64) -> f64 {
+    roof_of(&H, x, y)
+}
+
+/// A roof with control heights `h` over `(x, y)`, in its own box's frame.
+#[allow(clippy::needless_range_loop)]
+fn roof_of(h: &[[f64; 3]; 3], x: f64, y: f64) -> f64 {
     let b = |t: f64| [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
     let (bu, bv) = (b(x / 2.0), b(y / 2.0));
     let mut z = 0.0;
     for i in 0..3 {
         for j in 0..3 {
-            z += H[i][j] * bu[i] * bv[j];
+            z += h[i][j] * bu[i] * bv[j];
         }
     }
     z
@@ -228,4 +233,97 @@ fn a_ball_dipping_into_the_spline_roof() {
             .sum::<f64>()
     });
     close("intersection", i, want, 1e-5);
+}
+
+#[test]
+fn two_spline_roofed_boxes_meet_roof_to_roof() {
+    // The second box is moved by (0.5, 0.3, -0.2) and its roof crosses the
+    // first one's: the roofs meet along a traced pair section (ADR 0077).
+    const G: [[f64; 3]; 3] = [[1.6, 1.0, 1.5], [1.1, 0.9, 1.3], [1.7, 1.2, 1.0]];
+    let (dx, dy, dz) = (0.5, 0.3, -0.2);
+    let first = spline_box(H);
+    let second = spline_box_at(axiolid_core::Vec3::new(dx, dy, dz), G);
+    let other = |x: f64, y: f64| roof_of(&G, x - dx, y - dy) + dz;
+    // Over each x both roofs are quadratics in y, so their difference is
+    // one too: split at its roots, and every piece is a polynomial.
+    let inner = |x: f64| {
+        let q = |y: f64| roof(x, y) - other(x, y);
+        let (q0, q1, q2) = (q(0.0), q(1.0), q(2.0));
+        let a = 0.5 * (q2 - 2.0 * q1 + q0);
+        let b = q1 - q0 - a;
+        let c = q0;
+        let mut cuts = vec![dy, 2.0];
+        let d = b * b - 4.0 * a * c;
+        if a.abs() > 1e-14 && d > 0.0 {
+            for r in [(-b + d.sqrt()) / (2.0 * a), (-b - d.sqrt()) / (2.0 * a)] {
+                if r > dy && r < 2.0 {
+                    cuts.push(r);
+                }
+            }
+        } else if a.abs() <= 1e-14 && b != 0.0 {
+            let r = -c / b;
+            if r > dy && r < 2.0 {
+                cuts.push(r);
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        cuts.windows(2)
+            .map(|w| gauss(w[0], w[1], |y| roof(x, y).min(other(x, y))))
+            .sum::<f64>()
+    };
+    let panels = 600;
+    let want: f64 = (0..panels)
+        .map(|k| {
+            let (a, b) = (
+                dx + (2.0 - dx) * k as f64 / panels as f64,
+                dx + (2.0 - dx) * (k + 1) as f64 / panels as f64,
+            );
+            gauss(a, b, inner)
+        })
+        .sum();
+    check(&first, &second, want, 1e-7);
+}
+
+#[test]
+fn a_spline_bump_pierces_the_spline_roof_in_a_closed_loop() {
+    // A smaller box under the roof, its own roof a bump poking through the
+    // first one's inside the face: the roofs meet in one closed pair section
+    // touching no edge, which leaves a hole in each roof.
+    const G: [[f64; 3]; 3] = [[0.8, 0.8, 0.8], [0.8, 4.0, 0.8], [0.8, 0.8, 0.8]];
+    let (x0, y0, z0, step) = (0.5, 0.5, 0.1, 0.5);
+    let first = spline_box(H);
+    let bump = spline_box_sized(axiolid_core::Vec3::new(x0, y0, z0), step, G);
+    let other = |x: f64, y: f64| roof_of(&G, (x - x0) / step, (y - y0) / step) + z0;
+    let (x1, y1) = (x0 + 2.0 * step, y0 + 2.0 * step);
+    let inner = |x: f64| {
+        let q = |y: f64| roof(x, y) - other(x, y);
+        let (q0, q1, q2) = (q(0.0), q(1.0), q(2.0));
+        let a = 0.5 * (q2 - 2.0 * q1 + q0);
+        let b = q1 - q0 - a;
+        let c = q0;
+        let mut cuts = vec![y0, y1];
+        let d = b * b - 4.0 * a * c;
+        if a.abs() > 1e-14 && d > 0.0 {
+            for r in [(-b + d.sqrt()) / (2.0 * a), (-b - d.sqrt()) / (2.0 * a)] {
+                if r > y0 && r < y1 {
+                    cuts.push(r);
+                }
+            }
+        }
+        cuts.sort_by(f64::total_cmp);
+        cuts.windows(2)
+            .map(|w| gauss(w[0], w[1], |y| roof(x, y).min(other(x, y)) - z0))
+            .sum::<f64>()
+    };
+    let panels = 600;
+    let want: f64 = (0..panels)
+        .map(|k| {
+            let (a, b) = (
+                x0 + (x1 - x0) * k as f64 / panels as f64,
+                x0 + (x1 - x0) * (k + 1) as f64 / panels as f64,
+            );
+            gauss(a, b, inner)
+        })
+        .sum();
+    check(&first, &bump, want, 1e-7);
 }

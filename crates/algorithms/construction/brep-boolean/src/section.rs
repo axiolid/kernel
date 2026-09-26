@@ -41,7 +41,8 @@ use axiolid_evaluate::{curve::locate3, evaluate3};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{
     exact_curve_curve_intersection3, exact_curve_surface_intersection, exact_surface_intersection,
-    implicit_surface_intersection, ExactCurveIntersection, ExactIntersectionRefusal,
+    implicit_surface_intersection, spline_pair_intersection, ExactCurveIntersection,
+    ExactIntersectionRefusal,
 };
 use axiolid_surface::{Plane, Surface};
 use axiolid_topology::FaceId;
@@ -109,21 +110,29 @@ pub fn section_edges(
             // Lines and conics in closed form; every other section traced in
             // one face's parameter box (ADR 0077), which holds every part
             // of it that can matter.
-            let closed_form = match exact_surface_intersection(&cleaned(sa), &cleaned(sb)) {
-                Ok(curve) => {
-                    let conic = curve.branches.iter().zip(&curve.spans).all(|(b, s)| {
-                        matches!(
-                            (b, s),
-                            (Curve3::Line(_), _) | (Curve3::Circle(_) | Curve3::Ellipse(_), None)
-                        )
-                    });
-                    conic.then_some(curve)
+            let splines = matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_)));
+            // Two B-splines are traced below, in the faces' own boxes.
+            let closed_form = if splines {
+                None
+            } else {
+                match exact_surface_intersection(&cleaned(sa), &cleaned(sb)) {
+                    Ok(curve) => {
+                        let conic = curve.branches.iter().zip(&curve.spans).all(|(b, s)| {
+                            matches!(
+                                (b, s),
+                                (Curve3::Line(_), _)
+                                    | (Curve3::Circle(_) | Curve3::Ellipse(_), None)
+                            )
+                        });
+                        conic.then_some(curve)
+                    }
+                    // Apart, or touching without crossing: no section.
+                    Err(
+                        ExactIntersectionRefusal::Disjoint
+                        | ExactIntersectionRefusal::NotRegularCurve,
+                    ) => continue,
+                    Err(_) => None,
                 }
-                // Apart, or touching without crossing: no section.
-                Err(
-                    ExactIntersectionRefusal::Disjoint | ExactIntersectionRefusal::NotRegularCurve,
-                ) => continue,
-                Err(_) => None,
             };
             let branches: Vec<(Curve3, Option<Interval>)> = match closed_form {
                 Some(curve) => curve.branches.into_iter().zip(curve.spans).collect(),
@@ -138,29 +147,48 @@ pub fn section_edges(
                         Surface::Plane(_) => 0,
                         _ => 1,
                     };
-                    if matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_))) {
-                        return Err(BooleanError::UnsupportedSection);
-                    }
-                    let (carrier, other, side, face) = if rank(sa) >= rank(sb) {
-                        (sa, sb, &side_a, fa)
+                    // Two B-splines: the section carried on both, traced in
+                    // both faces' boxes (ADR 0077).
+                    if let (Surface::BSpline(ba), Surface::BSpline(bb)) = (sa, sb) {
+                        let (la, ha) = side_a.domains[fa].bounds();
+                        let (lb, hb) = side_b.domains[fb].bounds();
+                        match spline_pair_intersection(
+                            ba,
+                            bb,
+                            Some((window(sa, la, ha), window(sb, lb, hb))),
+                        ) {
+                            Ok(sections) => sections
+                                .into_iter()
+                                .map(|s| {
+                                    let end = s.end();
+                                    (Curve3::PairSection(s), Some(Interval::new(0.0, end)))
+                                })
+                                .collect(),
+                            Err(ExactIntersectionRefusal::Disjoint) => continue,
+                            Err(_) => return Err(BooleanError::UnsupportedSection),
+                        }
                     } else {
-                        (sb, sa, &side_b, fb)
-                    };
-                    let (lo, hi) = side.domains[face].bounds();
-                    match implicit_surface_intersection(
-                        carrier,
-                        other,
-                        Some(window(carrier, lo, hi)),
-                    ) {
-                        Ok(sections) => sections
-                            .into_iter()
-                            .map(|s| {
-                                let end = s.curve.end();
-                                (Curve3::ImplicitSection(s), Some(Interval::new(0.0, end)))
-                            })
-                            .collect(),
-                        Err(ExactIntersectionRefusal::Disjoint) => continue,
-                        Err(_) => return Err(BooleanError::UnsupportedSection),
+                        let (carrier, other, side, face) = if rank(sa) >= rank(sb) {
+                            (sa, sb, &side_a, fa)
+                        } else {
+                            (sb, sa, &side_b, fb)
+                        };
+                        let (lo, hi) = side.domains[face].bounds();
+                        match implicit_surface_intersection(
+                            carrier,
+                            other,
+                            Some(window(carrier, lo, hi)),
+                        ) {
+                            Ok(sections) => sections
+                                .into_iter()
+                                .map(|s| {
+                                    let end = s.curve.end();
+                                    (Curve3::ImplicitSection(s), Some(Interval::new(0.0, end)))
+                                })
+                                .collect(),
+                            Err(ExactIntersectionRefusal::Disjoint) => continue,
+                            Err(_) => return Err(BooleanError::UnsupportedSection),
+                        }
                     }
                 }
             };
@@ -426,6 +454,55 @@ fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Result<Vec<(Curve3, Interval
                 }
                 out
             }
+        }
+        Curve3::PairSection(section) => {
+            let n = section.end();
+            let slack = 1e-9 * (1.0 + n);
+            let mut inner: Vec<Scalar> = cuts
+                .into_iter()
+                .filter(|&c| c > slack && c < n - slack)
+                .collect();
+            inner.dedup_by(|x, y| (*x - *y).abs() <= slack);
+            let (first, last) = (
+                section.nodes[0].point,
+                section.nodes[section.nodes.len() - 1].point,
+            );
+            let closed = first == last;
+            let own = |a: Scalar, b: Scalar| -> Result<(Curve3, Interval), BooleanError> {
+                let sub = if a < b {
+                    section.sub(a, b)
+                } else {
+                    // Across a loop's own start.
+                    section
+                        .sub(a, n)
+                        .zip(section.sub(0.0, b))
+                        .map(|(mut x, y)| {
+                            x.nodes.extend(y.nodes.into_iter().skip(1));
+                            x
+                        })
+                };
+                let sub = sub.ok_or(BooleanError::Evaluation)?;
+                let end = sub.end();
+                Ok((Curve3::PairSection(sub), Interval::new(0.0, end)))
+            };
+            let mut out = Vec::new();
+            if closed {
+                if inner.is_empty() {
+                    return Ok(vec![(curve.clone(), Interval::new(0.0, n))]);
+                }
+                for pair in inner.windows(2) {
+                    out.push(own(pair[0], pair[1])?);
+                }
+                out.push(own(inner[inner.len() - 1], inner[0])?);
+            } else {
+                let mut ends = vec![0.0];
+                ends.extend(inner);
+                ends.push(n);
+                for pair in ends.windows(2) {
+                    out.push(own(pair[0], pair[1])?);
+                }
+            }
+            out
         }
         _ => {
             if cuts.is_empty() {

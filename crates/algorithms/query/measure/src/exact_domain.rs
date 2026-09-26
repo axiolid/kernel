@@ -104,7 +104,10 @@ impl Piece<'_> {
             Self::Curve {
                 curve: Curve2::Lifted(l),
                 ..
-            } => matches!(l.curve.as_ref(), axiolid_curve::Curve3::ImplicitSection(_)),
+            } => matches!(
+                l.curve.as_ref(),
+                axiolid_curve::Curve3::ImplicitSection(_) | axiolid_curve::Curve3::PairSection(_)
+            ),
             _ => false,
         };
         if kinked {
@@ -420,7 +423,9 @@ fn turning_points(curve: &Curve2, lo: Scalar, hi: Scalar) -> Option<Vec<Scalar>>
         // by a dense scan of the derivative's signs and bisection, and the
         // space curve's own cell boundaries are kept as breaks.
         Curve2::Lifted(l) => {
-            if let axiolid_curve::Curve3::ImplicitSection(_) = l.curve.as_ref() {
+            if let axiolid_curve::Curve3::ImplicitSection(_)
+            | axiolid_curve::Curve3::PairSection(_) = l.curve.as_ref()
+            {
                 let mut k = lo.floor() + 1.0;
                 while k < hi {
                     out.push(k);

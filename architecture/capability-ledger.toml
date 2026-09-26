@@ -35,27 +35,11 @@ commit = "28811b671a12b5caa9e3688569dadbc6b3728fe6"
 
 
 [[issue]]
-key = "surface-intersection"
-title = "General curve/surface and surface/surface intersection, including tangent and overlapping cases"
-priority = "High"
-effort = "High"
-number = 119
-
-[[issue]]
-key = "curved-boolean"
-title = "Exact B-rep boolean for solids with curved faces"
-priority = "High"
-effort = "High"
-number = 120
-blocked_by = ["surface-intersection"]
-
-[[issue]]
 key = "fillet-chamfer-chains"
 title = "Fillet and chamfer over edge chains and networks, constant and variable radius"
 priority = "Medium"
 effort = "High"
 number = 121
-blocked_by = ["surface-intersection", "curved-boolean"]
 
 [[issue]]
 key = "sweep-loft-breadth"
@@ -70,7 +54,6 @@ title = "Solid offset, shell and thicken over curved faces, and draft angle"
 priority = "Medium"
 effort = "High"
 number = 123
-blocked_by = ["surface-intersection"]
 
 [[issue]]
 key = "surface-filling"
@@ -288,7 +271,6 @@ title = "Form features: holes, pockets, slots and ribs on B-rep solids"
 priority = "Medium"
 effort = "High"
 number = 152
-blocked_by = ["curved-boolean"]
 
 [[issue]]
 key = "smooth-surface-meshing"
@@ -473,12 +455,11 @@ cgal = []
 id = "B10"
 area = "curves-surfaces"
 name = "surface-surface intersection (analytic + general)"
-level = "narrow"
-summary = "Analytic pairs are complete. exact_surface_intersection derives lines, circles and ellipses in closed form, with case decisions (tangent, parallel, perpendicular) exact on the given doubles; ruled quadric sections (ADR 0076) as root branches of a quadratic over the carrier angle; torus sections against planes and spheres in closed form; a plane through a cone apex as rays along its rulings; and every remaining analytic pair (a torus against a cylinder, cone or torus off-axis) as a traced implicit section (ADR 0077): the other surface's equation read in the carrier's parameters, traced into certified monotone cells by subdivision, so no component is missed for want of a step. B-spline surfaces against analytic ones are traced the same way on piecewise Bernstein fields over the spline's Bezier patches (implicit_surface_intersection), clipped to its domain. Isolated touching points are recognised; a section whose branches cross where the surfaces touch (a saddle) is refused by name, since it is not decidable in doubles within a micrometre of the crossing. Refused by name: two B-spline surfaces against each other."
-evidence = ["crates/algorithms/parametric/nurbs/src/certified_surface_surface_intersection.rs::intersect_surface_surface_certified", "crates/algorithms/parametric/nurbs/src/exact_surface_intersection.rs::exact_surface_intersection", "crates/algorithms/parametric/nurbs/src/ruled_section.rs", "crates/algorithms/parametric/nurbs/tests/exact_intersection.rs", "crates/algorithms/parametric/nurbs/tests/ruled_section.rs", "scripts/probe_ruled_section_mutants.py", "crates/execution/compile/tests/surface_curve_sweep.rs", "crates/algorithms/parametric/nurbs/src/implicit_section.rs::implicit_surface_intersection", "crates/algorithms/parametric/nurbs/src/implicit_trace.rs::trace", "crates/algorithms/parametric/nurbs/src/spline_field.rs::spline_section_field", "crates/algorithms/parametric/nurbs/tests/implicit_section.rs", "crates/algorithms/parametric/nurbs/tests/spline_section.rs"]
+level = "implemented"
+summary = "Analytic pairs are complete. exact_surface_intersection derives lines, circles and ellipses in closed form, with case decisions (tangent, parallel, perpendicular) exact on the given doubles; ruled quadric sections (ADR 0076) as root branches of a quadratic over the carrier angle; torus sections against planes and spheres in closed form; a plane through a cone apex as rays along its rulings; and every remaining analytic pair (a torus against a cylinder, cone or torus off-axis) as a traced implicit section (ADR 0077): the other surface's equation read in the carrier's parameters, traced into certified monotone cells by subdivision, so no component is missed for want of a step. B-spline surfaces against analytic ones are traced the same way on piecewise Bernstein fields over the spline's Bezier patches (implicit_surface_intersection), clipped to its domain. Isolated touching points are recognised; a section whose branches cross where the surfaces touch (a saddle) is refused by name, since it is not decidable in doubles within a micrometre of the crossing. Two B-spline surfaces meet in a section carried on both (spline_pair_intersection, Curve3::PairSection): Bezier sub-patch pairs are split until their normal cones are apart, so no closed loop can hide in one, seeded where sub-patch edges cross, and followed on both surfaces with nodes exact to rounding; the pruning and loop-free test are certain, the seeding and following are Newton with step control."
+evidence = ["crates/algorithms/parametric/nurbs/src/certified_surface_surface_intersection.rs::intersect_surface_surface_certified", "crates/algorithms/parametric/nurbs/src/exact_surface_intersection.rs::exact_surface_intersection", "crates/algorithms/parametric/nurbs/src/ruled_section.rs", "crates/algorithms/parametric/nurbs/tests/exact_intersection.rs", "crates/algorithms/parametric/nurbs/tests/ruled_section.rs", "scripts/probe_ruled_section_mutants.py", "crates/execution/compile/tests/surface_curve_sweep.rs", "crates/algorithms/parametric/nurbs/src/implicit_section.rs::implicit_surface_intersection", "crates/algorithms/parametric/nurbs/src/implicit_trace.rs::trace", "crates/algorithms/parametric/nurbs/src/spline_field.rs::spline_section_field", "crates/algorithms/parametric/nurbs/tests/implicit_section.rs", "crates/algorithms/parametric/nurbs/tests/spline_section.rs", "crates/algorithms/parametric/nurbs/src/pair_trace.rs::spline_pair_intersection", "crates/algorithms/parametric/nurbs/tests/pair_section.rs"]
 occt = ["src/ModelingAlgorithms/TKGeomAlgo/IntPatch", "src/ModelingAlgorithms/TKGeomAlgo/IntWalk", "src/ModelingAlgorithms/TKGeomAlgo/GeomInt", "src/ModelingAlgorithms/TKGeomAlgo/IntPolyh"]
 cgal = []
-issue = "surface-intersection"
 
 [[capability]]
 id = "B11"
@@ -632,12 +613,11 @@ cgal = ["Polygon_mesh_processing"]
 id = "C9"
 area = "brep"
 name = "B-rep booleans (general, incl. curved)"
-level = "narrow"
-summary = "Exact booleans over planar polyhedra (boolean_polyhedra_exact), coaxial curved prisms and column solids (boolean_arc_prisms_exact, clip_arc_prism_exact, ADR 0070-0072), and a mesh-level provider (boolmesh). The general exact boolean (axiolid-brep-boolean, ADR 0075) takes union, intersection and difference of solids whose faces lie on planes, cylinders, elliptical cylinders, cones, spheres, tori and B-splines, meeting in any section surface intersection builds (closed forms, ruled and torus sections, traced implicit sections, ADR 0077): exact section edges, parameter-space face splitting with exact pcurves (closed form, implicit, or the space curve read back on the analytic face against a B-spline), certified ray-parity classification and radial sewing. Operands that touch are handled: coincident faces keep their shared patch once, sections along edges split only the other face, tangent contact adds no section, solids meeting along an edge stay manifold, faces winding round a seamless surface get a seam, sections through poles are cut there, cavities go to the smallest enclosing solid. Results audit clean and satisfy the exact volume identity. Refused by name: two B-spline faces meeting each other, and sections whose branches cross where surfaces touch."
+level = "implemented"
+summary = "Exact booleans over planar polyhedra (boolean_polyhedra_exact), coaxial curved prisms and column solids (boolean_arc_prisms_exact, clip_arc_prism_exact, ADR 0070-0072), and a mesh-level provider (boolmesh). The general exact boolean (axiolid-brep-boolean, ADR 0075) takes union, intersection and difference of solids whose faces lie on planes, cylinders, elliptical cylinders, cones, spheres, tori and B-splines, meeting in any section surface intersection builds (closed forms, ruled and torus sections, traced implicit sections, and sections of two B-splines carried on both, ADR 0077): exact section edges, parameter-space face splitting with exact pcurves (closed form, implicit, or the space curve read back on the analytic face against a B-spline), certified ray-parity classification and radial sewing. Operands that touch are handled: coincident faces keep their shared patch once, sections along edges split only the other face, tangent contact adds no section, solids meeting along an edge stay manifold, faces winding round a seamless surface get a seam, sections through poles are cut there, cavities go to the smallest enclosing solid. Results audit clean and satisfy the exact volume identity. Refused by name: sections whose branches cross where the surfaces touch (a saddle), not decidable in doubles within a micrometre of the crossing."
 evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/src/boolean_exact.rs::boolean_prisms_exact", "crates/providers/mesh/boolmesh/src/lib.rs", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs", "crates/algorithms/construction/construct/src/boolean_exact.rs::boolean_arc_prisms_exact", "crates/algorithms/construction/construct/src/boolean_exact.rs::clip_arc_prism_exact", "crates/algorithms/construction/construct/tests/clip_arc_prism.rs", "crates/algorithms/construction/construct/src/column.rs::build_columns", "crates/algorithms/construction/construct/tests/column_booleans.rs", "crates/algorithms/planar/overlay/src/arrangement.rs::ArcArrangement", "crates/algorithms/construction/construct/tests/boolean_arc.rs", "crates/algorithms/construction/brep-boolean/src/lib.rs::boolean", "crates/algorithms/construction/brep-boolean/tests/boolean.rs", "crates/algorithms/construction/brep-boolean/tests/contact.rs", "crates/algorithms/construction/brep-boolean/tests/curved.rs", "crates/algorithms/construction/brep-boolean/tests/quadrics.rs", "crates/algorithms/construction/brep-boolean/tests/splines.rs", "crates/algorithms/construction/brep-boolean/tests/seamless.rs"]
 occt = ["src/ModelingAlgorithms/TKBO/BOPAlgo", "src/ModelingAlgorithms/TKBO/BRepAlgoAPI", "src/ModelingAlgorithms/TKBool/TopOpeBRep", "src/ModelingAlgorithms/TKBool/TopOpeBRepBuild"]
 cgal = []
-issue = "curved-boolean"
 
 [[capability]]
 id = "C10"
@@ -788,7 +768,6 @@ summary = "boolean_polyhedra_exact handles general planar-faced solids (convex o
 evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs"]
 occt = []
 cgal = ["Nef_3", "Nef_2", "Nef_S2"]
-issue = "curved-boolean"
 
 [[capability]]
 id = "D4"

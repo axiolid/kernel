@@ -169,6 +169,21 @@ pub fn exact_curve_surface_intersection(
         let span = axiolid_core::Interval::new(0.0, section.curve.end());
         return crate::implicit_ops::section_curve_surface_intersection(curve, span, surface);
     }
+    // A B-spline curve on a B-spline surface: hull pruning over the Bezier
+    // pieces of both, then Newton (ADR 0077).
+    if let (Curve3::BSpline(c), Surface::BSpline(s)) = (curve, surface) {
+        let hits = crate::pair_trace::spline_curve_surface_hits(c, s)
+            .ok_or(ExactCurveRefusal::UnsupportedCurve)?;
+        return Ok(ExactCurveIntersection::Points(
+            hits.into_iter()
+                .map(|(t, point)| ExactCurveHit {
+                    parameter: ExactCurveParameter::Certified(Isolated::new(t)),
+                    multiplicity: 1,
+                    point,
+                })
+                .collect(),
+        ));
+    }
     // A B-spline surface: traced (ADR 0077) for lines and conics.
     if matches!(surface, Surface::BSpline(_)) {
         return crate::implicit_ops::conic_spline_intersection(curve, surface);

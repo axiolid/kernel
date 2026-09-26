@@ -194,6 +194,11 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
         Curve2::Implicit(c) => c.point(t).ok_or_else(|| outside_graph(t)),
         // The space curve's point, read on the carrier.
         Curve2::Lifted(l) => {
+            // A section of two B-splines carries its parameters on both.
+            if let Some((section, first)) = pair_side(l) {
+                let (a, b, _) = section.solve(t).ok_or_else(|| outside_graph(t))?;
+                return finite2(if first { a } else { b }, "curve point");
+            }
             let p = evaluate3(&l.curve, t)?;
             l.unwrap_at(t, p).ok_or_else(|| outside_graph(t))
         }
@@ -298,6 +303,13 @@ pub fn jet2(curve: &Curve2, t: Scalar) -> GeomResult<CurveJet<Point2, Vec2>> {
 /// v'`, and `C'' = S_uu u'^2 + 2 S_uv u' v' + S_vv v'^2 + S_u u'' + S_v v''`,
 /// each solved in the least-squares sense on the tangent plane.
 fn lifted_rates(l: &axiolid_curve::LiftedCurve2, t: Scalar) -> GeomResult<(Vec2, Vec2)> {
+    if let Some((section, first)) = pair_side(l) {
+        let (a, b, _) = section.rates(t).ok_or_else(|| outside_graph(t))?;
+        let (aa, bb, _) = section.second_rates(t).ok_or_else(|| outside_graph(t))?;
+        let pick = |x: Point2, y: Point2| if first { x } else { y };
+        let (d, dd) = (pick(a, b), pick(aa, bb));
+        return Ok((Vec2::new(d.x, d.y), Vec2::new(dd.x, dd.y)));
+    }
     let p = evaluate3(&l.curve, t)?;
     let uv = l.unwrap_at(t, p).ok_or_else(|| outside_graph(t))?;
     let jet = l.carrier.jet(uv.x, uv.y);
@@ -314,6 +326,15 @@ fn lifted_rates(l: &axiolid_curve::LiftedCurve2, t: Scalar) -> GeomResult<(Vec2,
     let rest = second_derivative3(&l.curve, t)?
         - (jet.uu * (d.x * d.x) + jet.uv * (2.0 * d.x * d.y) + jet.vv * (d.y * d.y));
     Ok((d, solve(rest)))
+}
+
+/// The section of two B-splines a lifted pcurve reads, when it reads one on
+/// either of its own surfaces, and whether that is the first.
+fn pair_side(l: &axiolid_curve::LiftedCurve2) -> Option<(&axiolid_curve::PairSection3, bool)> {
+    match l.curve.as_ref() {
+        Curve3::PairSection(section) => section.side(&l.carrier).map(|first| (section, first)),
+        _ => None,
+    }
 }
 
 /// A quadratic-graph parameter where its root does not exist, diverges, or
@@ -344,6 +365,7 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         Curve3::RuledSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
+        Curve3::PairSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -370,6 +392,7 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::RuledSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
+        Curve3::PairSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -393,6 +416,7 @@ pub fn second_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::RuledSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
+        Curve3::PairSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,
@@ -1498,6 +1522,13 @@ pub fn invert3(curve: &Curve3, point: Point3, tolerance: Tolerance) -> GeomResul
             let carrier = axiolid_curve::Carrier::Torus(r.torus);
             let (_, v) = carrier.parameters(point);
             first_on_curve(curve, &turns_of(v), point, linear)
+        }
+        // The nearest chord, then the curve itself (ADR 0077).
+        Curve3::PairSection(r) => {
+            let t = r
+                .parameter_of(point)
+                .ok_or_else(|| point_not_on_curve(Scalar::INFINITY, linear))?;
+            verify3(curve, t, point, linear)
         }
         // The carrier's parameters of the point, over whole turns, located
         // in the curve's cells (ADR 0077).
