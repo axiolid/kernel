@@ -478,6 +478,13 @@ fn edge_hits(
                     break;
                 }
             }
+            // Rounding can keep the steps above the stopping test at a
+            // root: accept a residual at rounding level.
+            if !ok && s.is_finite() && uv.is_finite() {
+                let e = edge.uv(s);
+                let p = edge_surface.jet(e.x, e.y).point;
+                ok = (p - other.jet(uv.x, uv.y).point).length() <= 1e-12 * (1.0 + p.length());
+            }
             let inside =
                 |x: Scalar, a: Scalar, b: Scalar| x >= a.min(b) - 1e-9 && x <= a.max(b) + 1e-9;
             if ok
@@ -987,6 +994,13 @@ pub(crate) fn spline_curve_surface_hits(
                             ok = true;
                             break;
                         }
+                    }
+                    // Rounding can keep the steps above the stopping
+                    // test at a root: accept a residual at rounding level.
+                    if !ok {
+                        let (c, _) = bezier_jet(seg, s0 + (s1 - s0) * s);
+                        let miss = (c - carrier.jet(uv.x, uv.y).point).length();
+                        ok = miss <= 1e-12 * (1.0 + c.length());
                     }
                     let local = s0 + (s1 - s0) * s;
                     if ok

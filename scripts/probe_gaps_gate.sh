@@ -43,7 +43,7 @@ mutate 'src/ModelingAlgorithms/TKGeomAlgo/IntPatch' 'src/ModelingAlgorithms/TKGe
 check "OCCT path that is not in the package list" 1 'is not a package in the pinned tree'
 mutate 'issue = "straight-skeleton"' 'issue = "no-such-issue"'
 check "row pointing at an undeclared issue" 1 'is not declared in [[issue]]'
-mutate 'blocked_by = ["surface-intersection"]' 'blocked_by = ["nope"]'
+mutate 'blocked_by = ["delaunay-3d"]' 'blocked_by = ["nope"]'
 check "blocked_by naming no issue" 1 'is not another issue key'
 mutate 'priority = "Low"' 'priority = "Soon"'
 check "priority that is not a board option" 1 'is not a board option'

@@ -169,10 +169,12 @@ fn a_spline_curve_crosses_a_spline_surface_where_a_scan_says() {
         degree: 2,
         control_points: vec![
             Point3::new(-0.9, -0.2, 1.0),
-            Point3::new(0.0, 0.0, -0.5),
+            Point3::new(0.0, 0.0, -1.5),
             Point3::new(0.9, 0.3, 1.0),
         ],
-        knots: vec![0.0, 1.0],
+        // Knots over [0, 2], so the curve's parameter is not a Bezier
+        // piece's local one.
+        knots: vec![0.0, 2.0],
         multiplicities: vec![3, 3],
         weights: None,
         closed: false,
@@ -190,8 +192,10 @@ fn a_spline_curve_crosses_a_spline_surface_where_a_scan_says() {
         p.z - (p.x * p.x + p.y * p.y)
     };
     let changes = (0..4000)
-        .filter(|&i| gap(i as f64 / 4000.0).signum() != gap((i + 1) as f64 / 4000.0).signum())
+        .filter(|&i| gap(i as f64 / 2000.0).signum() != gap((i + 1) as f64 / 2000.0).signum())
         .count();
+    // Down through the bowl and back up.
+    assert_eq!(changes, 2);
     assert_eq!(hits.len(), changes);
     for hit in &hits {
         let t = hit.parameter.approx();
