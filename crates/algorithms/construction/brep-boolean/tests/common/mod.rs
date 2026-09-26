@@ -460,3 +460,146 @@ pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
     });
     b.finish().expect("a spline-roofed box")
 }
+
+/// A solid bounded by `wall` (a surface of revolution about world z whose
+/// face winds round it with no seam) and flat discs at the given heights:
+/// the wall's loops are circles with no seam edge, as a dome or a can read
+/// from a file might be. `rims` are `(height, radius, wall v)` from bottom
+/// to top; a single rim closes the wall at a pole above it.
+pub fn seamless(wall: Surface, rims: &[(f64, f64, f64)]) -> ExactBRep {
+    use axiolid_core::Frame2;
+    use axiolid_curve::Circle2;
+    use axiolid_surface::Plane;
+    let mut b = ExactBRepBuilder::default();
+    let mut edges = Vec::new();
+    for &(z, r, _) in rims {
+        let v = b.topology_mut().add_vertex(Vertex {
+            position: Point3::new(r, 0.0, z),
+        });
+        let c = b.add_curve3(Curve3::Circle(Circle3 {
+            frame: Frame3 {
+                origin: Point3::new(0.0, 0.0, z),
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius: r,
+        }));
+        let e = b.topology_mut().add_edge(Edge {
+            start: v,
+            end: v,
+            curve: Some(c),
+        });
+        b.set_edge_interval(e, Interval::new(0.0, TAU));
+        edges.push(e);
+    }
+    let wall_id = b.add_surface(wall);
+    // Wall loops: the lowest rim runs +u (the wall above it), the highest -u.
+    let mut bounds = Vec::new();
+    let n = rims.len();
+    for (k, &(_, _, v)) in rims.iter().enumerate() {
+        let up = k == 0;
+        let pc = b.add_curve2(Curve2::Line(Line2 {
+            origin: Vec2::new(0.0, v),
+            direction: Vec2::X,
+        }));
+        let ring = b.topology_mut().add_loop(Loop {
+            edges: vec![EdgeUse {
+                edge: edges[k],
+                orientation: if up {
+                    Orientation::Forward
+                } else {
+                    Orientation::Reversed
+                },
+                pcurve: Some(pc),
+            }],
+        });
+        b.set_pcurve_interval(
+            ring,
+            0,
+            if up {
+                Interval::new(0.0, TAU)
+            } else {
+                Interval::new(TAU, 0.0)
+            },
+        );
+        bounds.push(FaceBound {
+            loop_id: ring,
+            orientation: Orientation::Forward,
+            outer: k == 0,
+        });
+    }
+    let mut faces = vec![(
+        b.topology_mut().add_face(Face {
+            surface: Some(wall_id),
+            bounds,
+            orientation: Orientation::Forward,
+        }),
+        Orientation::Forward,
+    )];
+    // Discs: the bottom one faces down, the top one (when there are two
+    // rims) faces up.
+    for (k, &(z, r, _)) in rims.iter().enumerate() {
+        let bottom = k == 0;
+        if !bottom && k != n - 1 {
+            continue;
+        }
+        let plane = b.add_surface(Surface::Plane(Plane {
+            frame: Frame3 {
+                origin: Point3::new(0.0, 0.0, z),
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+        }));
+        let pc = b.add_curve2(Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: Vec2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: r,
+        }));
+        let ring = b.topology_mut().add_loop(Loop {
+            edges: vec![EdgeUse {
+                edge: edges[k],
+                orientation: if bottom {
+                    Orientation::Reversed
+                } else {
+                    Orientation::Forward
+                },
+                pcurve: Some(pc),
+            }],
+        });
+        b.set_pcurve_interval(
+            ring,
+            0,
+            if bottom {
+                Interval::new(TAU, 0.0)
+            } else {
+                Interval::new(0.0, TAU)
+            },
+        );
+        faces.push((
+            b.topology_mut().add_face(Face {
+                surface: Some(plane),
+                bounds: vec![FaceBound {
+                    loop_id: ring,
+                    orientation: Orientation::Forward,
+                    outer: true,
+                }],
+                orientation: Orientation::Forward,
+            }),
+            Orientation::Forward,
+        ));
+    }
+    let shell = b.topology_mut().add_shell(Shell {
+        faces,
+        closed: true,
+    });
+    b.topology_mut().add_solid(Solid {
+        outer: shell,
+        voids: Vec::new(),
+    });
+    b.finish().expect("a seamless solid")
+}

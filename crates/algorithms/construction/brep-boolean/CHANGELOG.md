@@ -11,6 +11,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Faces that wind round their surface without a seam edge (a dome bounded
+  by its rim alone, a can by its two rims), as files may deliver them. The
+  boolean first gives each a seam edge along the iso-curve where its loops
+  wrap, joining the lower loop, the seam, the upper loop or a pole, and the
+  seam back into one loop.
+- Sections through a sphere's pole or a cone's apex are cut there, and the
+  collapsed pole piece is split where they end. Meridians and latitudes,
+  cone rulings and circles, and a torus's tube and ring circles get their
+  straight pcurves, affine in the curve's own parameter.
+
 - B-spline faces (#167, ADR 0075 stage 3) against planes, quadrics and
   tori:
   - The section is traced on the spline (ADR 0077).

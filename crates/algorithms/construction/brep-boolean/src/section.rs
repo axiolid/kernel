@@ -50,6 +50,10 @@ use core::f64::consts::TAU;
 use crate::support::{cleaned, same_support, window};
 use crate::BooleanError;
 
+/// Where along a piece its inside/outside sample is taken: off-centre, so
+/// the midpoint of a symmetric section (a meridian's pole) is never it.
+const SAMPLE: Scalar = 0.414_213_562_373_095;
+
 /// A piece of an intersection curve lying on a face of each operand.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SectionEdge {
@@ -192,8 +196,11 @@ pub fn section_edges(
                     cuts.extend([lo, hi].into_iter().filter(|x| x.is_finite()));
                 }
                 for (piece_curve, span) in pieces(branch, cuts)? {
-                    let mid = evaluate3(&piece_curve, 0.5 * (span.start + span.end))
-                        .map_err(|_| BooleanError::Evaluation)?;
+                    // Off-centre, so a symmetric section's pole or seam
+                    // crossing never becomes the sample.
+                    let mid =
+                        evaluate3(&piece_curve, span.start + SAMPLE * (span.end - span.start))
+                            .map_err(|_| BooleanError::Evaluation)?;
                     if touching(sa, sb, mid, tolerance)? {
                         continue;
                     }
@@ -224,6 +231,26 @@ pub fn section_edges(
         }
     }
     Ok(out)
+}
+
+/// The points where a surface's angle parameter has no value: a sphere's
+/// poles, a cone's apex.
+fn poles(surface: &Surface) -> Vec<Point3> {
+    match surface {
+        Surface::Sphere(s) => {
+            let z = s.frame.z.normalize() * s.radius;
+            vec![s.frame.origin + z, s.frame.origin - z]
+        }
+        Surface::Cone(c) => {
+            let slope = c.semi_angle.tan();
+            if slope == 0.0 {
+                Vec::new()
+            } else {
+                vec![c.frame.origin - c.frame.z.normalize() * (c.radius / slope)]
+            }
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Whether two surfaces through `point` share their tangent plane there: a
@@ -264,7 +291,7 @@ fn imprint(
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
         let (cuts, along) = onto.cuts(other, &curve, &bounding, tolerance)?;
         for piece in pieces_within(&curve, span, cuts) {
-            let mid = evaluate3(&curve, 0.5 * (piece.start + piece.end))
+            let mid = evaluate3(&curve, piece.start + SAMPLE * (piece.end - piece.start))
                 .map_err(|_| BooleanError::Evaluation)?;
             let at = onto.locate(other, mid, &along, tolerance)?;
             if at == Place::Outside {
@@ -540,6 +567,16 @@ impl<'a> Side<'a> {
         let mut out = Vec::new();
         let mut along = Vec::new();
         let mut seen = Vec::new();
+        // A pole or apex the curve passes through cuts it: its pcurve jumps
+        // round the angle there.
+        for pole in poles(self.surface(face)?) {
+            if let Ok(t) = locate3(curve, pole, tolerance) {
+                let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
+                if (on - pole).length() <= tolerance.linear().max(1e-9) {
+                    out.push(t);
+                }
+            }
+        }
         for bound in &topology.faces()[face].bounds {
             let wire = topology
                 .loops()

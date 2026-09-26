@@ -18,6 +18,7 @@
 
 mod assemble;
 mod classify;
+mod seams;
 mod section;
 mod split;
 mod support;
@@ -48,6 +49,11 @@ pub fn boolean(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> Result<ExactBRep, BooleanError> {
+    // Faces that wind round their surface without a seam get one first.
+    let seamed_a = seams::with_seams(a, tolerance)?;
+    let seamed_b = seams::with_seams(b, tolerance)?;
+    let a = seamed_a.as_ref().unwrap_or(a);
+    let b = seamed_b.as_ref().unwrap_or(b);
     let edges = section_edges(a, b, tolerance)?;
     let solid_a = classify::Solid::new(a, tolerance)?;
     let solid_b = classify::Solid::new(b, tolerance)?;

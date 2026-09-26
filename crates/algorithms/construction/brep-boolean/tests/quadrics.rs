@@ -244,3 +244,15 @@ fn a_pipe_through_a_sphere_at_an_angle() {
     close("difference", d, volume(&ball) - i, 1e-9);
     assert!(i > 0.0 && i < PI * 0.45 * 0.45 * 2.0);
 }
+
+#[test]
+fn a_sphere_halved_through_its_poles() {
+    // The box's face x = 0.2 misses the poles; x = 0 runs through both, so
+    // the section meridian is cut at each pole.
+    let ball = sphere(Point3::ZERO, 1.0);
+    let through = block((0.0, 2.0), (-2.0, 2.0), (-2.0, 2.0));
+    check(&ball, &through, 2.0 / 3.0 * PI, 1e-9);
+    let beside = block((0.2, 2.0), (-2.0, 2.0), (-2.0, 2.0));
+    // A cap of height 0.8: pi h^2 (3 r - h) / 3.
+    check(&ball, &beside, PI * 0.64 * (3.0 - 0.8) / 3.0, 1e-9);
+}

@@ -208,6 +208,49 @@ pub fn split_face(
         }
     }
 
+    // Sections ending at a pole meet the collapsed piece there: split it at
+    // those points in parameters, so the graph has a vertex for them.
+    let mut pole_ends: Vec<Point2> = Vec::new();
+    for (piece, section) in &pieces {
+        if *section {
+            for t in [piece.pspan.start, piece.pspan.end] {
+                pole_ends.push(evaluate2(&piece.pcurve, t).map_err(|_| BooleanError::Evaluation)?);
+            }
+        }
+    }
+    let mut split_pieces = Vec::with_capacity(pieces.len());
+    for (piece, section) in pieces {
+        if piece.source != PieceSource::Collapsed {
+            split_pieces.push((piece, section));
+            continue;
+        }
+        let (a, b) = (
+            evaluate2(&piece.pcurve, piece.pspan.start).map_err(|_| BooleanError::Evaluation)?,
+            evaluate2(&piece.pcurve, piece.pspan.end).map_err(|_| BooleanError::Evaluation)?,
+        );
+        let slack = 1e-9 * (1.0 + a.x.abs().max(b.x.abs()));
+        let mut cuts: Vec<Scalar> = pole_ends
+            .iter()
+            .filter(|p| (p.y - a.y).abs() <= slack)
+            .filter(|p| p.x > a.x.min(b.x) + slack && p.x < a.x.max(b.x) - slack)
+            .map(|p| (p.x - a.x) / (b.x - a.x))
+            .collect();
+        cuts.sort_by(Scalar::total_cmp);
+        cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12);
+        let mut from = piece.pspan.start;
+        for c in cuts.into_iter().chain(std::iter::once(piece.pspan.end)) {
+            split_pieces.push((
+                Piece {
+                    pspan: Interval::new(from, c),
+                    ..piece.clone()
+                },
+                false,
+            ));
+            from = c;
+        }
+    }
+    let mut pieces = split_pieces;
+
     // A face whose loops wind clockwise (a region an earlier boolean turned
     // over) is traced with its boundary reversed, so regions come out
     // anticlockwise; they then face against the face's flag.
@@ -351,20 +394,29 @@ fn section_piece(
     traces: &mut Traces,
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
-    let closed_form = matches!(
-        (surface, &section.curve),
-        (
-            Surface::Plane(_),
-            Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
-        ) | (
-            Surface::Cylinder(_),
-            Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
-        )
-    );
+    let closed_form = iso_curve(surface, &section.curve, tolerance)
+        || matches!(
+            (surface, &section.curve),
+            (
+                Surface::Plane(_),
+                Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+            ) | (
+                Surface::Cylinder(_),
+                Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+            )
+        );
     if !closed_form {
         return implicit_piece(surface, other, section, index, lo, hi, traces, tolerance);
     }
-    let first = place(surface, section.start, lo, hi, tolerance)?;
+    // A start at a pole has no angle: read the piece a little way in.
+    let first = match place(surface, section.start, lo, hi, tolerance) {
+        Ok(p) => p,
+        Err(_) => {
+            let t = section.span.start + 0.01 * (section.span.end - section.span.start);
+            let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
+            place(surface, p, lo, hi, tolerance)?
+        }
+    };
     let slack = 1e-9 * (1.0 + lo.x.abs().max(hi.x.abs()));
     let mut candidates = vec![first];
     if periods(surface).0 {
@@ -551,6 +603,89 @@ fn implicit_piece(
     })
 }
 
+/// Whether a curve is an iso-curve of the surface -- a sphere's meridian or
+/// latitude, a cone's ruling or circle about its axis, a torus's tube or
+/// ring circle -- whose pcurve is a straight line, affine in the curve's own
+/// parameter.
+fn iso_curve(surface: &Surface, curve: &Curve3, tolerance: Tolerance) -> bool {
+    let eps = tolerance.linear().max(1e-9);
+    let parallel = |a: axiolid_core::Vec3, b: axiolid_core::Vec3| {
+        a.normalize().cross(b.normalize()).length() <= 1e-12
+    };
+    let on_axis =
+        |p: Point3, o: Point3, z: axiolid_core::Vec3| (p - o).cross(z.normalize()).length() <= eps;
+    match (surface, curve) {
+        (Surface::Sphere(sp), Curve3::Circle(c)) => {
+            let n = c.frame.x.cross(c.frame.y);
+            let meridian = (c.frame.origin - sp.frame.origin).length() <= eps
+                && (c.radius - sp.radius).abs() <= eps
+                && n.normalize().dot(sp.frame.z.normalize()).abs() <= 1e-12;
+            let latitude =
+                parallel(n, sp.frame.z) && on_axis(c.frame.origin, sp.frame.origin, sp.frame.z);
+            meridian || latitude
+        }
+        (Surface::Cone(k), Curve3::Line(l)) => {
+            let slope = k.semi_angle.tan();
+            let apex = k.frame.origin - k.frame.z.normalize() * (k.radius / slope);
+            let d = l.direction.normalize();
+            let through = (apex - l.origin).cross(d).length() <= eps;
+            let axis = k.frame.z.normalize();
+            through && (d.dot(axis).abs() - k.semi_angle.cos().abs()).abs() <= 1e-12
+        }
+        (Surface::Cone(k), Curve3::Circle(c)) => {
+            let n = c.frame.x.cross(c.frame.y);
+            parallel(n, k.frame.z) && on_axis(c.frame.origin, k.frame.origin, k.frame.z)
+        }
+        (Surface::Torus(t), Curve3::Circle(c)) => {
+            let n = c.frame.x.cross(c.frame.y);
+            let z = t.frame.z.normalize();
+            let ring = parallel(n, z) && on_axis(c.frame.origin, t.frame.origin, z);
+            let d = c.frame.origin - t.frame.origin;
+            let tube = n.normalize().dot(z).abs() <= 1e-12
+                && d.dot(z).abs() <= eps
+                && (d.length() - t.major_radius).abs() <= eps
+                && (c.radius - t.minor_radius).abs() <= eps;
+            ring || tube
+        }
+        _ => false,
+    }
+}
+
+/// The straight pcurve of an iso-curve piece, affine in the curve's
+/// parameter: read at two interior points (clear of a pole at an end,
+/// where the angle has no value) and extended linearly.
+fn affine_pcurve(
+    surface: &Surface,
+    section: &SectionEdge,
+    start_uv: Point2,
+    tolerance: Tolerance,
+) -> Result<(Curve2, Interval), BooleanError> {
+    let (t0, t1) = (section.span.start, section.span.end);
+    let (ta, tb) = (t0 + 0.25 * (t1 - t0), t0 + 0.75 * (t1 - t0));
+    let (pu, pv) = periods(surface);
+    let uv = |t: Scalar, near: Point2| -> Result<Point2, BooleanError> {
+        let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
+        let (mut u, mut v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        if pu {
+            u += ((near.x - u) / TAU).round() * TAU;
+        }
+        if pv {
+            v += ((near.y - v) / TAU).round() * TAU;
+        }
+        Ok(Point2::new(u, v))
+    };
+    let a = uv(ta, start_uv)?;
+    let b = uv(tb, a)?;
+    let direction = (b - a) / (tb - ta);
+    Ok((
+        Curve2::Line(Line2 {
+            origin: a - direction * ta,
+            direction,
+        }),
+        section.span,
+    ))
+}
+
 /// [`section_piece`] with the start's parameters given.
 fn section_piece_from(
     surface: &Surface,
@@ -560,6 +695,9 @@ fn section_piece_from(
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
     let (pcurve, pspan) = match (surface, &section.curve) {
+        _ if iso_curve(surface, &section.curve, tolerance) => {
+            affine_pcurve(surface, section, start_uv, tolerance)?
+        }
         (Surface::Plane(p), curve) => {
             let f = p.frame;
             let local = |q: Point3| Point2::new((q - f.origin).dot(f.x), (q - f.origin).dot(f.y));
