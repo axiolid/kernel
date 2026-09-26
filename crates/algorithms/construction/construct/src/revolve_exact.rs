@@ -253,7 +253,13 @@ fn revolve_rectangle(
                 pcurve: Some(pcurve),
             }],
         });
-        builder.set_pcurve_interval(loop_id, 0, Interval::new(0.0, TAU));
+        // A pcurve interval runs the way its use traverses the edge
+        // (ADR 0024): a reversed use walks the circle backwards.
+        let interval = match orientation {
+            Orientation::Forward => Interval::new(0.0, TAU),
+            Orientation::Reversed => Interval::new(TAU, 0.0),
+        };
+        builder.set_pcurve_interval(loop_id, 0, interval);
         loop_id
     };
 

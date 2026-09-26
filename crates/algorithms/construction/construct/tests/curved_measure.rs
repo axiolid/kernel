@@ -409,3 +409,22 @@ fn exact_and_tessellated_measures_agree_on_a_curved_solid() {
     }
     assert!(previous < 1e-5, "finest mesh still {previous} away");
 }
+
+#[test]
+fn a_revolved_plain_rectangle_takes_the_dedicated_path_and_matches_pappus() {
+    // A sharp rectangle revolves through `revolve_rectangle`, not the
+    // contour path. Its reversed cap loops once carried forward pcurve
+    // intervals, so each cap's hole ran against its edge: the audit put
+    // the pcurve 8 off the edge and the volume came out 289, not 188.5.
+    let profile = Profile::Rectangle(RectangleProfile {
+        x: 2.0,
+        y: 3.0,
+        thickness: None,
+        outer_radius: None,
+        inner_radius: None,
+    });
+    let solid = revolve_profile_exact(&profile, Point3::new(-5.0, 0.0, 0.0), Vec3::Y, TAU, tol())
+        .expect("a ring");
+    let props = measure(&solid);
+    close("volume", props.signed_volume, TAU * 5.0 * 6.0);
+}

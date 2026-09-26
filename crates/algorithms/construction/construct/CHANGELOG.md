@@ -67,6 +67,12 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- A sharp rectangle revolved through `revolve_rectangle` wrote its cap
+  holes' pcurve intervals forwards although their uses run the edge
+  backwards (ADR 0024), so each hole's pcurve ran against its edge: the
+  geometric audit put it 8 off the edge and the solid measured 289 instead
+  of 188.5. Found by the general boolean (#167); present before #125.
+
 - Exact revolutions are no longer built inside out (#125).
   `revolve_profile_exact` and the contour revolution put their surface
   frames at `(x, y, z) = (X, Z, Y)`, which is left-handed; every loop is
