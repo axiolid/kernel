@@ -127,8 +127,8 @@ do not adopt or wrap another kernel.
     traced section is never mere touching. Pieces leaving a vertex with
     the same direction and bend (touching to third order) are ordered by
     their chords a small way out.
-- **Refused by name:** contact to fifth order or more along a whole
-  curve (`Undecided`).
+- **Refused by name:** lines of contact that rounding hides more than a
+  twentieth of the window wide (`Undecided`), which doubles cannot place.
 
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where

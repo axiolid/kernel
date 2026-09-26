@@ -419,7 +419,7 @@ fn a_branch_running_into_a_line_of_contact_meets_it_at_a_vertex() {
     };
     let curves = implicit_surface_intersection(&Surface::BSpline(sheet), &ground(), None)
         .expect("the line of contact and the branch");
-    let mut at_vertex = 0;
+    let mut at_vertex: Vec<Point3> = Vec::new();
     for c in &curves {
         let branch = Curve3::ImplicitSection(c.clone());
         for k in 0..=1000 {
@@ -434,12 +434,15 @@ fn a_branch_running_into_a_line_of_contact_meets_it_at_a_vertex() {
         }
         for t in [0.0, c.curve.end()] {
             let p = axiolid_evaluate::evaluate3(&branch, t).unwrap();
-            if (p - Point3::new(0.0, 0.5, 0.0)).length() < 1e-9 {
-                at_vertex += 1;
+            // Along the line the field vanishes whatever y is: where the
+            // branch meets it is known to its certified end's precision.
+            if (p - Point3::new(0.0, 0.5, 0.0)).length() < 1e-6 {
+                at_vertex.push(p);
             }
         }
     }
-    assert_eq!((curves.len(), at_vertex), (4, 4));
+    assert_eq!((curves.len(), at_vertex.len()), (4, 4));
+    assert!(at_vertex.iter().all(|p| *p == at_vertex[0]), "one vertex");
 }
 
 #[test]
@@ -455,5 +458,73 @@ fn a_sheet_touching_a_plane_along_a_line_to_fourth_order_only_touches() {
     assert_eq!(
         implicit_surface_intersection(&Surface::BSpline(sheet), &ground(), None),
         Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve)
+    );
+}
+
+/// `z = x^k` over `[-1, 1]^2`, degree `k` in `x` and 1 in `y` (the
+/// Bernstein coefficients of `x^k` there are `(-1)^(k - i)`).
+fn power(k: usize) -> BSplineSurface {
+    BSplineSurface {
+        u_degree: k as u16,
+        v_degree: 1,
+        control_points: (0..=k)
+            .map(|i| {
+                let c = if (k - i) % 2 == 0 { 1.0 } else { -1.0 };
+                (0..2)
+                    .map(|j| {
+                        Point3::new(-1.0 + 2.0 * i as f64 / k as f64, -1.0 + 2.0 * j as f64, c)
+                    })
+                    .collect()
+            })
+            .collect(),
+        u_knots: vec![0.0, 1.0],
+        u_multiplicities: vec![k as u32 + 1, k as u32 + 1],
+        v_knots: vec![0.0, 1.0],
+        v_multiplicities: vec![2, 2],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::PiecewiseBezier,
+        self_intersect: None,
+    }
+}
+
+#[test]
+fn lines_of_contact_of_higher_orders() {
+    // z = x^k against z = 0 is tangent along x = 0 to order k: crossing
+    // there for odd k, touching for even k.
+    for k in [5, 7, 9, 11] {
+        let curves = implicit_surface_intersection(&Surface::BSpline(power(k)), &ground(), None)
+            .unwrap_or_else(|e| panic!("x^{k}: {e:?}"));
+        assert_eq!(curves.len(), 1, "x^{k}");
+        let branch = Curve3::ImplicitSection(curves[0].clone());
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for i in 0..=1000 {
+            let p = axiolid_evaluate::evaluate3(&branch, curves[0].curve.end() * i as f64 / 1000.0)
+                .unwrap();
+            assert!(p.x.abs() < 1e-12 && p.z.abs() < 1e-12, "x^{k}: {p:?}");
+            lo = lo.min(p.y);
+            hi = hi.max(p.y);
+        }
+        assert!(lo < -1.0 + 1e-9 && hi > 1.0 - 1e-9, "x^{k}: {lo} .. {hi}");
+    }
+    for k in [6, 8, 10, 12] {
+        assert_eq!(
+            implicit_surface_intersection(&Surface::BSpline(power(k)), &ground(), None),
+            Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve),
+            "x^{k}"
+        );
+    }
+}
+
+#[test]
+fn contact_beyond_what_doubles_resolve_is_undecided() {
+    // z = x^13: rounding hides the field more than a twentieth of the
+    // window from the line of contact, so where the line runs is not
+    // decidable in doubles.
+    assert_eq!(
+        implicit_surface_intersection(&Surface::BSpline(power(13)), &ground(), None)
+            .map(|c| c.len()),
+        Err(axiolid_nurbs::ExactIntersectionRefusal::Undecided)
     );
 }

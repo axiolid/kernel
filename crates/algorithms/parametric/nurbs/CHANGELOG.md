@@ -17,9 +17,13 @@ caret rule for `0.x` versions.
   vanishes along them with its gradient, as crossing or touching by the
   field's sign across. The field is then traced with tubes about the
   lines left out, and branches running into a line are bridged to it at
-  a vertex. Crossing lines are sections; touching lines add none. Third
-  derivatives are tried too; contact to fifth order or more along a curve
-  stays `Undecided`.
+  a vertex. Crossing lines are sections; touching lines add none.
+  Derivatives of every order are tried (up to 16), the tubes sized to where
+  the field clears its rounding; only lines rounding hides over more than
+  a twentieth of the window stay `Undecided`.
+- A trace trusts a value's sign only clear of its rounding, on a piece's
+  sides and across it (it could certify cells along noise near high-order
+  contact).
 - Contact to higher order than a saddle (a singular Hessian: a tacnode,
   where two branches touch each other) is a vertex too. The ends are
   checked against the field's sign changes about the point, and a

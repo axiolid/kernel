@@ -268,18 +268,23 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 - Where the surfaces are tangent along a whole curve, every piece along
   it is singular; more than a few dozen singular points in one trace hand
   over to a search for such curves.
-  1. Along the curve the field vanishes as `c n^2` (tangent, touching),
-     `c n^3` (tangent and crossing) or `c n^4` in the distance `n` across
-     it. So a first, second or third derivative vanishes exactly on it,
-     and generically crosses zero there regularly: its trace, certified
-     as usual, holds the curve.
+  1. Along the curve the field vanishes as `c n^m` in the distance `n`
+     across it (`m` even: touching; odd: crossing). So every derivative of
+     order `m - 1` vanishes exactly on it, and generically one crosses
+     zero there regularly: its trace, certified as usual, holds the
+     curve. Orders are tried from the first up; a derivative whose own
+     trace meets a degenerate point is passed over.
   2. Each curve of that trace is a *line of contact* only where the field
      vanishes along the whole of it (to rounding), its gradient far below
      the gradient just beside it, and changes sign across it (crossing) or
      not (touching). Curves of the derivative that are regular zeros of
      the field, or not zeros at all, are dropped.
-  3. The field is traced again with tubes a thousandth of the window wide
-     left out about every line of contact. A branch of it ending at a tube
+  3. The field is traced again with tubes left out about every line of
+     contact, out to where `c n^m` is 64 times its rounding (`c` read off
+     the derivative's slope, `m! c`), and at least a thousandth of the
+     window wide. Wider than a twentieth, rounding hides the line and it
+     is `Undecided`. Two branches meeting a line within rounding of each
+     other meet it at one vertex. A branch of it ending at a tube
      runs into the line: it is bridged to the line's nearest point (an end
      the line already has, within rounding, is that point), and the line
      cut there, a vertex as at a crossing.
@@ -333,9 +338,12 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 
 **Follow-ups / risks to watch**
 
-- Lines of contact where the field vanishes to fifth order or more (the
-  search tries derivatives up to the third), or whose derivatives are all
-  singular along them too, are still `Undecided`.
+- Lines of contact that rounding hides more than a twentieth of the
+  window wide (for `x^k` against a plane over a unit window, from `k = 13`
+  on), or whose derivatives are all singular along them too, are
+  `Undecided`: where the line runs is not decidable in doubles.
+- A value's sign is trusted only clear of its rounding, on a piece's
+  sides and across the piece; below it, the piece splits.
 - A pcurve on a face whose trace is too costly (a tacnode read far from
   the face's parameter origin) falls back to the section's own space
   curve read on the face (`Curve2::Lifted`).
