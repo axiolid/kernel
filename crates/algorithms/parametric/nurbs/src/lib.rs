@@ -24,6 +24,7 @@ mod curve_analysis;
 mod curve_projection;
 mod degree;
 mod exact_curve_intersection;
+mod exact_field;
 mod exact_surface_intersection;
 pub mod extrema;
 mod field;

@@ -518,13 +518,26 @@ fn lines_of_contact_of_higher_orders() {
 }
 
 #[test]
-fn contact_beyond_what_doubles_resolve_is_undecided() {
-    // z = x^13: rounding hides the field more than a twentieth of the
-    // window from the line of contact, so where the line runs is not
-    // decidable in doubles.
-    assert_eq!(
-        implicit_surface_intersection(&Surface::BSpline(power(13)), &ground(), None)
-            .map(|c| c.len()),
-        Err(axiolid_nurbs::ExactIntersectionRefusal::Undecided)
-    );
+fn contact_beyond_what_doubles_resolve_is_decided_exactly() {
+    // z = x^k for high k: the field is below `f64` rounding over much of
+    // the window about the line, so its signs there are decided exactly
+    // (dyadic Bernstein arithmetic), and the line is found all the same.
+    for k in [13, 17, 21] {
+        let curves = implicit_surface_intersection(&Surface::BSpline(power(k)), &ground(), None)
+            .unwrap_or_else(|e| panic!("x^{k}: {e:?}"));
+        assert_eq!(curves.len(), 1, "x^{k}");
+        let branch = Curve3::ImplicitSection(curves[0].clone());
+        for i in 0..=200 {
+            let p = axiolid_evaluate::evaluate3(&branch, curves[0].curve.end() * i as f64 / 200.0)
+                .unwrap();
+            assert!(p.x.abs() < 1e-12 && p.z.abs() < 1e-12, "x^{k}: {p:?}");
+        }
+    }
+    for k in [14, 18] {
+        assert_eq!(
+            implicit_surface_intersection(&Surface::BSpline(power(k)), &ground(), None),
+            Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve),
+            "x^{k}"
+        );
+    }
 }

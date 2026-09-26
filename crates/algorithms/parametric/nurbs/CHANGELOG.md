@@ -11,6 +11,15 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- An exact tier for B-spline fields: signs at points and over boxes (and
+  of derivatives) decided in dyadic Bernstein arithmetic, with no division,
+  behind an interval filter, wherever `f64` rounding cannot decide. A
+  B-spline field's trace excludes pieces, finds sides monotone, places
+  roots and tells lines of contact apart on exact signs, so it has no
+  precision limit: lines of contact of every order its degree allows are
+  found (tested to `x^21`), their derivatives tried up to that degree.
+  Series fields keep `f64`, split pieces below rounding, and refuse lines
+  of contact rounding hides over more than a twentieth of the window.
 - Surfaces tangent along a whole curve (a line of contact) are traced. A
   first or second derivative of the field crosses zero regularly on the
   line and is traced instead; its curves are kept where the field

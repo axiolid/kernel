@@ -25,6 +25,9 @@ use axiolid_curve::{Axis, Field2, ImplicitCell, ImplicitCurve2};
 use core::f64::consts::TAU;
 
 use axiolid_curve::implicit::{bound, bound_simple, partial, Cell, Range};
+use axiolid_guarantees::Sign;
+
+use crate::exact_field::Exact;
 
 /// Why a trace was refused.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -206,7 +209,13 @@ fn along_contact(
     // first up: `level[i]` is the derivative taken `i` times along `u` and
     // the rest along `v`.
     let mut level = vec![field.clone()];
-    for order in 1..=MAX_ORDER {
+    // A B-spline field's derivatives run out at its degree, and its signs
+    // are exact: every order is tried. A series field's never run out.
+    let orders = match field {
+        Field2::Patches(f) => f.u_degree + f.v_degree,
+        Field2::Series(_) => MAX_ORDER,
+    };
+    for order in 1..=orders {
         let next: Vec<Field2> = (0..=order)
             .map(|i| {
                 if i == 0 {
@@ -229,7 +238,8 @@ fn along_contact(
     None
 }
 
-/// The highest order of derivative [`along_contact`] tries: contact up to
+/// The highest order of derivative [`along_contact`] tries on a series
+/// field (a B-spline field's run out at its degree): contact up to
 /// `c n^(MAX_ORDER + 1)`.
 const MAX_ORDER: usize = 16;
 
@@ -254,8 +264,7 @@ fn contact_of_order(
         // to the line, and its bridged branches are no better than the
         // field's.
         let watch = Tubes::none();
-        let Ok((candidates, _)) =
-            trace_with_touches(g, domain, periodic, budget, &watch, usize::MAX)
+        let Ok((candidates, _)) = trace_with_touches(g, domain, periodic, budget, &watch, FEW)
         else {
             continue;
         };
@@ -279,7 +288,9 @@ fn contact_of_order(
         // twentieth, the lines are not followed: rounding hides them.
         let mut radius = 1e-3 * size;
         let factorial: Scalar = (1..=m).map(|k| k as Scalar).product();
-        for curve in crossing.iter().chain(&touching) {
+        // With an exact tier nothing is hidden: the least width serves.
+        let exact = Exact::of(field).is_some();
+        for curve in crossing.iter().chain(&touching).filter(|_| !exact) {
             let p = curve.point(0.5 * curve.end())?;
             let slope = g.jet(p).gradient.length();
             let rounding = 64.0 * Scalar::EPSILON * field.scale_at(p).max(field.magnitude());
@@ -492,6 +503,7 @@ fn cut_at(
 /// Whether the zeros of a second derivative `g` along `curve` are the
 /// field's own, and whether the field changes sign across them.
 fn contact(field: &Field2, g: &Field2, curve: &ImplicitCurve2, size: Scalar) -> Contact {
+    let exact = Exact::of(field);
     let n = 16 * curve.cells.len().max(1);
     let (mut crossing, mut touching) = (0, 0);
     for k in 0..=n {
@@ -521,33 +533,49 @@ fn contact(field: &Field2, g: &Field2, curve: &ImplicitCurve2, size: Scalar) -> 
         }
         let normal = grad / l;
         let mut decided = false;
-        // Far enough for the field, vanishing as `c n^m`, to show its sign.
+        // Far enough for the field, vanishing as `c n^m`, to show its sign:
+        // in `f64` once clear of the rounding, exactly at once where the
+        // field has an exact tier.
+        let sign = |q: Point2| -> Option<Sign> {
+            let f = field.value(q);
+            if f.abs() > 1e3 * rounding {
+                return Some(if f < 0.0 {
+                    Sign::Negative
+                } else {
+                    Sign::Positive
+                });
+            }
+            exact.and_then(|e| e.sign_at(q, (0, 0)))
+        };
         for step in [1e-4, 1e-3, 1e-2, 3e-2, 1e-1] {
             let d = normal * (step * size);
-            let (a, b) = (
-                field.value(p + Point2::new(d.x, d.y)),
-                field.value(p - Point2::new(d.x, d.y)),
-            );
-            if a.abs() > 1e3 * rounding && b.abs() > 1e3 * rounding {
-                // Tangent there: the field's gradient vanishes on the curve
-                // (as `n^2` or `n`), far below its size just beside it; on
-                // a regular zero it is much the same.
-                let beside = field
-                    .jet(p + Point2::new(d.x, d.y))
-                    .gradient
-                    .length()
-                    .max(field.jet(p - Point2::new(d.x, d.y)).gradient.length());
-                if field.jet(p).gradient.length() > 0.25 * beside {
-                    return Contact::Not;
-                }
-                if (a < 0.0) != (b < 0.0) {
-                    crossing += 1;
-                } else {
-                    touching += 1;
-                }
-                decided = true;
-                break;
+            let (qa, qb) = (p + Point2::new(d.x, d.y), p - Point2::new(d.x, d.y));
+            let (Some(a), Some(b)) = (sign(qa), sign(qb)) else {
+                continue;
+            };
+            if a == Sign::Zero || b == Sign::Zero {
+                continue;
             }
+            // Tangent there: the field's gradient vanishes on the curve
+            // (as `n^(m-1)`), far below its size just beside it; on a
+            // regular zero it is much the same. Below its own rounding the
+            // gradient tells nothing, and the check is passed over.
+            let beside = field
+                .jet(qa)
+                .gradient
+                .length()
+                .max(field.jet(qb).gradient.length());
+            let floor = 64.0 * Scalar::EPSILON * field.magnitude() * size.recip();
+            if beside > 1e3 * floor && field.jet(p).gradient.length() > 0.25 * beside {
+                return Contact::Not;
+            }
+            if a != b {
+                crossing += 1;
+            } else {
+                touching += 1;
+            }
+            decided = true;
+            break;
         }
         if !decided {
             return Contact::Not;
@@ -572,6 +600,8 @@ pub(crate) fn trace_with_touches(
 ) -> Result<(Vec<ImplicitCurve2>, Vec<Point2>), TraceRefusal> {
     let du = partial(field, true);
     let dv = partial(field, false);
+    // Signs `f64` cannot decide, decided exactly (B-spline fields).
+    let exact = Exact::of(field);
     let extent = (domain.hi - domain.lo).abs();
     let smallest = extent * 1e-9;
     // How far from a singular point a piece may still be its own: a bridge
@@ -634,7 +664,9 @@ pub(crate) fn trace_with_touches(
         if work > budget {
             return Err(TraceRefusal::Budget);
         }
-        if !bound(field, &du, &dv, &cell).straddles_zero() {
+        if !bound(field, &du, &dv, &cell).straddles_zero()
+            || exact.is_some_and(|e| e.keeps_sign(cell.lo, cell.hi, (0, 0)).is_some())
+        {
             continue;
         }
         if inside_one(&singular, &cell) || tubes.holds(&cell) {
@@ -642,8 +674,13 @@ pub(crate) fn trace_with_touches(
         }
         let fu = bound_simple(&du, &cell);
         let fv = bound_simple(&dv, &cell);
+        // Monotone along a parameter: by the partial's bound, else exactly.
+        let mono = |r: Range, d: (usize, usize)| {
+            !r.straddles_zero()
+                || exact.is_some_and(|e| e.keeps_sign(cell.lo, cell.hi, d).is_some())
+        };
         // Monotone in v: a graph over u. Where both hold, the steeper.
-        let axis = match (!fu.straddles_zero(), !fv.straddles_zero()) {
+        let axis = match (mono(fu, (1, 0)), mono(fv, (0, 1))) {
             (true, true) => {
                 if steeper(fv, &cell, false) >= steeper(fu, &cell, true) {
                     Some(Axis::U)
@@ -656,7 +693,7 @@ pub(crate) fn trace_with_touches(
             (false, false) => None,
         };
         match axis {
-            Some(axis) => match cells_in(field, &du, &dv, &cell, axis) {
+            Some(axis) => match cells_in(field, &du, &dv, &cell, axis, exact) {
                 Ok(found) => all.extend(found),
                 Err(()) => {
                     // A root on a side could not be certified simple: move
@@ -1122,6 +1159,10 @@ struct Side<'a> {
     /// field's bound straddles zero along much of the side (branches
     /// nearly touching), a smaller piece is cheaper than a deep search.
     work: core::cell::Cell<usize>,
+    /// The field's exact tier, where it has one, and the free
+    /// parameter's derivative order in it.
+    exact: Option<Exact<'a>>,
+    d_order: (usize, usize),
 }
 
 /// Stretches of one side examined before its piece is split instead.
@@ -1137,6 +1178,44 @@ impl Side<'_> {
 
     fn value(&self, x: Scalar) -> Scalar {
         self.field.value(self.at(x))
+    }
+
+    /// The field's sign at `x`: from its `f64` value where that clears the
+    /// rounding, else exactly where the field has an exact tier, else
+    /// `None`.
+    fn sign(&self, x: Scalar) -> Option<Sign> {
+        let p = self.at(x);
+        let f = self.field.value(p);
+        let rounding = 64.0 * Scalar::EPSILON * self.field.scale_at(p).max(self.field.magnitude());
+        if f.abs() > rounding {
+            return Some(if f < 0.0 {
+                Sign::Negative
+            } else {
+                Sign::Positive
+            });
+        }
+        self.exact?.sign_at(p, (0, 0))
+    }
+
+    /// Whether the field keeps one sign over `[a, b]`: its bound, else its
+    /// exact tier.
+    fn excludes_zero(&self, a: Scalar, b: Scalar) -> bool {
+        if !self.range(a, b).straddles_zero() {
+            return true;
+        }
+        let c = self.cell(a, b);
+        self.exact
+            .is_some_and(|e| e.keeps_sign(c.lo, c.hi, (0, 0)).is_some())
+    }
+
+    /// Whether the field is strictly monotone over `[a, b]`.
+    fn monotone(&self, a: Scalar, b: Scalar) -> bool {
+        if !self.slope(a, b).straddles_zero() {
+            return true;
+        }
+        let c = self.cell(a, b);
+        self.exact
+            .is_some_and(|e| e.keeps_sign(c.lo, c.hi, self.d_order).is_some())
     }
 
     fn cell(&self, a: Scalar, b: Scalar) -> Cell {
@@ -1180,30 +1259,24 @@ impl Side<'_> {
         if self.work.get() > SIDE_BUDGET {
             return Err(());
         }
-        if !self.range(a, b).straddles_zero() {
+        if self.excludes_zero(a, b) {
             return Ok(());
         }
-        let (fa, fb) = (self.value(a), self.value(b));
-        if !self.slope(a, b).straddles_zero() {
+        if self.monotone(a, b) {
             // Monotone: one root exactly where the signs differ -- signs
-            // only a value clear of its rounding can be trusted with.
-            let unclear = |x: Scalar, f: Scalar| {
-                let p = self.at(x);
-                f.abs()
-                    <= 64.0 * Scalar::EPSILON * self.field.scale_at(p).max(self.field.magnitude())
+            // taken from values clear of their rounding, or exactly.
+            let (Some(sa), Some(sb)) = (self.sign(a), self.sign(b)) else {
+                // Below rounding at an end, with no exact tier: which side
+                // the root lies on cannot be told here; a smaller piece may.
+                return Err(());
             };
-            if fa == 0.0 || fb == 0.0 {
+            if sa == Sign::Zero || sb == Sign::Zero {
                 // A root at an end: it belongs to the neighbouring piece's
                 // side as much as to this one, and is found as an end there.
                 return Err(());
             }
-            if unclear(a, fa) || unclear(b, fb) {
-                // Below rounding at an end: which side the root lies on
-                // cannot be told here; a smaller piece may.
-                return Err(());
-            }
-            if (fa < 0.0) != (fb < 0.0) {
-                out.push(self.refine(a, b, fa));
+            if sa != sb {
+                out.push(self.refine(a, b, sa));
             }
             return Ok(());
         }
@@ -1218,22 +1291,31 @@ impl Side<'_> {
         self.roots(m, b, out, depth + 1)
     }
 
-    /// The root in `[a, b]`, where the field is monotone and changes sign.
-    fn refine(&self, mut a: Scalar, mut b: Scalar, fa: Scalar) -> Scalar {
-        let negative_at_a = fa < 0.0;
+    /// The root in `[a, b]`, where the field is monotone and changes sign
+    /// (`sa` its sign at `a`), bisected on certain signs where they can be
+    /// had.
+    fn refine(&self, mut a: Scalar, mut b: Scalar, sa: Sign) -> Scalar {
         for _ in 0..200 {
             let m = 0.5 * (a + b);
             if m <= a.min(b) || m >= a.max(b) {
                 break;
             }
-            let fm = self.value(m);
-            if fm == 0.0 {
-                return m;
-            }
-            if (fm < 0.0) == negative_at_a {
-                a = m;
-            } else {
-                b = m;
+            // Below rounding with no exact tier, the `f64` sign is the best
+            // there is: the root is placed to within that noise.
+            let sign = self.sign(m).unwrap_or_else(|| {
+                let f = self.value(m);
+                if f == 0.0 {
+                    Sign::Zero
+                } else if f < 0.0 {
+                    Sign::Negative
+                } else {
+                    Sign::Positive
+                }
+            });
+            match sign {
+                Sign::Zero => return m,
+                s if s == sa => a = m,
+                _ => b = m,
             }
         }
         0.5 * (a + b)
@@ -1248,7 +1330,12 @@ fn cells_in(
     dv: &Field2,
     cell: &Cell,
     axis: Axis,
+    exact: Option<Exact<'_>>,
 ) -> Result<Vec<ImplicitCell>, ()> {
+    let d_order = match axis {
+        Axis::U => (1, 0),
+        Axis::V => (0, 1),
+    };
     let (d_free, lo_free, hi_free, lo_solved, hi_solved) = match axis {
         Axis::U => (du, cell.lo.x, cell.hi.x, cell.lo.y, cell.hi.y),
         Axis::V => (dv, cell.lo.y, cell.hi.y, cell.lo.x, cell.hi.x),
@@ -1261,6 +1348,8 @@ fn cells_in(
         fixed: lo_solved,
         resolution,
         work: core::cell::Cell::new(0),
+        exact,
+        d_order,
     };
     let high = Side {
         field,
@@ -1269,6 +1358,8 @@ fn cells_in(
         fixed: hi_solved,
         resolution,
         work: core::cell::Cell::new(0),
+        exact,
+        d_order,
     };
     let mut breaks = vec![lo_free, hi_free];
     low.roots(lo_free, hi_free, &mut breaks, 0)?;
@@ -1281,16 +1372,15 @@ fn cells_in(
             continue;
         }
         let m = 0.5 * (a + b);
-        let (f0, f1) = (low.value(m), high.value(m));
-        // Signs only a value clear of its rounding can be trusted with.
-        let unclear = |side: &Side, f: Scalar| {
-            let p = side.at(m);
-            f.abs() <= 64.0 * Scalar::EPSILON * field.scale_at(p).max(field.magnitude())
+        // Signs from values clear of their rounding, or exactly; neither
+        // to be had, a smaller piece may tell.
+        let (Some(s0), Some(s1)) = (low.sign(m), high.sign(m)) else {
+            return Err(());
         };
-        if unclear(&low, f0) || unclear(&high, f1) {
+        if s0 == Sign::Zero || s1 == Sign::Zero {
             return Err(());
         }
-        if (f0 < 0.0) != (f1 < 0.0) && f0 != 0.0 && f1 != 0.0 {
+        if s0 != s1 {
             out.push(ImplicitCell {
                 axis,
                 from: a,

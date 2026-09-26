@@ -4,8 +4,8 @@ ADR 0077).
 Each mutant weakens one step -- bridging the branch ends to the crossing,
 the bridge's tangent at the crossing, its reversal, degenerate contact and
 its tangent, telling touching from undecided, lines of contact where the
-surfaces are tangent and cross (of any order doubles resolve), signs
-below rounding, and ordering pieces that touch to third order at a vertex
+surfaces are tangent and cross (of any order), signs below rounding and
+the exact tier that decides them, and ordering pieces that touch to third order at a vertex
 -- and must turn a test red.
 
 Equivalent mutants, deliberately not listed:
@@ -15,9 +15,17 @@ Equivalent mutants, deliberately not listed:
 - swapping a bridge's two end slopes, or its two tangents: over a bridge
   the branch turns by its curvature times the bridge's length, a few
   millionths, so the cubic hardly changes;
-- trusting a side's end signs below rounding: a noisy root there only
-  moves a break, and the piece-level check (`noisy signs trusted across
-  a piece`, listed) refuses the cell it would make;
+- on B-spline fields, which every contact test uses: trusting an `f64`
+  sign below its rounding (the exact tier's exclusion of the piece
+  decides first), widening the tubes with the order (nothing is hidden
+  with exact signs), and capping the derivatives' order at a fixed
+  number (`B-spline derivatives capped`, listed, pins the degree bound);
+  all three still matter for series fields, which have no exact tier;
+- taking a zero coefficient for a strict sign over a box: the box test
+  refuses a zero sign one level up;
+- keeping a piece the exact tier proves of one sign: its sides then find
+  no roots by the same exact test, so it makes no cells (the exclusion
+  saves work only);
 - taking a regular zero of the field for a line of contact: it is a zero
   of the derivative as well, so it comes out through the derivative
   instead of the field, the same curve either way (the check keeps the
@@ -39,14 +47,18 @@ SPLINE = ["-p", "axiolid-nurbs", "--test", "spline_section"]
 B = "crates/algorithms/construction/brep-boolean/src/section.rs"
 P = "crates/algorithms/construction/brep-boolean/src/split.rs"
 ROOF = ["-p", "axiolid-brep-boolean", "--test", "splines"]
+E = "crates/algorithms/parametric/nurbs/src/exact_field.rs"
+EXACT = ["-p", "axiolid-nurbs", "--lib", "exact_field"]
 
 MUTANTS = [
-    ('noisy signs trusted across a piece', T, '        if unclear(&low, f0) || unclear(&high, f1) {', '        if false {', SPLINE),
-    ('tubes as narrow for every order', T, '                radius = radius.max(clear);', '', SPLINE),
-    ('derivatives of low orders only', T, 'const MAX_ORDER: usize = 16;', 'const MAX_ORDER: usize = 3;', SPLINE),
+    ('no exact tier', E, '            Field2::Patches(f) if f.is_finite() => Some(Self { field: f }),', '            Field2::Patches(_) => None,', SPLINE),
+    ('right split mis-indexed', E, '        out[n - r] = w[n - r].clone();', '        out[n - r] = w[0].clone();', EXACT),
+    ('undecided coefficients passed over', E, '        if undecided {\n            return None;\n        }', '', EXACT),
+    ('tubes widened as if nothing were exact', T, '.filter(|_| !exact)', '', SPLINE),
+    ('B-spline derivatives capped', T, '        Field2::Patches(f) => f.u_degree + f.v_degree,', '        Field2::Patches(_) => MAX_ORDER,', SPLINE),
     ('branches cut a line apart', T, '                    (s, q) = (t, at);', '', SPLINE),
     ('lines of contact never sought', T, '        {\n            return found;\n        }', '        {\n            let _ = found;\n        }', SPLINE),
-    ('crossing contact taken for touching', T, '                if (a < 0.0) != (b < 0.0) {\n                    crossing += 1;', '                if (a < 0.0) == (b < 0.0) {\n                    crossing += 1;', SPLINE),
+    ('crossing contact taken for touching', T, '            if a != b {\n                crossing += 1;', '            if a == b {\n                crossing += 1;', SPLINE),
     ('branches into a contact line left loose', T, '                if (q - p).length() > 4.0 * radius {', '                if true {', SPLINE),
     ('a traced contact dropped as touching', B, '                    if !traced && touching(sa, sb, mid, tolerance)? {', '                    if touching(sa, sb, mid, tolerance)? {', ROOF),
     ('pieces touching to third order refused', P, '                        let Some(t) = c.into_iter().find(|t| *t > 1e-12 && *t < TAU - 1e-12)', '                        let Some(t) = None::<Scalar>', ROOF),

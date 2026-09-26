@@ -280,10 +280,10 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
      not (touching). Curves of the derivative that are regular zeros of
      the field, or not zeros at all, are dropped.
   3. The field is traced again with tubes left out about every line of
-     contact, out to where `c n^m` is 64 times its rounding (`c` read off
-     the derivative's slope, `m! c`), and at least a thousandth of the
-     window wide. Wider than a twentieth, rounding hides the line and it
-     is `Undecided`. Two branches meeting a line within rounding of each
+     contact at least a thousandth of the window wide; on a series field,
+     out to where `c n^m` is 64 times its rounding (`c` read off the
+     derivative's slope, `m! c`), and wider than a twentieth, rounding
+     hides the line and it is `Undecided`. Two branches meeting a line within rounding of each
      other meet it at one vertex. A branch of it ending at a tube
      runs into the line: it is bridged to the line's nearest point (an end
      the line already has, within rounding, is that point), and the line
@@ -338,12 +338,29 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 
 **Follow-ups / risks to watch**
 
-- Lines of contact that rounding hides more than a twentieth of the
-  window wide (for `x^k` against a plane over a unit window, from `k = 13`
-  on), or whose derivatives are all singular along them too, are
-  `Undecided`: where the line runs is not decidable in doubles.
 - A value's sign is trusted only clear of its rounding, on a piece's
-  sides and across the piece; below it, the piece splits.
+  sides and across the piece. Below it:
+  - **B-spline fields decide it exactly** (`exact_field`). On a cell
+    `[a, b] x [c, d]` the field times `(b - a)^p (d - c)^q` is
+    `sum c_kl C(p,k) C(q,l) (u - a)^k (b - u)^(p-k) (v - c)^l (d - v)^(q-l)`,
+    which needs no division: its value at any `f64` point is exact in
+    dyadic arithmetic. Over a box, de Casteljau subdivision with
+    homogeneous weights (`(b - x) P_i + (x - a) P_(i+1)`) gives its
+    Bernstein coefficients there, again without division; all of one
+    strict sign prove that sign over the box. Derivatives' signs come
+    from the coefficients' differences. Each question is asked in
+    outward-rounded intervals first and in big integers only where they
+    cannot decide. So a B-spline field's trace has no precision limit:
+    pieces are excluded, sides found monotone and roots placed on exact
+    signs, lines of contact of every order the field's degree allows are
+    found (`x^21` against a plane in the tests), and their tubes need no
+    widening.
+  - Series fields (analytic carriers), whose harmonics no finite
+    arithmetic evaluates exactly, split the piece instead; their lines
+    of contact that rounding hides more than a twentieth of the window
+    wide are `Undecided`. Contact of high order along a curve needs
+    inflections quadrics and tori do not have; it arises with B-splines,
+    which are exact.
 - A pcurve on a face whose trace is too costly (a tacnode read far from
   the face's parameter origin) falls back to the section's own space
   curve read on the face (`Curve2::Lifted`).
