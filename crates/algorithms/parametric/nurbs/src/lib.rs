@@ -35,6 +35,7 @@ mod ruled_section;
 mod surface_analysis;
 mod surface_projection;
 mod surface_transform;
+mod torus_section;
 mod transform;
 
 pub use certified_curve_distance::{distance_curve2_certified, distance_curve3_certified};

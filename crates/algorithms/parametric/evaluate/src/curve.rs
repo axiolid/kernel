@@ -185,6 +185,11 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
             .height(t)
             .map(|v| Point2::new(t, v))
             .ok_or_else(|| outside_graph(t)),
+        // The angle is the first coordinate, the parameter the second.
+        Curve2::AngleGraph(g) => g
+            .angle(t)
+            .map(|u| Point2::new(u, t))
+            .ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -216,6 +221,10 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             .slope(t)
             .map(|slope| Vec2::new(1.0, slope))
             .ok_or_else(|| outside_graph(t)),
+        Curve2::AngleGraph(g) => g
+            .slope(t)
+            .map(|slope| Vec2::new(slope, 1.0))
+            .ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -243,6 +252,10 @@ pub fn second_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
         Curve2::QuadraticGraph(g) => g
             .bend(t)
             .map(|bend| Vec2::new(0.0, bend))
+            .ok_or_else(|| outside_graph(t)),
+        Curve2::AngleGraph(g) => g
+            .bend(t)
+            .map(|bend| Vec2::new(bend, 0.0))
             .ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
@@ -296,6 +309,7 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         Curve3::Intrinsic(i) => crate::frenet::frenet_point(i, t),
         // The carrier along its section graph (ADR 0076).
         Curve3::RuledSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
+        Curve3::TorusSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -320,6 +334,7 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         // Arc-length parameterised, so the derivative is the UNIT tangent.
         Curve3::Intrinsic(i) => crate::frenet::frenet_tangent(i, t),
         Curve3::RuledSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
+        Curve3::TorusSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -341,6 +356,7 @@ pub fn second_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
             de_boor_second_derivative(b, t, |p| [p.x, p.y, p.z], |c| Vec3::new(c[0], c[1], c[2]))
         }
         Curve3::RuledSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
+        Curve3::TorusSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,

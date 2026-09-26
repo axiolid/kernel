@@ -15,6 +15,8 @@ import pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 R = "crates/algorithms/parametric/nurbs/src/ruled_section.rs"
 Q = "crates/representations/analytic/curve/src/quadric_section.rs"
+T = "crates/algorithms/parametric/nurbs/src/torus_section.rs"
+A = "crates/representations/analytic/curve/src/torus_section.rs"
 RULED = ["-p", "axiolid-nurbs", "--test", "ruled_section"]
 PAIRS = ["-p", "axiolid-nurbs", "--test", "exact_intersection"]
 EVAL = ["-p", "axiolid-evaluate", "--test", "quadratic_graph"]
@@ -32,6 +34,9 @@ MUTANTS = [
     ('other cone keeps both nappes', R, '        out.push((h0, linear(&sz, a1)));', '', RULED),
     ('carrier cone keeps both nappes', R, "        out.push((constant(d(c.radius)?), constant(d(c.semi_angle.tan())?)));", '', RULED),
     ('sign of a ignored on nappes', R, "                    (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive)", "                    (_, Sign::Negative)", RULED),
+    ('torus angle branch swapped', A, '        let u = (b * c + s * a * root).atan2(a * c - s * b * root);', '        let u = (b * c - s * a * root).atan2(a * c - s * b * root);', EVAL),
+    ('torus sphere cross term dropped', T, '                    two.mul(&small).mul(&dz).neg(),', '                    zero(),', RULED),
+    ('torus pieces cross the cut', T, '        &[e.clone(), cut],', '        &[e.clone()],', RULED),
     ('degenerate frame accepted', R, '    if dot(&cross, &z).sign() == Some(Sign::Zero) {\n        return Err(refuse());\n    }', '', PAIRS),
 ]
 

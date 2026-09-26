@@ -43,7 +43,7 @@ use crate::exact_surface_intersection::{
     Derivation, ExactIntersectionCurve, ExactIntersectionRefusal,
 };
 
-type D3 = [Dyadic; 3];
+pub(crate) type D3 = [Dyadic; 3];
 
 /// `e0 + ec cos(u) + es sin(u)`, exactly.
 #[derive(Clone)]
@@ -54,7 +54,7 @@ struct TrigVec {
 }
 
 /// A degree-2 trigonometric polynomial, exactly: `[1, cos, sin, cos2, sin2]`.
-type ETrig = [Dyadic; 5];
+pub(crate) type ETrig = [Dyadic; 5];
 
 /// `p^T M p + 2 q^T p + k`, exactly.
 struct Quadric {
@@ -63,24 +63,24 @@ struct Quadric {
     k: Dyadic,
 }
 
-fn refuse() -> ExactIntersectionRefusal {
+pub(crate) fn refuse() -> ExactIntersectionRefusal {
     ExactIntersectionRefusal::DegenerateFrame
 }
 
-fn d(value: Scalar) -> Result<Dyadic, ExactIntersectionRefusal> {
+pub(crate) fn d(value: Scalar) -> Result<Dyadic, ExactIntersectionRefusal> {
     Dyadic::try_from_f64(value).ok_or_else(refuse)
 }
 
-fn d3(v: axiolid_core::Vec3) -> Result<D3, ExactIntersectionRefusal> {
+pub(crate) fn d3(v: axiolid_core::Vec3) -> Result<D3, ExactIntersectionRefusal> {
     Ok([d(v.x)?, d(v.y)?, d(v.z)?])
 }
 
-fn zero() -> Dyadic {
+pub(crate) fn zero() -> Dyadic {
     Dyadic::zero()
 }
 
 /// A small integer, exactly (every such value is a double).
-fn int(value: i64) -> Dyadic {
+pub(crate) fn int(value: i64) -> Dyadic {
     Dyadic::try_from_f64(value as f64).expect("small integers are finite")
 }
 
@@ -88,7 +88,7 @@ fn half() -> Dyadic {
     Dyadic::try_from_f64(0.5).expect("finite")
 }
 
-fn dot(a: &D3, b: &D3) -> Dyadic {
+pub(crate) fn dot(a: &D3, b: &D3) -> Dyadic {
     a[0].mul(&b[0]).add(&a[1].mul(&b[1])).add(&a[2].mul(&b[2]))
 }
 
@@ -149,7 +149,7 @@ fn trig_scale(a: &ETrig, s: &Dyadic) -> ETrig {
     ]
 }
 
-fn rounded(a: &ETrig) -> Trig2 {
+pub(crate) fn rounded(a: &ETrig) -> Trig2 {
     Trig2 {
         constant: a[0].to_f64(),
         cos: a[1].to_f64(),
@@ -159,12 +159,12 @@ fn rounded(a: &ETrig) -> Trig2 {
     }
 }
 
-fn is_zero(a: &ETrig) -> bool {
+pub(crate) fn is_zero(a: &ETrig) -> bool {
     a.iter().all(|c| c.sign() == Some(Sign::Zero))
 }
 
 /// Polynomial product, lowest degree first.
-fn pmul(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
+pub(crate) fn pmul(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
     let mut out = vec![zero(); a.len() + b.len() - 1];
     for (i, x) in a.iter().enumerate() {
         for (j, y) in b.iter().enumerate() {
@@ -174,7 +174,18 @@ fn pmul(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
     out
 }
 
-fn psub(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
+pub(crate) fn padd(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
+    let n = a.len().max(b.len());
+    (0..n)
+        .map(|i| {
+            let x = a.get(i).cloned().unwrap_or_else(zero);
+            let y = b.get(i).cloned().unwrap_or_else(zero);
+            x.add(&y)
+        })
+        .collect()
+}
+
+pub(crate) fn psub(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
     let n = a.len().max(b.len());
     (0..n)
         .map(|i| {
@@ -186,7 +197,7 @@ fn psub(a: &[Dyadic], b: &[Dyadic]) -> Vec<Dyadic> {
 }
 
 /// `T(u) (1 + t^2)^2` as a polynomial in `t = tan(u/2)`, degree 4.
-fn in_half_angle(a: &ETrig) -> Vec<Dyadic> {
+pub(crate) fn in_half_angle(a: &ETrig) -> Vec<Dyadic> {
     // 1 -> 1 + 2t^2 + t^4; cos -> 1 - t^4; sin -> 2t + 2t^3;
     // cos2 -> 1 - 6t^2 + t^4; sin2 -> 4t - 4t^3.
     let basis: [[i64; 5]; 5] = [
@@ -206,7 +217,7 @@ fn in_half_angle(a: &ETrig) -> Vec<Dyadic> {
 }
 
 /// Value of an exact trigonometric polynomial at `u = pi`, exactly.
-fn at_pi(a: &ETrig) -> Dyadic {
+pub(crate) fn at_pi(a: &ETrig) -> Dyadic {
     a[0].sub(&a[1]).add(&a[3])
 }
 
@@ -214,7 +225,7 @@ fn at_pi(a: &ETrig) -> Dyadic {
 /// A degenerate frame describes a degenerate parameterisation, and an
 /// implicit equation that ignores the frame would describe a different
 /// surface from the one evaluation draws.
-fn frame_spans(frame: &axiolid_core::Frame3) -> Result<(), ExactIntersectionRefusal> {
+pub(crate) fn frame_spans(frame: &axiolid_core::Frame3) -> Result<(), ExactIntersectionRefusal> {
     let (x, y, z) = (d3(frame.x)?, d3(frame.y)?, d3(frame.z)?);
     let cross = [
         x[1].mul(&y[2]).sub(&x[2].mul(&y[1])),
@@ -228,7 +239,7 @@ fn frame_spans(frame: &axiolid_core::Frame3) -> Result<(), ExactIntersectionRefu
     Ok(())
 }
 
-fn surface_frame(surface: &Surface) -> Option<&axiolid_core::Frame3> {
+pub(crate) fn surface_frame(surface: &Surface) -> Option<&axiolid_core::Frame3> {
     match surface {
         Surface::Plane(p) => Some(&p.frame),
         Surface::Cylinder(c) => Some(&c.frame),
@@ -387,7 +398,7 @@ fn nappes(
 /// Angles in `(-pi, pi)` where an exact half-angle polynomial vanishes, in
 /// increasing order, as `(t_lo, t_hi, u)`: the isolating interval in `t` and
 /// the root's angle rounded once.
-fn angle_roots(poly: &[Dyadic]) -> Vec<(Dyadic, Dyadic, Scalar)> {
+pub(crate) fn angle_roots(poly: &[Dyadic]) -> Vec<(Dyadic, Dyadic, Scalar)> {
     let poly = IntPoly::from_dyadic(poly);
     if poly.is_zero() {
         return Vec::new();
@@ -409,7 +420,7 @@ fn between(left: &(Dyadic, Dyadic, Scalar), right: &(Dyadic, Dyadic, Scalar)) ->
     left.1.add(&right.0).mul(&half())
 }
 
-fn sign_at(poly: &IntPoly, t: &Dyadic) -> Sign {
+pub(crate) fn sign_at(poly: &IntPoly, t: &Dyadic) -> Sign {
     poly.sign_at(t)
 }
 
@@ -423,7 +434,7 @@ fn sign_at(poly: &IntPoly, t: &Dyadic) -> Sign {
 /// dropping. `vanishes_at_pi` says whether any break is zero there exactly,
 /// and then `pi` is a break too. Spans beside it are sampled beyond the
 /// outermost finite root.
-fn spans(
+pub(crate) fn spans(
     breaks: &[Vec<Dyadic>],
     positive: &dyn Fn(&Dyadic) -> Option<bool>,
     positive_at_pi: bool,

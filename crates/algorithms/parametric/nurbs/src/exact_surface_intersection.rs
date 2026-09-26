@@ -212,6 +212,10 @@ pub enum Derivation {
     /// parameter at every angle; the curve is a root branch of that
     /// quadratic (ADR 0076).
     RuledQuadricSection,
+    /// A plane or sphere meets each circle of a torus about its axis where
+    /// `A(v) cos u + B(v) sin u = C(v)`; the curve is `u` as a function of
+    /// the tube angle `v` (ADR 0076).
+    TorusAngleSection,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -233,10 +237,15 @@ pub fn exact_surface_intersection(
         ) => Err(refusal),
         // No conic or line for this pair: a cylinder or cone cut by a
         // quadric is still exact as a ruled section (ADR 0076).
-        Err(refusal) => match crate::ruled_section::ruled_section(first, second)? {
-            Some(curve) => Ok(curve),
-            None => Err(refusal),
-        },
+        Err(refusal) => {
+            if let Some(curve) = crate::ruled_section::ruled_section(first, second)? {
+                return Ok(curve);
+            }
+            match crate::torus_section::torus_section(first, second)? {
+                Some(curve) => Ok(curve),
+                None => Err(refusal),
+            }
+        }
     }
 }
 

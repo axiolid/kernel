@@ -518,3 +518,219 @@ fn a_sphere_below_a_cone_apex_meets_only_the_unmodelled_nappe() {
         Err(ExactIntersectionRefusal::Disjoint)
     );
 }
+
+// --- torus sections -----------------------------------------------------------
+
+fn torus(origin: Point3, axis: Vec3, major: f64, minor: f64) -> Surface {
+    Surface::Torus(axiolid_surface::Torus {
+        frame: frame(origin, axis),
+        major_radius: major,
+        minor_radius: minor,
+    })
+}
+
+/// Residual from a torus: distance to the tube's centre circle less `r`.
+fn off_torus(surface: &Surface, p: Point3) -> f64 {
+    let Surface::Torus(t) = surface else {
+        return off(surface, p);
+    };
+    let axis = t.frame.z.normalize();
+    let d = p - t.frame.origin;
+    let h = d.dot(axis);
+    let radial = (d - axis * h).length();
+    (radial - t.major_radius).hypot(h) - t.minor_radius
+}
+
+/// A torus piece's pcurve is continuous: the angle never jumps by a turn
+/// inside it, because pieces are split where the returned angle wraps.
+fn assert_continuous(branch: &Curve3, span: Interval) {
+    let Curve3::TorusSection(section) = branch else {
+        panic!("expected a torus section, got {branch:?}");
+    };
+    let pcurve = axiolid_curve::Curve2::AngleGraph(section.graph);
+    let mut previous: Option<f64> = None;
+    for i in 1..400 {
+        let t = span.start + (span.end - span.start) * i as f64 / 400.0;
+        let Ok(p) = axiolid_evaluate::evaluate2(&pcurve, t) else {
+            continue;
+        };
+        if let Some(last) = previous {
+            assert!(
+                (p.x - last).abs() < 1.0,
+                "pcurve jumps from {last} to {} at {t}",
+                p.x
+            );
+        }
+        previous = Some(p.x);
+    }
+}
+
+fn check_torus(first: &Surface, second: &Surface) -> usize {
+    let curve = exact_surface_intersection(first, second).expect("a torus section");
+    assert_eq!(curve.derivation, Derivation::TorusAngleSection);
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        let span = span.expect("a torus piece carries its span");
+        assert_continuous(branch, span);
+        for i in 0..=300 {
+            let t = span.start + (span.end - span.start) * i as f64 / 300.0;
+            let Ok(p) = evaluate3(branch, t) else {
+                assert!(i == 0 || i == 300, "no point at {t} inside {span:?}");
+                continue;
+            };
+            for surface in [first, second] {
+                let r = off_torus(surface, p);
+                assert!(r.abs() < 1e-9, "point at {t} is {r} off {surface:?}");
+            }
+        }
+    }
+    curve.branches.len()
+}
+
+#[test]
+fn a_pipe_bend_meets_an_oblique_wall_exactly() {
+    // A quarter of a pipe bend is a torus; a wall at an angle crosses it
+    // off its axis.
+    let bend = torus(Point3::ZERO, Vec3::Z, 3.0, 0.5);
+    let wall = Surface::Plane(Plane {
+        frame: frame(Point3::new(2.5, 0.5, 0.0), Vec3::new(1.0, 0.3, 0.4)),
+    });
+    assert!(check_torus(&bend, &wall) >= 2);
+    assert!(check_torus(&wall, &bend) >= 2);
+}
+
+#[test]
+fn a_torus_and_an_off_axis_sphere_meet_exactly() {
+    let ring = torus(
+        Point3::new(0.5, 0.0, 0.2),
+        Vec3::new(0.1, 0.0, 1.0),
+        4.0,
+        1.0,
+    );
+    let ball = Surface::Sphere(Sphere {
+        frame: frame(Point3::new(4.2, 0.3, 0.1), Vec3::Z),
+        radius: 1.3,
+    });
+    assert!(check_torus(&ring, &ball) >= 2);
+}
+
+#[test]
+fn torus_pairs_that_miss_or_touch_are_named() {
+    let ring = torus(Point3::ZERO, Vec3::Z, 3.0, 1.0);
+    // A plane parallel to the axis, beyond the outer equator.
+    let far = Surface::Plane(Plane {
+        frame: frame(Point3::new(5.0, 0.0, 0.0), Vec3::X),
+    });
+    assert_eq!(
+        exact_surface_intersection(&ring, &far),
+        Err(ExactIntersectionRefusal::Disjoint)
+    );
+    // Tangent to the outer equator at one point, exactly.
+    let touching = Surface::Plane(Plane {
+        frame: frame(Point3::new(4.0, 0.0, 0.0), Vec3::X),
+    });
+    assert_eq!(
+        exact_surface_intersection(&ring, &touching),
+        Err(ExactIntersectionRefusal::NotRegularCurve)
+    );
+}
+
+/// Tube circles `v = const` that the other surface crosses.
+fn scan_torus_hits(t: &axiolid_surface::Torus, other: &Surface) -> usize {
+    let mut hits = 0;
+    for i in 0..360 {
+        let v = -PI + 2.0 * PI * (i as f64 + 0.5) / 360.0;
+        let ring = t.major_radius + t.minor_radius * v.cos();
+        let point = |u: f64| {
+            t.frame.origin
+                + t.frame.x * (ring * u.cos())
+                + t.frame.y * (ring * u.sin())
+                + t.frame.z * (t.minor_radius * v.sin())
+        };
+        let mut last = off(other, point(-PI)).signum();
+        for k in 1..=1440 {
+            let now = off(other, point(-PI + 2.0 * PI * k as f64 / 1440.0)).signum();
+            if now != last {
+                hits += 1;
+                break;
+            }
+            last = now;
+        }
+    }
+    hits
+}
+
+#[test]
+fn random_torus_plane_and_sphere_pairs_agree_with_a_dense_scan() {
+    let mut rng = Lcg(0x7025_0119);
+    let mut met = 0;
+    for round in 0..100 {
+        let t = axiolid_surface::Torus {
+            frame: frame(
+                Point3::new(
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                ),
+                Vec3::new(rng.range(-0.5, 0.5), rng.range(-0.5, 0.5), 1.0),
+            ),
+            major_radius: rng.range(2.0, 4.0),
+            minor_radius: rng.range(0.3, 1.5),
+        };
+        let other = if round % 2 == 0 {
+            Surface::Plane(Plane {
+                frame: frame(
+                    Point3::new(
+                        rng.range(-4.0, 4.0),
+                        rng.range(-4.0, 4.0),
+                        rng.range(-1.0, 1.0),
+                    ),
+                    Vec3::new(
+                        rng.range(-1.0, 1.0),
+                        rng.range(-1.0, 1.0),
+                        rng.range(-1.0, 1.0),
+                    ),
+                ),
+            })
+        } else {
+            Surface::Sphere(Sphere {
+                frame: frame(
+                    Point3::new(
+                        rng.range(-4.0, 4.0),
+                        rng.range(-4.0, 4.0),
+                        rng.range(-1.5, 1.5),
+                    ),
+                    Vec3::Z,
+                ),
+                radius: rng.range(0.5, 2.5),
+            })
+        };
+        let carrier = Surface::Torus(t);
+        let scanned = scan_torus_hits(&t, &other);
+        match exact_surface_intersection(&carrier, &other) {
+            Ok(curve) => {
+                met += 1;
+                for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+                    let Some(span) = span else { continue };
+                    assert_continuous(branch, *span);
+                    for i in 1..40 {
+                        let s = span.start + (span.end - span.start) * i as f64 / 40.0;
+                        if let Ok(p) = evaluate3(branch, s) {
+                            assert!(off_torus(&carrier, p).abs() < 1e-8, "off torus");
+                            assert!(off(&other, p).abs() < 1e-8, "off other");
+                        }
+                    }
+                }
+                assert!(scanned > 0, "a curve where the scan finds no crossing");
+            }
+            Err(ExactIntersectionRefusal::Disjoint) => {
+                assert_eq!(
+                    scanned, 0,
+                    "disjoint, but the scan crosses on {scanned} circles"
+                );
+            }
+            Err(ExactIntersectionRefusal::NotRegularCurve) => {}
+            Err(other) => panic!("unexpected refusal {other:?}"),
+        }
+    }
+    assert!(met > 30, "too few meeting pairs ({met})");
+}

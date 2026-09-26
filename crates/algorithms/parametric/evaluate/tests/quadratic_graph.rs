@@ -147,3 +147,73 @@ fn outside_its_spans_the_graph_is_refused_not_extrapolated() {
     };
     assert!(evaluate2(&Curve2::QuadraticGraph(empty), 0.3).is_err());
 }
+
+#[test]
+fn an_angle_graph_solves_its_equation_and_differentiates_consistently() {
+    use axiolid_curve::{AngleGraph2, TorusCarrier, TorusSection3};
+    use axiolid_surface::Torus;
+    let g = |branch| AngleGraph2 {
+        a: Trig2 {
+            constant: 3.0,
+            cos: 0.5,
+            ..Trig2::default()
+        },
+        b: Trig2 {
+            constant: 1.2,
+            cos: 0.2,
+            ..Trig2::default()
+        },
+        c: Trig2 {
+            constant: 0.4,
+            sin: -0.6,
+            ..Trig2::default()
+        },
+        branch,
+    };
+    let h = 1e-5;
+    for branch in [Branch::Plus, Branch::Minus] {
+        let graph = g(branch);
+        let curve = Curve2::AngleGraph(graph);
+        for t in [-2.0, -0.5, 0.3, 1.7] {
+            let p = evaluate2(&curve, t).unwrap();
+            assert_eq!(p.y, t, "the parameter is the second coordinate");
+            let residual =
+                graph.a.value(t) * p.x.cos() + graph.b.value(t) * p.x.sin() - graph.c.value(t);
+            assert!(residual.abs() < 1e-12, "{branch:?} at {t}: {residual}");
+            let d = derivative2(&curve, t).unwrap();
+            let fd =
+                (evaluate2(&curve, t + h).unwrap() - evaluate2(&curve, t - h).unwrap()) / (2.0 * h);
+            assert!((d - fd).length() < 1e-6, "first at {t}: {d:?} vs {fd:?}");
+            let dd = second_derivative2(&curve, t).unwrap();
+            let fdd = (derivative2(&curve, t + h).unwrap() - derivative2(&curve, t - h).unwrap())
+                / (2.0 * h);
+            assert!(
+                (dd - fdd).length() < 1e-5,
+                "second at {t}: {dd:?} vs {fdd:?}"
+            );
+        }
+    }
+    // Lifted onto a torus, it lies on the torus as the surface module draws it.
+    let torus = Torus {
+        frame: frame(),
+        major_radius: 3.0,
+        minor_radius: 0.8,
+    };
+    let section = Curve3::TorusSection(TorusSection3 {
+        torus: TorusCarrier {
+            frame: torus.frame,
+            major_radius: torus.major_radius,
+            minor_radius: torus.minor_radius,
+        },
+        graph: g(Branch::Plus),
+    });
+    for t in [-1.0, 0.5] {
+        let u = g(Branch::Plus).angle(t).unwrap();
+        let on = evaluate(&Surface::Torus(torus), u, t).unwrap();
+        assert!((evaluate3(&section, t).unwrap() - on).length() < 1e-12);
+        let d = derivative3(&section, t).unwrap();
+        let fd =
+            (evaluate3(&section, t + h).unwrap() - evaluate3(&section, t - h).unwrap()) / (2.0 * h);
+        assert!((d - fd).length() < 1e-6, "tangent at {t}");
+    }
+}

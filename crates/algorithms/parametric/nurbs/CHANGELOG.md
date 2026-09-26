@@ -20,6 +20,11 @@ caret rule for `0.x` versions.
   angle carry the curve is decided by exact root isolation of the
   discriminant. `ExactIntersectionCurve` gains `spans` and `Derivation`
   gains `RuledQuadricSection`.
+- `exact_surface_intersection` derives a ring torus's section by a plane or
+  sphere off its axis (#119, ADR 0076) -- a pipe bend meeting a wall, a ball
+  against a ring -- as `u(v)` solving `A(v) cos u + B(v) sin u = C(v)`,
+  with spans and wrap points decided exactly
+  (`Derivation::TorusAngleSection`).
 
 - Exact intersection of analytic curves (#119): `exact_curve_surface_intersection`
   (line, circle or ellipse against plane, cylinder, elliptical cylinder, cone,

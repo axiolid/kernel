@@ -17,6 +17,10 @@ caret rule for `0.x` versions.
   (`Trig2`, `Branch`), and the same curve lifted onto a cylinder,
   elliptical cylinder or cone (`RuledCarrier`). The exact pcurve and edge
   of a quadric's cut across a ruled surface.
+- `Curve2::AngleGraph(AngleGraph2)` and `Curve3::TorusSection(TorusSection3)`
+  (#119, ADR 0076): the solution `u(t)` of `a(t) cos u + b(t) sin u = c(t)`,
+  and the same curve on a torus (`TorusCarrier`). The exact pcurve and edge
+  of a plane's or sphere's cut across a torus.
 
 - `Curve2::Sinusoid(Sinusoid2)`: the graph `v = mean + a cos(t) + b sin(t)`,
   the exact pcurve of a plane's cut across a cylinder in its (angle, height)

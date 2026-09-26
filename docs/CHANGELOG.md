@@ -65,7 +65,7 @@ All notable changes to Axiolid are documented in this file.
 - Exact ruled quadric sections (#119, ADR 0076): where a quadric crosses a
   cylinder or cone off any shared axis -- a pipe tee, a column piercing a
   dome off-centre, a pipe entering a hopper, an oblique cut through a
-  cone -- the intersection is
+  cone, a pipe bend (torus) meeting a wall or a sphere -- the intersection is
   derived exactly as a root branch of a quadratic over the carrier's angle,
   with its loops and branch ends decided by exact root isolation. Checked
   on 120 random cylinder pairs against a dense scan and a 10-fault mutation

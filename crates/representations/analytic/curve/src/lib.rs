@@ -14,6 +14,7 @@ pub mod linear;
 pub mod quadric_section;
 pub mod sinusoid;
 pub mod spline;
+pub mod torus_section;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
@@ -24,6 +25,7 @@ pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use sinusoid::Sinusoid2;
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
+pub use torus_section::{AngleGraph2, TorusCarrier, TorusSection3};
 
 /// The focused linear vocabulary, re-exported for consumers that want to name
 /// its origin explicitly. A line-only consumer should depend on
@@ -58,6 +60,10 @@ pub enum Curve2 {
     /// exact pcurve of a quadric's cut across a cylinder or cone. See
     /// [`QuadraticGraph2`] (ADR 0076).
     QuadraticGraph(QuadraticGraph2),
+    /// A solution of `a(t) cos u + b(t) sin u = c(t)` as `u` over `t`: the
+    /// exact pcurve of a plane's or sphere's cut across a torus. See
+    /// [`AngleGraph2`] (ADR 0076).
+    AngleGraph(AngleGraph2),
 }
 
 /// Atomic three-dimensional curve values.
@@ -84,4 +90,7 @@ pub enum Curve3 {
     /// A quadric's cut across a cylinder or cone: the carrier evaluated along
     /// a [`QuadraticGraph2`]. See [`RuledSection3`] (ADR 0076).
     RuledSection(RuledSection3),
+    /// A plane's or sphere's cut across a torus: the torus evaluated along
+    /// an [`AngleGraph2`]. See [`TorusSection3`] (ADR 0076).
+    TorusSection(TorusSection3),
 }

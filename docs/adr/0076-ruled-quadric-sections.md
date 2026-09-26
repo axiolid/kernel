@@ -57,6 +57,15 @@ of degree at most two. The curve is the graph of one root.
   sphere, cylinder, elliptical cylinder and cone; a cone against plane,
   sphere and cone. The closed forms still win where they apply; the ruled
   path runs only when they refuse.
+- **Tori.** A torus is not ruled, but at a fixed tube angle `v` its
+  points form a circle about the axis, which a plane or sphere meets where
+  `A(v) cos u + B(v) sin u = C(v)` (degree one in `v`). The section is `u`
+  as a function of `v`: `Curve2::AngleGraph(AngleGraph2)` (the parameter is
+  the second coordinate) and `Curve3::TorusSection(TorusSection3)`. It
+  exists where `E = A^2 + B^2 - C^2 >= 0`; the returned angle wraps at
+  `u = pi`, so spans are also split at the roots of `B^2 C^2 - A^2 E`,
+  keeping each pcurve piece continuous. Both are decided by the same exact
+  root isolation. `Derivation::TorusAngleSection`.
 - **Nappes.** A cone's implicit equation holds both nappes, and a cone
   carrier's parameterisation reaches the other nappe past its apex. Each
   cone taking part adds a condition `h0(u) + h1(u) v >= 0` (the carrier's
@@ -98,7 +107,8 @@ of degree at most two. The curve is the graph of one root.
 
 **Follow-ups / risks to watch**
 
-- Tori are quartic surfaces; torus pairs other than coaxial stay refused.
+- A torus against a cylinder, cone or torus is quartic in `u` at each `v`
+  and stays refused unless coaxial.
 - B-spline pairs stay on the certified bounded tier.
 
 ## Relation to existing code
@@ -110,4 +120,4 @@ of degree at most two. The curve is the graph of one root.
   derivation; `exact_surface_intersection.rs`: dispatch and `spans`.
 - `crates/algorithms/parametric/nurbs/tests/ruled_section.rs`,
   `crates/algorithms/parametric/evaluate/tests/quadratic_graph.rs`:
-  oracles; `scripts/probe_ruled_section_mutants.py`: 13 faults, all caught.
+  oracles; `scripts/probe_ruled_section_mutants.py`: 16 faults, all caught.
