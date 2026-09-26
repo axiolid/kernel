@@ -6,6 +6,11 @@ already traced, the rates, the edge exits, the pcurve read from the solve,
 the domain breaks, or the refusal of touching surfaces -- and must turn a
 test red.
 
+Accepting every crossing that cannot be proven, tangent or not, is not
+listed on its own: the tests hold no regular crossing that fails its proof
+unless the certificate is broken, and `partials not scaled to the box`
+breaks it -- and is killed only because such crossings are refused.
+
 Equivalent mutants, deliberately not listed: accepting a chord whose box
 was not proven. Every chord the tests trace is provable, so only a march
 that strayed would tell, and the tests' curves are far apart; the
@@ -33,6 +38,7 @@ MUTANTS = [
     ('rates not per chord', S, '        let x = solve4(matrix(&j1, &j2, d), [0.0, 0.0, 0.0, d.dot(d)])?;', '        let x = solve4(matrix(&j1, &j2, d), [0.0, 0.0, 0.0, 1.0])?;', BOOL),
     ('window edges never crossed', P, '                let outside = if value == w.0[axis] {\n                    x1 < value', '                let outside = if false {\n                    x1 < value', BOOL),
     ('a seed on an edge heading out fails', P, '                    && (step.length() <= 1e-12 * scale', '                    && (false', PAIR),
+    ('a tangent edge crossing refused', C, '                _ if tangent(&root, curve, enclosure) => {', '                _ if false => {', PAIR),
     ('pcurve reads the other surface', E, '                return finite2(if first { a } else { b }, "curve point");', '                return finite2(if first { b } else { a }, "curve point");', BOOL),
     ('no domain breaks at nodes', M, 'axiolid_curve::Curve3::ImplicitSection(_) | axiolid_curve::Curve3::PairSection(_)', 'axiolid_curve::Curve3::ImplicitSection(_)', BOOL),
 ]

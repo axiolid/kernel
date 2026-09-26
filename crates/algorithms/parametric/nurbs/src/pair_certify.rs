@@ -615,16 +615,37 @@ pub(crate) fn isolate(
             Verdict::Unknown => {}
         }
         if depth > 40 {
-            // A crossing on the box's side: prove it in a box about it.
-            let root = newton3(
-                [
-                    0.5 * (tb[0] + tb[1]),
-                    0.5 * (ub[0] + ub[1]),
-                    0.5 * (vb[0] + vb[1]),
-                ],
-                curve,
-                enclosure,
-            )?;
+            let centre = [
+                0.5 * (tb[0] + tb[1]),
+                0.5 * (ub[0] + ub[1]),
+                0.5 * (vb[0] + vb[1]),
+            ];
+            let inside_asked = |r: &[Scalar; 3]| {
+                r[0] >= t.0
+                    && r[0] <= t.1
+                    && r[1] >= lo.x
+                    && r[1] <= hi.x
+                    && r[2] >= lo.y
+                    && r[2] <= hi.y
+            };
+            // A box this small that can be neither proven empty nor
+            // proven to hold one crossing: the curve touches the surface
+            // here (its crossing is double, the Jacobian singular), or
+            // passes within rounding of it. The touching point, where a
+            // damped Newton finds one, is kept; none found means no
+            // crossing above rounding.
+            let Some(root) = newton3(centre, curve, enclosure) else {
+                match touch3(centre, curve, enclosure) {
+                    Some(r) if !tangent(&r, curve, enclosure) => return None,
+                    Some(r) => {
+                        if inside_asked(&r.0) {
+                            push_root(&mut out, r);
+                        }
+                    }
+                    None => {}
+                }
+                continue;
+            };
             let w = [tb[1] - tb[0], ub[1] - ub[0], vb[1] - vb[0]];
             let grown = [0, 1, 2]
                 .map(|k| I::around(root.0[k], 3.0 * w[k] + 1e-13 * (1.0 + root.0[k].abs())));
@@ -642,18 +663,22 @@ pub(crate) fn isolate(
             match krawczyk3(grown, curve, gd, gj, enclosure) {
                 Verdict::One(r) if covers => {
                     // Keep it only where it lies in the box asked about.
-                    if r.0[0] >= t.0
-                        && r.0[0] <= t.1
-                        && r.0[1] >= lo.x
-                        && r.0[1] <= hi.x
-                        && r.0[2] >= lo.y
-                        && r.0[2] <= hi.y
-                    {
+                    if inside_asked(&r.0) {
                         push_root(&mut out, r);
                     }
                     continue;
                 }
                 Verdict::None if covers => continue,
+                // Newton reached a point it cannot prove alone: kept where
+                // the curve touches the surface there (the Jacobian is
+                // singular, so no proof can exist); a regular crossing
+                // that cannot be proven is refused.
+                _ if tangent(&root, curve, enclosure) => {
+                    if inside_asked(&root.0) {
+                        push_root(&mut out, root);
+                    }
+                    continue;
+                }
                 _ => return None,
             }
         }
@@ -724,6 +749,67 @@ fn newton3(
     let (c, _) = curve(x[0])?;
     let miss = (c - surface.at(Point2::new(x[1], x[2]))?.0).length();
     (miss <= 1e-9 * (1.0 + c.length())).then_some((x, c))
+}
+
+/// Whether the curve touches the surface at `root`: its tangent lies in
+/// the surface's tangent plane, to within a millionth of a radian.
+fn tangent(
+    root: &([Scalar; 3], Point3),
+    curve: &dyn Fn(Scalar) -> Option<(Point3, Vec3)>,
+    surface: &Enclosure,
+) -> bool {
+    let (Some((_, dc)), Some((_, su, sv))) = (
+        curve(root.0[0]),
+        surface.at(Point2::new(root.0[1], root.0[2])),
+    ) else {
+        return false;
+    };
+    let n = su.cross(sv);
+    let (ln, lc) = (n.length(), dc.length());
+    ln > 0.0 && lc > 0.0 && (n.dot(dc) / (ln * lc)).abs() <= 1e-6
+}
+
+/// Levenberg-Marquardt on `|C(t) - S(u, v)|^2` from `x`: converges, if
+/// only linearly, where the curve touches the surface and Newton's
+/// Jacobian is singular. The point where the gap vanishes to rounding.
+#[allow(clippy::needless_range_loop)]
+fn touch3(
+    mut x: [Scalar; 3],
+    curve: &dyn Fn(Scalar) -> Option<(Point3, Vec3)>,
+    surface: &Enclosure,
+) -> Option<([Scalar; 3], Point3)> {
+    for _ in 0..400 {
+        let (c, dc) = curve(x[0])?;
+        let (sp, su, sv) = surface.at(Point2::new(x[1], x[2]))?;
+        let r = c - sp;
+        let cols = [dc, -su, -sv];
+        // (J^T J + mu I) step = -J^T r.
+        let mut m = [[0.0; 3]; 3];
+        let mut g = [0.0; 3];
+        let mut scale = 0.0 as Scalar;
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] = cols[i].dot(cols[j]);
+            }
+            g[i] = -cols[i].dot(r);
+            scale = scale.max(m[i][i]);
+        }
+        for i in 0..3 {
+            m[i][i] += 1e-12 * scale;
+        }
+        let step = crate::pair_trace::solve3(m, g)?;
+        for k in 0..3 {
+            x[k] += step[k];
+        }
+        if step.iter().map(|v| v.abs()).fold(0.0, Scalar::max)
+            <= 4.0 * Scalar::EPSILON * (1.0 + x.iter().map(|v| v.abs()).fold(0.0, Scalar::max))
+        {
+            break;
+        }
+    }
+    let (c, _) = curve(x[0])?;
+    let miss = (c - surface.at(Point2::new(x[1], x[2]))?.0).length();
+    (miss <= 1e-12 * (1.0 + c.length())).then_some((x, c))
 }
 
 /// Krawczyk's test for `C(t) - S(u, v) = 0` over the box `x`, given

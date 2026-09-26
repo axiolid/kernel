@@ -35,6 +35,9 @@ pub(crate) enum TraceRefusal {
     Singular(Point2),
     /// The subdivision exceeded its work budget.
     Budget,
+    /// The zero set is only isolated points: the surfaces touch there
+    /// without crossing.
+    Touching(Point2),
 }
 
 /// Periodicity of the box's parameters: a component leaving through one
@@ -51,10 +54,23 @@ pub(crate) fn trace(
     domain: Cell,
     periodic: Periodic,
 ) -> Result<Vec<ImplicitCurve2>, TraceRefusal> {
-    let (curves, touches) = trace_with_touches(field, domain, periodic)?;
+    trace_within(field, domain, periodic, BUDGET)
+}
+
+/// The work budget of a trace, in pieces examined.
+pub(crate) const BUDGET: usize = 400_000;
+
+/// [`trace`] within a work budget of its own.
+pub(crate) fn trace_within(
+    field: &Field2,
+    domain: Cell,
+    periodic: Periodic,
+    budget: usize,
+) -> Result<Vec<ImplicitCurve2>, TraceRefusal> {
+    let (curves, touches) = trace_with_touches(field, domain, periodic, budget)?;
     // Only isolated touching points: the surfaces touch, they do not cross.
     if curves.is_empty() && !touches.is_empty() {
-        return Err(TraceRefusal::Singular(touches[0]));
+        return Err(TraceRefusal::Touching(touches[0]));
     }
     Ok(curves)
 }
@@ -65,6 +81,7 @@ pub(crate) fn trace_with_touches(
     field: &Field2,
     domain: Cell,
     periodic: Periodic,
+    budget: usize,
 ) -> Result<(Vec<ImplicitCurve2>, Vec<Point2>), TraceRefusal> {
     let du = partial(field, true);
     let dv = partial(field, false);
@@ -100,7 +117,7 @@ pub(crate) fn trace_with_touches(
             let d = (cell.lo - z.at).abs().max((cell.hi - z.at).abs());
             d.x.max(d.y)
         };
-        let Some((at, kind, reach, hessian)) = critical_point(field, cell, limit) else {
+        let Some((at, kind, reach, hessian)) = critical_point(field, cell, limit, limit) else {
             return Err(TraceRefusal::Singular(cell.centre()));
         };
         if let Some(z) = singular
@@ -108,6 +125,10 @@ pub(crate) fn trace_with_touches(
             .find(|z| (z.at - at).abs().max_element() <= z.reach.max(reach))
         {
             z.reach = z.reach.max(far(z)) * 1.000_001;
+            // Beyond this the bridges would be too long to trust.
+            if z.reach > 2.0 * limit {
+                return Err(TraceRefusal::Singular(z.at));
+            }
             return Ok(());
         }
         let mut z = Singular {
@@ -123,7 +144,7 @@ pub(crate) fn trace_with_touches(
     let mut work = 0usize;
     while let Some((cell, depth)) = queue.pop() {
         work += 1;
-        if work > 400_000 {
+        if work > budget {
             return Err(TraceRefusal::Budget);
         }
         if !bound(field, &du, &dv, &cell).straddles_zero() {
@@ -168,21 +189,158 @@ pub(crate) fn trace_with_touches(
                     undecided(&mut singular, &cell)?;
                     continue;
                 }
+                // A small piece where both partials may vanish: a singular
+                // point of the curve may lie in it. Found now, its square
+                // spares the subdivision that would otherwise run down to
+                // it along branches too close to tell apart cheaply (where
+                // two branches touch, the cells shrink as the square of
+                // the distance).
+                let side = (cell.hi.x - cell.lo.x).max(cell.hi.y - cell.lo.y);
+                if side <= 0.25 * limit {
+                    if let Some((at, kind, reach, hessian)) =
+                        critical_point(field, &cell, limit, 4.0 * side)
+                    {
+                        let off = (at - cell.centre()).abs().max_element();
+                        let known = singular
+                            .iter()
+                            .any(|z| (z.at - at).abs().max_element() <= z.reach);
+                        if off <= side && !known {
+                            let reach = match kind {
+                                Critical::Degenerate => limit,
+                                _ => reach.min(limit),
+                            };
+                            singular.push(Singular {
+                                at,
+                                reach: reach.max(side),
+                                kind,
+                                hessian,
+                            });
+                            if inside_one(&singular, &cell) {
+                                continue;
+                            }
+                        }
+                    }
+                }
                 for piece in split(cell, 0.5) {
                     queue.push((piece, depth + 1));
                 }
             }
         }
     }
+    // Cells made before a square grew to hold them are its now: every
+    // branch then stops at the square, where it is bridged in.
+    all.retain(|cell| {
+        let Some((a, b)) = ends(field, cell) else {
+            return true;
+        };
+        let m = (a + b) * 0.5;
+        !singular
+            .iter()
+            .any(|z| (m - z.at).abs().max_element() < z.reach)
+    });
     let mut curves = chain(field, all, domain, periodic);
     let mut touches = Vec::new();
     for z in &singular {
         bridge(&mut curves, z, periodic)?;
-        if matches!(z.kind, Critical::Extremum) {
+        // A point with no branch into it is where the surfaces only touch.
+        let into = curves.iter().any(|c| {
+            [c.point(0.0), c.point(c.end())]
+                .into_iter()
+                .flatten()
+                .any(|e| (e - z.at).abs().max_element() <= 1e-12 * (1.0 + z.at.abs().max_element()))
+        });
+        if !into {
             touches.push(z.at);
         }
     }
     Ok((curves, touches))
+}
+
+/// Bridges into a point where the surfaces touch to higher order. The
+/// Hessian gives no directions there, so the ends are checked against the
+/// field itself: as many as its sign changes round a square about the
+/// point, outside the part rounding hides. Each end is bridged along its
+/// own direction to the point; the bridge lies where the field is below
+/// its rounding, on both surfaces to that rounding.
+fn bridge_degenerate(
+    curves: &mut [ImplicitCurve2],
+    z: &Singular,
+    ends: &[(usize, bool, Point2)],
+    near: impl Fn(Point2) -> Point2,
+) -> Result<(), TraceRefusal> {
+    let refuse = || TraceRefusal::Singular(z.at);
+    let Some(field) = curves.first().map(|c| c.field.clone()) else {
+        return if ends.is_empty() {
+            Ok(())
+        } else {
+            Err(refuse())
+        };
+    };
+    // Sign changes round the square three times the hidden part's size.
+    let r = 3.0 * z.reach;
+    let n = 4096;
+    let at = |k: usize| {
+        let s = 4.0 * k as Scalar / n as Scalar;
+        let (side, f) = ((s.floor() as usize) % 4, s.fract());
+        let w = -1.0 + 2.0 * f;
+        let offset = match side {
+            0 => Point2::new(w, -1.0),
+            1 => Point2::new(1.0, w),
+            2 => Point2::new(-w, 1.0),
+            _ => Point2::new(-1.0, -w),
+        };
+        z.at + offset * r
+    };
+    let mut changes = 0;
+    let mut last = field.value(at(0));
+    for k in 1..=n {
+        let now = field.value(at(k % n));
+        if now != 0.0 && last != 0.0 && (now < 0.0) != (last < 0.0) {
+            changes += 1;
+        }
+        if now != 0.0 {
+            last = now;
+        }
+    }
+    if changes != ends.len() || changes % 2 != 0 {
+        return Err(refuse());
+    }
+    // Where the Hessian keeps one direction (a tacnode: branches tangent
+    // to each other), every branch arrives along the other, its null
+    // direction; with none (a higher crossing), along its own chord.
+    let (uu, uv, vv) = z.hessian;
+    let trace = uu + vv;
+    let root = ((uu - vv) * (uu - vv) + 4.0 * uv * uv).sqrt();
+    let (big, small) = (
+        0.5 * (trace + root.copysign(trace)),
+        0.5 * (trace - root.copysign(trace)),
+    );
+    let null = if big.abs() > 1e3 * small.abs() && big != 0.0 {
+        // The eigenvector of the small eigenvalue.
+        let v = if (uu - small).abs() >= (vv - small).abs() {
+            Vec2::new(-uv, uu - small)
+        } else {
+            Vec2::new(vv - small, -uv)
+        };
+        (v.length() > 0.0).then(|| v.normalize())
+    } else {
+        None
+    };
+    for &(k, at_start, p) in ends {
+        let c = near(p);
+        let curve = &mut curves[k];
+        let g = curve.field.jet(p).gradient;
+        let leaving = Vec2::new(-g.y, g.x);
+        let chord = c - p;
+        let into = null.unwrap_or(Vec2::new(chord.x, chord.y));
+        let cell = ImplicitCell::bridge(p, c, leaving, into);
+        if at_start {
+            curve.cells.insert(0, cell.reversed());
+        } else {
+            curve.cells.push(cell);
+        }
+    }
+    Ok(())
 }
 
 /// A singular point of the curve and the square about it that rounding
@@ -243,8 +401,12 @@ fn bridge(
     match z.kind {
         Critical::Extremum if ends.is_empty() => return Ok(()),
         Critical::Extremum => return Err(refuse()),
-        Critical::Saddle if ends.len() != 4 => return Err(refuse()),
+        // A crossing whose ends do not follow the Hessian's directions -- a
+        // near-degenerate one, whose point rounding moves off the true one
+        // -- is checked against the field instead.
+        Critical::Saddle if ends.len() != 4 => return bridge_degenerate(curves, z, &ends, near),
         Critical::Saddle => {}
+        Critical::Degenerate => return bridge_degenerate(curves, z, &ends, near),
     }
     // The two directions where `uu x^2 + 2 uv x y + vv y^2 = 0`.
     let (uu, uv, vv) = z.hessian;
@@ -273,13 +435,13 @@ fn bridge(
         };
         // Within about 25 degrees of the direction.
         if cos.abs() < 0.9 {
-            return Err(refuse());
+            return bridge_degenerate(curves, z, &ends, near);
         }
         sides[k][usize::from(cos > 0.0)] += 1;
         along.push(lines[k]);
     }
     if sides != [[1, 1], [1, 1]] {
-        return Err(refuse());
+        return bridge_degenerate(curves, z, &ends, near);
     }
     for ((k, at_start, p), into) in ends.into_iter().zip(along) {
         let c = near(p);
@@ -304,6 +466,9 @@ enum Critical {
     Saddle,
     /// Definite Hessian: an isolated point of the zero set.
     Extremum,
+    /// Singular Hessian: the surfaces touch to higher order. Any even
+    /// number of branches may end there, or none.
+    Degenerate,
 }
 
 /// The field's critical point on its zero set near `cell`, found by Newton
@@ -316,40 +481,65 @@ fn critical_point(
     field: &Field2,
     cell: &Cell,
     limit: Scalar,
+    leash: Scalar,
 ) -> Option<(Point2, Critical, Scalar, (Scalar, Scalar, Scalar))> {
     let mut p = cell.centre();
     let size = (cell.hi - cell.lo).length().max(1e-300);
-    for _ in 0..40 {
+    // Newton on the gradient, damped (Levenberg-Marquardt) so that it
+    // still converges, if only linearly, where the Hessian is singular.
+    for _ in 0..200 {
         let jet = field.jet(p);
-        let det = jet.uu * jet.vv - jet.uv * jet.uv;
-        if det == 0.0 || !det.is_finite() {
+        let g = jet.gradient;
+        let (a, b, c) = (jet.uu, jet.uv, jet.vv);
+        let norm = a.abs() + b.abs() + c.abs();
+        if !norm.is_finite() {
             return None;
         }
-        let g = jet.gradient;
-        let step = Point2::new(
-            (jet.vv * g.x - jet.uv * g.y) / det,
-            (jet.uu * g.y - jet.uv * g.x) / det,
-        );
+        // (H^T H + mu I) step = H^T g, H symmetric.
+        let mu = 1e-12 * norm * norm;
+        let (m00, m01, m11) = (a * a + b * b + mu, a * b + b * c, b * b + c * c + mu);
+        let (r0, r1) = (a * g.x + b * g.y, b * g.x + c * g.y);
+        let det = m00 * m11 - m01 * m01;
+        if det == 0.0 || !det.is_finite() {
+            break;
+        }
+        let step = Point2::new((m11 * r0 - m01 * r1) / det, (m00 * r1 - m01 * r0) / det);
         p -= step;
+        // Wandered off: no critical point of this piece's.
+        if (p - cell.centre()).abs().max_element() > leash {
+            return None;
+        }
         if step.length() <= 1e-15 * (1.0 + p.length()) {
             break;
         }
     }
-    // Near the cell, on the curve to its rounding, with a regular Hessian.
-    // The rounding hides the zero set within `sqrt(2 m / lambda)` of the
-    // point (m the rounding, lambda the smaller curvature); a cell within
-    // that reach is the point's.
+    // On the curve to its rounding. A regular Hessian hides the zero set
+    // within `sqrt(2 m / lambda)` of the point (m the rounding, lambda the
+    // smaller curvature); a singular one further, which the square's growth
+    // below takes care of.
     let jet = field.jet(p);
     let rounding = 64.0 * Scalar::EPSILON * field.magnitude().max(field.scale_at(p)).max(1.0);
-    let det = jet.uu * jet.vv - jet.uv * jet.uv;
-    let norm = jet.uu.abs() + jet.vv.abs() + jet.uv.abs();
-    if det.abs() <= 1e-9 * norm * norm || jet.value.abs() > 16.0 * rounding {
+    if jet.value.abs() > 16.0 * rounding || !p.is_finite() {
         return None;
     }
-    let trace = jet.uu + jet.vv;
-    let root = (trace * trace - 4.0 * det).max(0.0).sqrt();
-    let lambda = (0.5 * (trace.abs() - root)).abs().max(1e-300);
-    let reach = 4.0 * (2.0 * rounding / lambda).sqrt() + 8.0 * size;
+    let det = jet.uu * jet.vv - jet.uv * jet.uv;
+    let norm = jet.uu.abs() + jet.vv.abs() + jet.uv.abs();
+    let kind = if det < -1e-9 * norm * norm {
+        Critical::Saddle
+    } else if det > 1e-9 * norm * norm {
+        Critical::Extremum
+    } else {
+        Critical::Degenerate
+    };
+    let reach = match kind {
+        Critical::Degenerate => 8.0 * size,
+        _ => {
+            let trace = jet.uu + jet.vv;
+            let root = (trace * trace - 4.0 * det).max(0.0).sqrt();
+            let lambda = (0.5 * (trace.abs() - root)).abs().max(1e-300);
+            4.0 * (2.0 * rounding / lambda).sqrt() + 8.0 * size
+        }
+    };
     // Interval bounds can be too loose to certify cells some way further
     // out, where the branches are still well apart: the square then grows
     // to that distance, up to `limit`.
@@ -357,17 +547,7 @@ fn critical_point(
     if away > limit {
         return None;
     }
-    let reach = reach.max(away + size);
-    Some((
-        p,
-        if det < 0.0 {
-            Critical::Saddle
-        } else {
-            Critical::Extremum
-        },
-        reach,
-        (jet.uu, jet.uv, jet.vv),
-    ))
+    Some((p, kind, reach.max(away + size), (jet.uu, jet.uv, jet.vv)))
 }
 
 /// How strongly a partial's bound keeps the field monotone, scaled by the
@@ -432,7 +612,18 @@ struct Side<'a> {
     d_free: &'a Field2,
     axis: Axis,
     fixed: Scalar,
+    /// The shortest stretch of the side worth halving: below it, roots
+    /// too close to separate make the piece split instead, which sees
+    /// them further apart relative to its size.
+    resolution: Scalar,
+    /// Stretches examined so far, against [`SIDE_BUDGET`]: where the
+    /// field's bound straddles zero along much of the side (branches
+    /// nearly touching), a smaller piece is cheaper than a deep search.
+    work: core::cell::Cell<usize>,
 }
+
+/// Stretches of one side examined before its piece is split instead.
+const SIDE_BUDGET: usize = 256;
 
 impl Side<'_> {
     fn at(&self, x: Scalar) -> Point2 {
@@ -454,8 +645,26 @@ impl Side<'_> {
         }
     }
 
+    /// A bound of the field over `[a, b]`: the tighter of the direct
+    /// bound and the mean-value one (the middle's value, give or take the
+    /// slope's bound times the half-width). Where the field nearly cancels
+    /// over a wide stretch, only the second is narrow.
     fn range(&self, a: Scalar, b: Scalar) -> Range {
-        bound_simple(self.field, &self.cell(a, b))
+        let direct = bound_simple(self.field, &self.cell(a, b));
+        let m = 0.5 * (a + b);
+        let slope = self.slope(a, b);
+        let reach = slope.lo.abs().max(slope.hi.abs()) * 0.5 * (b - a).abs();
+        let at = self.at(m);
+        let margin = 64.0 * Scalar::EPSILON * self.field.scale_at(at).max(self.field.magnitude());
+        let f = self.value(m);
+        let spread = reach + margin;
+        if !spread.is_finite() {
+            return direct;
+        }
+        Range {
+            lo: direct.lo.max(f - spread),
+            hi: direct.hi.min(f + spread),
+        }
     }
 
     fn slope(&self, a: Scalar, b: Scalar) -> Range {
@@ -465,6 +674,10 @@ impl Side<'_> {
     /// The roots in `(a, b)`, each certified simple; `Err` where a root
     /// cannot be separated or certified.
     fn roots(&self, a: Scalar, b: Scalar, out: &mut Vec<Scalar>, depth: u32) -> Result<(), ()> {
+        self.work.set(self.work.get() + 1);
+        if self.work.get() > SIDE_BUDGET {
+            return Err(());
+        }
         if !self.range(a, b).straddles_zero() {
             return Ok(());
         }
@@ -481,7 +694,10 @@ impl Side<'_> {
             }
             return Ok(());
         }
-        if depth > 60 || (b - a).abs() <= 1e-13 * (1.0 + a.abs().max(b.abs())) {
+        if depth > 60
+            || (b - a).abs() <= self.resolution
+            || (b - a).abs() <= 1e-13 * (1.0 + a.abs().max(b.abs()))
+        {
             return Err(());
         }
         let m = 0.5 * (a + b);
@@ -524,17 +740,22 @@ fn cells_in(
         Axis::U => (du, cell.lo.x, cell.hi.x, cell.lo.y, cell.hi.y),
         Axis::V => (dv, cell.lo.y, cell.hi.y, cell.lo.x, cell.hi.x),
     };
+    let resolution = 1e-7 * (hi_free - lo_free).abs();
     let low = Side {
         field,
         d_free,
         axis,
         fixed: lo_solved,
+        resolution,
+        work: core::cell::Cell::new(0),
     };
     let high = Side {
         field,
         d_free,
         axis,
         fixed: hi_solved,
+        resolution,
+        work: core::cell::Cell::new(0),
     };
     let mut breaks = vec![lo_free, hi_free];
     low.roots(lo_free, hi_free, &mut breaks, 0)?;

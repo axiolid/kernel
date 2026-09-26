@@ -11,6 +11,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- A traced pair that only touches adds no section, as the closed forms'
+  touching does. A pcurve whose trace on its face cannot be decided falls
+  back to the section's own space curve read on the face, and failed
+  traces are not repeated. Each surface pair's closed form is computed
+  once per boolean.
 - Two B-spline faces meeting each other: their section is traced in both
   faces' parameter boxes and carried on both (`Curve3::PairSection`), its
   pcurve on each read from the solve. The last refusal by face type is

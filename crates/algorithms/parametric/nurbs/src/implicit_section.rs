@@ -29,6 +29,16 @@ pub fn section_field_of(carrier: &Surface, other: &Surface) -> Option<Field2> {
     section_field(&carrier_of(carrier)?, other)
 }
 
+/// The refusal a trace's own refusal amounts to: touching only at isolated
+/// points is `NotRegularCurve`, as for the closed forms; anything else is
+/// `Undecided`.
+pub(crate) fn refusal_of(refusal: TraceRefusal) -> ExactIntersectionRefusal {
+    match refusal {
+        TraceRefusal::Touching(_) => ExactIntersectionRefusal::NotRegularCurve,
+        TraceRefusal::Singular(_) | TraceRefusal::Budget => ExactIntersectionRefusal::Undecided,
+    }
+}
+
 /// Every component of the section of `carrier` by `other` in a window of
 /// `carrier`'s parameters, as implicit curves on `carrier`.
 ///
@@ -40,7 +50,9 @@ pub fn section_field_of(carrier: &Surface, other: &Surface) -> Option<Field2> {
 ///
 /// - `UnsupportedPair`: a B-spline operand, or an unbounded pair with no
 ///   window.
-/// - `NotRegularCurve`: the surfaces touch somewhere in the window (a
+/// - `Undecided`: the trace ran out of budget, or met a singular point it
+///   could not match to the field's sign changes about it.
+/// - `NotRegularCurve`: the surfaces only touch in the window (a
 ///   singular point of the section), or the trace exhausted its budget.
 /// - `Disjoint`: no section in the window.
 pub fn implicit_surface_intersection(
@@ -63,11 +75,7 @@ pub fn implicit_surface_intersection(
         u: wraps(periodic_u, lo.x, hi.x),
         v: wraps(periodic_v, lo.y, hi.y),
     };
-    let curves = trace(&field, Cell { lo, hi }, periodic).map_err(|refusal| match refusal {
-        TraceRefusal::Singular(_) | TraceRefusal::Budget => {
-            ExactIntersectionRefusal::NotRegularCurve
-        }
-    })?;
+    let curves = trace(&field, Cell { lo, hi }, periodic).map_err(refusal_of)?;
     // A B-spline ends at its domain: its sections do too.
     let curves: Vec<_> = match &form {
         Carrier::Spline(b) => match b.domain() {

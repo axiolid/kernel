@@ -111,6 +111,19 @@ fn ring(big: f64, r: f64) -> ExactBRep {
     ])
 }
 
+/// [`ring`] with its tube's faces starting `offset` round the tube, so no
+/// face boundary lies at the tube's top or bottom.
+fn ring_turned(big: f64, r: f64, offset: f64) -> ExactBRep {
+    let c = Point2::new(big, 0.0);
+    let q = 0.5 * PI;
+    revolve(vec![
+        arc(c, r, offset, offset + q),
+        arc(c, r, offset + q, offset + PI),
+        arc(c, r, offset + PI, offset + 3.0 * q),
+        arc(c, r, offset + 3.0 * q, offset + TAU),
+    ])
+}
+
 /// A box from a column prism: `x`, `y` (world) and `z` ranges.
 fn block(x: (f64, f64), y: (f64, f64), z: (f64, f64)) -> ExactBRep {
     let p = ArcPrism {
@@ -208,6 +221,53 @@ fn a_pipe_touching_the_tube_of_a_torus_from_inside() {
     let pipe = boolean_arc_prisms_exact(&p, &p, BooleanOperator::Intersection, tol()).unwrap();
     // Over the pipe's disc, the torus holds the z where the distance from
     // the y axis lies within sqrt(1 - y^2) of `big`.
+    let length = |x: f64, y: f64| {
+        let w = (r * r - y * y).max(0.0).sqrt();
+        let outer = ((big + w) * (big + w) - x * x).max(0.0).sqrt();
+        let inner = ((big - w) * (big - w) - x * x).max(0.0).sqrt();
+        2.0 * (outer - inner)
+    };
+    let n = 400;
+    let want: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (
+                cx - rho + 2.0 * rho * i as f64 / n as f64,
+                cx - rho + 2.0 * rho * (i + 1) as f64 / n as f64,
+            );
+            gauss12(a, b, |x| {
+                let h = (rho * rho - (x - cx) * (x - cx)).max(0.0).sqrt();
+                (0..8)
+                    .map(|k| {
+                        let (lo, hi) = (
+                            cy - h + 2.0 * h * k as f64 / 8.0,
+                            cy - h + 2.0 * h * (k + 1) as f64 / 8.0,
+                        );
+                        gauss12(lo, hi, |y| length(x, y))
+                    })
+                    .sum::<f64>()
+            })
+        })
+        .sum();
+    check(&torus, &pipe, Some(want), 1e-6);
+}
+
+#[test]
+fn a_pipe_touching_the_top_of_a_torus_tube_to_fourth_order() {
+    // A vertical pipe of radius 1/2 inside the tube, touching it at the
+    // tube's top (-4, 1, 0). Across the tube the pipe curves more; along
+    // it the torus's parallel circle lies in the shared tangent plane, so
+    // the surfaces part only as z^4 / 128. The field's Hessian is singular
+    // there and the two branches of the section touch each other (a
+    // tacnode, x ~ z^2): the point is a vertex of the section graph.
+    let (big, r, rho) = (4.0, 1.0, 0.5);
+    let torus = ring_turned(big, r, 0.3);
+    let (cx, cy) = (-big, r - rho);
+    let p = ArcPrism {
+        section: ArcRing::circle(Point2::new(cx, cy), rho),
+        bottom: -8.0,
+        top: 8.0,
+    };
+    let pipe = boolean_arc_prisms_exact(&p, &p, BooleanOperator::Intersection, tol()).unwrap();
     let length = |x: f64, y: f64| {
         let w = (r * r - y * y).max(0.0).sqrt();
         let outer = ((big + w) * (big + w) - x * x).max(0.0).sqrt();

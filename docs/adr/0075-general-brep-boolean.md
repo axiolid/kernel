@@ -119,8 +119,11 @@ do not adopt or wrap another kernel.
   - Cavities go to the smallest solid around them.
   - Sections whose branches cross where the surfaces touch meet at a
     vertex there (ADR 0077).
-- **Refused by name:** degenerate contact, where the surfaces touch to
-  higher order than a saddle or an isolated point.
+  - Contact to higher order at a point (a tacnode) is a vertex too, and a
+    traced pair that only touches adds no section.
+- **Refused by name:** surfaces on a traced pair that are tangent along a
+  whole curve and cross there (`Undecided`). Tangent along a curve without
+  crossing is touching, and adds no section.
 
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where

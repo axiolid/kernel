@@ -38,6 +38,36 @@ pub enum Basis {
 }
 
 impl Basis {
+    /// The first `n` terms' values at `x` into `out`, exactly as
+    /// [`Basis::terms`] computes them.
+    fn values_into(self, x: Scalar, out: &mut [Scalar]) {
+        let n = out.len();
+        match self {
+            Basis::Power => {
+                let mut p = 1.0;
+                for slot in out.iter_mut() {
+                    *slot = p;
+                    p *= x;
+                }
+            }
+            Basis::Fourier => {
+                if n > 0 {
+                    out[0] = 1.0;
+                }
+                let mut k = 1;
+                while 2 * k - 1 < n {
+                    let w = k as Scalar;
+                    let (s, c) = (w * x).sin_cos();
+                    out[2 * k - 1] = c;
+                    if 2 * k < n {
+                        out[2 * k] = s;
+                    }
+                    k += 1;
+                }
+            }
+        }
+    }
+
     /// Values, first and second derivatives of the first `n` terms at `x`.
     fn terms(self, x: Scalar, n: usize) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
         let (mut f, mut d, mut dd) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
@@ -106,7 +136,10 @@ impl Field2 {
     /// The field's value at `p`.
     #[must_use]
     pub fn value(&self, p: Point2) -> Scalar {
-        self.jet(p).value
+        match self {
+            Self::Series(f) => f.value(p),
+            Self::Patches(f) => f.jet(p).value,
+        }
     }
 
     /// Value, gradient and Hessian at `p`.
@@ -507,7 +540,35 @@ impl SeriesField2 {
     /// The field's value at `p`.
     #[must_use]
     pub fn value(&self, p: Point2) -> Scalar {
-        self.jet(p).value
+        // The same terms, summed in the same order, as `jet`'s value: the
+        // two agree to the last bit. Small series stay on the stack.
+        let (n, m) = self.size();
+        let (mut su, mut sv) = ([0.0; 16], [0.0; 16]);
+        let (mut hu, mut hv) = (Vec::new(), Vec::new());
+        let fu: &mut [Scalar] = if n <= 16 {
+            &mut su[..n]
+        } else {
+            hu.resize(n, 0.0);
+            &mut hu
+        };
+        let fv: &mut [Scalar] = if m <= 16 {
+            &mut sv[..m]
+        } else {
+            hv.resize(m, 0.0);
+            &mut hv
+        };
+        self.u.values_into(p.x, fu);
+        self.v.values_into(p.y, fv);
+        let mut value = 0.0;
+        for (i, row) in self.coefficients.iter().enumerate() {
+            for (j, &c) in row.iter().enumerate() {
+                if c == 0.0 {
+                    continue;
+                }
+                value += c * fu[i] * fv[j];
+            }
+        }
+        value
     }
 
     /// Value, gradient and Hessian at `p`.

@@ -99,6 +99,13 @@ pub fn section_edges(
     let side_a = Side::new(a, tolerance)?;
     let side_b = Side::new(b, tolerance)?;
     let mut out = Vec::new();
+    // Surfaces are shared by many faces: each pair's closed form once.
+    #[allow(clippy::type_complexity)]
+    let mut closed_forms: Vec<(
+        Surface,
+        Surface,
+        Result<axiolid_nurbs::ExactIntersectionCurve, ExactIntersectionRefusal>,
+    )> = Vec::new();
     for fa in 0..side_a.faces.len() {
         for fb in 0..side_b.faces.len() {
             let (sa, sb) = (side_a.surface(fa)?, side_b.surface(fb)?);
@@ -115,7 +122,16 @@ pub fn section_edges(
             let closed_form = if splines {
                 None
             } else {
-                match exact_surface_intersection(&cleaned(sa), &cleaned(sb)) {
+                let known = closed_forms
+                    .iter()
+                    .find(|(a, b, _)| a == sa && b == sb)
+                    .map(|(_, _, r)| r.clone());
+                let result = known.unwrap_or_else(|| {
+                    let r = exact_surface_intersection(&cleaned(sa), &cleaned(sb));
+                    closed_forms.push((sa.clone(), sb.clone(), r.clone()));
+                    r
+                });
+                match result {
                     Ok(curve) => {
                         let conic = curve.branches.iter().zip(&curve.spans).all(|(b, s)| {
                             matches!(
@@ -186,7 +202,12 @@ pub fn section_edges(
                                     (Curve3::ImplicitSection(s), Some(Interval::new(0.0, end)))
                                 })
                                 .collect(),
-                            Err(ExactIntersectionRefusal::Disjoint) => continue,
+                            // Apart, or touching only at isolated points: no
+                            // section, as for the closed forms.
+                            Err(
+                                ExactIntersectionRefusal::Disjoint
+                                | ExactIntersectionRefusal::NotRegularCurve,
+                            ) => continue,
                             Err(_) => return Err(BooleanError::UnsupportedSection),
                         }
                     }

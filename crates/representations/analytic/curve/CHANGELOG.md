@@ -11,6 +11,8 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `Field2::value` and `SeriesField2::value` evaluate the value alone,
+  without the jet, and agree with `jet` to the last bit.
 - Bridge cells in `ImplicitCurve2` (`ImplicitCell::bridge`, a cubic into a
   point where two branches cross, bounded by its Bezier control values),
   `ImplicitCell::part`, `reversed` and `solved_range`,

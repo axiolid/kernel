@@ -116,6 +116,11 @@ pub enum ExactIntersectionRefusal {
     /// that representational gap instead of substituting a nearby ellipse or
     /// a fitted spline.
     UnrepresentableConic,
+    /// A traced section could not be decided within its work budget or
+    /// near a singular point whose branches do not match the field's sign
+    /// changes about it. Unlike `NotRegularCurve`, this says nothing of
+    /// whether the surfaces cross there.
+    Undecided,
 }
 
 /// The exact intersection curve of two elementary surfaces, when one exists

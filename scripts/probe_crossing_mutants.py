@@ -2,8 +2,9 @@
 ADR 0077).
 
 Each mutant weakens one step -- bridging the branch ends to the crossing,
-the bridge's tangent at the crossing, its reversal, or the rounding scale
-that sizes the square about the crossing -- and must turn a test red.
+the bridge's tangent at the crossing, its reversal, degenerate contact and
+its tangent, or telling touching from undecided -- and must turn a test
+red.
 
 Equivalent mutants, deliberately not listed:
 - loosening the checks that the four ends lie two by two along the
@@ -21,11 +22,16 @@ import pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 T = "crates/algorithms/parametric/nurbs/src/implicit_trace.rs"
 Q = "crates/representations/analytic/curve/src/implicit.rs"
+S = "crates/algorithms/parametric/nurbs/src/implicit_section.rs"
 CURVE = ["-p", "axiolid-nurbs", "--test", "implicit_section"]
+SPLINE = ["-p", "axiolid-nurbs", "--test", "spline_section"]
 
 MUTANTS = [
+    ('degenerate contact always refused', T, '    if changes != ends.len() || changes % 2 != 0 {', '    if true {', CURVE),
+    ('tacnode bridges arrive along their chords', T, '        let into = null.unwrap_or(Vec2::new(chord.x, chord.y));', '        let into = Vec2::new(chord.x, chord.y);', CURVE),
+    ('touching read as undecided', S, '        TraceRefusal::Touching(_) => ExactIntersectionRefusal::NotRegularCurve,', '        TraceRefusal::Touching(_) => ExactIntersectionRefusal::Undecided,', SPLINE),
     ('crossings not bridged', T, '        bridge(&mut curves, z, periodic)?;\n', '', CURVE),
-    ('bridge leaves along the normal', T, 'ImplicitCell::bridge(p, c, leaving, into)', 'ImplicitCell::bridge(p, c, Vec2::new(g.x, g.y), into)', CURVE),
+    ('bridge leaves along the normal', T, '        let leaving = Vec2::new(-g.y, g.x);\n        let cell = ImplicitCell::bridge(p, c, leaving, into);', '        let leaving = Vec2::new(g.x, g.y);\n        let cell = ImplicitCell::bridge(p, c, leaving, into);', CURVE),
     ('reversed bridge keeps its ends', Q, '                low: self.high,\n                high: self.low,\n                bridge: Some((m1, m0)),', '                bridge: Some((m1, m0)),', CURVE),
 ]
 

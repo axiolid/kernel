@@ -538,3 +538,63 @@ fn bridges_into_a_crossing_stay_on_both_surfaces() {
     assert_eq!((bridges, at_touch), (4, 4));
     assert!(longest > 1e-6, "bridges of {longest} test nothing");
 }
+
+#[test]
+fn a_pipe_touching_the_top_of_a_torus_tube_meets_it_in_a_tacnode() {
+    // A pipe of radius 1/2 along z inside a torus's tube, touching it at
+    // the tube's top (-4, 1, 0): across the tube the pipe curves more, and
+    // along it the torus parts from the shared tangent plane only as
+    // z^4 / 128. The Hessian is singular there; the two branches touch
+    // each other (x ~ z^2) and all four halves end at the contact.
+    let t = Surface::Torus(Torus {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::Z,
+            y: Vec3::X,
+            z: Vec3::Y,
+        },
+        major_radius: 4.0,
+        minor_radius: 1.0,
+    });
+    let pipe = Surface::Cylinder(Cylinder {
+        frame: Frame3 {
+            origin: Point3::new(-4.0, 0.5, -8.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius: 0.5,
+    });
+    let curves = implicit_surface_intersection(&t, &pipe, None).expect("a traced section");
+    let mut meeting: Vec<Point3> = Vec::new();
+    let mut bridges = 0;
+    for s in &curves {
+        let branch = Curve3::ImplicitSection(s.clone());
+        for t_end in [0.0, s.curve.end()] {
+            let p = evaluate3(&branch, t_end).unwrap();
+            if (p - Point3::new(-4.0, 1.0, 0.0)).length() < 0.05 {
+                meeting.push(p);
+            }
+        }
+        for (i, cell) in s.curve.cells.iter().enumerate() {
+            let steps = if cell.bridge.is_some() {
+                bridges += 1;
+                200
+            } else {
+                4
+            };
+            for k in 0..=steps {
+                let p = evaluate3(&branch, i as f64 + k as f64 / steps as f64).unwrap();
+                for surface in [&t, &pipe] {
+                    assert!(
+                        off(surface, p).abs() < 1e-9,
+                        "{p:?} is {} off",
+                        off(surface, p)
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!((meeting.len(), bridges), (4, 4));
+    assert!(meeting.iter().all(|p| (*p - meeting[0]).length() < 1e-12));
+}

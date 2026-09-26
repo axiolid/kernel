@@ -24,7 +24,7 @@ use crate::exact_curve_intersection::{
 };
 use crate::exact_surface_intersection::ExactIntersectionRefusal;
 use crate::field::{carrier_of, section_field};
-use crate::implicit_trace::{trace, Periodic};
+use crate::implicit_trace::Periodic;
 
 /// Every component of the section of `surface` by `other` in a window of
 /// `surface`'s parameters, as curves in those parameters.
@@ -42,13 +42,16 @@ pub fn trace_section_pcurves(
 ) -> Result<Vec<ImplicitCurve2>, ExactIntersectionRefusal> {
     let carrier = carrier_of(surface).ok_or(ExactIntersectionRefusal::UnsupportedPair)?;
     let field = section_field(&carrier, other).ok_or(ExactIntersectionRefusal::UnsupportedPair)?;
-    trace_field(&carrier, &field, window)
+    // A quarter of a section's budget: the section itself is traced
+    // already, and a face without these pcurves reads it back instead.
+    trace_field(&carrier, &field, window, crate::implicit_trace::BUDGET / 4)
 }
 
 fn trace_field(
     carrier: &Carrier,
     field: &Field2,
     window: (Point2, Point2),
+    budget: usize,
 ) -> Result<Vec<ImplicitCurve2>, ExactIntersectionRefusal> {
     let (pu, pv) = carrier.periodic();
     let (lo, hi) = window;
@@ -59,7 +62,8 @@ fn trace_field(
         u: wraps(pu, lo.x, hi.x),
         v: wraps(pv, lo.y, hi.y),
     };
-    trace(field, Cell { lo, hi }, periodic).map_err(|_| ExactIntersectionRefusal::NotRegularCurve)
+    crate::implicit_trace::trace_within(field, Cell { lo, hi }, periodic, budget)
+        .map_err(crate::implicit_section::refusal_of)
 }
 
 /// The stretch of one of `curves` that runs from `start` through `first`
@@ -268,7 +272,7 @@ pub fn implicit_view(curve: &Curve3, span: Interval) -> Option<ImplicitSection3>
         let c = 0.5 * (lo.y + hi.y);
         (lo.y, hi.y) = (c - PI, c + PI);
     }
-    let curves = trace_field(&carrier, &field, (lo, hi)).ok()?;
+    let curves = trace_field(&carrier, &field, (lo, hi), crate::implicit_trace::BUDGET).ok()?;
     // A loop closes in space, whatever whole turns its parameters make.
     let (first, last) = (
         axiolid_evaluate::evaluate3(curve, span.start).ok()?,

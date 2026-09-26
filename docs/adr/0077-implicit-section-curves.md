@@ -82,8 +82,10 @@ never by marching.
 - **Singular points become vertices.** A box where the field and both
   partials may all vanish, at the smallest size allowed, holds a point
   where the surfaces touch. A touching point with no curve through it is
-  dropped; two branches crossing there end at it (see *Singular points*).
-  Anything degenerate is refused as `NotRegularCurve`.
+  dropped; branches crossing or touching there end at it (see *Singular
+  points*). A trace that exhausts its budget, or meets a singular point
+  whose branch ends do not match the field's sign changes about it, is
+  `Undecided`; one that finds only touching points is `NotRegularCurve`.
 - **Where it is used:**
   - `exact_surface_intersection` falls back to it after the closed forms and
     ADR 0076. It is used for analytic pairs with a compact surface to carry
@@ -169,8 +171,11 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
      its chords' boxes at a level of that chord.
   7. Pairs that never separate within the depth limit are refused as
      `NotRegularCurve`: the surfaces touch there, or come closer than the
-     search resolves. So is an edge crossing that cannot be isolated (an
-     edge touching the other surface).
+     search resolves.
+  8. An edge crossing that no box can prove, where the edge touches the
+     other surface (the Jacobian is singular there, so no proof can exist),
+     is found by damped Newton and kept as a seed; a regular crossing that
+     cannot be proven is refused.
 - **Enclosures** (`pair_certify`). Each surface's point and first partials
   over a parameter box are bounded by Bernstein coefficients: the point by
   its rational control points (the weights are positive), each partial by
@@ -236,7 +241,7 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
      Only pieces wholly inside it are dropped.
   3. Exactly four branch ends must lie at the square, two along each
      direction where the Hessian's form vanishes, on opposite sides.
-     Anything else is refused.
+     Otherwise the point is treated as degenerate (below).
   4. Each end is joined to the crossing by a *bridge* cell: the cubic that
      matches the branch's value and slope at its certified end and its
      tangent at the crossing (the Hessian's direction). It is smooth, its
@@ -245,6 +250,27 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   5. Every branch then ends at the crossing, so the chains stop there: the
      crossing is a vertex, as the Steinmetz ellipses' crossings are.
      A boolean cuts faces there like any other section vertex.
+- Where the surfaces touch to higher order (a singular Hessian), any
+  even number of branches may end at the point, or none.
+  1. Newton on the gradient is damped (Levenberg-Marquardt), so it still
+     converges, if only linearly.
+  2. The branch ends at the square are checked against the field itself:
+     there must be as many as its sign changes round a square three times
+     the size. None means the surfaces only touch there.
+  3. A tacnode's branches (x ~ c z^2) all arrive along the Hessian's null
+     direction, and the cubic bridge reproduces them exactly to second
+     order; with no direction left (a higher crossing), each arrives along
+     its chord.
+  4. Along such a contact the surfaces agree to rounding over a stretch of
+     about `rounding^(1/4)`: where along it the branches meet cannot be
+     decided in doubles. Every point, the vertex too, lies on both
+     surfaces to rounding.
+- Finding such points early matters. Where two branches nearly touch,
+  certified cells shrink as the square of the distance to the contact. So
+  a small piece where both partials may vanish is searched for a singular
+  point at once, and its square spares that work. A side's roots are
+  bounded by the tighter of the direct and the mean-value bound, and a
+  side that needs a deep search makes its piece split instead.
 - Windows a whole turn wide start an irrational fraction of a radian past
   `-pi` (and past a face's own seam angle), so a symmetric section's
   special points never sit on the window's edge.
@@ -264,8 +290,7 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 
 - Every analytic pair's section now exists exactly, whether or not a closed
   form does, and so does every section involving B-splines, including
-  branches crossing where the surfaces touch. Only degenerate singular
-  points (a singular Hessian, or more than two branches) are refused.
+  branches crossing or touching each other where the surfaces touch.
 - One pcurve family serves every section on every analytic face, so the
   boolean needs no per-pair pcurve derivations beyond the cheap closed forms
   it already has.
@@ -285,13 +310,15 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 
 **Follow-ups / risks to watch**
 
-- Degenerate singular points (a singular Hessian: higher-order contact)
-  are still refused as `NotRegularCurve`.
+- Surfaces tangent along a whole curve and crossing there (z = x^3
+  against z = 0) are `Undecided`: every piece along the contact is
+  singular. Tangent along a curve without crossing is touching
+  (`NotRegularCurve`), like an isolated touching point.
+- A pcurve on a face whose trace is too costly (a tacnode read far from
+  the face's parameter origin) falls back to the section's own space
+  curve read on the face (`Curve2::Lifted`).
 - Very thin sections or nearly tangent pairs can exhaust the trace's box
-  budget (400 000 boxes). That is also refused as `NotRegularCurve`.
-- Two B-splines: a section tangent to a sub-patch edge cannot have that
-  crossing isolated, and is refused, though the section itself is regular.
-  Sub-patch edges lie at binary fractions, so this needs a coincidence.
+  budget (400 000 boxes). That is refused as `Undecided`.
 
 ## Relation to existing code
 

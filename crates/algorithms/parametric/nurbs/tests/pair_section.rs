@@ -292,3 +292,51 @@ fn a_bowl_touching_a_flat_sheet_is_refused_not_guessed() {
         Err(ExactIntersectionRefusal::NotRegularCurve)
     );
 }
+
+#[test]
+fn a_section_tangent_to_a_knot_line_is_traced_not_refused() {
+    // The bowl z = x^2 + y^2 with a knot inserted at x = 1/2 (u = 3/4), so
+    // the line x = 1/2 is an edge of its Bezier patches. Cut at z = 1/4 it
+    // is the circle of radius 1/2, which touches that line at (1/2, 0): an
+    // edge crossing that cannot be isolated, only found.
+    let cq = [1.0, -0.5, 0.5, 1.0];
+    let xs = [-1.0, -0.25, 0.75, 1.0];
+    let cy = [1.0, -1.0, 1.0];
+    let knotted = BSplineSurface {
+        u_degree: 2,
+        v_degree: 2,
+        control_points: (0..4)
+            .map(|i| {
+                (0..3)
+                    .map(|j| Point3::new(xs[i], -1.0 + j as f64, cq[i] + cy[j]))
+                    .collect()
+            })
+            .collect(),
+        u_knots: vec![0.0, 0.75, 1.0],
+        u_multiplicities: vec![3, 1, 3],
+        v_knots: vec![0.0, 1.0],
+        v_multiplicities: vec![3, 3],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::Unspecified,
+        self_intersect: None,
+    };
+    // The same surface as the plain bowl.
+    for (u, v) in [(0.3, 0.4), (0.8, 0.9), (0.75, 0.2)] {
+        let p = knotted.jet(u, v).unwrap().point;
+        assert!((p.z - (p.x * p.x + p.y * p.y)).abs() < 1e-12, "{p:?}");
+    }
+    let curves = spline_pair_intersection(&knotted, &flat(0.25), None).expect("the circle");
+    assert_eq!(curves.len(), 1);
+    let c = &curves[0];
+    assert_eq!(c.nodes[0].point, c.nodes[c.nodes.len() - 1].point, "closed");
+    for i in 0..=2000 {
+        let t = c.end() * i as f64 / 2000.0;
+        let p = c.point(t).unwrap();
+        assert!(
+            (p.x.hypot(p.y) - 0.5).abs() < 1e-9 && (p.z - 0.25).abs() < 1e-9,
+            "{p:?}"
+        );
+    }
+}

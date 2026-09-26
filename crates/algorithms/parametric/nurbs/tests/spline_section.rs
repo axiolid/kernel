@@ -264,3 +264,112 @@ fn lines_and_circles_against_a_spline_sheet() {
         assert!((b.jet(u, v).unwrap().point - hit.point).length() < 1e-9);
     }
 }
+
+/// `z = x^2 + sign * y^4` over `[-1, 1]^2`, degree 2 in `x` and 4 in `y`:
+/// the Bernstein coefficients of `x^2` there are `1, -1, 1`, of `y^4`
+/// `1, -1, 1, -1, 1`.
+fn quartic(sign: f64) -> BSplineSurface {
+    let cx = [1.0, -1.0, 1.0];
+    let cy = [1.0, -1.0, 1.0, -1.0, 1.0];
+    BSplineSurface {
+        u_degree: 2,
+        v_degree: 4,
+        control_points: (0..3)
+            .map(|i| {
+                (0..5)
+                    .map(|j| {
+                        Point3::new(-1.0 + i as f64, -1.0 + 0.5 * j as f64, cx[i] + sign * cy[j])
+                    })
+                    .collect()
+            })
+            .collect(),
+        u_knots: vec![0.0, 1.0],
+        u_multiplicities: vec![3, 3],
+        v_knots: vec![0.0, 1.0],
+        v_multiplicities: vec![5, 5],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::PiecewiseBezier,
+        self_intersect: None,
+    }
+}
+
+fn ground() -> Surface {
+    Surface::Plane(Plane {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+    })
+}
+
+#[test]
+fn branches_tangent_where_the_surfaces_touch_to_fourth_order_meet_there() {
+    // z = x^2 - y^4 against z = 0: the branches x = y^2 and x = -y^2 touch
+    // each other at the origin, where the field's Hessian is singular.
+    // There the surfaces agree to rounding along x = 0 for |y| up to about
+    // rounding^(1/4): where along it the branches meet is not decidable
+    // in doubles, only that every point lies on both surfaces.
+    let sheet = Surface::BSpline(quartic(-1.0));
+    let curves = implicit_surface_intersection(&sheet, &ground(), None).expect("a section");
+    let mut meeting: Vec<Point3> = Vec::new();
+    for c in &curves {
+        let branch = Curve3::ImplicitSection(c.clone());
+        for t in [0.0, c.curve.end()] {
+            let p = axiolid_evaluate::evaluate3(&branch, t).unwrap();
+            if p.length() < 1e-3 {
+                meeting.push(p);
+            }
+        }
+        for k in 0..=4000 {
+            let p =
+                axiolid_evaluate::evaluate3(&branch, c.curve.end() * k as f64 / 4000.0).unwrap();
+            assert!(p.z.abs() < 1e-10, "{p:?}");
+            assert!((p.x * p.x - p.y.powi(4)).abs() < 1e-10, "{p:?}");
+        }
+    }
+    // Four half-branches from the sheet's edge, all ending at one point.
+    assert_eq!(meeting.len(), 4, "{} curves", curves.len());
+    assert!(meeting.iter().all(|p| (*p - meeting[0]).length() < 1e-12));
+}
+
+#[test]
+fn a_sheet_touching_a_plane_to_fourth_order_only_touches() {
+    // z = x^2 + y^4 meets z = 0 only at the origin.
+    let sheet = Surface::BSpline(quartic(1.0));
+    assert_eq!(
+        implicit_surface_intersection(&sheet, &ground(), None),
+        Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve)
+    );
+}
+
+#[test]
+fn tangency_along_a_whole_line_touches_or_is_undecided() {
+    // z = x^2 touches z = 0 along the line x = 0 without crossing it: no
+    // section, as for any touching.
+    assert_eq!(
+        implicit_surface_intersection(&Surface::BSpline(quartic(0.0)), &ground(), None),
+        Err(axiolid_nurbs::ExactIntersectionRefusal::NotRegularCurve)
+    );
+    // z = x^3 is tangent to z = 0 along the same line and crosses it there:
+    // every piece along the line is singular, and the trace says it cannot
+    // decide rather than guess.
+    let mut cubic = quartic(0.0);
+    cubic.u_degree = 3;
+    cubic.u_multiplicities = vec![4, 4];
+    let cx = [-1.0, 1.0, -1.0, 1.0];
+    cubic.control_points = (0..4)
+        .map(|i| {
+            (0..5)
+                .map(|j| Point3::new(-1.0 + 2.0 * i as f64 / 3.0, -1.0 + 0.5 * j as f64, cx[i]))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        implicit_surface_intersection(&Surface::BSpline(cubic), &ground(), None),
+        Err(axiolid_nurbs::ExactIntersectionRefusal::Undecided)
+    );
+}

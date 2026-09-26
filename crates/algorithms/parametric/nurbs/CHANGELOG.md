@@ -11,6 +11,22 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Contact to higher order than a saddle (a singular Hessian: a tacnode,
+  where two branches touch each other) is a vertex too. The ends are
+  checked against the field's sign changes about the point, and a
+  tacnode's bridges arrive along the Hessian's null direction. Tangency
+  along a whole curve without crossing is touching; with crossing it is
+  `ExactIntersectionRefusal::Undecided`, a new variant that also names an
+  exhausted budget (both were `NotRegularCurve`, which now means touching
+  only).
+- A B-spline section tangent to a sub-patch edge (a knot line, a window's
+  or a split's edge) is traced: the touching crossing, where no proof can
+  exist, is found by damped Newton and seeds the curve; a regular crossing
+  that cannot be proven is still refused.
+- Faster traces near contact: singular points are sought as soon as a
+  small piece is irregular, sides use the tighter of the direct and the
+  mean-value bound and split their piece rather than search deep, and
+  `SeriesField2::value` evaluates the value alone (bit for bit the same).
 - Sections of two B-splines are certified. Every crossing of a sub-patch
   edge with the other sub-patch is isolated by Krawczyk's test on Bernstein
   enclosures of the surfaces and their partials, so every component is

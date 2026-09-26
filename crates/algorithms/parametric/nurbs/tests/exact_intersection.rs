@@ -363,9 +363,8 @@ fn offset_coplanar_tori_touch_where_their_sections_cross() {
     // not coincide, so no closed-form circle family exists and the section
     // is traced (ADR 0077). Their top circles (z = 1, radius 3 about each
     // centre) meet at two points where both normals are vertical: the
-    // surfaces touch there and the section's branches cross. The trace
-    // refuses such a singular point by name instead of guessing through
-    // it.
+    // surfaces touch there and the section's branches cross. Each crossing
+    // is a vertex: four branch ends meet there.
     let first = Surface::Torus(Torus {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         major_radius: 3.0,
@@ -377,10 +376,36 @@ fn offset_coplanar_tori_touch_where_their_sections_cross() {
         minor_radius: 1.0,
     });
 
-    assert_eq!(
-        exact_surface_intersection(&first, &second),
-        Err(ExactIntersectionRefusal::NotRegularCurve)
-    );
+    let curve = exact_surface_intersection(&first, &second).expect("a traced section");
+    let on = |c: Point3, p: Point3| {
+        let d = p - c;
+        (d.x.hypot(d.y) - 3.0).hypot(d.z) - 1.0
+    };
+    let touches = [
+        Point3::new(1.0, 8f64.sqrt(), 1.0),
+        Point3::new(1.0, -(8f64.sqrt()), 1.0),
+    ];
+    let mut meetings = [0; 2];
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        let span = span.expect("a traced span");
+        for k in 0..=1000 {
+            let t = span.start + (span.end - span.start) * k as f64 / 1000.0;
+            let p = axiolid_evaluate::evaluate3(branch, t).unwrap();
+            assert!(
+                on(Point3::ZERO, p).abs() < 1e-9 && on(Point3::new(2.0, 0.0, 0.0), p).abs() < 1e-9,
+                "{p:?}"
+            );
+        }
+        for t in [span.start, span.end] {
+            let p = axiolid_evaluate::evaluate3(branch, t).unwrap();
+            for (m, touch) in meetings.iter_mut().zip(touches) {
+                if (p - touch).length() < 1e-6 {
+                    *m += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(meetings, [4, 4], "{} branches", curve.branches.len());
 }
 
 #[test]

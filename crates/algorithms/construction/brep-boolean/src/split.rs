@@ -354,10 +354,11 @@ fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool 
     ends && matches!((mid(a), mid(b)), (Ok(p), Ok(q)) if near(p, q))
 }
 
-/// Traced sections of the face's surface, one set per other surface.
+/// Traced sections of the face's surface, one set per other surface, or
+/// the fact that the trace could not be done (so it is not tried again).
 #[derive(Default)]
 struct Traces {
-    done: Vec<(Surface, Vec<axiolid_curve::ImplicitCurve2>)>,
+    done: Vec<(Surface, Option<Vec<axiolid_curve::ImplicitCurve2>>)>,
 }
 
 impl Traces {
@@ -368,13 +369,20 @@ impl Traces {
         lo: Point2,
         hi: Point2,
     ) -> Result<&[axiolid_curve::ImplicitCurve2], BooleanError> {
-        if let Some(index) = self.done.iter().position(|(s, _)| s == other) {
-            return Ok(&self.done[index].1);
-        }
-        let curves = axiolid_nurbs::trace_section_pcurves(surface, other, window(surface, lo, hi))
-            .map_err(|_| BooleanError::UnsupportedSplit)?;
-        self.done.push((other.clone(), curves));
-        Ok(&self.done[self.done.len() - 1].1)
+        let index = match self.done.iter().position(|(s, _)| s == other) {
+            Some(index) => index,
+            None => {
+                let curves =
+                    axiolid_nurbs::trace_section_pcurves(surface, other, window(surface, lo, hi))
+                        .ok();
+                self.done.push((other.clone(), curves));
+                self.done.len() - 1
+            }
+        };
+        self.done[index]
+            .1
+            .as_deref()
+            .ok_or(BooleanError::UnsupportedSplit)
     }
 }
 
@@ -589,9 +597,11 @@ fn implicit_piece(
     let closed = (section.start - section.end).length() <= tolerance.linear().max(1e-9);
     let curves = match traces.of(surface, other, lo, hi) {
         Ok(curves) => curves,
-        // The other surface has no equation to read here (a B-spline):
-        // the section's own space curve, read on this analytic face.
-        Err(BooleanError::UnsupportedSplit) if matches!(other, Surface::BSpline(_)) => {
+        // The other surface has no equation to read here (a B-spline), or
+        // its trace here cannot be decided (branches nearly touching, read
+        // far from the parameters' origin): the section's own space curve,
+        // read on this face through its closed-form inverse.
+        Err(BooleanError::UnsupportedSplit) => {
             return lifted_piece(surface, section, index, lo, hi, tolerance);
         }
         Err(e) => return Err(e),
