@@ -274,6 +274,13 @@ fn cell_hull(
         Axis::U => curve.point(index as Scalar + s0)?.y,
         Axis::V => curve.point(index as Scalar + s0)?.x,
     };
+    // A bridge is straight: the box of its ends.
+    // A bridge lies in its bracket about the straight line.
+    if cell.bridge.is_some() {
+        let (w_lo, w_hi) = cell.solved_range();
+        let (a, b) = (place(f_lo, w_lo), place(f_hi, w_hi));
+        return Some((a.min(b), a.max(b)));
+    }
     let (d_free, d_solved) = match cell.axis {
         Axis::U => (partial(&curve.field, true), partial(&curve.field, false)),
         Axis::V => (partial(&curve.field, false), partial(&curve.field, true)),

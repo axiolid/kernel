@@ -79,10 +79,11 @@ never by marching.
      or chains leaving the window.
   7. Completeness needs no step size. The regular boxes cover every point of
      the zero set, and each regular box's cells are exact.
-- **Singular points are refused by name.** A box where the field and both
-  partials may all vanish, at the smallest size allowed, may hold a point
-  where the surfaces touch and branches cross. The trace answers
-  `NotRegularCurve`, as every other tangency in #119 does.
+- **Singular points become vertices.** A box where the field and both
+  partials may all vanish, at the smallest size allowed, holds a point
+  where the surfaces touch. A touching point with no curve through it is
+  dropped; two branches crossing there end at it (see *Singular points*).
+  Anything degenerate is refused as `NotRegularCurve`.
 - **Where it is used:**
   - `exact_surface_intersection` falls back to it after the closed forms and
     ADR 0076. It is used for analytic pairs with a compact surface to carry
@@ -200,11 +201,28 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   The trace finds it by Newton on the gradient and drops the boxes around
   it that rounding cannot decide: no curve runs through it. A trace that
   finds only such points answers `NotRegularCurve`, as the closed forms do.
-- Two branches crossing at a saddle (indefinite Hessian) stay refused by
-  name. Within about `sqrt(rounding / curvature)` of the crossing, which
-  is micrometres at metre scale, the field is below its own rounding, so
-  where the branches run there is not decidable in doubles. Ending them at
-  that distance would leave gaps larger than a micrometre tolerance.
+- Two branches crossing at a saddle (indefinite Hessian) meet at a vertex
+  of the section graph.
+  1. Newton on the gradient finds the crossing and its Hessian. Rounding is
+     measured on the terms that make up the value there
+     (`Field2::scale_at`), not the coefficients: a power series read far
+     from its origin cancels terms much larger than its coefficients.
+  2. The pieces around the crossing that cannot be certified form a
+     square. It holds at least the `sqrt(rounding / curvature)` where the
+     field is below its own rounding, and it grows to hold every piece
+     that fails certification there, up to a thousandth of the window.
+     Only pieces wholly inside it are dropped.
+  3. Exactly four branch ends must lie at the square, two along each
+     direction where the Hessian's form vanishes, on opposite sides.
+     Anything else is refused.
+  4. Each end is joined to the crossing by a *bridge* cell: the cubic that
+     matches the branch's value and slope at its certified end and its
+     tangent at the crossing (the Hessian's direction). It is smooth, its
+     Bezier control values bound it, and it leaves the branch by about its
+     length to the fourth power, far below rounding for these lengths.
+  5. Every branch then ends at the crossing, so the chains stop there: the
+     crossing is a vertex, as the Steinmetz ellipses' crossings are.
+     A boolean cuts faces there like any other section vertex.
 - Windows a whole turn wide start an irrational fraction of a radian past
   `-pi` (and past a face's own seam angle), so a symmetric section's
   special points never sit on the window's edge.
@@ -223,9 +241,9 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 **Positive**
 
 - Every analytic pair's section now exists exactly, whether or not a closed
-  form does, and so does every section involving B-splines. The only
-  exception is the singular case (touching surfaces), which is refused by
-  name.
+  form does, and so does every section involving B-splines, including
+  branches crossing where the surfaces touch. Only degenerate singular
+  points (a singular Hessian, or more than two branches) are refused.
 - One pcurve family serves every section on every analytic face, so the
   boolean needs no per-pair pcurve derivations beyond the cheap closed forms
   it already has.
@@ -245,8 +263,8 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
 
 **Follow-ups / risks to watch**
 
-- Singular points (branches crossing where surfaces touch): isolate them as
-  vertices of the section graph instead of refusing.
+- Degenerate singular points (a singular Hessian: higher-order contact)
+  are still refused as `NotRegularCurve`.
 - Very thin sections or nearly tangent pairs can exhaust the trace's box
   budget (400 000 boxes). That is also refused as `NotRegularCurve`.
 - Two B-splines: seeding and following are not certified (see above). A

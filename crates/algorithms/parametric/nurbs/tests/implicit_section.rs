@@ -424,3 +424,54 @@ fn a_ruled_section_against_a_plane_by_its_span() {
     }
     assert!(total >= 2, "{total}");
 }
+
+#[test]
+fn branches_crossing_where_a_pipe_touches_a_torus_meet_at_a_vertex() {
+    // A pipe of radius 1/2 along y, inside the torus's tube and touching
+    // it at the outer equator (3, 0, 0). Across the tube the pipe curves
+    // more than the torus, along it less, so there the two branches of the
+    // section cross: a saddle of the field on its zero set.
+    let t = Torus {
+        frame: frame(Point3::ZERO, Vec3::Z),
+        major_radius: 2.0,
+        minor_radius: 1.0,
+    };
+    let pipe = cylinder(Point3::new(2.5, 0.0, 0.0), Vec3::Y, 0.5);
+    let torus_surface = Surface::Torus(t);
+    check(&torus_surface, &pipe);
+    let curve = exact_surface_intersection(&torus_surface, &pipe).expect("a traced section");
+    let touch = Point3::new(3.0, 0.0, 0.0);
+    // Every branch into the crossing ends there.
+    let mut at_touch = 0;
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        let span = span.unwrap();
+        for t in [span.start, span.end] {
+            if (evaluate3(branch, t).unwrap() - touch).length() < 1e-12 {
+                at_touch += 1;
+            }
+        }
+    }
+    assert_eq!(at_touch, 4, "{} branches", curve.branches.len());
+    // The straight bridges into the crossing stay on both surfaces.
+    let mut bridges = 0;
+    for branch in &curve.branches {
+        let Curve3::ImplicitSection(s) = branch else {
+            panic!("expected an implicit section");
+        };
+        for (i, cell) in s.curve.cells.iter().enumerate() {
+            if cell.bridge.is_none() {
+                continue;
+            }
+            bridges += 1;
+            for k in 0..=50 {
+                let p = evaluate3(branch, i as f64 + k as f64 / 50.0).unwrap();
+                for surface in [&torus_surface, &pipe] {
+                    assert!(off(surface, p).abs() < 1e-9, "bridge point {p:?}");
+                }
+            }
+        }
+    }
+    assert_eq!(bridges, 4);
+    let bad = completeness(&t, &pipe, &curve.branches);
+    assert!(bad.is_empty(), "{bad:?}");
+}

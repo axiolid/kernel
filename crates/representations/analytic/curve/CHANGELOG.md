@@ -11,6 +11,13 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Bridge cells in `ImplicitCurve2` (`ImplicitCell::bridge`, a cubic into a
+  point where two branches cross, bounded by its Bezier control values),
+  `ImplicitCell::part`, `reversed` and `solved_range`,
+  `ImplicitCurve2::solve_cell`, and `Field2::scale_at` (the size of the
+  terms that make up the value at a point, which its rounding scales
+  with).
+
 - `Curve3::PairSection` (`PairSection3`, `PairNode`): the section of two
   B-spline surfaces, carried by nodes on both and defined between them by
   the surfaces themselves (where both meet on the plane across the chord).

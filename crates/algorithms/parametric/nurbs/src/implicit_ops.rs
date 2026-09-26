@@ -427,6 +427,9 @@ impl CellRoots<'_> {
     }
 
     fn solved(&self, free: Scalar) -> Option<Scalar> {
+        if self.cell.bridge.is_some() {
+            return self.curve.solve_cell(self.cell, free);
+        }
         let one = ImplicitCurve2 {
             field: self.curve.field.clone(),
             cells: vec![ImplicitCell {
@@ -494,6 +497,27 @@ impl CellRoots<'_> {
     }
 
     fn roots(&self, s0: Scalar, s1: Scalar, depth: u32, out: &mut Vec<(Scalar, usize)>) {
+        // A bridge into a crossing is too short and too close to the
+        // singular point for bounds: its sign changes are scanned.
+        if self.cell.bridge.is_some() {
+            let n = 64;
+            let at = |k: usize| s0 + (s1 - s0) * k as Scalar / n as Scalar;
+            let mut last = self.h(at(0));
+            for k in 1..=n {
+                let now = self.h(at(k));
+                if let (Some(a), Some(b)) = (last, now) {
+                    if a == 0.0 && k == 1 {
+                        out.push((at(0), 1));
+                    } else if (a < 0.0) != (b < 0.0) && b != 0.0 {
+                        out.push((self.bisect(at(k - 1), at(k), a), 1));
+                    } else if b == 0.0 {
+                        out.push((at(k), 1));
+                    }
+                }
+                last = now;
+            }
+            return;
+        }
         let Some((hull, slope)) = self.hull(s0, s1) else {
             return;
         };

@@ -128,6 +128,31 @@ impl Field2 {
         }
     }
 
+    /// The sum of the magnitudes of the terms that make up the value at
+    /// `p`: the scale the value's rounding is measured in there. A power
+    /// series read far from its origin has terms much larger than its
+    /// coefficients, and a value that cancels them to near zero carries
+    /// their rounding.
+    #[must_use]
+    pub fn scale_at(&self, p: Point2) -> Scalar {
+        match self {
+            Self::Series(f) => {
+                let (n, m) = f.size();
+                let (fu, _, _) = f.u.terms(p.x, n);
+                let (fv, _, _) = f.v.terms(p.y, m);
+                let mut sum = 0.0;
+                for (i, row) in f.coefficients.iter().enumerate() {
+                    for (j, &c) in row.iter().enumerate() {
+                        sum += (c * fu[i] * fv[j]).abs();
+                    }
+                }
+                sum
+            }
+            // Bernstein weights sum to one: the coefficients bound it.
+            Self::Patches(f) => f.magnitude(),
+        }
+    }
+
     /// Whether every coefficient is finite.
     #[must_use]
     pub fn is_finite(&self) -> bool {
@@ -821,6 +846,15 @@ pub enum Axis {
 /// One stretch of an [`ImplicitCurve2`]: as the free parameter runs from
 /// `from` to `to`, the curve is the unique zero of the field for the other
 /// parameter in `[low, high]`, where the field is strictly monotone in it.
+///
+/// A *bridge* is the last stretch into a point where two branches cross
+/// (a saddle of the field on its zero set, where the surfaces touch).
+/// Near there the zero cannot be isolated with certainty, so the bridge
+/// carries the solved parameter as the cubic that matches the branch's
+/// value and slope at both ends: at the certified end the field's own, at
+/// the crossing the direction where the field's Hessian vanishes, which is
+/// the branch's tangent there. It leaves the branch by about its length to
+/// the fourth power (ADR 0077).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImplicitCell {
     /// The free parameter.
@@ -833,9 +867,163 @@ pub struct ImplicitCell {
     pub low: Scalar,
     /// Upper end of the bracket.
     pub high: Scalar,
+    /// For a bridge into a crossing, the slopes `d solved / d free` at
+    /// `from` and at `to`.
+    pub bridge: Option<(Scalar, Scalar)>,
 }
 
 impl ImplicitCell {
+    /// A bridge from `from` to `to` in `(u, v)`, leaving along `start` and
+    /// arriving along `end` (directions in `(u, v)`), free along the
+    /// parameter both directions move in most.
+    #[must_use]
+    pub fn bridge(from: Point2, to: Point2, start: Vec2, end: Vec2) -> Self {
+        let share = |d: Vec2, along_u: bool| {
+            let l = d.length();
+            if l == 0.0 {
+                0.0
+            } else if along_u {
+                d.x.abs() / l
+            } else {
+                d.y.abs() / l
+            }
+        };
+        let chord = to - from;
+        let along_u = share(start, true)
+            .min(share(end, true))
+            .min(share(chord, true))
+            >= share(start, false)
+                .min(share(end, false))
+                .min(share(chord, false));
+        let slope = |d: Vec2| {
+            let (free, solved) = if along_u { (d.x, d.y) } else { (d.y, d.x) };
+            if free == 0.0 {
+                0.0
+            } else {
+                solved / free
+            }
+        };
+        let (axis, f0, f1, w0, w1) = if along_u {
+            (Axis::U, from.x, to.x, from.y, to.y)
+        } else {
+            (Axis::V, from.y, to.y, from.x, to.x)
+        };
+        Self {
+            axis,
+            from: f0,
+            to: f1,
+            low: w0,
+            high: w1,
+            bridge: Some((slope(start), slope(end))),
+        }
+    }
+
+    /// A bridge's solved value and its first and second derivatives in the
+    /// local parameter `s`.
+    fn hermite(&self, s: Scalar) -> (Scalar, Scalar, Scalar) {
+        let (m0, m1) = self.bridge.unwrap_or((0.0, 0.0));
+        let span = self.to - self.from;
+        let (a, b) = (m0 * span, m1 * span);
+        let (w0, w1) = (self.low, self.high);
+        let (s2, s3) = (s * s, s * s * s);
+        let value = (2.0 * s3 - 3.0 * s2 + 1.0) * w0
+            + (s3 - 2.0 * s2 + s) * a
+            + (-2.0 * s3 + 3.0 * s2) * w1
+            + (s3 - s2) * b;
+        let first = (6.0 * s2 - 6.0 * s) * w0
+            + (3.0 * s2 - 4.0 * s + 1.0) * a
+            + (-6.0 * s2 + 6.0 * s) * w1
+            + (3.0 * s2 - 2.0 * s) * b;
+        let second = (12.0 * s - 6.0) * w0
+            + (6.0 * s - 4.0) * a
+            + (-12.0 * s + 6.0) * w1
+            + (6.0 * s - 2.0) * b;
+        (value, first, second)
+    }
+
+    /// The local parameter of a free value.
+    fn local(&self, free: Scalar) -> Scalar {
+        let span = self.to - self.from;
+        if span == 0.0 {
+            0.0
+        } else {
+            (free - self.from) / span
+        }
+    }
+
+    /// The part of the cell over local parameters `[s0, s1]`.
+    #[must_use]
+    pub fn part(&self, s0: Scalar, s1: Scalar) -> Self {
+        let (f0, f1) = (self.free(s0), self.free(s1));
+        match self.bridge {
+            Some(_) => {
+                let span = self.to - self.from;
+                let slope = |s: Scalar| {
+                    if span == 0.0 {
+                        0.0
+                    } else {
+                        self.hermite(s).1 / span
+                    }
+                };
+                Self {
+                    from: f0,
+                    to: f1,
+                    low: self.hermite(s0).0,
+                    high: self.hermite(s1).0,
+                    bridge: Some((slope(s0), slope(s1))),
+                    ..*self
+                }
+            }
+            None => Self {
+                from: f0,
+                to: f1,
+                ..*self
+            },
+        }
+    }
+
+    /// The cell run backwards.
+    #[must_use]
+    pub fn reversed(&self) -> Self {
+        match self.bridge {
+            Some((m0, m1)) => Self {
+                from: self.to,
+                to: self.from,
+                low: self.high,
+                high: self.low,
+                bridge: Some((m1, m0)),
+                ..*self
+            },
+            None => Self {
+                from: self.to,
+                to: self.from,
+                ..*self
+            },
+        }
+    }
+
+    /// The smallest and largest solved value the cell can take: a
+    /// bridge's range is bounded by its Bezier control values.
+    #[must_use]
+    pub fn solved_range(&self) -> (Scalar, Scalar) {
+        match self.bridge {
+            Some((m0, m1)) => {
+                let span = self.to - self.from;
+                let c = [
+                    self.low,
+                    self.low + m0 * span / 3.0,
+                    self.high - m1 * span / 3.0,
+                    self.high,
+                ];
+                (
+                    c.iter().copied().fold(Scalar::INFINITY, Scalar::min),
+                    c.iter().copied().fold(Scalar::NEG_INFINITY, Scalar::max),
+                )
+            }
+            None => (self.low.min(self.high), self.low.max(self.high)),
+        }
+    }
+
     /// `(u, v)` from the free and solved values.
     fn place(&self, free: Scalar, solved: Scalar) -> Point2 {
         match self.axis {
@@ -869,6 +1057,12 @@ impl ImplicitCurve2 {
         self.cells.len() as Scalar
     }
 
+    /// The solved value of `cell` at free value `free`.
+    #[must_use]
+    pub fn solve_cell(&self, cell: &ImplicitCell, free: Scalar) -> Option<Scalar> {
+        self.solve(cell, free)
+    }
+
     /// The cell holding `t` and the local parameter in it.
     fn locate(&self, t: Scalar) -> Option<(&ImplicitCell, Scalar)> {
         if !t.is_finite() || self.cells.is_empty() {
@@ -887,6 +1081,9 @@ impl ImplicitCurve2 {
     /// The solved value in `cell` at free value `free`: the field's unique
     /// zero in the bracket.
     fn solve(&self, cell: &ImplicitCell, free: Scalar) -> Option<Scalar> {
+        if cell.bridge.is_some() {
+            return Some(cell.hermite(cell.local(free)).0);
+        }
         let at = |w: Scalar| self.field.jet(cell.place(free, w));
         let along = |jet: &Jet2| match cell.axis {
             Axis::U => jet.gradient.y,
@@ -955,6 +1152,14 @@ impl ImplicitCurve2 {
     /// function theorem, and the cell's rate `d free / dt`.
     fn slopes(&self, t: Scalar) -> Option<(&ImplicitCell, Scalar, Scalar, Scalar)> {
         let (cell, s) = self.locate(t)?;
+        if cell.bridge.is_some() {
+            let span = cell.to - cell.from;
+            if span == 0.0 {
+                return Some((cell, 0.0, 0.0, span));
+            }
+            let (_, d1, d2) = cell.hermite(s);
+            return Some((cell, d1 / span, d2 / (span * span), span));
+        }
         let free = cell.free(s);
         let solved = self.solve(cell, free)?;
         let jet = self.field.jet(cell.place(free, solved));
@@ -1098,11 +1303,7 @@ impl ImplicitCurve2 {
             if b - a <= 1e-12 {
                 continue;
             }
-            cells.push(ImplicitCell {
-                from: cell.free(a - c0),
-                to: cell.free(b - c0),
-                ..*cell
-            });
+            cells.push(cell.part(a - c0, b - c0));
         }
         (!cells.is_empty()).then(|| Self {
             field: self.field.clone(),
@@ -1135,18 +1336,12 @@ impl ImplicitCurve2 {
         };
         let mut cells = Vec::with_capacity(self.cells.len() + 1);
         if s < 1.0 - 1e-12 {
-            cells.push(ImplicitCell {
-                from: cell.free(s),
-                ..cell
-            });
+            cells.push(cell.part(s, 1.0));
         }
         cells.extend(self.cells[index + 1..].iter().copied());
         cells.extend(self.cells[..index].iter().copied().map(shift));
         if s > 1e-12 {
-            cells.push(shift(ImplicitCell {
-                to: cell.free(s),
-                ..cell
-            }));
+            cells.push(shift(cell.part(0.0, s)));
         }
         Some(Self {
             field: self.field.clone(),
@@ -1210,11 +1405,7 @@ impl ImplicitCurve2 {
                 .cells
                 .iter()
                 .rev()
-                .map(|cell| ImplicitCell {
-                    from: cell.to,
-                    to: cell.from,
-                    ..*cell
-                })
+                .map(ImplicitCell::reversed)
                 .collect(),
         }
     }
@@ -1241,7 +1432,8 @@ impl ImplicitCurve2 {
             if t0 > lo && t0 < hi {
                 out.push(t0);
             }
-            if t1 <= lo || t0 >= hi {
+            // A bridge is straight: it never turns.
+            if t1 <= lo || t0 >= hi || cell.bridge.is_some() {
                 continue;
             }
             let (d_free, d_solved) = match cell.axis {
@@ -1269,6 +1461,15 @@ impl ImplicitCurve2 {
     ) -> Option<Cell> {
         let (f0, f1) = (cell.free(s0), cell.free(s1));
         let w0 = self.solve(cell, f0)?;
+        if cell.bridge.is_some() {
+            // Its part over `[s0, s1]` lies in its control values' range.
+            let (w_lo, w_hi) = cell.part(s0, s1).solved_range();
+            let (a, b) = (cell.place(f0.min(f1), w_lo), cell.place(f0.max(f1), w_hi));
+            return Some(Cell {
+                lo: a.min(b),
+                hi: a.max(b),
+            });
+        }
         let bracket = |f_lo: Scalar, f_hi: Scalar, w_lo: Scalar, w_hi: Scalar| {
             let (a, b) = match cell.axis {
                 Axis::U => (Point2::new(f_lo, w_lo), Point2::new(f_hi, w_hi)),

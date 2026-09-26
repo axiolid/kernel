@@ -117,8 +117,10 @@ do not adopt or wrap another kernel.
   - Faces that wind round their surface without a seam get one first.
   - Sections through poles are cut there.
   - Cavities go to the smallest solid around them.
-- **Refused by name:** sections whose branches cross where the surfaces
-  touch (a saddle; see ADR 0077).
+  - Sections whose branches cross where the surfaces touch meet at a
+    vertex there (ADR 0077).
+- **Refused by name:** degenerate contact, where the surfaces touch to
+  higher order than a saddle or an isolated point.
 
 `boolean_arc_prisms_exact` and the column builder stay as the fast exact
 path for vertical columns; the general pipeline must agree with them where

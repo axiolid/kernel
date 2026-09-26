@@ -188,3 +188,77 @@ fn a_pipe_through_the_tube_of_a_torus() {
     let i = check(&torus, &pipe, None, 1e-8);
     assert!(i > 0.0 && i < volume(&pipe));
 }
+
+#[test]
+fn a_pipe_touching_the_tube_of_a_torus_from_inside() {
+    // A vertical pipe of radius 1/2 inside the tube, touching it where the
+    // ring runs along z (world x = -4) at tube angle 45 degrees, away from
+    // every face boundary. Across the tube the pipe curves more than the
+    // torus, along it less, so the section's two branches cross there (a
+    // saddle, ADR 0077): the crossing is a vertex of the section graph.
+    let (big, r, rho) = (4.0, 1.0, 0.5);
+    let (c, s) = (0.5f64.sqrt(), 0.5f64.sqrt());
+    let torus = ring(big, r);
+    let (cx, cy) = (-(big + r * c) + rho * c, (r - rho) * s);
+    let p = ArcPrism {
+        section: ArcRing::circle(Point2::new(cx, cy), rho),
+        bottom: -8.0,
+        top: 8.0,
+    };
+    let pipe = boolean_arc_prisms_exact(&p, &p, BooleanOperator::Intersection, tol()).unwrap();
+    // Over the pipe's disc, the torus holds the z where the distance from
+    // the y axis lies within sqrt(1 - y^2) of `big`.
+    let length = |x: f64, y: f64| {
+        let w = (r * r - y * y).max(0.0).sqrt();
+        let outer = ((big + w) * (big + w) - x * x).max(0.0).sqrt();
+        let inner = ((big - w) * (big - w) - x * x).max(0.0).sqrt();
+        2.0 * (outer - inner)
+    };
+    let n = 400;
+    let want: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (
+                cx - rho + 2.0 * rho * i as f64 / n as f64,
+                cx - rho + 2.0 * rho * (i + 1) as f64 / n as f64,
+            );
+            gauss12(a, b, |x| {
+                let h = (rho * rho - (x - cx) * (x - cx)).max(0.0).sqrt();
+                (0..8)
+                    .map(|k| {
+                        let (lo, hi) = (
+                            cy - h + 2.0 * h * k as f64 / 8.0,
+                            cy - h + 2.0 * h * (k + 1) as f64 / 8.0,
+                        );
+                        gauss12(lo, hi, |y| length(x, y))
+                    })
+                    .sum::<f64>()
+            })
+        })
+        .sum();
+    check(&torus, &pipe, Some(want), 1e-6);
+}
+
+/// Gauss-Legendre with 12 points on `[a, b]`.
+fn gauss12(a: f64, b: f64, f: impl Fn(f64) -> f64) -> f64 {
+    const X: [f64; 6] = [
+        0.125_233_408_511_468_9,
+        0.367_831_498_998_180_2,
+        0.587_317_954_286_617_4,
+        0.769_902_674_194_304_7,
+        0.904_117_256_370_474_9,
+        0.981_560_634_246_719_3,
+    ];
+    const W: [f64; 6] = [
+        0.249_147_045_813_402_8,
+        0.233_492_536_538_354_8,
+        0.203_167_426_723_065_9,
+        0.160_078_328_543_346_2,
+        0.106_939_325_995_318_4,
+        0.047_175_336_386_511_8,
+    ];
+    let (m, h) = (0.5 * (a + b), 0.5 * (b - a));
+    (0..6)
+        .map(|k| W[k] * (f(m + h * X[k]) + f(m - h * X[k])))
+        .sum::<f64>()
+        * h
+}

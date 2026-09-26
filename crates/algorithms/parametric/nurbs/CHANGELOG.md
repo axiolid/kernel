@@ -28,9 +28,12 @@ caret rule for `0.x` versions.
   where the surfaces touch without crossing is dropped, with the boxes
   about it that rounding cannot decide. A trace that finds only such
   points answers `NotRegularCurve`, as the closed forms do for touching.
-  Branches crossing at a saddle are still refused by name: within about
-  `sqrt(rounding / curvature)` of the crossing (micrometres at metre
-  scale), where the branches run cannot be decided in doubles. Whole-turn
+  Branches crossing at a saddle meet at a vertex: the pieces about the
+  crossing that cannot be certified are dropped, and each of the four
+  branch ends is joined to the crossing by a bridge cell (the cubic
+  matching the branch's value and slope at its end and its tangent at the
+  crossing). Rounding there is measured on the field's terms at the
+  point, not its coefficients. Whole-turn
   windows start an irrational fraction of a radian past `-pi`, so a
   symmetric section's special points never sit on the window's edge.
 
