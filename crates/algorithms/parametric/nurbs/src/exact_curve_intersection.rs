@@ -72,6 +72,28 @@ pub enum ExactCurveParameter {
     HalfAngle(RealRoot),
     /// A conic's point at `theta = pi`, where `w` is infinite.
     Antipode,
+    /// A section-family curve's own parameter, isolated by certified
+    /// subdivision (ADR 0077) and refined to the last bits.
+    Certified(Isolated),
+}
+
+/// A parameter isolated by certified subdivision, held as the exact double
+/// it was refined to (so parameters compare exactly, bit for bit).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Isolated(u64);
+
+impl Isolated {
+    /// The parameter `value`.
+    #[must_use]
+    pub fn new(value: f64) -> Self {
+        Self(value.to_bits())
+    }
+
+    /// The parameter as a double.
+    #[must_use]
+    pub fn value(self) -> f64 {
+        f64::from_bits(self.0)
+    }
 }
 
 impl ExactCurveParameter {
@@ -90,6 +112,7 @@ impl ExactCurveParameter {
                 }
             }
             Self::Antipode => std::f64::consts::PI,
+            Self::Certified(t) => t.value(),
         }
     }
 }
@@ -139,6 +162,13 @@ pub fn exact_curve_surface_intersection(
     curve: &Curve3,
     surface: &Surface,
 ) -> Result<ExactCurveIntersection, ExactCurveRefusal> {
+    // A traced section: along its cells, with certified root isolation
+    // (ADR 0077). The ADR 0076 graphs need their span, so they take
+    // `section_curve_surface_intersection`.
+    if let Curve3::ImplicitSection(section) = curve {
+        let span = axiolid_core::Interval::new(0.0, section.curve.end());
+        return crate::implicit_ops::section_curve_surface_intersection(curve, span, surface);
+    }
     let param = Param::of(curve)?;
     let locus = surface_locus(surface, &param)?;
     let result = solve(curve, &param, &locus);

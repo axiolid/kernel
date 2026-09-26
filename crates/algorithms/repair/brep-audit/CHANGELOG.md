@@ -8,3 +8,11 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Changed
+
+- An implicit pcurve (ADR 0077) is parameterised by its cells, not in
+  proportion to its edge. It passes when every lifted sample projects onto
+  the edge within tolerance, inside the edge's span, in the order the use
+  runs, and starting and ending at the use's ends. Every other pcurve is
+  still checked against the edge at proportional parameters.

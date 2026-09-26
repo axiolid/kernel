@@ -88,11 +88,10 @@ fn area(region: &Region, surface: &Surface) -> f64 {
     total * scale
 }
 
-/// Split every face of `brep` that carries sections; `other` is the second
-/// operand, `first` whether `brep` is the first operand of `edges`.
+/// Split every face of `brep` that carries sections; `first` whether `brep`
+/// is the first operand of `edges`.
 fn split_all(
     brep: &ExactBRep,
-    other: &ExactBRep,
     edges: &[SectionEdge],
     first: bool,
 ) -> Vec<(FaceId, Vec<Region>)> {
@@ -110,12 +109,8 @@ fn split_all(
             })
             .cloned()
             .collect();
-        let others: Vec<Surface> = mine
-            .iter()
-            .map(|e| surface_of(other, if first { e.face_b } else { e.face_a }))
-            .collect();
         let cuts: Vec<_> = edges.iter().flat_map(|e| [e.start, e.end]).collect();
-        let regions = split_face(brep, face, &mine, &others, first, &cuts, tol()).expect("split");
+        let regions = split_face(brep, face, &mine, first, &cuts, tol()).expect("split");
         out.push((face, regions));
     }
     out
@@ -134,7 +129,7 @@ fn a_box_roof_pierced_by_a_pipe_splits_into_a_ring_and_a_disc() {
     let r = 0.5;
     let pipe = solid(ArcRing::circle(Point2::new(0.2, -0.1), r), -1.0, 3.0);
     let edges = section_edges(&block, &pipe, tol()).expect("sections");
-    for (face, regions) in split_all(&block, &pipe, &edges, true) {
+    for (face, regions) in split_all(&block, &edges, true) {
         let surface = surface_of(&block, face);
         let total: f64 = regions.iter().map(|r| area(r, &surface)).sum();
         let pierced = edges.iter().any(|e| e.face_a == face);
@@ -157,7 +152,7 @@ fn a_box_roof_pierced_by_a_pipe_splits_into_a_ring_and_a_disc() {
     }
     // The pipe's two half-walls each split into three bands, of heights
     // 1, 2 and 1.
-    for (face, regions) in split_all(&pipe, &block, &edges, false) {
+    for (face, regions) in split_all(&pipe, &edges, false) {
         let surface = surface_of(&pipe, face);
         if !matches!(surface, Surface::Cylinder(_)) {
             continue;
@@ -188,7 +183,7 @@ fn a_sloped_roof_and_the_pipe_through_it_split_exactly() {
     let edges = section_edges(&block, &pipe, tol()).expect("sections");
     // On the roof: an ellipse of area pi r^2 / cos(theta).
     let cos = normal.normalize().z;
-    for (face, regions) in split_all(&block, &pipe, &edges, true) {
+    for (face, regions) in split_all(&block, &edges, true) {
         let surface = surface_of(&block, face);
         let Surface::Plane(plane) = &surface else {
             continue;
@@ -209,7 +204,7 @@ fn a_sloped_roof_and_the_pipe_through_it_split_exactly() {
     // the wall starts at z = -1.
     let mean = 3.0 + 0.4 * cx - 0.2 * cy;
     let mut below = 0.0;
-    for (face, regions) in split_all(&pipe, &block, &edges, false) {
+    for (face, regions) in split_all(&pipe, &edges, false) {
         let surface = surface_of(&pipe, face);
         if !matches!(surface, Surface::Cylinder(_)) {
             continue;
@@ -246,7 +241,7 @@ fn a_box_roof_cut_at_its_corner_keeps_its_area() {
     let (cx, cy, r) = (1.0, 0.9, 0.5);
     let pipe = solid(ArcRing::circle(Point2::new(cx, cy), r), -1.0, 3.0);
     let edges = section_edges(&block, &pipe, tol()).expect("sections");
-    for (face, regions) in split_all(&block, &pipe, &edges, true) {
+    for (face, regions) in split_all(&block, &edges, true) {
         let surface = surface_of(&block, face);
         let total: f64 = regions.iter().map(|g| area(g, &surface)).sum();
         let Surface::Plane(plane) = &surface else {

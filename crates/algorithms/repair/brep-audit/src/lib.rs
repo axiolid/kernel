@@ -60,6 +60,93 @@ pub fn geometric_audit(brep: &ExactBRep, tolerance: Tolerance) -> GeometricHealt
 /// exactly at both ends.
 const SAMPLES: [Scalar; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 
+/// The worst deviation of a pcurve from its edge when the two share no
+/// parameterisation: each lifted sample is projected onto the edge (by
+/// inversion), and must land within the edge's span, at the use's start and
+/// end for the end samples, and in order along the use between them. A
+/// sample that fails any of these counts as infinitely far.
+fn follows_in_order(
+    pcurve: &axiolid_curve::Curve2,
+    pcurve_interval: axiolid_core::Interval,
+    support: &axiolid_surface::Surface,
+    curve3: &axiolid_curve::Curve3,
+    edge_interval: axiolid_core::Interval,
+    orientation: Orientation,
+    tolerance: Tolerance,
+) -> Scalar {
+    const DENSE: usize = 16;
+    let (lo, hi) = (
+        edge_interval.start.min(edge_interval.end),
+        edge_interval.start.max(edge_interval.end),
+    );
+    let periodic = matches!(
+        curve3,
+        axiolid_curve::Curve3::Circle(_) | axiolid_curve::Curve3::Ellipse(_)
+    );
+    // An edge that closes on itself (one vertex) reads its end as its start.
+    let closed = match (curve::evaluate3(curve3, lo), curve::evaluate3(curve3, hi)) {
+        (Ok(a), Ok(b)) => distance(a, b) <= tolerance.linear(),
+        _ => false,
+    };
+    let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
+    let mut worst: Scalar = 0.0;
+    let mut previous: Option<Scalar> = None;
+    for i in 0..=DENSE {
+        let sample = i as Scalar / DENSE as Scalar;
+        let Ok(uv) = curve::evaluate2(pcurve, lerp(pcurve_interval, sample)) else {
+            return Scalar::INFINITY;
+        };
+        let Ok(lifted) = surface::evaluate(support, uv.x, uv.y) else {
+            return Scalar::INFINITY;
+        };
+        let Ok(t) = curve::invert3(curve3, lifted, tolerance) else {
+            return Scalar::INFINITY;
+        };
+        // Into the edge's span, by whole turns for a closed conic.
+        let candidates: &[Scalar] = if periodic {
+            &[0.0, 1.0, -1.0, 2.0]
+        } else {
+            &[0.0]
+        };
+        let Some(t) = candidates
+            .iter()
+            .map(|k| t + k * core::f64::consts::TAU)
+            .find(|t| *t >= lo - slack && *t <= hi + slack)
+        else {
+            return Scalar::INFINITY;
+        };
+        // Where along the use, from 0 at its start to 1 at its end.
+        let along = (t - edge_interval.start) / (edge_interval.end - edge_interval.start);
+        let along = match orientation {
+            Orientation::Forward => along,
+            Orientation::Reversed => 1.0 - along,
+        };
+        // The end samples at the use's ends (a closed edge's end may read
+        // as its start).
+        let at_end = |target: Scalar| {
+            (along - target).abs() <= 1e-6 || (closed && (along - (1.0 - target)).abs() <= 1e-6)
+        };
+        if (i == 0 && !at_end(0.0)) || (i == DENSE && !at_end(1.0)) {
+            return Scalar::INFINITY;
+        }
+        if i > 0 && i < DENSE {
+            if let Some(last) = previous {
+                if along < last - 1e-9 {
+                    return Scalar::INFINITY;
+                }
+            }
+            previous = Some(along);
+        } else if i == 0 {
+            previous = Some(0.0);
+        }
+        let Ok(on) = curve::evaluate3(curve3, t) else {
+            return Scalar::INFINITY;
+        };
+        worst = worst.max(distance(lifted, on));
+    }
+    worst
+}
+
 fn lerp(interval: axiolid_core::Interval, t: Scalar) -> Scalar {
     interval.start + (interval.end - interval.start) * t
 }
@@ -182,6 +269,23 @@ fn check_pcurves_against_curves(
                     if error > worst {
                         worst = error;
                     }
+                }
+                // An implicit pcurve (ADR 0077) is parameterised by its own
+                // cells, not in proportion to the edge: it follows the edge
+                // when every lifted sample lies on the edge's span, in the
+                // order the use runs, from the use's start to its end.
+                if worst > tolerance.linear()
+                    && matches!(pcurve, axiolid_curve::Curve2::Implicit(_))
+                {
+                    worst = follows_in_order(
+                        pcurve,
+                        pcurve_interval,
+                        support,
+                        curve3,
+                        edge_interval,
+                        use_.orientation,
+                        tolerance,
+                    );
                 }
                 if worst > tolerance.linear() {
                     health.push(GeometricDefect::PcurveOffCurve {

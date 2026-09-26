@@ -90,6 +90,33 @@ impl Piece<'_> {
         }
     }
 
+    /// The span split where the pcurve's derivative may jump: an implicit
+    /// pcurve's cell boundaries (ADR 0077), where the parameter's speed
+    /// changes. Integrating piecewise between them keeps each panel smooth.
+    pub(crate) fn smooth_spans(&self) -> Vec<(Scalar, Scalar)> {
+        let (a, b) = self.span();
+        let mut cuts = vec![a];
+        if let Self::Curve {
+            curve: Curve2::Implicit(_),
+            ..
+        } = self
+        {
+            let (lo, hi) = (a.min(b), a.max(b));
+            let mut k = lo.floor() + 1.0;
+            let mut inner = Vec::new();
+            while k < hi {
+                inner.push(k);
+                k += 1.0;
+            }
+            if b < a {
+                inner.reverse();
+            }
+            cuts.extend(inner);
+        }
+        cuts.push(b);
+        cuts.windows(2).map(|w| (w[0], w[1])).collect()
+    }
+
     pub(crate) fn at(&self, t: Scalar) -> Result<(Point2, Vec2), ExactMeasureError> {
         match self {
             Self::Curve { curve, offset, .. } => {
@@ -325,6 +352,11 @@ pub(crate) struct Domain<'a> {
     transpose: bool,
     /// Period of the first (possibly swapped) coordinate.
     period: Option<Scalar>,
+    /// Period of the second (possibly swapped) coordinate, when the surface
+    /// has one but the loops do not wind round it (a torus face that goes
+    /// round the axis but not round the tube): a point is moved by whole
+    /// periods into the box before it is classified.
+    across: Option<Scalar>,
     /// The pole the domain reaches and the net winding that reaches it.
     pole: Option<(Scalar, i64)>,
     /// Box of the domain, in unswapped `(u, v)`.
@@ -368,6 +400,9 @@ fn turning_points(curve: &Curve2, lo: Scalar, hi: Scalar) -> Option<Vec<Scalar>>
                 k += 1.0;
             }
         }
+        // Cell boundaries and certified turns of the solved parameter
+        // (ADR 0077).
+        Curve2::Implicit(c) => out.extend(c.turning_points(lo, hi)),
         _ => return None,
     }
     out.sort_by(Scalar::total_cmp);
@@ -469,6 +504,11 @@ impl<'a> Domain<'a> {
         } else {
             chart.u_period
         };
+        let across = if transpose {
+            chart.u_period
+        } else {
+            chart.v_period
+        };
         let (min, max) = if transpose {
             (Point2::new(min.y, min.x), Point2::new(max.y, max.x))
         } else {
@@ -479,6 +519,7 @@ impl<'a> Domain<'a> {
             arcs,
             transpose,
             period,
+            across,
             pole,
             min,
             max,
@@ -589,6 +630,25 @@ impl<'a> Domain<'a> {
     /// Whether `p` lies in the domain: `Some` when certain, `None` when it
     /// is too close to the boundary to say.
     pub(crate) fn contains(&self, p: Point2) -> Result<Option<bool>, ExactMeasureError> {
+        // The same point a whole period away in the coordinate the loops do
+        // not wind round, moved into the box when that lands it there.
+        let p = match self.across {
+            Some(period) => {
+                let q = self.swap(p);
+                let (lo, hi) = {
+                    let (a, b) = (self.swap(self.min), self.swap(self.max));
+                    (a.y.min(b.y), a.y.max(b.y))
+                };
+                let k = ((0.5 * (lo + hi) - q.y) / period).round();
+                let moved = q.y + k * period;
+                if moved >= lo - slack(lo) && moved <= hi + slack(hi) {
+                    self.swap(Point2::new(q.x, moved))
+                } else {
+                    p
+                }
+            }
+            None => p,
+        };
         // Outside the domain's box in a coordinate that does not wrap is
         // outside, certainly -- and it is where a ray cast along the box's
         // own edge could not decide.
@@ -628,9 +688,11 @@ impl<'a> Domain<'a> {
         if self.transpose {
             total = -total;
         }
+        // A face whose loops wind clockwise in its parameters (a reversed
+        // face, its holes then anticlockwise) counts -1 inside.
         Ok(match total {
             0 => Some(false),
-            1 => Some(true),
+            1 | -1 => Some(true),
             _ => None,
         })
     }

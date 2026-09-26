@@ -114,26 +114,27 @@ pub(crate) fn face_sums(
 
     let mut total = [0.0; COMPONENTS];
     for piece in &boundary.pieces {
-        let (a, b) = piece.span();
-        let sums = adaptive(a, b, &floor, &mut |t| {
-            let (point, tangent) = piece.at(t)?;
-            // `- H du` in the default direction, `+ G dv` along the tube.
-            let (weight, inner) = if along_v {
-                (tangent.y, inner_along_u(surface, reference, point, &floor)?)
-            } else {
-                (
-                    -tangent.x,
-                    inner_along_v(surface, reference, point, &floor)?,
-                )
-            };
-            let mut value = inner;
-            for slot in &mut value {
-                *slot *= weight;
+        for (a, b) in piece.smooth_spans() {
+            let sums = adaptive(a, b, &floor, &mut |t| {
+                let (point, tangent) = piece.at(t)?;
+                // `- H du` in the default direction, `+ G dv` along the tube.
+                let (weight, inner) = if along_v {
+                    (tangent.y, inner_along_u(surface, reference, point, &floor)?)
+                } else {
+                    (
+                        -tangent.x,
+                        inner_along_v(surface, reference, point, &floor)?,
+                    )
+                };
+                let mut value = inner;
+                for slot in &mut value {
+                    *slot *= weight;
+                }
+                Ok(value)
+            })?;
+            for (slot, value) in total.iter_mut().zip(sums) {
+                *slot += value;
             }
-            Ok(value)
-        })?;
-        for (slot, value) in total.iter_mut().zip(sums) {
-            *slot += value;
         }
     }
     Ok(total)

@@ -11,6 +11,19 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- A plane through a cone's apex cuts rays along the rulings of the
+  modelled nappe (`Derivation::ConeApexRulings`, spans `[0, inf)`). It was
+  refused before. A plane flatter than the cone meets it only at the apex
+  (`NotRegularCurve`).
+- Curve/surface intersection for the section families (B9, #119):
+  `exact_curve_surface_intersection` takes an `ImplicitSection`, and
+  `section_curve_surface_intersection` takes any ruled, torus or traced
+  section over a span. Roots are isolated along the curve's cells with
+  interval bounds. Parameters are `ExactCurveParameter::Certified`.
+- `trace_section_pcurves`, `extract_stretch` and `implicit_view` give a
+  section's implicit pcurve on any analytic face, cut out between given
+  points, and a ruled or torus section as an implicit curve.
+
 - Traced sections (#119, ADR 0077): `exact_surface_intersection` now
   builds a torus against a cylinder, elliptical cylinder, cone or torus off
   its axis (`Derivation::ImplicitTrace`). The section is found in the

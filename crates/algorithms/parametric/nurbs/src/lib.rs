@@ -27,6 +27,7 @@ mod exact_curve_intersection;
 mod exact_surface_intersection;
 mod field;
 mod fit;
+mod implicit_ops;
 mod implicit_section;
 mod implicit_trace;
 mod intersection_curve;
@@ -84,12 +85,15 @@ pub use degree::{
 pub use exact_curve_intersection::{
     exact_curve_curve_intersection2, exact_curve_curve_intersection3,
     exact_curve_surface_intersection, ExactCurveHit, ExactCurveIntersection, ExactCurveParameter,
-    ExactCurveRefusal,
+    ExactCurveRefusal, Isolated,
 };
 pub use exact_surface_intersection::{
     exact_surface_intersection, Derivation, ExactIntersectionCurve, ExactIntersectionRefusal,
 };
 pub use fit::{interpolate_curve3, loft_surface};
+pub use implicit_ops::{
+    extract_stretch, implicit_view, section_curve_surface_intersection, trace_section_pcurves,
+};
 pub use implicit_section::{implicit_surface_intersection, section_field_of};
 pub use intersection_curve::{
     construct_curve_surface_points, construct_surface_surface_curves,

@@ -216,6 +216,9 @@ pub enum Derivation {
     /// `A(v) cos u + B(v) sin u = C(v)`; the curve is `u` as a function of
     /// the tube angle `v` (ADR 0076).
     TorusAngleSection,
+    /// A plane through a cone's apex cuts rays along its rulings, starting
+    /// at the apex.
+    ConeApexRulings,
     /// The zero set of one surface's equation read in the other's
     /// parameters, traced into certified monotone cells (ADR 0077): a torus
     /// against a cylinder, cone or torus off its axis.
@@ -232,6 +235,14 @@ pub fn exact_surface_intersection(
     first: &Surface,
     second: &Surface,
 ) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    // A plane through a cone's apex: rulings, or only the apex (final).
+    if let (Surface::Cone(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cone(c)) =
+        (first, second)
+    {
+        if let Some(curve) = cone_apex_plane(c, p)? {
+            return Ok(curve);
+        }
+    }
     match closed_form(first, second) {
         Ok(curve) => Ok(curve),
         // Apart, or a frame that cannot be read: final either way.
@@ -728,6 +739,70 @@ fn cone_plane(
         return Err(ExactIntersectionRefusal::UnsupportedPair);
     }
     Err(ExactIntersectionRefusal::UnrepresentableConic)
+}
+
+/// A plane through a cone's apex cuts the modelled nappe in rulings: rays
+/// from the apex, two where the plane is steeper than the cone, one where
+/// it is tangent along a ruling, none (only the apex) where it is flatter.
+///
+/// Identity: with `z` the unit direction the nappe opens along, `alpha`
+/// the semi-angle and `x`, `y` completing the frame, a ruling is
+/// `cos(alpha) z + sin(alpha) (cos(phi) x + sin(phi) y)`; it lies in the
+/// plane where `A cos(phi) + B sin(phi) = C` with `A = sin(alpha) n.x`,
+/// `B = sin(alpha) n.y`, `C = -cos(alpha) n.z`, solved in closed form. The
+/// rays start at the apex, so each branch's span is `[0, +inf)`.
+/// Returns `None` when the plane misses the apex.
+fn cone_apex_plane(
+    cone: &axiolid_surface::Cone,
+    plane: &Plane,
+) -> Result<Option<ExactIntersectionCurve>, ExactIntersectionRefusal> {
+    let slope = cone.semi_angle.tan();
+    if slope == 0.0 || !slope.is_finite() {
+        return Ok(None);
+    }
+    let axis = cone.frame.z.normalize();
+    let apex = cone.frame.origin - axis * (cone.radius / slope);
+    let n = plane.frame.z.normalize();
+    let offset = n.dot(apex - plane.frame.origin);
+    let scale = 1.0 + apex.length() + plane.frame.origin.length();
+    if offset.abs() > 1e-12 * scale {
+        return Ok(None);
+    }
+    // The nappe opens where the radius grows.
+    let z = axis * slope.signum();
+    let x = cone.frame.x.normalize();
+    let y = z.cross(x).normalize();
+    let x = y.cross(z);
+    let alpha = slope.abs().atan();
+    let (sa, ca) = alpha.sin_cos();
+    let (a, b, c) = (sa * n.dot(x), sa * n.dot(y), -ca * n.dot(z));
+    let rr = a * a + b * b;
+    let e = rr - c * c;
+    if e < -1e-14 * (rr + c * c) || rr == 0.0 {
+        // Only the apex: a point, not a curve.
+        return Err(ExactIntersectionRefusal::NotRegularCurve);
+    }
+    let root = e.max(0.0).sqrt();
+    let tangent = e <= 1e-14 * (rr + c * c);
+    let signs: &[Scalar] = if tangent { &[0.0] } else { &[1.0, -1.0] };
+    let mut branches = Vec::new();
+    for s in signs {
+        let (cos_phi, sin_phi) = ((a * c - s * b * root) / rr, (b * c + s * a * root) / rr);
+        let direction = z * ca + (x * cos_phi + y * sin_phi) * sa;
+        if !direction.is_finite() || !apex.is_finite() {
+            return Err(ExactIntersectionRefusal::DegenerateFrame);
+        }
+        branches.push(Curve3::Line(axiolid_curve::Line3 {
+            origin: apex,
+            direction: direction.normalize(),
+        }));
+    }
+    let spans = vec![Some(Interval::new(0.0, Scalar::INFINITY)); branches.len()];
+    Ok(Some(ExactIntersectionCurve {
+        branches,
+        derivation: Derivation::ConeApexRulings,
+        spans,
+    }))
 }
 
 /// A plane parallel to a cylinder axis cuts rulings, not a conic.

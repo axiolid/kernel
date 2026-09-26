@@ -3,8 +3,11 @@
 //! For every pair of faces, one from each operand:
 //!
 //! 1. The support surfaces' exact intersection curves come from
-//!    `exact_surface_intersection` (#119). Stage 1 takes lines, circles and
-//!    ellipses; any other section is refused by name.
+//!    `exact_surface_intersection` (#119): lines and conics, ruled and
+//!    torus sections (ADR 0076), traced sections (ADR 0077). A ruled or
+//!    torus section piece is read as a traced section over its span, so
+//!    every curve past this point is a line, a conic or an
+//!    `ImplicitSection3`.
 //! 2. Each curve is cut where it crosses a boundary edge of either face.
 //!    Two curves on one surface meet only up to the rounding of their
 //!    constructed doubles, so the crossing is found transversally instead:
@@ -37,14 +40,14 @@ use axiolid_evaluate::surface::{invert, normal};
 use axiolid_evaluate::{curve::invert3, evaluate3};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{
-    exact_curve_surface_intersection, exact_surface_intersection, ExactCurveIntersection,
-    ExactIntersectionRefusal,
+    exact_curve_curve_intersection3, exact_curve_surface_intersection, exact_surface_intersection,
+    implicit_surface_intersection, ExactCurveIntersection, ExactIntersectionRefusal,
 };
 use axiolid_surface::{Plane, Surface};
 use axiolid_topology::FaceId;
 use core::f64::consts::TAU;
 
-use crate::support::same_support;
+use crate::support::{cleaned, same_support, window};
 use crate::BooleanError;
 
 /// A piece of an intersection curve lying on a face of each operand.
@@ -68,6 +71,13 @@ pub struct SectionEdge {
     pub along_a: bool,
     /// Whether the edge runs along a boundary edge `face_b` already has.
     pub along_b: bool,
+    /// The surface that meets `face_a`'s surface along this edge: `face_b`'s
+    /// for a crossing, or for an edge imprinted from a coincident face the
+    /// surface that bounds it there. Its equation on `face_a` is the edge's
+    /// pcurve.
+    pub other_a: Surface,
+    /// The surface that meets `face_b`'s surface along this edge.
+    pub other_b: Surface,
 }
 
 /// Every section edge between the faces of `a` and the faces of `b`.
@@ -92,28 +102,90 @@ pub fn section_edges(
                 imprint(&side_b, fb, &side_a, fa, false, tolerance, &mut out)?;
                 continue;
             }
-            let curve = match exact_surface_intersection(sa, sb) {
-                Ok(curve) => curve,
+            // Lines and conics in closed form; every other section traced in
+            // one face's parameter box (ADR 0077), which holds every part
+            // of it that can matter.
+            let closed_form = match exact_surface_intersection(&cleaned(sa), &cleaned(sb)) {
+                Ok(curve) => {
+                    let conic = curve.branches.iter().zip(&curve.spans).all(|(b, s)| {
+                        matches!(
+                            (b, s),
+                            (Curve3::Line(_), _) | (Curve3::Circle(_) | Curve3::Ellipse(_), None)
+                        )
+                    });
+                    conic.then_some(curve)
+                }
                 // Apart, or touching without crossing: no section.
                 Err(
                     ExactIntersectionRefusal::Disjoint | ExactIntersectionRefusal::NotRegularCurve,
                 ) => continue,
-                Err(_) => return Err(BooleanError::UnsupportedSection),
+                Err(_) => None,
             };
-            for (branch, span) in curve.branches.iter().zip(&curve.spans) {
-                if span.is_some()
-                    || !matches!(
-                        branch,
-                        Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
-                    )
-                {
-                    return Err(BooleanError::UnsupportedSection);
+            let branches: Vec<(Curve3, Option<Interval>)> = match closed_form {
+                Some(curve) => curve.branches.into_iter().zip(curve.spans).collect(),
+                None => {
+                    let rank = |s: &Surface| match s {
+                        Surface::Torus(_) => 3,
+                        Surface::Sphere(_) => 2,
+                        Surface::Plane(_) => 0,
+                        _ => 1,
+                    };
+                    let (carrier, other, side, face) = if rank(sa) >= rank(sb) {
+                        (sa, sb, &side_a, fa)
+                    } else {
+                        (sb, sa, &side_b, fb)
+                    };
+                    let (lo, hi) = side.domains[face].bounds();
+                    match implicit_surface_intersection(
+                        carrier,
+                        other,
+                        Some(window(carrier, lo, hi)),
+                    ) {
+                        Ok(sections) => sections
+                            .into_iter()
+                            .map(|s| {
+                                let end = s.curve.end();
+                                (Curve3::ImplicitSection(s), Some(Interval::new(0.0, end)))
+                            })
+                            .collect(),
+                        Err(ExactIntersectionRefusal::Disjoint) => continue,
+                        Err(_) => return Err(BooleanError::UnsupportedSection),
+                    }
                 }
+            };
+            for (index, (branch, span)) in branches.iter().enumerate() {
+                // A ray (a cone's ruling from its apex) is a line bounded
+                // at its finite ends.
+                let bounds = match (branch, span) {
+                    (Curve3::Line(_), Some(span)) => Some(*span),
+                    _ => None,
+                };
+                let branch = branch.clone();
+                let branch = &branch;
                 let (mut cuts, along_a) = side_a.cuts(fa, branch, tolerance)?;
                 let (more, along_b) = side_b.cuts(fb, branch, tolerance)?;
                 cuts.extend(more);
-                for span in pieces(branch, cuts) {
-                    let mid = evaluate3(branch, 0.5 * (span.start + span.end))
+                // Branches of one section meet only where the surfaces touch
+                // (the two ellipses of a Steinmetz pair): such a point splits
+                // both, so the faces' graphs get a vertex there.
+                for (other, _) in branches
+                    .iter()
+                    .skip(index + 1)
+                    .chain(branches.iter().take(index))
+                {
+                    if let Ok(ExactCurveIntersection::Points(hits)) =
+                        exact_curve_curve_intersection3(branch, other)
+                    {
+                        cuts.extend(hits.iter().map(|h| h.parameter.approx()));
+                    }
+                }
+                if let Some(b) = bounds {
+                    let (lo, hi) = (b.start.min(b.end), b.start.max(b.end));
+                    cuts.retain(|&c| c >= lo && c <= hi);
+                    cuts.extend([lo, hi].into_iter().filter(|x| x.is_finite()));
+                }
+                for (piece_curve, span) in pieces(branch, cuts)? {
+                    let mid = evaluate3(&piece_curve, 0.5 * (span.start + span.end))
                         .map_err(|_| BooleanError::Evaluation)?;
                     if touching(sa, sb, mid, tolerance)? {
                         continue;
@@ -129,13 +201,16 @@ pub fn section_edges(
                     out.push(SectionEdge {
                         face_a: side_a.faces[fa],
                         face_b: side_b.faces[fb],
-                        curve: branch.clone(),
-                        span,
-                        start: evaluate3(branch, span.start)
+                        start: evaluate3(&piece_curve, span.start)
                             .map_err(|_| BooleanError::Evaluation)?,
-                        end: evaluate3(branch, span.end).map_err(|_| BooleanError::Evaluation)?,
+                        end: evaluate3(&piece_curve, span.end)
+                            .map_err(|_| BooleanError::Evaluation)?,
+                        curve: piece_curve,
+                        span,
                         along_a: at_a == Place::Boundary,
                         along_b: at_b == Place::Boundary,
+                        other_a: sb.clone(),
+                        other_b: sa.clone(),
                     });
                 }
             }
@@ -176,7 +251,10 @@ fn imprint(
     tolerance: Tolerance,
     out: &mut Vec<SectionEdge>,
 ) -> Result<(), BooleanError> {
-    for (curve, span) in from.edges_of(face)? {
+    for (edge, curve, span) in from.edges_of(face)? {
+        // The surface that bounds the imprinted edge in its own operand:
+        // together with the shared surface it defines the edge's curve.
+        let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
         let (cuts, along) = onto.cuts(other, &curve, tolerance)?;
         for piece in pieces_within(&curve, span, cuts) {
             let mid = evaluate3(&curve, 0.5 * (piece.start + piece.end))
@@ -209,6 +287,8 @@ fn imprint(
                 end: evaluate3(&curve, piece.end).map_err(|_| BooleanError::Evaluation)?,
                 along_a,
                 along_b,
+                other_a: bounding.clone(),
+                other_b: bounding.clone(),
             });
         }
     }
@@ -249,28 +329,82 @@ fn pieces_within(curve: &Curve3, span: Interval, cuts: Vec<Scalar>) -> Vec<Inter
         .collect()
 }
 
-/// The spans between consecutive cuts: finite stretches of a line (its
-/// unbounded ends leave every bounded face), the cyclic arcs of a conic.
-fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Vec<Interval> {
+/// The stretches between consecutive cuts, each with the curve it lies on:
+/// finite stretches of a line (its unbounded ends leave every bounded
+/// face), the cyclic arcs of a conic, and for a traced section the
+/// stretches of its span. A traced loop's stretch across the loop's start
+/// becomes a curve of its own.
+fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Result<Vec<(Curve3, Interval)>, BooleanError> {
     cuts.sort_by(Scalar::total_cmp);
     cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12 * (1.0 + x.abs()));
-    match curve {
-        Curve3::Line(_) => cuts
-            .windows(2)
-            .map(|pair| Interval::new(pair[0], pair[1]))
-            .collect(),
+    let plain = |spans: Vec<Interval>| spans.into_iter().map(|s| (curve.clone(), s)).collect();
+    Ok(match curve {
+        Curve3::Line(_) => plain(
+            cuts.windows(2)
+                .map(|pair| Interval::new(pair[0], pair[1]))
+                .collect(),
+        ),
+        Curve3::ImplicitSection(section) => {
+            let n = section.curve.end();
+            let (pu, pv) = section.carrier.periodic();
+            let closure = section.curve.closure(pu, pv);
+            let slack = 1e-9 * (1.0 + n);
+            let mut inner: Vec<Scalar> = cuts
+                .into_iter()
+                .filter(|&c| c > slack && c < n - slack)
+                .collect();
+            inner.dedup_by(|x, y| (*x - *y).abs() <= slack);
+            let own = |a: Scalar, b: Scalar| -> Result<(Curve3, Interval), BooleanError> {
+                // One cut on a loop: the whole loop, starting there.
+                let sub = if (a - b).abs() <= slack {
+                    closure.and_then(|c| section.curve.rotated(a, c))
+                } else {
+                    section.curve.sub(a, b, closure)
+                };
+                let sub = sub.ok_or(BooleanError::Evaluation)?;
+                let end = sub.end();
+                Ok((
+                    Curve3::ImplicitSection(axiolid_curve::ImplicitSection3 {
+                        carrier: section.carrier,
+                        curve: sub,
+                    }),
+                    Interval::new(0.0, end),
+                ))
+            };
+            if closure.is_some() {
+                if inner.is_empty() {
+                    return Ok(vec![(curve.clone(), Interval::new(0.0, n))]);
+                }
+                let mut out = Vec::new();
+                for pair in inner.windows(2) {
+                    out.push(own(pair[0], pair[1])?);
+                }
+                // Across the loop's own start.
+                out.push(own(inner[inner.len() - 1], inner[0])?);
+                out
+            } else {
+                let mut ends = vec![0.0];
+                ends.extend(inner);
+                ends.push(n);
+                let mut out = Vec::new();
+                for pair in ends.windows(2) {
+                    out.push(own(pair[0], pair[1])?);
+                }
+                out
+            }
+        }
         _ => {
             if cuts.is_empty() {
-                return vec![Interval::new(0.0, TAU)];
+                return Ok(vec![(curve.clone(), Interval::new(0.0, TAU))]);
             }
             let mut out: Vec<Interval> = cuts
                 .windows(2)
                 .map(|pair| Interval::new(pair[0], pair[1]))
                 .collect();
             out.push(Interval::new(cuts[cuts.len() - 1], cuts[0] + TAU));
-            out
+            plain(out)
         }
-    }
+    })
 }
 
 /// One operand, with each face's certified domain built once.
@@ -351,7 +485,7 @@ impl<'a> Side<'a> {
     }
 
     /// The face's boundary edges, each once, with their curves and spans.
-    fn edges_of(&self, face: usize) -> Result<Vec<(Curve3, Interval)>, BooleanError> {
+    fn edges_of(&self, face: usize) -> Result<Vec<(usize, Curve3, Interval)>, BooleanError> {
         let topology = self.brep.topology();
         let mut out = Vec::new();
         let mut seen = Vec::new();
@@ -373,7 +507,7 @@ impl<'a> Side<'a> {
                     .brep
                     .edge_interval(use_.edge)
                     .ok_or(BooleanError::DanglingReference)?;
-                out.push((curve.clone(), span));
+                out.push((use_.edge.index(), curve.clone(), span));
             }
         }
         Ok(out)
@@ -484,7 +618,14 @@ impl Side<'_> {
                 return Ok(theirs.clone());
             }
         }
-        // A seam: the same support on both sides (or a free edge).
+        // A seam: the same support on both sides (or a free edge). A seam
+        // circle (a sphere's meridian or latitude, a torus's tube or ring
+        // circle) is cut by the surface its normals sweep: coaxial with the
+        // circle, a plane, cylinder or cone, which crosses the face
+        // transversally along the whole circle.
+        if let Curve3::Circle(circle) = edge_curve {
+            return normal_sweep(own, circle, tolerance);
+        }
         let Curve3::Line(line) = edge_curve else {
             return Err(BooleanError::UnsupportedTrim);
         };
@@ -508,6 +649,62 @@ impl Side<'_> {
             },
         }))
     }
+}
+
+/// The surface swept by `surface`'s normal lines along a circle on it,
+/// when the surface is one of revolution about the circle's axis (or the
+/// circle is a meridian, whose normals stay in its plane): a plane, a
+/// cylinder or a cone coaxial with the circle.
+fn normal_sweep(
+    surface: &Surface,
+    circle: &axiolid_curve::Circle3,
+    tolerance: Tolerance,
+) -> Result<Surface, BooleanError> {
+    let f = circle.frame;
+    let axis = f.x.cross(f.y).normalize();
+    let x = f.x.normalize();
+    let y = axis.cross(x);
+    let p = f.origin + x * circle.radius;
+    let (u, v) = invert(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let n = normal(surface, u, v)
+        .map_err(|_| BooleanError::Evaluation)?
+        .normalize();
+    let frame = axiolid_core::Frame3 {
+        origin: f.origin,
+        x,
+        y,
+        z: axis,
+    };
+    let along = n.dot(axis);
+    let radial = n.dot(x);
+    let plane = || {
+        Surface::Plane(Plane {
+            frame: axiolid_core::Frame3 {
+                origin: f.origin,
+                x,
+                y,
+                z: axis,
+            },
+        })
+    };
+    // Normals within the circle's plane: the plane itself.
+    if along.abs() <= 1e-12 {
+        return Ok(plane());
+    }
+    // Normals along the axis: the cylinder through the circle.
+    if radial.abs() <= 1e-12 {
+        return Ok(Surface::Cylinder(axiolid_surface::Cylinder {
+            frame,
+            radius: circle.radius,
+        }));
+    }
+    // Otherwise the cone of normal lines: at height `h` along the axis the
+    // line is `radius + h * radial / along` from it.
+    Ok(Surface::Cone(axiolid_surface::Cone {
+        frame,
+        radius: circle.radius,
+        semi_angle: (radial / along).atan(),
+    }))
 }
 
 /// Whether `point` lies on the edge within tolerance and inside its span.

@@ -24,7 +24,7 @@ use axiolid_core::{Point2, Scalar};
 use axiolid_curve::{Axis, Field2, ImplicitCell, ImplicitCurve2};
 use core::f64::consts::TAU;
 
-use crate::field::{bound, bound_simple, partial, Cell, Range};
+use axiolid_curve::implicit::{bound, bound_simple, partial, Cell, Range};
 
 /// Why a trace was refused.
 #[derive(Debug, Clone, Copy, PartialEq)]

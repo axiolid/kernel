@@ -7,7 +7,12 @@
 //!    two surfaces: on a plane a line, circle or ellipse maps to its own
 //!    family in the plane's coordinates; on a cylinder a ruling is a vertical
 //!    line, a circle about the axis a horizontal one, and a plane's oblique
-//!    cut a `Sinusoid2` (ADR 0071). Other faces are refused in this stage.
+//!    cut a `Sinusoid2` (ADR 0071). Every other section on every analytic
+//!    face -- a sphere, cone or torus, or a curved section on a plane or
+//!    cylinder -- gets the implicit pcurve of ADR 0077: the other surface's
+//!    equation read in the face's parameters, traced once per surface over
+//!    the face's parameter box, and the stretch between the section's ends
+//!    cut out of it.
 //! 2. Boundary uses are split wherever a section edge ends on them.
 //! 3. The pieces form a graph in `(u, v)`: boundary pieces are walked the
 //!    way their loop runs, section pieces both ways. Starting from each
@@ -33,6 +38,7 @@ use axiolid_topology::{EdgeId, FaceId, Orientation};
 use core::f64::consts::{PI, TAU};
 
 use crate::section::SectionEdge;
+use crate::support::{periods, window};
 use crate::BooleanError;
 
 /// Where a piece of a split face's boundary came from.
@@ -42,6 +48,10 @@ pub enum PieceSource {
     Boundary(EdgeId),
     /// Part of the section edge with this index in the list given.
     Section(usize),
+    /// A stretch of parameters that is one point in space -- a sphere's
+    /// pole, a cone's apex -- closing a loop in the face's parameters. It
+    /// bounds regions while the face is split but is no edge of the result.
+    Collapsed,
 }
 
 /// One stretch of a split face's boundary, in the direction the region's
@@ -76,8 +86,7 @@ pub struct Region {
 
 /// Split `face` of `brep` along the section edges lying on it.
 ///
-/// `sections` are the section edges on this face; `others` gives, for each,
-/// the support surface of the face on the other operand. `first` says
+/// `sections` are the section edges on this face. `first` says
 /// whether `brep` is the first operand of the sections, which picks the
 /// side whose `along_*` flag applies: a section running along one of the
 /// face's own edges splits nothing but the edge, at its ends. `cuts` are
@@ -92,7 +101,6 @@ pub fn split_face(
     brep: &ExactBRep,
     face: FaceId,
     sections: &[SectionEdge],
-    others: &[Surface],
     first: bool,
     cuts: &[Point3],
     tolerance: Tolerance,
@@ -106,7 +114,7 @@ pub fn split_face(
         .surface
         .and_then(|id| brep.surfaces().get(id.index()))
         .ok_or(BooleanError::DanglingReference)?;
-    if !matches!(surface, Surface::Plane(_) | Surface::Cylinder(_)) {
+    if matches!(surface, Surface::BSpline(_)) {
         return Err(BooleanError::UnsupportedSplit);
     }
     let domain = FaceDomain::new(brep, face, tolerance)
@@ -121,13 +129,14 @@ pub fn split_face(
     // One stretch of curve can reach a face from several face pairs (a
     // shared patch's edge is also where the neighbouring faces meet it).
     let mut seen: Vec<&SectionEdge> = Vec::new();
-    for (index, (section, other)) in sections.iter().zip(others).enumerate() {
+    let mut traces = Traces::default();
+    for (index, section) in sections.iter().enumerate() {
         ends.push(section.start);
         ends.push(section.end);
-        let along = if first {
-            section.along_a
+        let (along, other) = if first {
+            (section.along_a, &section.other_a)
         } else {
-            section.along_b
+            (section.along_b, &section.other_b)
         };
         if along
             || seen
@@ -137,7 +146,16 @@ pub fn split_face(
             continue;
         }
         seen.push(section);
-        let piece = section_piece(surface, other, section, index, lo, hi, tolerance)?;
+        let piece = section_piece(
+            surface,
+            other,
+            section,
+            index,
+            lo,
+            hi,
+            &mut traces,
+            tolerance,
+        )?;
         pieces.push((piece, true));
     }
 
@@ -185,7 +203,8 @@ pub fn split_face(
                 piece.pspan = Interval::new(piece.pspan.end, piece.pspan.start);
             }
         }
-        for piece in uses {
+        let closed = close_poles(surface, uses, tolerance)?;
+        for piece in closed {
             for part in split_use(surface, piece, &ends, tolerance)? {
                 pieces.push((part, false));
             }
@@ -233,6 +252,58 @@ fn sweep(piece: &Piece) -> Result<Scalar, BooleanError> {
     Ok(total)
 }
 
+/// A loop's uses with a [`PieceSource::Collapsed`] piece wherever one use
+/// ends and the next starts at the same point in space but not in
+/// parameters, at a pole: a sphere's seam reaches its north pole at
+/// `(2 pi, pi/2)` and leaves it at `(0, pi/2)`.
+fn close_poles(
+    surface: &Surface,
+    uses: Vec<Piece>,
+    tolerance: Tolerance,
+) -> Result<Vec<Piece>, BooleanError> {
+    let n = uses.len();
+    let mut out = Vec::with_capacity(n + 2);
+    for i in 0..n {
+        let next = &uses[(i + 1) % n];
+        let a =
+            evaluate2(&uses[i].pcurve, uses[i].pspan.end).map_err(|_| BooleanError::Evaluation)?;
+        let b = evaluate2(&next.pcurve, next.pspan.start).map_err(|_| BooleanError::Evaluation)?;
+        out.push(uses[i].clone());
+        let slack = 1e-7 * (1.0 + a.x.abs().max(a.y.abs()));
+        if (a - b).length() <= slack {
+            continue;
+        }
+        let pa = axiolid_evaluate::surface::evaluate(surface, a.x, a.y)
+            .map_err(|_| BooleanError::Evaluation)?;
+        let pb = axiolid_evaluate::surface::evaluate(surface, b.x, b.y)
+            .map_err(|_| BooleanError::Evaluation)?;
+        let (su, sv) = axiolid_evaluate::surface::partials(surface, a.x, a.y)
+            .map_err(|_| BooleanError::Evaluation)?;
+        let scale = 1.0 + sv.length();
+        let pole =
+            (pa - pb).length() <= tolerance.linear().max(1e-9) && su.length() <= 1e-9 * scale;
+        if !pole {
+            // A gap that is not a pole: the loop winds round a seam with no
+            // seam edge, which this split does not close.
+            return Err(BooleanError::UnclosedSplit);
+        }
+        out.push(Piece {
+            curve: Curve3::Line(axiolid_curve::Line3 {
+                origin: pa,
+                direction: axiolid_core::Vec3::ZERO,
+            }),
+            span: Interval::new(0.0, 1.0),
+            pcurve: Curve2::Line(Line2 {
+                origin: a,
+                direction: b - a,
+            }),
+            pspan: Interval::new(0.0, 1.0),
+            source: PieceSource::Collapsed,
+        });
+    }
+    Ok(out)
+}
+
 /// Whether two section edges are the same stretch of curve, either way.
 fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool {
     let eps = tolerance.linear().max(1e-9);
@@ -243,11 +314,36 @@ fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool 
     ends && matches!((mid(a), mid(b)), (Ok(p), Ok(q)) if near(p, q))
 }
 
+/// Traced sections of the face's surface, one set per other surface.
+#[derive(Default)]
+struct Traces {
+    done: Vec<(Surface, Vec<axiolid_curve::ImplicitCurve2>)>,
+}
+
+impl Traces {
+    fn of(
+        &mut self,
+        surface: &Surface,
+        other: &Surface,
+        lo: Point2,
+        hi: Point2,
+    ) -> Result<&[axiolid_curve::ImplicitCurve2], BooleanError> {
+        if let Some(index) = self.done.iter().position(|(s, _)| s == other) {
+            return Ok(&self.done[index].1);
+        }
+        let curves = axiolid_nurbs::trace_section_pcurves(surface, other, window(surface, lo, hi))
+            .map_err(|_| BooleanError::UnsupportedSplit)?;
+        self.done.push((other.clone(), curves));
+        Ok(&self.done[self.done.len() - 1].1)
+    }
+}
+
 /// A section edge with its exact pcurve on `surface`.
 ///
 /// On a seam the start's angle is ambiguous (`0` and `2 pi` name one
 /// point), so each placement in the face's range is tried and the one whose
 /// piece runs inside the range is kept.
+#[allow(clippy::too_many_arguments)]
 fn section_piece(
     surface: &Surface,
     other: &Surface,
@@ -255,12 +351,26 @@ fn section_piece(
     index: usize,
     lo: Point2,
     hi: Point2,
+    traces: &mut Traces,
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
+    let closed_form = matches!(
+        (surface, &section.curve),
+        (
+            Surface::Plane(_),
+            Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+        ) | (
+            Surface::Cylinder(_),
+            Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+        )
+    );
+    if !closed_form {
+        return implicit_piece(surface, other, section, index, lo, hi, traces, tolerance);
+    }
     let first = place(surface, section.start, lo, hi, tolerance)?;
     let slack = 1e-9 * (1.0 + lo.x.abs().max(hi.x.abs()));
     let mut candidates = vec![first];
-    if matches!(surface, Surface::Cylinder(_)) {
+    if periods(surface).0 {
         for shift in [TAU, -TAU] {
             let other_turn = Point2::new(first.x + shift, first.y);
             if other_turn.x >= lo.x - slack && other_turn.x <= hi.x + slack {
@@ -270,7 +380,7 @@ fn section_piece(
     }
     let mut fallback = None;
     for start_uv in candidates {
-        let piece = section_piece_from(surface, other, section, index, start_uv, tolerance)?;
+        let piece = section_piece_from(surface, section, index, start_uv, tolerance)?;
         let mid = evaluate2(&piece.pcurve, 0.5 * (piece.pspan.start + piece.pspan.end))
             .map_err(|_| BooleanError::Evaluation)?;
         if mid.x >= lo.x - slack && mid.x <= hi.x + slack {
@@ -281,10 +391,71 @@ fn section_piece(
     fallback.ok_or(BooleanError::Evaluation)
 }
 
+/// A section edge's implicit pcurve (ADR 0077): the stretch of the other
+/// surface's traced equation, in this face's parameters, from the edge's
+/// start through its middle to its end.
+#[allow(clippy::too_many_arguments)]
+fn implicit_piece(
+    surface: &Surface,
+    other: &Surface,
+    section: &SectionEdge,
+    index: usize,
+    lo: Point2,
+    hi: Point2,
+    traces: &mut Traces,
+    tolerance: Tolerance,
+) -> Result<Piece, BooleanError> {
+    let uv = |p: Point3| -> Result<Point2, BooleanError> {
+        let (u, v) = invert(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        Ok(Point2::new(u, v))
+    };
+    let at = |f: Scalar| {
+        evaluate3(
+            &section.curve,
+            section.span.start + f * (section.span.end - section.span.start),
+        )
+        .map_err(|_| BooleanError::Evaluation)
+    };
+    let closed = (section.start - section.end).length() <= tolerance.linear().max(1e-9);
+    let curves = traces.of(surface, other, lo, hi)?;
+    let stretch = axiolid_nurbs::extract_stretch(
+        curves,
+        periods(surface),
+        uv(section.start)?,
+        [uv(at(1.0 / 3.0)?)?, uv(at(2.0 / 3.0)?)?],
+        uv(section.end)?,
+        closed,
+    )
+    .ok_or(BooleanError::UnsupportedSplit)?;
+    // Whole turns into the face's own range, judged at the middle.
+    let (pu, pv) = periods(surface);
+    let middle = stretch
+        .point(0.5 * stretch.end())
+        .ok_or(BooleanError::Evaluation)?;
+    let into = |x: Scalar, a: Scalar, b: Scalar, periodic: bool| {
+        if !periodic || (x >= a - 1e-9 && x <= b + 1e-9) {
+            return 0.0;
+        }
+        let k = ((0.5 * (a + b) - x) / TAU).round();
+        k * TAU
+    };
+    let stretch = stretch.shifted(
+        into(middle.x, lo.x, hi.x, pu),
+        into(middle.y, lo.y, hi.y, pv),
+    );
+    let end = stretch.end();
+    Ok(Piece {
+        curve: section.curve.clone(),
+        span: section.span,
+        pcurve: Curve2::Implicit(stretch),
+        pspan: Interval::new(0.0, end),
+        source: PieceSource::Section(index),
+    })
+}
+
 /// [`section_piece`] with the start's parameters given.
 fn section_piece_from(
     surface: &Surface,
-    other: &Surface,
     section: &SectionEdge,
     index: usize,
     start_uv: Point2,
@@ -344,7 +515,6 @@ fn section_piece_from(
         (Surface::Cylinder(c), Curve3::Ellipse(ellipse)) => {
             // A plane's oblique cut: v = mean + a cos u + b sin u, with the
             // angle itself as parameter. The plane is the ellipse's own.
-            let _ = other;
             let n = ellipse.frame.x.cross(ellipse.frame.y);
             let nz = n.dot(c.frame.z);
             if nz == 0.0 {
@@ -407,15 +577,22 @@ fn place(
     hi: Point2,
     tolerance: Tolerance,
 ) -> Result<Point2, BooleanError> {
-    let (mut u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
-    if matches!(surface, Surface::Cylinder(_)) {
-        let slack = 1e-9;
-        while u < lo.x - slack {
-            u += TAU;
+    let (mut u, mut v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let (pu, pv) = periods(surface);
+    let slack = 1e-9;
+    let wrap = |x: &mut Scalar, a: Scalar, b: Scalar| {
+        while *x < a - slack {
+            *x += TAU;
         }
-        while u > hi.x + slack {
-            u -= TAU;
+        while *x > b + slack {
+            *x -= TAU;
         }
+    };
+    if pu {
+        wrap(&mut u, lo.x, hi.x);
+    }
+    if pv {
+        wrap(&mut v, lo.y, hi.y);
     }
     Ok(Point2::new(u, v))
 }
@@ -451,9 +628,17 @@ fn split_use(
         }
         // The same point on the pcurve, through the surface's parameters.
         let (u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (pu, pv) = periods(surface);
+        let turns: &[Scalar] = &[0.0, TAU, -TAU, 2.0 * TAU, -2.0 * TAU];
+        let mut shifts = Vec::new();
+        for &a in if pu { turns } else { &turns[..1] } {
+            for &b in if pv { turns } else { &turns[..1] } {
+                shifts.push((a, b));
+            }
+        }
         let mut found = None;
-        for shift in [0.0, TAU, -TAU, 2.0 * TAU, -2.0 * TAU] {
-            if let Ok(p) = invert2(&piece.pcurve, Point2::new(u + shift, v), tolerance) {
+        for (du, dv) in shifts {
+            if let Ok(p) = invert2(&piece.pcurve, Point2::new(u + du, v + dv), tolerance) {
                 let (plo, phi) = (
                     piece.pspan.start.min(piece.pspan.end),
                     piece.pspan.start.max(piece.pspan.end),
@@ -720,7 +905,26 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
         })
         .collect();
     for (hole, polygon) in holes {
-        let probe = polygon[0];
+        // A point just left of the hole's boundary, on the owner's side (a
+        // hole runs clockwise): a point on the boundary itself would also
+        // read as inside the region the same curve bounds from within.
+        let piece = &hole[0];
+        let t = 0.5 * (piece.pspan.start + piece.pspan.end);
+        let at = evaluate2(&piece.pcurve, t).map_err(|_| BooleanError::Evaluation)?;
+        let mut d = derivative2(&piece.pcurve, t).map_err(|_| BooleanError::Evaluation)?;
+        if piece.pspan.end < piece.pspan.start {
+            d = -d;
+        }
+        let size = {
+            let (mut lo, mut hi) = (polygon[0], polygon[0]);
+            for p in &polygon {
+                lo = lo.min(*p);
+                hi = hi.max(*p);
+            }
+            (hi - lo).length()
+        };
+        let left = Vec2::new(-d.y, d.x).normalize_or_zero();
+        let probe = at + left * (1e-6 * size.max(1e-9));
         let owner = outers
             .iter()
             .enumerate()

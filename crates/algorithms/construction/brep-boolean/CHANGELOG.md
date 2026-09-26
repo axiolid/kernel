@@ -11,6 +11,20 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Faces on spheres, cones, tori and elliptical cylinders (#167, ADR 0075
+  stage 2), meeting in any section #119 builds:
+  - A section with no line or conic is traced inside one face's parameter
+    box (ADR 0077).
+  - Every section on every analytic face gets an exact implicit pcurve, cut
+    out of the other surface's traced equation between the section's ends.
+  - A sphere's pole or a cone's apex closes loops as a collapsed piece that
+    is no edge.
+  - Seam circles are cut by the cone of normals along them.
+  - Section branches that cross (a Steinmetz pair) are split where they
+    meet.
+  - Frame components that are only rounding residue are cleared before
+    intersecting.
+
 - Operands that touch (#167, ADR 0075 stage 2): faces on one surface share
   their overlap (each face's edges are imprinted on the other, and a region
   on the other solid's boundary is kept once by normal agreement); sections

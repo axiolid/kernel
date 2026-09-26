@@ -9,7 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Turning points of `Curve2::Implicit` pcurves, isolated with interval
+  bounds, so faces trimmed by them get a certified domain.
+
 ### Fixed
+
+- `FaceDomain::contains` counts winding -1 as inside (a face whose loops
+  run clockwise in its parameters). It also moves a point by whole periods
+  of a torus's second angle into the face's box.
+- Face integrals split an implicit pcurve at its cell boundaries, where
+  its parameter's speed jumps, so adaptive quadrature converges there.
 
 - `FaceDomain::contains` decides a point whose ray passes through a
   boundary vertex or along a boundary piece, by simulation of simplicity

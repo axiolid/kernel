@@ -39,10 +39,18 @@ pub(crate) struct Kept {
     pub(crate) flip: bool,
 }
 
-/// The loops of a kept region, outer first.
+/// The loops of a kept region, outer first, without the collapsed pieces
+/// that closed them at poles in parameters (no edge lies there).
 fn loops_of(kept: &Kept) -> Vec<Vec<Piece>> {
-    let mut out = vec![kept.region.outer.clone()];
-    out.extend(kept.region.holes.iter().cloned());
+    let real = |pieces: &Vec<Piece>| -> Vec<Piece> {
+        pieces
+            .iter()
+            .filter(|p| p.source != crate::split::PieceSource::Collapsed)
+            .cloned()
+            .collect()
+    };
+    let mut out = vec![real(&kept.region.outer)];
+    out.extend(kept.region.holes.iter().map(real));
     out
 }
 

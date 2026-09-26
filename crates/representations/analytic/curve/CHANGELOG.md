@@ -11,6 +11,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `ImplicitCurve2::sub`, `rotated`, `reversed`, `shifted`, `closure` and
+  `turning_points`. `implicit::{bound, bound_simple, partial}` give
+  interval bounds and partial derivatives of a `Field2` over parameter
+  boxes.
+
 - `Curve2::Implicit(ImplicitCurve2)` and
   `Curve3::ImplicitSection(ImplicitSection3)` (#119, ADR 0077): a stretch of
   a `Field2`'s zero set in monotone cells, where each point is the field's

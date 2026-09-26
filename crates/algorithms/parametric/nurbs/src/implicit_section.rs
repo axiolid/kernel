@@ -17,8 +17,9 @@ use core::f64::consts::{FRAC_PI_2, PI};
 use crate::exact_surface_intersection::{
     Derivation, ExactIntersectionCurve, ExactIntersectionRefusal,
 };
-use crate::field::{carrier_of, section_field, Cell};
+use crate::field::{carrier_of, section_field};
 use crate::implicit_trace::{trace, Periodic, TraceRefusal};
+use axiolid_curve::implicit::Cell;
 
 /// `other`'s implicit equation read in `carrier`'s parameters, where both
 /// are analytic: zero exactly where `carrier`'s point lies on `other` (for

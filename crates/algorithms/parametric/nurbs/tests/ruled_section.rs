@@ -208,20 +208,44 @@ fn planes_cut_a_cone_in_hyperbolas_parabolas_and_oblique_ellipses() {
 }
 
 #[test]
-fn a_plane_through_the_apex_is_still_refused_by_name() {
+fn a_plane_through_the_apex_cuts_two_rulings() {
     let cone = Surface::Cone(Cone {
         frame: frame(Point3::ZERO, Vec3::Z),
         radius: 1.0,
         semi_angle: PI / 6.0,
     });
-    // Contains the axis: two rulings through the apex, lines of constant
-    // angle that no graph over the angle can hold.
+    // Contains the axis: two rulings through the apex, rays from it along
+    // the modelled nappe.
     let plane = Surface::Plane(Plane {
         frame: frame(Point3::ZERO, Vec3::X),
     });
+    let curve = exact_surface_intersection(&cone, &plane).expect("rulings");
+    assert_eq!(curve.derivation, Derivation::ConeApexRulings);
+    assert_eq!(curve.branches.len(), 2);
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        assert_eq!(*span, Some(Interval::new(0.0, f64::INFINITY)));
+        for t in [0.0, 0.5, 3.0] {
+            let p = evaluate3(branch, t).unwrap();
+            assert!(off(&cone, p).abs() < 1e-12, "{t}");
+            assert!(off(&plane, p).abs() < 1e-12, "{t}");
+            // On the modelled nappe: at or above the apex (radius >= 0).
+            let Surface::Cone(c) = &cone else {
+                unreachable!()
+            };
+            let apex_v = -c.radius / c.semi_angle.tan();
+            assert!(p.z >= apex_v - 1e-12);
+        }
+    }
+    // Tilted past the semi-angle through the apex: only the apex.
+    let flat = Surface::Plane(Plane {
+        frame: frame(
+            Point3::new(0.0, 0.0, -1.0 / (PI / 6.0).tan()),
+            Vec3::new(0.1, 0.0, 1.0),
+        ),
+    });
     assert_eq!(
-        exact_surface_intersection(&cone, &plane),
-        Err(ExactIntersectionRefusal::UnrepresentableConic)
+        exact_surface_intersection(&cone, &flat),
+        Err(ExactIntersectionRefusal::NotRegularCurve)
     );
 }
 

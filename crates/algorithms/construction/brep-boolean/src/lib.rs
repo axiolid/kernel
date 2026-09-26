@@ -33,8 +33,10 @@ use axiolid_topology::Orientation;
 
 /// The exact boolean of two exact B-rep solids.
 ///
-/// Stage 1 of ADR 0075: faces on planes and cylinders, meeting in lines,
-/// circles and ellipses. Every other configuration is refused by name.
+/// ADR 0075 stages 1 and 2: faces on planes, cylinders, elliptical
+/// cylinders, cones, spheres and tori, meeting in any section
+/// `exact_surface_intersection` builds (lines, conics, ruled, torus and
+/// traced sections).
 ///
 /// # Errors
 ///
@@ -74,17 +76,6 @@ pub fn boolean(
                 })
                 .cloned()
                 .collect();
-            let others = mine
-                .iter()
-                .map(|e| {
-                    let id = if first { e.face_b } else { e.face_a };
-                    other.topology().faces()[id.index()]
-                        .surface
-                        .and_then(|s| other.surfaces().get(s.index()))
-                        .cloned()
-                        .ok_or(BooleanError::DanglingReference)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
             // The other operand's faces on this face's surface: a region
             // may lie on one of them rather than inside or outside.
             let coincident: Vec<usize> = (0..other.topology().faces().len())
@@ -95,7 +86,7 @@ pub fn boolean(
                         .is_some_and(|s| support::same_support(&surface, s, tolerance))
                 })
                 .collect();
-            for region in split_face(operand, face, &mine, &others, first, &cuts, tolerance)? {
+            for region in split_face(operand, face, &mine, first, &cuts, tolerance)? {
                 let sign = match record.orientation {
                     Orientation::Forward if !region.against => 1.0,
                     Orientation::Reversed if region.against => 1.0,

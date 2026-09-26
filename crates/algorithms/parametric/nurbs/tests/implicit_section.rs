@@ -311,3 +311,116 @@ fn random_torus_and_cylinder_pairs_agree_with_a_dense_scan() {
     }
     assert!(met >= 10, "{met}");
 }
+
+// --- B9 for the section families ------------------------------------------
+
+use axiolid_core::Interval;
+use axiolid_nurbs::{
+    exact_curve_surface_intersection, section_curve_surface_intersection, ExactCurveIntersection,
+};
+use axiolid_surface::{Plane, Sphere};
+
+/// Sign changes of `off(surface)` along a curve, sampled densely.
+fn scan_crossings(curve: &Curve3, span: Interval, surface: &Surface) -> usize {
+    let n = 20_000;
+    let mut count = 0;
+    let mut last = None;
+    for i in 0..=n {
+        let t = span.start + (span.end - span.start) * i as f64 / n as f64;
+        let Ok(p) = evaluate3(curve, t) else { continue };
+        let s = match surface {
+            Surface::Plane(q) => q.frame.z.normalize().dot(p - q.frame.origin),
+            Surface::Sphere(q) => (p - q.frame.origin).length() - q.radius,
+            other => off(other, p),
+        }
+        .signum();
+        if let Some(l) = last {
+            if l != s {
+                count += 1;
+            }
+        }
+        last = Some(s);
+    }
+    count
+}
+
+#[test]
+fn a_traced_section_against_planes_and_spheres_agrees_with_sampling() {
+    let bend = torus(Point3::ZERO, Vec3::Z, 3.0, 1.0);
+    let pipe = cylinder(Point3::new(0.0, 3.0, 0.1), Vec3::X, 0.5);
+    let curve = exact_surface_intersection(&bend, &pipe).unwrap();
+    let cutters = [
+        Surface::Plane(Plane {
+            frame: frame(Point3::new(1.9, 3.0, 0.0), Vec3::new(1.0, 0.2, 0.1)),
+        }),
+        Surface::Plane(Plane {
+            frame: frame(Point3::new(0.0, 3.0, 0.2), Vec3::Z),
+        }),
+        Surface::Sphere(Sphere {
+            frame: frame(Point3::new(2.2, 3.1, 0.0), Vec3::Z),
+            radius: 0.8,
+        }),
+    ];
+    let mut total = 0;
+    for branch in &curve.branches {
+        let Curve3::ImplicitSection(s) = branch else {
+            unreachable!()
+        };
+        let span = Interval::new(0.0, s.curve.end());
+        for cutter in &cutters {
+            let ExactCurveIntersection::Points(hits) =
+                exact_curve_surface_intersection(branch, cutter).expect("hits")
+            else {
+                panic!("not contained");
+            };
+            for hit in &hits {
+                let p = evaluate3(branch, hit.parameter.approx()).unwrap();
+                assert!((p - hit.point).length() < 1e-9);
+                let r = match cutter {
+                    Surface::Plane(q) => q.frame.z.normalize().dot(p - q.frame.origin),
+                    Surface::Sphere(q) => (p - q.frame.origin).length() - q.radius,
+                    _ => unreachable!(),
+                };
+                assert!(r.abs() < 1e-9, "{r}");
+            }
+            let crossings = hits.iter().filter(|h| h.multiplicity == 1).count();
+            assert_eq!(crossings, scan_crossings(branch, span, cutter));
+            total += crossings;
+        }
+        // It lies on both of its own surfaces.
+        assert_eq!(
+            exact_curve_surface_intersection(branch, &pipe),
+            Ok(ExactCurveIntersection::Contained)
+        );
+    }
+    assert!(total >= 4, "{total}");
+}
+
+#[test]
+fn a_ruled_section_against_a_plane_by_its_span() {
+    // A pipe tee: the thin pipe's loops on the wide one.
+    let wide = cylinder(Point3::ZERO, Vec3::Z, 2.0);
+    let thin = cylinder(Point3::new(0.0, 0.0, 1.0), Vec3::X, 0.7);
+    let curve = exact_surface_intersection(&wide, &thin).unwrap();
+    let cutter = Surface::Plane(Plane {
+        frame: frame(Point3::new(0.0, 0.0, 1.2), Vec3::new(0.1, 0.3, 1.0)),
+    });
+    let mut total = 0;
+    for (branch, span) in curve.branches.iter().zip(&curve.spans) {
+        let span = span.expect("a ruled piece carries its span");
+        let ExactCurveIntersection::Points(hits) =
+            section_curve_surface_intersection(branch, span, &cutter).expect("hits")
+        else {
+            panic!("not contained");
+        };
+        for hit in &hits {
+            let t = hit.parameter.approx();
+            assert!(t >= span.start.min(span.end) - 1e-9 && t <= span.start.max(span.end) + 1e-9);
+            let p = evaluate3(branch, t).unwrap();
+            assert!((p - hit.point).length() < 1e-8, "{p:?} vs {:?}", hit.point);
+        }
+        assert_eq!(hits.len(), scan_crossings(branch, span, &cutter));
+        total += hits.len();
+    }
+    assert!(total >= 2, "{total}");
+}

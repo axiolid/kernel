@@ -677,23 +677,25 @@ fn an_offset_sphere_and_cylinder_meet_in_a_ruled_section_not_a_circle() {
 }
 
 #[test]
-fn a_hyperbolic_cone_section_is_refused_as_unrepresentable() {
+fn a_plane_containing_the_cone_axis_cuts_rulings_not_a_hyperbola() {
     let cone = Surface::Cone(Cone {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         radius: 1.0,
         semi_angle: std::f64::consts::FRAC_PI_6,
     });
-    // Plane containing the axis direction: the section is a hyperbola,
-    // and Curve3 has no hyperbola variant.
+    // The plane x = 0 contains the axis, so it passes through the apex:
+    // the section degenerates from a hyperbola to its two asymptotes, the
+    // rulings, which are rays from the apex on the modelled nappe.
     let plane = Surface::Plane(Plane {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
     });
-
-    assert_eq!(
-        exact_surface_intersection(&cone, &plane),
-        Err(ExactIntersectionRefusal::UnrepresentableConic),
-        "a parabola or hyperbola must be named, not swapped for an ellipse"
-    );
+    let curve = exact_surface_intersection(&cone, &plane).expect("rulings");
+    assert_eq!(curve.derivation, Derivation::ConeApexRulings);
+    assert_eq!(curve.branches.len(), 2);
+    assert!(curve
+        .branches
+        .iter()
+        .all(|branch| matches!(branch, Curve3::Line(_))));
 }
 
 /// The same shape gets the same verdict in metres, millimetres and
