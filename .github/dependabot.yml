@@ -1,0 +1,14 @@
+# Workflows pin every action to a full commit SHA (a moved tag cannot change
+# what runs). Dependabot keeps those pins current: it proposes the new SHA and
+# rewrites the version comment beside it, one grouped PR a week.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
