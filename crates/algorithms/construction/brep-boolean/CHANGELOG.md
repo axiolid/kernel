@@ -13,3 +13,8 @@ caret rule for `0.x` versions.
 
 - `section_edges` (#167, ADR 0075 stage 1): the exact intersection curves of
   two exact B-reps' faces, each trimmed to where it lies inside both faces.
+  Crossings with a boundary edge are found against the adjacent face's
+  surface, or across a seam against the plane through the ruling.
+- `split_face` (#167): a plane or cylinder face cut along its section edges
+  into regions, traced in the face's parameters with exact pcurves (lines,
+  conics, rulings, circles about the axis, `Sinusoid2` for oblique cuts).

@@ -6,12 +6,14 @@ general-fuse pipeline of ADR 0075, built in stages.
 ## Pipeline and module ownership
 
 - `section.rs`: section edges -- every face pair's exact intersection curve
-  (`axiolid_nurbs::exact_surface_intersection`), trimmed exactly to where it
-  lies inside both faces (curve/boundary-edge crossings from
-  `exact_curve_curve_intersection3`, membership from
-  `axiolid_measure::FaceDomain`).
-- Later stages add face splitting, classification, selection and sewing,
-  each in its own module.
+  (`axiolid_nurbs::exact_surface_intersection`), cut where it crosses a
+  boundary edge (transversally: against the ADJACENT face's surface, or
+  across a seam against the plane through the ruling), membership from
+  `axiolid_measure::FaceDomain`.
+- `split.rs`: one face cut along its section edges into regions, in the
+  face's parameters, with exact pcurves (planes and cylinders in stage 1).
+- Later slices add classification, selection and sewing, each in its own
+  module.
 
 ## Rules
 
@@ -26,3 +28,8 @@ general-fuse pipeline of ADR 0075, built in stages.
 
 - `tests/section_edges.rs`: section edges lie on both boundaries, close into
   loops, and match closed-form curves.
+- `tests/split_faces.rs`: regions cover each face exactly and match
+  closed-form areas.
+- Never cut a section with an exact curve/curve test against a boundary
+  edge: two curves on one surface meet only up to the rounding of their
+  doubles. Cut against a transverse surface.

@@ -2,14 +2,20 @@
 
 //! General exact booleans between exact B-reps with analytic faces.
 //!
-//! The general-fuse pipeline of ADR 0075, built in stages. This first slice
-//! provides the section edges: where two operands' faces cross, as exact
-//! curves trimmed exactly to both faces. Face splitting, classification and
-//! assembly follow in later slices.
+//! The general-fuse pipeline of ADR 0075, built in stages:
+//!
+//! - [`section_edges`]: where two operands' faces cross, as exact curves
+//!   trimmed exactly to both faces;
+//! - [`split_face`]: one face cut along its section edges into regions, in
+//!   the face's own parameters, with exact pcurves.
+//!
+//! Classification and assembly follow in later slices.
 
 mod section;
+mod split;
 
 pub use section::{section_edges, SectionEdge};
+pub use split::{split_face, Piece, PieceSource, Region};
 
 use axiolid_measure::ExactMeasureError;
 use axiolid_topology::FaceId;
@@ -42,6 +48,13 @@ pub enum BooleanError {
     DanglingReference,
     /// A face domain could not be built.
     Measure(ExactMeasureError),
+    /// A face whose surface, or a section on it, has no exact pcurve in
+    /// this stage.
+    UnsupportedSplit,
+    /// The pieces of a split face do not close into loops.
+    UnclosedSplit,
+    /// Two pieces leave a vertex of a split face in the same direction.
+    TangentSplit,
 }
 
 impl fmt::Display for BooleanError {
@@ -64,6 +77,13 @@ impl fmt::Display for BooleanError {
             Self::Evaluation => f.write_str("a curve or surface could not be evaluated"),
             Self::DanglingReference => f.write_str("a handle references missing geometry"),
             Self::Measure(error) => write!(f, "a face domain could not be built: {error}"),
+            Self::UnsupportedSplit => {
+                f.write_str("a face or section has no exact pcurve in this stage")
+            }
+            Self::UnclosedSplit => f.write_str("the pieces of a split face do not close"),
+            Self::TangentSplit => {
+                f.write_str("two pieces leave a vertex of a split face in one direction")
+            }
         }
     }
 }

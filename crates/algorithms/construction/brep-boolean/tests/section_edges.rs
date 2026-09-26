@@ -97,16 +97,18 @@ fn length(edge: &SectionEdge) -> f64 {
 }
 
 #[test]
-fn a_pipe_through_a_box_cuts_two_full_circles() {
+fn a_pipe_through_a_box_cuts_two_circles_split_at_the_seams() {
     let block = solid(square(-1.0, -1.0, 1.0, 1.0), 0.0, 2.0);
     let pipe = solid(ArcRing::circle(Point2::new(0.2, -0.1), 0.5), -1.0, 3.0);
     let edges = section_edges(&block, &pipe, tol()).expect("sections");
     on_both(&block, &pipe, &edges);
     closed(&edges);
-    assert_eq!(edges.len(), 2, "{edges:#?}");
+    // The pipe's column is two half-walls with seams, so each circle is cut
+    // there: one half-circle per (floor or roof, half-wall) pair.
+    assert_eq!(edges.len(), 4, "{edges:#?}");
     for edge in &edges {
         assert!(matches!(edge.curve, Curve3::Circle(_)));
-        assert!((length(edge) - 2.0 * PI * 0.5).abs() < 1e-5);
+        assert!((length(edge) - PI * 0.5).abs() < 1e-5);
     }
 }
 
@@ -164,9 +166,23 @@ fn a_pipe_through_a_sloped_roof_cuts_an_ellipse() {
     let edges = section_edges(&block, &pipe, tol()).expect("sections");
     on_both(&block, &pipe, &edges);
     closed(&edges);
-    assert_eq!(edges.len(), 2, "{edges:#?}");
-    assert!(edges.iter().any(|e| matches!(e.curve, Curve3::Ellipse(_))));
-    assert!(edges.iter().any(|e| matches!(e.curve, Curve3::Circle(_))));
+    // Each is split at the pipe's two seams.
+    assert_eq!(edges.len(), 4, "{edges:#?}");
+    let ellipses = edges
+        .iter()
+        .filter(|e| matches!(e.curve, Curve3::Ellipse(_)))
+        .count();
+    let circles = edges
+        .iter()
+        .filter(|e| matches!(e.curve, Curve3::Circle(_)))
+        .count();
+    assert_eq!((ellipses, circles), (2, 2));
+    let floor: f64 = edges
+        .iter()
+        .filter(|e| matches!(e.curve, Curve3::Circle(_)))
+        .map(length)
+        .sum();
+    assert!((floor - 2.0 * PI * 0.6).abs() < 1e-5, "{floor}");
 }
 
 #[test]
