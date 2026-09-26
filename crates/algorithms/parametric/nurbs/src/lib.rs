@@ -25,7 +25,10 @@ mod curve_projection;
 mod degree;
 mod exact_curve_intersection;
 mod exact_surface_intersection;
+mod field;
 mod fit;
+mod implicit_section;
+mod implicit_trace;
 mod intersection_curve;
 mod periodic;
 mod periodic_surface;
@@ -87,6 +90,7 @@ pub use exact_surface_intersection::{
     exact_surface_intersection, Derivation, ExactIntersectionCurve, ExactIntersectionRefusal,
 };
 pub use fit::{interpolate_curve3, loft_surface};
+pub use implicit_section::{implicit_surface_intersection, section_field_of};
 pub use intersection_curve::{
     construct_curve_surface_points, construct_surface_surface_curves,
     ConstructedCurveSurfacePoint3, ConstructedIntersectionCurve3, IntersectionCurveRefusal,

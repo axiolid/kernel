@@ -8,6 +8,7 @@
 pub mod conic;
 pub mod elevation;
 pub mod evaluate;
+pub mod implicit;
 mod intrinsic;
 mod intrinsic3;
 pub mod linear;
@@ -19,6 +20,9 @@ pub mod torus_section;
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
+pub use implicit::{
+    Axis, Basis, Carrier, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3, Jet2, SurfaceJet,
+};
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
@@ -64,6 +68,11 @@ pub enum Curve2 {
     /// exact pcurve of a plane's or sphere's cut across a torus. See
     /// [`AngleGraph2`] (ADR 0076).
     AngleGraph(AngleGraph2),
+    /// A stretch of a field's zero set, the field being another analytic
+    /// surface's equation read in this surface's parameters: the exact
+    /// pcurve of any section between planes, quadrics and tori. See
+    /// [`ImplicitCurve2`] (ADR 0077).
+    Implicit(ImplicitCurve2),
 }
 
 /// Atomic three-dimensional curve values.
@@ -93,4 +102,8 @@ pub enum Curve3 {
     /// A plane's or sphere's cut across a torus: the torus evaluated along
     /// an [`AngleGraph2`]. See [`TorusSection3`] (ADR 0076).
     TorusSection(TorusSection3),
+    /// An [`ImplicitCurve2`] on its analytic carrier: the section of a
+    /// torus by a cylinder, cone or torus, and any other analytic pair with
+    /// no closed form. See [`ImplicitSection3`] (ADR 0077).
+    ImplicitSection(ImplicitSection3),
 }

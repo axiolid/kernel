@@ -11,6 +11,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Traced sections (#119, ADR 0077): `exact_surface_intersection` now
+  builds a torus against a cylinder, elliptical cylinder, cone or torus off
+  its axis (`Derivation::ImplicitTrace`). The section is found in the
+  torus's parameters as every component of the other surface's equation,
+  by certified subdivision into monotone cells. There is no marching, so no
+  loop is missed for want of a small step. A singular point (surfaces
+  touching where branches cross) is refused as `NotRegularCurve`.
+  `implicit_surface_intersection` exposes it with an explicit window for
+  any analytic pair, and `section_field_of` the field itself.
+
 - `exact_surface_intersection` derives ruled quadric sections (#119,
   ADR 0076): a cylinder or elliptical cylinder against a plane, sphere,
   cylinder, elliptical cylinder or cone, and a cone against a plane, sphere

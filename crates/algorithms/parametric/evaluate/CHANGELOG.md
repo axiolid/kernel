@@ -11,6 +11,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Evaluation, derivatives and inversion of `Curve2::Implicit` and
+  `Curve3::ImplicitSection` (ADR 0077). `invert2` and `invert3` now also
+  cover `QuadraticGraph`, `AngleGraph`, `RuledSection` and `TorusSection`,
+  reading the angle off the point and trying whole turns.
+
 - Evaluation, first and second derivatives of `Curve2::QuadraticGraph`,
   `Curve3::RuledSection`, `Curve2::AngleGraph` and `Curve3::TorusSection`
   (#119, ADR 0076); a parameter outside the graph's

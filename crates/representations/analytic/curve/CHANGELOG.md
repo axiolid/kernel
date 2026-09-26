@@ -11,6 +11,12 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `Curve2::Implicit(ImplicitCurve2)` and
+  `Curve3::ImplicitSection(ImplicitSection3)` (#119, ADR 0077): a stretch of
+  a `Field2`'s zero set in monotone cells, where each point is the field's
+  unique root in its cell's bracket, and the same curve on its analytic
+  `Carrier` (plane, ruled surface, sphere or torus).
+
 - `Curve2::QuadraticGraph(QuadraticGraph2)` and
   `Curve3::RuledSection(RuledSection3)` (#119, ADR 0076): one root branch of
   `a(t) v^2 + b(t) v + c(t) = 0` with degree-2 trigonometric coefficients

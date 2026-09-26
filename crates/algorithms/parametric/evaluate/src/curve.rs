@@ -190,6 +190,8 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
             .angle(t)
             .map(|u| Point2::new(u, t))
             .ok_or_else(|| outside_graph(t)),
+        // The field's unique zero in the cell holding `t` (ADR 0077).
+        Curve2::Implicit(c) => c.point(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -225,6 +227,7 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             .slope(t)
             .map(|slope| Vec2::new(slope, 1.0))
             .ok_or_else(|| outside_graph(t)),
+        Curve2::Implicit(c) => c.derivative(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -257,6 +260,7 @@ pub fn second_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             .bend(t)
             .map(|bend| Vec2::new(bend, 0.0))
             .ok_or_else(|| outside_graph(t)),
+        Curve2::Implicit(c) => c.second_derivative(t).ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,
@@ -310,6 +314,7 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         // The carrier along its section graph (ADR 0076).
         Curve3::RuledSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
+        Curve3::ImplicitSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -335,6 +340,7 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::Intrinsic(i) => crate::frenet::frenet_tangent(i, t),
         Curve3::RuledSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
+        Curve3::ImplicitSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -357,6 +363,7 @@ pub fn second_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         }
         Curve3::RuledSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         Curve3::TorusSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
+        Curve3::ImplicitSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,
@@ -1374,7 +1381,22 @@ pub fn invert2(curve: &Curve2, point: Point2, tolerance: Tolerance) -> GeomResul
         }
         // A graph over its parameter: the parameter of a point IS its first
         // coordinate, then the height is checked.
-        Curve2::Sinusoid(_) => verify2(curve, point.x, point, linear),
+        Curve2::Sinusoid(_) | Curve2::QuadraticGraph(_) => verify2(curve, point.x, point, linear),
+        // A graph over its second coordinate; the angle it returns lies in
+        // `(-pi, pi]`, so a point given a whole turn away is read there.
+        Curve2::AngleGraph(g) => {
+            let u = g.angle(point.y).ok_or_else(|| outside_graph(point.y))?;
+            let turns = ((point.x - u) / std::f64::consts::TAU).round();
+            let shifted = Point2::new(point.x - turns * std::f64::consts::TAU, point.y);
+            verify2(curve, point.y, shifted, linear)
+        }
+        // The cell whose box holds the point; its free value places it.
+        Curve2::Implicit(c) => {
+            let t = c
+                .parameter_of(point)
+                .ok_or_else(|| point_not_on_curve(Scalar::INFINITY, linear))?;
+            verify2(curve, t, point, linear)
+        }
         _ => Err(no_closed_form_inversion()),
     }
 }
@@ -1430,8 +1452,78 @@ pub fn invert3(curve: &Curve3, point: Point3, tolerance: Tolerance) -> GeomResul
             let t = invert_conic_in_frame3(&e.frame, point, e.semi_axis_x, e.semi_axis_y)?;
             verify3(curve, t, point, linear)
         }
+        // Graphs over the carrier angle: the parameter is that angle, read
+        // off the point, up to whole turns (ADR 0076).
+        Curve3::RuledSection(r) => {
+            let carrier = axiolid_curve::Carrier::Ruled(r.carrier);
+            let (u, _) = carrier.parameters(point);
+            first_on_curve(curve, &turns_of(u), point, linear)
+        }
+        Curve3::TorusSection(r) => {
+            let carrier = axiolid_curve::Carrier::Torus(r.torus);
+            let (_, v) = carrier.parameters(point);
+            first_on_curve(curve, &turns_of(v), point, linear)
+        }
+        // The carrier's parameters of the point, over whole turns, located
+        // in the curve's cells (ADR 0077).
+        Curve3::ImplicitSection(r) => {
+            let (u, v) = r.carrier.parameters(point);
+            let (pu, pv) = r.carrier.periodic();
+            let turns = |periodic: bool| -> &'static [Scalar] {
+                if periodic {
+                    &[0.0, 1.0, -1.0, 2.0, -2.0]
+                } else {
+                    &[0.0]
+                }
+            };
+            let mut candidates = Vec::new();
+            for &ku in turns(pu) {
+                for &kv in turns(pv) {
+                    let tau = std::f64::consts::TAU;
+                    if let Some(t) = r
+                        .curve
+                        .parameter_of(Point2::new(u + ku * tau, v + kv * tau))
+                    {
+                        candidates.push(t);
+                    }
+                }
+            }
+            first_on_curve(curve, &candidates, point, linear)
+        }
         _ => Err(no_closed_form_inversion()),
     }
+}
+
+/// An angle and its neighbours a whole turn or two away.
+fn turns_of(angle: Scalar) -> Vec<Scalar> {
+    let tau = std::f64::consts::TAU;
+    vec![
+        angle,
+        angle + tau,
+        angle - tau,
+        angle + 2.0 * tau,
+        angle - 2.0 * tau,
+    ]
+}
+
+/// The first candidate parameter that reproduces the point.
+fn first_on_curve(
+    curve: &Curve3,
+    candidates: &[Scalar],
+    point: Point3,
+    tolerance: Scalar,
+) -> GeomResult<Scalar> {
+    let mut nearest = Scalar::INFINITY;
+    for &t in candidates {
+        if let Ok(found) = evaluate3(curve, t) {
+            let distance = (found - point).length();
+            if distance <= tolerance {
+                return Ok(t);
+            }
+            nearest = nearest.min(distance);
+        }
+    }
+    Err(point_not_on_curve(nearest, tolerance))
 }
 
 /// Project a point into a 3D conic frame and invert it there.

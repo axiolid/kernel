@@ -358,11 +358,14 @@ fn parallel_planes_are_refused() {
 }
 
 #[test]
-fn a_spline_surface_pair_is_refused_explicitly_rather_than_approximated() {
+fn offset_coplanar_tori_touch_where_their_sections_cross() {
     // Two offset tori: both are surfaces of revolution, but the axes do
-    // not coincide, so no closed-form circle family exists. Previously
-    // coaxial torus/plane stood here; that case is now derived, so this
-    // guards a pair that genuinely remains outside the closed forms.
+    // not coincide, so no closed-form circle family exists and the section
+    // is traced (ADR 0077). Their top circles (z = 1, radius 3 about each
+    // centre) meet at two points where both normals are vertical: the
+    // surfaces touch there and the section's branches cross. The trace
+    // refuses such a singular point by name instead of guessing through
+    // it.
     let first = Surface::Torus(Torus {
         frame: frame(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)),
         major_radius: 3.0,
@@ -376,7 +379,7 @@ fn a_spline_surface_pair_is_refused_explicitly_rather_than_approximated() {
 
     assert_eq!(
         exact_surface_intersection(&first, &second),
-        Err(ExactIntersectionRefusal::UnsupportedPair)
+        Err(ExactIntersectionRefusal::NotRegularCurve)
     );
 }
 

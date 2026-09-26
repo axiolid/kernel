@@ -216,6 +216,10 @@ pub enum Derivation {
     /// `A(v) cos u + B(v) sin u = C(v)`; the curve is `u` as a function of
     /// the tube angle `v` (ADR 0076).
     TorusAngleSection,
+    /// The zero set of one surface's equation read in the other's
+    /// parameters, traced into certified monotone cells (ADR 0077): a torus
+    /// against a cylinder, cone or torus off its axis.
+    ImplicitTrace,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -241,7 +245,12 @@ pub fn exact_surface_intersection(
             if let Some(curve) = crate::ruled_section::ruled_section(first, second)? {
                 return Ok(curve);
             }
-            match crate::torus_section::torus_section(first, second)? {
+            if let Some(curve) = crate::torus_section::torus_section(first, second)? {
+                return Ok(curve);
+            }
+            // No closed form at all: traced as an implicit curve on the
+            // compact surface, with certified topology (ADR 0077).
+            match crate::implicit_section::traced_section(first, second)? {
                 Some(curve) => Ok(curve),
                 None => Err(refusal),
             }
