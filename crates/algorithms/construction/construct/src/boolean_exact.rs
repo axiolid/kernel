@@ -29,8 +29,9 @@
 //! the plan is cut into cells by an exact arrangement of every operand
 //! ring, and each cell carries the heights its operands give it. The
 //! result is still exact, with ledge faces where the section changes; it
-//! is never approximated by the nearest prism. A stepped result that
-//! would enclose a cavity is refused by name.
+//! is never approximated by the nearest prism. A result enclosing a cavity
+//! carries it as a void shell; one with several pieces as well as a cavity
+//! is refused by name.
 
 use axiolid_brep::{ExactBRep, FaceName, Operand, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
@@ -405,8 +406,8 @@ fn cap_operand(
 /// # Refused
 ///
 /// A result with several disconnected regions (one `ExactBRep` is one
-/// solid; [`boolean_arc_prisms_exact_solids`] returns every piece), and a
-/// stepped result that would enclose a cavity. Other stepped spans are
+/// solid; [`boolean_arc_prisms_exact_solids`] returns every piece). A
+/// cavity comes back as a void shell of the solid. Other stepped spans are
 /// built as in [`boolean_prisms_exact`], with cylindrical walls split at
 /// the step heights.
 pub fn boolean_arc_prisms_exact(

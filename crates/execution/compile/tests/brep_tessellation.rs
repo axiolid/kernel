@@ -411,15 +411,134 @@ fn tessellated_winding_stays_outward() {
     );
 }
 
-/// Void shells contribute no surface: they are boolean intent, not geometry.
-///
-/// The cavity uses its own smaller corners, so tessellating it would add
-/// distinct positions and triangles rather than welding away invisibly.
-#[test]
-fn void_shells_do_not_add_surface() {
-    let (mut brep, outer) = cube_shell(Orientation::Forward);
+/// Add an axis-aligned box's six quads as a shell of `brep`, wound outward
+/// from the box when `outward`, into it otherwise.
+fn add_box_shell(
+    brep: &mut BRep<axiolid_model::NodeId>,
+    lo: f64,
+    hi: f64,
+    outward: bool,
+) -> axiolid_topology::ShellId {
+    let verts: Vec<_> = (0..8)
+        .map(|i| {
+            let pick = |bit: usize| if i >> bit & 1 == 1 { hi } else { lo };
+            brep.add_vertex(Vertex {
+                position: Vec3::new(pick(0), pick(1), pick(2)),
+            })
+        })
+        .collect();
+    // Corner index bits are (x, y, z); these quads run CCW seen from outside.
+    let quads = [
+        [0usize, 2, 3, 1],
+        [4, 5, 7, 6],
+        [0, 1, 5, 4],
+        [1, 3, 7, 5],
+        [3, 2, 6, 7],
+        [2, 0, 4, 6],
+    ];
+    let mut edges: HashMap<(usize, usize), axiolid_topology::EdgeId> = HashMap::new();
+    let mut faces = Vec::new();
+    for mut quad in quads {
+        if !outward {
+            quad.reverse();
+        }
+        let mut uses = Vec::new();
+        for i in 0..4 {
+            let (a, b) = (quad[i], quad[(i + 1) % 4]);
+            let key = if a < b { (a, b) } else { (b, a) };
+            let id = *edges.entry(key).or_insert_with(|| {
+                brep.add_edge(Edge {
+                    start: verts[key.0],
+                    end: verts[key.1],
+                    curve: None,
+                })
+            });
+            uses.push(EdgeUse {
+                edge: id,
+                orientation: if a == key.0 {
+                    Orientation::Forward
+                } else {
+                    Orientation::Reversed
+                },
+                pcurve: None,
+            });
+        }
+        let wire = brep.add_loop(Loop { edges: uses });
+        faces.push((
+            brep.add_face(Face {
+                surface: None,
+                bounds: vec![FaceBound {
+                    loop_id: wire,
+                    orientation: Orientation::Forward,
+                    outer: true,
+                }],
+                orientation: Orientation::Forward,
+            }),
+            Orientation::Forward,
+        ));
+    }
+    brep.add_shell(Shell {
+        faces,
+        closed: true,
+    })
+}
 
-    // An inner cube face at 0.25..0.75 -- geometrically distinct from the shell.
+fn signed_volume(mesh: &axiolid_mesh::TriMesh) -> f64 {
+    mesh.indices
+        .chunks_exact(3)
+        .map(|t| {
+            let a = mesh.positions[t[0] as usize];
+            let b = mesh.positions[t[1] as usize];
+            let c = mesh.positions[t[2] as usize];
+            a.dot(b.cross(c)) / 6.0
+        })
+        .sum()
+}
+
+/// A void shell is a cavity: it is tessellated, facing into the cavity, so
+/// the mesh encloses the outer volume less the void (#120). It used to be
+/// dropped as "boolean intent", which silently filled every cavity.
+#[test]
+fn a_void_shell_is_tessellated_as_a_cavity() {
+    let (mut brep, outer) = cube_shell(Orientation::Forward);
+    // Wound into the cavity, away from the material: the B-rep sense.
+    let void = add_box_shell(&mut brep, 0.25, 0.75, false);
+    brep.add_solid(Solid {
+        outer,
+        voids: vec![void],
+    });
+
+    let mesh = compile(brep);
+    assert_eq!(mesh.positions.len(), 16, "both shells' corners");
+    assert_eq!(mesh.indices.len(), 72, "both shells' triangles");
+    let volume = signed_volume(&mesh);
+    assert!(
+        (volume - (1.0 - 0.125)).abs() < 1e-12,
+        "cube less its cavity, got {volume}"
+    );
+}
+
+/// A void authored facing out of the cavity (the STEP convention, reversed
+/// on use) still removes material: a cavity cannot add volume.
+#[test]
+fn a_void_authored_outward_still_subtracts() {
+    let (mut brep, outer) = cube_shell(Orientation::Forward);
+    let void = add_box_shell(&mut brep, 0.25, 0.75, true);
+    brep.add_solid(Solid {
+        outer,
+        voids: vec![void],
+    });
+    let volume = signed_volume(&compile(brep));
+    assert!(
+        (volume - (1.0 - 0.125)).abs() < 1e-12,
+        "cube less its cavity, got {volume}"
+    );
+}
+
+/// A void shell that does not close would leave a hole in the mesh.
+#[test]
+fn an_open_void_shell_is_refused() {
+    let (mut brep, outer) = cube_shell(Orientation::Forward);
     let inner: Vec<_> = [
         [0.25, 0.25, 0.25],
         [0.75, 0.25, 0.25],
@@ -460,24 +579,18 @@ fn void_shells_do_not_add_surface() {
         faces: vec![(face, Orientation::Forward)],
         closed: true,
     });
-    // The void belongs to solids()[0], which is what tessellation reads.
     brep.add_solid(Solid {
         outer,
         voids: vec![void],
     });
 
-    let mesh = compile(brep);
-    assert_eq!(
-        mesh.positions.len(),
-        8,
-        "void corners must not reach the mesh"
-    );
-    assert_eq!(
-        mesh.indices.len(),
-        36,
-        "only the outer shell is tessellated; voids are boolean intent"
+    let error = compile_result(brep).expect_err("one face bounds no cavity");
+    assert!(
+        format!("{error:?}").contains("void shell is not closed"),
+        "got {error:?}"
     );
 }
+
 /// A reversed shell sense flips the emitted winding.
 ///
 /// The cube is symmetric enough that a missed flip still yields a closed

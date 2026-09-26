@@ -25,8 +25,9 @@
 //! other ends over that cell (the caller refuses crossings before building).
 //! Each connected piece of solid becomes one `ExactBRep`. Two pieces that
 //! touch along an edge are refused, since that edge would bound four faces
-//! and the result would not be a manifold solid. A result enclosing a
-//! cavity is refused too: void shells are not tessellated in this kernel.
+//! and the result would not be a manifold solid. An enclosed cavity is a
+//! void shell of the piece around it; with several pieces, which piece
+//! holds it is not decided here, so that case is refused.
 
 use std::collections::BTreeMap;
 
@@ -521,8 +522,8 @@ fn plane_integral(level: &Level, ring: &ArcRing) -> Scalar {
 
 /// Build the solids a column description encloses.
 ///
-/// One `ExactBRep` per connected piece of solid. A result with an enclosed
-/// cavity is refused (see below). Faces are grouped into shells by the edges they share;
+/// One `ExactBRep` per connected piece of solid. An enclosed cavity is a
+/// void shell of that solid; with several pieces it is refused (see below). Faces are grouped into shells by the edges they share;
 /// an edge shared by more than two faces means two pieces touch along it,
 /// which is not a manifold solid and is refused.
 pub(crate) fn build_columns(c: &Columns<'_>) -> GeomResult<Vec<ExactBRep>> {
@@ -581,13 +582,16 @@ pub(crate) fn build_columns(c: &Columns<'_>) -> GeomResult<Vec<ExactBRep>> {
             return Err(contract("a column shell encloses no volume"));
         }
     }
-    // An enclosed cavity would be a void shell, and this kernel reads void
-    // shells as boolean intent, not geometry: the mesh compiler tessellates
-    // only the outer shell (`void_shells_do_not_add_surface`). Returning one
-    // would lose the cavity silently downstream, so it is refused by name.
-    if !voids.is_empty() {
+    // A cavity is a void shell of the solid around it; the mesh compiler
+    // tessellates void shells facing into the cavity
+    // (`a_void_shell_is_tessellated_as_a_cavity`). With a single piece that
+    // solid is the only one. With several, the piece around each cavity
+    // would need a containment test this builder does not have, so that
+    // combination is refused by name rather than guessed. Two prism
+    // operands cannot produce it today; the refusal guards future callers.
+    if !voids.is_empty() && outers.len() > 1 {
         return Err(unsupported(
-            "exact prism boolean leaving an enclosed cavity (void shells are not geometry here)",
+            "exact prism boolean leaving an enclosed cavity in a result of several pieces",
         ));
     }
 
@@ -595,7 +599,11 @@ pub(crate) fn build_columns(c: &Columns<'_>) -> GeomResult<Vec<ExactBRep>> {
     for outer in outers {
         let mut emit = Emit::new(c, &plan);
         let outer = emit.shell(&outer)?;
-        solids.push(emit.finish(outer)?);
+        let mut cavities = Vec::with_capacity(voids.len());
+        for void in voids.drain(..) {
+            cavities.push(emit.shell(&void)?);
+        }
+        solids.push(emit.finish(outer, cavities)?);
     }
     Ok(solids)
 }
@@ -719,11 +727,10 @@ impl<'a> Emit<'a> {
         }))
     }
 
-    fn finish(mut self, outer: ShellId) -> GeomResult<ExactBRep> {
-        self.builder.topology_mut().add_solid(Solid {
-            outer,
-            voids: Vec::new(),
-        });
+    fn finish(mut self, outer: ShellId, voids: Vec<ShellId>) -> GeomResult<ExactBRep> {
+        self.builder
+            .topology_mut()
+            .add_solid(Solid { outer, voids });
         let exact = self
             .builder
             .finish()

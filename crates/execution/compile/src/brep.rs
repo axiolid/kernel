@@ -129,10 +129,14 @@ fn check_mesh_budget(mesh: &TriMesh) -> GeomResult<()> {
 
 /// Tessellate one faceted B-rep into a triangle mesh.
 ///
-/// With a solid, only its outer shell contributes surface; void shells are
-/// interior boundaries whose removal is a boolean, not a tessellation, so
-/// emitting them here would produce a mesh with stray inside-out geometry.
-/// The result is [`MeshClosure::Solid`].
+/// With a solid, its outer shell and every void shell contribute surface
+/// and the result is [`MeshClosure::Solid`]. A void is a cavity: its
+/// triangles face into it, away from the material, so the mesh's signed
+/// volume is the outer volume less every cavity. A void can only remove
+/// material, so one authored facing the other way (the STEP convention
+/// stores a void shell outward and reverses it on use) is turned round
+/// rather than added. A void shell that is not closed is refused: it would
+/// leave the mesh open.
 ///
 /// Without a solid -- a surface model, e.g. IFC `IfcShellBasedSurfaceModel`
 /// -- every shell is tessellated as authored and the result is
@@ -161,11 +165,21 @@ pub fn tessellate(
         .first()
     {
         Some(solid) => {
+            let mut shells = Vec::with_capacity(1 + solid.voids.len());
             let shell = brep
                 .shells()
                 .get(solid.outer.index())
                 .ok_or_else(|| GeomError::InvalidInput("outer shell missing".to_string()))?;
-            (vec![shell], MeshClosure::Solid)
+            shells.push(shell);
+            for void in &solid.voids {
+                let shell = brep
+                    .shells()
+                    .get(void.index())
+                    .ok_or_else(|| GeomError::InvalidInput("void shell missing".to_string()))?;
+                check_void_closed(brep, shell)?;
+                shells.push(shell);
+            }
+            (shells, MeshClosure::Solid)
         }
         None if !brep.shells().is_empty() => (brep.shells().iter().collect(), MeshClosure::Surface),
         None => {
@@ -210,25 +224,82 @@ pub fn tessellate(
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
         std::collections::HashMap::new();
     let mut total_curved_records = 0_usize;
-    for &(face_id, shell_sense) in shell_faces() {
+    for (index, shell) in shells.iter().enumerate() {
+        let first_index = mesh.indices.len();
+        for &(face_id, shell_sense) in &shell.faces {
+            let face = brep
+                .faces()
+                .get(face_id.index())
+                .ok_or_else(|| GeomError::InvalidInput("face missing".to_string()))?;
+            let flip = (shell_sense == Orientation::Reversed)
+                ^ (face.orientation == Orientation::Reversed);
+            append_face(
+                &mut mesh,
+                &ctx,
+                face,
+                flip,
+                &mut welded,
+                &mut edge_cache,
+                &mut total_curved_records,
+            )?;
+            check_mesh_budget(&mesh)?;
+        }
+        // Shells after the first of a solid are its voids.
+        if closure == MeshClosure::Solid && index > 0 {
+            face_into_cavity(&mut mesh, first_index);
+        }
+    }
+    Ok((mesh, closure))
+}
+
+/// A void shell must be closed on its own: every edge its faces use is
+/// used exactly twice within it.
+fn check_void_closed(brep: &BRep<NodeId>, shell: &axiolid_topology::Shell) -> GeomResult<()> {
+    let mut uses: std::collections::HashMap<axiolid_topology::EdgeId, usize> =
+        std::collections::HashMap::new();
+    for &(face_id, _) in &shell.faces {
         let face = brep
             .faces()
             .get(face_id.index())
-            .ok_or_else(|| GeomError::InvalidInput("face missing".to_string()))?;
-        let flip =
-            (shell_sense == Orientation::Reversed) ^ (face.orientation == Orientation::Reversed);
-        append_face(
-            &mut mesh,
-            &ctx,
-            face,
-            flip,
-            &mut welded,
-            &mut edge_cache,
-            &mut total_curved_records,
-        )?;
-        check_mesh_budget(&mesh)?;
+            .ok_or_else(|| GeomError::InvalidInput("face missing".to_owned()))?;
+        for bound in &face.bounds {
+            let wire = brep
+                .loops()
+                .get(bound.loop_id.index())
+                .ok_or_else(|| GeomError::InvalidInput("loop missing".to_owned()))?;
+            for use_ in &wire.edges {
+                *uses.entry(use_.edge).or_default() += 1;
+            }
+        }
     }
-    Ok((mesh, closure))
+    if shell.faces.is_empty() || uses.values().any(|&count| count != 2) {
+        return Err(GeomError::InvalidInput(
+            "a void shell is not closed: a cavity must be bounded on every side".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Turn the triangles from `first_index` on so they enclose negative
+/// volume: a cavity removes material whichever way it was authored.
+fn face_into_cavity(mesh: &mut TriMesh, first_index: usize) {
+    let positions = &mesh.positions;
+    let volume: Scalar = mesh.indices[first_index..]
+        .chunks_exact(3)
+        .map(|t| {
+            let (a, b, c) = (
+                positions[t[0] as usize],
+                positions[t[1] as usize],
+                positions[t[2] as usize],
+            );
+            a.dot(b.cross(c))
+        })
+        .sum();
+    if volume > 0.0 {
+        for triangle in mesh.indices[first_index..].chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
 }
 
 /// Triangulate one face and append it to the mesh.

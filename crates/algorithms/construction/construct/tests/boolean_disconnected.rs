@@ -164,16 +164,15 @@ fn an_empty_result_is_an_empty_list_not_an_error() {
 
 #[test]
 fn refusals_other_than_emptiness_are_kept() {
-    // An enclosed cavity is still refused, even by the multi-solid path.
+    // A buried tool now leaves one solid with a void shell (#120,
+    // `column_cavities.rs`), on the multi-solid path too.
     let a = prism(rect(0.0, 0.0, 1.0, 1.0), 0.0, 1.0);
     let buried = prism(rect(0.25, 0.25, 0.75, 0.75), 0.25, 0.75);
-    let error =
+    let pieces =
         boolean_prisms_exact_solids(&a, &buried, BooleanOperator::Difference, Tolerance::METRE)
-            .expect_err("cavity");
-    assert!(
-        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("cavity")),
-        "{error:?}"
-    );
+            .expect("a cavity is representable");
+    assert_eq!(pieces.len(), 1);
+    assert_eq!(pieces[0].topology().solids()[0].voids.len(), 1);
     // Malformed input is still malformed.
     let bad = prism(rect(0.0, 0.0, 1.0, 1.0), 1.0, 0.0);
     assert!(matches!(

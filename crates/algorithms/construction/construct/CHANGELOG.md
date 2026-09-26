@@ -45,6 +45,13 @@ caret rule for `0.x` versions.
 - `boolean_stepped` docs: the bands are the lighter alternative to the
   stepped solid; their volumes are checked against it.
 
+### Changed
+
+- Coaxial booleans whose result encloses a cavity return one solid with a
+  void shell (#120) instead of refusing: `boolean_prisms_exact`,
+  `boolean_arc_prisms_exact` and their `_solids` variants. A cavity in a
+  result of several pieces is still refused by name.
+
 ### Fixed
 
 - Exact revolutions are no longer built inside out (#125).

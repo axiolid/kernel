@@ -62,6 +62,11 @@ All notable changes to Axiolid are documented in this file.
 - Surface models (#161): B-reps with shells but no solid compile to a mesh
   flagged `MeshClosure::Surface`; `CompileOutcome::solid_mesh` refuses a
   volume on it.
+- Cavities (#120): a solid's void shells are tessellated, facing into the
+  cavity, so the mesh encloses the outer volume less every cavity. A void
+  authored facing the other way is turned round; an open void shell is
+  refused. Exact coaxial booleans that bury a tool inside the subject now
+  return one solid with a void shell instead of refusing.
 - Exact mass properties over curved faces (#125, ADR 0073):
   `exact_properties` integrates cylinders, cones, spheres, tori, elliptical
   cylinders, B-spline faces and arc-bounded planar faces over their own

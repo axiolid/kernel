@@ -11,7 +11,6 @@
 //! toy case.
 
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
-use axiolid_contracts::GeomError;
 use axiolid_core::{BooleanOperator, Point2, Tolerance};
 
 /// An axis-aligned rectangle ring, counter-clockwise.
@@ -208,22 +207,24 @@ fn a_difference_with_a_short_tool_leaves_a_pocket() {
     );
 }
 
-/// A tool buried inside the subject would leave an enclosed cavity. This
-/// kernel's consumers read only a solid's outer shell, so a cavity would be
-/// lost downstream without a trace; it is refused by name instead.
+/// A tool buried inside the subject leaves an enclosed cavity. It used to be
+/// refused because the mesh compiler dropped void shells; both now carry it
+/// (#120): one solid, one void shell, the subject less the tool.
 #[test]
-fn a_difference_that_would_enclose_a_cavity_is_refused() {
+fn a_difference_that_encloses_a_cavity_carries_it_as_a_void() {
     let subject = prism(vec![rect_ring(0.0, 0.0, 10.0, 4.0)], 0.0, 3.0);
     let buried = prism(vec![rect_ring(0.0, 0.0, 2.0, 2.0)], 1.0, 2.0);
-    let error = boolean_prisms_exact(
+    let solid = boolean_prisms_exact(
         &subject,
         &buried,
         BooleanOperator::Difference,
         Tolerance::METRE,
     )
-    .expect_err("an enclosed cavity is not representable here");
-    assert!(
-        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("cavity")),
-        "got {error:?}"
-    );
+    .expect("a cavity is representable");
+    let solids = solid.topology().solids();
+    assert_eq!(solids[0].voids.len(), 1, "the cavity is a void shell");
+    let volume = axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .expect("measurable")
+        .signed_volume;
+    assert!((volume - (120.0 - 4.0)).abs() < 1e-9, "volume {volume}");
 }

@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A solid's void shells are tessellated (#120). They were dropped as
+  "boolean intent", which silently filled every cavity of an authored
+  `IfcFacetedBrepWithVoids`-style B-rep and forced the exact booleans to
+  refuse cavities. Each void is emitted facing into the cavity, so the mesh
+  encloses the outer volume less every cavity; a void authored facing out
+  of it (the STEP convention, reversed on use) is turned round, since a
+  cavity can only remove material. A void shell that is not closed is
+  refused rather than leaving the mesh open.
+
 ## [0.3.3] - 2026-09-25
 
 ### Added
