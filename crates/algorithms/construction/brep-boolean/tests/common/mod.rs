@@ -1,7 +1,7 @@
 //! Fixtures the constructors do not build yet: a whole sphere, and any
 //! solid moved by a rigid motion.
 
-#![allow(dead_code)]
+#![allow(dead_code, clippy::needless_range_loop)]
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_core::{Frame3, Interval, Point3, Vec2, Vec3};
@@ -201,4 +201,262 @@ pub fn moved(brep: &ExactBRep, m: Motion) -> ExactBRep {
         b.topology_mut().add_solid(s.clone());
     }
     b.finish().expect("a moved solid")
+}
+
+/// A box over `[0, 2] x [0, 2]` from `z = 0` up to a bi-quadratic Bezier
+/// roof with control heights `h[i][j]` over `x = i`, `y = j`: the roof is
+/// `z(x, y) = sum h[i][j] B_i(x / 2) B_j(y / 2)`, its boundary four quadratic
+/// B-spline edges shared with the vertical walls.
+pub fn spline_box(h: [[f64; 3]; 3]) -> ExactBRep {
+    use axiolid_curve::{BSplineCurve2, BSplineCurve3, BSplineSurface, KnotSpec, Line3};
+    use axiolid_surface::Plane;
+    let roof_point = |i: usize, j: usize| Point3::new(i as f64, j as f64, h[i][j]);
+    let roof = BSplineSurface {
+        u_degree: 2,
+        v_degree: 2,
+        control_points: (0..3)
+            .map(|i| (0..3).map(|j| roof_point(i, j)).collect())
+            .collect(),
+        u_knots: vec![0.0, 1.0],
+        u_multiplicities: vec![3, 3],
+        v_knots: vec![0.0, 1.0],
+        v_multiplicities: vec![3, 3],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::PiecewiseBezier,
+        self_intersect: None,
+    };
+    let curve3 = |pts: Vec<Point3>| {
+        Curve3::BSpline(BSplineCurve3 {
+            degree: 2,
+            control_points: pts,
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![3, 3],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::PiecewiseBezier,
+        })
+    };
+    let curve2 = |pts: Vec<Vec2>| {
+        Curve2::BSpline(BSplineCurve2 {
+            degree: 2,
+            control_points: pts,
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![3, 3],
+            weights: None,
+            closed: false,
+            self_intersect: None,
+            knot_spec: KnotSpec::PiecewiseBezier,
+        })
+    };
+    let mut b = ExactBRepBuilder::default();
+    // Vertices: bottom corners 0..4, top corners 4..8, anticlockwise from
+    // (0, 0).
+    let corners = [(0usize, 0usize), (2, 0), (2, 2), (0, 2)];
+    let mut v = Vec::new();
+    for (i, j) in corners {
+        v.push(b.topology_mut().add_vertex(Vertex {
+            position: Point3::new(i as f64, j as f64, 0.0),
+        }));
+    }
+    for (i, j) in corners {
+        v.push(b.topology_mut().add_vertex(Vertex {
+            position: roof_point(i, j),
+        }));
+    }
+    let line = |b: &mut ExactBRepBuilder, from: Point3, to: Point3| {
+        b.add_curve3(Curve3::Line(Line3 {
+            origin: from,
+            direction: to - from,
+        }))
+    };
+    let pos = |k: usize| {
+        let (i, j) = corners[k % 4];
+        if k < 4 {
+            Point3::new(i as f64, j as f64, 0.0)
+        } else {
+            roof_point(i, j)
+        }
+    };
+    let edge = |b: &mut ExactBRepBuilder, s: usize, e: usize, curve| {
+        let id = b.topology_mut().add_edge(Edge {
+            start: v[s],
+            end: v[e],
+            curve: Some(curve),
+        });
+        b.set_edge_interval(id, Interval::new(0.0, 1.0));
+        id
+    };
+    // Bottom edges 0->1->2->3->0, verticals k -> k+4, roof edges along the
+    // patch boundary: v = 0 (y = 0), u = 1 (x = 2), v = 1 (y = 2), u = 0.
+    let mut bottom = Vec::new();
+    for k in 0..4 {
+        let c = line(&mut b, pos(k), pos((k + 1) % 4));
+        bottom.push(edge(&mut b, k, (k + 1) % 4, c));
+    }
+    let mut vertical = Vec::new();
+    for k in 0..4 {
+        let c = line(&mut b, pos(k), pos(k + 4));
+        vertical.push(edge(&mut b, k, k + 4, c));
+    }
+    let rows = [
+        (0..3).map(|i| roof_point(i, 0)).collect::<Vec<_>>(),
+        (0..3).map(|j| roof_point(2, j)).collect(),
+        (0..3).map(|i| roof_point(2 - i, 2)).collect(),
+        (0..3).map(|j| roof_point(0, 2 - j)).collect(),
+    ];
+    let mut top = Vec::new();
+    for k in 0..4 {
+        let c = b.add_curve3(curve3(rows[k].clone()));
+        top.push(edge(&mut b, 4 + k, 4 + (k + 1) % 4, c));
+    }
+    let add_loop =
+        |b: &mut ExactBRepBuilder,
+         uses: Vec<(axiolid_topology::EdgeId, Orientation, Curve2, Interval)>| {
+            let mut edges = Vec::new();
+            let mut spans = Vec::new();
+            for (edge, orientation, pcurve, span) in uses {
+                let pc = b.add_curve2(pcurve);
+                edges.push(EdgeUse {
+                    edge,
+                    orientation,
+                    pcurve: Some(pc),
+                });
+                spans.push(span);
+            }
+            let id = b.topology_mut().add_loop(Loop { edges });
+            for (k, span) in spans.into_iter().enumerate() {
+                b.set_pcurve_interval(id, k, span);
+            }
+            id
+        };
+    let fwd = Interval::new(0.0, 1.0);
+    let rev = Interval::new(1.0, 0.0);
+    let seg = |a: Vec2, bb: Vec2| {
+        Curve2::Line(Line2 {
+            origin: a,
+            direction: bb - a,
+        })
+    };
+    let mut faces = Vec::new();
+    let mut face = |b: &mut ExactBRepBuilder, surface: Surface, ring, orientation| {
+        let s = b.add_surface(surface);
+        let f = b.topology_mut().add_face(Face {
+            surface: Some(s),
+            bounds: vec![FaceBound {
+                loop_id: ring,
+                orientation: Orientation::Forward,
+                outer: true,
+            }],
+            orientation,
+        });
+        faces.push((f, Orientation::Forward));
+    };
+    // Bottom: plane z = 0 in world (x, y); loop anticlockwise, facing down.
+    let world = Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    };
+    let c2 = |k: usize| {
+        let (i, j) = corners[k];
+        Vec2::new(i as f64, j as f64)
+    };
+    let ring = add_loop(
+        &mut b,
+        (0..4)
+            .map(|k| {
+                (
+                    bottom[k],
+                    Orientation::Forward,
+                    seg(c2(k), c2((k + 1) % 4)),
+                    fwd,
+                )
+            })
+            .collect(),
+    );
+    face(
+        &mut b,
+        Surface::Plane(Plane { frame: world }),
+        ring,
+        Orientation::Reversed,
+    );
+    // Roof: the patch, (u, v) in [0, 1]^2, anticlockwise, facing up.
+    let uv = [
+        Vec2::new(0.0, 0.0),
+        Vec2::new(1.0, 0.0),
+        Vec2::new(1.0, 1.0),
+        Vec2::new(0.0, 1.0),
+    ];
+    let ring = add_loop(
+        &mut b,
+        (0..4)
+            .map(|k| {
+                (
+                    top[k],
+                    Orientation::Forward,
+                    seg(uv[k], uv[(k + 1) % 4]),
+                    fwd,
+                )
+            })
+            .collect(),
+    );
+    face(&mut b, Surface::BSpline(roof), ring, Orientation::Forward);
+    // Walls: wall k runs from corner k to corner k + 1, outward. Its plane
+    // frame: x along the bottom edge, y up, z = x cross y outward.
+    for k in 0..4 {
+        let (a, bb) = (pos(k), pos((k + 1) % 4));
+        let x = (bb - a).normalize();
+        let frame = Frame3 {
+            origin: a,
+            x,
+            y: Vec3::Z,
+            z: x.cross(Vec3::Z),
+        };
+        let local = |p: Point3| Vec2::new((p - a).dot(x), p.z);
+        let length = (bb - a).length();
+        let top_pts: Vec<Vec2> = rows[k].iter().map(|p| local(*p)).collect();
+        let ring = add_loop(
+            &mut b,
+            vec![
+                (
+                    bottom[k],
+                    Orientation::Forward,
+                    seg(Vec2::ZERO, Vec2::new(length, 0.0)),
+                    fwd,
+                ),
+                (
+                    vertical[(k + 1) % 4],
+                    Orientation::Forward,
+                    seg(Vec2::new(length, 0.0), local(pos(4 + (k + 1) % 4))),
+                    fwd,
+                ),
+                (top[k], Orientation::Reversed, curve2(top_pts), rev),
+                (
+                    vertical[k],
+                    Orientation::Reversed,
+                    seg(Vec2::ZERO, local(pos(4 + k))),
+                    rev,
+                ),
+            ],
+        );
+        face(
+            &mut b,
+            Surface::Plane(Plane { frame }),
+            ring,
+            Orientation::Forward,
+        );
+    }
+    let shell = b.topology_mut().add_shell(Shell {
+        faces: faces.clone(),
+        closed: true,
+    });
+    b.topology_mut().add_solid(Solid {
+        outer: shell,
+        voids: Vec::new(),
+    });
+    b.finish().expect("a spline-roofed box")
 }

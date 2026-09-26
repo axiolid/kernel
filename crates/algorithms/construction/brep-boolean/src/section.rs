@@ -36,8 +36,8 @@
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance};
 use axiolid_curve::Curve3;
-use axiolid_evaluate::surface::{invert, normal};
-use axiolid_evaluate::{curve::invert3, evaluate3};
+use axiolid_evaluate::surface::{locate, normal};
+use axiolid_evaluate::{curve::locate3, evaluate3};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{
     exact_curve_curve_intersection3, exact_curve_surface_intersection, exact_surface_intersection,
@@ -124,12 +124,19 @@ pub fn section_edges(
             let branches: Vec<(Curve3, Option<Interval>)> = match closed_form {
                 Some(curve) => curve.branches.into_iter().zip(curve.spans).collect(),
                 None => {
+                    // Only a B-spline can carry a section with a B-spline
+                    // (it has no equation to read elsewhere); otherwise the
+                    // compact and low-degree surfaces carry best.
                     let rank = |s: &Surface| match s {
+                        Surface::BSpline(_) => 4,
                         Surface::Torus(_) => 3,
                         Surface::Sphere(_) => 2,
                         Surface::Plane(_) => 0,
                         _ => 1,
                     };
+                    if matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_))) {
+                        return Err(BooleanError::UnsupportedSection);
+                    }
                     let (carrier, other, side, face) = if rank(sa) >= rank(sb) {
                         (sa, sb, &side_a, fa)
                     } else {
@@ -162,8 +169,8 @@ pub fn section_edges(
                 };
                 let branch = branch.clone();
                 let branch = &branch;
-                let (mut cuts, along_a) = side_a.cuts(fa, branch, tolerance)?;
-                let (more, along_b) = side_b.cuts(fb, branch, tolerance)?;
+                let (mut cuts, along_a) = side_a.cuts(fa, branch, sb, tolerance)?;
+                let (more, along_b) = side_b.cuts(fb, branch, sa, tolerance)?;
                 cuts.extend(more);
                 // Branches of one section meet only where the surfaces touch
                 // (the two ellipses of a Steinmetz pair): such a point splits
@@ -230,7 +237,7 @@ fn touching(
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
     let at = |s: &Surface| -> Result<axiolid_core::Vec3, BooleanError> {
-        let (u, v) = invert(s, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(s, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
         Ok(normal(s, u, v)
             .map_err(|_| BooleanError::Evaluation)?
             .normalize())
@@ -255,7 +262,7 @@ fn imprint(
         // The surface that bounds the imprinted edge in its own operand:
         // together with the shared surface it defines the edge's curve.
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
-        let (cuts, along) = onto.cuts(other, &curve, tolerance)?;
+        let (cuts, along) = onto.cuts(other, &curve, &bounding, tolerance)?;
         for piece in pieces_within(&curve, span, cuts) {
             let mid = evaluate3(&curve, 0.5 * (piece.start + piece.end))
                 .map_err(|_| BooleanError::Evaluation)?;
@@ -365,7 +372,7 @@ fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Result<Vec<(Curve3, Interval
                 let end = sub.end();
                 Ok((
                     Curve3::ImplicitSection(axiolid_curve::ImplicitSection3 {
-                        carrier: section.carrier,
+                        carrier: section.carrier.clone(),
                         curve: sub,
                     }),
                     Interval::new(0.0, end),
@@ -473,7 +480,7 @@ impl<'a> Side<'a> {
             }
         }
         let (u, v) =
-            invert(self.surface(face)?, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+            locate(self.surface(face)?, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
         match self.domains[face]
             .contains(Point2::new(u, v))
             .map_err(BooleanError::Measure)?
@@ -517,10 +524,16 @@ impl<'a> Side<'a> {
     /// and the edges it runs along (lying in the adjacent face's surface
     /// too), which cut it at their ends.
     #[allow(clippy::type_complexity)]
+    ///
+    /// `meets` is the other surface `curve` lies on. Where the curve cannot
+    /// be intersected with the adjacent face's surface (a B-spline), the
+    /// edge is intersected with `meets` instead: the curve crosses the edge
+    /// exactly where the edge crosses `meets`.
     fn cuts(
         &self,
         face: usize,
         curve: &Curve3,
+        meets: &Surface,
         tolerance: Tolerance,
     ) -> Result<(Vec<Scalar>, Vec<(Curve3, Interval)>), BooleanError> {
         let topology = self.brep.topology();
@@ -575,7 +588,7 @@ impl<'a> Side<'a> {
                         for t in [span.start, span.end] {
                             let end =
                                 evaluate3(edge_curve, t).map_err(|_| BooleanError::Evaluation)?;
-                            if let Ok(s) = invert3(curve, end, tolerance) {
+                            if let Ok(s) = locate3(curve, end, tolerance) {
                                 let on =
                                     evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
                                 if (on - end).length() <= tolerance.linear().max(1e-9) {
@@ -586,7 +599,24 @@ impl<'a> Side<'a> {
                         along.push((edge_curve.clone(), span));
                     }
                     Ok(_) => return Err(BooleanError::UnsupportedSection),
-                    Err(_) => return Err(BooleanError::UnsupportedTrim),
+                    Err(_) => {
+                        let hits = match exact_curve_surface_intersection(edge_curve, meets) {
+                            Ok(ExactCurveIntersection::Points(hits)) => hits,
+                            _ => return Err(BooleanError::UnsupportedTrim),
+                        };
+                        for hit in hits {
+                            if !on_span(edge_curve, span, hit.point, tolerance)? {
+                                continue;
+                            }
+                            if let Ok(s) = locate3(curve, hit.point, tolerance) {
+                                let on =
+                                    evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
+                                if (on - hit.point).length() <= tolerance.linear().max(1e-9) {
+                                    out.push(s);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -631,7 +661,7 @@ impl Side<'_> {
         };
         let mid = evaluate3(edge_curve, 0.5 * (span.start + span.end))
             .map_err(|_| BooleanError::Evaluation)?;
-        let (u, v) = invert(own, mid, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(own, mid, tolerance).map_err(|_| BooleanError::Evaluation)?;
         let n = normal(own, u, v).map_err(|_| BooleanError::Evaluation)?;
         let across = line.direction.cross(n);
         let length = across.length();
@@ -665,7 +695,7 @@ fn normal_sweep(
     let x = f.x.normalize();
     let y = axis.cross(x);
     let p = f.origin + x * circle.radius;
-    let (u, v) = invert(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let (u, v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
     let n = normal(surface, u, v)
         .map_err(|_| BooleanError::Evaluation)?
         .normalize();
@@ -714,7 +744,7 @@ fn on_edge(
     point: Point3,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let Ok(t) = invert3(curve, point, tolerance) else {
+    let Ok(t) = locate3(curve, point, tolerance) else {
         return Ok(false);
     };
     let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
@@ -732,7 +762,7 @@ fn on_span(
     point: Point3,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let t = invert3(curve, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let t = locate3(curve, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
     let (lo, hi) = (span.start.min(span.end), span.start.max(span.end));
     let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
     let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));

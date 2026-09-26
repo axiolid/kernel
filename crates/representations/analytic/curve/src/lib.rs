@@ -15,13 +15,15 @@ pub mod linear;
 pub mod quadric_section;
 pub mod sinusoid;
 pub mod spline;
+pub mod spline_surface;
 pub mod torus_section;
 
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
 pub use implicit::{
-    Axis, Basis, Carrier, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3, Jet2, SurfaceJet,
+    Axis, Basis, Carrier, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3, Jet2,
+    LiftedCurve2, PatchField2, SeriesField2, SurfaceJet,
 };
 pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
@@ -29,6 +31,7 @@ pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use sinusoid::Sinusoid2;
 pub use spline::{BSplineCurve, BSplineCurve2, BSplineCurve3, KnotSpec};
+pub use spline_surface::BSplineSurface;
 pub use torus_section::{AngleGraph2, TorusCarrier, TorusSection3};
 
 /// The focused linear vocabulary, re-exported for consumers that want to name
@@ -73,6 +76,10 @@ pub enum Curve2 {
     /// pcurve of any section between planes, quadrics and tori. See
     /// [`ImplicitCurve2`] (ADR 0077).
     Implicit(ImplicitCurve2),
+    /// A space curve read in an analytic surface's parameters, sharing the
+    /// curve's parameter: the pcurve of a B-spline's section on the analytic
+    /// face it meets. See [`LiftedCurve2`] (ADR 0077).
+    Lifted(LiftedCurve2),
 }
 
 /// Atomic three-dimensional curve values.

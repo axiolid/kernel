@@ -1101,9 +1101,10 @@ pub fn invert(
         }
         // A B-spline has no closed-form inverse; recovering parameters
         // needs iterative closest-point with its own seeding and
-        // convergence contract. `Surface` is non-exhaustive, so any
-        // future variant lands here too and is refused by name rather
-        // than silently taking an analytic branch that does not fit it.
+        // convergence contract, which `locate` provides. `Surface` is
+        // non-exhaustive, so any future variant lands here too and is
+        // refused by name rather than silently taking an analytic branch
+        // that does not fit it.
         _ => {
             return Err(GeomError::Unsupported {
                 backend: ScalarSurface::ID,
@@ -1302,4 +1303,82 @@ fn angle_about_axis(local: Vec3, surface: &str) -> GeomResult<Scalar> {
         )));
     }
     Ok(local.y.atan2(local.x))
+}
+
+/// Parameters of a point on a surface, iterating where no closed form
+/// exists: [`invert`] first, and for a B-spline the nearest point of a
+/// sample grid refined by Gauss-Newton. The answer must reproduce the point
+/// within `tolerance`, as [`invert`]'s must; where a surface overlaps itself
+/// one of the preimages is returned.
+///
+/// # Errors
+///
+/// The point is not on the surface, or the surface cannot be evaluated.
+pub fn locate(
+    surface: &Surface,
+    point: Point3,
+    tolerance: axiolid_core::Tolerance,
+) -> GeomResult<(Scalar, Scalar)> {
+    match (invert(surface, point, tolerance), surface) {
+        (Ok(uv), _) => Ok(uv),
+        (Err(_), Surface::BSpline(b)) => {
+            let (u, v) = spline_parameters(b, point)?;
+            let residual = (evaluate(surface, u, v)? - point).length();
+            if residual > tolerance.linear() {
+                return Err(GeomError::Degenerate(format!(
+                    "point is {residual} from the B-spline surface, beyond the {} tolerance",
+                    tolerance.linear()
+                )));
+            }
+            Ok((u, v))
+        }
+        (Err(error), _) => Err(error),
+    }
+}
+
+/// Parameters of a point on a B-spline surface: the nearest point of a
+/// 24 x 24 sample grid over the domain, refined by Gauss-Newton on
+/// `S(u, v) = p` within the domain.
+fn spline_parameters(b: &BSplineSurface, point: Point3) -> GeomResult<(Scalar, Scalar)> {
+    let ((u0, u1), (v0, v1)) = b
+        .domain()
+        .ok_or_else(|| GeomError::InvalidInput("malformed B-spline surface".to_owned()))?;
+    let n = 24;
+    let mut best = (Scalar::INFINITY, u0, v0);
+    for i in 0..=n {
+        for j in 0..=n {
+            let (u, v) = (
+                u0 + (u1 - u0) * i as Scalar / n as Scalar,
+                v0 + (v1 - v0) * j as Scalar / n as Scalar,
+            );
+            if let Some(jet) = b.jet(u, v) {
+                let d = (jet.point - point).length();
+                if d < best.0 {
+                    best = (d, u, v);
+                }
+            }
+        }
+    }
+    let (_, mut u, mut v) = best;
+    for _ in 0..60 {
+        let jet = b
+            .jet(u, v)
+            .ok_or_else(|| GeomError::Degenerate("B-spline weight vanished".to_owned()))?;
+        let r = jet.point - point;
+        // Normal equations of the 3x2 system [S_u S_v] (du, dv) = -r.
+        let (a, bb, c) = (jet.u.dot(jet.u), jet.u.dot(jet.v), jet.v.dot(jet.v));
+        let (g0, g1) = (-jet.u.dot(r), -jet.v.dot(r));
+        let det = a * c - bb * bb;
+        if det == 0.0 || !det.is_finite() {
+            break;
+        }
+        let (du, dv) = ((c * g0 - bb * g1) / det, (a * g1 - bb * g0) / det);
+        let (nu, nv) = ((u + du).clamp(u0, u1), (v + dv).clamp(v0, v1));
+        let moved = (nu - u).abs() + (nv - v).abs();
+        (u, v) = (nu, nv);
+        if moved <= 4.0 * Scalar::EPSILON * (1.0 + u.abs() + v.abs()) {
+            break;
+        }
+    }
+    Ok((u, v))
 }

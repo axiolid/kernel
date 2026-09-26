@@ -11,6 +11,14 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `surface::locate`, `curve::locate2` and `curve::locate3`: parameters of
+  a point, iterating where no closed form exists (B-spline surfaces and
+  curves: seeded Newton, verified by the round trip). `invert`, `invert2`
+  and `invert3` keep their closed-form-only contract.
+- Evaluation, derivatives and inversion of `Curve2::Lifted`. An
+  `ImplicitSection` on a B-spline carrier is inverted through the
+  surface's `locate`.
+
 - Evaluation, derivatives and inversion of `Curve2::Implicit` and
   `Curve3::ImplicitSection` (ADR 0077). `invert2` and `invert3` now also
   cover `QuadraticGraph`, `AngleGraph`, `RuledSection` and `TorusSection`,

@@ -99,7 +99,7 @@ fn follows_in_order(
         let Ok(lifted) = surface::evaluate(support, uv.x, uv.y) else {
             return Scalar::INFINITY;
         };
-        let Ok(t) = curve::invert3(curve3, lifted, tolerance) else {
+        let Ok(t) = curve::locate3(curve3, lifted, tolerance) else {
             return Scalar::INFINITY;
         };
         // Into the edge's span, by whole turns for a closed conic.

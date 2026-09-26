@@ -192,6 +192,11 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
             .ok_or_else(|| outside_graph(t)),
         // The field's unique zero in the cell holding `t` (ADR 0077).
         Curve2::Implicit(c) => c.point(t).ok_or_else(|| outside_graph(t)),
+        // The space curve's point, read on the carrier.
+        Curve2::Lifted(l) => {
+            let p = evaluate3(&l.curve, t)?;
+            l.unwrap_at(t, p).ok_or_else(|| outside_graph(t))
+        }
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -228,6 +233,7 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             .map(|slope| Vec2::new(slope, 1.0))
             .ok_or_else(|| outside_graph(t)),
         Curve2::Implicit(c) => c.derivative(t).ok_or_else(|| outside_graph(t)),
+        Curve2::Lifted(l) => lifted_rates(l, t).map(|(d, _)| d),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -261,6 +267,7 @@ pub fn second_derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
             .map(|bend| Vec2::new(bend, 0.0))
             .ok_or_else(|| outside_graph(t)),
         Curve2::Implicit(c) => c.second_derivative(t).ok_or_else(|| outside_graph(t)),
+        Curve2::Lifted(l) => lifted_rates(l, t).map(|(_, dd)| dd),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,
@@ -285,6 +292,28 @@ pub fn jet2(curve: &Curve2, t: Scalar) -> GeomResult<CurveJet<Point2, Vec2>> {
         first: derivative2(curve, t)?,
         second: second_derivative2(curve, t)?,
     })
+}
+
+/// First and second parameter rates of a lifted pcurve: `C' = S_u u' + S_v
+/// v'`, and `C'' = S_uu u'^2 + 2 S_uv u' v' + S_vv v'^2 + S_u u'' + S_v v''`,
+/// each solved in the least-squares sense on the tangent plane.
+fn lifted_rates(l: &axiolid_curve::LiftedCurve2, t: Scalar) -> GeomResult<(Vec2, Vec2)> {
+    let p = evaluate3(&l.curve, t)?;
+    let uv = l.unwrap_at(t, p).ok_or_else(|| outside_graph(t))?;
+    let jet = l.carrier.jet(uv.x, uv.y);
+    let (a, b, c) = (jet.u.dot(jet.u), jet.u.dot(jet.v), jet.v.dot(jet.v));
+    let det = a * c - b * b;
+    if det == 0.0 || !det.is_finite() {
+        return Err(outside_graph(t));
+    }
+    let solve = |w: Vec3| {
+        let (g0, g1) = (jet.u.dot(w), jet.v.dot(w));
+        Vec2::new((c * g0 - b * g1) / det, (a * g1 - b * g0) / det)
+    };
+    let d = solve(derivative3(&l.curve, t)?);
+    let rest = second_derivative3(&l.curve, t)?
+        - (jet.uu * (d.x * d.x) + jet.uv * (2.0 * d.x * d.y) + jet.vv * (d.y * d.y));
+    Ok((d, solve(rest)))
 }
 
 /// A quadratic-graph parameter where its root does not exist, diverges, or
@@ -1390,6 +1419,12 @@ pub fn invert2(curve: &Curve2, point: Point2, tolerance: Tolerance) -> GeomResul
             let shifted = Point2::new(point.x - turns * std::f64::consts::TAU, point.y);
             verify2(curve, point.y, shifted, linear)
         }
+        // The space curve's parameter of the point lifted onto the carrier.
+        Curve2::Lifted(l) => {
+            let lifted = l.carrier.jet(point.x, point.y).point;
+            let t = invert3(&l.curve, lifted, tolerance)?;
+            verify2(curve, t, point, linear)
+        }
         // The cell whose box holds the point; its free value places it.
         Curve2::Implicit(c) => {
             let t = c
@@ -1467,6 +1502,17 @@ pub fn invert3(curve: &Curve3, point: Point3, tolerance: Tolerance) -> GeomResul
         // The carrier's parameters of the point, over whole turns, located
         // in the curve's cells (ADR 0077).
         Curve3::ImplicitSection(r) => {
+            // A B-spline carrier has no closed-form inverse: the surface is
+            // inverted, then the cell located.
+            if let axiolid_curve::Carrier::Spline(b) = &r.carrier {
+                let surface = axiolid_surface::Surface::BSpline((**b).clone());
+                let (u, v) = crate::surface::locate(&surface, point, tolerance)?;
+                let t = r
+                    .curve
+                    .parameter_of(Point2::new(u, v))
+                    .ok_or_else(|| point_not_on_curve(Scalar::INFINITY, linear))?;
+                return verify3(curve, t, point, linear);
+            }
             let (u, v) = r.carrier.parameters(point);
             let (pu, pv) = r.carrier.periodic();
             let turns = |periodic: bool| -> &'static [Scalar] {
@@ -1524,6 +1570,108 @@ fn first_on_curve(
         }
     }
     Err(point_not_on_curve(nearest, tolerance))
+}
+
+/// Parameter of a point on a 3D curve, iterating where no closed form
+/// exists: [`invert3`] first, and for a B-spline the nearest of 64 samples
+/// per span refined by Newton on `|C(t) - p|^2`. The answer must reproduce
+/// the point within `tolerance`, as [`invert3`]'s must.
+///
+/// # Errors
+///
+/// The point is not on the curve, or the family cannot be evaluated.
+pub fn locate3(curve: &Curve3, point: Point3, tolerance: Tolerance) -> GeomResult<Scalar> {
+    match invert3(curve, point, tolerance) {
+        Ok(t) => Ok(t),
+        Err(error) => match curve {
+            Curve3::BSpline(b) => {
+                let domain = spline_domain(b);
+                let t = nearest_parameter(
+                    domain,
+                    b.control_points.len().max(2) * 64,
+                    |t| evaluate3(curve, t).map(|p| (p - point).length()),
+                    |t| {
+                        let (p, d, dd) = (
+                            evaluate3(curve, t)?,
+                            derivative3(curve, t)?,
+                            second_derivative3(curve, t)?,
+                        );
+                        let r = p - point;
+                        Ok((r.dot(d), d.dot(d) + r.dot(dd)))
+                    },
+                )?;
+                verify3(curve, t, point, tolerance.linear())
+            }
+            _ => Err(error),
+        },
+    }
+}
+
+/// Parameter of a point on a 2D curve, iterating where no closed form
+/// exists. See [`locate3`].
+///
+/// # Errors
+///
+/// The point is not on the curve, or the family cannot be evaluated.
+pub fn locate2(curve: &Curve2, point: Point2, tolerance: Tolerance) -> GeomResult<Scalar> {
+    match invert2(curve, point, tolerance) {
+        Ok(t) => Ok(t),
+        Err(error) => match curve {
+            Curve2::BSpline(b) => {
+                let domain = spline_domain(b);
+                let t = nearest_parameter(
+                    domain,
+                    b.control_points.len().max(2) * 64,
+                    |t| evaluate2(curve, t).map(|p| (p - point).length()),
+                    |t| {
+                        let (p, d, dd) = (
+                            evaluate2(curve, t)?,
+                            derivative2(curve, t)?,
+                            second_derivative2(curve, t)?,
+                        );
+                        let r = p - point;
+                        Ok((r.dot(d), d.dot(d) + r.dot(dd)))
+                    },
+                )?;
+                verify2(curve, t, point, tolerance.linear())
+            }
+            _ => Err(error),
+        },
+    }
+}
+
+/// The parameter in `domain` nearest the target: the best of `samples`
+/// evenly spaced values, then Newton on the distance's derivative
+/// (`gradient` returns it and its derivative), kept inside the domain.
+fn nearest_parameter(
+    domain: Interval,
+    samples: usize,
+    distance: impl Fn(Scalar) -> GeomResult<Scalar>,
+    gradient: impl Fn(Scalar) -> GeomResult<(Scalar, Scalar)>,
+) -> GeomResult<Scalar> {
+    let (lo, hi) = (domain.start.min(domain.end), domain.start.max(domain.end));
+    let mut best = (Scalar::INFINITY, lo);
+    for i in 0..=samples {
+        let t = lo + (hi - lo) * i as Scalar / samples as Scalar;
+        let d = distance(t)?;
+        if d < best.0 {
+            best = (d, t);
+        }
+    }
+    let mut t = best.1;
+    for _ in 0..60 {
+        let (g, h) = gradient(t)?;
+        if h <= 0.0 || !h.is_finite() {
+            break;
+        }
+        let next = (t - g / h).clamp(lo, hi);
+        let moved = (next - t).abs();
+        t = next;
+        if moved <= 4.0 * Scalar::EPSILON * (1.0 + t.abs()) {
+            break;
+        }
+    }
+    Ok(t)
 }
 
 /// Project a point into a 3D conic frame and invert it there.

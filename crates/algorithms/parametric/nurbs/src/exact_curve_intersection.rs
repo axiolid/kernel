@@ -169,6 +169,10 @@ pub fn exact_curve_surface_intersection(
         let span = axiolid_core::Interval::new(0.0, section.curve.end());
         return crate::implicit_ops::section_curve_surface_intersection(curve, span, surface);
     }
+    // A B-spline surface: traced (ADR 0077) for lines and conics.
+    if matches!(surface, Surface::BSpline(_)) {
+        return crate::implicit_ops::conic_spline_intersection(curve, surface);
+    }
     let param = Param::of(curve)?;
     let locus = surface_locus(surface, &param)?;
     let result = solve(curve, &param, &locus);

@@ -14,7 +14,7 @@
 
 use axiolid_core::{Frame3, Scalar, Vec3};
 use axiolid_curve::implicit::grow;
-use axiolid_curve::{Basis, Carrier, Field2, RuledCarrier, TorusCarrier};
+use axiolid_curve::{Basis, Carrier, Field2, RuledCarrier, SeriesField2, TorusCarrier};
 use axiolid_surface::Surface;
 
 // --- Algebra ---------------------------------------------------------------
@@ -63,15 +63,15 @@ fn product(basis: Basis, a: usize, b: usize) -> Vec<(usize, Scalar)> {
     }
 }
 
-pub(crate) fn constant(u: Basis, v: Basis, c: Scalar) -> Field2 {
-    Field2 {
+pub(crate) fn constant(u: Basis, v: Basis, c: Scalar) -> SeriesField2 {
+    SeriesField2 {
         u,
         v,
         coefficients: vec![vec![c]],
     }
 }
 
-pub(crate) fn add(a: &Field2, b: &Field2, scale_b: Scalar) -> Field2 {
+pub(crate) fn add(a: &SeriesField2, b: &SeriesField2, scale_b: Scalar) -> SeriesField2 {
     let mut out = a.coefficients.clone();
     for (i, row) in b.coefficients.iter().enumerate() {
         for (j, &c) in row.iter().enumerate() {
@@ -81,14 +81,14 @@ pub(crate) fn add(a: &Field2, b: &Field2, scale_b: Scalar) -> Field2 {
             }
         }
     }
-    Field2 {
+    SeriesField2 {
         u: a.u,
         v: a.v,
         coefficients: out,
     }
 }
 
-pub(crate) fn mul(a: &Field2, b: &Field2) -> Field2 {
+pub(crate) fn mul(a: &SeriesField2, b: &SeriesField2) -> SeriesField2 {
     let mut out: Vec<Vec<Scalar>> = vec![vec![0.0]];
     for (i1, r1) in a.coefficients.iter().enumerate() {
         for (j1, &c1) in r1.iter().enumerate() {
@@ -116,7 +116,7 @@ pub(crate) fn mul(a: &Field2, b: &Field2) -> Field2 {
             }
         }
     }
-    Field2 {
+    SeriesField2 {
         u: a.u,
         v: a.v,
         coefficients: out,
@@ -156,6 +156,7 @@ pub(crate) fn carrier_of(surface: &Surface) -> Option<Carrier> {
             major_radius: t.major_radius,
             minor_radius: t.minor_radius,
         }),
+        Surface::BSpline(b) => Carrier::Spline(Box::new(b.clone())),
         _ => return None,
     })
 }
@@ -163,14 +164,14 @@ pub(crate) fn carrier_of(surface: &Surface) -> Option<Carrier> {
 /// The bases of a carrier's parameters.
 pub(crate) fn bases(carrier: &Carrier) -> (Basis, Basis) {
     match carrier {
-        Carrier::Plane(_) => (Basis::Power, Basis::Power),
+        Carrier::Plane(_) | Carrier::Spline(_) => (Basis::Power, Basis::Power),
         Carrier::Ruled(_) => (Basis::Fourier, Basis::Power),
         Carrier::Sphere { .. } | Carrier::Torus(_) => (Basis::Fourier, Basis::Fourier),
     }
 }
 
 /// The carrier's point as three fields, one per world coordinate.
-fn world(carrier: &Carrier) -> [Field2; 3] {
+fn world(carrier: &Carrier) -> [SeriesField2; 3] {
     let (bu, bv) = bases(carrier);
     // Terms: (u term, v term, vector coefficient).
     let (origin, terms): (Vec3, Vec<(usize, usize, Vec3)>) = match carrier {
@@ -209,6 +210,8 @@ fn world(carrier: &Carrier) -> [Field2; 3] {
                 ],
             )
         }
+        // Not a series: `section_field` takes a spline carrier elsewhere.
+        Carrier::Spline(_) => (Vec3::ZERO, Vec::new()),
     };
     let one = |axis: usize| {
         let mut c = vec![vec![0.0; 3]; 3];
@@ -216,7 +219,7 @@ fn world(carrier: &Carrier) -> [Field2; 3] {
         for (i, j, v) in &terms {
             c[*i][*j] += v[axis];
         }
-        Field2 {
+        SeriesField2 {
             u: bu,
             v: bv,
             coefficients: c,
@@ -226,7 +229,7 @@ fn world(carrier: &Carrier) -> [Field2; 3] {
 }
 
 /// A world point's coordinate along `axis` from `origin`, as a field.
-fn local(point: &[Field2; 3], origin: Vec3, axis: Vec3) -> Field2 {
+fn local(point: &[SeriesField2; 3], origin: Vec3, axis: Vec3) -> SeriesField2 {
     let axis = axis.normalize();
     let mut out = constant(point[0].u, point[0].v, -origin.dot(axis));
     for (k, field) in point.iter().enumerate() {
@@ -235,7 +238,7 @@ fn local(point: &[Field2; 3], origin: Vec3, axis: Vec3) -> Field2 {
     out
 }
 
-fn frame_locals(point: &[Field2; 3], f: &Frame3) -> [Field2; 3] {
+fn frame_locals(point: &[SeriesField2; 3], f: &Frame3) -> [SeriesField2; 3] {
     [
         local(point, f.origin, f.x),
         local(point, f.origin, f.y),
@@ -247,10 +250,13 @@ fn frame_locals(point: &[Field2; 3], f: &Frame3) -> [Field2; 3] {
 /// where the carrier's point lies on `other` (for a cone, on either nappe).
 /// `None` for a B-spline `other`.
 pub(crate) fn section_field(carrier: &Carrier, other: &Surface) -> Option<Field2> {
+    if let Carrier::Spline(b) = carrier {
+        return crate::spline_field::spline_section_field(b, other);
+    }
     let p = world(carrier);
     let (bu, bv) = bases(carrier);
-    let square = |f: &Field2| mul(f, f);
-    Some(match other {
+    let square = |f: &SeriesField2| mul(f, f);
+    Some(Field2::Series(match other {
         Surface::Plane(q) => local(&p, q.frame.origin, q.frame.z),
         Surface::Cylinder(c) => {
             let [x, y, _] = frame_locals(&p, &c.frame);
@@ -288,5 +294,5 @@ pub(crate) fn section_field(carrier: &Carrier, other: &Surface) -> Option<Field2
             add(&square(&inner), &planar, -4.0 * big * big)
         }
         _ => return None,
-    })
+    }))
 }

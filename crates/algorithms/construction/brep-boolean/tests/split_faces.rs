@@ -90,11 +90,7 @@ fn area(region: &Region, surface: &Surface) -> f64 {
 
 /// Split every face of `brep` that carries sections; `first` whether `brep`
 /// is the first operand of `edges`.
-fn split_all(
-    brep: &ExactBRep,
-    edges: &[SectionEdge],
-    first: bool,
-) -> Vec<(FaceId, Vec<Region>)> {
+fn split_all(brep: &ExactBRep, edges: &[SectionEdge], first: bool) -> Vec<(FaceId, Vec<Region>)> {
     let mut out = Vec::new();
     for index in 0..brep.topology().faces().len() {
         let face = brep.topology().face_id_at(index).unwrap();

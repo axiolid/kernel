@@ -13,7 +13,8 @@
 use axiolid_core::{Interval, Point2, Scalar, Vec2};
 use axiolid_curve::implicit::{bound_simple, partial, Cell, Range};
 use axiolid_curve::{
-    Axis, Basis, Carrier, Curve3, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3, Trig2,
+    Axis, Basis, Carrier, Curve3, Field2, ImplicitCell, ImplicitCurve2, ImplicitSection3,
+    SeriesField2, Trig2,
 };
 use axiolid_surface::Surface;
 use core::f64::consts::{PI, TAU};
@@ -164,7 +165,7 @@ pub fn extract_stretch(
 fn defining_field(curve: &Curve3) -> Option<(Carrier, Field2)> {
     let fourier = |t: &Trig2| vec![t.constant, t.cos, t.sin, t.cos2, t.sin2];
     match curve {
-        Curve3::ImplicitSection(s) => Some((s.carrier, s.curve.field.clone())),
+        Curve3::ImplicitSection(s) => Some((s.carrier.clone(), s.curve.field.clone())),
         Curve3::RuledSection(r) => {
             // c(u) + b(u) v + a(u) v^2, u harmonic, v a power.
             let (a, b, c) = (
@@ -175,11 +176,11 @@ fn defining_field(curve: &Curve3) -> Option<(Carrier, Field2)> {
             let coefficients = (0..5).map(|i| vec![c[i], b[i], a[i]]).collect();
             Some((
                 Carrier::Ruled(r.carrier),
-                Field2 {
+                Field2::Series(SeriesField2 {
                     u: Basis::Fourier,
                     v: Basis::Power,
                     coefficients,
-                },
+                }),
             ))
         }
         Curve3::TorusSection(t) => {
@@ -192,11 +193,11 @@ fn defining_field(curve: &Curve3) -> Option<(Carrier, Field2)> {
             let coefficients = vec![c.iter().map(|x| -x).collect(), a, b];
             Some((
                 Carrier::Torus(t.torus),
-                Field2 {
+                Field2::Series(SeriesField2 {
                     u: Basis::Fourier,
                     v: Basis::Fourier,
                     coefficients,
-                },
+                }),
             ))
         }
         _ => None,
@@ -222,7 +223,7 @@ pub fn implicit_view(curve: &Curve3, span: Interval) -> Option<ImplicitSection3>
             }
         };
         return Some(ImplicitSection3 {
-            carrier: s.carrier,
+            carrier: s.carrier.clone(),
             curve: sub,
         });
     }
@@ -546,4 +547,114 @@ impl CellRoots<'_> {
         }
         0.5 * (s0 + s1)
     }
+}
+
+/// A line, circle or ellipse against a B-spline surface: the curve is the
+/// meeting of two analytic surfaces (a line of two planes, a circle of its
+/// plane and a sphere, an ellipse of its plane and an elliptical cylinder).
+/// The first is traced on the spline (certified, over its Bernstein
+/// patches); the second's roots along each traced piece are the hits.
+///
+/// # Errors
+///
+/// `UnsupportedCurve` for other families, `UnsupportedSurface` for a
+/// surface that is not a B-spline or a spline whose trace is refused.
+pub fn conic_spline_intersection(
+    curve: &Curve3,
+    surface: &Surface,
+) -> Result<ExactCurveIntersection, ExactCurveRefusal> {
+    use axiolid_core::Frame3;
+    use axiolid_surface::{EllipticalCylinder, Plane, Sphere};
+    if !matches!(surface, Surface::BSpline(_)) {
+        return Err(ExactCurveRefusal::UnsupportedSurface);
+    }
+    let plane = |origin: axiolid_core::Point3, z: axiolid_core::Vec3| -> Surface {
+        let z = z.normalize();
+        let helper = if z.x.abs() < 0.9 {
+            axiolid_core::Vec3::X
+        } else {
+            axiolid_core::Vec3::Y
+        };
+        let x = helper.cross(z).normalize();
+        Surface::Plane(Plane {
+            frame: Frame3 {
+                origin,
+                x,
+                y: z.cross(x),
+                z,
+            },
+        })
+    };
+    let (first, second) = match curve {
+        Curve3::Line(l) => {
+            let d = l.direction.normalize();
+            let helper = if d.x.abs() < 0.9 {
+                axiolid_core::Vec3::X
+            } else {
+                axiolid_core::Vec3::Y
+            };
+            let n1 = d.cross(helper).normalize();
+            (plane(l.origin, n1), plane(l.origin, d.cross(n1)))
+        }
+        Curve3::Circle(c) => (
+            plane(c.frame.origin, c.frame.x.cross(c.frame.y)),
+            Surface::Sphere(Sphere {
+                frame: c.frame,
+                radius: c.radius,
+            }),
+        ),
+        Curve3::Ellipse(e) => (
+            plane(e.frame.origin, e.frame.x.cross(e.frame.y)),
+            Surface::EllipticalCylinder(EllipticalCylinder {
+                frame: Frame3 {
+                    z: e.frame.x.cross(e.frame.y).normalize(),
+                    ..e.frame
+                },
+                semi_axis_x: e.semi_axis_x,
+                semi_axis_y: e.semi_axis_y,
+            }),
+        ),
+        _ => return Err(ExactCurveRefusal::UnsupportedCurve),
+    };
+    let pieces = match crate::implicit_section::implicit_surface_intersection(surface, &first, None)
+    {
+        Ok(pieces) => pieces,
+        Err(ExactIntersectionRefusal::Disjoint) => {
+            return Ok(ExactCurveIntersection::Points(Vec::new()))
+        }
+        Err(_) => return Err(ExactCurveRefusal::UnsupportedSurface),
+    };
+    let mut hits = Vec::new();
+    for piece in pieces {
+        let end = piece.curve.end();
+        let traced = Curve3::ImplicitSection(piece);
+        match section_curve_surface_intersection(&traced, Interval::new(0.0, end), &second)? {
+            ExactCurveIntersection::Points(found) => {
+                for hit in found {
+                    let t = match curve {
+                        Curve3::Line(l) => {
+                            (hit.point - l.origin).dot(l.direction) / l.direction.length_squared()
+                        }
+                        _ => match axiolid_evaluate::curve::invert3(
+                            curve,
+                            hit.point,
+                            axiolid_core::Tolerance::METRE,
+                        ) {
+                            Ok(t) => t,
+                            Err(_) => continue,
+                        },
+                    };
+                    hits.push(ExactCurveHit {
+                        parameter: ExactCurveParameter::Certified(Isolated::new(t)),
+                        ..hit
+                    });
+                }
+            }
+            // The traced piece lies on the second surface too: the curve
+            // runs in the spline.
+            _ => return Ok(ExactCurveIntersection::Contained),
+        }
+    }
+    hits.sort_by(|a, b| a.parameter.approx().total_cmp(&b.parameter.approx()));
+    Ok(ExactCurveIntersection::Points(hits))
 }

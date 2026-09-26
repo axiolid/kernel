@@ -68,13 +68,24 @@ pub fn implicit_surface_intersection(
             ExactIntersectionRefusal::NotRegularCurve
         }
     })?;
+    // A B-spline ends at its domain: its sections do too.
+    let curves: Vec<_> = match &form {
+        Carrier::Spline(b) => match b.domain() {
+            Some(((u0, u1), (v0, v1))) => curves
+                .iter()
+                .flat_map(|c| c.clipped(Point2::new(u0, v0), Point2::new(u1, v1)))
+                .collect(),
+            None => curves,
+        },
+        _ => curves,
+    };
     if curves.is_empty() {
         return Err(ExactIntersectionRefusal::Disjoint);
     }
     Ok(curves
         .into_iter()
         .map(|curve| ImplicitSection3 {
-            carrier: form,
+            carrier: form.clone(),
             curve,
         })
         .collect())
@@ -115,6 +126,13 @@ fn default_window(carrier: &Carrier, other: &Surface) -> Option<(Point2, Point2)
                 }
             }
             Some((Point2::new(-PI, v0), Point2::new(PI, v1)))
+        }
+        Carrier::Spline(b) => {
+            // A little past the domain, so a section reaching its edge is
+            // found there and not on the window's own boundary.
+            let ((u0, u1), (v0, v1)) = b.domain()?;
+            let (pu, pv) = (1e-6 * (u1 - u0), 1e-6 * (v1 - v0));
+            Some((Point2::new(u0 - pu, v0 - pv), Point2::new(u1 + pu, v1 + pv)))
         }
         Carrier::Plane(f) => {
             let (centre, radius) = ball(other)?;

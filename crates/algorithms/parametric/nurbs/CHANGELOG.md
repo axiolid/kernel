@@ -11,6 +11,17 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Sections of B-spline surfaces by planes, quadrics and tori (#119,
+  ADR 0077). The analytic equation is read on the spline's rational Bezier
+  patches as Bernstein polynomials (knot insertion, then Bernstein
+  products) and traced with the same certified subdivision, clipped to the
+  spline's domain. `implicit_surface_intersection` and
+  `trace_section_pcurves` take a B-spline carrier.
+- `exact_curve_surface_intersection` takes a B-spline surface for lines,
+  circles and ellipses. The curve is written as the meeting of two
+  analytic surfaces; the first is traced on the spline and the second's
+  roots are found along it.
+
 - A plane through a cone's apex cuts rays along the rulings of the
   modelled nappe (`Derivation::ConeApexRulings`, spans `[0, inf)`). It was
   refused before. A plane flatter than the cone meets it only at the apex

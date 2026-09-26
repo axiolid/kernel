@@ -11,6 +11,18 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `BSplineSurface` is defined here, and `axiolid_surface` re-exports it
+  unchanged, so a traced curve can carry a B-spline carrier
+  (`Carrier::Spline`). It has `BSplineSurface::jet` (point and first and
+  second partials, rational) and `domain`.
+- `Field2` is now an enum of `SeriesField2` (the former struct: powers and
+  harmonics) and `PatchField2` (piecewise Bernstein polynomials on a grid,
+  bounded by their coefficients over any box and continued past the grid by
+  their edge polynomials). `ImplicitCurve2::clipped` cuts a curve to a box.
+- `Curve2::Lifted(LiftedCurve2)`: a space curve read in an analytic
+  surface's parameters, sharing the curve's parameter. It is the pcurve,
+  on the analytic face, of a section only a B-spline can carry.
+
 - `ImplicitCurve2::sub`, `rotated`, `reversed`, `shifted`, `closure` and
   `turning_points`. `implicit::{bound, bound_simple, partial}` give
   interval bounds and partial derivatives of a `Field2` over parameter

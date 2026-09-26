@@ -15,7 +15,7 @@ use axiolid_brep::ExactBRep;
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Curve3, Line3};
 use axiolid_evaluate::curve::{derivative2, evaluate2};
-use axiolid_evaluate::surface::{evaluate, invert, normal};
+use axiolid_evaluate::surface::{evaluate, locate, normal};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{exact_curve_surface_intersection, ExactCurveIntersection};
 use axiolid_surface::Surface;
@@ -74,7 +74,7 @@ impl<'a> Solid<'a> {
     ) -> Result<Option<Vec3>, BooleanError> {
         for &face in candidates {
             let surface = self.surface(face)?;
-            let (u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+            let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
             match self.domains[face]
                 .contains(Point2::new(u, v))
                 .map_err(BooleanError::Measure)?
@@ -121,7 +121,7 @@ impl<'a> Solid<'a> {
                     if t < 0.0 && !at_start {
                         continue;
                     }
-                    let (u, v) = invert(surface, hit.point, tolerance)
+                    let (u, v) = locate(surface, hit.point, tolerance)
                         .map_err(|_| BooleanError::Evaluation)?;
                     let on_face = self.domains[face]
                         .contains(Point2::new(u, v))

@@ -96,11 +96,18 @@ impl Piece<'_> {
     pub(crate) fn smooth_spans(&self) -> Vec<(Scalar, Scalar)> {
         let (a, b) = self.span();
         let mut cuts = vec![a];
-        if let Self::Curve {
-            curve: Curve2::Implicit(_),
-            ..
-        } = self
-        {
+        let kinked = match self {
+            Self::Curve {
+                curve: Curve2::Implicit(_),
+                ..
+            } => true,
+            Self::Curve {
+                curve: Curve2::Lifted(l),
+                ..
+            } => matches!(l.curve.as_ref(), axiolid_curve::Curve3::ImplicitSection(_)),
+            _ => false,
+        };
+        if kinked {
             let (lo, hi) = (a.min(b), a.max(b));
             let mut k = lo.floor() + 1.0;
             let mut inner = Vec::new();
@@ -403,9 +410,64 @@ fn turning_points(curve: &Curve2, lo: Scalar, hi: Scalar) -> Option<Vec<Scalar>>
         // Cell boundaries and certified turns of the solved parameter
         // (ADR 0077).
         Curve2::Implicit(c) => out.extend(c.turning_points(lo, hi)),
+        // A B-spline trim: its knots, where the derivative may jump, and
+        // its turns by a dense scan between them.
+        Curve2::BSpline(b) => {
+            out.extend(b.knots.iter().copied().filter(|k| *k > lo && *k < hi));
+            out.extend(scanned_turns(curve, lo, hi)?);
+        }
+        // A space curve read on an analytic surface: its turns are found
+        // by a dense scan of the derivative's signs and bisection, and the
+        // space curve's own cell boundaries are kept as breaks.
+        Curve2::Lifted(l) => {
+            if let axiolid_curve::Curve3::ImplicitSection(_) = l.curve.as_ref() {
+                let mut k = lo.floor() + 1.0;
+                while k < hi {
+                    out.push(k);
+                    k += 1.0;
+                }
+            }
+            out.extend(scanned_turns(curve, lo, hi)?);
+        }
         _ => return None,
     }
     out.sort_by(Scalar::total_cmp);
+    Some(out)
+}
+
+/// Where either coordinate of a pcurve's derivative changes sign in
+/// `(lo, hi)`: a scan of 256 samples, each change bisected to the last
+/// bits.
+fn scanned_turns(curve: &Curve2, lo: Scalar, hi: Scalar) -> Option<Vec<Scalar>> {
+    let n = 256;
+    let d = |t: Scalar| derivative2(curve, t).ok();
+    let mut out = Vec::new();
+    let mut previous = (lo, d(lo + (hi - lo) * 1e-9)?);
+    for i in 1..=n {
+        let t = if i == n {
+            hi - (hi - lo) * 1e-9
+        } else {
+            lo + (hi - lo) * i as Scalar / n as Scalar
+        };
+        let now = d(t)?;
+        for axis in 0..2 {
+            let (a, b) = (previous.1[axis], now[axis]);
+            if (a < 0.0) != (b < 0.0) && a != 0.0 && b != 0.0 {
+                let (mut x0, mut x1) = (previous.0, t);
+                for _ in 0..80 {
+                    let m = 0.5 * (x0 + x1);
+                    let dm = d(m)?[axis];
+                    if (dm < 0.0) == (a < 0.0) {
+                        x0 = m;
+                    } else {
+                        x1 = m;
+                    }
+                }
+                out.push(0.5 * (x0 + x1));
+            }
+        }
+        previous = (t, now);
+    }
     Some(out)
 }
 

@@ -27,7 +27,7 @@ pub use split::{split_face, Piece, PieceSource, Region};
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{BooleanOperator, Tolerance};
-use axiolid_evaluate::surface::{invert, normal};
+use axiolid_evaluate::surface::{locate, normal};
 use axiolid_surface::Surface;
 use axiolid_topology::Orientation;
 
@@ -162,7 +162,7 @@ fn classify_point(
     if let Some(theirs) = other_solid.on_face(point, coincident, tolerance)? {
         // On the other solid's boundary: kept once, from the first
         // operand, where the operator leaves a boundary.
-        let (u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
         let ours = normal(surface, u, v).map_err(|_| BooleanError::Evaluation)? * sign;
         let same = ours.dot(theirs) > 0.0;
         let keep = first

@@ -11,6 +11,10 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Face domains for B-spline and lifted pcurves. Turning points come from a
+  dense scan of the derivative's signs with bisection, and a B-spline's
+  knots are kept as breaks.
+
 - Turning points of `Curve2::Implicit` pcurves, isolated with interval
   bounds, so faces trimmed by them get a certified domain.
 

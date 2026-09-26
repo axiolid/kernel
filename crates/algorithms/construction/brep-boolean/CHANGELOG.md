@@ -11,6 +11,18 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- B-spline faces (#167, ADR 0075 stage 3) against planes, quadrics and
+  tori:
+  - The section is traced on the spline (ADR 0077).
+  - On the analytic face its pcurve is the same space curve read in the
+    face's parameters (`Curve2::Lifted`), so it shares the edge's
+    parameter.
+  - An edge next to a B-spline face is cut where it meets the section's
+    other surface.
+  - Classification rays meet B-spline faces through the spline trace.
+  - Two B-spline faces meeting each other are refused by name
+    (`UnsupportedSection`).
+
 - Faces on spheres, cones, tori and elliptical cylinders (#167, ADR 0075
   stage 2), meeting in any section #119 builds:
   - A section with no line or conic is traced inside one face's parameter

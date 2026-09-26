@@ -136,6 +136,7 @@ fn curve2_is_structurally_valid_trim_basis(curve: &Curve2) -> bool {
         Curve2::QuadraticGraph(graph) => graph.is_finite(),
         Curve2::AngleGraph(graph) => graph.is_finite(),
         Curve2::Implicit(curve) => curve.is_finite(),
+        Curve2::Lifted(curve) => curve.is_finite(),
         _ => false,
     }
 }

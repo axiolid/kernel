@@ -20,7 +20,7 @@
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
 use axiolid_core::{Interval, Point3, Tolerance};
-use axiolid_evaluate::surface::invert;
+use axiolid_evaluate::surface::locate;
 use axiolid_evaluate::{derivative3, evaluate3};
 use axiolid_surface::Surface;
 use axiolid_topology::{
@@ -177,13 +177,13 @@ fn radial_pairs(
     for u in uses {
         let piece = piece_of(u);
         let k = &kept[u.face];
-        let t = axiolid_evaluate::curve::invert3(&piece.curve, m, tolerance)
+        let t = axiolid_evaluate::curve::locate3(&piece.curve, m, tolerance)
             .map_err(|_| BooleanError::Evaluation)?;
         let mut along = derivative3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?;
         if piece.span.end < piece.span.start {
             along = -along;
         }
-        let (su, sv) = invert(&k.surface, m, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (su, sv) = locate(&k.surface, m, tolerance).map_err(|_| BooleanError::Evaluation)?;
         let n_uv = axiolid_evaluate::surface::normal(&k.surface, su, sv)
             .map_err(|_| BooleanError::Evaluation)?;
         // Loops run anticlockwise in parameters: the face lies to the left
@@ -427,7 +427,7 @@ fn along_edge(
     if piece.span.end < piece.span.start {
         d = -d;
     }
-    let s = axiolid_evaluate::curve::invert3(edge_curve, mid, tolerance)
+    let s = axiolid_evaluate::curve::locate3(edge_curve, mid, tolerance)
         .map_err(|_| BooleanError::Evaluation)?;
     let e = derivative3(edge_curve, s).map_err(|_| BooleanError::Evaluation)?;
     Ok(d.dot(e) > 0.0)

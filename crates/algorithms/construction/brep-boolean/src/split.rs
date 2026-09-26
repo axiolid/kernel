@@ -29,9 +29,9 @@
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Vec2};
 use axiolid_curve::{Curve2, Curve3, Ellipse2, Line2, Sinusoid2};
-use axiolid_evaluate::curve::{derivative2, evaluate2, invert2, invert3, second_derivative2};
+use axiolid_evaluate::curve::{derivative2, evaluate2, locate2, locate3, second_derivative2};
 use axiolid_evaluate::evaluate3;
-use axiolid_evaluate::surface::invert;
+use axiolid_evaluate::surface::locate;
 use axiolid_measure::FaceDomain;
 use axiolid_surface::Surface;
 use axiolid_topology::{EdgeId, FaceId, Orientation};
@@ -114,9 +114,6 @@ pub fn split_face(
         .surface
         .and_then(|id| brep.surfaces().get(id.index()))
         .ok_or(BooleanError::DanglingReference)?;
-    if matches!(surface, Surface::BSpline(_)) {
-        return Err(BooleanError::UnsupportedSplit);
-    }
     let domain = FaceDomain::new(brep, face, tolerance)
         .map_err(BooleanError::Measure)?
         .ok_or(BooleanError::UnsupportedTrim)?;
@@ -391,6 +388,99 @@ fn section_piece(
     fallback.ok_or(BooleanError::Evaluation)
 }
 
+/// A section edge's pcurve on an analytic face as its space curve read in
+/// the face's parameters (`Curve2::Lifted`), sharing the edge's parameter;
+/// the guide unwraps its angles into the face's range.
+fn lifted_piece(
+    surface: &Surface,
+    section: &SectionEdge,
+    index: usize,
+    lo: Point2,
+    hi: Point2,
+    tolerance: Tolerance,
+) -> Result<Piece, BooleanError> {
+    let carrier = match surface {
+        Surface::Plane(p) => axiolid_curve::Carrier::Plane(p.frame),
+        Surface::Cylinder(c) => axiolid_curve::Carrier::Ruled(axiolid_curve::RuledCarrier {
+            frame: c.frame,
+            x_radius: c.radius,
+            y_radius: c.radius,
+            slope: 0.0,
+        }),
+        Surface::EllipticalCylinder(c) => {
+            axiolid_curve::Carrier::Ruled(axiolid_curve::RuledCarrier {
+                frame: c.frame,
+                x_radius: c.semi_axis_x,
+                y_radius: c.semi_axis_y,
+                slope: 0.0,
+            })
+        }
+        Surface::Cone(c) => axiolid_curve::Carrier::Ruled(axiolid_curve::RuledCarrier {
+            frame: c.frame,
+            x_radius: c.radius,
+            y_radius: c.radius,
+            slope: c.semi_angle.tan(),
+        }),
+        Surface::Sphere(s) => axiolid_curve::Carrier::Sphere {
+            frame: s.frame,
+            radius: s.radius,
+        },
+        Surface::Torus(t) => axiolid_curve::Carrier::Torus(axiolid_curve::TorusCarrier {
+            frame: t.frame,
+            major_radius: t.major_radius,
+            minor_radius: t.minor_radius,
+        }),
+        _ => return Err(BooleanError::UnsupportedSplit),
+    };
+    let (pu, pv) = periods(surface);
+    let n = 128;
+    let (t0, t1) = (section.span.start, section.span.end);
+    let mut guide: Vec<Point2> = Vec::with_capacity(n + 1);
+    for i in 0..=n {
+        let t = t0 + (t1 - t0) * i as Scalar / n as Scalar;
+        let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
+        let (mut u, mut v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        if let Some(last) = guide.last() {
+            if pu {
+                u += ((last.x - u) / TAU).round() * TAU;
+            }
+            if pv {
+                v += ((last.y - v) / TAU).round() * TAU;
+            }
+        }
+        guide.push(Point2::new(u, v));
+    }
+    // Whole turns into the face's range, judged at the middle.
+    let middle = guide[n / 2];
+    let into = |x: Scalar, a: Scalar, b: Scalar, periodic: bool| {
+        if !periodic || (x >= a - 1e-9 && x <= b + 1e-9) {
+            0.0
+        } else {
+            ((0.5 * (a + b) - x) / TAU).round() * TAU
+        }
+    };
+    let shift = Vec2::new(
+        into(middle.x, lo.x, hi.x, pu),
+        into(middle.y, lo.y, hi.y, pv),
+    );
+    for p in &mut guide {
+        *p += shift;
+    }
+    Ok(Piece {
+        curve: section.curve.clone(),
+        span: section.span,
+        pcurve: Curve2::Lifted(axiolid_curve::LiftedCurve2 {
+            curve: Box::new(section.curve.clone()),
+            carrier,
+            start: t0,
+            end: t1,
+            guide,
+        }),
+        pspan: section.span,
+        source: PieceSource::Section(index),
+    })
+}
+
 /// A section edge's implicit pcurve (ADR 0077): the stretch of the other
 /// surface's traced equation, in this face's parameters, from the edge's
 /// start through its middle to its end.
@@ -406,7 +496,7 @@ fn implicit_piece(
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
     let uv = |p: Point3| -> Result<Point2, BooleanError> {
-        let (u, v) = invert(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
         Ok(Point2::new(u, v))
     };
     let at = |f: Scalar| {
@@ -417,7 +507,15 @@ fn implicit_piece(
         .map_err(|_| BooleanError::Evaluation)
     };
     let closed = (section.start - section.end).length() <= tolerance.linear().max(1e-9);
-    let curves = traces.of(surface, other, lo, hi)?;
+    let curves = match traces.of(surface, other, lo, hi) {
+        Ok(curves) => curves,
+        // The other surface has no equation to read here (a B-spline):
+        // the section's own space curve, read on this analytic face.
+        Err(BooleanError::UnsupportedSplit) if matches!(other, Surface::BSpline(_)) => {
+            return lifted_piece(surface, section, index, lo, hi, tolerance);
+        }
+        Err(e) => return Err(e),
+    };
     let stretch = axiolid_nurbs::extract_stretch(
         curves,
         periods(surface),
@@ -550,7 +648,7 @@ fn angle_span(
 ) -> Result<Interval, BooleanError> {
     let at = |t: Scalar| -> Result<Scalar, BooleanError> {
         let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        Ok(invert(surface, p, tolerance)
+        Ok(locate(surface, p, tolerance)
             .map_err(|_| BooleanError::Evaluation)?
             .0)
     };
@@ -577,7 +675,7 @@ fn place(
     hi: Point2,
     tolerance: Tolerance,
 ) -> Result<Point2, BooleanError> {
-    let (mut u, mut v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let (mut u, mut v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
     let (pu, pv) = periods(surface);
     let slack = 1e-9;
     let wrap = |x: &mut Scalar, a: Scalar, b: Scalar| {
@@ -611,7 +709,7 @@ fn split_use(
     );
     let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
     for &point in ends {
-        let Ok(t) = invert3(&piece.curve, point, tolerance) else {
+        let Ok(t) = locate3(&piece.curve, point, tolerance) else {
             continue;
         };
         let t = if matches!(piece.curve, Curve3::Circle(_) | Curve3::Ellipse(_)) {
@@ -627,7 +725,7 @@ fn split_use(
             continue;
         }
         // The same point on the pcurve, through the surface's parameters.
-        let (u, v) = invert(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
         let (pu, pv) = periods(surface);
         let turns: &[Scalar] = &[0.0, TAU, -TAU, 2.0 * TAU, -2.0 * TAU];
         let mut shifts = Vec::new();
@@ -638,7 +736,7 @@ fn split_use(
         }
         let mut found = None;
         for (du, dv) in shifts {
-            if let Ok(p) = invert2(&piece.pcurve, Point2::new(u + du, v + dv), tolerance) {
+            if let Ok(p) = locate2(&piece.pcurve, Point2::new(u + du, v + dv), tolerance) {
                 let (plo, phi) = (
                     piece.pspan.start.min(piece.pspan.end),
                     piece.pspan.start.max(piece.pspan.end),

@@ -27,7 +27,7 @@ use core::f64::consts::{PI, TAU};
 use crate::quadric_section::RuledCarrier;
 use crate::torus_section::TorusCarrier;
 
-/// How a [`Field2`] varies along one parameter.
+/// How a [`SeriesField2`] varies along one parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Basis {
     /// Powers: term `k` is `x^k`.
@@ -80,15 +80,381 @@ impl Basis {
 }
 
 /// A field over the parameter plane: `sum c[i][j] B_i(u) B_j(v)`, with the
-/// bases of [`Basis`] along each parameter.
+/// bases of [`Basis`] along each parameter. The form a plane's, quadric's or
+/// torus's equation takes on an analytic surface.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Field2 {
+pub struct SeriesField2 {
     /// The basis along `u`.
     pub u: Basis,
     /// The basis along `v`.
     pub v: Basis,
     /// `coefficients[i][j]` multiplies term `i` in `u` and term `j` in `v`.
     pub coefficients: Vec<Vec<Scalar>>,
+}
+
+/// A field over a surface's parameters whose zero set is a section curve:
+/// another surface's equation read in this surface's parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Field2 {
+    /// Powers and harmonics, on an analytic surface.
+    Series(SeriesField2),
+    /// Piecewise Bernstein polynomials, on a B-spline surface.
+    Patches(PatchField2),
+}
+
+impl Field2 {
+    /// The field's value at `p`.
+    #[must_use]
+    pub fn value(&self, p: Point2) -> Scalar {
+        self.jet(p).value
+    }
+
+    /// Value, gradient and Hessian at `p`.
+    #[must_use]
+    pub fn jet(&self, p: Point2) -> Jet2 {
+        match self {
+            Self::Series(f) => f.jet(p),
+            Self::Patches(f) => f.jet(p),
+        }
+    }
+
+    /// A bound on the field's size over its whole domain, and the scale
+    /// its rounding is measured in.
+    #[must_use]
+    pub fn magnitude(&self) -> Scalar {
+        match self {
+            Self::Series(f) => f.magnitude(),
+            Self::Patches(f) => f.magnitude(),
+        }
+    }
+
+    /// Whether every coefficient is finite.
+    #[must_use]
+    pub fn is_finite(&self) -> bool {
+        match self {
+            Self::Series(f) => f.is_finite(),
+            Self::Patches(f) => f.is_finite(),
+        }
+    }
+}
+
+/// A piecewise polynomial field: on each cell of the grid of `u_breaks` by
+/// `v_breaks`, a tensor-product Bernstein polynomial of degree
+/// `(u_degree, v_degree)` in the cell's local coordinates `s`, `t` in
+/// `[0, 1]`. Its coefficients bound it (the convex hull property), which is
+/// what makes a trace on it certified.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchField2 {
+    /// Cell boundaries along `u`, increasing.
+    pub u_breaks: Vec<Scalar>,
+    /// Cell boundaries along `v`, increasing.
+    pub v_breaks: Vec<Scalar>,
+    /// Degree along `u`.
+    pub u_degree: usize,
+    /// Degree along `v`.
+    pub v_degree: usize,
+    /// Per cell (index `i * (v_breaks.len() - 1) + j` for cell `i` along `u`
+    /// and `j` along `v`), the coefficients, index `a * (v_degree + 1) + b`.
+    pub patches: Vec<Vec<Scalar>>,
+}
+
+/// Bernstein basis values and first two derivatives of degree `n` at `s`.
+fn bernstein(n: usize, s: Scalar) -> [Vec<Scalar>; 3] {
+    let basis = |n: usize| -> Vec<Scalar> {
+        // de Casteljau-style build-up, stable on [0, 1].
+        let mut b = vec![0.0; n + 1];
+        b[0] = 1.0;
+        for k in 1..=n {
+            let mut prev = 0.0;
+            for slot in b.iter_mut().take(k + 1) {
+                let here = *slot;
+                *slot = here * (1.0 - s) + prev * s;
+                prev = here;
+            }
+        }
+        b
+    };
+    let b0 = basis(n);
+    let mut b1 = vec![0.0; n + 1];
+    let mut b2 = vec![0.0; n + 1];
+    if n >= 1 {
+        let lower = basis(n - 1);
+        for a in 0..=n {
+            let left = if a >= 1 { lower[a - 1] } else { 0.0 };
+            let right = if a < n { lower[a] } else { 0.0 };
+            b1[a] = n as Scalar * (left - right);
+        }
+    }
+    if n >= 2 {
+        let lower = basis(n - 2);
+        let at = |k: isize| {
+            if k >= 0 && (k as usize) <= n - 2 {
+                lower[k as usize]
+            } else {
+                0.0
+            }
+        };
+        for a in 0..=n {
+            let a = a as isize;
+            b2[a as usize] = (n * (n - 1)) as Scalar * (at(a - 2) - 2.0 * at(a - 1) + at(a));
+        }
+    }
+    [b0, b1, b2]
+}
+
+/// The Bernstein coefficients, over `[s0, s1]`, of the polynomial whose
+/// coefficients over `[0, 1]` are `c` -- by de Casteljau, which holds for
+/// parameters outside `[0, 1]` as well (extrapolation).
+#[allow(clippy::needless_range_loop)] // de Casteljau's triangle, by index
+fn restrict(c: &[Scalar], s0: Scalar, s1: Scalar) -> Vec<Scalar> {
+    let n = c.len();
+    // The polynomial's coefficients over [0, s]: the left points of de
+    // Casteljau at s.
+    let left = |c: &[Scalar], s: Scalar| -> Vec<Scalar> {
+        let mut w = c.to_vec();
+        let mut out = vec![0.0; n];
+        out[0] = w[0];
+        for k in 1..n {
+            for i in 0..n - k {
+                w[i] = w[i] * (1.0 - s) + w[i + 1] * s;
+            }
+            out[k] = w[0];
+        }
+        out
+    };
+    // Coefficients over [s, 1]: the right points of de Casteljau at s.
+    let right = |c: &[Scalar], s: Scalar| -> Vec<Scalar> {
+        let mut w = c.to_vec();
+        let mut out = vec![0.0; n];
+        out[n - 1] = w[n - 1];
+        for k in 1..n {
+            for i in 0..n - k {
+                w[i] = w[i] * (1.0 - s) + w[i + 1] * s;
+            }
+            out[n - 1 - k] = w[n - 1 - k];
+        }
+        out
+    };
+    if s1 <= s0 {
+        // A single parameter: every coefficient is the value there.
+        let mut w = c.to_vec();
+        for k in 1..n {
+            for i in 0..n - k {
+                w[i] = w[i] * (1.0 - s0) + w[i + 1] * s0;
+            }
+        }
+        return vec![w[0]; n];
+    }
+    if s0 == 0.0 && s1 == 1.0 {
+        return c.to_vec();
+    }
+    // Over [0, s1], then the part [s0 / s1, 1] of that; when s1 is zero or
+    // close to it, over [s0, 1] first instead.
+    if s1.abs() >= (1.0 - s0).abs() {
+        let over = left(c, s1);
+        right(&over, s0 / s1)
+    } else {
+        let over = right(c, s0);
+        left(&over, (s1 - s0) / (1.0 - s0))
+    }
+}
+
+impl PatchField2 {
+    fn cells(&self) -> (usize, usize) {
+        (self.u_breaks.len() - 1, self.v_breaks.len() - 1)
+    }
+
+    /// The cell index along one axis holding `x`, clamped.
+    fn cell_of(breaks: &[Scalar], x: Scalar) -> usize {
+        let n = breaks.len() - 1;
+        let mut i = 0;
+        while i + 1 < n && x >= breaks[i + 1] {
+            i += 1;
+        }
+        i
+    }
+
+    /// Value, gradient and Hessian at `p`; beyond the grid, the nearest
+    /// edge cell's polynomial continued.
+    #[must_use]
+    pub fn jet(&self, p: Point2) -> Jet2 {
+        let (_, m) = self.cells();
+        let i = Self::cell_of(&self.u_breaks, p.x);
+        let j = Self::cell_of(&self.v_breaks, p.y);
+        let (hu, hv) = (
+            self.u_breaks[i + 1] - self.u_breaks[i],
+            self.v_breaks[j + 1] - self.v_breaks[j],
+        );
+        // Past the grid's first or last cell the edge patch's polynomial
+        // continues: a trace may look a little beyond a spline's domain.
+        let s = (p.x - self.u_breaks[i]) / hu;
+        let t = (p.y - self.v_breaks[j]) / hv;
+        let bu = bernstein(self.u_degree, s);
+        let bv = bernstein(self.v_degree, t);
+        let c = &self.patches[i * m + j];
+        let q = self.v_degree + 1;
+        let mut jet = Jet2 {
+            value: 0.0,
+            gradient: Vec2::ZERO,
+            uu: 0.0,
+            uv: 0.0,
+            vv: 0.0,
+        };
+        for a in 0..=self.u_degree {
+            for b in 0..=self.v_degree {
+                let k = c[a * q + b];
+                jet.value += k * bu[0][a] * bv[0][b];
+                jet.gradient.x += k * bu[1][a] * bv[0][b];
+                jet.gradient.y += k * bu[0][a] * bv[1][b];
+                jet.uu += k * bu[2][a] * bv[0][b];
+                jet.uv += k * bu[1][a] * bv[1][b];
+                jet.vv += k * bu[0][a] * bv[2][b];
+            }
+        }
+        jet.gradient.x /= hu;
+        jet.gradient.y /= hv;
+        jet.uu /= hu * hu;
+        jet.uv /= hu * hv;
+        jet.vv /= hv * hv;
+        jet
+    }
+
+    /// The largest coefficient: a bound on the field's size (convex hull).
+    #[must_use]
+    pub fn magnitude(&self) -> Scalar {
+        self.patches
+            .iter()
+            .flatten()
+            .fold(0.0, |m: Scalar, c| m.max(c.abs()))
+    }
+
+    /// Whether every number is finite.
+    #[must_use]
+    pub fn is_finite(&self) -> bool {
+        self.patches.iter().flatten().all(|c| c.is_finite())
+            && self
+                .u_breaks
+                .iter()
+                .chain(&self.v_breaks)
+                .all(|b| b.is_finite())
+    }
+
+    /// A bound over the box: the hull of every overlapping cell's
+    /// coefficients restricted to the box.
+    #[must_use]
+    pub fn bound(&self, cell: &Cell) -> Range {
+        let (n, m) = self.cells();
+        let q = self.v_degree + 1;
+        let mut out: Option<Range> = None;
+        for i in 0..n {
+            let (a0, a1) = (self.u_breaks[i], self.u_breaks[i + 1]);
+            // The first and last cells reach past the grid's ends.
+            let reach_lo = if i == 0 { Scalar::NEG_INFINITY } else { a0 };
+            let reach_hi = if i + 1 == n { Scalar::INFINITY } else { a1 };
+            if reach_hi < cell.lo.x || reach_lo > cell.hi.x {
+                continue;
+            }
+            let (s0, s1) = (
+                (cell.lo.x.max(reach_lo) - a0) / (a1 - a0),
+                (cell.hi.x.min(reach_hi) - a0) / (a1 - a0),
+            );
+            for j in 0..m {
+                let (b0, b1) = (self.v_breaks[j], self.v_breaks[j + 1]);
+                let reach_lo = if j == 0 { Scalar::NEG_INFINITY } else { b0 };
+                let reach_hi = if j + 1 == m { Scalar::INFINITY } else { b1 };
+                if reach_hi < cell.lo.y || reach_lo > cell.hi.y {
+                    continue;
+                }
+                let (t0, t1) = (
+                    (cell.lo.y.max(reach_lo) - b0) / (b1 - b0),
+                    (cell.hi.y.min(reach_hi) - b0) / (b1 - b0),
+                );
+                let c = &self.patches[i * m + j];
+                // Restrict every row along v, then every column along u.
+                let mut rows: Vec<Vec<Scalar>> = (0..=self.u_degree)
+                    .map(|a| restrict(&c[a * q..(a + 1) * q], t0, t1))
+                    .collect();
+                for b in 0..q {
+                    let column: Vec<Scalar> = rows.iter().map(|r| r[b]).collect();
+                    let restricted = restrict(&column, s0, s1);
+                    for (a, value) in restricted.into_iter().enumerate() {
+                        rows[a][b] = value;
+                    }
+                }
+                let (mut lo, mut hi) = (Scalar::INFINITY, Scalar::NEG_INFINITY);
+                let mut size: Scalar = 0.0;
+                for value in rows.iter().flatten() {
+                    lo = lo.min(*value);
+                    hi = hi.max(*value);
+                    size = size.max(value.abs());
+                }
+                let r = Range { lo, hi }
+                    .widen(64.0 * Scalar::EPSILON * size * (q + self.u_degree + 1) as Scalar);
+                out = Some(match out {
+                    None => r,
+                    Some(o) => Range {
+                        lo: o.lo.min(r.lo),
+                        hi: o.hi.max(r.hi),
+                    },
+                });
+            }
+        }
+        out.unwrap_or(Range::point(0.0))
+    }
+
+    /// The partial derivative along `u` (`along_u`) or `v`, in the same
+    /// cells, one degree lower along that axis.
+    #[must_use]
+    pub fn partial(&self, along_u: bool) -> Self {
+        let (n, m) = self.cells();
+        let (p, q) = (self.u_degree, self.v_degree);
+        let mut patches = Vec::with_capacity(self.patches.len());
+        for i in 0..n {
+            for j in 0..m {
+                let c = &self.patches[i * m + j];
+                let at = |a: usize, b: usize| c[a * (q + 1) + b];
+                if along_u {
+                    let h = self.u_breaks[i + 1] - self.u_breaks[i];
+                    if p == 0 {
+                        patches.push(vec![0.0; q + 1]);
+                        continue;
+                    }
+                    let mut d = vec![0.0; p * (q + 1)];
+                    for a in 0..p {
+                        for b in 0..=q {
+                            d[a * (q + 1) + b] = p as Scalar * (at(a + 1, b) - at(a, b)) / h;
+                        }
+                    }
+                    patches.push(d);
+                } else {
+                    let h = self.v_breaks[j + 1] - self.v_breaks[j];
+                    if q == 0 {
+                        patches.push(vec![0.0; p + 1]);
+                        continue;
+                    }
+                    let mut d = vec![0.0; (p + 1) * q];
+                    for a in 0..=p {
+                        for b in 0..q {
+                            d[a * q + b] = q as Scalar * (at(a, b + 1) - at(a, b)) / h;
+                        }
+                    }
+                    patches.push(d);
+                }
+            }
+        }
+        let (u_degree, v_degree) = if along_u {
+            (p.saturating_sub(1), q)
+        } else {
+            (p, q.saturating_sub(1))
+        };
+        Self {
+            u_breaks: self.u_breaks.clone(),
+            v_breaks: self.v_breaks.clone(),
+            u_degree,
+            v_degree,
+            patches,
+        }
+    }
 }
 
 /// A field's value, gradient and Hessian at one point.
@@ -106,7 +472,7 @@ pub struct Jet2 {
     pub vv: Scalar,
 }
 
-impl Field2 {
+impl SeriesField2 {
     fn size(&self) -> (usize, usize) {
         let n = self.coefficients.len();
         let m = self.coefficients.iter().map(Vec::len).max().unwrap_or(0);
@@ -304,7 +670,7 @@ impl Cell {
 }
 
 /// Naive interval bound of the field over the box.
-fn naive(field: &Field2, cell: &Cell) -> Range {
+fn naive(field: &SeriesField2, cell: &Cell) -> Range {
     let mut total = Range::point(0.0);
     let (n, m) = size(field);
     let ru: Vec<Range> = (0..n)
@@ -325,7 +691,7 @@ fn naive(field: &Field2, cell: &Cell) -> Range {
 
 /// The margin covering rounding in a sum over the field's terms at the
 /// given parameter magnitudes.
-fn margin(field: &Field2, cell: &Cell) -> Scalar {
+fn margin(field: &SeriesField2, cell: &Cell) -> Scalar {
     let (n, m) = size(field);
     // Harmonics never exceed one; powers grow with the parameter.
     let reach = |basis: Basis, x: Scalar, terms: usize| match basis {
@@ -339,24 +705,32 @@ fn margin(field: &Field2, cell: &Cell) -> Scalar {
 }
 
 /// A bound certain to hold the field's values over the box (up to the
-/// rounding margin included in it).
+/// rounding margin included in it), given the field's partials.
 pub fn bound(field: &Field2, du: &Field2, dv: &Field2, cell: &Cell) -> Range {
-    let direct = naive(field, cell);
-    let c = cell.centre();
-    let (hu, hv) = (0.5 * (cell.hi.x - cell.lo.x), 0.5 * (cell.hi.y - cell.lo.y));
-    let mean = Range::point(field.value(c))
-        .add(naive(du, cell).mul(Range { lo: -hu, hi: hu }))
-        .add(naive(dv, cell).mul(Range { lo: -hv, hi: hv }));
-    direct.intersect(mean).widen(margin(field, cell))
+    match (field, du, dv) {
+        (Field2::Series(f), Field2::Series(fu), Field2::Series(fv)) => {
+            let direct = naive(f, cell);
+            let c = cell.centre();
+            let (hu, hv) = (0.5 * (cell.hi.x - cell.lo.x), 0.5 * (cell.hi.y - cell.lo.y));
+            let mean = Range::point(f.value(c))
+                .add(naive(fu, cell).mul(Range { lo: -hu, hi: hu }))
+                .add(naive(fv, cell).mul(Range { lo: -hv, hi: hv }));
+            direct.intersect(mean).widen(margin(f, cell))
+        }
+        _ => bound_simple(field, cell),
+    }
 }
 
 /// A bound of the field over the box without the mean-value tightening.
 pub fn bound_simple(field: &Field2, cell: &Cell) -> Range {
-    naive(field, cell).widen(margin(field, cell))
+    match field {
+        Field2::Series(f) => naive(f, cell).widen(margin(f, cell)),
+        Field2::Patches(f) => f.bound(cell),
+    }
 }
 
 /// The coefficient table's extent in `u` and `v`.
-pub fn size(field: &Field2) -> (usize, usize) {
+pub fn size(field: &SeriesField2) -> (usize, usize) {
     (
         field.coefficients.len(),
         field.coefficients.iter().map(Vec::len).max().unwrap_or(0),
@@ -365,6 +739,13 @@ pub fn size(field: &Field2) -> (usize, usize) {
 
 /// The partial derivative of a field along `u` (`along_u`) or `v`.
 pub fn partial(field: &Field2, along_u: bool) -> Field2 {
+    match field {
+        Field2::Series(f) => Field2::Series(series_partial(f, along_u)),
+        Field2::Patches(f) => Field2::Patches(f.partial(along_u)),
+    }
+}
+
+fn series_partial(field: &SeriesField2, along_u: bool) -> SeriesField2 {
     let (n, m) = size(field);
     let mut out = vec![vec![0.0; m]; n];
     let basis = if along_u { field.u } else { field.v };
@@ -403,7 +784,7 @@ pub fn partial(field: &Field2, along_u: bool) -> Field2 {
             }
         }
     }
-    Field2 {
+    SeriesField2 {
         u: field.u,
         v: field.v,
         coefficients: out,
@@ -773,6 +1154,53 @@ impl ImplicitCurve2 {
         })
     }
 
+    /// The stretches of the curve inside the box `[lo, hi]`, each as a curve
+    /// of its own. Crossings of the box's sides are found by a scan of each
+    /// cell and bisection on the distance to the box.
+    #[must_use]
+    pub fn clipped(&self, lo: Point2, hi: Point2) -> Vec<Self> {
+        let outside = |t: Scalar| -> Scalar {
+            self.point(t).map_or(Scalar::INFINITY, |p| {
+                (lo.x - p.x).max(p.x - hi.x).max(lo.y - p.y).max(p.y - hi.y)
+            })
+        };
+        let n = self.end();
+        let steps = 16 * self.cells.len().max(1);
+        let mut out = Vec::new();
+        let mut start: Option<Scalar> = None;
+        let mut previous = (0.0, outside(0.0) <= 0.0);
+        if previous.1 {
+            start = Some(0.0);
+        }
+        for k in 1..=steps {
+            let t = n * k as Scalar / steps as Scalar;
+            let inside = outside(t) <= 0.0;
+            if inside != previous.1 {
+                // Bisect the change.
+                let (mut a, mut b) = (previous.0, t);
+                for _ in 0..80 {
+                    let m = 0.5 * (a + b);
+                    if (outside(m) <= 0.0) == previous.1 {
+                        a = m;
+                    } else {
+                        b = m;
+                    }
+                }
+                let cross = 0.5 * (a + b);
+                if inside {
+                    start = Some(cross);
+                } else if let Some(s) = start.take() {
+                    out.extend(self.sub(s, cross, None));
+                }
+            }
+            previous = (t, inside);
+        }
+        if let Some(s) = start {
+            out.extend(self.sub(s, n, None));
+        }
+        out
+    }
+
     /// The same curve run backwards: `t` becomes `cells.len() - t`.
     #[must_use]
     pub fn reversed(&self) -> Self {
@@ -908,9 +1336,9 @@ impl ImplicitCurve2 {
     }
 }
 
-/// An analytic surface, as a curve on it needs it, in the same
+/// The surface a traced curve lies on, as the curve needs it, in the same
 /// parameterisation as the matching `axiolid_surface` family.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Carrier {
     /// `O + u X + v Y`.
     Plane(Frame3),
@@ -925,6 +1353,8 @@ pub enum Carrier {
     },
     /// A torus.
     Torus(TorusCarrier),
+    /// A B-spline surface.
+    Spline(Box<crate::spline_surface::BSplineSurface>),
 }
 
 /// A point's partial derivatives on a [`Carrier`], to second order.
@@ -1002,12 +1432,22 @@ impl Carrier {
                     vv: dir * (-r * cv) + f.z * (-r * sv),
                 }
             }
+            Carrier::Spline(b) => b.jet(u, v).unwrap_or(SurfaceJet {
+                point: Point3::splat(Scalar::NAN),
+                u: Vec3::splat(Scalar::NAN),
+                v: Vec3::splat(Scalar::NAN),
+                uu: Vec3::splat(Scalar::NAN),
+                uv: Vec3::splat(Scalar::NAN),
+                vv: Vec3::splat(Scalar::NAN),
+            }),
         }
     }
 
     /// Principal parameters of a point on the carrier: angles in
     /// `(-pi, pi]` (a sphere's latitude in `[-pi/2, pi/2]`); a caller
-    /// reading a curve that runs past them adds whole turns.
+    /// reading a curve that runs past them adds whole turns. A B-spline
+    /// carrier has no closed-form inverse: `NaN`, and the caller inverts
+    /// the surface itself.
     #[must_use]
     pub fn parameters(&self, p: Point3) -> (Scalar, Scalar) {
         let local = |f: &Frame3| {
@@ -1032,6 +1472,7 @@ impl Carrier {
                 let (x, y, z) = local(&t.frame);
                 (y.atan2(x), z.atan2(x.hypot(y) - t.major_radius))
             }
+            Carrier::Spline(_) => (Scalar::NAN, Scalar::NAN),
         }
     }
 
@@ -1039,7 +1480,7 @@ impl Carrier {
     #[must_use]
     pub fn periodic(&self) -> (bool, bool) {
         match self {
-            Carrier::Plane(_) => (false, false),
+            Carrier::Plane(_) | Carrier::Spline(_) => (false, false),
             Carrier::Ruled(_) | Carrier::Sphere { .. } => (true, false),
             Carrier::Torus(_) => (true, true),
         }
@@ -1057,6 +1498,12 @@ impl Carrier {
             Carrier::Sphere { frame: f, radius } => frame(f) && radius.is_finite(),
             Carrier::Torus(t) => {
                 frame(&t.frame) && t.major_radius.is_finite() && t.minor_radius.is_finite()
+            }
+            Carrier::Spline(b) => {
+                b.control_points.iter().flatten().all(|p| p.is_finite())
+                    && b.weights
+                        .as_ref()
+                        .is_none_or(|w| w.iter().flatten().all(|x| x.is_finite()))
             }
         }
     }
@@ -1109,5 +1556,78 @@ impl ImplicitSection3 {
     #[must_use]
     pub fn is_finite(&self) -> bool {
         self.carrier.is_finite() && self.curve.is_finite()
+    }
+}
+
+/// A curve in space read in an analytic surface's parameters: the pcurve
+/// at `t` is the carrier's parameters of `curve`'s point at `t`, so it
+/// shares the edge's parameter exactly. This is the pcurve, on the analytic
+/// face, of a section that only the other face's surface can carry (a
+/// B-spline's section, ADR 0077): the inverse is in closed form for planes,
+/// ruled surfaces, spheres and tori.
+///
+/// Angles are defined up to whole turns; `guide` holds the parameters at
+/// evenly spaced `t` over `[start, end]`, unwrapped along the curve, and a
+/// point is read at the turn nearest the guide there. Evaluation lives in
+/// `axiolid-evaluate`, which evaluates the space curve.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiftedCurve2 {
+    /// The curve in space.
+    pub curve: Box<crate::Curve3>,
+    /// The surface it is read on.
+    pub carrier: Carrier,
+    /// Parameter range the guide covers.
+    pub start: Scalar,
+    /// End of that range.
+    pub end: Scalar,
+    /// Unwrapped parameters at evenly spaced `t` from `start` to `end`.
+    pub guide: Vec<Point2>,
+}
+
+impl LiftedCurve2 {
+    /// The guide's parameters at `t`, interpolated.
+    #[must_use]
+    pub fn guide_at(&self, t: Scalar) -> Option<Point2> {
+        let n = self.guide.len();
+        if n == 0 {
+            return None;
+        }
+        if n == 1 || self.end == self.start {
+            return Some(self.guide[0]);
+        }
+        let x = ((t - self.start) / (self.end - self.start) * (n - 1) as Scalar)
+            .clamp(0.0, (n - 1) as Scalar);
+        let i = (x.floor() as usize).min(n - 2);
+        let f = x - i as Scalar;
+        Some(self.guide[i] + (self.guide[i + 1] - self.guide[i]) * f)
+    }
+
+    /// The carrier's parameters of a space point, at the turns nearest the
+    /// guide at `t`.
+    #[must_use]
+    pub fn unwrap_at(&self, t: Scalar, point: Point3) -> Option<Point2> {
+        let (u, v) = self.carrier.parameters(point);
+        if !u.is_finite() || !v.is_finite() {
+            return None;
+        }
+        let near = self.guide_at(t)?;
+        let (pu, pv) = self.carrier.periodic();
+        let snap = |x: Scalar, g: Scalar, periodic: bool| {
+            if periodic {
+                x + ((g - x) / TAU).round() * TAU
+            } else {
+                x
+            }
+        };
+        Some(Point2::new(snap(u, near.x, pu), snap(v, near.y, pv)))
+    }
+
+    /// Whether every number is finite.
+    #[must_use]
+    pub fn is_finite(&self) -> bool {
+        self.carrier.is_finite()
+            && self.start.is_finite()
+            && self.end.is_finite()
+            && self.guide.iter().all(|p| p.is_finite())
     }
 }
