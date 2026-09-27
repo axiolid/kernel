@@ -304,10 +304,14 @@ fn ring_edges(ring: &Ring) -> Vec<(Point2, Point2)> {
 
 /// Can the open segment `a`-`b` be travelled without leaving the region?
 ///
-/// Two conditions, both necessary. The segment must not properly cross any
-/// obstacle edge, and its midpoint must lie inside the region: a segment can
-/// clear every edge yet still pass through a hole by spanning it corner to
-/// corner, which the crossing test alone accepts.
+/// It must not properly cross any obstacle edge. And every stretch of it
+/// must lie in the closed region: a segment can clear every edge yet pass
+/// through a hole corner to corner, or run along one wall, through a
+/// vertex, and on across a gap outside the region (#187). So the segment
+/// is cut at every obstacle vertex lying on it, decided exactly. Between
+/// two cuts a stretch either runs along an obstacle edge -- on the
+/// boundary, which a route may follow -- or meets no boundary at all, and
+/// then its midpoint decides for the whole of it.
 fn visible(
     a: Point2,
     b: Point2,
@@ -319,8 +323,45 @@ fn visible(
             return Ok(false);
         }
     }
-    let midpoint = Point2::new(a.x * 0.5 + b.x * 0.5, a.y * 0.5 + b.y * 0.5);
-    contains(region, midpoint)
+    // Obstacle vertices strictly inside the segment, in order along it.
+    let d = b - a;
+    let mut cuts: Vec<Point2> = Vec::new();
+    for (p, q) in obstacles {
+        for v in [*p, *q] {
+            if v != a && v != b && side(a, b, v)? == Sign::Zero && within(a, b, v) {
+                cuts.push(v);
+            }
+        }
+    }
+    cuts.sort_by(|u, v| (*u - a).dot(d).total_cmp(&(*v - a).dot(d)));
+    cuts.dedup();
+    let mut stops = Vec::with_capacity(cuts.len() + 2);
+    stops.push(a);
+    stops.extend(cuts);
+    stops.push(b);
+    for pair in stops.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        // Along an obstacle edge: both ends on it, exactly.
+        let along = obstacles.iter().any(|&(p, q)| {
+            matches!(side(p, q, from), Ok(Sign::Zero))
+                && matches!(side(p, q, to), Ok(Sign::Zero))
+                && within(p, q, from)
+                && within(p, q, to)
+        });
+        if along {
+            continue;
+        }
+        let midpoint = Point2::new(from.x * 0.5 + to.x * 0.5, from.y * 0.5 + to.y * 0.5);
+        if !contains(region, midpoint)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Whether `v`, collinear with `a`-`b`, lies within the segment's span.
+fn within(a: Point2, b: Point2, v: Point2) -> bool {
+    v.x >= a.x.min(b.x) && v.x <= a.x.max(b.x) && v.y >= a.y.min(b.y) && v.y <= a.y.max(b.y)
 }
 
 /// Is `point` inside the region (outer boundary, minus holes)?

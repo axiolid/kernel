@@ -341,3 +341,149 @@ fn the_lower_bound_never_exceeds_the_real_route() {
         "the detour must actually be longer than the straight line"
     );
 }
+
+/// Two 4 x 4 rooms joined by a 1 m corridor (#187).
+fn h_rooms() -> Vec<Polygon> {
+    vec![Polygon {
+        outer: ring(&[
+            (0.0, 0.0),
+            (4.0, 0.0),
+            (4.0, 1.0),
+            (5.0, 1.0),
+            (5.0, 0.0),
+            (9.0, 0.0),
+            (9.0, 4.0),
+            (5.0, 4.0),
+            (5.0, 2.0),
+            (4.0, 2.0),
+            (4.0, 4.0),
+            (0.0, 4.0),
+        ]),
+        holes: vec![],
+    }]
+}
+
+#[test]
+fn a_cut_corridor_disconnects_even_where_walls_line_up() {
+    // The rooms' top walls lie on one line, y = 4, with a gap outside the
+    // region between x = 4 and 5. With the corridor cut, no route runs
+    // along the walls across that gap.
+    let p = Point2::new;
+    let barriers = vec![vec![p(4.5, 0.9), p(4.5, 2.1)]];
+    assert_eq!(
+        shortest_path(&h_rooms(), &barriers, p(1.0, 3.0), p(8.0, 3.0)),
+        Ok(Err(Unreachable::DisconnectedComponents))
+    );
+    // Without the cut, the route through the corridor.
+    let route = shortest_path(&h_rooms(), &[], p(1.0, 3.0), p(8.0, 3.0))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        route.polyline,
+        vec![p(1.0, 3.0), p(4.0, 2.0), p(5.0, 2.0), p(8.0, 3.0)]
+    );
+    assert!((route.length - (2.0 * 10f64.sqrt() + 1.0)).abs() < 1e-12);
+}
+
+/// Whether `q` lies in the closed region: inside an outer ring and outside
+/// every hole, or within a hair of a boundary.
+fn in_closed(region: &[Polygon], q: Point2) -> bool {
+    let inside = |r: &Ring| {
+        let mut c = false;
+        let n = r.points.len();
+        for i in 0..n {
+            let (a, b) = (r.points[i], r.points[(i + 1) % n]);
+            if (a.y > q.y) != (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x {
+                c = !c;
+            }
+        }
+        c
+    };
+    let near = |r: &Ring| {
+        let n = r.points.len();
+        (0..n).any(|i| {
+            let (a, b) = (r.points[i], r.points[(i + 1) % n]);
+            let d = b - a;
+            let t = ((q - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+            (a + d * t - q).length() <= 1e-9
+        })
+    };
+    region.iter().any(|poly| {
+        let rings = std::iter::once(&poly.outer).chain(&poly.holes);
+        rings.clone().any(|r| near(r))
+            || (inside(&poly.outer) && !poly.holes.iter().any(|h| inside(h)))
+    })
+}
+
+#[test]
+fn every_route_segment_lies_in_the_closed_region() {
+    let p = Point2::new;
+    // Regions whose walls line up across gaps, run along each other and
+    // around holes: the H with and without its cut, a comb, and a room
+    // with a hole whose side lies on the line of a wall.
+    let comb = vec![Polygon {
+        outer: ring(&[
+            (0.0, 0.0),
+            (7.0, 0.0),
+            (7.0, 3.0),
+            (6.0, 3.0),
+            (6.0, 1.0),
+            (5.0, 1.0),
+            (5.0, 3.0),
+            (4.0, 3.0),
+            (4.0, 1.0),
+            (3.0, 1.0),
+            (3.0, 3.0),
+            (2.0, 3.0),
+            (2.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 3.0),
+            (0.0, 3.0),
+        ]),
+        holes: vec![],
+    }];
+    let holed = vec![Polygon {
+        outer: ring(&[(0.0, 0.0), (6.0, 0.0), (6.0, 4.0), (0.0, 4.0)]),
+        holes: vec![ring(&[
+            (2.0, 1.0),
+            (4.0, 1.0),
+            (4.0, 4.0 - 1e-3),
+            (2.0, 4.0 - 1e-3),
+        ])],
+    }];
+    let cases: Vec<(Vec<Polygon>, Vec<Vec<Point2>>)> = vec![
+        (h_rooms(), vec![]),
+        (h_rooms(), vec![vec![p(4.5, 0.9), p(4.5, 2.1)]]),
+        (comb, vec![]),
+        (holed, vec![]),
+    ];
+    let mut routes = 0;
+    for (region, barriers) in &cases {
+        // Deterministic start and goal pairs over the region's box.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..60 {
+            let (s, g) = (p(9.0 * next(), 4.0 * next()), p(9.0 * next(), 4.0 * next()));
+            let Ok(Ok(route)) = shortest_path(region, barriers, s, g) else {
+                continue;
+            };
+            routes += 1;
+            for w in route.polyline.windows(2) {
+                for k in 0..=200 {
+                    let q = w[0] + (w[1] - w[0]) * (k as f64 / 200.0);
+                    assert!(
+                        in_closed(region, q),
+                        "{q:?} on {:?} leaves the region",
+                        route.polyline
+                    );
+                }
+            }
+        }
+    }
+    assert!(routes > 60, "{routes} routes");
+}
