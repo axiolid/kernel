@@ -4,7 +4,186 @@
 
 Every publishable crate versions and publishes independently ([ADR 0067](/adr/0067-crates-version-independently)); this page collects each crate's own `CHANGELOG.md`, newest release first per crate. Workspace-wide narrative — breaking bumps and coordinated releases — stays in the [top-level changelog](/CHANGELOG).
 
+## axiolid-brep
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- `ExactBRepBuilder::append`: copy another exact B-rep's vertices, edges,
+  loops, faces and shells, with their curves, surfaces, intervals and
+  names, and return the new shell handles; optionally with every face used
+  reversed, which turns an outer shell into a void (#111).
+
+
+## axiolid-brep-audit
+
+### 0.3.1 - 2026-09-27
+
+### Changed
+
+- An implicit pcurve (ADR 0077) is parameterised by its cells, not in
+  proportion to its edge. It passes when every lifted sample projects onto
+  the edge within tolerance, inside the edge's span, in the order the use
+  runs, and starting and ending at the use's ends. Every other pcurve is
+  still checked against the edge at proportional parameters.
+
+
+## axiolid-brep-boolean
+
+### 0.1.0 - 2026-09-27
+
+### Added
+
+- Surfaces tangent along a whole curve and crossing there: the line of
+  contact is a section edge (the tangent-contact rule now applies to
+  closed forms only), and pieces leaving a vertex with the same direction
+  and bend are ordered by their chords a small way out.
+- A traced pair that only touches adds no section, as the closed forms'
+  touching does. A pcurve whose trace on its face cannot be decided falls
+  back to the section's own space curve read on the face, and failed
+  traces are not repeated. Each surface pair's closed form is computed
+  once per boolean.
+- Two B-spline faces meeting each other: their section is traced in both
+  faces' parameter boxes and carried on both (`Curve3::PairSection`), its
+  pcurve on each read from the solve. The last refusal by face type is
+  gone; sections whose branches cross where the surfaces touch stay
+  refused by name.
+- Faces that wind round their surface without a seam edge (a dome bounded
+  by its rim alone, a can by its two rims), as files may deliver them. The
+  boolean first gives each a seam edge along the iso-curve where its loops
+  wrap, joining the lower loop, the seam, the upper loop or a pole, and the
+  seam back into one loop.
+- Sections through a sphere's pole or a cone's apex are cut there, and the
+  collapsed pole piece is split where they end. Meridians and latitudes,
+  cone rulings and circles, and a torus's tube and ring circles get their
+  straight pcurves, affine in the curve's own parameter.
+
+- B-spline faces (#167, ADR 0075 stage 3) against planes, quadrics and
+  tori:
+  - The section is traced on the spline (ADR 0077).
+  - On the analytic face its pcurve is the same space curve read in the
+    face's parameters (`Curve2::Lifted`), so it shares the edge's
+    parameter.
+  - An edge next to a B-spline face is cut where it meets the section's
+    other surface.
+  - Classification rays meet B-spline faces through the spline trace.
+  - Two B-spline faces meeting each other are refused by name
+    (`UnsupportedSection`).
+
+- Faces on spheres, cones, tori and elliptical cylinders (#167, ADR 0075
+  stage 2), meeting in any section #119 builds:
+  - A section with no line or conic is traced inside one face's parameter
+    box (ADR 0077).
+  - Every section on every analytic face gets an exact implicit pcurve, cut
+    out of the other surface's traced equation between the section's ends.
+  - A sphere's pole or a cone's apex closes loops as a collapsed piece that
+    is no edge.
+  - Seam circles are cut by the cone of normals along them.
+  - Section branches that cross (a Steinmetz pair) are split where they
+    meet.
+  - Frame components that are only rounding residue are cleared before
+    intersecting.
+
+- Operands that touch (#167, ADR 0075 stage 2): faces on one surface share
+  their overlap (each face's edges are imprinted on the other, and a region
+  on the other solid's boundary is kept once by normal agreement); sections
+  along an existing edge split only the other face; tangent contact adds no
+  section; pieces leaving a vertex in one direction are ordered by
+  curvature; solids meeting along an edge are paired radially around it so
+  each stays manifold. Cavities go to the smallest solid around them, in
+  results of several solids too.
+
+- `section_edges` (#167, ADR 0075 stage 1): the exact intersection curves of
+  two exact B-reps' faces, each trimmed to where it lies inside both faces.
+  Crossings with a boundary edge are found against the adjacent face's
+  surface, or across a seam against the plane through the ruling.
+- `boolean(a, b, operator, tolerance)` (#167, ADR 0075 stage 1): the exact
+  union, intersection and difference of two exact solids whose faces lie on
+  planes and cylinders and meet in lines, circles and ellipses -- not only
+  vertical columns. Regions are classified by exact ray parity with
+  certified face membership and sewn into shells; cavities become voids.
+  Every result audits clean and measures exactly.
+- `split_face` (#167): a plane or cylinder face cut along its section edges
+  into regions, traced in the face's parameters with exact pcurves (lines,
+  conics, rulings, circles about the axis, `Sinusoid2` for oblique cuts).
+
+
 ## axiolid-construct
+
+### 0.3.3 - 2026-09-27
+
+### Added
+
+- Exact full-turn revolution of circles, hollow circles, hollow rectangles
+  and every section with holes (#111). Each hole revolves on its own and
+  joins the solid as a void shell. Verified by Pappus on every case.
+- Composite profiles are unioned by `profile_lower::composite_regions` over
+  one `ArcArrangement` (#111): members may carry arcs and their own
+  openings, a member's opening stays open unless another member fills it,
+  and members that do not touch become separate solids of one `ExactBRep`,
+  for extrusion and revolution alike. Member vertices within the linear
+  tolerance are welded first, so members authored to meet do meet.
+- `section_lower::circle_contour`: a circle profile (and its bore) as exact
+  quarter-arc contours. A circle moved off the origin by a derived profile
+  now lowers to that contour instead of being refused.
+
+- `clip_arc_prism_exact` (#120): an arc prism cut by a half-space whose
+  plane passes between its caps, the "column under a sloped roof" case.
+  Cylindrical walls stay `Cylinder` faces trimmed by an exact `Ellipse3`
+  edge with a `Sinusoid2` pcurve (ADR 0071); planar walls get sloped edges;
+  the cut cap is unnamed. A plane parallel to the axis is refused by name.
+
+- `boolean_prisms_exact_solids` and `boolean_arc_prisms_exact_solids`
+  (#120): coaxial booleans whose result falls apart into separate pieces
+  return one solid per piece, ordered by lowest vertex (x, then y), each
+  audited on its own. An empty result is an empty list. The single-solid
+  functions keep refusing a disconnected result, so callers that expect
+  one solid are not silently handed the first piece.
+
+### Changed
+
+- `boolean_arc_prisms_exact` runs on the exact arc overlay (ADR 0070) and
+  builds results it used to refuse: a result with interior holes becomes a
+  solid with through-passages (#120), and a result starting above `z = 0`
+  is extruded from its own base height. Disconnected results go through
+  the `_solids` variants.
+- Stepped coaxial booleans are built, not refused (#120, ADR 0072):
+  `boolean_prisms_exact`, `boolean_arc_prisms_exact` and their `_solids`
+  variants return a union of prisms with different spans, a difference
+  whose tool stops inside the subject (notch, counterbore, blind pocket,
+  slot through the middle heights) as exact solids with their ledge faces.
+  Walls are named after the operand edge they lie on, caps and ledges
+  after the operand cap that made them. A result enclosing a cavity, and
+  pieces touching only along an edge, are refused by name.
+- `clip_arc_prism_exact` builds a plane that crosses a cap inside the
+  section: the part of the old cap that survives keeps its name, next to
+  the unnamed cut.
+- `boolean_stepped` docs: the bands are the lighter alternative to the
+  stepped solid; their volumes are checked against it.
+
+### Changed
+
+- Coaxial booleans whose result encloses a cavity return one solid with a
+  void shell (#120) instead of refusing: `boolean_prisms_exact`,
+  `boolean_arc_prisms_exact` and their `_solids` variants. A cavity in a
+  result of several pieces is still refused by name.
+
+### Fixed
+
+- A sharp rectangle revolved through `revolve_rectangle` wrote its cap
+  holes' pcurve intervals forwards although their uses run the edge
+  backwards (ADR 0024), so each hole's pcurve ran against its edge: the
+  geometric audit put it 8 off the edge and the solid measured 289 instead
+  of 188.5. Found by the general boolean (#167); present before #125.
+
+- Exact revolutions are no longer built inside out (#125).
+  `revolve_profile_exact` and the contour revolution put their surface
+  frames at `(x, y, z) = (X, Z, Y)`, which is left-handed; every loop is
+  built anticlockwise in its parameters, so every `Forward` face pointed
+  into the solid. The topological and geometric audits compare faces with
+  each other and passed it; `exact_properties` measured `-2 pi R A` for
+  every Pappus fixture. The frames are now `(X, -Z, Y)`.
 
 ### 0.3.2 - 2026-09-25
 
@@ -78,6 +257,99 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   arc a few chords at `Tolerance::MILLIMETRE`, and small profiles mesh
   percent-level off. `None` (the default) keeps each provider's previous
   behaviour. A non-finite or non-positive budget is refused (`None`).
+
+
+## axiolid-curve
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- `Field2::value` and `SeriesField2::value` evaluate the value alone,
+  without the jet, and agree with `jet` to the last bit.
+- Bridge cells in `ImplicitCurve2` (`ImplicitCell::bridge`, a cubic into a
+  point where two branches cross, bounded by its Bezier control values),
+  `ImplicitCell::part`, `reversed` and `solved_range`,
+  `ImplicitCurve2::solve_cell`, and `Field2::scale_at` (the size of the
+  terms that make up the value at a point, which its rounding scales
+  with).
+
+- `Curve3::PairSection` (`PairSection3`, `PairNode`): the section of two
+  B-spline surfaces, carried by nodes on both and defined between them by
+  the surfaces themselves (where both meet on the plane across the chord).
+  It has `solve` (the parameters on both surfaces and the point), `rates`,
+  `second_rates`, `sub`, `reversed`, `parameter_of` and `side`, and
+  `pair_section::solve4` for the 4x4 systems behind it (ADR 0077).
+- `BSplineSurface` is defined here, and `axiolid_surface` re-exports it
+  unchanged, so a traced curve can carry a B-spline carrier
+  (`Carrier::Spline`). It has `BSplineSurface::jet` (point and first and
+  second partials, rational) and `domain`.
+- `Field2` is now an enum of `SeriesField2` (the former struct: powers and
+  harmonics) and `PatchField2` (piecewise Bernstein polynomials on a grid,
+  bounded by their coefficients over any box and continued past the grid by
+  their edge polynomials). `ImplicitCurve2::clipped` cuts a curve to a box.
+- `Curve2::Lifted(LiftedCurve2)`: a space curve read in an analytic
+  surface's parameters, sharing the curve's parameter. It is the pcurve,
+  on the analytic face, of a section only a B-spline can carry.
+
+- `ImplicitCurve2::sub`, `rotated`, `reversed`, `shifted`, `closure` and
+  `turning_points`. `implicit::{bound, bound_simple, partial}` give
+  interval bounds and partial derivatives of a `Field2` over parameter
+  boxes.
+
+- `Curve2::Implicit(ImplicitCurve2)` and
+  `Curve3::ImplicitSection(ImplicitSection3)` (#119, ADR 0077): a stretch of
+  a `Field2`'s zero set in monotone cells, where each point is the field's
+  unique root in its cell's bracket, and the same curve on its analytic
+  `Carrier` (plane, ruled surface, sphere or torus).
+
+- `Curve2::QuadraticGraph(QuadraticGraph2)` and
+  `Curve3::RuledSection(RuledSection3)` (#119, ADR 0076): one root branch of
+  `a(t) v^2 + b(t) v + c(t) = 0` with degree-2 trigonometric coefficients
+  (`Trig2`, `Branch`), and the same curve lifted onto a cylinder,
+  elliptical cylinder or cone (`RuledCarrier`). The exact pcurve and edge
+  of a quadric's cut across a ruled surface.
+- `Curve2::AngleGraph(AngleGraph2)` and `Curve3::TorusSection(TorusSection3)`
+  (#119, ADR 0076): the solution `u(t)` of `a(t) cos u + b(t) sin u = c(t)`,
+  and the same curve on a torus (`TorusCarrier`). The exact pcurve and edge
+  of a plane's or sphere's cut across a torus.
+
+- `Curve2::Sinusoid(Sinusoid2)`: the graph `v = mean + a cos(t) + b sin(t)`,
+  the exact pcurve of a plane's cut across a cylinder in its (angle, height)
+  parameters (ADR 0071). The parameter is the first coordinate. Additive:
+  `Curve2` is `#[non_exhaustive]`.
+
+
+## axiolid-evaluate
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- Evaluation, derivatives and inversion of `Curve3::PairSection`. A
+  `Curve2::Lifted` reading a pair section on one of its own B-spline
+  surfaces takes that surface's parameters straight from the solve.
+- `surface::locate`, `curve::locate2` and `curve::locate3`: parameters of
+  a point, iterating where no closed form exists (B-spline surfaces and
+  curves: seeded Newton, verified by the round trip). `invert`, `invert2`
+  and `invert3` keep their closed-form-only contract.
+- Evaluation, derivatives and inversion of `Curve2::Lifted`. An
+  `ImplicitSection` on a B-spline carrier is inverted through the
+  surface's `locate`.
+
+- Evaluation, derivatives and inversion of `Curve2::Implicit` and
+  `Curve3::ImplicitSection` (ADR 0077). `invert2` and `invert3` now also
+  cover `QuadraticGraph`, `AngleGraph`, `RuledSection` and `TorusSection`,
+  reading the angle off the point and trying whole turns.
+
+- Evaluation, first and second derivatives of `Curve2::QuadraticGraph`,
+  `Curve3::RuledSection`, `Curve2::AngleGraph` and `Curve3::TorusSection`
+  (#119, ADR 0076); a parameter outside the graph's
+  spans is refused, not extrapolated.
+
+- `Curve2::Sinusoid` evaluation: point, first and second derivative, a
+  one-turn domain, and exact inversion (the parameter is the point's first
+  coordinate, then its height is checked) (ADR 0071).
 
 
 ## axiolid-exact
@@ -154,6 +426,84 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   named (`OverlapError`); either winding is accepted.
 
 
+## axiolid-measure
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- Face domains trimmed by pair sections of two B-splines: the section's
+  nodes are kept as breaks, where its parameter speed changes.
+- Face domains for B-spline and lifted pcurves. Turning points come from a
+  dense scan of the derivative's signs with bisection, and a B-spline's
+  knots are kept as breaks.
+
+- Turning points of `Curve2::Implicit` pcurves, isolated with interval
+  bounds, so faces trimmed by them get a certified domain.
+
+### Fixed
+
+- `FaceDomain::contains` counts winding -1 as inside (a face whose loops
+  run clockwise in its parameters). It also moves a point by whole periods
+  of a torus's second angle into the face's box.
+- Face integrals split an implicit pcurve at its cell boundaries, where
+  its parameter's speed jumps, so adaptive quadrature converges there.
+
+- `FaceDomain::contains` decides a point whose ray passes through a
+  boundary vertex or along a boundary piece, by simulation of simplicity
+  (the ray runs just right of the point), instead of answering `None`. The
+  centre of a diamond, whose every axis ray meets a corner, used to be
+  undecidable.
+
+### Added
+
+- `FaceDomain` (#167): an exact face's parameter domain, answering whether
+  a point lies in the face with a certificate or not at all; a point outside
+  the domain's box in a coordinate that does not wrap is decided at once.
+- `boundary_distance` and `boundary_clearance` (#125, ADR 0074): an
+  interval certain to contain the distance between the boundaries of two
+  exact B-reps, with witness points on both, and a comparison with a limit
+  that answers `Clearance::Below`, `Above` or `Indeterminate`. Branch and
+  bound over face patches and edge spans; lower bounds from Lipschitz
+  spheres and exact projection ranges, upper bounds only from points
+  certified on the boundary.
+
+- `exact_properties` measures curved faces (#125, ADR 0073): cylinders,
+  cones, spheres, tori, elliptical cylinders, B-spline faces, and planar
+  faces bounded by arcs or ellipses. Each face is integrated over its own
+  parameter domain by Green's theorem round its pcurves, with adaptive
+  Gauss-Kronrod quadrature held to a relative error of 1e-13; nothing is
+  tessellated. Seams, poles and apexes, and torus faces bounded by meridians
+  are handled; a boundary that encloses nothing in the surface's parameters
+  is refused.
+
+### Changed
+
+- **Breaking:** `ExactMeasureError` is `#[non_exhaustive]` and gains
+  `ParameterDomain`, `Evaluation` and `NotConverged`. `NonPlanarFace` now
+  means a surface family the module cannot integrate at all.
+- The `exact` feature now also enables `axiolid-evaluate` and
+  `axiolid-curve`.
+
+### Fixed
+
+- `FaceDomain` and the certified distance read a point on a periodic face
+  with a negative angle as outside it (#167): the whole-period shifts tried
+  had the wrong sign, so `-0.2` was tried at `-0.2 - 2 pi`, not at
+  `2 pi - 0.2`. Faces reaching a pole hid it, since the pole adds its own
+  crossing.
+
+- A planar face with a hole reported the hole's area added to its own: the
+  fan summed triangle magnitudes. Areas are now summed as vectors, so a hole
+  subtracts (a 4 x 4 plate with a 2 x 2 hole read 20 per cap, not 12).
+
+- `exact_properties` honours face, shell-use and bound orientation. It
+  read loop winding alone, which is only right for faces used forward; a
+  `Reversed` cap off the plane `z = 0` added its volume instead of
+  subtracting it (a unit cube at `2 <= z <= 3` measured 7/3). Every
+  solid tested before sat on `z = 0`, where the error vanishes.
+
+
 ## axiolid-mesh
 
 ### 0.3.0 - 2026-09-23
@@ -200,6 +550,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.4 - 2026-09-27
+
+### Changed
+
+- Every solid of a B-rep is tessellated, not only the first (#111): a
+  composite profile whose members do not touch is several solids in one
+  B-rep.
+- A solid's void shells are tessellated (#120). They were dropped as
+  "boolean intent", which silently filled every cavity of an authored
+  `IfcFacetedBrepWithVoids`-style B-rep and forced the exact booleans to
+  refuse cavities. Each void is emitted facing into the cavity, so the mesh
+  encloses the outer volume less every cavity; a void authored facing out
+  of it (the STEP convention, reversed on use) is turned round, since a
+  cavity can only remove material. A void shell that is not closed is
+  refused rather than leaving the mesh open.
 
 ### 0.3.3 - 2026-09-25
 
@@ -314,6 +680,186 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 ### Added
 
 - `CompileOutcome` and the provided method `MeshCompiler::compile_mesh_reported` (#115): a compiled mesh with the fate of each attribute channel. The default wraps `compile_mesh` and reports `attribute_fates: None` ("not tracked", not "nothing dropped"), so existing implementations compile unchanged.
+
+
+## axiolid-model
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- A `Curve2::QuadraticGraph` or `Curve2::AngleGraph` with finite
+  coefficients is accepted as a trim basis (#119).
+
+- A `Curve2::Sinusoid` is a valid trim basis when its three coefficients
+  are finite (ADR 0071).
+
+
+## axiolid-nurbs
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- An exact tier for B-spline fields: signs at points and over boxes (and
+  of derivatives) decided in dyadic Bernstein arithmetic, with no division,
+  behind an interval filter, wherever `f64` rounding cannot decide. A
+  B-spline field's trace excludes pieces, finds sides monotone, places
+  roots and tells lines of contact apart on exact signs, so it has no
+  precision limit: lines of contact of every order its degree allows are
+  found (tested to `x^21`), their derivatives tried up to that degree.
+  Series fields keep `f64`, split pieces below rounding, and refuse lines
+  of contact rounding hides over more than a twentieth of the window.
+- Surfaces tangent along a whole curve (a line of contact) are traced. A
+  first or second derivative of the field crosses zero regularly on the
+  line and is traced instead; its curves are kept where the field
+  vanishes along them with its gradient, as crossing or touching by the
+  field's sign across. The field is then traced with tubes about the
+  lines left out, and branches running into a line are bridged to it at
+  a vertex. Crossing lines are sections; touching lines add none.
+  Derivatives of every order are tried (up to 16), the tubes sized to where
+  the field clears its rounding; only lines rounding hides over more than
+  a twentieth of the window stay `Undecided`.
+- A trace trusts a value's sign only clear of its rounding, on a piece's
+  sides and across it (it could certify cells along noise near high-order
+  contact).
+- Contact to higher order than a saddle (a singular Hessian: a tacnode,
+  where two branches touch each other) is a vertex too. The ends are
+  checked against the field's sign changes about the point, and a
+  tacnode's bridges arrive along the Hessian's null direction. Tangency
+  along a whole curve without crossing is touching; with crossing it is
+  `ExactIntersectionRefusal::Undecided`, a new variant that also names an
+  exhausted budget (both were `NotRegularCurve`, which now means touching
+  only).
+- A B-spline section tangent to a sub-patch edge (a knot line, a window's
+  or a split's edge) is traced: the touching crossing, where no proof can
+  exist, is found by damped Newton and seeds the curve; a regular crossing
+  that cannot be proven is still refused.
+- Faster traces near contact: singular points are sought as soon as a
+  small piece is irregular, sides use the tighter of the direct and the
+  mean-value bound and split their piece rather than search deep, and
+  `SeriesField2::value` evaluates the value alone (bit for bit the same).
+- Sections of two B-splines are certified. Every crossing of a sub-patch
+  edge with the other sub-patch is isolated by Krawczyk's test on Bernstein
+  enclosures of the surfaces and their partials, so every component is
+  seeded; every chord of a traced curve is proven, by a parametric
+  Krawczyk test over the chord's sweeping plane, to follow one arc (a
+  chord that cannot be is halved, a curve that still cannot is re-traced
+  with shorter steps, then refused). Patches are cut to the windows first,
+  so a curve crossing a window inside one patch pair is found. B-spline
+  curve/surface crossings use the same isolation.
+
+- `spline_pair_intersection`: every component of the section of two
+  B-spline surfaces within parameter windows, as `PairSection3` curves.
+  Bezier sub-patch pairs are split until their normal cones are apart, so
+  no closed loop hides in one; sub-patch edge crossings seed every
+  component, and each is followed on both surfaces to the window's edge,
+  where its last node is solved exactly. `exact_surface_intersection`
+  returns it for two B-splines (`Derivation::PairTrace`).
+- `exact_curve_surface_intersection` for a B-spline curve against a
+  B-spline surface: hull pruning over the Bezier pieces of both, then
+  Newton.
+
+### Changed
+
+- The trace separates the singular points it meets. An isolated point
+  where the surfaces touch without crossing is dropped, with the boxes
+  about it that rounding cannot decide. A trace that finds only such
+  points answers `NotRegularCurve`, as the closed forms do for touching.
+  Branches crossing at a saddle meet at a vertex: the pieces about the
+  crossing that cannot be certified are dropped, and each of the four
+  branch ends is joined to the crossing by a bridge cell (the cubic
+  matching the branch's value and slope at its end and its tangent at the
+  crossing). Rounding there is measured on the field's terms at the
+  point, not its coefficients. Whole-turn
+  windows start an irrational fraction of a radian past `-pi`, so a
+  symmetric section's special points never sit on the window's edge.
+
+### Added
+
+- `section_curve_curve_intersection2` (B8, #119): lines, conics,
+  sinusoids, quadratic and angle graphs and implicit curves meet each
+  other, in any pairing. One piece is traced over its span and the other's
+  defining field has its roots isolated along it; roots on a graph's other
+  branch are filtered out.
+- `section_curve_curve_intersection3` (B8): space curves of the section
+  families meet where one crosses a surface the other lies on, kept within
+  a tolerance.
+- `extrema::minimum_distance` (B7, #119): the smallest distance between
+  points, curve spans and surface patches of any analytic or B-spline
+  family and traced sections, bracketed and certified, with witness points.
+  It is a branch and bound whose lower bounds are exact image boxes and
+  projections on the joining direction, in mean-value form so they close
+  quadratically at a closest point.
+
+- Sections of B-spline surfaces by planes, quadrics and tori (#119,
+  ADR 0077). The analytic equation is read on the spline's rational Bezier
+  patches as Bernstein polynomials (knot insertion, then Bernstein
+  products) and traced with the same certified subdivision, clipped to the
+  spline's domain. `implicit_surface_intersection` and
+  `trace_section_pcurves` take a B-spline carrier.
+- `exact_curve_surface_intersection` takes a B-spline surface for lines,
+  circles and ellipses. The curve is written as the meeting of two
+  analytic surfaces; the first is traced on the spline and the second's
+  roots are found along it.
+
+- A plane through a cone's apex cuts rays along the rulings of the
+  modelled nappe (`Derivation::ConeApexRulings`, spans `[0, inf)`). It was
+  refused before. A plane flatter than the cone meets it only at the apex
+  (`NotRegularCurve`).
+- Curve/surface intersection for the section families (B9, #119):
+  `exact_curve_surface_intersection` takes an `ImplicitSection`, and
+  `section_curve_surface_intersection` takes any ruled, torus or traced
+  section over a span. Roots are isolated along the curve's cells with
+  interval bounds. Parameters are `ExactCurveParameter::Certified`.
+- `trace_section_pcurves`, `extract_stretch` and `implicit_view` give a
+  section's implicit pcurve on any analytic face, cut out between given
+  points, and a ruled or torus section as an implicit curve.
+
+- Traced sections (#119, ADR 0077): `exact_surface_intersection` now
+  builds a torus against a cylinder, elliptical cylinder, cone or torus off
+  its axis (`Derivation::ImplicitTrace`). The section is found in the
+  torus's parameters as every component of the other surface's equation,
+  by certified subdivision into monotone cells. There is no marching, so no
+  loop is missed for want of a small step. A singular point (surfaces
+  touching where branches cross) is refused as `NotRegularCurve`.
+  `implicit_surface_intersection` exposes it with an explicit window for
+  any analytic pair, and `section_field_of` the field itself.
+
+- `exact_surface_intersection` derives ruled quadric sections (#119,
+  ADR 0076): a cylinder or elliptical cylinder against a plane, sphere,
+  cylinder, elliptical cylinder or cone, and a cone against a plane, sphere
+  or cone (on the modelled nappes, decided exactly), when no
+  line, circle or ellipse applies -- pipe tees, off-axis sphere/cylinder
+  junctions, oblique cone cuts, parabolas and hyperbolas. Which spans of
+  angle carry the curve is decided by exact root isolation of the
+  discriminant. `ExactIntersectionCurve` gains `spans` and `Derivation`
+  gains `RuledQuadricSection`.
+- `exact_surface_intersection` derives a ring torus's section by a plane or
+  sphere off its axis (#119, ADR 0076) -- a pipe bend meeting a wall, a ball
+  against a ring -- as `u(v)` solving `A(v) cos u + B(v) sin u = C(v)`,
+  with spans and wrap points decided exactly
+  (`Derivation::TorusAngleSection`).
+
+- Exact intersection of analytic curves (#119): `exact_curve_surface_intersection`
+  (line, circle or ellipse against plane, cylinder, elliptical cylinder, cone,
+  sphere or torus) and `exact_curve_curve_intersection2`/`3` (lines, circles,
+  ellipses). The equations become integer polynomials in the line parameter or
+  the conic's half-angle parameter, solved with `axiolid-exact`: each hit, its
+  multiplicity (2 = touching) and "the curve lies on the surface" are exact
+  decisions, and a hit at a conic's half-angle singularity (`theta = pi`) is
+  reported as `Antipode`. A cone counts only its modelled nappe; a line on the
+  cone through its apex is refused as `PartialOverlap`. Points are rounded to
+  `f64` for output only. B-spline operands stay on the certified tier.
+
+### Fixed
+
+- `exact_surface_intersection` decides tangent, parallel and perpendicular
+  cases exactly (#119). In `f64` a plane exactly tangent to a sphere along
+  a normal like (3, 2, 6) came out as a circle of radius about 1e-7, an
+  exactly perpendicular oblique plane cut a cylinder in a near-circular
+  ellipse, and an exactly parallel one produced a huge ellipse instead of
+  rulings. Only output coordinates are rounded now.
 
 
 ## axiolid-overlay
@@ -504,6 +1050,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   every obstacle vertex lying on it, decided exactly, and each stretch is
   either along an obstacle edge or has its midpoint in the region. Two
   rooms whose corridor is cut are `DisconnectedComponents` again.
+
+
+## axiolid-surface
+
+### 0.3.1 - 2026-09-27
+
+### Changed
+
+- `BSplineSurface` is defined in `axiolid-curve` (so a curve traced on a
+  B-spline surface can carry its carrier, ADR 0077) and re-exported here
+  unchanged: same fields, same derives. Requires `axiolid-curve` 0.3.1.
 
 
 ## axiolid-triangulate

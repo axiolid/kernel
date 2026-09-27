@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-27
+
 ### Added
 
 - Exact full-turn revolution of circles, hollow circles, hollow rectangles

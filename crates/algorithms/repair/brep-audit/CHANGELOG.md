@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-27
+
 ### Changed
 
 - An implicit pcurve (ADR 0077) is parameterised by its cells, not in

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-27
+
 ### Changed
 
 - Every solid of a B-rep is tessellated, not only the first (#111): a
