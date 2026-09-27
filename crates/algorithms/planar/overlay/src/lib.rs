@@ -248,12 +248,29 @@ fn validate(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
         validate_ring(&p.outer, t)?;
         for h in &p.holes {
             validate_ring(h, t)?;
-            if !contains(&p.outer, h.points[0]) {
+            if hole_outside(&p.outer, h, t) {
                 return Err(OverlayError::HoleOutsideOuter);
             }
         }
     }
     Ok(())
+}
+/// Whether a hole leaves its outer ring: a vertex of it strictly outside.
+/// Vertices on the outer boundary decide nothing -- a hole may touch its
+/// outer ring at a vertex, which settled outputs do, and testing only the
+/// first vertex called such a hole outside whenever that was the touching
+/// one (axioval, #191).
+fn hole_outside(outer: &Ring, hole: &Ring, t: Tolerance) -> bool {
+    let n = outer.points.len();
+    let on_boundary = |q: Point2| {
+        (0..n).any(|i| {
+            let (a, b) = (outer.points[i], outer.points[(i + 1) % n]);
+            cross(a, b, q).abs() <= t.linear() && within_extent(a, b, q, t.linear())
+        })
+    };
+    hole.points
+        .iter()
+        .any(|&q| !on_boundary(q) && !contains(outer, q))
 }
 fn contains(r: &Ring, p: Point2) -> bool {
     let mut inside = false;
@@ -357,7 +374,9 @@ pub fn union_soup(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, 
         .collect();
     let empty: Vec<Vec<Vec<[f64; 2]>>> = Vec::new();
     let shapes = subject.overlay(&empty, OverlayRule::Union, BackendFill::NonZero);
-    Ok(shapes_to_polygons(shapes))
+    // Settled like every other output, so the polygons are valid operands
+    // (#191).
+    Ok(settle::settle(shapes_to_polygons(shapes), tolerance))
 }
 
 /// Convert backend shapes to canonical kernel polygons.

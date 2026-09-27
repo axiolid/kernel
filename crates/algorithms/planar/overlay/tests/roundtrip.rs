@@ -173,3 +173,125 @@ fn a_gap_under_the_tolerance_closes_round_a_hole() {
     round_trips("closed C", &r);
     assert!((r.area() - 6.9995).abs() < 1e-3, "{}", r.area());
 }
+
+/// Triangles from recursive midpoint subdivision of a room with a wall
+/// and a gap, kept within a disc: rounded midpoints, T-junctions and edges
+/// that almost but not quite coincide, as a travel-distance effect makes.
+fn subdivided_cells(seed: u64) -> Vec<Polygon> {
+    let mut s = seed;
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        (s >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let mut cells: Vec<([Point2; 3], u32)> = Vec::new();
+    for (x, y, w, h) in [
+        (0.0, 0.0, 5.0, 7.0),
+        (5.2, 0.0, 4.8, 7.0),
+        (5.0, 3.5, 0.2, 1.0),
+    ] {
+        let p = |a: f64, b: f64| Point2::new(a, b);
+        cells.push(([p(x, y), p(x + w, y), p(x + w, y + h)], 0));
+        cells.push(([p(x, y), p(x + w, y + h), p(x, y + h)], 0));
+    }
+    let centre = Point2::new(1.0 + 3.0 * next(), 1.0 + 5.0 * next());
+    let range = 3.0 + 3.0 * next();
+    let mut kept = Vec::new();
+    while let Some((c, depth)) = cells.pop() {
+        let g = Point2::new(
+            (c[0].x + c[1].x + c[2].x) / 3.0,
+            (c[0].y + c[1].y + c[2].y) / 3.0,
+        );
+        let r = c.iter().map(|q| (*q - g).length()).fold(0.0, f64::max);
+        let d = (g - centre).length();
+        if d - r > range {
+            continue;
+        }
+        if d + r > range && depth < 6 {
+            let [a, b, cc] = c;
+            let mid = |p: Point2, q: Point2| Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y));
+            let (ab, bc, ca) = (mid(a, b), mid(b, cc), mid(cc, a));
+            for child in [[a, ab, ca], [ab, b, bc], [ca, bc, cc], [ab, bc, ca]] {
+                cells.push((child, depth + 1));
+            }
+            continue;
+        }
+        let mut points = c.to_vec();
+        if (points[1] - points[0]).perp_dot(points[2] - points[0]) < 0.0 {
+            points.reverse();
+        }
+        kept.push(Polygon {
+            outer: Ring { points },
+            holes: Vec::new(),
+        });
+    }
+    kept
+}
+
+#[test]
+fn unions_of_subdivided_cells_are_operands_again() {
+    // #191: such unions came back with holes touching their outer ring at
+    // the hole's first vertex, refused as HoleOutsideOuter, and union_soup
+    // returned them unsettled, refused as SelfIntersection.
+    for seed in [
+        0x1357_9bdf_2468_ace0u64,
+        0x0bad_cafe_dead_beef,
+        0x1234_4321_5678_8765,
+    ] {
+        let cells = subdivided_cells(seed);
+        let rings: Vec<Ring> = cells.iter().map(|p| p.outer.clone()).collect();
+        let soup = Region::new(axiolid_overlay::union_soup(&rings, t()).unwrap(), t()).unwrap();
+        round_trips("union_soup", &soup);
+        let half = cells.len() / 2;
+        let a = Region::new(cells[..half].to_vec(), t()).unwrap();
+        let b = Region::new(cells[half..].to_vec(), t()).unwrap();
+        let both = a.union(&b, t()).unwrap();
+        round_trips("halves", &both);
+        both.union(&a, t()).unwrap();
+        both.union(&soup, t()).unwrap();
+        assert!(
+            (both.area() - soup.area()).abs() < 1e-3,
+            "{} {}",
+            both.area(),
+            soup.area()
+        );
+        let mut acc = Region::empty();
+        for cell in cells.iter().take(120) {
+            let piece = Region::new(vec![cell.clone()], t()).unwrap();
+            acc = acc.union(&piece, t()).unwrap();
+            round_trips("one by one", &acc);
+        }
+    }
+}
+
+#[test]
+fn a_hole_touching_its_outer_ring_at_its_first_vertex_is_an_operand() {
+    // The hole's lowest-leftmost vertex -- where a canonical ring starts --
+    // is the one on the outer ring. Judged by that vertex alone, the hole
+    // was "outside" and every operation refused the region (#191).
+    let r = Region::new(
+        vec![Polygon {
+            outer: ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]),
+            // Touching the top edge, where a rightward ray from the
+            // touching vertex crosses nothing: "outside" by that test.
+            holes: vec![ring(&[(1.0, 4.0), (3.0, 3.0), (2.0, 2.0)])],
+        }],
+        t(),
+    )
+    .unwrap();
+    assert_eq!(r.polygons()[0].holes[0].points[0], Point2::new(1.0, 4.0));
+    let grown = r.union(&rect(3.0, 3.0, 2.0, 2.0), t()).unwrap();
+    round_trips("union with a touching hole", &grown);
+    assert!((grown.area() - 17.5).abs() < 1e-9, "{}", grown.area());
+    // A hole really outside is still refused.
+    let outside = axiolid_overlay::Polygon {
+        outer: ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]),
+        holes: vec![ring(&[(5.0, 1.0), (6.0, 1.0), (6.0, 2.0)])],
+    };
+    let bad = Region::new(vec![outside], t()).unwrap();
+    assert_eq!(
+        bad.union(&rect(0.0, 0.0, 1.0, 1.0), t()),
+        Err(axiolid_overlay::OverlayError::HoleOutsideOuter)
+    );
+}

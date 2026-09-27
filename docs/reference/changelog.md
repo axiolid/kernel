@@ -867,6 +867,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-overlay
 
+### 0.3.3 - 2026-09-27
+
+### Fixed
+
+- Unions of many small cells are operands again (#191): a hole touching
+  its outer ring at a vertex was called outside whenever that vertex was
+  the hole's first and lay where the boundary-exclusive ray test counts it
+  out, so the next operation refused the region with `HoleOutsideOuter`.
+  A hole is now outside only if a vertex of it lies strictly outside.
+- `union_soup` settles its output like every other operation, so its
+  polygons are accepted by `Region::new` (#191).
+
 ### 0.3.2 - 2026-09-27
 
 ### Added

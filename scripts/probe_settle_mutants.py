@@ -23,6 +23,8 @@ MUTANTS = [
     ('rings passing a point twice kept whole', S, '        if let Some((i, j)) = split_point(&ring) {', '        if let Some((i, j)) = split_point(&ring).filter(|_| false) {', TESTS),
     ('touching vertices left off the edge', S, '        match touching(&ring, eps) {', '        match None::<Vec<Point2>>.or_else(|| { let _ = touching; None }) {', TESTS),
     ('pieces keep the ring\'s kind regardless of winding', S, '                if same != hole {', '                if !hole {', TESTS),
+    ('holes judged by their first vertex', L, '    hole.points\n        .iter()\n        .any(|&q| !on_boundary(q) && !contains(outer, q))', '    let _ = on_boundary;\n    !contains(outer, hole.points[0])', TESTS),
+    ('union_soup output not settled', L, '    Ok(settle::settle(shapes_to_polygons(shapes), tolerance))', '    Ok(shapes_to_polygons(shapes))', TESTS),
 ]
 
 def run(target):
