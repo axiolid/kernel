@@ -8,3 +8,13 @@ Pre-1.0: the minor version is the breaking-change slot, per Cargo's own
 caret rule for `0.x` versions.
 
 ## [Unreleased]
+
+### Added
+
+- `tessellate_primitive` meshes `Primitive::Torus` and `Primitive::Wedge`
+  (#142). The torus is a grid of planar trapezoids sized by the chord
+  budget, round the axis for the outer equator and round the tube for the
+  tube; horn and spindle tori, and non-positive or non-finite radii, are
+  refused by name. The wedge's faces are planar and shared corners of a
+  collapsed top are merged, so a ridge or apex wedge is still a closed,
+  outward-wound solid; a reversed or non-finite top range is refused.

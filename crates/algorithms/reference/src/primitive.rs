@@ -36,6 +36,23 @@ pub fn tessellate_primitive(primitive: &Primitive, tolerance: Tolerance) -> Geom
         Primitive::Cylinder { radius, height } => cylinder(*radius, *height, tol),
         Primitive::Cone { radius, height } => cone(*radius, *height, tol),
         Primitive::Pyramid { x, y, height } => pyramid(*x, *y, *height),
+        Primitive::Torus {
+            major_radius,
+            minor_radius,
+        } => torus(*major_radius, *minor_radius, tol),
+        Primitive::Wedge {
+            x,
+            y,
+            height,
+            top_x_min,
+            top_x_max,
+            top_y_min,
+            top_y_max,
+        } => wedge(
+            [*x, *y, *height],
+            [*top_x_min, *top_x_max],
+            [*top_y_min, *top_y_max],
+        ),
         // The enum is non_exhaustive: a new family is unsupported, never
         // silently approximated by the nearest one.
         _ => Err(GeomError::Unsupported {
@@ -97,6 +114,145 @@ fn pyramid(x: Scalar, y: Scalar, height: Scalar) -> GeomResult<TriMesh> {
     ];
     let i = vec![0, 2, 1, 0, 3, 2, 0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4];
     Ok(TriMesh::new(p, i))
+}
+
+/// Wedge: base `[0, x] x [0, y]` at z = 0, top `[x0, x1] x [y0, y1]` at
+/// z = `height`.
+///
+/// Every face is planar: the x sides join edges parallel to y, the y sides
+/// edges parallel to x. A top collapsed to a segment or a point shares
+/// vertices, so the faces that lose area are dropped and the rest meet at
+/// the shared vertices rather than along zero-length edges.
+fn wedge(
+    [x, y, height]: [Scalar; 3],
+    [x0, x1]: [Scalar; 2],
+    [y0, y1]: [Scalar; 2],
+) -> GeomResult<TriMesh> {
+    let (x, y, h) = (
+        positive(x, "wedge x")?,
+        positive(y, "wedge y")?,
+        positive(height, "wedge height")?,
+    );
+    for (value, what) in [
+        (x0, "wedge top x min"),
+        (x1, "wedge top x max"),
+        (y0, "wedge top y min"),
+        (y1, "wedge top y max"),
+    ] {
+        if !value.is_finite() {
+            return Err(GeomError::InvalidInput(format!(
+                "{what} must be finite, got {value}"
+            )));
+        }
+    }
+    if x0 > x1 || y0 > y1 {
+        return Err(GeomError::InvalidInput(format!(
+            "wedge top must have min <= max, got x {x0}..{x1}, y {y0}..{y1}"
+        )));
+    }
+    let corners = [
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(x, 0.0, 0.0),
+        Point3::new(x, y, 0.0),
+        Point3::new(0.0, y, 0.0),
+        Point3::new(x0, y0, h),
+        Point3::new(x1, y0, h),
+        Point3::new(x1, y1, h),
+        Point3::new(x0, y1, h),
+    ];
+    // Outward faces over the corners above: bottom, top, then the sides at
+    // y = 0, x = x, y = y and x = 0.
+    const FACES: [[usize; 4]; 6] = [
+        [0, 3, 2, 1],
+        [4, 5, 6, 7],
+        [0, 1, 5, 4],
+        [1, 2, 6, 5],
+        [2, 3, 7, 6],
+        [3, 0, 4, 7],
+    ];
+    let mut p: Vec<Point3> = Vec::with_capacity(8);
+    let index: Vec<u32> = corners
+        .iter()
+        .map(|&c| match p.iter().position(|&q| q == c) {
+            Some(k) => k as u32,
+            None => {
+                p.push(c);
+                (p.len() - 1) as u32
+            }
+        })
+        .collect();
+    let mut i = Vec::with_capacity(36);
+    for face in FACES {
+        let mut ring: Vec<u32> = Vec::with_capacity(4);
+        for corner in face {
+            let v = index[corner];
+            if ring.last() != Some(&v) {
+                ring.push(v);
+            }
+        }
+        if ring.len() > 1 && ring.first() == ring.last() {
+            ring.pop();
+        }
+        if ring.len() < 3 {
+            continue;
+        }
+        // Each face is convex, so a fan triangulates it.
+        for k in 1..ring.len() - 1 {
+            i.extend([ring[0], ring[k], ring[k + 1]]);
+        }
+    }
+    Ok(TriMesh::new(p, i))
+}
+
+/// Ring torus about +z, tube centre circle of radius `major` in z = 0.
+///
+/// A grid of `n` steps round the axis by `m` round the tube, each sized by
+/// the same chord rule as the other curved primitives: `n` for the outer
+/// equator, the largest circle round the axis. Each grid cell is a planar
+/// trapezoid (its two edges round the axis are parallel chords), split in
+/// two.
+fn torus(major: Scalar, minor: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
+    let big = positive(major, "torus major radius")?;
+    let r = positive(minor, "torus minor radius")?;
+    if r >= big {
+        let kind = if r == big {
+            "a horn torus (minor radius equal to major)"
+        } else {
+            "a spindle torus (minor radius above major)"
+        };
+        return Err(GeomError::InvalidInput(format!(
+            "torus minor radius {r} must be below major radius {big}: {kind} \
+             does not bound a two-manifold solid"
+        )));
+    }
+    let n = segments(big + r, tol);
+    let m = segments(r, tol);
+    let mut p = Vec::with_capacity(n * m);
+    for i in 0..n {
+        let theta = core::f64::consts::TAU * (i as Scalar) / (n as Scalar);
+        for j in 0..m {
+            let phi = core::f64::consts::TAU * (j as Scalar) / (m as Scalar);
+            let rho = big + r * phi.cos();
+            p.push(Point3::new(
+                rho * theta.cos(),
+                rho * theta.sin(),
+                r * phi.sin(),
+            ));
+        }
+    }
+    let at = |i: usize, j: usize| ((i % n) * m + (j % m)) as u32;
+    let mut idx = Vec::with_capacity(n * m * 6);
+    for i in 0..n {
+        for j in 0..m {
+            // Round the axis, then round the tube: outward, since the
+            // axis tangent crossed with the tube tangent points away from
+            // the tube's centre.
+            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            idx.extend([a, b, c]);
+            idx.extend([a, c, d]);
+        }
+    }
+    Ok(TriMesh::new(p, idx))
 }
 
 /// A ring of `n` points at `radius`, height `z`.

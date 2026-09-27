@@ -179,13 +179,6 @@ effort = "Medium"
 number = 140
 
 [[issue]]
-key = "torus-wedge-primitives"
-title = "Torus and wedge B-rep primitive solids"
-priority = "Medium"
-effort = "Low"
-number = 142
-
-[[issue]]
 key = "barycentric-coords"
 title = "Public barycentric and mean-value coordinates"
 priority = "Low"
@@ -534,10 +527,9 @@ cgal = ["BGL"]
 id = "C3"
 area = "brep"
 name = "primitives (box,cyl,cone,sphere,torus,wedge)"
-issue = "torus-wedge-primitives"
-level = "narrow"
-summary = "Primitive enum covers Block, Sphere, Cylinder, Cone, Pyramid only -- no Torus, no Wedge as primitive-solid variants (Torus exists only as an analytic surface type, B3, not as a closed primitive solid)"
-evidence = ["crates/representations/analytic/primitive/src/solid.rs::Primitive", "crates/algorithms/reference/src/tessellate.rs", "crates/algorithms/reference/tests/primitive.rs", "crates/representations/analytic/primitive/tests/values.rs"]
+level = "implemented"
+summary = "Primitive covers Block, Sphere, Cylinder, Cone, Pyramid, Torus (ring tori only; horn and spindle tori refused by name, as they bound no two-manifold solid) and Wedge (OCCT MakeWedge's general form, dx dy dz with the top's x and z ranges, height read as local z; a top collapsed to a ridge or an apex is still a closed solid). Primitives are exact values; the reference path tessellates each to a closed, outward-wound mesh at the chord budget, the torus as a grid of planar trapezoids whose volume and area have closed forms of their own."
+evidence = ["crates/representations/analytic/primitive/src/solid.rs::Primitive", "crates/algorithms/reference/src/primitive.rs::tessellate_primitive", "crates/algorithms/reference/tests/primitive.rs", "crates/algorithms/reference/tests/torus_wedge.rs", "crates/representations/analytic/primitive/tests/values.rs", "scripts/probe_torus_wedge_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKPrim/BRepPrim", "src/ModelingAlgorithms/TKPrim/BRepPrimAPI"]
 cgal = []
 
