@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-inspect"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-measure"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-brep",
  "axiolid-core",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-nurbs"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-primitive"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-spatial"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]

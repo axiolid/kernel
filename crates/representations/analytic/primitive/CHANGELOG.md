@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-27
+
 ### Added
 
 - `Primitive::Torus` (#142): a ring torus about local +z, by major and

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-27
+
 ### Added
 
 - Surface knot removal, degree change and iso-curves (#141):

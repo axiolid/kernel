@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-27
+
 ### Added
 
 - `bounding::minimum_enclosing_sphere` (#118): the least sphere holding a

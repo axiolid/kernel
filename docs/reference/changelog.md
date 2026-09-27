@@ -111,6 +111,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.4 - 2026-09-27
+
+### Added
+
+- `bounding::minimum_enclosing_sphere` (#118): the least sphere holding a
+  point set, by Welzl's algorithm with exact in/out decisions (diametral,
+  least sphere through three points, circumsphere through four), the
+  centre enclosed from exact dyadic values and the radius rounded up, with
+  `SphereEvidence::error` bounding centre offset and radius excess.
+- `bounding::oriented_bounding_box` (#118): a box holding every point,
+  exactly (`|(p - centre) . axes[i]| <= half_extents[i]` for the returned
+  doubles), never larger than the axis-aligned box. Tries the axis-aligned
+  box, the principal axes, and each world axis, principal axis and exact
+  hull face normal with the exact minimum-area rectangle across it. It does
+  not claim the global minimum volume.
+- Depends on `axiolid-exact` for the exact decisions.
+
 ### 0.3.3 - 2026-09-27
 
 ### Added
@@ -398,6 +415,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
+### 0.3.3 - 2026-09-27
+
+### Added
+
+- `topology` (#144): every connected component of a two-manifold triangle
+  mesh, classified exactly from its connectivity -- counts, Euler
+  characteristic, boundary loops, orientability and consistent winding, and
+  the surface (`SurfaceKind::Orientable { genus }` or
+  `NonOrientable { crosscaps }`). A closed orientable component also gets a
+  basis of its first homology: `2g` simple closed edge loops, by the
+  tree-cotree construction. Meshes with an edge on three or more triangles,
+  or a vertex whose triangles form several fans, are refused
+  (`TopologyError::NonManifold`). `genus` is unchanged.
+
 ### 0.3.2 - 2026-09-27
 
 ### Added
@@ -427,6 +458,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.2 - 2026-09-27
+
+### Added
+
+- Fréchet distance between polylines (#147): `frechet_distance` (the
+  continuous distance: the least critical value of the free space that the
+  Alt-Godau decision accepts), `discrete_frechet_distance` (Eiter-Mannila,
+  `O(nm)` time, `O(m)` memory) and the decision `frechet_at_most`, each
+  with a `_2d` form. Empty polylines, non-finite points and an invalid
+  leash are `FrechetError`s. Floating point, not certified.
 
 ### 0.3.1 - 2026-09-27
 
@@ -732,6 +774,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-nurbs
 
+### 0.3.2 - 2026-09-27
+
+### Added
+
+- Surface knot removal, degree change and iso-curves (#141):
+  `remove_surface_knot_u`/`_v` remove a knot up to a requested number of
+  times, keeping the surface within a tolerance, and report how many
+  copies were removed with a deviation bound (`SurfaceKnotRemoval`). The
+  bound comes from the control nets after inserting the knot back, so it
+  holds everywhere, not only at samples; a knot that carries shape is left
+  in place. `elevate_surface_degree_u`/`_v` raise a degree exactly.
+  `reduce_surface_degree_u`/`_v` lower one within a tolerance
+  (`BoundedSurface`), or refuse; rational surfaces are refused, as for
+  curves. `iso_curve_at_u`/`_v` extract the exact iso-parameter curve.
+  Rational surfaces are handled in homogeneous coordinates.
+
 ### 0.3.1 - 2026-09-27
 
 ### Added
@@ -899,6 +957,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-overlay
 
+### 0.3.4 - 2026-09-27
+
+### Added
+
+- `minimum_enclosing_circle` (#118): the least circle holding a point set,
+  by Welzl's algorithm in a fixed visiting order. Every in/out decision is
+  exact, so the support points are the exact minimum circle's; the centre
+  is enclosed from exact dyadic values and the radius rounded up, so the
+  returned circle holds every point, and `CircleEvidence::error` bounds
+  both the centre's offset and the radius's excess. Refuses empty and
+  non-finite input (`CircleError`).
+
 ### 0.3.3 - 2026-09-27
 
 ### Fixed
@@ -1030,6 +1100,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   expansion product; checked against an exact dyadic determinant.
 
 
+## axiolid-primitive
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- `Primitive::Torus` (#142): a ring torus about local +z, by major and
+  minor radius. Horn and spindle tori are not solids and are refused by
+  the tessellator.
+- `Primitive::Wedge` (#142): OCCT's `MakeWedge` general form with the
+  height along local +z -- a base rectangle at z = 0 and a top rectangle,
+  narrowed or shifted, at z = height. The top may collapse to a ridge or
+  an apex.
+
+
+## axiolid-reference
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- `tessellate_primitive` meshes `Primitive::Torus` and `Primitive::Wedge`
+  (#142). The torus is a grid of planar trapezoids sized by the chord
+  budget, round the axis for the outer equator and round the tube for the
+  tube; horn and spindle tori, and non-positive or non-finite radii, are
+  refused by name. The wedge's faces are planar and shared corners of a
+  collapsed top are merged, so a ridge or apex wedge is still a closed,
+  outward-wound solid; a reversed or non-finite top range is refused.
+
+
 ## axiolid-refine
 
 ### 0.3.0 - 2026-09-23
@@ -1097,6 +1197,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   every obstacle vertex lying on it, decided exactly, and each stretch is
   either along an obstacle edge or has its midpoint in the region. Two
   rooms whose corridor is cut are `DisconnectedComponents` again.
+
+
+## axiolid-spatial
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- Barycentric coordinates (#143): `triangle_barycentric2`,
+  `triangle_barycentric3` (for the point's projection onto the triangle's
+  plane) and `tetrahedron_barycentric`, exact at corners; and
+  `mean_value_coordinates2` for simple polygons, convex or not, which
+  interpolate the boundary linearly and reproduce points inside. Shapes
+  thinner than the linear tolerance, non-simple polygons and points where
+  mean-value weights cancel are refused with `BarycentricError`.
 
 
 ## axiolid-surface

@@ -1,6 +1,6 @@
 //! Topology of a triangle mesh, per connected component (#144).
 //!
-//! [`genus`](crate::genus) answers one number for one closed orientable
+//! [`genus`](fn@crate::genus) answers one number for one closed orientable
 //! surface and refuses everything else. This reports every component of a
 //! two-manifold mesh, with or without boundary and whether or not it is
 //! orientable: its counts, Euler characteristic, boundary loops,
