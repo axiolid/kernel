@@ -43,6 +43,7 @@ mod ruled_section;
 mod section_curves;
 mod spline_field;
 mod surface_analysis;
+mod surface_ops;
 mod surface_projection;
 mod surface_transform;
 mod torus_section;
@@ -118,6 +119,11 @@ pub use section_curves::{
     section_curve_curve_intersection2, section_curve_curve_intersection3, CurveCurveHit,
 };
 pub use surface_analysis::{analyze_surface, FundamentalForm, SurfaceDifferential};
+pub use surface_ops::{
+    elevate_surface_degree_u, elevate_surface_degree_v, iso_curve_at_u, iso_curve_at_v,
+    reduce_surface_degree_u, reduce_surface_degree_v, remove_surface_knot_u, remove_surface_knot_v,
+    BoundedSurface, SurfaceKnotRemoval,
+};
 pub use surface_projection::project_surface;
 pub use surface_transform::{
     insert_surface_knot_u, insert_surface_knot_v, reverse_surface_u, reverse_surface_v,

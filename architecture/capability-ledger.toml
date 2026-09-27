@@ -186,13 +186,6 @@ effort = "Medium"
 number = 140
 
 [[issue]]
-key = "surface-knot-ops"
-title = "Surface knot removal, degree elevation and iso-curve extraction"
-priority = "Medium"
-effort = "Low"
-number = 141
-
-[[issue]]
 key = "torus-wedge-primitives"
 title = "Torus and wedge B-rep primitive solids"
 priority = "Medium"
@@ -393,10 +386,9 @@ cgal = ["Circular_kernel_3"]
 id = "B4"
 area = "curves-surfaces"
 name = "NURBS surfaces: eval, knot ops, iso-curves"
-issue = "surface-knot-ops"
-level = "narrow"
-summary = "Surface evaluation and knot insertion in u and v (insert_surface_knot_u/v, tested) and parameter reversal exist. Missing for surfaces, though present for curves: knot removal, degree elevation and reduction, and iso-parameter curve extraction."
-evidence = ["crates/algorithms/parametric/nurbs/src/surface_transform.rs::insert_surface_knot_u", "crates/algorithms/parametric/nurbs/tests/surface_insertion.rs", "crates/algorithms/parametric/nurbs/src/degree.rs::elevate_degree3"]
+level = "implemented"
+summary = "Surface evaluation, knot insertion and parameter reversal in u and v; knot removal in u and v within a tolerance (remove_surface_knot_u/v: removes up to a requested count, stops at the first copy whose bound would exceed the tolerance, and reports the count and a deviation bound from the control nets, not from samples); exact degree elevation (elevate_surface_degree_u/v, Bezier form along the elevated axis); degree reduction within a tolerance (reduce_surface_degree_u/v, bounded by elevating back); exact iso-parameter curves (iso_curve_at_u/v). Rational surfaces are handled in homogeneous coordinates throughout, except degree reduction, which refuses them as the curve reduction does."
+evidence = ["crates/algorithms/parametric/nurbs/src/surface_transform.rs::insert_surface_knot_u", "crates/algorithms/parametric/nurbs/tests/surface_insertion.rs", "crates/algorithms/parametric/nurbs/src/degree.rs::elevate_degree3", "crates/algorithms/parametric/nurbs/src/surface_ops.rs::remove_surface_knot_u", "crates/algorithms/parametric/nurbs/src/surface_ops.rs::elevate_surface_degree_u", "crates/algorithms/parametric/nurbs/src/surface_ops.rs::reduce_surface_degree_u", "crates/algorithms/parametric/nurbs/src/surface_ops.rs::iso_curve_at_u", "crates/algorithms/parametric/nurbs/tests/surface_knot_ops.rs", "scripts/probe_surface_knot_ops_mutants.py"]
 occt = ["src/FoundationClasses/TKMath/BSplSLib", "src/ModelingData/TKG3d/Geom"]
 cgal = []
 

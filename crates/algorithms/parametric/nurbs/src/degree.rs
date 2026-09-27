@@ -287,7 +287,7 @@ fn domain<P>(curve: &BSplineCurve<P>) -> (Scalar, Scalar) {
 /// knot is genuinely removable the two walks meet; when it is not, they
 /// disagree and the resulting curve differs from the original -- which is what
 /// the caller-side deviation check detects.
-fn remove<const N: usize, P: Clone>(
+pub(crate) fn remove<const N: usize, P: Clone>(
     curve: &BSplineCurve<P>,
     parameter: Scalar,
     coordinates: impl Fn(&P) -> [Scalar; N],

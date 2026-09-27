@@ -231,7 +231,7 @@ fn decompose<P: Clone>(
     Ok(result)
 }
 
-fn insert<const N: usize, P: Clone>(
+pub(crate) fn insert<const N: usize, P: Clone>(
     curve: &BSplineCurve<P>,
     parameter: Scalar,
     coordinates: impl Fn(&P) -> [Scalar; N],

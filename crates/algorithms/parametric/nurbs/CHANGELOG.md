@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Surface knot removal, degree change and iso-curves (#141):
+  `remove_surface_knot_u`/`_v` remove a knot up to a requested number of
+  times, keeping the surface within a tolerance, and report how many
+  copies were removed with a deviation bound (`SurfaceKnotRemoval`). The
+  bound comes from the control nets after inserting the knot back, so it
+  holds everywhere, not only at samples; a knot that carries shape is left
+  in place. `elevate_surface_degree_u`/`_v` raise a degree exactly.
+  `reduce_surface_degree_u`/`_v` lower one within a tolerance
+  (`BoundedSurface`), or refuse; rational surfaces are refused, as for
+  curves. `iso_curve_at_u`/`_v` extract the exact iso-parameter curve.
+  Rational surfaces are handled in homogeneous coordinates.
+
 ## [0.3.1] - 2026-09-27
 
 ### Added

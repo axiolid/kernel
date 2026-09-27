@@ -117,7 +117,7 @@ pub fn reverse_surface_v(surface: &BSplineSurface) -> GeomResult<BSplineSurface>
     Ok(result)
 }
 
-fn u_curve(surface: &BSplineSurface, v: usize) -> BSplineCurve<Point3> {
+pub(crate) fn u_curve(surface: &BSplineSurface, v: usize) -> BSplineCurve<Point3> {
     BSplineCurve {
         degree: surface.u_degree,
         control_points: surface.control_points.iter().map(|row| row[v]).collect(),
