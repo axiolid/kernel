@@ -317,8 +317,10 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `[0, 90)` degrees, so the result does not depend on input order. Returns
   an `OrientedRectangle` (centre, unit axes, half extents) and
   `RectangleEvidence` (hull size, count of tied orientations, and a bound
-  on the rounding of the output). Collinear input gives an exactly
-  zero-width rectangle; empty or non-finite input is a `RectangleError`.
+  on the rounding of the output -- for an axis-aligned rectangle the
+  rounding actually done, measured exactly, so zero for a box with
+  representable coordinates). Collinear input gives an exactly zero-width
+  rectangle; empty or non-finite input is a `RectangleError`.
 - `Region::visibility_polygon` (#184): the part of a region with holes in
   sight of a point inside it. An angular sweep round the viewpoint with
   every decision exact -- the order of vertex directions, which edges a
@@ -326,6 +328,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   exact shadows; only the shadow ends are rounded, once, and the result is
   presented like the other region operations. A viewpoint on the boundary
   or outside is refused (`VisibilityError::NotInside`).
+
+### Fixed
+
+- Every region an operation returns is now one `Region::new` accepts and
+  the next operation takes: unions, intersections, differences,
+  morphology, Minkowski sums and visibility polygons of shapes that share
+  collinear edges, touch at vertices or pinch holes against their outer
+  rings could come back with edges shorter than the tolerance or rings
+  touching themselves, and were then refused as `RepeatedVertex` or
+  `SelfIntersection`. Outputs are settled by the same tests validation
+  applies -- short edges merged, a vertex touching another part of its
+  ring put on it, rings split where they pass a point twice, holes given
+  back to their outer rings -- each move within the tolerance.
 
 ### 0.3.1 - 2026-09-27
 

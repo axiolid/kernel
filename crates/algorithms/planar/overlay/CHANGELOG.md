@@ -9,13 +9,28 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-### Changed
+## [0.3.2] - 2026-09-27
 
-- `minimum_area_rectangle`: for an axis-aligned rectangle,
-  `RectangleEvidence::error` is now the rounding actually done, measured
-  exactly over the centre, half extents and corners -- zero for a box with
-  representable coordinates, so an exact 5 m side no longer straddles a
-  5 m bound. Other orientations keep the general bound.
+### Added
+
+- `minimum_area_rectangle` (#182): the least-area rectangle enclosing a
+  point set, by rotating calipers over the exact convex hull. Caliper
+  steps and the area comparison (`W H / |d|^2`, cross-multiplied) are
+  exact; ties are broken by the least angle of the first axis, turned into
+  `[0, 90)` degrees, so the result does not depend on input order. Returns
+  an `OrientedRectangle` (centre, unit axes, half extents) and
+  `RectangleEvidence` (hull size, count of tied orientations, and a bound
+  on the rounding of the output -- for an axis-aligned rectangle the
+  rounding actually done, measured exactly, so zero for a box with
+  representable coordinates). Collinear input gives an exactly zero-width
+  rectangle; empty or non-finite input is a `RectangleError`.
+- `Region::visibility_polygon` (#184): the part of a region with holes in
+  sight of a point inside it. An angular sweep round the viewpoint with
+  every decision exact -- the order of vertex directions, which edges a
+  wedge's middle ray meets and which is nearest -- so walls and holes cast
+  exact shadows; only the shadow ends are rounded, once, and the result is
+  presented like the other region operations. A viewpoint on the boundary
+  or outside is refused (`VisibilityError::NotInside`).
 
 ### Fixed
 
@@ -29,27 +44,6 @@ caret rule for `0.x` versions.
   applies -- short edges merged, a vertex touching another part of its
   ring put on it, rings split where they pass a point twice, holes given
   back to their outer rings -- each move within the tolerance.
-
-## [0.3.2] - 2026-09-27
-
-### Added
-
-- `minimum_area_rectangle` (#182): the least-area rectangle enclosing a
-  point set, by rotating calipers over the exact convex hull. Caliper
-  steps and the area comparison (`W H / |d|^2`, cross-multiplied) are
-  exact; ties are broken by the least angle of the first axis, turned into
-  `[0, 90)` degrees, so the result does not depend on input order. Returns
-  an `OrientedRectangle` (centre, unit axes, half extents) and
-  `RectangleEvidence` (hull size, count of tied orientations, and a bound
-  on the rounding of the output). Collinear input gives an exactly
-  zero-width rectangle; empty or non-finite input is a `RectangleError`.
-- `Region::visibility_polygon` (#184): the part of a region with holes in
-  sight of a point inside it. An angular sweep round the viewpoint with
-  every decision exact -- the order of vertex directions, which edges a
-  wedge's middle ray meets and which is nearest -- so walls and holes cast
-  exact shadows; only the shadow ends are rounded, once, and the result is
-  presented like the other region operations. A viewpoint on the boundary
-  or outside is refused (`VisibilityError::NotInside`).
 
 ## [0.3.1] - 2026-09-27
 
