@@ -410,8 +410,7 @@ fn in_closed(region: &[Polygon], q: Point2) -> bool {
     };
     region.iter().any(|poly| {
         let rings = std::iter::once(&poly.outer).chain(&poly.holes);
-        rings.clone().any(|r| near(r))
-            || (inside(&poly.outer) && !poly.holes.iter().any(|h| inside(h)))
+        rings.clone().any(&near) || (inside(&poly.outer) && !poly.holes.iter().any(&inside))
     })
 }
 
