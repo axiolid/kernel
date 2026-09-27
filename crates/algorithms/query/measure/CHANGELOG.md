@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Fréchet distance between polylines (#147): `frechet_distance` (the
+  continuous distance: the least critical value of the free space that the
+  Alt-Godau decision accepts), `discrete_frechet_distance` (Eiter-Mannila,
+  `O(nm)` time, `O(m)` memory) and the decision `frechet_at_most`, each
+  with a `_2d` form. Empty polylines, non-finite points and an invalid
+  leash are `FrechetError`s. Floating point, not certified.
+
 ## [0.3.1] - 2026-09-27
 
 ### Added

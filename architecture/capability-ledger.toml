@@ -1302,9 +1302,9 @@ id = "H4"
 area = "spatial"
 name = "Frechet / curve distances"
 issue = "frechet-distance"
-level = "absent"
-summary = "No Frechet distance or other curve-distance metric found anywhere in the workspace."
-evidence = []
+level = "narrow"
+summary = "Discrete (Eiter-Mannila) and continuous (Alt-Godau decision, then binary search over the free space's critical values) Frechet distance between polylines in 2D and 3D, with a decision function, in axiolid-measure. Floating point throughout: the decision reads the same distances the critical values are built from, but is not certified the way CGAL's filtered decision is. Refused by name: empty polylines, non-finite points, a negative or non-finite leash. Not provided: other dimensions, curves other than polylines (flatten them first), Hausdorff or other curve distances."
+evidence = ["crates/algorithms/query/measure/src/frechet.rs::frechet_distance", "crates/algorithms/query/measure/src/frechet.rs::discrete_frechet_distance", "crates/algorithms/query/measure/src/frechet.rs::frechet_at_most", "crates/algorithms/query/measure/tests/frechet.rs", "scripts/probe_frechet_mutants.py"]
 occt = []
 cgal = ["Frechet_distance"]
 

@@ -13,6 +13,7 @@ pub mod exact_distance;
 mod exact_domain;
 #[cfg(feature = "exact")]
 mod exact_face;
+pub mod frechet;
 pub mod measure;
 pub mod mesh;
 pub mod mesh_measure;
@@ -27,6 +28,10 @@ pub use exact::{exact_properties, ExactMeasureError};
 pub use exact_distance::{boundary_clearance, boundary_distance, Clearance, DistanceBounds};
 #[cfg(feature = "exact")]
 pub use exact_domain::FaceDomain;
+pub use frechet::{
+    discrete_frechet_distance, discrete_frechet_distance_2d, frechet_at_most, frechet_at_most_2d,
+    frechet_distance, frechet_distance_2d, FrechetError,
+};
 pub use measure::Measure;
 pub use mesh::{
     second_moments, surface_properties, volume_properties, MeshMeasureError, SurfaceProperties,
