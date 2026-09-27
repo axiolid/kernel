@@ -11,6 +11,7 @@ pub mod clearance;
 pub mod containment;
 pub mod genus;
 pub mod overlap;
+pub mod sight;
 
 pub use cast::{ray_cast, Hit};
 pub use clearance::min_gap;
@@ -19,3 +20,4 @@ pub use genus::{genus, GenusError};
 pub use overlap::{
     difference_volume, enclosed_volume, intersection_volume, Operand, OverlapError, VolumeInterval,
 };
+pub use sight::{line_of_sight, line_of_sight_within, Sight, SightError, MAX_SIGHT_CELLS};
