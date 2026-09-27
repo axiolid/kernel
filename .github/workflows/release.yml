@@ -2,9 +2,11 @@ name: Release
 
 # Publishes the workspace to crates.io. Every axiolid crate is "trusted
 # publishing only" on crates.io and trusts exactly this file name and the
-# `release` environment (which only `main` may deploy to); renaming either
+# `crates.io` environment (which only `main` may deploy to); renaming either
 # breaks publishing until the crate settings follow. There is no registry
-# token anywhere.
+# token anywhere. Each registry gets its own environment, named after it:
+# `crates.io` here, and `npmjs.com` and `pypi.org` for the npm and PyPI
+# jobs when those packages exist.
 on:
   workflow_dispatch:
     inputs:
@@ -47,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment:
-      name: release
+      name: crates.io
       url: https://crates.io
     permissions:
       contents: read
