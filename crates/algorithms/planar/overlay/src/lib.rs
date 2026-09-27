@@ -4,6 +4,7 @@ mod arc;
 mod arc_overlay;
 mod arrangement;
 mod exact_arc;
+mod minkowski;
 mod offset;
 mod region;
 
@@ -14,6 +15,7 @@ pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPoly
 pub use arrangement::{
     ArcArrangement, ArrangementEdge, ArrangementRegion, EdgeSource, EdgeUse as ArrangementEdgeUse,
 };
+pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound};
 pub use offset::{
     offset_polygons, polygon_area, ring_area, stroke_polyline, total_area, CapStyle, JoinStyle,
     OffsetEvidence, OffsetResult,

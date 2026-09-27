@@ -93,7 +93,7 @@ fn oriented(ring: ArcRing, want_positive: bool) -> ArcRing {
 /// This is the only place the tolerance acts on a result, and it acts on
 /// presentation only: which pieces exist and how they link were decided
 /// exactly beforehand.
-fn presented(mut ring: ArcRing, tolerance: Tolerance) -> Option<ArcRing> {
+pub(crate) fn presented(mut ring: ArcRing, tolerance: Tolerance) -> Option<ArcRing> {
     loop {
         let count = ring.vertices.len();
         if count < 2 {

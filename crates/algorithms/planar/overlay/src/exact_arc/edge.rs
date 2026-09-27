@@ -91,6 +91,16 @@ impl Bounds {
         }
     }
 
+    /// The box holding both, or `self` alone for the first of a set.
+    pub(crate) fn hull(boxes: impl Iterator<Item = Self>) -> Option<Self> {
+        boxes.reduce(|a, b| Self {
+            x0: a.x0.min(b.x0),
+            y0: a.y0.min(b.y0),
+            x1: a.x1.max(b.x1),
+            y1: a.y1.max(b.y1),
+        })
+    }
+
     /// Whether the boxes share a point. Closed: touching counts.
     pub(crate) fn overlaps(&self, other: &Self) -> bool {
         self.x0 <= other.x1 && other.x0 <= self.x1 && self.y0 <= other.y1 && other.y0 <= self.y1

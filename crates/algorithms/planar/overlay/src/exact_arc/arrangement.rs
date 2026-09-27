@@ -92,8 +92,25 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         .map(|own| own.iter().flat_map(monotone).collect())
         .collect();
 
+    // Each ring's box, holding every edge's: a point or edge outside it
+    // meets nothing of the ring, and lies outside it (winding zero). Only
+    // skips work; with many rings, most lie far from any one piece.
+    let ring_bounds: Vec<Option<crate::exact_arc::edge::Bounds>> = edges
+        .iter()
+        .map(|own| crate::exact_arc::edge::Bounds::hull(own.iter().map(|e| e.bounds)))
+        .collect();
+    let near = |ring: usize, x: &XPoint| {
+        let (sx, sy) = x.enclosures();
+        ring_bounds[ring]
+            .as_ref()
+            .is_some_and(|b| b.may_hold(sx, sy))
+    };
+
     // The ring boundary that carries `x`, if any: `(edge index, edge)`.
     let carrier = |ring: usize, x: &XPoint| -> Option<(usize, &Edge)> {
+        if !near(ring, x) {
+            return None;
+        }
         let (sx, sy) = x.enclosures();
         edges[ring]
             .iter()
@@ -110,7 +127,11 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
             // Rings are simple, so a ring never splits itself.
             let mut stops = vec![edge.p0.clone(), edge.p1.clone()];
             for (other, theirs) in edges.iter().enumerate() {
-                if other == ring {
+                if other == ring
+                    || !ring_bounds[other]
+                        .as_ref()
+                        .is_some_and(|b| b.overlaps(&edge.bounds))
+                {
                     continue;
                 }
                 for their in theirs.iter().filter(|t| t.bounds.overlaps(&edge.bounds)) {
@@ -170,7 +191,9 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
                             right[other] = true;
                         }
                         sources.push((other, index, same));
-                    } else if winding(&piece.sample, &parts[other]) != 0 {
+                    } else if near(other, &piece.sample)
+                        && winding(&piece.sample, &parts[other]) != 0
+                    {
                         left[other] = true;
                         right[other] = true;
                     }

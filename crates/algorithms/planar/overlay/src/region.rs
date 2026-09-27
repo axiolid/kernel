@@ -32,6 +32,7 @@
 
 use axiolid_core::{Point2, Tolerance, Vec2};
 
+use crate::minkowski::MorphologyBound;
 use crate::offset::{offset_polygons, total_area, JoinStyle};
 use crate::{canonical, validate_ring, OverlayError, Polygon, Ring};
 
@@ -59,6 +60,9 @@ pub struct RegionEvidence {
 pub struct Region {
     polygons: Vec<Polygon>,
     evidence: RegionEvidence,
+    /// For a disc morphology with a stated side, that side and the
+    /// deviation from the exact result (#163).
+    bound: Option<MorphologyBound>,
 }
 
 /// Normalise a polygon set: canonical ring order, deterministic sorting.
@@ -127,7 +131,28 @@ impl Region {
         Self {
             polygons: normalise(polygons),
             evidence,
+            bound: None,
         }
+    }
+
+    /// [`Self::from_valid`] for the other modules of the crate.
+    pub(crate) fn from_valid_polygons(polygons: Vec<Polygon>, had_input: bool) -> Self {
+        Self::from_valid(polygons, had_input)
+    }
+
+    /// Record the side and deviation of a disc morphology.
+    pub(crate) fn set_bound(&mut self, bound: MorphologyBound) {
+        self.bound = Some(bound);
+    }
+
+    /// For a result of [`Self::dilate_inner`], [`Self::dilate_outer`],
+    /// [`Self::erode_inner`] or [`Self::erode_outer`]: which side of the
+    /// exact disc morphology it lies on and how far from it it can be.
+    /// `None` for every other region, including [`Self::dilate`] and
+    /// [`Self::erode`], whose side is not stated.
+    #[must_use]
+    pub const fn bound(&self) -> Option<MorphologyBound> {
+        self.bound
     }
 
     /// The region's polygons, in canonical order.
@@ -247,7 +272,9 @@ impl Region {
         Ok(Self::from_valid(result.polygons, had_input))
     }
 
-    /// Dilate by `radius`: the Minkowski sum with a disc.
+    /// Dilate by `radius`: the Minkowski sum with a disc, approximated by
+    /// round joins on an unstated side of the exact result. Where a verdict
+    /// must be proven, use [`Self::dilate_inner`] or [`Self::dilate_outer`].
     ///
     /// This is the disc-expansion form used for clearance envelopes. A zero
     /// radius is the identity.
@@ -255,7 +282,11 @@ impl Region {
         self.morphology(radius, tolerance)
     }
 
-    /// Erode by `radius`: the Minkowski erosion by a disc.
+    /// Erode by `radius`: the Minkowski erosion by a disc, approximated on
+    /// an unstated side of the exact result. Where a verdict must be
+    /// proven, use [`Self::erode_inner`] (a route found proves
+    /// reachability) or [`Self::erode_outer`] (no route proves
+    /// unreachability).
     ///
     /// A region thinner than `2 * radius` anywhere is cut there, which is
     /// how a corridor narrower than a body radius becomes impassable. If
