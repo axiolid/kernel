@@ -137,13 +137,6 @@ effort = "Medium"
 number = 135
 
 [[issue]]
-key = "bounding-volumes-3d"
-title = "3D oriented bounding box and minimum enclosing sphere"
-priority = "Low"
-effort = "Low"
-number = 118
-
-[[issue]]
 key = "numeric-substrate"
 title = "Shared numeric substrate: root finding, quadrature, least squares and optimisation"
 priority = "Medium"
@@ -1185,12 +1178,11 @@ cgal = ["Convex_hull_2", "Convex_hull_3"]
 id = "G2"
 area = "point-sets"
 name = "bounding volumes (min sphere, OBB, min rect)"
-level = "narrow"
-summary = "2D only: minimum-area oriented rectangle by exact rotating calipers in axiolid-overlay (exact hull, exact area comparison, deterministic ties by least axis angle; only the output axes, centre and extents are rounded, with a stated error bound), and strict 2D convex hull. No 3D OBB, no minimum enclosing circle/sphere."
-evidence = ["crates/providers/mesh/boolmesh/tests/reconstruction.rs", "crates/algorithms/planar/overlay/src/rectangle.rs::minimum_area_rectangle", "crates/algorithms/planar/overlay/tests/rectangle.rs"]
+level = "implemented"
+summary = "Minimum-area oriented rectangle by exact rotating calipers and minimum enclosing circle by Welzl in axiolid-overlay; minimum enclosing sphere by Welzl and a containing oriented box in axiolid-construct (#118). Circle and sphere: every in/out decision exact (diametral, incircle, least-sphere and circumsphere signs in intervals then dyadics), deterministic visiting order, centre enclosed from exact dyadic numerators, radius rounded up so every point is contained, with a stated error bound. Oriented box: best of the axis-aligned box, principal axes, and each world axis, principal axis and exact-hull face normal paired with the exact minimum-area rectangle across it; containment certified exactly (|(p - c) . a_i| <= h_i for the returned doubles), volume never above the axis-aligned box. Not claimed: the global minimum-volume box (O'Rourke's exact algorithm is not implemented; OCCT's Bnd_OBB and CGAL's Optimal_bounding_box do not certify it either). No minimum ellipse, annulus or parallelogram."
+evidence = ["crates/algorithms/planar/overlay/src/rectangle.rs::minimum_area_rectangle", "crates/algorithms/planar/overlay/tests/rectangle.rs", "crates/algorithms/planar/overlay/src/circle.rs::minimum_enclosing_circle", "crates/algorithms/planar/overlay/tests/circle.rs", "crates/algorithms/construction/construct/src/bounding.rs::minimum_enclosing_sphere", "crates/algorithms/construction/construct/src/bounding.rs::oriented_bounding_box", "crates/algorithms/construction/construct/tests/bounding_volumes.rs", "scripts/probe_bounding_volume_mutants.py"]
 occt = ["src/FoundationClasses/TKMath/Bnd"]
 cgal = ["Bounding_volumes", "Optimal_bounding_box"]
-issue = "bounding-volumes-3d"
 
 [[capability]]
 id = "G3"

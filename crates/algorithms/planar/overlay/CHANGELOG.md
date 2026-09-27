@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `minimum_enclosing_circle` (#118): the least circle holding a point set,
+  by Welzl's algorithm in a fixed visiting order. Every in/out decision is
+  exact, so the support points are the exact minimum circle's; the centre
+  is enclosed from exact dyadic values and the radius rounded up, so the
+  returned circle holds every point, and `CircleEvidence::error` bounds
+  both the centre's offset and the radius's excess. Refuses empty and
+  non-finite input (`CircleError`).
+
 ## [0.3.3] - 2026-09-27
 
 ### Fixed

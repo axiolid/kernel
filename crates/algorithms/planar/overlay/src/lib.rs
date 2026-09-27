@@ -3,6 +3,7 @@
 mod arc;
 mod arc_overlay;
 mod arrangement;
+mod circle;
 mod exact_arc;
 mod minkowski;
 mod offset;
@@ -17,6 +18,9 @@ pub use arc::{
 pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPolygon};
 pub use arrangement::{
     ArcArrangement, ArrangementEdge, ArrangementRegion, EdgeSource, EdgeUse as ArrangementEdgeUse,
+};
+pub use circle::{
+    minimum_enclosing_circle, CircleError, CircleEvidence, EnclosingCircle, MinimumCircle,
 };
 pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound};
 pub use offset::{

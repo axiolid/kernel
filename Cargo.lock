@@ -240,6 +240,7 @@ dependencies = [
  "axiolid-core",
  "axiolid-curve",
  "axiolid-evaluate",
+ "axiolid-exact",
  "axiolid-guarantees",
  "axiolid-heal",
  "axiolid-measure",

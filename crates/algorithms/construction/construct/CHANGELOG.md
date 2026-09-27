@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `bounding::minimum_enclosing_sphere` (#118): the least sphere holding a
+  point set, by Welzl's algorithm with exact in/out decisions (diametral,
+  least sphere through three points, circumsphere through four), the
+  centre enclosed from exact dyadic values and the radius rounded up, with
+  `SphereEvidence::error` bounding centre offset and radius excess.
+- `bounding::oriented_bounding_box` (#118): a box holding every point,
+  exactly (`|(p - centre) . axes[i]| <= half_extents[i]` for the returned
+  doubles), never larger than the axis-aligned box. Tries the axis-aligned
+  box, the principal axes, and each world axis, principal axis and exact
+  hull face normal with the exact minimum-area rectangle across it. It does
+  not claim the global minimum volume.
+- Depends on `axiolid-exact` for the exact decisions.
+
 ## [0.3.3] - 2026-09-27
 
 ### Added

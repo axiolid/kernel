@@ -154,6 +154,7 @@ graph TD
     axiolid_construct --> axiolid_core
     axiolid_construct --> axiolid_curve
     axiolid_construct --> axiolid_evaluate
+    axiolid_construct --> axiolid_exact
     axiolid_construct --> axiolid_guarantees
     axiolid_construct --> axiolid_heal
     axiolid_construct --> axiolid_measure
