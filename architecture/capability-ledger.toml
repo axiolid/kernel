@@ -882,8 +882,8 @@ id = "D14"
 area = "mesh"
 name = "mesh measures (area/volume/centroid/moments)"
 level = "implemented"
-summary = "MeshMeasure computes area, signed volume, volume centroid, and second moments in one pass; refuses non-closed/non-manifold input for volume/moments (open shell still gets area)."
-evidence = ["crates/algorithms/query/measure/src/mesh_measure.rs::measure", "crates/algorithms/query/measure/tests/mass_properties.rs"]
+summary = "MeshMeasure computes area, signed volume, volume centroid, and second moments in one pass; refuses non-closed/non-manifold input for volume/moments (open shell still gets area). axiolid-inspect brackets the enclosed, shared (intersection) and difference volumes of closed meshes in certified intervals without building a boolean: a prism decomposition over face-pair shadow overlaps, with every side and lower-plane decision exact and the arithmetic outward-rounded; open or self-intersecting meshes are refused by operand."
+evidence = ["crates/algorithms/query/measure/src/mesh_measure.rs::measure", "crates/algorithms/query/measure/tests/mass_properties.rs", "crates/algorithms/query/inspect/src/overlap.rs::intersection_volume", "crates/algorithms/query/inspect/tests/overlap.rs"]
 occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepGProp"]
 cgal = ["Polygon_mesh_processing"]
 

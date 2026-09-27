@@ -10,8 +10,12 @@ pub mod cast;
 pub mod clearance;
 pub mod containment;
 pub mod genus;
+pub mod overlap;
 
 pub use cast::{ray_cast, Hit};
 pub use clearance::min_gap;
 pub use containment::{contains, winding_number};
 pub use genus::{genus, GenusError};
+pub use overlap::{
+    difference_volume, enclosed_volume, intersection_volume, Operand, OverlapError, VolumeInterval,
+};

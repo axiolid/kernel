@@ -220,6 +220,7 @@ graph TD
     axiolid_heal --> axiolid_predicates
     axiolid_heal --> axiolid_spatial
     axiolid_inspect --> axiolid_core
+    axiolid_inspect --> axiolid_exact
     axiolid_inspect --> axiolid_guarantees
     axiolid_inspect --> axiolid_heal
     axiolid_inspect --> axiolid_mesh
