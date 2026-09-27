@@ -1141,8 +1141,8 @@ id = "F8"
 area = "planar"
 name = "visibility / shortest path in polygon"
 level = "implemented"
-summary = "axiolid-route computes visibility graphs and shortest paths constrained to stay inside a polygon (with holes)."
-evidence = ["crates/algorithms/planar/route/src/lib.rs", "crates/algorithms/planar/route/tests/route.rs"]
+summary = "axiolid-route computes visibility graphs and shortest paths constrained to stay inside a polygon (with holes), and many-target distance maps (one multi-source Dijkstra, nearest target and route from any point) with the farthest point of a subregion bracketed in a certified interval (Lipschitz branch and bound over a constrained triangulation of the free space). Known defect: routes may pass through a point where obstacles touch (#189). Refused by name: farthest point with crossing barriers."
+evidence = ["crates/algorithms/planar/route/src/lib.rs", "crates/algorithms/planar/route/tests/route.rs", "crates/algorithms/planar/route/src/map.rs::farthest_point", "crates/algorithms/planar/route/tests/distance_map.rs"]
 occt = []
 cgal = ["Visibility_2"]
 

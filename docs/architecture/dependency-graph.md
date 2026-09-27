@@ -371,6 +371,7 @@ graph TD
     axiolid_route --> axiolid_guarantees
     axiolid_route --> axiolid_overlay
     axiolid_route --> axiolid_predicates
+    axiolid_route --> axiolid_triangulate
     axiolid_spatial --> axiolid_core
     axiolid_surface --> axiolid_core
     axiolid_surface --> axiolid_curve

@@ -43,6 +43,13 @@ use axiolid_guarantees::Certified;
 use axiolid_overlay::{Polygon, Ring};
 use axiolid_predicates::orient2d;
 
+mod map;
+
+pub use map::{
+    distance_map, distance_map_within, farthest_point, farthest_point_within, DistanceMap,
+    Farthest, FarthestError, LengthInterval, MapError, Reach, MAX_CELLS,
+};
+
 /// Maximum vertices, counting region, barrier and endpoint vertices.
 pub const MAX_VERTICES: usize = 512;
 
@@ -229,6 +236,11 @@ fn validate(
     if !start.is_finite() || !goal.is_finite() {
         return Err(RouteError::NonFinitePoint);
     }
+    validate_region(region, barriers)
+}
+
+/// The region's rings and the barriers are long enough and finite.
+fn validate_region(region: &[Polygon], barriers: &[Vec<Point2>]) -> Result<(), RouteError> {
     for polygon in region {
         for ring in core::iter::once(&polygon.outer).chain(polygon.holes.iter()) {
             if ring.points.len() < 3 {

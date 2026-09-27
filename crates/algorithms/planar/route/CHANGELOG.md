@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `distance_map` and `distance_map_within` (#186): shortest-path distances
+  to the nearest of several targets, from one multi-source Dijkstra over
+  the visibility graph. `DistanceMap::nearest` gives, for any point of the
+  region, the nearest target's index and the route there (`Reach`).
+  Refusals are typed: `MapError::NoTargets`, `MapError::TargetOutside`.
+- `farthest_point` and `farthest_point_within` (#186): the greatest
+  distance to the nearest target over a polygon subregion, as a
+  `LengthInterval` that contains the true value, with a witness point
+  (`Farthest`). Branch and bound over a constrained triangulation of the
+  free space, bounding each cell by the 1-Lipschitz property of the
+  distance from anchors proven inside it; widened for the rounding of
+  lengths and midpoints. Part of the subregion that no target reaches is
+  refused with the triangle as evidence (`FarthestError::Unreachable`);
+  crossing barriers are refused (`FarthestError::CrossingObstacles`).
+
 ## [0.3.1] - 2026-09-27
 
 ### Fixed
