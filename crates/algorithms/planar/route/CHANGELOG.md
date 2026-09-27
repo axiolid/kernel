@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `skeleton` (#139): the corridors of a region with holes as a graph --
+  path ends, junctions and paths -- for circulation checks. Nodes are
+  Voronoi vertices of the walls sampled at most `spacing` apart, over a
+  constrained Delaunay triangulation, pruned of spurs into corners as in
+  the lambda-medial axis (`prune`; 1.5 drops spurs into right-angled
+  corners). Every node is
+  decided inside the region exactly and carries a `clearance` interval
+  proven to contain its distance to the nearest wall; each path end names
+  the wall it runs into (`ahead`). The skeleton's position approximates
+  the medial axis and is not certified.
+
 ## [0.3.2] - 2026-09-27
 
 ### Added

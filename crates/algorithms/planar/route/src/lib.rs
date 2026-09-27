@@ -45,6 +45,7 @@ use axiolid_predicates::orient2d;
 
 mod graph;
 mod map;
+mod skeleton;
 
 use graph::Graph;
 
@@ -52,6 +53,7 @@ pub use map::{
     distance_map, distance_map_within, farthest_point, farthest_point_within, DistanceMap,
     Farthest, FarthestError, LengthInterval, MapError, Reach, MAX_CELLS,
 };
+pub use skeleton::{skeleton, NodeKind, Skeleton, SkeletonError, SkeletonNode, Wall};
 
 /// Maximum vertices, counting region, barrier and endpoint vertices.
 pub const MAX_VERTICES: usize = 512;

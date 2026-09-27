@@ -17,6 +17,9 @@ axiolid-overlay.workspace = true
 axiolid-predicates.workspace = true
 axiolid-triangulate.workspace = true
 
+[dev-dependencies]
+axiolid-exact.workspace = true
+
 [package.metadata.axiolid]
 architecture-version = 1
 layer = "algorithms"
@@ -24,4 +27,4 @@ role = "algorithm.planar"
 domain = "planar.route"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-guarantees", "axiolid-overlay", "axiolid-predicates", "axiolid-triangulate"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-exact", "axiolid-guarantees", "axiolid-overlay", "axiolid-predicates", "axiolid-triangulate"]

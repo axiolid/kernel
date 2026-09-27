@@ -733,6 +733,7 @@ version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
+ "axiolid-exact",
  "axiolid-guarantees",
  "axiolid-overlay",
  "axiolid-predicates",

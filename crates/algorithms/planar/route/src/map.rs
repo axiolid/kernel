@@ -746,7 +746,7 @@ fn segments_meet(p: Point2, q: Point2, r: Point2, s: Point2) -> Result<bool, Rou
 
 /// Whether `p` lies in the closed polygon (outer ring minus the open
 /// holes), exactly.
-fn in_polygon(polygon: &Polygon, p: Point2) -> Result<bool, RouteError> {
+pub(crate) fn in_polygon(polygon: &Polygon, p: Point2) -> Result<bool, RouteError> {
     if on_ring(&polygon.outer, p)? {
         return Ok(true);
     }
