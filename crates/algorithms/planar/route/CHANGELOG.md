@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-27
+
 ### Added
 
 - `skeleton` (#139): the corridors of a region with holes as a graph --

@@ -126,6 +126,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
+### 0.3.2 - 2026-09-27
+
+### Added
+
+- `detect_planes` (#131): the planar regions of a triangle mesh, grown
+  over shared edges within an angle and a distance (`PlaneTolerance`) and
+  then certified. Each `DetectedPlane` gives its triangles, a point and
+  unit normal, a `deviation` that is a proven upper bound on every member
+  corner's distance from that plane (regions are peeled until it is
+  within the requested distance), whether the region is exactly coplanar
+  (by `orient3d`), and its area. Largest first; deterministic.
+
 ### 0.3.1 - 2026-09-27
 
 ### Added
@@ -421,6 +433,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-route
 
+### 0.3.3 - 2026-09-27
+
+### Added
+
+- `skeleton` (#139): the corridors of a region with holes as a graph --
+  path ends, junctions and paths -- for circulation checks. Nodes are
+  Voronoi vertices of the walls sampled at most `spacing` apart, over a
+  constrained Delaunay triangulation, pruned of spurs into corners as in
+  the lambda-medial axis (`prune`; 1.5 drops spurs into right-angled
+  corners). Every node is
+  decided inside the region exactly and carries a `clearance` interval
+  proven to contain its distance to the nearest wall; each path end names
+  the wall it runs into (`ahead`). The skeleton's position approximates
+  the medial axis and is not certified.
+
 ### 0.3.2 - 2026-09-27
 
 ### Added
@@ -462,3 +489,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   every obstacle vertex lying on it, decided exactly, and each stretch is
   either along an obstacle edge or has its midpoint in the region. Two
   rooms whose corridor is cut are `DisconnectedComponents` again.
+
+
+## axiolid-triangulate
+
+### 0.3.1 - 2026-09-27
+
+### Fixed
+
+- `triangulate`: after recovering constraint edges, unconstrained edges are
+  flipped back to locally Delaunay (Lawson's flips). Recovery used to leave
+  long triangles whose circumcircles held points no constraint hid, so the
+  result was not constrained Delaunay as documented -- with finely sampled
+  walls, triangles spanned whole rooms (#139).
