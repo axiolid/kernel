@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `minimum_area_rectangle` (#182): the least-area rectangle enclosing a
+  point set, by rotating calipers over the exact convex hull. Caliper
+  steps and the area comparison (`W H / |d|^2`, cross-multiplied) are
+  exact; ties are broken by the least angle of the first axis, turned into
+  `[0, 90)` degrees, so the result does not depend on input order. Returns
+  an `OrientedRectangle` (centre, unit axes, half extents) and
+  `RectangleEvidence` (hull size, count of tied orientations, and a bound
+  on the rounding of the output). Collinear input gives an exactly
+  zero-width rectangle; empty or non-finite input is a `RectangleError`.
+
 ## [0.3.1] - 2026-09-27
 
 ### Added

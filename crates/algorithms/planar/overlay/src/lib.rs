@@ -6,6 +6,7 @@ mod arrangement;
 mod exact_arc;
 mod minkowski;
 mod offset;
+mod rectangle;
 mod region;
 
 pub use arc::{
@@ -19,6 +20,9 @@ pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound};
 pub use offset::{
     offset_polygons, polygon_area, ring_area, stroke_polyline, total_area, CapStyle, JoinStyle,
     OffsetEvidence, OffsetResult,
+};
+pub use rectangle::{
+    minimum_area_rectangle, MinimumRectangle, OrientedRectangle, RectangleError, RectangleEvidence,
 };
 pub use region::{Region, RegionEvidence};
 
