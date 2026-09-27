@@ -24,6 +24,8 @@ MUTANTS = [
     ('tied orientations not counted', R, '                    ties.push(axis);', '', TESTS),
     ('collinear hull vertices kept', R, '                if sign(&Orient { a, b, c }) == Sign::Positive {', '                if sign(&Orient { a, b, c }) != Sign::Negative {', TESTS),
     ('segment width left rounded', R, '            rectangle.half_extents[usize::from(axis == d || axis == -d)] = 0.0;', '', TESTS),
+    ('measured error never used', R, '            measured_error(&h, &rectangle).unwrap_or(64.0 * f64::EPSILON * size),', '            64.0 * f64::EPSILON * size,', TESTS),
+    ('corners left out of the measured error', R, '        (c0.x, exact(x0)),\n        (c0.y, exact(y0)),\n        (c1.x, exact(x1)),\n        (c1.y, exact(y0)),\n        (c2.x, exact(x1)),\n        (c2.y, exact(y1)),\n        (c3.x, exact(x0)),\n        (c3.y, exact(y1)),\n', '', TESTS),
 ]
 
 def run(target):

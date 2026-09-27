@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `minimum_area_rectangle`: for an axis-aligned rectangle,
+  `RectangleEvidence::error` is now the rounding actually done, measured
+  exactly over the centre, half extents and corners -- zero for a box with
+  representable coordinates, so an exact 5 m side no longer straddles a
+  5 m bound. Other orientations keep the general bound.
+
 ### Fixed
 
 - Every region an operation returns is now one `Region::new` accepts and

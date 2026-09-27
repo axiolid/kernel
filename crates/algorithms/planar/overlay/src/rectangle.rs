@@ -67,10 +67,12 @@ pub struct RectangleEvidence {
     /// set one). The one returned turns its first axis least from the
     /// x-axis.
     pub minimal_orientations: usize,
-    /// A bound on the distance between any output point (the centre, a
-    /// corner) or length (a half extent) and its exact value: a few ulps
-    /// of the largest coordinate, from normalising the axes and projecting
-    /// onto them. Zero when nothing needed rounding.
+    /// A bound on the distance between any output coordinate (of the
+    /// centre or a corner) or length (a half extent) and its exact value.
+    /// For an axis-aligned rectangle it is the rounding actually done,
+    /// measured exactly -- zero for a box with representable coordinates.
+    /// Otherwise a few ulps of the largest coordinate, from normalising the
+    /// axes and projecting onto them.
     pub error: f64,
 }
 
@@ -267,8 +269,59 @@ pub fn minimum_area_rectangle(points: &[Point2]) -> Result<MinimumRectangle, Rec
     };
     Ok(MinimumRectangle {
         rectangle,
-        evidence: evidence(minimal, 64.0 * f64::EPSILON * size),
+        evidence: evidence(
+            minimal,
+            measured_error(&h, &rectangle).unwrap_or(64.0 * f64::EPSILON * size),
+        ),
     })
+}
+
+/// For an axis-aligned rectangle, the rounding actually done, measured
+/// exactly: its axes are exact, and its centre, half extents and corners
+/// are each one rounding of a dyadic value -- zero whenever that value is
+/// representable, as for any box with representable coordinates. `None`
+/// for other orientations, whose unit axes are irrational.
+fn measured_error(h: &[Point2], r: &OrientedRectangle) -> Option<f64> {
+    if r.axes != [Vec2::X, Vec2::Y] {
+        return None;
+    }
+    let low = |f: fn(&Point2) -> f64| h.iter().map(f).fold(f64::INFINITY, f64::min);
+    let high = |f: fn(&Point2) -> f64| h.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
+    let (x0, x1, y0, y1) = (low(|p| p.x), high(|p| p.x), low(|p| p.y), high(|p| p.y));
+    let half = exact(0.5);
+    let mid = |a: f64, b: f64| exact(a).add(&exact(b)).mul(&half);
+    let span = |a: f64, b: f64| exact(b).sub(&exact(a)).mul(&half);
+    let [c0, c1, c2, c3] = r.corners();
+    let pairs = [
+        (r.centre.x, mid(x0, x1)),
+        (r.centre.y, mid(y0, y1)),
+        (r.half_extents[0], span(x0, x1)),
+        (r.half_extents[1], span(y0, y1)),
+        (c0.x, exact(x0)),
+        (c0.y, exact(y0)),
+        (c1.x, exact(x1)),
+        (c1.y, exact(y0)),
+        (c2.x, exact(x1)),
+        (c2.y, exact(y1)),
+        (c3.x, exact(x0)),
+        (c3.y, exact(y1)),
+    ];
+    let mut worst = 0.0f64;
+    for (rounded, true_value) in pairs {
+        let gap = exact(rounded).sub(&true_value);
+        let gap = if gap.sign() == Some(Sign::Negative) {
+            gap.neg()
+        } else {
+            gap
+        };
+        // Round the gap up, so the bound holds.
+        let mut bound = gap.to_f64();
+        if exact(bound).sub(&gap).sign() == Some(Sign::Negative) {
+            bound = bound.next_up();
+        }
+        worst = worst.max(bound);
+    }
+    Some(worst)
 }
 
 /// The orientation of least area over a hull of three or more vertices,

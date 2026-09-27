@@ -203,3 +203,53 @@ fn ties_resolve_the_same_way_for_any_input_order() {
         assert_eq!(minimum_area_rectangle(&turned).unwrap(), first);
     }
 }
+
+#[test]
+fn an_axis_aligned_box_reports_the_rounding_actually_done() {
+    // A 2.5 m x 5 m bay: nothing is rounded, so a 5 m side is exactly 5 m.
+    let bay = [
+        p(10.0, 20.0),
+        p(12.5, 20.0),
+        p(12.5, 25.0),
+        p(10.0, 25.0),
+        p(11.0, 22.0),
+    ];
+    let m = minimum_area_rectangle(&bay).unwrap();
+    assert_eq!(m.rectangle.axes, [Vec2::X, Vec2::Y]);
+    assert_eq!(m.rectangle.half_extents, [1.25, 2.5]);
+    assert_eq!(m.rectangle.centre, p(11.25, 22.5));
+    assert_eq!(m.evidence.error, 0.0);
+    // Decimal coordinates round: the error is what was rounded, no more,
+    // and it covers the corners.
+    let decimal = [p(0.1, 0.3), p(2.6, 0.3), p(2.6, 5.3), p(0.1, 5.3)];
+    let m = minimum_area_rectangle(&decimal).unwrap();
+    let e = m.evidence.error;
+    assert!(e < 4.0 * f64::EPSILON * 5.3, "{e}");
+    let [c0, _, c2, _] = m.rectangle.corners();
+    assert!(
+        (c0.x - 0.1).abs() <= e
+            && (c0.y - 0.3).abs() <= e
+            && (c2.x - 2.6).abs() <= e
+            && (c2.y - 5.3).abs() <= e
+    );
+    // Along an axis, collinear: exact too.
+    let line = [p(0.0, 1.0), p(3.0, 1.0), p(1.0, 1.0)];
+    assert_eq!(minimum_area_rectangle(&line).unwrap().evidence.error, 0.0);
+}
+
+#[test]
+fn the_measured_error_covers_every_corner() {
+    // From x = 1.3 to 4.22 the low corner, centre minus half extent,
+    // rounds twice as far as the centre or the half extent do.
+    let m =
+        minimum_area_rectangle(&[p(1.3, 0.0), p(4.22, 0.0), p(4.22, 1.0), p(1.3, 1.0)]).unwrap();
+    let e = m.evidence.error;
+    assert!(e > 0.0);
+    let exact = [p(1.3, 0.0), p(4.22, 0.0), p(4.22, 1.0), p(1.3, 1.0)];
+    for (c, x) in m.rectangle.corners().iter().zip(exact) {
+        assert!(
+            (c.x - x.x).abs() <= e && (c.y - x.y).abs() <= e,
+            "{c:?} vs {x:?}, {e}"
+        );
+    }
+}
