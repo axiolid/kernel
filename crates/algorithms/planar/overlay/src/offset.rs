@@ -220,7 +220,10 @@ pub fn offset_polygons(
         to_kernel(backend_shape(polygons))
     } else {
         let style = OutlineStyle::new(distance).line_join(join.to_backend()?);
-        to_kernel(backend_shape(polygons).outline(&style))
+        crate::settle::settle(
+            to_kernel(backend_shape(polygons).outline(&style)),
+            tolerance,
+        )
     };
 
     let evidence = OffsetEvidence {

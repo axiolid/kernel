@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Every region an operation returns is now one `Region::new` accepts and
+  the next operation takes: unions, intersections, differences,
+  morphology, Minkowski sums and visibility polygons of shapes that share
+  collinear edges, touch at vertices or pinch holes against their outer
+  rings could come back with edges shorter than the tolerance or rings
+  touching themselves, and were then refused as `RepeatedVertex` or
+  `SelfIntersection`. Outputs are settled by the same tests validation
+  applies -- short edges merged, a vertex touching another part of its
+  ring put on it, rings split where they pass a point twice, holes given
+  back to their outer rings -- each move within the tolerance.
+
 ## [0.3.2] - 2026-09-27
 
 ### Added

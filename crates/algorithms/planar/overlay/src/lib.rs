@@ -8,6 +8,7 @@ mod minkowski;
 mod offset;
 mod rectangle;
 mod region;
+mod settle;
 mod visibility;
 
 pub use arc::{
@@ -323,7 +324,7 @@ pub fn overlay(
         FillRule::Negative => BackendFill::Negative,
     };
     let shapes = backend(&subject.polygons).overlay(&backend(&clip.polygons), rule, fill);
-    let polygons = shapes_to_polygons(shapes);
+    let polygons = settle::settle(shapes_to_polygons(shapes), tolerance);
     let evidence = OverlayEvidence {
         subject_rings: subject.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
         clip_rings: clip.polygons.iter().map(|p| 1 + p.holes.len()).sum(),

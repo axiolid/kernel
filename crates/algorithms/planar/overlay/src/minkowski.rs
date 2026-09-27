@@ -259,7 +259,10 @@ pub(crate) fn region_of(
             holes,
         });
     }
-    Ok(Region::from_valid_polygons(polygons, had_input))
+    Ok(Region::from_valid_polygons(
+        crate::settle::settle(polygons, tolerance),
+        had_input,
+    ))
 }
 
 impl Region {
