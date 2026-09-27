@@ -26,7 +26,7 @@ MUTANTS = [
     ('unreachable anchors skipped', M, '            let Some(d) = self.distance(a)? else {\n                return Err(FarthestError::Unreachable {\n                    triangle: self.roots[root],\n                });\n            };', '            let Some(d) = self.distance(a)? else {\n                continue;\n            };', TESTS),
     ('subregion edges ignored', M, '                if meets_triangle(p, q, t)? {\n                    return Ok(false);', '                if false && meets_triangle(p, q, t)? {\n                    return Ok(false);', TESTS),
     ('only the first target seeded', M, '        if let Some(t) = targets.iter().position(|t| t == node) {', '        if let Some(t) = targets.iter().take(1).position(|t| t == node) {', TESTS),
-    ('query ignores visibility', M, '            if *node == point || visible(point, *node, &self.region, &self.obstacles)? {', '            if true {', TESTS),
+    ('query ignores visibility', M, '                if !ok[k] {\n                    continue;\n                }', '', TESTS),
     ('crossing barriers accepted', M, '                return Err(FarthestError::CrossingObstacles);', '', TESTS),
 ]
 

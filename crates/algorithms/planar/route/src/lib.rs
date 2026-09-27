@@ -43,7 +43,10 @@ use axiolid_guarantees::Certified;
 use axiolid_overlay::{Polygon, Ring};
 use axiolid_predicates::orient2d;
 
+mod graph;
 mod map;
+
+use graph::Graph;
 
 pub use map::{
     distance_map, distance_map_within, farthest_point, farthest_point_within, DistanceMap,
@@ -206,23 +209,31 @@ pub fn shortest_path_within(
     }
 
     let obstacles = obstacle_segments(region, barriers);
-    let mut adjacency = vec![Vec::new(); nodes.len()];
-    for i in 0..nodes.len() {
-        for j in i + 1..nodes.len() {
-            if visible(nodes[i], nodes[j], region, &obstacles)? {
-                let length = (nodes[i] - nodes[j]).length();
-                adjacency[i].push((j, length));
-                adjacency[j].push((i, length));
-            }
-        }
-    }
-
-    let Some((length, path)) = dijkstra(&adjacency, 0, 1) else {
+    let graph = Graph::build(&nodes, region, barriers, &obstacles)?;
+    // The goal is the first vertex equal to it (the start, if they are
+    // the same point).
+    let target = nodes.iter().position(|n| *n == goal).unwrap_or(1);
+    let sources: Vec<usize> = graph.states(0).collect();
+    let (distance, previous, reached) = graph::dijkstra(&graph.adjacency, &sources, |state| {
+        graph.node(state) == target
+    });
+    let Some(end) = reached else {
         return Ok(Err(Unreachable::DisconnectedComponents));
     };
+    let mut path = vec![end];
+    let mut state = end;
+    while previous[state] != usize::MAX {
+        state = previous[state];
+        path.push(state);
+    }
+    path.reverse();
+    let mut polyline: Vec<Point2> = path.into_iter().map(|s| nodes[graph.node(s)]).collect();
+    if polyline.len() == 1 {
+        polyline.push(goal);
+    }
     Ok(Ok(Route {
-        polyline: path.into_iter().map(|index| nodes[index]).collect(),
-        length,
+        polyline,
+        length: distance[end],
         graph_vertices: nodes.len(),
     }))
 }
@@ -324,6 +335,9 @@ fn ring_edges(ring: &Ring) -> Vec<(Point2, Point2)> {
 /// two cuts a stretch either runs along an obstacle edge -- on the
 /// boundary, which a route may follow -- or meets no boundary at all, and
 /// then its midpoint decides for the whole of it.
+///
+/// Passing through a vertex where obstacles meet is decided per side of
+/// travel, with the vertex's sectors, in [`graph::sides`] (#189).
 fn visible(
     a: Point2,
     b: Point2,
@@ -450,61 +464,4 @@ fn dedup_points(points: &mut Vec<Point2>) {
             true
         }
     });
-}
-
-/// Dijkstra returning `(length, path)`.
-///
-/// Ties break on the lowest node index, so two equal-length paths always
-/// resolve to the same one. Without that, the answer would depend on
-/// iteration order and the same query could return different polylines.
-fn dijkstra(
-    adjacency: &[Vec<(usize, f64)>],
-    source: usize,
-    target: usize,
-) -> Option<(f64, Vec<usize>)> {
-    let count = adjacency.len();
-    let mut distance = vec![f64::INFINITY; count];
-    let mut previous = vec![usize::MAX; count];
-    let mut settled = vec![false; count];
-    distance[source] = 0.0;
-
-    for _ in 0..count {
-        // Linear scan rather than a heap: it makes the lowest-index tie-break
-        // explicit, and MAX_VERTICES already bounds the cost.
-        let mut current = None;
-        for index in 0..count {
-            if settled[index] || distance[index].is_infinite() {
-                continue;
-            }
-            // Strictly less, so the lowest index wins an exact tie.
-            if current.is_none_or(|best: usize| distance[index] < distance[best]) {
-                current = Some(index);
-            }
-        }
-        let Some(current) = current else { break };
-        if current == target {
-            break;
-        }
-        settled[current] = true;
-
-        for (neighbour, weight) in &adjacency[current] {
-            let candidate = distance[current] + weight;
-            if candidate < distance[*neighbour] {
-                distance[*neighbour] = candidate;
-                previous[*neighbour] = current;
-            }
-        }
-    }
-
-    if distance[target].is_infinite() {
-        return None;
-    }
-    let mut path = vec![target];
-    let mut node = target;
-    while node != source {
-        node = previous[node];
-        path.push(node);
-    }
-    path.reverse();
-    Some((distance[target], path))
 }

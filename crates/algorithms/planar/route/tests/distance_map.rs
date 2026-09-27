@@ -156,6 +156,46 @@ fn the_far_side_of_a_barrier_is_not_bounded_from_the_near_side() {
 }
 
 #[test]
+fn a_barrier_drawn_in_pieces_has_no_gap_at_its_joint() {
+    // #189: the wall's middle vertex is a graph vertex seen from both
+    // sides; the far strip is still reached only round the ends.
+    let room = rect(0.0, 0.0, 6.0, 10.0);
+    let barrier = vec![vec![p(5.0, 0.5), p(5.0, 4.0), p(5.0, 8.5)]];
+    let map = distance_map(&[room.clone()], &barrier, &[p(0.0, 5.0)]).unwrap();
+    let reach = map.nearest(p(6.0, 4.0)).unwrap().unwrap();
+    let expected = 45.25f64.sqrt() + 13.25f64.sqrt();
+    assert!((reach.route.length - expected).abs() < 1e-9, "{reach:?}");
+    let far = farthest_point(&map, &room, TOL).unwrap();
+    assert!(far.converged);
+    // As with the wall in one piece: the ways round its ends tie on the
+    // far wall at 10.538891669743386 (bisected in the test above).
+    assert_brackets(
+        far.distance.lower,
+        far.distance.upper,
+        10.538_891_669_743_386,
+    );
+}
+
+#[test]
+fn a_point_on_a_barrier_arrives_on_its_own_side() {
+    // Barriers meet at (2, 5): one runs right to (8, 5), one down to
+    // (2, 2); a third stands on the first at (5, 5). From (7, 5), on the
+    // first barrier, the way below it to (2, 5) arrives in the corner
+    // below-right of the junction, not above-left, where the exit is.
+    let room = rect(0.0, 0.0, 10.0, 10.0);
+    let barriers = vec![
+        vec![p(2.0, 5.0), p(8.0, 5.0)],
+        vec![p(2.0, 5.0), p(2.0, 2.0)],
+        vec![p(5.0, 5.0), p(5.0, 8.0)],
+    ];
+    let map = distance_map(&[room], &barriers, &[p(1.0, 4.0)]).unwrap();
+    let reach = map.nearest(p(7.0, 5.0)).unwrap().unwrap();
+    // Round the lower end of the second barrier.
+    let expected = 34f64.sqrt() + 5f64.sqrt();
+    assert!((reach.route.length - expected).abs() < 1e-9, "{reach:?}");
+}
+
+#[test]
 fn only_the_subregion_counts() {
     // The far end of the room is farther, but outside the subregion.
     let room = rect(0.0, 0.0, 10.0, 4.0);
@@ -177,11 +217,7 @@ fn an_interior_maximum_is_found() {
     let map = distance_map(&[room.clone()], &[], &targets).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
-    assert_brackets(
-        far.distance.lower,
-        far.distance.upper,
-        5.075_490_229_455_75,
-    );
+    assert_brackets(far.distance.lower, far.distance.upper, 5.075_490_229_455_75);
     let w = far.witness.unwrap();
     assert!(
         (w - p(5.007_268_722_466_96, 3.333_480_176_211_45)).length() < 0.05,

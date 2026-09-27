@@ -33,9 +33,8 @@
 //! points proven inside the cell's original triangle, exactly: a rounded
 //! midpoint on a wall may fall just outside the free space, and its
 //! distance says nothing about the triangle. Nor may an anchor lie on a
-//! barrier, unless strictly inside the triangle (which it then cannot be):
-//! a point on a barrier is seen from both sides, so its distance is the
-//! nearer side's, and bounds nothing on the farther.
+//! barrier: a point on a barrier is seen from both sides, so its distance
+//! is the nearer side's, and bounds nothing on the farther.
 
 use core::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -45,9 +44,10 @@ use axiolid_core::Point2;
 use axiolid_overlay::{Polygon, Ring};
 use axiolid_triangulate::{triangulate, Constraint};
 
+use crate::graph::{self, Graph, Side};
 use crate::{
-    contains, crosses, dedup_points, obstacle_segments, ring_edges, side, validate_region, visible,
-    within, Route, RouteError, Unreachable, MAX_VERTICES,
+    contains, crosses, dedup_points, obstacle_segments, ring_edges, side, validate_region, within,
+    Route, RouteError, Unreachable, MAX_VERTICES,
 };
 
 /// Cells [`farthest_point`] refines at most.
@@ -85,9 +85,11 @@ pub struct DistanceMap {
     walls: Vec<(Point2, Point2)>,
     obstacles: Vec<(Point2, Point2)>,
     nodes: Vec<Point2>,
-    /// Distance from each node to its nearest target; infinite if none.
+    graph: Graph,
+    /// Distance from each (vertex, sector) state to its nearest target;
+    /// infinite if none.
     distance: Vec<f64>,
-    /// The next node towards that target; `usize::MAX` at a target.
+    /// The next state towards that target; `usize::MAX` at a target.
     next: Vec<usize>,
     /// Which target, as an index into the targets given.
     target: Vec<usize>,
@@ -161,49 +163,30 @@ pub fn distance_map_within(
         .into());
     }
     let obstacles = obstacle_segments(region, barriers);
-    let mut adjacency = vec![Vec::new(); nodes.len()];
-    for i in 0..nodes.len() {
-        for j in i + 1..nodes.len() {
-            if visible(nodes[i], nodes[j], region, &obstacles)? {
-                let length = (nodes[i] - nodes[j]).length();
-                adjacency[i].push((j, length));
-                adjacency[j].push((i, length));
-            }
-        }
-    }
-    // Every target at distance zero, then one Dijkstra; ties go to the
-    // lowest index, as in `shortest_path`.
-    let count = nodes.len();
-    let mut distance = vec![f64::INFINITY; count];
-    let mut next = vec![usize::MAX; count];
-    let mut target = vec![usize::MAX; count];
+    let graph = Graph::build(&nodes, region, barriers, &obstacles)?;
+    // Every free sector of every target at distance zero, then one
+    // Dijkstra; ties go to the lowest state, as in `shortest_path`.
+    let mut sources = Vec::new();
+    let mut seed = vec![usize::MAX; graph.adjacency.len()];
     for (i, node) in nodes.iter().enumerate() {
         if let Some(t) = targets.iter().position(|t| t == node) {
-            distance[i] = 0.0;
-            target[i] = t;
+            for state in graph.states(i) {
+                sources.push(state);
+                seed[state] = t;
+            }
         }
     }
-    let mut settled = vec![false; count];
-    for _ in 0..count {
-        let mut current = None;
-        for i in 0..count {
-            if settled[i] || distance[i].is_infinite() {
-                continue;
-            }
-            if current.is_none_or(|best: usize| distance[i] < distance[best]) {
-                current = Some(i);
-            }
+    let (distance, next, _) = graph::dijkstra(&graph.adjacency, &sources, |_| false);
+    // Follow each state's chain to the target that seeded it.
+    let mut target = seed.clone();
+    for (state, t) in target.iter_mut().enumerate() {
+        let mut at = state;
+        let mut steps = 0;
+        while seed[at] == usize::MAX && next[at] != usize::MAX && steps <= seed.len() {
+            at = next[at];
+            steps += 1;
         }
-        let Some(current) = current else { break };
-        settled[current] = true;
-        for &(neighbour, weight) in &adjacency[current] {
-            let candidate = distance[current] + weight;
-            if candidate < distance[neighbour] {
-                distance[neighbour] = candidate;
-                next[neighbour] = current;
-                target[neighbour] = target[current];
-            }
-        }
+        *t = seed[at];
     }
     Ok(DistanceMap {
         region: region.to_vec(),
@@ -213,6 +196,7 @@ pub fn distance_map_within(
             .collect(),
         obstacles,
         nodes,
+        graph,
         distance,
         next,
         target,
@@ -252,15 +236,16 @@ impl DistanceMap {
             return Ok(Err(Unreachable::DisconnectedComponents));
         };
         let mut polyline = vec![point];
-        let mut node = first;
+        let mut state = first;
         loop {
-            if self.nodes[node] != point {
-                polyline.push(self.nodes[node]);
+            let at = self.nodes[self.graph.node(state)];
+            if polyline.last() != Some(&at) {
+                polyline.push(at);
             }
-            if self.next[node] == usize::MAX {
+            if self.next[state] == usize::MAX {
                 break;
             }
-            node = self.next[node];
+            state = self.next[state];
         }
         Ok(Ok(Reach {
             target: self.target[first],
@@ -273,20 +258,50 @@ impl DistanceMap {
     }
 
     /// The distance from `point`, known to be inside the region, and the
-    /// first graph vertex on the way; `None` when no target is reachable.
+    /// first state on the way; `None` when no target is reachable.
     fn via(&self, point: Point2) -> Result<Option<(f64, usize)>, RouteError> {
         let mut best: Option<(f64, usize)> = None;
+        let offer = |length: f64, state: usize, best: &mut Option<(f64, usize)>| {
+            if best.is_none_or(|(b, s)| length < b || (length == b && state < s)) {
+                *best = Some((length, state));
+            }
+        };
         for (i, node) in self.nodes.iter().enumerate() {
-            if self.distance[i].is_infinite() {
+            let nearest = self
+                .graph
+                .states(i)
+                .map(|s| self.distance[s])
+                .fold(f64::INFINITY, f64::min);
+            if nearest.is_infinite() {
+                continue;
+            }
+            if *node == point {
+                for s in self.graph.states(i) {
+                    offer(self.distance[s], s, &mut best);
+                }
                 continue;
             }
             let leg = (*node - point).length();
-            let length = leg + self.distance[i];
-            if best.is_some_and(|(b, _)| length >= b) {
+            if best.is_some_and(|(b, _)| leg + nearest > b) {
                 continue;
             }
-            if *node == point || visible(point, *node, &self.region, &self.obstacles)? {
-                best = Some((length, i));
+            let ok = graph::sides(
+                point,
+                *node,
+                &self.region,
+                &self.obstacles,
+                &self.nodes,
+                &self.graph.stars,
+            )?;
+            for (k, on) in [Side::Left, Side::Right].into_iter().enumerate() {
+                if !ok[k] {
+                    continue;
+                }
+                if let Some(s) = self.graph.arrival(i, point, on)? {
+                    if self.distance[s].is_finite() {
+                        offer(leg + self.distance[s], s, &mut best);
+                    }
+                }
             }
         }
         Ok(best)
@@ -301,11 +316,11 @@ impl DistanceMap {
     /// roundings a distance carries.
     fn hops(&self) -> usize {
         let mut most = 0;
-        for start in 0..self.nodes.len() {
-            let mut node = start;
+        for start in 0..self.next.len() {
+            let mut state = start;
             let mut hops = 0;
-            while self.next[node] != usize::MAX && hops <= self.nodes.len() {
-                node = self.next[node];
+            while self.next[state] != usize::MAX && hops <= self.next.len() {
+                state = self.next[state];
                 hops += 1;
             }
             most = most.max(hops);

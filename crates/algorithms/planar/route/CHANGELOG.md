@@ -26,6 +26,18 @@ caret rule for `0.x` versions.
   refused with the triangle as evidence (`FarthestError::Unreachable`);
   crossing barriers are refused (`FarthestError::CrossingObstacles`).
 
+### Fixed
+
+- Routes no longer squeeze through a point where obstacles meet (#189):
+  a barrier's foot on a wall, two holes touching at a corner, a barrier
+  bent or joined at a vertex. Each graph vertex is split into the free
+  sectors between the obstacle rays leaving it, ordered exactly; a route
+  moves over (vertex, sector) states, each edge is taken on one side of
+  travel and attached to the sector beside it at each end, and passes
+  through a vertex only on a side with no obstacle ray and free space.
+  Two polygons sharing an edge are walkable along it on either side.
+  `shortest_path` and `DistanceMap` share the graph.
+
 ## [0.3.1] - 2026-09-27
 
 ### Fixed

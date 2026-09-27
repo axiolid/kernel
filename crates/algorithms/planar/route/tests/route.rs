@@ -486,3 +486,117 @@ fn every_route_segment_lies_in_the_closed_region() {
     }
     assert!(routes > 60, "{routes} routes");
 }
+
+fn length_of(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    from: (f64, f64),
+    to: (f64, f64),
+) -> f64 {
+    let (a, b) = (Point2::new(from.0, from.1), Point2::new(to.0, to.1));
+    let route = shortest_path(region, barriers, a, b).unwrap().unwrap();
+    // Whatever the length, the polyline must be it.
+    let walked: f64 = route
+        .polyline
+        .windows(2)
+        .map(|w| (w[1] - w[0]).length())
+        .sum();
+    assert!((walked - route.length).abs() < 1e-9);
+    route.length
+}
+
+#[test]
+fn a_barrier_touching_a_wall_is_not_squeezed_past() {
+    // #189: the barrier's foot touches the bottom wall. Along the wall
+    // through the foot is a gap of zero width; the way is over the top.
+    let barrier = vec![vec![Point2::new(5.0, 0.0), Point2::new(5.0, 8.0)]];
+    let length = length_of(&room(), &barrier, (0.0, 0.0), (10.0, 0.0));
+    assert!((length - 2.0 * 89f64.sqrt()).abs() < 1e-9, "{length}");
+    // From just above the wall, too.
+    let length = length_of(&room(), &barrier, (1.0, 1.0), (9.0, 1.0));
+    assert!(
+        (length - 2.0 * (16.0f64 + 49.0).sqrt()).abs() < 1e-9,
+        "{length}"
+    );
+}
+
+#[test]
+fn holes_touching_at_a_corner_are_not_squeezed_between() {
+    // Two pillars meet corner to corner at (5, 5); the straight line from
+    // (3, 7) to (7, 3) runs through that point. Round either pillar is
+    // 2 sqrt(5) + 6.
+    let region = vec![Polygon {
+        outer: ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+        holes: vec![
+            ring(&[(2.0, 2.0), (2.0, 5.0), (5.0, 5.0), (5.0, 2.0)]),
+            ring(&[(5.0, 5.0), (5.0, 8.0), (8.0, 8.0), (8.0, 5.0)]),
+        ],
+    }];
+    let length = length_of(&region, &[], (3.0, 7.0), (7.0, 3.0));
+    assert!(
+        (length - (2.0 * 5f64.sqrt() + 6.0)).abs() < 1e-9,
+        "{length}"
+    );
+    // The other diagonal runs through the same point, between the two
+    // open quarters: round a pillar again.
+    let length = length_of(&region, &[], (6.0, 4.0), (4.0, 6.0));
+    assert!(
+        (length - (2.0 * 5f64.sqrt() + 6.0)).abs() < 1e-9,
+        "{length}"
+    );
+}
+
+#[test]
+fn a_bent_barrier_is_one_wall() {
+    // A wall drawn in two collinear pieces: its middle vertex is no gap.
+    let region = vec![Polygon {
+        outer: ring(&[(0.0, 0.0), (6.0, 0.0), (6.0, 10.0), (0.0, 10.0)]),
+        holes: Vec::new(),
+    }];
+    let wall = vec![vec![
+        Point2::new(5.0, 0.5),
+        Point2::new(5.0, 4.0),
+        Point2::new(5.0, 8.5),
+    ]];
+    let length = length_of(&region, &wall, (0.0, 5.0), (6.0, 4.0));
+    let expected = 45.25f64.sqrt() + 13.25f64.sqrt();
+    assert!((length - expected).abs() < 1e-9, "{length} vs {expected}");
+    // Bent at a right angle, the corner is no gap either.
+    let corner = vec![vec![
+        Point2::new(2.0, 2.0),
+        Point2::new(2.0, 8.0),
+        Point2::new(8.0, 8.0),
+    ]];
+    // From outside the corner to inside it, the straight line runs through
+    // the bend; round either end is sqrt(50) + sqrt(26).
+    let length = length_of(&room(), &corner, (1.0, 9.0), (3.0, 7.0));
+    let expected = 50f64.sqrt() + 26f64.sqrt();
+    assert!((length - expected).abs() < 1e-9, "{length} vs {expected}");
+}
+
+#[test]
+fn a_barrier_along_a_wall_leaves_the_wall_walkable() {
+    let barrier = vec![vec![Point2::new(2.0, 0.0), Point2::new(4.0, 0.0)]];
+    let length = length_of(&room(), &barrier, (0.0, 0.0), (10.0, 0.0));
+    assert!((length - 10.0).abs() < 1e-12, "{length}");
+}
+
+#[test]
+fn two_rooms_sharing_a_wall_are_walkable_along_it() {
+    // Two polygons share the edge y = 5: a wall between rooms, walkable
+    // on either side, closed to crossing.
+    let region = vec![
+        Polygon {
+            outer: ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]),
+            holes: Vec::new(),
+        },
+        Polygon {
+            outer: ring(&[(0.0, 5.0), (10.0, 5.0), (10.0, 10.0), (0.0, 10.0)]),
+            holes: Vec::new(),
+        },
+    ];
+    let length = length_of(&region, &[], (1.0, 5.0), (9.0, 5.0));
+    assert!((length - 8.0).abs() < 1e-12, "{length}");
+    let length = length_of(&region, &[], (0.0, 5.0), (3.0, 9.0));
+    assert!((length - 5.0).abs() < 1e-12, "{length}");
+}
