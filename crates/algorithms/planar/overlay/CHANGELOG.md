@@ -20,6 +20,13 @@ caret rule for `0.x` versions.
   `RectangleEvidence` (hull size, count of tied orientations, and a bound
   on the rounding of the output). Collinear input gives an exactly
   zero-width rectangle; empty or non-finite input is a `RectangleError`.
+- `Region::visibility_polygon` (#184): the part of a region with holes in
+  sight of a point inside it. An angular sweep round the viewpoint with
+  every decision exact -- the order of vertex directions, which edges a
+  wedge's middle ray meets and which is nearest -- so walls and holes cast
+  exact shadows; only the shadow ends are rounded, once, and the result is
+  presented like the other region operations. A viewpoint on the boundary
+  or outside is refused (`VisibilityError::NotInside`).
 
 ## [0.3.1] - 2026-09-27
 

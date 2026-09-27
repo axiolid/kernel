@@ -233,7 +233,7 @@ fn sum_rings(
 }
 
 /// The faces of `arrangement` where `inside` holds, as a region.
-fn region_of(
+pub(crate) fn region_of(
     arrangement: &ArcArrangement,
     inside: impl Fn(&[bool]) -> bool,
     had_input: bool,

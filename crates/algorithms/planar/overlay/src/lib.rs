@@ -8,6 +8,7 @@ mod minkowski;
 mod offset;
 mod rectangle;
 mod region;
+mod visibility;
 
 pub use arc::{
     arc_edge_radius, arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing, ArcVertex,
@@ -25,6 +26,7 @@ pub use rectangle::{
     minimum_area_rectangle, MinimumRectangle, OrientedRectangle, RectangleError, RectangleEvidence,
 };
 pub use region::{Region, RegionEvidence};
+pub use visibility::VisibilityError;
 
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
 use i_overlay::core::{fill_rule::FillRule as BackendFill, overlay_rule::OverlayRule};
