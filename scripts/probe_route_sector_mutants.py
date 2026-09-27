@@ -19,7 +19,7 @@ TESTS = ["-p", "axiolid-route"]
 
 MUTANTS = [
     ('rays on the side of travel ignored', G, '            if side(a, b, ray.to)? == blocking {\n                return Ok(false);', '            if false && side(a, b, ray.to)? == blocking {\n                return Ok(false);', TESTS),
-    ('cut vertices not checked', G, '        if side(a, b, *v)? != Sign::Zero || !within(a, b, *v) {\n            continue;', '        if true || side(a, b, *v)? != Sign::Zero || !within(a, b, *v) {\n            continue;', TESTS),
+    ('cut vertices not checked', G, '        if !within(a, b, *v) || side(a, b, *v)? != Sign::Zero {\n            continue;', '        if true || !within(a, b, *v) || side(a, b, *v)? != Sign::Zero {\n            continue;', TESTS),
     ('every sector free', G, '            n => self.rays[sector].ccw_free && self.rays[(sector + 1) % n].cw_free,', '            _ => { let _ = sector; true }', TESTS),
     ('holes treated as outer rings', G, '    Ok(ccw != hole)', '    Ok(ccw)', TESTS),
     ('shared ring edges free on neither side', G, '                self.ccw_free |= other.ccw_free;\n                self.cw_free |= other.cw_free;', '                self.ccw_free &= other.ccw_free;\n                self.cw_free &= other.cw_free;', TESTS),

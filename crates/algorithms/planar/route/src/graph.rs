@@ -164,7 +164,7 @@ impl Star {
 }
 
 /// Whether the region lies to the left of a ring's edges in ring order.
-fn region_left(ring: &Ring, hole: bool) -> Result<bool, RouteError> {
+pub(crate) fn region_left(ring: &Ring, hole: bool) -> Result<bool, RouteError> {
     let p = &ring.points;
     let n = p.len();
     let low = (0..n)
@@ -288,16 +288,18 @@ pub(crate) fn sides(
     obstacles: &[(Point2, Point2)],
     nodes: &[Point2],
     stars: &[Star],
+    rayed: &[usize],
 ) -> Result<[bool; 2], RouteError> {
     if !visible(a, b, region, obstacles)? {
         return Ok([false, false]);
     }
     let mut ok = [true, true];
-    for (v, star) in nodes.iter().zip(stars) {
-        if *v == a || *v == b || star.rays.is_empty() {
+    for &k in rayed {
+        let (v, star) = (&nodes[k], &stars[k]);
+        if *v == a || *v == b {
             continue;
         }
-        if side(a, b, *v)? != Sign::Zero || !within(a, b, *v) {
+        if !within(a, b, *v) || side(a, b, *v)? != Sign::Zero {
             continue;
         }
         for (k, on) in [Side::Left, Side::Right].into_iter().enumerate() {
@@ -316,6 +318,9 @@ pub(crate) fn sides(
 #[derive(Debug, Clone)]
 pub(crate) struct Graph {
     pub(crate) stars: Vec<Star>,
+    /// The vertices with obstacle rays: the only ones a segment passing
+    /// through can be stopped at.
+    pub(crate) rayed: Vec<usize>,
     /// First state of each vertex; its sectors follow.
     pub(crate) offset: Vec<usize>,
     pub(crate) adjacency: Vec<Vec<(usize, f64)>>,
@@ -329,6 +334,9 @@ impl Graph {
         obstacles: &[(Point2, Point2)],
     ) -> Result<Self, RouteError> {
         let stars = stars(nodes, region, barriers)?;
+        let rayed: Vec<usize> = (0..nodes.len())
+            .filter(|&k| !stars[k].rays.is_empty())
+            .collect();
         let mut offset = Vec::with_capacity(nodes.len() + 1);
         let mut total = 0;
         for star in &stars {
@@ -339,7 +347,7 @@ impl Graph {
         let mut adjacency = vec![Vec::new(); total];
         for i in 0..nodes.len() {
             for j in i + 1..nodes.len() {
-                let ok = sides(nodes[i], nodes[j], region, obstacles, nodes, &stars)?;
+                let ok = sides(nodes[i], nodes[j], region, obstacles, nodes, &stars, &rayed)?;
                 let length = (nodes[i] - nodes[j]).length();
                 let mut linked: Vec<(usize, usize)> = Vec::new();
                 for (k, on) in [Side::Left, Side::Right].into_iter().enumerate() {
@@ -364,6 +372,7 @@ impl Graph {
         }
         Ok(Self {
             stars,
+            rayed,
             offset,
             adjacency,
         })
@@ -379,6 +388,54 @@ impl Graph {
         (0..self.stars[node].sectors())
             .filter(move |&s| self.stars[node].free(s))
             .map(move |s| self.offset[node] + s)
+    }
+
+    /// The free states of `node` whose sectors meet the closed cone of
+    /// directions from it to the points of the segment `b1`-`b2`: every
+    /// state a route from the node to that segment might leave in. All of
+    /// them when the node lies on the segment.
+    pub(crate) fn cone_states(
+        &self,
+        node: usize,
+        at: Point2,
+        b1: Point2,
+        b2: Point2,
+    ) -> Result<Vec<usize>, RouteError> {
+        let star = &self.stars[node];
+        let n = star.sectors();
+        let turn = side(at, b1, b2)?;
+        if turn == Sign::Zero && within(b1, b2, at) {
+            return Ok(self.states(node).collect());
+        }
+        let (lo, hi) = if turn == Sign::Negative {
+            (b2, b1)
+        } else {
+            (b1, b2)
+        };
+        let mut sectors = vec![
+            star.cw_of(lo)?,
+            star.ccw_of(lo)?,
+            star.cw_of(hi)?,
+            star.ccw_of(hi)?,
+        ];
+        if turn != Sign::Zero {
+            // Rays strictly inside the cone: the sectors on both sides.
+            for (i, ray) in star.rays.iter().enumerate() {
+                if side(at, lo, ray.to)? == Sign::Positive
+                    && side(at, ray.to, hi)? == Sign::Positive
+                {
+                    sectors.push(i);
+                    sectors.push((i + n - 1) % n);
+                }
+            }
+        }
+        sectors.sort_unstable();
+        sectors.dedup();
+        Ok(sectors
+            .into_iter()
+            .filter(|&s| star.free(s))
+            .map(|s| self.offset[node] + s)
+            .collect())
     }
 
     /// The state an edge from an outside point `from` arrives in at

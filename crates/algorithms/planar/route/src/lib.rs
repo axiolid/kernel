@@ -47,6 +47,7 @@ mod forced;
 mod graph;
 mod map;
 mod skeleton;
+mod weighted;
 
 use graph::Graph;
 
@@ -56,6 +57,10 @@ pub use map::{
     Farthest, FarthestError, LengthInterval, MapError, Reach, MAX_CELLS,
 };
 pub use skeleton::{skeleton, NodeKind, Skeleton, SkeletonError, SkeletonNode, Wall};
+pub use weighted::{
+    weighted_distance_map, weighted_distance_map_within, weighted_farthest_point,
+    weighted_farthest_point_within, CostRegion, WeightedMap, WeightedReach, MAX_WEIGHTED_NODES,
+};
 
 /// Maximum vertices, counting region, barrier and endpoint vertices.
 pub const MAX_VERTICES: usize = 512;
@@ -291,6 +296,14 @@ fn side(a: Point2, b: Point2, c: Point2) -> Result<Sign, RouteError> {
 /// meeting at a shared polygon vertex is the normal case, and treating that as
 /// a blocking crossing would disconnect every graph.
 fn crosses(p: Point2, q: Point2, r: Point2, s: Point2) -> Result<bool, RouteError> {
+    // Disjoint bounding boxes cannot cross; skips the predicates.
+    if p.x.max(q.x) < r.x.min(s.x)
+        || r.x.max(s.x) < p.x.min(q.x)
+        || p.y.max(q.y) < r.y.min(s.y)
+        || r.y.max(s.y) < p.y.min(q.y)
+    {
+        return Ok(false);
+    }
     let d1 = side(p, q, r)?;
     let d2 = side(p, q, s)?;
     let d3 = side(r, s, p)?;

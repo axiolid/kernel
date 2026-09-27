@@ -68,6 +68,21 @@ pub enum MapError {
         /// Its index in the targets given.
         index: usize,
     },
+    /// A cost region's factor is below 1 or not finite.
+    InvalidFactor {
+        /// Its index in the cost regions given.
+        index: usize,
+    },
+    /// The spacing of points along cost edges is not positive and finite.
+    InvalidSpacing,
+    /// A cost region's edge properly crosses a region edge, a barrier or
+    /// another cost region's edge, or runs along a barrier. Cost regions
+    /// may nest, touch and share edges, and run along the region's
+    /// boundary; crossings would need rounded vertices, not supported yet.
+    CostCrossing {
+        /// Index of the cost region, in the cost regions given.
+        index: usize,
+    },
 }
 
 impl From<RouteError> for MapError {
@@ -332,6 +347,7 @@ impl DistanceMap {
                 &self.obstacles,
                 &self.nodes,
                 &self.graph.stars,
+                &self.graph.rayed,
             )?;
             for (k, on) in [Side::Left, Side::Right].into_iter().enumerate() {
                 if !ok[k] {
@@ -706,10 +722,18 @@ pub(crate) fn admissible(
 /// wall and barrier, each segment first cut at the vertices lying on it,
 /// keeping the triangles inside the region.
 pub(crate) fn free_triangles(map: &DistanceMap) -> Result<Vec<[Point2; 3]>, FarthestError> {
-    let mut points: Vec<Point2> = map.obstacles.iter().flat_map(|(p, q)| [*p, *q]).collect();
+    free_triangles_in(&map.region, &map.obstacles)
+}
+
+/// [`free_triangles`] of a region and its obstacle segments.
+pub(crate) fn free_triangles_in(
+    region: &[Polygon],
+    obstacles: &[(Point2, Point2)],
+) -> Result<Vec<[Point2; 3]>, FarthestError> {
+    let mut points: Vec<Point2> = obstacles.iter().flat_map(|(p, q)| [*p, *q]).collect();
     dedup_points(&mut points);
     let mut pieces: Vec<(Point2, Point2)> = Vec::new();
-    for &(p, q) in &map.obstacles {
+    for &(p, q) in obstacles {
         let d = q - p;
         let mut cuts = vec![p, q];
         for &v in &points {
@@ -750,7 +774,7 @@ pub(crate) fn free_triangles(map: &DistanceMap) -> Result<Vec<[Point2; 3]>, Fart
             (corners[0].x + corners[1].x + corners[2].x) / 3.0,
             (corners[0].y + corners[1].y + corners[2].y) / 3.0,
         );
-        if contains(&map.region, centroid)? {
+        if contains(region, centroid)? {
             out.push(corners);
         }
     }
@@ -758,7 +782,7 @@ pub(crate) fn free_triangles(map: &DistanceMap) -> Result<Vec<[Point2; 3]>, Fart
 }
 
 /// Whether `p` lies in the closed counter-clockwise triangle, exactly.
-fn in_triangle(t: &[Point2; 3], p: Point2) -> Result<bool, RouteError> {
+pub(crate) fn in_triangle(t: &[Point2; 3], p: Point2) -> Result<bool, RouteError> {
     for i in 0..3 {
         if side(t[i], t[(i + 1) % 3], p)? == Sign::Negative {
             return Ok(false);
@@ -781,7 +805,12 @@ pub(crate) fn meets_triangle(p: Point2, q: Point2, t: &[Point2; 3]) -> Result<bo
 }
 
 /// Whether two closed segments share a point, exactly.
-fn segments_meet(p: Point2, q: Point2, r: Point2, s: Point2) -> Result<bool, RouteError> {
+pub(crate) fn segments_meet(
+    p: Point2,
+    q: Point2,
+    r: Point2,
+    s: Point2,
+) -> Result<bool, RouteError> {
     let (d1, d2) = (side(p, q, r)?, side(p, q, s)?);
     let (d3, d4) = (side(r, s, p)?, side(r, s, q)?);
     if d1 != d2
