@@ -20,11 +20,20 @@
 //!
 //! Narrow-phase geometry remains outside the index: these answer *which
 //! candidates*, never *what the intersection is*.
+//!
+//! Beside the indices, [`barycentric`] locates a point in a triangle,
+//! tetrahedron or polygon by weights of its corners, for interpolating
+//! values given there.
 
+pub mod barycentric;
 pub mod bvh;
 pub mod index;
 pub mod points;
 
+pub use barycentric::{
+    mean_value_coordinates2, tetrahedron_barycentric, triangle_barycentric2, triangle_barycentric3,
+    BarycentricError,
+};
 pub use bvh::{Bvh, CandidatePair, NearestCandidate, PairCandidates, SpatialQueryStats};
 pub use index::{RayHit, SpatialIndex, SpatialItem};
 pub use points::{PointHit, PointIndex, PointQueryError};
