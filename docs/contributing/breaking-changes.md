@@ -68,6 +68,24 @@ python3 scripts/check-semver.py --explain  # show each crate's baseline
 A crate with no published release yet is skipped: there is no baseline
 to break. It joins the gate automatically on its first publish.
 
+A crate whose working version equals a published one is checked against
+that release: the baseline comes from crates.io, so this compares the
+tree with what was actually published under that number, and catches an
+unreleased break before the version moves. (It used to be skipped; a
+break in `axiolid-measure` then surfaced only when its patch release was
+prepared.)
+
+### Exceptions
+
+`architecture/semver-exceptions.toml` accepts findings the tool gets
+wrong, by name: the crate, the lint and the exact item paths, with the
+reason each still resolves as before, and a test that proves it. The gate
+prints every accepted finding; anything not listed still fails, and so
+does a failure whose findings it cannot parse. The one entry today:
+`axiolid_surface::BSplineSurface`, re-exported from `axiolid-curve`
+(cargo-semver-checks does not follow re-exports of another crate's
+items).
+
 ## When a breaking change is the right answer
 
 This policy does not forbid breaking changes; it forbids SILENT ones.

@@ -47,6 +47,27 @@ python3 scripts/check-semver.py >/dev/null 2>&1
 rc=$?
 check "gate rejects a removed public method" 1 $rc
 
+echo "=== mutation: an exception covers only its own items ==="
+# axiolid-surface has an accepted finding (architecture/semver-exceptions.toml).
+# Renaming a public field of another struct in the same crate is still a
+# break, so the gate MUST fail: the exception excuses items, not crates.
+SURF=crates/representations/analytic/surface/src/elementary.rs
+cp "$SURF" "${BAK}.surface"
+python3 - <<'PY'
+import pathlib
+p = pathlib.Path("crates/representations/analytic/surface/src/elementary.rs")
+t = p.read_text()
+i = t.index("pub struct Plane {")
+j = t.index("pub ", i + len("pub struct Plane {"))
+k = t.index(":", j)
+p.write_text(t[:j] + "pub renamed_by_probe" + t[k:])
+print("renamed a Plane field")
+PY
+python3 scripts/check-semver.py >/dev/null 2>&1
+rc=$?
+cp "${BAK}.surface" "$SURF"; rm -f "${BAK}.surface"
+check "gate rejects a break beside an excepted item" 1 $rc
+
 echo "=== restored ==="
 restore
 trap - EXIT

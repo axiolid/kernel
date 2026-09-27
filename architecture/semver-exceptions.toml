@@ -1,0 +1,18 @@
+# Findings of cargo-semver-checks accepted by name (scripts/check-semver.py).
+#
+# Only for findings the tool gets wrong. Each entry names the crate, the
+# lint and the exact item paths, and says why they still resolve as
+# before; a test must prove it. Anything not listed still fails the gate.
+
+[[exception]]
+crate = "axiolid-surface"
+lint = "struct_missing"
+items = ["axiolid_surface::spline::BSplineSurface", "axiolid_surface::BSplineSurface"]
+reason = """
+BSplineSurface moved to axiolid-curve (ADR 0077: a curve traced on a
+B-spline surface carries its carrier) and is re-exported from both old
+paths, unchanged: same fields, same derives. cargo-semver-checks does not
+follow re-exports of another crate's items and reports the paths as
+removed. crates/representations/analytic/surface/tests/reexport.rs builds
+the struct through both old paths with every published field.
+"""

@@ -23,6 +23,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    tomllib = None
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -116,6 +121,80 @@ def run_semver_checks(crates, baseline):
     return process.returncode, process.stdout
 
 
+EXCEPTIONS = ROOT / "architecture" / "semver-exceptions.toml"
+
+
+def load_exceptions() -> list[dict]:
+    """Findings accepted by name, each with its reason.
+
+    Only for findings the tool gets wrong: every entry names the crate,
+    the lint and the exact item paths, and says why the item still
+    resolves as before. Anything not listed still fails.
+    """
+    if not EXCEPTIONS.exists():
+        return []
+    if tomllib is None:
+        raise SystemExit("semver exceptions need Python 3.11+ (tomllib)")
+    data = tomllib.loads(EXCEPTIONS.read_text())
+    entries = data.get("exception", [])
+    for entry in entries:
+        for key in ("crate", "lint", "items", "reason"):
+            if not entry.get(key):
+                raise SystemExit(f"semver exception missing `{key}`: {entry}")
+    return entries
+
+
+def judge(output: str, exceptions: list[dict]) -> tuple[list[str], list[str]]:
+    """Split cargo-semver-checks findings into unexcused and excused.
+
+    Findings are attributed to the crate named by the last `Checking`
+    line before them. A crate that failed but whose findings could not be
+    parsed counts as unexcused: the gate never passes on output it does
+    not understand.
+    """
+    crate = None
+    lint = None
+    in_items = False
+    unexcused: list[str] = []
+    excused: list[str] = []
+    failed_crates: set[str] = set()
+    seen_findings: set[str] = set()
+    for raw in output.splitlines():
+        line = raw.strip()
+        if line.startswith("Checking ") and " -> " in line:
+            crate = line.split()[1]
+            continue
+        if line.startswith("--- failure "):
+            lint = line[len("--- failure "):].split(":", 1)[0].strip()
+            in_items = False
+            continue
+        if line.startswith("Failed in:"):
+            in_items = True
+            continue
+        if line.startswith("Summary semver requires") and crate:
+            failed_crates.add(crate)
+            in_items = False
+            continue
+        if in_items and line and crate and lint:
+            seen_findings.add(crate)
+            covered = any(
+                e["crate"] == crate
+                and e["lint"] == lint
+                and any(
+                    line.split()[1].rstrip(",") == item
+                    for item in e["items"]
+                    if len(line.split()) > 1
+                )
+                for e in exceptions
+            )
+            (excused if covered else unexcused).append(f"{crate} {lint}: {line}")
+        elif in_items and not line:
+            in_items = False
+    for crate_name in failed_crates - seen_findings:
+        unexcused.append(f"{crate_name}: failed without parsable findings")
+    return unexcused, excused
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--explain", action="store_true")
@@ -140,10 +219,13 @@ def main() -> int:
         if not versions:
             skipped.append(name)
             continue
-        # Compare against the newest release STRICTLY BELOW this crate's
-        # working version. The equal-version case is the tree against
-        # itself, which cannot fail and would make the gate decorative.
-        prior = [v for v in versions if parse(v) < parse(current)]
+        # Compare against the newest release AT OR BELOW this crate's
+        # working version. The equal-version case is the working tree
+        # against what crates.io actually holds under that number -- not
+        # the tree against itself -- and is where an unreleased break sits
+        # until the version moves. Skipping it hid one (axiolid-measure,
+        # found only when its patch bump was prepared).
+        prior = [v for v in versions if parse(v) <= parse(current)]
         if not prior:
             skipped.append(name)
             continue
@@ -171,13 +253,18 @@ def main() -> int:
 
     # Crates can sit on different baselines, so group by baseline and run
     # one pass per group rather than assuming a single shared version.
+    exceptions = load_exceptions()
     failed = False
     collected = []
     for baseline, group in sorted(baselines.items()):
         code, output = run_semver_checks(group, baseline)
-        collected.append(output)
         if code != 0:
-            failed = True
+            unexcused, excused = judge(output, exceptions)
+            for line in excused:
+                print(f"semver: accepted exception: {line}")
+            if unexcused:
+                collected.append(output)
+                failed = True
     if failed:
         print("\n".join(collected))
         print("")
