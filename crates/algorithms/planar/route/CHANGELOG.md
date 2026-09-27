@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `forced_walk` (#196): the shortest walk from an origin to a target that
+  enters a polygon, `min over p of d_origin(p) + d_targets(p)`, bracketed
+  to a tolerance from two distance maps over the same free space. Branch
+  and bound as for `farthest_point`, with a second lower bound from the
+  maps' own vertices (`D(u) + D'(v) + max(|u - v|, dist(T, u) + dist(T,
+  v))` over the vertices a cell may see), which is exact on every cell the
+  walk runs straight through. `ForcedWalk::shortest` is the shortest walk
+  overall; a lower end above it proves no shortest walk enters the
+  polygon. A polygon no walk reaches is infinitely far, not an error.
+- `FarthestError::MismatchedMaps`, for two maps over different region or
+  barriers.
+
 ## [0.3.3] - 2026-09-27
 
 ### Added

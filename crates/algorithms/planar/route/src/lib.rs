@@ -43,12 +43,14 @@ use axiolid_guarantees::Certified;
 use axiolid_overlay::{Polygon, Ring};
 use axiolid_predicates::orient2d;
 
+mod forced;
 mod graph;
 mod map;
 mod skeleton;
 
 use graph::Graph;
 
+pub use forced::{forced_walk, forced_walk_within, ForcedWalk};
 pub use map::{
     distance_map, distance_map_within, farthest_point, farthest_point_within, DistanceMap,
     Farthest, FarthestError, LengthInterval, MapError, Reach, MAX_CELLS,

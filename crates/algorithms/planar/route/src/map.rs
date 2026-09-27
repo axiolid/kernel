@@ -93,7 +93,8 @@ pub struct DistanceMap {
     next: Vec<usize>,
     /// Which target, as an index into the targets given.
     target: Vec<usize>,
-    targets: usize,
+    /// The targets given.
+    sites: Vec<Point2>,
 }
 
 /// The nearest target from a point, and the route there.
@@ -200,7 +201,7 @@ pub fn distance_map_within(
         distance,
         next,
         target,
-        targets: targets.len(),
+        sites: targets.to_vec(),
     })
 }
 
@@ -214,7 +215,46 @@ impl DistanceMap {
     /// How many targets the map was built from.
     #[must_use]
     pub fn targets(&self) -> usize {
-        self.targets
+        self.sites.len()
+    }
+
+    /// The graph's vertices.
+    pub(crate) fn nodes(&self) -> &[Point2] {
+        &self.nodes
+    }
+
+    /// Each graph vertex's distance to the nearest target, over all its
+    /// sectors; infinite when no target is reached.
+    pub(crate) fn vertex_distances(&self) -> Vec<f64> {
+        (0..self.nodes.len())
+            .map(|i| {
+                self.graph
+                    .states(i)
+                    .map(|s| self.distance[s])
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .collect()
+    }
+
+    /// The free-space region.
+    pub(crate) fn region(&self) -> &[Polygon] {
+        &self.region
+    }
+
+    /// Region boundary and barrier edges.
+    pub(crate) fn obstacles(&self) -> &[(Point2, Point2)] {
+        &self.obstacles
+    }
+
+    /// The targets the map was built from.
+    pub(crate) fn sites(&self) -> &[Point2] {
+        &self.sites
+    }
+
+    /// Whether two maps cover the same free space: the same region and the
+    /// same barriers.
+    pub(crate) fn same_space(&self, other: &Self) -> bool {
+        self.region == other.region && self.walls == other.walls
     }
 
     /// The nearest target from `point` and the route there.
@@ -308,13 +348,13 @@ impl DistanceMap {
     }
 
     /// Distance to the nearest target, for a point inside the region.
-    fn at(&self, point: Point2) -> Result<Option<f64>, RouteError> {
+    pub(crate) fn at(&self, point: Point2) -> Result<Option<f64>, RouteError> {
         Ok(self.via(point)?.map(|(length, _)| length))
     }
 
     /// The largest length of a path in the graph, in edges: bounds how many
     /// roundings a distance carries.
-    fn hops(&self) -> usize {
+    pub(crate) fn hops(&self) -> usize {
         let mut most = 0;
         for start in 0..self.next.len() {
             let mut state = start;
@@ -380,6 +420,9 @@ pub enum FarthestError {
     },
     /// The subregion does not meet the free space.
     Empty,
+    /// Two distance maps cover different free space: their regions or
+    /// barriers differ.
+    MismatchedMaps,
 }
 
 impl From<RouteError> for FarthestError {
@@ -557,31 +600,12 @@ struct Search<'a> {
 }
 
 impl Search<'_> {
-    /// Whether a triangle misses the subregion, decided exactly: no edge
-    /// of the subregion meets it, and a corner lies outside.
     fn outside(&self, t: &[Point2; 3]) -> Result<bool, RouteError> {
-        for ring in core::iter::once(&self.subregion.outer).chain(self.subregion.holes.iter()) {
-            for (p, q) in ring_edges(ring) {
-                if meets_triangle(p, q, t)? {
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(!in_polygon(self.subregion, t[0])?)
+        outside(self.subregion, t)
     }
 
-    /// Whether `a` may anchor a cell of `root`: inside it, and not on a
-    /// barrier.
     fn admissible(&self, root: usize, a: Point2) -> Result<bool, RouteError> {
-        if !in_triangle(&self.roots[root], a)? {
-            return Ok(false);
-        }
-        for &(p, q) in &self.map.walls {
-            if side(p, q, a)? == Sign::Zero && within(p, q, a) {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        admissible(self.map, &self.roots[root], a)
     }
 
     fn distance(&mut self, p: Point2) -> Result<Option<f64>, RouteError> {
@@ -647,10 +671,41 @@ impl Search<'_> {
     }
 }
 
+/// Whether a triangle misses `subregion`, decided exactly: no edge of the
+/// subregion meets it, and a corner lies outside.
+pub(crate) fn outside(subregion: &Polygon, t: &[Point2; 3]) -> Result<bool, RouteError> {
+    for ring in core::iter::once(&subregion.outer).chain(subregion.holes.iter()) {
+        for (p, q) in ring_edges(ring) {
+            if meets_triangle(p, q, t)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(!in_polygon(subregion, t[0])?)
+}
+
+/// Whether `a` may anchor a cell of the free-space triangle `root`: inside
+/// it, and not on a barrier of `map`.
+pub(crate) fn admissible(
+    map: &DistanceMap,
+    root: &[Point2; 3],
+    a: Point2,
+) -> Result<bool, RouteError> {
+    if !in_triangle(root, a)? {
+        return Ok(false);
+    }
+    for &(p, q) in &map.walls {
+        if side(p, q, a)? == Sign::Zero && within(p, q, a) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// The triangles of the free space: a constrained triangulation of every
 /// wall and barrier, each segment first cut at the vertices lying on it,
 /// keeping the triangles inside the region.
-fn free_triangles(map: &DistanceMap) -> Result<Vec<[Point2; 3]>, FarthestError> {
+pub(crate) fn free_triangles(map: &DistanceMap) -> Result<Vec<[Point2; 3]>, FarthestError> {
     let mut points: Vec<Point2> = map.obstacles.iter().flat_map(|(p, q)| [*p, *q]).collect();
     dedup_points(&mut points);
     let mut pieces: Vec<(Point2, Point2)> = Vec::new();
@@ -713,7 +768,7 @@ fn in_triangle(t: &[Point2; 3], p: Point2) -> Result<bool, RouteError> {
 }
 
 /// Whether the closed segment `pq` meets the closed triangle, exactly.
-fn meets_triangle(p: Point2, q: Point2, t: &[Point2; 3]) -> Result<bool, RouteError> {
+pub(crate) fn meets_triangle(p: Point2, q: Point2, t: &[Point2; 3]) -> Result<bool, RouteError> {
     if in_triangle(t, p)? || in_triangle(t, q)? {
         return Ok(true);
     }
