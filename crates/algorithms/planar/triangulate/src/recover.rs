@@ -104,38 +104,78 @@ fn restore_delaunay(tri: &mut Triangulation) {
 
 /// Recover a single missing constraint by flipping the edges it crosses.
 ///
-/// Bounded by the number of halfedges: each flip strictly reduces the number
-/// of edges crossing the constraint, so the loop terminates. The bound is a
-/// guard against a corrupted adjacency turning that into an infinite loop,
-/// not an expected exit.
+/// Anglada's queue: the crossing edges are taken in turn; one whose
+/// quadrilateral is not convex yet goes to the back, and so does a new
+/// diagonal that still crosses. Flipping whichever crossing edge came
+/// first in a fresh scan, as this did, could flip a diagonal straight back
+/// and cycle until the budget ran out (#190). There is always a flippable
+/// edge while one crosses, so a pass over the whole queue with no flip
+/// means another constraint blocks the way.
 fn recover_one(tri: &mut Triangulation, c: Constraint) -> Result<(), TriangulationError> {
+    use std::collections::VecDeque;
     let pa = tri.points[c.a as usize];
     let pb = tri.points[c.b as usize];
-    let budget = tri.triangles.len() * 4 + 16;
-
-    for _ in 0..budget {
-        if tri.has_edge(c.a, c.b) {
-            return Ok(());
-        }
-        let Some((t, i)) = find_crossing(tri, pa, pb, c) else {
-            // No crossing edge remains but the constraint is still absent:
-            // another constraint occupies the corridor.
-            return Err(TriangulationError::CrossingConstraints { a: c.a, b: c.b });
+    let blocked = || TriangulationError::CrossingConstraints { a: c.a, b: c.b };
+    let mut queue: VecDeque<(u32, u32)> = find_crossing(tri, pa, pb, c)
+        .into_iter()
+        .map(|(t, i)| (tri.triangles[3 * t + i], tri.triangles[3 * t + (i + 1) % 3]))
+        .collect();
+    if queue.is_empty() && !tri.has_edge(c.a, c.b) {
+        return Err(blocked());
+    }
+    let mut idle = 0usize;
+    let mut budget = tri.triangles.len() * tri.triangles.len() + 64;
+    while let Some((u, v)) = queue.pop_front() {
+        budget = budget.checked_sub(1).ok_or_else(blocked)?;
+        let Some((t, i)) = halfedge(tri, u, v) else {
+            continue;
         };
         if !flip(tri, t, i) {
-            return Err(TriangulationError::CrossingConstraints { a: c.a, b: c.b });
+            queue.push_back((u, v));
+            idle += 1;
+            if idle > queue.len() {
+                return Err(blocked());
+            }
+            continue;
+        }
+        idle = 0;
+        // The new diagonal runs apex -> other: slot 0 -> 1 of triangle `t`.
+        let (x, y) = (tri.triangles[3 * t], tri.triangles[3 * t + 1]);
+        let shares = x == c.a || x == c.b || y == c.a || y == c.b;
+        if !shares
+            && segments_properly_cross(pa, pb, tri.points[x as usize], tri.points[y as usize])
+        {
+            queue.push_back((x, y));
         }
     }
-    Err(TriangulationError::CrossingConstraints { a: c.a, b: c.b })
+    if tri.has_edge(c.a, c.b) {
+        Ok(())
+    } else {
+        Err(blocked())
+    }
 }
 
-/// Find a triangle edge that properly crosses the segment `pa`-`pb`.
+/// The triangle and slot of the edge between `u` and `v`, either way.
+fn halfedge(tri: &Triangulation, u: u32, v: u32) -> Option<(usize, usize)> {
+    for t in 0..tri.triangle_count() {
+        for i in 0..3 {
+            let (a, b) = (tri.triangles[3 * t + i], tri.triangles[3 * t + (i + 1) % 3]);
+            if (a == u && b == v) || (a == v && b == u) {
+                return Some((t, i));
+            }
+        }
+    }
+    None
+}
+
+/// Every triangle edge that properly crosses the segment `pa`-`pb`.
 fn find_crossing(
     tri: &Triangulation,
     pa: Point2,
     pb: Point2,
     c: Constraint,
-) -> Option<(usize, usize)> {
+) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
     for t in 0..tri.triangle_count() {
         for i in 0..3 {
             let u = tri.triangles[3 * t + i];
@@ -151,11 +191,11 @@ fn find_crossing(
             let pu = tri.points[u as usize];
             let pv = tri.points[v as usize];
             if segments_properly_cross(pa, pb, pu, pv) {
-                return Some((t, i));
+                out.push((t, i));
             }
         }
     }
-    None
+    out
 }
 
 /// Strict crossing test: shared endpoints and touching do not count.

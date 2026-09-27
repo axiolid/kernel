@@ -124,6 +124,51 @@ impl Builder {
             self.triangles[3 * t + 1],
             self.triangles[3 * t + 2],
         );
+        let p = self.points[v as usize];
+
+        // On an edge: split the edge, and the triangles either side of it,
+        // rather than the one triangle into three -- one of the three would
+        // have no area, and flips over a triangle with no area never settle.
+        for i in 0..3 {
+            let (u, w) = (
+                self.triangles[3 * t + i],
+                self.triangles[3 * t + (i + 1) % 3],
+            );
+            if decided(orient2d(
+                self.points[u as usize],
+                self.points[w as usize],
+                p,
+            )) != Sign::Zero
+            {
+                continue;
+            }
+            let twin = self.halfedges[3 * t + i];
+            if twin == NO_HALFEDGE {
+                return Err(TriangulationError::VertexUnplaceable { index: v });
+            }
+            let x = self.triangles[3 * t + (i + 2) % 3];
+            let ot = twin as usize / 3;
+            let oi = twin as usize % 3;
+            let y = self.triangles[3 * ot + (oi + 2) % 3];
+            // (u, w, x) and (w, u, y) become (u, v, x), (v, w, x),
+            // (w, v, y), (v, u, y).
+            let t1 = self.triangles.len() / 3;
+            let t2 = t1 + 1;
+            self.triangles[3 * t] = x;
+            self.triangles[3 * t + 1] = u;
+            self.triangles[3 * t + 2] = v;
+            self.triangles[3 * ot] = y;
+            self.triangles[3 * ot + 1] = w;
+            self.triangles[3 * ot + 2] = v;
+            self.triangles.extend_from_slice(&[w, x, v]);
+            self.triangles.extend_from_slice(&[u, y, v]);
+            self.halfedges.extend_from_slice(&[NO_HALFEDGE; 6]);
+            self.rebuild_adjacency();
+            for tri in [t, ot, t1, t2] {
+                self.legalize(3 * tri);
+            }
+            return Ok(());
+        }
 
         // Reuse slot `t` for the first sub-triangle and append the other two,
         // so existing neighbour indices into `t` stay valid where possible.
@@ -211,10 +256,20 @@ impl Builder {
         None
     }
 
-    /// Restore the Delaunay property across `edge` and propagate.
+    /// Restore the Delaunay property across `edge`, whose triangle's third
+    /// corner is the vertex just inserted, and propagate to the edges
+    /// across from it.
     fn legalize(&mut self, edge: usize) {
         let mut stack = vec![edge];
+        // Lawson's flips after one insertion are few; the bound only keeps
+        // a corrupted mesh from spinning. Anything left is repaired after
+        // constraint recovery.
+        let mut budget = 4 * self.triangles.len() + 64;
         while let Some(e) = stack.pop() {
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
             let twin = self.halfedges[e];
             if twin == NO_HALFEDGE {
                 continue;
@@ -238,8 +293,14 @@ impl Builder {
             ) {
                 continue;
             }
+            // Only a strictly convex quadrilateral flips without inverting.
+            let q = |k: u32| self.points[k as usize];
+            if !(turns_left(q(apex), q(p0), q(other)) && turns_left(q(other), q(p1), q(apex))) {
+                continue;
+            }
 
-            // Flip the shared edge to the other diagonal.
+            // Flip the shared edge to the other diagonal: (p0, other, apex)
+            // and (p1, apex, other).
             self.triangles[3 * t + (ti + 1) % 3] = other;
             self.triangles[3 * ot + (oi + 1) % 3] = apex;
 
@@ -247,8 +308,12 @@ impl Builder {
             // re-point twins by hand.
             self.rebuild_adjacency();
 
-            stack.push(3 * t + (ti + 1) % 3);
-            stack.push(3 * ot + (oi + 1) % 3);
+            // The two edges now across from the inserted vertex: p0 -> other
+            // and other -> p1. (Pushing the new diagonal instead, as this
+            // did, checked an edge that is Delaunay by construction and left
+            // these unchecked; thin quads then flipped back and forth.)
+            stack.push(3 * t + ti);
+            stack.push(3 * ot + (oi + 2) % 3);
         }
     }
 

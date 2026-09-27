@@ -266,3 +266,23 @@ fn the_wall_ahead_is_the_nearest_one() {
         }]
     );
 }
+
+#[test]
+fn real_room_outlines_do_not_break_the_triangulation() {
+    // #190: an eroded room outline, and a square turned 45 degrees.
+    for outline in [
+        vec![
+            (0.45, 0.45),
+            (2.55, 0.45),
+            (2.55, 3.3),
+            (2.62, 3.55),
+            (0.45, 3.55),
+        ],
+        vec![(0.0, 0.0), (2.0, -2.0), (4.0, 0.0), (2.0, 2.0)],
+    ] {
+        let region = polygon(&outline, &[]);
+        let s = skeleton(&region, 0.1, PRUNE).unwrap();
+        check(&region, &s);
+        assert!(!s.nodes.is_empty());
+    }
+}

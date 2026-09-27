@@ -347,7 +347,11 @@ fn assert_constrained_delaunay(tri: &axiolid_triangulate::Triangulation) {
                     ..
                 }
             );
-            assert!(!inside, "edge {u}-{v} is not locally Delaunay");
+            assert!(
+                !inside,
+                "edge {u}-{v} is not locally Delaunay: {:?} {:?} apex {:?} other {:?}",
+                pts[u as usize], pts[v as usize], pts[apex as usize], pts[other as usize]
+            );
         }
     }
 }
@@ -387,4 +391,119 @@ fn recovered_constraints_leave_the_rest_delaunay() {
     let tri = triangulate(&points, &constraints).unwrap();
     assert_all_ccw(&tri);
     assert_constrained_delaunay(&tri);
+}
+
+/// A closed outline sampled `per_unit` points to a unit length, with its
+/// pieces as constraints.
+fn sampled(corners: &[(f64, f64)], spacing: f64) -> (Vec<Point2>, Vec<Constraint>) {
+    let mut points = Vec::new();
+    for k in 0..corners.len() {
+        let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+        let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+        let n = (len / spacing).ceil().max(1.0) as usize;
+        for j in 0..n {
+            let t = j as f64 / n as f64;
+            points.push(p(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+        }
+    }
+    let n = points.len() as u32;
+    let constraints = (0..n).map(|i| Constraint::new(i, (i + 1) % n)).collect();
+    (points, constraints)
+}
+
+#[test]
+fn an_eroded_room_outline_triangulates() {
+    // #190: recovery gave up at the first crossing edge it could not flip.
+    let (points, constraints) = sampled(
+        &[
+            (0.45, 0.45),
+            (2.55, 0.45),
+            (2.55, 3.3),
+            (2.62, 3.55),
+            (0.45, 3.55),
+        ],
+        0.1,
+    );
+    let tri = triangulate(&points, &constraints).unwrap();
+    assert_all_ccw(&tri);
+    assert_constrained_delaunay(&tri);
+}
+
+#[test]
+fn a_square_turned_forty_five_degrees_terminates() {
+    // #190: legalisation checked the new diagonal instead of the edges
+    // across from the inserted point, and thin quads flipped for ever.
+    let (points, constraints) = sampled(&[(0.0, 0.0), (2.0, -2.0), (4.0, 0.0), (2.0, 2.0)], 0.1);
+    let tri = triangulate(&points, &constraints).unwrap();
+    assert_all_ccw(&tri);
+    assert_constrained_delaunay(&tri);
+}
+
+#[test]
+fn random_turned_and_notched_outlines_triangulate() {
+    let mut s = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        (s >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for _ in 0..60 {
+        // A rectangle with a notched corner, turned and shifted.
+        let (w, h) = (1.0 + 3.0 * next(), 1.0 + 3.0 * next());
+        let (nx, ny) = (0.05 + 0.4 * next() * w, 0.05 + 0.4 * next() * h);
+        let local = [(0.0, 0.0), (w, 0.0), (w, h - ny), (w - nx, h), (0.0, h)];
+        let (a, ox, oy) = (next() * std::f64::consts::TAU, 10.0 * next(), 10.0 * next());
+        let (c, sn) = (a.cos(), a.sin());
+        let corners: Vec<(f64, f64)> = local
+            .iter()
+            .map(|&(x, y)| (ox + c * x - sn * y, oy + sn * x + c * y))
+            .collect();
+        let (points, constraints) = sampled(&corners, 0.1);
+        let tri = triangulate(&points, &constraints).unwrap();
+        assert_all_ccw(&tri);
+        assert_constrained_delaunay(&tri);
+    }
+}
+
+#[test]
+fn long_constraints_through_a_point_cloud_are_recovered_and_the_rest_restored() {
+    // Constraints cutting across many Delaunay edges: recovery has to flip
+    // its way through, some edges only once others have moved, and leaves
+    // triangles that must be flipped back to Delaunay afterwards.
+    let mut s = 0x5555_aaaa_1234_9876u64;
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        (s >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for round in 0..20 {
+        let mut points = vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)];
+        for _ in 0..150 {
+            points.push(p(0.2 + 9.6 * next(), 0.2 + 9.6 * next()));
+        }
+        // Three parallel chords across the square, each between two added
+        // endpoints on the left and right sides.
+        let mut constraints = Vec::new();
+        for k in 0..3 {
+            let y0 = 1.0 + 3.0 * k as f64 + next();
+            let y1 = 1.0 + 3.0 * k as f64 + next();
+            let a = points.len() as u32;
+            points.push(p(0.0, y0));
+            points.push(p(10.0, y1));
+            constraints.push(Constraint::new(a, a + 1));
+        }
+        let tri =
+            triangulate(&points, &constraints).unwrap_or_else(|e| panic!("round {round}: {e:?}"));
+        assert_all_ccw(&tri);
+        assert_constrained_delaunay(&tri);
+        for c in &constraints {
+            let has = tri
+                .triangles()
+                .chunks_exact(3)
+                .any(|t| t.contains(&c.a) && t.contains(&c.b));
+            assert!(has, "round {round}: constraint {c:?} missing");
+        }
+    }
 }

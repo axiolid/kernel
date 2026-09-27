@@ -18,3 +18,14 @@ caret rule for `0.x` versions.
   long triangles whose circumcircles held points no constraint hid, so the
   result was not constrained Delaunay as documented -- with finely sampled
   walls, triangles spanned whole rooms (#139).
+- `triangulate` no longer loops for ever on outlines like a square turned
+  45 degrees (#190): legalisation after inserting a point checked the new
+  diagonal instead of the two edges across from the point, so the real
+  edges were never checked and thin quadrilaterals flipped back and forth.
+  It now checks those edges, flips only strictly convex quadrilaterals,
+  splits the edge (and both triangles beside it) when a point lands on
+  one, and carries a flip bound.
+- Constraint recovery no longer gives up at the first crossing edge it
+  cannot flip (#190): it follows Anglada's queue, retrying edges that
+  cannot flip yet and requeuing new diagonals that still cross, and
+  reports `CrossingConstraints` only when a full pass flips nothing.
