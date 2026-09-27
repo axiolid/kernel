@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-mesh-boolean-boolmesh"
 description = "boolmesh-backed MeshBoolean provider"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -34,6 +34,10 @@ parallel = ["dep:rayon"]
 # docs/architecture/threading.md). This axis is untested by that table:
 # it parallelises ACROSS independent booleans, not within one.
 parallel-batch = ["dep:rayon"]
+
+[[test]]
+name = "scratch_bound"
+harness = false
 
 [[bench]]
 name = "subtract_many"

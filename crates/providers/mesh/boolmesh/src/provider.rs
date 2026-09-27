@@ -166,26 +166,30 @@ impl MeshBoolean for BoolmeshBoolean {
     ///
     /// `boolmesh` builds a Morton collider and intersection tables sized by the
     /// combined input. It exposes no bound, so this was measured directly with
-    /// a counting global allocator (`src/bin/scratch_probe.rs`) across all four
-    /// operations at 24 to 1,536 input triangles:
+    /// a counting global allocator (`src/bin/scratch_probe/`) across all four
+    /// operations at 24 to 1,536 input triangles, after one discarded warmup
+    /// call so the first operation measured is not charged for process
+    /// startup (#110):
     ///
     /// ```text
     ///  triangles   peak bytes   bytes/triangle   worst operation
-    ///         24        63852             2660   SymmetricDifference
-    ///         96       125580             1308   SymmetricDifference
-    ///        384       438844             1142   SymmetricDifference
-    ///       1536      1756060             1143   SymmetricDifference
+    ///         24        52424             2184   SymmetricDifference
+    ///         96        98920             1030   SymmetricDifference
+    ///        384       343768              895   SymmetricDifference
+    ///       1536      1349668              878   SymmetricDifference
     /// ```
     ///
-    /// Consumption is linear in input size, converging to roughly 1.1 KiB per
+    /// Consumption is linear in input size, converging to under 1 KiB per
     /// triangle; the higher ratio at small inputs is fixed setup cost being
     /// divided by few triangles. `SymmetricDifference` is worst because it is
     /// composed from three passes and holds intermediates alive.
     ///
-    /// The declared bound is 4 KiB per triangle: above the worst observed
-    /// ratio with roughly 1.5x headroom for allocator variance and future
-    /// operand shapes. A declared bound that is occasionally too low is worse
-    /// than `Unbounded`, because it makes a budget look enforced when it is not.
+    /// The declared bound is 4 KiB per triangle: about 1.9x the worst
+    /// observed ratio, as headroom for allocator variance and future operand
+    /// shapes. `tests/scratch_bound.rs` measures the same workloads and fails
+    /// if any peak exceeds it. A declared bound that is occasionally too low
+    /// is worse than `Unbounded`, because it makes a budget look enforced
+    /// when it is not.
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::PerElement {
             bytes_per_element: 4096,

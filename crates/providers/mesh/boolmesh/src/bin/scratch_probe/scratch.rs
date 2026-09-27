@@ -2,10 +2,12 @@
 //!
 //! ADR 0017 section 4 says `ScratchRequirement::Unbounded` is a declared
 //! deficiency, not a resting state. Replacing it requires a *measured* bound,
-//! not a guessed one, so this bench wraps the global allocator with a counter
-//! and reports peak bytes per input triangle across representative workloads.
+//! not a guessed one, so this wraps the global allocator with a counter and
+//! measures peak bytes per input triangle across representative workloads.
 //!
-//! Run with:
+//! Shared by the `scratch_probe` binary, which prints the table, and the
+//! `scratch_bound` test, which fails when the provider's declared bound is
+//! below a measured peak (#110). Run the table with:
 //! ```text
 //! cargo run --release -p axiolid-mesh-boolean-boolmesh --bin scratch_probe --all-features
 //! ```
@@ -93,35 +95,51 @@ fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
     current
 }
 
-fn main() {
+/// One measured boolean.
+pub struct Sample {
+    pub elements: usize,
+    pub peak: usize,
+    pub operation: BooleanOperator,
+}
+
+/// Peak scratch of every operation on two overlapping boxes, subdivided to
+/// 24, 96, 384 and 1,536 input triangles.
+///
+/// One discarded boolean runs first: the first call in a process pays for
+/// allocator arena growth, lazy statics and first-touch pages, and used to
+/// charge them all to whichever operation happened to be measured first
+/// (#110). Peaks are measured above the bytes already live when the call
+/// starts, so nothing allocated before it is counted.
+pub fn measure() -> Vec<Sample> {
     let provider = BoolmeshBoolean::new();
     let options = ExecutionOptions::new(Tolerance::METRE);
-
-    println!(
-        "{:>10}  {:>14}  {:>18}",
-        "triangles", "peak bytes", "bytes/triangle"
+    let warmup = box_at([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let _ = provider.boolean(
+        &warmup,
+        &box_at([0.5, 0.5, 0.5], [1.5, 1.5, 1.5]),
+        BooleanOperator::Union,
+        &options,
     );
-    let mut worst_per_triangle = 0usize;
 
+    let mut samples = Vec::new();
     for levels in 0..=3 {
         let subject = subdivide(&box_at([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]), levels);
         let tool = subdivide(&box_at([0.5, 0.5, 0.5], [1.5, 1.5, 1.5]), levels);
         let elements = subject.triangle_count() + tool.triangle_count();
 
         for operation in BooleanOperator::ALL {
-            LIVE.store(0, Ordering::Relaxed);
-            PEAK.store(0, Ordering::Relaxed);
+            let baseline = LIVE.load(Ordering::Relaxed);
+            PEAK.store(baseline, Ordering::Relaxed);
             let outcome = provider.boolean(&subject, &tool, operation, &options);
-            let peak = PEAK.load(Ordering::Relaxed);
+            let peak = PEAK.load(Ordering::Relaxed) - baseline;
             assert!(outcome.is_ok(), "{operation:?} failed at level {levels}");
-
-            let per_triangle = peak / elements.max(1);
-            worst_per_triangle = worst_per_triangle.max(per_triangle);
-            println!("{elements:>10}  {peak:>14}  {per_triangle:>18}  {operation:?}");
+            drop(outcome);
+            samples.push(Sample {
+                elements,
+                peak,
+                operation,
+            });
         }
     }
-
-    println!();
-    println!("worst observed bytes/triangle: {worst_per_triangle}");
-    println!("Declare PerElement with headroom above this, never below.");
+    samples
 }

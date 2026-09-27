@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-27
+
+### Fixed
+
+- The scratch probe discards one warmup boolean before measuring, and
+  measures peaks above the bytes already live, so the first operation is
+  no longer charged for process startup (#110). A `scratch_bound` test
+  fails if any measured peak exceeds the declared 4 KiB per triangle.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

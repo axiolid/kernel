@@ -527,6 +527,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-boolmesh
 
+### 0.3.1 - 2026-09-27
+
+### Fixed
+
+- The scratch probe discards one warmup boolean before measuring, and
+  measures peaks above the bytes already live, so the first operation is
+  no longer charged for process startup (#110). A `scratch_bound` test
+  fails if any measured peak exceeds the declared 4 KiB per triangle.
+
 ### 0.3.0 - 2026-09-23
 
 ### Added
@@ -700,6 +709,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.2 - 2026-09-27
+
+### Fixed
+
+- A `SolidOperation::BoundedHalfSpace` boundary must be a 2D curve (#162).
+  The graph accepted a 3D curve, which the compiler refuses, so such a
+  graph validated and then could never compile; it is now refused when the
+  graph is built.
 
 ### 0.3.1 - 2026-09-27
 

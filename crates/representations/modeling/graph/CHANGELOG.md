@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-27
+
+### Fixed
+
+- A `SolidOperation::BoundedHalfSpace` boundary must be a 2D curve (#162).
+  The graph accepted a 3D curve, which the compiler refuses, so such a
+  graph validated and then could never compile; it is now refused when the
+  graph is built.
+
 ## [0.3.1] - 2026-09-27
 
 ### Added

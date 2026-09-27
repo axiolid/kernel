@@ -163,8 +163,20 @@ fn validate_declared_module(
     let parent = file
         .parent()
         .ok_or_else(|| format!("{} has no parent", file.display()))?;
+    let in_bin_directory = parent
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        == Some("bin");
+    if in_bin_directory && stem == "main" {
+        return Ok(());
+    }
     let candidate = if parent == src {
         src.join("lib.rs")
+    } else if in_bin_directory {
+        // A multi-file binary, `src/bin/<name>/main.rs`, declares its
+        // sibling modules from `main.rs`.
+        parent.join("main.rs")
     } else {
         parent.with_extension("rs")
     };

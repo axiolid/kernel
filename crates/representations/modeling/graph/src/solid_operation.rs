@@ -93,6 +93,8 @@ pub enum SolidOperation {
     /// Unbounded half-space clipped by a finite boundary geometry.
     BoundedHalfSpace {
         half_space: NodeId,
+        /// A closed 2D curve in `placement`'s XY plane. A 3D curve is
+        /// refused when the graph is built.
         boundary: NodeId,
         /// The boundary's own frame, independent of the clip plane.
         ///

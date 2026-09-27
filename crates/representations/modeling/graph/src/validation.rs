@@ -637,7 +637,10 @@ fn validate_solid_operation(
             ..
         } => {
             expect_reference(nodes, *half_space, ExpectedReference::HalfSpace)?;
-            expect_reference(nodes, *boundary, ExpectedReference::Curve)
+            // The boundary is authored in the placement frame's XY plane, so
+            // it is a 2D curve; a 3D one validated here and then could never
+            // compile (#162).
+            expect_reference(nodes, *boundary, ExpectedReference::Curve2)
         }
     }
 }

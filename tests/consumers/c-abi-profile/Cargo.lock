@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-boolean-boolmesh"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-model"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
