@@ -2,6 +2,7 @@
 
 //! Scalar reference `MeshCompiler`.
 
+mod bounded;
 mod brep;
 mod channels;
 mod directrix;

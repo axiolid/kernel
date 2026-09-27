@@ -11,6 +11,20 @@ caret rule for `0.x` versions.
 
 ## [0.3.4] - 2026-09-27
 
+### Added
+
+- Curve-bounded planes (#192), as IFC `IfcCurveBoundedPlane` space-boundary
+  connection surfaces carry them: a `SurfaceRelation::CurveBounded` over a
+  planar basis compiles to a triangulated planar region with
+  `MeshClosure::Surface`. Boundaries are read in the plane's parameters and
+  mapped through its frame; the first is the outer loop, the rest holes.
+  Straight boundaries (2D or 3D polylines, 3D ones on the parameter plane)
+  are exact, curved ones chorded within the chord budget; the mesh faces
+  along the plane's normal whatever the loop's winding. Crossing or
+  degenerate loops, holes outside the outer loop and open boundaries are
+  refused; a non-planar basis and `implicit_outer` get `UnsupportedInput`
+  naming the capability.
+
 ### Changed
 
 - Every solid of a B-rep is tessellated, not only the first (#111): a

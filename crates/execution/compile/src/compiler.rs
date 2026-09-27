@@ -459,6 +459,23 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 crate::brep::tessellate(brep, graph, options.tolerance(), chord_error(options))
                     .map(|(mesh, closure)| Built::with_closure(mesh, closure))
             }
+            // A plane trimmed by boundary curves: a surface (#192).
+            GeometryNode::SurfaceRelation(axiolid_model::SurfaceRelation::CurveBounded {
+                basis,
+                boundaries,
+                implicit_outer,
+            }) => crate::bounded::curve_bounded(
+                self.descriptor().id,
+                graph,
+                *basis,
+                boundaries,
+                *implicit_outer,
+                chord_error(options),
+                options.tolerance(),
+            )
+            .map(|mesh| {
+                Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
+            }),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
