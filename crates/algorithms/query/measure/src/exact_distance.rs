@@ -223,7 +223,7 @@ impl<'a> Side<'a> {
             let surface = surface_of(brep, face.surface)?;
             let (lo, hi) = match &side.domains[index] {
                 Some(domain) => (domain.min, domain.max),
-                None => natural_range(surface).ok_or(ExactMeasureError::ParameterDomain(
+                None => natural_range(surface).ok_or(ExactMeasureError::NonPlanarFace(
                     "an unbounded face trimmed by a pcurve family the distance query cannot bound",
                 ))?,
             };
@@ -363,7 +363,7 @@ fn surface_of(
 }
 
 fn point_on(surface: &Surface, at: Point2) -> Result<Point3, ExactMeasureError> {
-    evaluate(surface, at.x, at.y).map_err(|_| ExactMeasureError::Evaluation)
+    evaluate(surface, at.x, at.y).map_err(|_| crate::exact::EVALUATION)
 }
 
 /// The whole parameter range of a closed surface, for a face whose trim
@@ -427,7 +427,7 @@ fn lipschitz(
     if bounds.0.is_finite() && bounds.1.is_finite() {
         Ok(bounds)
     } else {
-        Err(ExactMeasureError::Evaluation)
+        Err(crate::exact::EVALUATION)
     }
 }
 
@@ -504,7 +504,7 @@ fn edge_element(
         }
         _ => return Ok(None),
     };
-    let centre = evaluate3(curve, 0.5 * (t0 + t1)).map_err(|_| ExactMeasureError::Evaluation)?;
+    let centre = evaluate3(curve, 0.5 * (t0 + t1)).map_err(|_| crate::exact::EVALUATION)?;
     let radius = pad(centre, 0.5 * (t1 - t0).abs() * speed);
     Ok(Some(Element {
         normal: None,
@@ -886,7 +886,7 @@ fn search(
     if let Some(Reverse((Key(bound), _, _))) = heap.peek() {
         lower = lower.min(*bound);
     }
-    let (upper, point_a, point_b) = best.ok_or(ExactMeasureError::NotConverged)?;
+    let (upper, point_a, point_b) = best.ok_or(crate::exact::NOT_CONVERGED)?;
     Ok(DistanceBounds {
         lower: lower.min(upper),
         upper,

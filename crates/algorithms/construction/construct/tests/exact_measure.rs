@@ -108,7 +108,8 @@ fn a_curved_face_is_integrated_not_refused() {
 /// approximate path.
 #[test]
 fn a_refusal_names_the_approximate_path() {
-    let text = ExactMeasureError::NotConverged.to_string();
+    let text =
+        ExactMeasureError::NonPlanarFace("a curved face short of its error bound").to_string();
     assert!(
         text.contains("MeshMeasure"),
         "refusal should point at the approximate path, got: {text}"

@@ -42,11 +42,17 @@ pub(crate) const COMPONENTS: usize = 8;
 pub(crate) type Sums = [Scalar; COMPONENTS];
 
 /// Why an exact B-rep could not be measured.
-#[non_exhaustive]
+///
+/// Kept exactly as published (exhaustive, four variants): a face this
+/// module cannot integrate -- a surface family it has no integral for, a
+/// face whose pcurves bound no domain, a surface it cannot evaluate there,
+/// an integral short of its error bound -- is `NonPlanarFace`, whose name
+/// predates curved faces, with the reason. Richer variants wait for a
+/// coordinated breaking release.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExactMeasureError {
-    /// A face's support surface belongs to a family this module cannot
-    /// integrate.
+    /// A face cannot be integrated; the reason says why (originally only
+    /// "its support surface is not planar", hence the name).
     NonPlanarFace(&'static str),
     /// A face has no support surface attached.
     MissingSurface,
@@ -54,20 +60,23 @@ pub enum ExactMeasureError {
     DanglingReference,
     /// The boundary enclosed no volume.
     Degenerate,
-    /// A face's pcurves do not bound a domain in its surface parameters.
-    ParameterDomain(&'static str),
-    /// A surface or pcurve could not be evaluated where the face needs it.
-    Evaluation,
-    /// A face integral did not reach its error bound.
-    NotConverged,
 }
+
+/// A surface or pcurve could not be evaluated where the face needs it.
+pub(crate) const EVALUATION: ExactMeasureError =
+    ExactMeasureError::NonPlanarFace("surface or pcurve not evaluable on the face");
+
+/// A face integral did not reach its error bound.
+pub(crate) const NOT_CONVERGED: ExactMeasureError = ExactMeasureError::NonPlanarFace(
+    "curved face integral short of its error bound; tessellate and use MeshMeasure",
+);
 
 impl fmt::Display for ExactMeasureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NonPlanarFace(kind) => write!(
+            Self::NonPlanarFace(why) => write!(
                 f,
-                "exact measurement cannot integrate a {kind} face. \
+                "exact measurement cannot integrate a face ({why}). \
                  Tessellate and use MeshMeasure for an approximate answer."
             ),
             Self::MissingSurface => f.write_str("a face has no support surface"),
@@ -75,12 +84,6 @@ impl fmt::Display for ExactMeasureError {
                 f.write_str("a boundary element references missing geometry")
             }
             Self::Degenerate => f.write_str("the boundary encloses no volume"),
-            Self::ParameterDomain(why) => write!(f, "a face cannot be integrated: {why}"),
-            Self::Evaluation => f.write_str("a surface or pcurve could not be evaluated on a face"),
-            Self::NotConverged => f.write_str(
-                "a curved face integral did not reach its error bound; \
-                 tessellate and use MeshMeasure for an approximate answer",
-            ),
         }
     }
 }

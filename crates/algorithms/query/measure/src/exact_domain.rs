@@ -130,8 +130,8 @@ impl Piece<'_> {
     pub(crate) fn at(&self, t: Scalar) -> Result<(Point2, Vec2), ExactMeasureError> {
         match self {
             Self::Curve { curve, offset, .. } => {
-                let point = evaluate2(curve, t).map_err(|_| ExactMeasureError::Evaluation)?;
-                let tangent = derivative2(curve, t).map_err(|_| ExactMeasureError::Evaluation)?;
+                let point = evaluate2(curve, t).map_err(|_| crate::exact::EVALUATION)?;
+                let tangent = derivative2(curve, t).map_err(|_| crate::exact::EVALUATION)?;
                 Ok((point + *offset, tangent))
             }
             Self::Segment { from, to } => Ok((*from + (*to - *from) * t, *to - *from)),
@@ -165,7 +165,7 @@ pub(crate) fn pole_on_domain_side(
         1 => true,
         -1 => false,
         _ => {
-            return Err(ExactMeasureError::ParameterDomain(
+            return Err(ExactMeasureError::NonPlanarFace(
                 "face boundary winds around the surface more than once",
             ))
         }
@@ -180,7 +180,7 @@ pub(crate) fn pole_on_domain_side(
                 .abs()
                 .total_cmp(&(b - boundary.anchor.y).abs())
         })
-        .ok_or(ExactMeasureError::ParameterDomain(
+        .ok_or(ExactMeasureError::NonPlanarFace(
             "face boundary winds around a surface with no pole on the domain side",
         ))
 }
@@ -234,12 +234,12 @@ pub(crate) fn assemble<'a>(
         };
 
         let loop_start =
-            evaluate2(first_curve, first_start).map_err(|_| ExactMeasureError::Evaluation)?;
+            evaluate2(first_curve, first_start).map_err(|_| crate::exact::EVALUATION)?;
         anchor.get_or_insert(loop_start);
         let mut offset = Vec2::ZERO;
         let mut cursor = loop_start;
         for (curve, start, end) in uses {
-            let raw = evaluate2(curve, start).map_err(|_| ExactMeasureError::Evaluation)?;
+            let raw = evaluate2(curve, start).map_err(|_| crate::exact::EVALUATION)?;
             let (shift, bridge) = join(surface, chart, cursor, raw + offset, linear)?;
             offset += shift;
             if let Some(segment) = bridge {
@@ -302,7 +302,7 @@ fn join<'a>(
     let there = point(surface, from)?;
     let here = point(surface, to)?;
     if (there - here).length() > linear {
-        return Err(ExactMeasureError::ParameterDomain(
+        return Err(ExactMeasureError::NonPlanarFace(
             "consecutive pcurves of a face loop do not meet on the surface",
         ));
     }
@@ -334,7 +334,7 @@ fn parameter_slack(value: Scalar) -> Scalar {
 }
 
 pub(crate) fn point(surface: &Surface, at: Point2) -> Result<Point3, ExactMeasureError> {
-    evaluate(surface, at.x, at.y).map_err(|_| ExactMeasureError::Evaluation)
+    evaluate(surface, at.x, at.y).map_err(|_| crate::exact::EVALUATION)
 }
 
 /// One stretch of a boundary piece over which both parameters are monotone.
@@ -494,7 +494,7 @@ impl<'a> Domain<'a> {
         let boundary = assemble(brep, face, surface, &chart, linear)?;
         let transpose = boundary.wraps[1];
         if transpose && (boundary.wraps[0] || boundary.winding[1] != 0) {
-            return Err(ExactMeasureError::ParameterDomain(
+            return Err(ExactMeasureError::NonPlanarFace(
                 "face boundary winds around the surface in both directions",
             ));
         }

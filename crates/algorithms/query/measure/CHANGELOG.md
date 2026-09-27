@@ -60,9 +60,12 @@ caret rule for `0.x` versions.
 
 ### Changed
 
-- **Breaking:** `ExactMeasureError` is `#[non_exhaustive]` and gains
-  `ParameterDomain`, `Evaluation` and `NotConverged`. `NonPlanarFace` now
-  means a surface family the module cannot integrate at all.
+- `ExactMeasureError` is unchanged in shape (exhaustive, four variants), so
+  this is a patch release. A face the module cannot integrate -- a surface
+  family it has no integral for, pcurves that bound no domain, a surface it
+  cannot evaluate there, an integral short of its error bound -- is
+  `NonPlanarFace`, whose name predates curved faces, with the reason. The
+  display text reads "cannot integrate a face (reason)".
 - The `exact` feature now also enables `axiolid-evaluate` and
   `axiolid-curve`.
 

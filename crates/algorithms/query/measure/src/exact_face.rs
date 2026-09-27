@@ -35,7 +35,7 @@
 //! Gauss-Kronrod (G7/K15) over the exact surface and the exact pcurves, and a
 //! piece is only accepted once its error estimate is below a relative bound
 //! near machine precision; otherwise the face is refused with
-//! [`ExactMeasureError::NotConverged`]. For a cylinder or cone the inner
+//! `NonPlanarFace` (not converged). For a cylinder or cone the inner
 //! integrand is a polynomial in `v` of degree at most four, which K15
 //! integrates exactly; the angular direction converges geometrically.
 //!
@@ -98,7 +98,7 @@ pub(crate) fn face_sums(
     if along_v {
         // Loops wind round the tube: integrate in `u` first, `oint G dv`.
         if boundary.wraps[0] || boundary.winding[1] != 0 {
-            return Err(ExactMeasureError::ParameterDomain(
+            return Err(ExactMeasureError::NonPlanarFace(
                 "face boundary winds around the surface in both directions",
             ));
         }
@@ -163,8 +163,8 @@ fn inner_along_u(
 /// Every component's density at `(u, v)`: `|N|`, then the cone fields
 /// dotted with `N = S_u x S_v`.
 fn density(surface: &Surface, u: Scalar, v: Scalar) -> Result<Sums, ExactMeasureError> {
-    let p = evaluate(surface, u, v).map_err(|_| ExactMeasureError::Evaluation)?;
-    let (su, sv) = partials(surface, u, v).map_err(|_| ExactMeasureError::Evaluation)?;
+    let p = evaluate(surface, u, v).map_err(|_| crate::exact::EVALUATION)?;
+    let (su, sv) = partials(surface, u, v).map_err(|_| crate::exact::EVALUATION)?;
     let n: Vec3 = su.cross(sv);
     let w = p.dot(n);
     Ok([
@@ -279,7 +279,7 @@ fn adaptive(
     while let Some((lo, hi)) = pending.pop() {
         pieces += 1;
         if pieces > MAX_PIECES {
-            return Err(ExactMeasureError::NotConverged);
+            return Err(crate::exact::NOT_CONVERGED);
         }
         let (value, error, scale) = kronrod(lo, hi, f)?;
         let accepted = (0..COMPONENTS).all(|c| error[c] <= (RELATIVE * scale[c]).max(floor[c]));
@@ -290,7 +290,7 @@ fn adaptive(
         } else {
             let mid = 0.5 * (lo + hi);
             if mid <= lo.min(hi) || mid >= lo.max(hi) {
-                return Err(ExactMeasureError::NotConverged);
+                return Err(crate::exact::NOT_CONVERGED);
             }
             pending.push((lo, mid));
             pending.push((mid, hi));
@@ -299,7 +299,7 @@ fn adaptive(
     if total.iter().all(|value| value.is_finite()) {
         Ok(total)
     } else {
-        Err(ExactMeasureError::NotConverged)
+        Err(crate::exact::NOT_CONVERGED)
     }
 }
 
@@ -868,7 +868,7 @@ mod tests {
         );
         let error = exact_properties(&solid, Tolerance::METRE).expect_err("unbounded");
         assert!(
-            matches!(error, ExactMeasureError::ParameterDomain(_)),
+            matches!(error, ExactMeasureError::NonPlanarFace(_)),
             "got {error:?}"
         );
     }
