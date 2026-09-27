@@ -15,8 +15,8 @@
 use axiolid_core::{Point2, Point3};
 use axiolid_guarantees::{Certified, Precision, Sign};
 
-use crate::arithmetic::{expansion_sign, expansion_sum, negate_expansion, scale_expansion};
-use crate::orient3::orient3d_cofactor;
+use crate::arithmetic::{expansion_product, expansion_sign, expansion_sum, negate_expansion};
+use crate::expansion::two_diff;
 
 /// Machine epsilon for binary64.
 const EPSILON: f64 = f64::EPSILON / 2.0;
@@ -76,32 +76,58 @@ pub fn incircle_filter(a: Point2, b: Point2, c: Point2, d: Point2) -> Certified 
 }
 
 /// Exact sign of the lifted `incircle` determinant.
+///
+/// Every coordinate difference is kept exactly, as a two-term expansion
+/// (`two_diff`), and every product and sum after it is an expansion. The
+/// differences used to be rounded first, which made this "exact" fallback
+/// wrong exactly where the filter hands over -- nearly cocircular points
+/// whose differences do not fit an `f64` -- and Delaunay flips driven by it
+/// could cycle for ever (#190).
 #[must_use]
 fn incircle_exact(a: Point2, b: Point2, c: Point2, d: Point2) -> Sign {
-    let (adx, ady) = (a.x - d.x, a.y - d.y);
-    let (bdx, bdy) = (b.x - d.x, b.y - d.y);
-    let (cdx, cdy) = (c.x - d.x, c.y - d.y);
+    let (adx, ady) = (diff(a.x, d.x), diff(a.y, d.y));
+    let (bdx, bdy) = (diff(b.x, d.x), diff(b.y, d.y));
+    let (cdx, cdy) = (diff(c.x, d.x), diff(c.y, d.y));
 
-    let bc = orient3d_cofactor(bdx, cdy, cdx, bdy);
-    let ca = orient3d_cofactor(cdx, ady, adx, cdy);
-    let ab = orient3d_cofactor(adx, bdy, bdx, ady);
+    let bc = minor(&bdx, &cdy, &cdx, &bdy);
+    let ca = minor(&cdx, &ady, &adx, &cdy);
+    let ab = minor(&adx, &bdy, &bdx, &ady);
 
-    // The lift is a sum of two squares, applied exactly by scaling twice
-    // rather than by rounding the lift into one f64 first.
     let total = expansion_sum(
-        &expansion_sum(&lift(&bc, adx, ady), &lift(&ca, bdx, bdy)),
-        &lift(&ab, cdx, cdy),
+        &expansion_sum(&lift(&bc, &adx, &ady), &lift(&ca, &bdx, &bdy)),
+        &lift(&ab, &cdx, &cdy),
     );
     expansion_sign(&total)
 }
 
+/// `p - q`, exactly, as an expansion.
+#[must_use]
+fn diff(p: f64, q: f64) -> Vec<f64> {
+    let (d, err) = two_diff(p, q);
+    let mut e = Vec::with_capacity(2);
+    if err != 0.0 {
+        e.push(err);
+    }
+    if d != 0.0 || e.is_empty() {
+        e.push(d);
+    }
+    e
+}
+
+/// `p q - r s` over expansions, exactly.
+#[must_use]
+fn minor(p: &[f64], q: &[f64], r: &[f64], s: &[f64]) -> Vec<f64> {
+    expansion_sum(
+        &expansion_product(p, q),
+        &negate_expansion(&expansion_product(r, s)),
+    )
+}
+
 /// Multiply an expansion by `x*x + y*y`, exactly.
 #[must_use]
-fn lift(e: &[f64], x: f64, y: f64) -> Vec<f64> {
-    expansion_sum(
-        &scale_expansion(&scale_expansion(e, x), x),
-        &scale_expansion(&scale_expansion(e, y), y),
-    )
+fn lift(e: &[f64], x: &[f64], y: &[f64]) -> Vec<f64> {
+    let square = expansion_sum(&expansion_product(x, x), &expansion_product(y, y));
+    expansion_product(e, &square)
 }
 
 /// Is `e` inside the sphere through `a`, `b`, `c`, `d`?
@@ -164,45 +190,45 @@ pub fn insphere_filter(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) ->
 /// distance. Nothing is rounded between those steps.
 #[must_use]
 fn insphere_exact(a: Point3, b: Point3, c: Point3, d: Point3, e: Point3) -> Sign {
-    let v = |p: Point3| (p.x - e.x, p.y - e.y, p.z - e.z);
-    let (ax, ay, az) = v(a);
-    let (bx, by, bz) = v(b);
-    let (cx, cy, cz) = v(c);
-    let (dx, dy, dz) = v(d);
+    // Differences exact, as for `incircle_exact` (#190).
+    let v = |p: Point3| [diff(p.x, e.x), diff(p.y, e.y), diff(p.z, e.z)];
+    let (a3, b3, c3, d3) = (v(a), v(b), v(c), v(d));
 
-    let minor = |p: (f64, f64, f64), q: (f64, f64, f64), r: (f64, f64, f64)| {
-        let qr = orient3d_cofactor(q.0, r.1, r.0, q.1);
-        let rp = orient3d_cofactor(r.0, p.1, p.0, r.1);
-        let pq = orient3d_cofactor(p.0, q.1, q.0, p.1);
+    let minor3 = |p: &[Vec<f64>; 3], q: &[Vec<f64>; 3], r: &[Vec<f64>; 3]| {
+        let qr = minor(&q[0], &r[1], &r[0], &q[1]);
+        let rp = minor(&r[0], &p[1], &p[0], &r[1]);
+        let pq = minor(&p[0], &q[1], &q[0], &p[1]);
         expansion_sum(
-            &expansion_sum(&scale_expansion(&qr, p.2), &scale_expansion(&rp, q.2)),
-            &scale_expansion(&pq, r.2),
+            &expansion_sum(
+                &expansion_product(&qr, &p[2]),
+                &expansion_product(&rp, &q[2]),
+            ),
+            &expansion_product(&pq, &r[2]),
         )
     };
 
-    let (a3, b3, c3, d3) = ((ax, ay, az), (bx, by, bz), (cx, cy, cz), (dx, dy, dz));
-    let bcd = minor(b3, c3, d3);
-    let cda = minor(c3, d3, a3);
-    let dab = minor(d3, a3, b3);
-    let abc = minor(a3, b3, c3);
+    let bcd = minor3(&b3, &c3, &d3);
+    let cda = minor3(&c3, &d3, &a3);
+    let dab = minor3(&d3, &a3, &b3);
+    let abc = minor3(&a3, &b3, &c3);
 
     // Cofactor expansion signs alternate: +d -c +b -a.
     let total = expansion_sum(
-        &expansion_sum(
-            &lift3(&abc, dx, dy, dz),
-            &negate_expansion(&lift3(&dab, cx, cy, cz)),
-        ),
-        &expansion_sum(
-            &lift3(&cda, bx, by, bz),
-            &negate_expansion(&lift3(&bcd, ax, ay, az)),
-        ),
+        &expansion_sum(&lift3(&abc, &d3), &negate_expansion(&lift3(&dab, &c3))),
+        &expansion_sum(&lift3(&cda, &b3), &negate_expansion(&lift3(&bcd, &a3))),
     );
     expansion_sign(&total)
 }
 
 /// Multiply an expansion by `x*x + y*y + z*z`, exactly.
 #[must_use]
-fn lift3(e: &[f64], x: f64, y: f64, z: f64) -> Vec<f64> {
-    let sq = |k: f64| scale_expansion(&scale_expansion(e, k), k);
-    expansion_sum(&expansion_sum(&sq(x), &sq(y)), &sq(z))
+fn lift3(e: &[f64], p: &[Vec<f64>; 3]) -> Vec<f64> {
+    let square = expansion_sum(
+        &expansion_sum(
+            &expansion_product(&p[0], &p[0]),
+            &expansion_product(&p[1], &p[1]),
+        ),
+        &expansion_product(&p[2], &p[2]),
+    );
+    expansion_product(e, &square)
 }

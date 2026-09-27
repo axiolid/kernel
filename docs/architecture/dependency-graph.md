@@ -333,6 +333,7 @@ graph TD
     axiolid_pointcloud_reconstruction_sdf --> axiolid_pointcloud_reconstruction_contract
     axiolid_pointcloud_reconstruction_sdf --> axiolid_spatial
     axiolid_predicates --> axiolid_core
+    axiolid_predicates --> axiolid_exact
     axiolid_predicates --> axiolid_guarantees
     axiolid_primitive --> axiolid_core
     axiolid_profile --> axiolid_core

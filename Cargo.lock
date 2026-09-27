@@ -650,9 +650,10 @@ dependencies = [
 
 [[package]]
 name = "axiolid-predicates"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
+ "axiolid-exact",
  "axiolid-guarantees",
 ]
 
