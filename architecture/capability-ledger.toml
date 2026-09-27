@@ -946,8 +946,8 @@ area = "mesh"
 name = "topology queries (genus, homotopy, cycles)"
 issue = "mesh-topology-invariants"
 level = "narrow"
-summary = "Genus only, via Euler characteristic; refuses meshes with boundary, non-manifold edges, non-orientable characteristic, or more than one connected component (must call per-component). No homotopy/cycle-basis queries."
-evidence = ["crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
+summary = "Exact, combinatorial classification of every connected component of a two-manifold triangle mesh (axiolid-inspect::topology): vertex/edge/triangle counts, Euler characteristic, boundary loops, orientability and consistent winding, and the surface (genus g orientable or k crosscaps non-orientable); non-manifold edges and vertices are refused. Closed orientable components get a first-homology basis of 2g simple edge loops by tree-cotree, tested independent and non-separating. Refused: homology generators with boundary or on non-orientable surfaces, and homotopy queries (contractibility, homotopy of two paths)."
+evidence = ["crates/algorithms/query/inspect/src/topology.rs::topology", "crates/algorithms/query/inspect/tests/topology.rs", "scripts/probe_mesh_topology_mutants.py", "crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
 occt = []
 cgal = ["Surface_mesh_topology"]
 

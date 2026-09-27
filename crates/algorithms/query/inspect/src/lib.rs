@@ -13,6 +13,7 @@ pub mod genus;
 pub mod overlap;
 pub mod planes;
 pub mod sight;
+pub mod topology;
 
 pub use cast::{ray_cast, Hit};
 pub use clearance::min_gap;
@@ -23,3 +24,6 @@ pub use overlap::{
 };
 pub use planes::{detect_planes, DetectedPlane, PlaneError, PlaneTolerance};
 pub use sight::{line_of_sight, line_of_sight_within, Sight, SightError, MAX_SIGHT_CELLS};
+pub use topology::{
+    topology, ComponentTopology, EdgeLoop, MeshTopology, SurfaceKind, TopologyError,
+};

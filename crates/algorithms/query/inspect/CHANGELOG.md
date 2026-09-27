@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `topology` (#144): every connected component of a two-manifold triangle
+  mesh, classified exactly from its connectivity -- counts, Euler
+  characteristic, boundary loops, orientability and consistent winding, and
+  the surface (`SurfaceKind::Orientable { genus }` or
+  `NonOrientable { crosscaps }`). A closed orientable component also gets a
+  basis of its first homology: `2g` simple closed edge loops, by the
+  tree-cotree construction. Meshes with an edge on three or more triangles,
+  or a vertex whose triangles form several fans, are refused
+  (`TopologyError::NonManifold`). `genus` is unchanged.
+
 ## [0.3.2] - 2026-09-27
 
 ### Added
