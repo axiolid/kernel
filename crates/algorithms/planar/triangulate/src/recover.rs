@@ -15,7 +15,7 @@
 use axiolid_core::Point2;
 
 use crate::mesh::{Triangulation, TriangulationError, NO_HALFEDGE};
-use crate::{turns_left, Constraint};
+use crate::{in_circumcircle, turns_left, Constraint};
 
 impl Triangulation {
     /// Rebuild the halfedge twin array from the triangle list.
@@ -60,7 +60,46 @@ pub(crate) fn recover_constraints(tri: &mut Triangulation) -> Result<(), Triangu
         recover_one(tri, c)?;
     }
     tri.rebuild_halfedges();
+    restore_delaunay(tri);
     Ok(())
+}
+
+/// Make every unconstrained edge locally Delaunay again.
+///
+/// Recovery's flips leave long, thin triangles whose circumcircles hold
+/// points no constraint hides; without this pass the result was not
+/// constrained Delaunay, though the crate promises it (#139: a skeleton
+/// read from it ran across a corridor). Lawson's flips: an unconstrained
+/// edge whose opposite vertex lies strictly inside the circumcircle is
+/// flipped, until none is. Strictly inside, so cocircular ties never flip
+/// and the loop ends; the bound only guards against a corrupted mesh.
+fn restore_delaunay(tri: &mut Triangulation) {
+    let mut budget = tri.triangles.len() * tri.triangles.len() + 64;
+    loop {
+        let mut changed = false;
+        for t in 0..tri.triangle_count() {
+            for i in 0..3 {
+                let twin = tri.halfedges[3 * t + i];
+                if twin == NO_HALFEDGE {
+                    continue;
+                }
+                let (u, v) = (tri.triangles[3 * t + i], tri.triangles[3 * t + (i + 1) % 3]);
+                if tri.is_constrained(u, v) {
+                    continue;
+                }
+                let apex = tri.triangles[3 * t + (i + 2) % 3];
+                let other = tri.triangles[3 * (twin as usize / 3) + (twin as usize % 3 + 2) % 3];
+                let p = |k: u32| tri.points[k as usize];
+                if in_circumcircle(p(u), p(v), p(apex), p(other)) && flip(tri, t, i) {
+                    changed = true;
+                    budget = budget.saturating_sub(1);
+                }
+            }
+        }
+        if !changed || budget == 0 {
+            break;
+        }
+    }
 }
 
 /// Recover a single missing constraint by flipping the edges it crosses.

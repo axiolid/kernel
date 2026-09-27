@@ -310,3 +310,81 @@ fn refinement_preserves_constraints() {
     });
     assert!(present, "refinement destroyed a constraint edge");
 }
+
+/// Every unconstrained edge between two triangles is locally Delaunay: the
+/// vertex across it lies outside (or on) the circumcircle, exactly.
+fn assert_constrained_delaunay(tri: &axiolid_triangulate::Triangulation) {
+    use axiolid_guarantees::Sign;
+    use std::collections::HashMap;
+    let t = tri.triangles();
+    let pts = tri.points();
+    let constrained: std::collections::BTreeSet<Constraint> =
+        tri.constraints().iter().copied().collect();
+    let mut across: HashMap<(u32, u32), u32> = HashMap::new();
+    for k in 0..tri.triangle_count() {
+        for i in 0..3 {
+            across.insert(
+                (t[3 * k + i], t[3 * k + (i + 1) % 3]),
+                t[3 * k + (i + 2) % 3],
+            );
+        }
+    }
+    for (&(u, v), &apex) in &across {
+        if constrained.contains(&Constraint::new(u, v)) {
+            continue;
+        }
+        if let Some(&other) = across.get(&(v, u)) {
+            let s = axiolid_predicates::incircle(
+                pts[u as usize],
+                pts[v as usize],
+                pts[apex as usize],
+                pts[other as usize],
+            );
+            let inside = matches!(
+                s,
+                axiolid_guarantees::Certified::Certain {
+                    sign: Sign::Positive,
+                    ..
+                }
+            );
+            assert!(!inside, "edge {u}-{v} is not locally Delaunay");
+        }
+    }
+}
+
+#[test]
+fn recovered_constraints_leave_the_rest_delaunay() {
+    // Walls sampled finely round a square room with a pillar: the
+    // samples line up across the room, and recovering the walls used to
+    // leave triangles spanning floor to ceiling whose circles held the
+    // side-wall samples (#139).
+    let mut points = Vec::new();
+    let mut constraints = Vec::new();
+    let mut ring = |corners: &[(f64, f64)], per: usize, points: &mut Vec<Point2>| {
+        let start = points.len() as u32;
+        for k in 0..corners.len() {
+            let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+            for j in 0..per {
+                let t = j as f64 / per as f64;
+                points.push(p(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+            }
+        }
+        let n = points.len() as u32 - start;
+        for i in 0..n {
+            constraints.push(Constraint::new(start + i, start + (i + 1) % n));
+        }
+    };
+    ring(
+        &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+        50,
+        &mut points,
+    );
+    ring(
+        &[(4.0, 4.0), (4.0, 6.0), (6.0, 6.0), (6.0, 4.0)],
+        10,
+        &mut points,
+    );
+    let tri = triangulate(&points, &constraints).unwrap();
+    assert_all_ccw(&tri);
+    assert_constrained_delaunay(&tri);
+}
