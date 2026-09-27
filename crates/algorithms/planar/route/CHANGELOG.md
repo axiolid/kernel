@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-27
+
 ### Added
 
 - `forced_walk` (#196): the shortest walk from an origin to a target that
