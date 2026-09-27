@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-27
+
 ### Fixed
 
 - A route could run along one wall, through a vertex and on across a gap

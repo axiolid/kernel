@@ -363,3 +363,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 ### Fixed
 
 - A refinement that creates no vertex returns the input's channels and normals. It previously reported them `Preserved` and returned a mesh without them.
+
+
+## axiolid-route
+
+### 0.3.1 - 2026-09-27
+
+### Fixed
+
+- A route could run along one wall, through a vertex and on across a gap
+  outside the region where two walls line up (#187): visibility tested only
+  proper crossings and the segment's midpoint. A segment is now cut at
+  every obstacle vertex lying on it, decided exactly, and each stretch is
+  either along an obstacle edge or has its midpoint in the region. Two
+  rooms whose corridor is cut are `DisconnectedComponents` again.
