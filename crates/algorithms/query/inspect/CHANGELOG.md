@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `detect_planes` (#131): the planar regions of a triangle mesh, grown
+  over shared edges within an angle and a distance (`PlaneTolerance`) and
+  then certified. Each `DetectedPlane` gives its triangles, a point and
+  unit normal, a `deviation` that is a proven upper bound on every member
+  corner's distance from that plane (regions are peeled until it is
+  within the requested distance), whether the region is exactly coplanar
+  (by `orient3d`), and its area. Largest first; deterministic.
+
 ## [0.3.1] - 2026-09-27
 
 ### Added
