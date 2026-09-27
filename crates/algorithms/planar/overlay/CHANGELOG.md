@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-27
+
 ### Added
 
 - `minimum_area_rectangle` (#182): the least-area rectangle enclosing a

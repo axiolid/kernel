@@ -124,6 +124,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - `RepairReport::attribute_fates` names every input channel's fate.
 
 
+## axiolid-inspect
+
+### 0.3.1 - 2026-09-27
+
+### Added
+
+- `intersection_volume`, `difference_volume` and `enclosed_volume` (#183):
+  the volume two closed triangle meshes share, the volume of the first
+  outside the second, and a mesh's own volume, each as a `VolumeInterval`
+  certified to contain the true value and never negative. No boolean is
+  built: every face pair whose shadows overlap contributes the integral of
+  the lower of the two planes over the overlap, with sides of lines and
+  the lower plane decided exactly and the arithmetic rounded outward.
+  Coplanar faces and touching bodies are exact cases. Open, non-manifold,
+  self-intersecting or non-finite meshes are refused with the operand
+  named (`OverlapError`); either winding is accepted.
+
+
 ## axiolid-mesh
 
 ### 0.3.0 - 2026-09-23
@@ -288,6 +306,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-overlay
 
+### 0.3.2 - 2026-09-27
+
+### Added
+
+- `minimum_area_rectangle` (#182): the least-area rectangle enclosing a
+  point set, by rotating calipers over the exact convex hull. Caliper
+  steps and the area comparison (`W H / |d|^2`, cross-multiplied) are
+  exact; ties are broken by the least angle of the first axis, turned into
+  `[0, 90)` degrees, so the result does not depend on input order. Returns
+  an `OrientedRectangle` (centre, unit axes, half extents) and
+  `RectangleEvidence` (hull size, count of tied orientations, and a bound
+  on the rounding of the output). Collinear input gives an exactly
+  zero-width rectangle; empty or non-finite input is a `RectangleError`.
+- `Region::visibility_polygon` (#184): the part of a region with holes in
+  sight of a point inside it. An angular sweep round the viewpoint with
+  every decision exact -- the order of vertex directions, which edges a
+  wedge's middle ray meets and which is nearest -- so walls and holes cast
+  exact shadows; only the shadow ends are rounded, once, and the result is
+  presented like the other region operations. A viewpoint on the boundary
+  or outside is refused (`VisibilityError::NotInside`).
+
 ### 0.3.1 - 2026-09-27
 
 ### Added
@@ -366,6 +405,37 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-route
+
+### 0.3.2 - 2026-09-27
+
+### Added
+
+- `distance_map` and `distance_map_within` (#186): shortest-path distances
+  to the nearest of several targets, from one multi-source Dijkstra over
+  the visibility graph. `DistanceMap::nearest` gives, for any point of the
+  region, the nearest target's index and the route there (`Reach`).
+  Refusals are typed: `MapError::NoTargets`, `MapError::TargetOutside`.
+- `farthest_point` and `farthest_point_within` (#186): the greatest
+  distance to the nearest target over a polygon subregion, as a
+  `LengthInterval` that contains the true value, with a witness point
+  (`Farthest`). Branch and bound over a constrained triangulation of the
+  free space, bounding each cell by the 1-Lipschitz property of the
+  distance from anchors proven inside it; widened for the rounding of
+  lengths and midpoints. Part of the subregion that no target reaches is
+  refused with the triangle as evidence (`FarthestError::Unreachable`);
+  crossing barriers are refused (`FarthestError::CrossingObstacles`).
+
+### Fixed
+
+- Routes no longer squeeze through a point where obstacles meet (#189):
+  a barrier's foot on a wall, two holes touching at a corner, a barrier
+  bent or joined at a vertex. Each graph vertex is split into the free
+  sectors between the obstacle rays leaving it, ordered exactly; a route
+  moves over (vertex, sector) states, each edge is taken on one side of
+  travel and attached to the sector beside it at each end, and passes
+  through a vertex only on a side with no obstacle ray and free space.
+  Two polygons sharing an edge are walkable along it on either side.
+  `shortest_path` and `DistanceMap` share the graph.
 
 ### 0.3.1 - 2026-09-27
 

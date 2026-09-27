@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-inspect"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-route"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
