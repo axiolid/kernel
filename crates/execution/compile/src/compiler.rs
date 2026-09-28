@@ -535,6 +535,19 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let outcome = self
             .boolean
             .boolean(&subject.mesh, tool, operator, options)?;
+        if let Some(pinch) = crate::pinch::find(&outcome.mesh) {
+            return Err(GeomError::Degenerate(match pinch {
+                crate::pinch::Pinch::Edge { from, to } => format!(
+                    "{operator:?} result touches itself along the edge {from:?} to {to:?}: \
+                     the operands meet tangentially there (a void tangent to its host's face), \
+                     leaving no material between two faces"
+                ),
+                crate::pinch::Pinch::Vertex { at } => format!(
+                    "{operator:?} result touches itself at the point {at:?}: the operands \
+                     meet tangentially there, leaving no material between two faces"
+                ),
+            }));
+        }
         Ok(channels::after_boolean(
             outcome.mesh,
             &subject.fates,

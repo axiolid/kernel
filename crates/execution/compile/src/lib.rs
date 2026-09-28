@@ -6,6 +6,7 @@ mod bounded;
 mod brep;
 mod channels;
 mod directrix;
+mod pinch;
 mod planar;
 
 use axiolid_contracts::BackendId;

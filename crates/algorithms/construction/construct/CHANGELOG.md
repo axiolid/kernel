@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Structural sections mesh (#193): `profile_rings` flattens every
+  `Profile::Section` family -- I, asymmetric I, L, T, U, C, Z, trapezium --
+  from the exact contour `section_contour` builds, fillets and toe radii
+  chorded within the budget, straight edges exact. It refused them with
+  `Unsupported { ProfileTriangulation }` before. Rectangles with corner
+  radii mesh with them, through `rectangle_contour`: the mesh path used to
+  drop the radii and mesh a sharp box.
+- Circles are chorded from half a step off the axes, not from angle 0
+  (#194): the same chords, turned, so a chord's middle, inside the circle,
+  sits at every quarter turn. A circular void tangent to a face along an
+  axis direction, as openings are, leaves a sliver of material under it
+  instead of a chord point on the face, which pinched the solid.
+
 ## [0.3.4] - 2026-09-27
 
 ### Added

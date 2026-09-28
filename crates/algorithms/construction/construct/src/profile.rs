@@ -35,20 +35,25 @@ pub fn profile_rings(
     tolerance: Tolerance,
 ) -> GeomResult<Rings> {
     match profile {
+        // Rounded corners are exact arcs in the contour, chorded like any
+        // other arc; a sharp rectangle keeps its four exact corners.
+        Profile::Rectangle(r) if r.outer_radius.is_some() || r.inner_radius.is_some() => {
+            let contour = crate::section_lower::rectangle_contour(r)?;
+            contour_rings(&contour, chord_error, tolerance)
+        }
         Profile::Rectangle(r) => rectangle_rings(r, chord_error, tolerance),
+        // Structural sections (#193): the same exact contour the exact
+        // extruder builds, fillets and toe radii as arcs, chorded here.
+        Profile::Section(section) => {
+            let contour = crate::section_lower::section_contour(section)?;
+            contour_rings(&contour, chord_error, tolerance)
+        }
         Profile::Circle(c) => circle_rings(c, chord_error),
         // Reachable only since curve evaluation moved into `axiolid-reference`:
         // an ellipse has no closed-form segment count, so the old fixed-count
         // flattener could not express it at all.
         Profile::Ellipse(e) => ellipse_rings(e, chord_error),
-        Profile::Contour(c) => {
-            let outer = contour_points(&c.outer, chord_error, tolerance)?;
-            let mut holes = Vec::with_capacity(c.holes.len());
-            for hole in &c.holes {
-                holes.push(contour_points(hole, chord_error, tolerance)?);
-            }
-            Ok(orient_rings(outer, holes))
-        }
+        Profile::Contour(c) => contour_rings(c, chord_error, tolerance),
         Profile::Derived { basis, transform } => {
             let mut rings = profile_rings(basis, chord_error, tolerance)?;
             apply2(&mut rings.outer, transform);
@@ -79,7 +84,22 @@ pub fn profile_rings(
     }
 }
 
-/// Rectangle, optionally hollow. Corner radii are not yet approximated.
+/// An exact contour with holes, flattened under the chord budget.
+fn contour_rings(
+    c: &axiolid_profile::ContourProfile,
+    chord_error: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<Rings> {
+    let outer = contour_points(&c.outer, chord_error, tolerance)?;
+    let mut holes = Vec::with_capacity(c.holes.len());
+    for hole in &c.holes {
+        holes.push(contour_points(hole, chord_error, tolerance)?);
+    }
+    Ok(orient_rings(outer, holes))
+}
+
+/// Rectangle, optionally hollow, with sharp corners (rounded ones go
+/// through the exact contour).
 fn rectangle_rings(
     r: &RectangleProfile,
     _chord_error: Scalar,
@@ -207,15 +227,24 @@ fn flatten_circle(radius: Scalar, chord_error: Scalar) -> GeomResult<Vec<Point2>
         },
         radius,
     });
-    let mut ring = axiolid_reference::curve::flatten2(
-        &curve,
-        Interval {
-            start: 0.0,
-            end: core::f64::consts::TAU,
-        },
-        chord_error,
-        MAX_SUBDIVISION_DEPTH,
-    )?;
+    let flatten = |start: Scalar| {
+        axiolid_reference::curve::flatten2(
+            &curve,
+            Interval {
+                start,
+                end: start + core::f64::consts::TAU,
+            },
+            chord_error,
+            MAX_SUBDIVISION_DEPTH,
+        )
+    };
+    // Bisection puts a point at every quarter turn. Started half a step
+    // later, the same chords put a chord's middle there instead, strictly
+    // inside the circle: a void tangent to a face along an axis direction,
+    // as openings are, then leaves a sliver of material rather than a
+    // chord point on the face, which would pinch the solid there (#194).
+    let steps = flatten(0.0)?.len().saturating_sub(1).max(1);
+    let mut ring = flatten(core::f64::consts::PI / steps as Scalar)?;
     ring.pop();
     Ok(ring)
 }

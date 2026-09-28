@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A boolean whose result touches itself is refused, not returned (#194):
+  where operands meet tangentially -- a void tangent to its host's face --
+  the solid has no material between two faces, and the mesh boolean keeps
+  two copies of the vertices there, closed by index but pinched by
+  position. Consumers welding by position saw an edge with four faces. The
+  result is now checked, positions welded, for an edge with more than two
+  faces or a vertex with separate fans, and refused with
+  `GeomError::Degenerate` naming the edge or point of contact. Circular
+  voids tangent along an axis direction no longer pinch at all (construct).
+- Structural sections and rounded rectangles extrude to meshes (#193, via
+  construct).
+
 ## [0.3.4] - 2026-09-27
 
 ### Added
