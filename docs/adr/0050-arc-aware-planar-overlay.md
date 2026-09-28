@@ -74,6 +74,8 @@ Rationale:
 
 Deliberately NOT decided here: replacing `i_overlay`. The polygon path is
 mature and gated by existing tests. The arc backend is additive.
+(Later: the polygon path moved onto the exact core of ADR 0070, #173; see
+that ADR's addendum.)
 
 ## Consequences
 

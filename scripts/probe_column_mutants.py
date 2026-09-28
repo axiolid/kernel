@@ -75,11 +75,11 @@ MUTANTS = [
      "                vec![(if under_bottom { cut } else { flat_bottom }, flat_top)]", TESTS),
     # Arrangement labels.
     ("shared piece on the wrong side", ARR,
-     "                        if same {\n                            left[other] = true;\n                        } else {\n                            right[other] = true;\n                        }",
-     "                        if same {\n                            right[other] = true;\n                        } else {\n                            left[other] = true;\n                        }", OT),
+     "            out[ring] = same == left;",
+     "            out[ring] = same != left;", OT),
     ("containment ignored", ARR,
-     "                    } else if winding(&piece.sample, &parts[other]) != 0 {",
-     "                    } else if winding(&piece.sample, &parts[other]) != 0 && false {", OT),
+     "                .filter(|&other| windings[other].winding(&piece.sample) != 0)",
+     "                .filter(|&other| windings[other].winding(&piece.sample) != 0 && false)", OT),
     # Measure fix.
     ("measure ignores face orientation", MEAS,
      "            ^ (face.orientation == Orientation::Reversed);",

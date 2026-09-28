@@ -106,6 +106,21 @@ impl Bounds {
         self.x0 <= other.x1 && other.x0 <= self.x1 && self.y0 <= other.y1 && other.y0 <= self.y1
     }
 
+    /// Whether any coordinate is NaN, which no comparison can place.
+    pub(crate) fn has_nan(&self) -> bool {
+        self.x0.is_nan() || self.y0.is_nan() || self.x1.is_nan() || self.y1.is_nan()
+    }
+
+    /// The centre, for splitting sets of boxes.
+    pub(crate) fn centre(&self) -> (f64, f64) {
+        (0.5 * self.x0 + 0.5 * self.x1, 0.5 * self.y0 + 0.5 * self.y1)
+    }
+
+    /// Whether the box is at least as wide as it is tall.
+    pub(crate) fn wider_than_tall(&self) -> bool {
+        self.x1 - self.x0 >= self.y1 - self.y0
+    }
+
     /// Whether the box may contain a point whose coordinates lie in the
     /// given enclosures.
     pub(crate) fn may_hold(&self, x: (f64, f64), y: (f64, f64)) -> bool {
@@ -253,6 +268,25 @@ impl Edge {
         }
     }
 
+    /// For two straight edges with the same two ends: `Some(true)` when
+    /// they run the same way, `Some(false)` when opposite. `None` for any
+    /// other pair, which may still share points.
+    pub(crate) fn same_segment(&self, other: &Self) -> Option<bool> {
+        if self.is_arc() || other.is_arc() {
+            return None;
+        }
+        // Input vertices are doubles, so the ends compare exactly.
+        let (a, b) = (self.p0f, self.p1.approx());
+        let (c, d) = (other.p0f, other.p1.approx());
+        if a == c && b == d {
+            Some(true)
+        } else if a == d && b == c {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     /// Whether `x` lies on this edge (any point, carrier not assumed).
     pub(crate) fn contains(&self, x: &XPoint) -> bool {
         let on_carrier = match &self.carrier {
@@ -339,6 +373,85 @@ pub(crate) fn line_meets_circle(
     }
 }
 
+/// `orient(a, b, c)` in `f64`, when its sign is certain: the error bound
+/// is Shewchuk's for the fast orientation test. `None` when the value may
+/// be zero or its sign is not certain (including overflow and values near
+/// underflow, where the bound does not hold).
+fn orient_f64(a: Point2, b: Point2, c: Point2) -> Option<Sign> {
+    let left = (b.x - a.x) * (c.y - a.y);
+    let right = (b.y - a.y) * (c.x - a.x);
+    let det = left - right;
+    let magnitude = left.abs() + right.abs();
+    if !(magnitude >= 1e-280 && magnitude.is_finite()) {
+        return None;
+    }
+    let bound = 3.330_669_073_875_472e-16 * magnitude;
+    if det > bound {
+        Some(Sign::Positive)
+    } else if -det > bound {
+        Some(Sign::Negative)
+    } else {
+        None
+    }
+}
+
+/// Whether `dot(b - p, c - p) < 0` for certain: `b` and `c` leave `p` at
+/// more than a right angle.
+fn apart_f64(p: Point2, b: Point2, c: Point2) -> bool {
+    let first = (b.x - p.x) * (c.x - p.x);
+    let second = (b.y - p.y) * (c.y - p.y);
+    let magnitude = first.abs() + second.abs();
+    magnitude >= 1e-280
+        && magnitude.is_finite()
+        && -(first + second) > 3.330_669_073_875_472e-16 * magnitude
+}
+
+/// The crossings of two input segments when `f64` decides them (#173):
+/// segments strictly apart, the same segment, or two segments sharing one
+/// end and meeting nowhere else. `None` leaves the rest to the exact path. The
+/// subdivision of a triangle soup asks mostly these questions, and the
+/// exact path answered each with big-number arithmetic.
+fn segments_quick(first: &Edge, second: &Edge) -> Option<Vec<XPoint>> {
+    // Input vertices are doubles, so `approx` is the exact end.
+    let (a, b) = (first.p0f, first.p1.approx());
+    let (c, d) = (second.p0f, second.p1.approx());
+    if (a == c && b == d) || (a == d && b == c) {
+        return Some(vec![first.p0.clone(), first.p1.clone()]);
+    }
+    let sides = [
+        orient_f64(a, b, c),
+        orient_f64(a, b, d),
+        orient_f64(c, d, a),
+        orient_f64(c, d, b),
+    ];
+    // Both ends of one segment strictly on one side of the other's line:
+    // apart, whatever the remaining signs.
+    let one_side = |p: Option<Sign>, q: Option<Sign>| p.is_some() && p == q;
+    if one_side(sides[0], sides[1]) || one_side(sides[2], sides[3]) {
+        return Some(Vec::new());
+    }
+    if sides.iter().all(Option::is_some) {
+        return None;
+    }
+    // One shared end, the other ends off each other's line: they meet
+    // there and nowhere else.
+    for (p, own) in [(a, &first.p0), (b, &first.p1)] {
+        let far = if p == c {
+            d
+        } else if p == d {
+            c
+        } else {
+            continue;
+        };
+        // Off the line, or on it but leaving the shared end the other
+        // way (an angle over a right angle): nothing else in common.
+        if orient_f64(a, b, far).is_some() || apart_f64(p, if p == a { b } else { a }, far) {
+            return Some(vec![own.clone()]);
+        }
+    }
+    None
+}
+
 /// Every point where two edges meet, endpoints included. Overlapping
 /// pieces contribute the endpoints of each edge lying on the other.
 pub(crate) fn crossings(first: &Edge, second: &Edge) -> Vec<XPoint> {
@@ -362,6 +475,9 @@ pub(crate) fn crossings(first: &Edge, second: &Edge) -> Vec<XPoint> {
     };
     match (&first.carrier, &second.carrier) {
         (Carrier::Segment, Carrier::Segment) => {
+            if let Some(quick) = segments_quick(first, second) {
+                return quick;
+            }
             // Lines P0 + t D and Q0 + s E: cross(D, E) = 0 means parallel.
             let (d, e) = (&first.d, &second.d);
             let den = d.0.mul(&e.1).sub(&d.1.mul(&e.0));

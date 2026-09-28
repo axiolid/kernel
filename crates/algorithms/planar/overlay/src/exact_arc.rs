@@ -29,6 +29,7 @@
 //!    a hole of the smallest outer that contains it.
 
 pub(crate) mod arrangement;
+mod boxes;
 mod edge;
 mod point;
 
@@ -167,10 +168,10 @@ fn monotone(edge: &Edge) -> Vec<Mono> {
 /// positive is left. Only called for `s` strictly within the part's height
 /// range (half-open) and not on it.
 fn side_of(part: &Mono, s: &XPoint) -> Sign {
-    let chord = orient(&part.a, &part.b, s);
     let Some((circle, turn)) = &part.arc else {
-        return chord;
+        return orient(&part.a, &part.b, s);
     };
+    let chord = orient(&part.a, &part.b, s);
     // The arc lies on side -turn of its chord, and the region between
     // chord and arc is the disc restricted to that side: a monotone part is
     // at most a semicircle.
@@ -187,23 +188,43 @@ fn side_of(part: &Mono, s: &XPoint) -> Sign {
 
 /// Winding number of `other`'s boundary around `s`, which is not on it.
 fn winding(s: &XPoint, parts: &[Mono]) -> i64 {
-    let mut total = 0;
-    for part in parts {
-        let ya = cmp_y(&part.a, s);
-        let yb = cmp_y(&part.b, s);
-        let up = ya != Sign::Positive && yb == Sign::Positive;
-        let down = yb != Sign::Positive && ya == Sign::Positive;
-        if !(up || down) {
-            continue;
+    parts.iter().map(|part| crossing(part, s)).sum()
+}
+
+/// What one monotone part adds to the winding number around `s`: `+1`
+/// crossing the horizontal through `s` upwards right of it, `-1` downwards
+/// right of it, `0` otherwise. A part whose box lies wholly above, below
+/// or left of `s` adds nothing.
+fn crossing(part: &Mono, s: &XPoint) -> i64 {
+    let ya = cmp_y(&part.a, s);
+    let yb = cmp_y(&part.b, s);
+    let up = ya != Sign::Positive && yb == Sign::Positive;
+    let down = yb != Sign::Positive && ya == Sign::Positive;
+    if !(up || down) {
+        return 0;
+    }
+    // A straight part wholly left or right of `s` in x: the side follows
+    // from the direction of travel, without arithmetic.
+    if part.arc.is_none() {
+        let ((ax0, ax1), _) = part.a.enclosures();
+        let ((bx0, bx1), _) = part.b.enclosures();
+        let ((sx0, sx1), _) = s.enclosures();
+        if sx0 > ax1.max(bx1) {
+            // `s` is right of the part: it counts neither way.
+            return 0;
         }
-        let side = side_of(part, s);
-        if up && side == Sign::Positive {
-            total += 1;
-        } else if down && side == Sign::Negative {
-            total -= 1;
+        if sx1 < ax0.min(bx0) {
+            return if up { 1 } else { -1 };
         }
     }
-    total
+    let side = side_of(part, s);
+    if up && side == Sign::Positive {
+        1
+    } else if down && side == Sign::Negative {
+        -1
+    } else {
+        0
+    }
 }
 
 fn tangent_of(edge: &Edge) -> Tangent {
@@ -556,7 +577,7 @@ fn to_ring(pieces: &[Piece]) -> ArcRing {
     ArcRing {
         vertices: pieces
             .iter()
-            .map(|p| ArcVertex::bulged(p.from.approx(), p.bulge()))
+            .map(|p| ArcVertex::bulged(p.from.rounded(), p.bulge()))
             .collect(),
     }
 }

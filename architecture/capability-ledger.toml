@@ -1042,8 +1042,8 @@ id = "F1"
 area = "planar"
 name = "polygon booleans (exact)"
 level = "implemented"
-summary = "Two exact backends, union/intersection/difference/xor, with holes. Straight-edge polygons: integer-predicate path via axiolid-overlay::Region. Arcs: arc_overlay on the in-tree exact core (ADR 0070): crossings, their order, inside/outside/on, linking and nesting are exact sign decisions via axiolid-exact, independent of units; crossing points of two curves are rounded to f64 once, in the output. Self-intersecting operand rings are outside the contract."
-evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay", "crates/algorithms/planar/overlay/src/exact_arc.rs::boolean", "crates/algorithms/planar/overlay/tests/arc_exact_oracle.rs"]
+summary = "One exact core, union/intersection/difference/xor, with holes, for straight-edge polygons (overlay, union_soup, axiolid-overlay::Region; #173) and arcs (arc_overlay; ADR 0070): crossings, their order, inside/outside/on, linking and nesting are exact sign decisions via axiolid-exact, independent of units. Output is rounded once: an untouched input vertex comes back bit-identical, a crossing of two segments is the correctly rounded double, a crossing involving an arc is rounded to about 50 bits. Self-intersecting operand rings are outside the contract."
+evidence = ["crates/algorithms/planar/overlay/src/region.rs::union", "crates/algorithms/planar/overlay/src/exact_overlay.rs::boolean", "crates/algorithms/planar/overlay/tests/exact_straight.rs", "crates/algorithms/planar/overlay/src/arc_overlay.rs::arc_overlay", "crates/algorithms/planar/overlay/src/exact_arc.rs::boolean", "crates/algorithms/planar/overlay/tests/arc_exact_oracle.rs"]
 occt = []
 cgal = ["Boolean_set_operations_2", "Nef_2"]
 

@@ -5,6 +5,7 @@ mod arc_overlay;
 mod arrangement;
 mod circle;
 mod exact_arc;
+mod exact_overlay;
 mod minkowski;
 mod offset;
 mod rectangle;
@@ -34,8 +35,6 @@ pub use region::{Region, RegionEvidence};
 pub use visibility::VisibilityError;
 
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
-use i_overlay::core::{fill_rule::FillRule as BackendFill, overlay_rule::OverlayRule};
-use i_overlay::float::single::SingleFloatOverlay;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillRule {
@@ -61,7 +60,7 @@ pub struct Ring {
 ///
 /// The two exist separately because they are reached from different places:
 /// `Polygon2` is a foundation value type usable without this crate, while
-/// `Ring` is what the overlay backend consumes. Making them the same type
+/// `Ring` is what the overlay consumes. Making them the same type
 /// would drag the planar boolean vocabulary into `axiolid-core`.
 impl From<Polygon2> for Ring {
     fn from(polygon: Polygon2) -> Self {
@@ -290,16 +289,6 @@ fn contains(r: &Ring, p: Point2) -> bool {
     }
     inside
 }
-fn backend(p: &[Polygon]) -> Vec<Vec<Vec<[f64; 2]>>> {
-    p.iter()
-        .map(|x| {
-            core::iter::once(&x.outer)
-                .chain(x.holes.iter())
-                .map(|r| r.points.iter().map(|q| [q.x, q.y]).collect())
-                .collect()
-        })
-        .collect()
-}
 pub(crate) fn canonical(mut r: Ring, want_positive: bool) -> Ring {
     if (signed(&r) > 0.) != want_positive {
         r.points.reverse()
@@ -320,6 +309,12 @@ pub(crate) fn canonical(mut r: Ring, want_positive: bool) -> Ring {
     r
 }
 /// Performs a neutral planar overlay. Output ordering is deterministic: polygons sort by outer-ring lexicographic start, rings are canonicalized CCW/CW.
+///
+/// Exact (#173): where boundaries cross and which side of each piece lies
+/// in the result are exact decisions; the tolerance only validates the
+/// operands and settles the output. An input vertex the operation does not
+/// move comes back bit-identical, and a crossing of two edges is the double
+/// nearest to the exact crossing point.
 pub fn overlay(
     subject: &OverlayInput,
     clip: &OverlayInput,
@@ -332,20 +327,8 @@ pub fn overlay(
     if subject.frame != clip.frame {
         return Err(OverlayError::InvalidFrame);
     };
-    let rule = match operation {
-        OverlayOperation::Intersection => OverlayRule::Intersect,
-        OverlayOperation::Union => OverlayRule::Union,
-        OverlayOperation::Difference => OverlayRule::Difference,
-        OverlayOperation::Xor => OverlayRule::Xor,
-    };
-    let fill = match fill {
-        FillRule::EvenOdd => BackendFill::EvenOdd,
-        FillRule::NonZero => BackendFill::NonZero,
-        FillRule::Positive => BackendFill::Positive,
-        FillRule::Negative => BackendFill::Negative,
-    };
-    let shapes = backend(&subject.polygons).overlay(&backend(&clip.polygons), rule, fill);
-    let polygons = settle::settle(shapes_to_polygons(shapes), tolerance);
+    let rings = exact_overlay::boolean(&subject.polygons, &clip.polygons, operation, fill)?;
+    let polygons = settle::settle(canonical_polygons(rings), tolerance);
     let evidence = OverlayEvidence {
         subject_rings: subject.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
         clip_rings: clip.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
@@ -369,33 +352,32 @@ pub fn union_soup(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, 
     if rings.is_empty() {
         return Ok(Vec::new());
     }
-    // All rings go to the backend as one subject against an empty clip. The
-    // NonZero fill then resolves the mutual overlaps in a single pass, which
-    // is both correct and cheaper than folding pairwise.
-    let subject: Vec<Vec<Vec<[f64; 2]>>> = rings
+    // All rings form one subject against an empty clip. The NonZero fill
+    // then resolves the mutual overlaps in a single pass, which is both
+    // correct and cheaper than folding pairwise.
+    let subject: Vec<Polygon> = rings
         .iter()
-        .map(|ring| vec![ring.points.iter().map(|p| [p.x, p.y]).collect()])
+        .map(|ring| Polygon {
+            outer: ring.clone(),
+            holes: Vec::new(),
+        })
         .collect();
-    let empty: Vec<Vec<Vec<[f64; 2]>>> = Vec::new();
-    let shapes = subject.overlay(&empty, OverlayRule::Union, BackendFill::NonZero);
+    let rings = exact_overlay::boolean(&subject, &[], OverlayOperation::Union, FillRule::NonZero)?;
     // Settled like every other output, so the polygons are valid operands
     // (#191).
-    Ok(settle::settle(shapes_to_polygons(shapes), tolerance))
+    Ok(settle::settle(canonical_polygons(rings), tolerance))
 }
 
-/// Convert backend shapes to canonical kernel polygons.
+/// Canonical kernel polygons from a boolean's rings.
 ///
 /// Shared by every operation so ring orientation, rotation and polygon
 /// ordering cannot drift between them.
-fn shapes_to_polygons(shapes: Vec<Vec<Vec<[f64; 2]>>>) -> Vec<Polygon> {
-    let mut polygons: Vec<Polygon> = shapes
+fn canonical_polygons(rings: Vec<(Ring, Vec<Ring>)>) -> Vec<Polygon> {
+    let mut polygons: Vec<Polygon> = rings
         .into_iter()
-        .filter_map(|shape| {
-            let mut rings = shape.into_iter();
-            let outer = rings.next()?;
-            let outer = canonical(to_ring(outer), true);
-            let holes = rings.map(|ring| canonical(to_ring(ring), false)).collect();
-            Some(Polygon { outer, holes })
+        .map(|(outer, holes)| Polygon {
+            outer: canonical(outer, true),
+            holes: holes.into_iter().map(|h| canonical(h, false)).collect(),
         })
         .collect();
     polygons.sort_by(|a, b| {
@@ -405,13 +387,4 @@ fn shapes_to_polygons(shapes: Vec<Vec<Vec<[f64; 2]>>>) -> Vec<Polygon> {
             .then(a.outer.points[0].y.total_cmp(&b.outer.points[0].y))
     });
     polygons
-}
-
-fn to_ring(points: Vec<[f64; 2]>) -> Ring {
-    Ring {
-        points: points
-            .into_iter()
-            .map(|p| Point2::new(p[0], p[1]))
-            .collect(),
-    }
 }

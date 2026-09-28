@@ -70,6 +70,45 @@ fn approx(a: &Dyadic, b: &Dyadic, d: &Dyadic, w: &Dyadic) -> f64 {
     scale2(sum / mw, top - ew)
 }
 
+/// `a / w` (with `w > 0`) correctly rounded to the nearest double, ties to
+/// even, starting from a guess within a few units in the last place.
+///
+/// Each step compares the exact value with the midpoint between the guess
+/// and its neighbour, which is a dyadic and so exact: the guess moves
+/// towards the value until neither midpoint lies between them.
+fn round_ratio(a: &Dyadic, w: &Dyadic, guess: f64) -> f64 {
+    if !guess.is_finite() {
+        return guess;
+    }
+    // Sign of `a / w - (lo + hi) / 2`.
+    let beyond = |lo: f64, hi: f64| sgn(&a.sub(&dy(lo).add(&dy(hi)).mul(&dy(0.5)).mul(w)));
+    let odd = |r: f64| r.to_bits() & 1 == 1;
+    let mut r = guess;
+    loop {
+        let up = r.next_up();
+        if !up.is_finite() {
+            break;
+        }
+        match beyond(r, up) {
+            Sign::Positive => r = up,
+            Sign::Zero if odd(r) => r = up,
+            _ => break,
+        }
+    }
+    loop {
+        let down = r.next_down();
+        if !down.is_finite() {
+            break;
+        }
+        match beyond(down, r) {
+            Sign::Negative => r = down,
+            Sign::Zero if odd(r) => r = down,
+            _ => break,
+        }
+    }
+    r
+}
+
 /// A circle `alpha * |X|^2 + bx * x + by * y + gamma = 0`, `alpha > 0`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Circle {
@@ -194,7 +233,13 @@ impl XPoint {
 
     /// An input vertex, exactly.
     pub(crate) fn from_f64(p: Point2) -> Self {
-        Self::rational(dy(p.x), dy(p.y), dy(1.0))
+        let mut point = Self::rational(dy(p.x), dy(p.y), dy(1.0));
+        // Exact boxes: the quotient by `w = 1` widens them by rounding,
+        // and single-point boxes let equality of input vertices be read
+        // off without arithmetic (see `same_point`).
+        point.bx = Interval::point(p.x);
+        point.by = Interval::point(p.y);
+        point
     }
 
     /// True when the point carries no square root.
@@ -205,6 +250,21 @@ impl XPoint {
     /// A nearby double pair, for output only; never for decisions.
     pub(crate) fn approx(&self) -> Point2 {
         self.approx
+    }
+
+    /// The output position: each coordinate of a rational point correctly
+    /// rounded to nearest (ties to even), so an input vertex comes back
+    /// bit-identical and a crossing of two segments is the double nearest
+    /// to the true crossing (#173). A point carrying a square root keeps
+    /// [`XPoint::approx`].
+    pub(crate) fn rounded(&self) -> Point2 {
+        if !self.is_rational() {
+            return self.approx;
+        }
+        Point2::new(
+            round_ratio(&self.xa, &self.w, self.approx.x),
+            round_ratio(&self.ya, &self.w, self.approx.y),
+        )
     }
 
     /// Sound enclosures of `x` and `y`, as `(lo, hi)` pairs.
@@ -449,6 +509,12 @@ pub(crate) fn same_point(a: &XPoint, b: &XPoint) -> bool {
     if a.bx.disjoint(b.bx) || a.by.disjoint(b.by) {
         return false;
     }
+    // Boxes that are single points hold their coordinate exactly: input
+    // vertices, and every point equal to one.
+    let exact = |p: &XPoint| p.bx.lo() == p.bx.hi() && p.by.lo() == p.by.hi();
+    if exact(a) && exact(b) {
+        return a.bx.lo() == b.bx.lo() && a.by.lo() == b.by.lo();
+    }
     // Same radicand (or none) and proportional coefficients: equal, by
     // plain dyadic cross-multiplication. The common case (a crossing met
     // again from the other edge, a vertex shared by both operands) ends
@@ -465,4 +531,56 @@ pub(crate) fn same_point(a: &XPoint, b: &XPoint) -> bool {
         }
     }
     sign(Pred::DiffX(a, b)) == Sign::Zero && sign(Pred::DiffY(a, b)) == Sign::Zero
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sign of `num / den - (a + b) / 2`, exactly.
+    fn beyond(num: &Dyadic, den: &Dyadic, a: f64, b: f64) -> Sign {
+        sgn(&num.sub(&dy(a).add(&dy(b)).mul(&dy(0.5)).mul(den)))
+    }
+
+    #[test]
+    fn rational_points_round_to_the_nearest_double() {
+        // Crossings of segments between random doubles: `rounded` must be
+        // correctly rounded, and must differ from the quick `approx` for
+        // some, or this test would not see a missing correction.
+        let mut state = 0x173u64;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 10.0 - 5.0
+        };
+        let mut corrected = 0;
+        for _ in 0..20_000 {
+            let (num, den) = (dy(next()).mul(&dy(next())), dy(next()).mul(&dy(next())));
+            let (num, den) = if sgn(&den) == Sign::Negative {
+                (num.neg(), den.neg())
+            } else {
+                (num, den)
+            };
+            if sgn(&den) == Sign::Zero {
+                continue;
+            }
+            let point = XPoint::rational(num.clone(), num.clone(), den.clone());
+            let value = point.rounded().x;
+            assert_ne!(
+                beyond(&num, &den, value.next_down(), value),
+                Sign::Negative,
+                "{value}"
+            );
+            assert_ne!(
+                beyond(&num, &den, value, value.next_up()),
+                Sign::Positive,
+                "{value}"
+            );
+            if value != point.approx().x {
+                corrected += 1;
+            }
+        }
+        assert!(corrected > 0, "approx was always right: the test is blind");
+    }
 }

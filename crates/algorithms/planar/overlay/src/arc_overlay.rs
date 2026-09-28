@@ -1,8 +1,7 @@
 //! Arc-aware planar boolean (ADR 0050; exact since ADR 0070).
 //!
-//! The polygon path keeps its integer-predicate backend. This path handles
-//! boundaries that carry arcs, which that backend cannot represent without
-//! tessellating them away.
+//! The polygon path ([`crate::overlay`], [`crate::Region`]) runs on the same
+//! exact core since #173. This path handles boundaries that carry arcs.
 //!
 //! # Exact, not tolerant
 //!
@@ -11,7 +10,8 @@
 //! inside what, how the result links into rings, which ring is a hole of
 //! which. None of them uses the tolerance, so a scene gives the same answer
 //! in millimetres and in metres. Crossing points of two curves are in
-//! general irrational; they are rounded to `f64` once, in the output.
+//! general irrational; they are rounded to `f64` once, in the output
+//! (correctly rounded where they are rational, as segment crossings are).
 //!
 //! The tolerance still validates operands ([`validate_arc_ring`]), the
 //! same contract the polygon path applies.

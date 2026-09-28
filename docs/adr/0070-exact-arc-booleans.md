@@ -122,3 +122,55 @@ ring is a hole of the smallest outer containing it.
 - **Performance work left.** The tower allocates per operation; a
   small-vector coefficient store would cut most of that. Per-edge exact
   setup could be deferred to edges whose box meets the other operand.
+
+## Addendum: straight edges on the same core (#173)
+
+ADR 0050 left the polygon path on `i_overlay`. That backend maps the
+operands' bounding box onto an `i32` grid and back, so every output
+coordinate, including an input vertex the operation does not move, came
+back snapped to a step of about 1.5e-8 of the extent: `[0,4]x[0,0.2]`
+clipped by a box around it had area `0.800000011920929`. Consumers report
+such areas as exact evidence, and threshold rules compare them with
+limits.
+
+`overlay`, `union_soup` and `Region` now run on this core: a straight ring
+is an arc ring without arcs. They use the multi-ring subdivision
+(`exact_arc/arrangement.rs`, built for #120) rather than the two-operand
+boolean, since an operand may hold several overlapping rings with holes
+and a fill rule:
+
+1. Cut the plane by every ring of both operands at once.
+2. For each piece, count each operand's winding number on either side:
+   the rings containing that side, `+1` for a ring given counter-clockwise
+   and `-1` for clockwise, as the integer backend counted them. The fill
+   rule reads the count, the operation combines the operands.
+3. Keep pieces with the result on exactly one side, facing it; link; drop
+   vertices where the boundary runs exactly straight on.
+4. Round once. Rational points (input vertices and segment crossings) are
+   now correctly rounded (`XPoint::rounded`), in the arc path too.
+
+The subdivision was quadratic in the ring count (every edge scanned every
+ring). It now indexes edge boxes, monotone parts and ring boxes in static
+box trees, and asks each edge pair once. Pairs of input segments go
+through certified `f64` filters first (apart, identical, sharing one end);
+points built from input vertices carry exact point boxes, so their
+identity needs no arithmetic. Measured against the integer backend
+(release, this machine, `union` of the same inputs):
+
+| Scene | `i_overlay` | Exact |
+| --- | ---: | ---: |
+| Two 100-gons | 0.16 ms | 2.4 ms |
+| Two 1000-gons | 9.2 ms | 31 ms |
+| Two 5000-gons (both: O(n^2) operand validation) | 221 ms | 330 ms |
+| Soup of 1600 triangles (`union_soup`) | 0.25 ms | 36 ms |
+| Soup of 14,400 triangles | 3.5 ms | 0.40 s |
+
+The route, project, construct and B-rep suites run in the same time as
+before, and `benches/arc_overlay.rs` is unchanged within the noise of a
+shared machine (alternating runs; the arc scenes were at or below the
+previous figures in the quieter round). Evidence: `src/exact_overlay.rs` (point membership against the
+integer backend over 256 random scenes, all four operations and fill
+rules), `tests/exact_straight.rs` (bit-identical vertices, correctly
+rounded crossings; all four tests fail on the old backend), and
+`scripts/probe_exact_overlay_mutants.py`. `i_overlay` remains for
+`offset.rs` only.

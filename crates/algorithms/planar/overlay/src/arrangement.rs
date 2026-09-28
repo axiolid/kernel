@@ -162,8 +162,8 @@ impl ArcArrangement {
                         }
                     })
                     .collect(),
-                left: edge.left.clone(),
-                right: edge.right.clone(),
+                left: edge.sides(counts.len(), true),
+                right: edge.sides(counts.len(), false),
             })
             .collect();
         Ok(Self {
