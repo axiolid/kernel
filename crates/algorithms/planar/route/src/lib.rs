@@ -53,8 +53,9 @@ use graph::Graph;
 
 pub use forced::{forced_walk, forced_walk_within, ForcedWalk};
 pub use map::{
-    distance_map, distance_map_within, farthest_point, farthest_point_within, DistanceMap,
-    Farthest, FarthestError, LengthInterval, MapError, Reach, MAX_CELLS,
+    distance_map, distance_map_weighted, distance_map_within, distance_map_within_weighted,
+    farthest_point, farthest_point_within, DistanceMap, Farthest, FarthestError, LengthInterval,
+    MapError, Reach, MAX_CELLS,
 };
 pub use skeleton::{skeleton, NodeKind, Skeleton, SkeletonError, SkeletonNode, Wall};
 pub use weighted::{

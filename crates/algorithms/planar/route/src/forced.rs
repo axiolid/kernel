@@ -173,9 +173,9 @@ pub fn forced_walk_within(
     };
     // The shortest walk overall: no walk through the polygon beats it.
     let mut shortest = f64::INFINITY;
-    for &origin in from.sites() {
+    for (&origin, &weight) in from.sites().iter().zip(from.weights()) {
         if let Some(d) = to.at(origin)? {
-            shortest = shortest.min(d);
+            shortest = shortest.min(weight + d);
         }
     }
     let floor = shortest * (1.0 - relative);

@@ -1141,9 +1141,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-route
 
-### 0.3.4 - 2026-09-27
+### 0.3.4 - 2026-09-28
 
 ### Added
+
+- Weighted targets (#197): `distance_map_weighted` and
+  `distance_map_within_weighted` take `(point, weight)` targets, each
+  starting at its own non-negative distance -- a stair landing carrying the
+  rest of a walk beyond it. `nearest` answers the least route length plus
+  weight, in the new `Reach::distance`, and names the target the route
+  ends at, which may be a lighter target the heavier one is reached from;
+  `route.length` is the route's own. `farthest_point` and `forced_walk`
+  keep their brackets (the weighted distance is still 1-Lipschitz), and
+  `ForcedWalk::shortest` counts the origins' weights. With every weight
+  zero the map is `distance_map`'s. `MapError::InvalidWeight` refuses a
+  negative or non-finite weight.
 
 - `forced_walk` (#196): the shortest walk from an origin to a target that
   enters a polygon, `min over p of d_origin(p) + d_targets(p)`, bracketed

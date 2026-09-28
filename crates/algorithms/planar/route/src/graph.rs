@@ -462,12 +462,23 @@ pub(crate) fn dijkstra(
     sources: &[usize],
     stop: impl Fn(usize) -> bool,
 ) -> (Vec<f64>, Vec<usize>, Option<usize>) {
+    let seeded: Vec<(usize, f64)> = sources.iter().map(|&s| (s, 0.0)).collect();
+    dijkstra_from(adjacency, &seeded, stop)
+}
+
+/// [`dijkstra`] with each source starting at its own distance; a source
+/// seeded twice keeps the lesser.
+pub(crate) fn dijkstra_from(
+    adjacency: &[Vec<(usize, f64)>],
+    sources: &[(usize, f64)],
+    stop: impl Fn(usize) -> bool,
+) -> (Vec<f64>, Vec<usize>, Option<usize>) {
     let count = adjacency.len();
     let mut distance = vec![f64::INFINITY; count];
     let mut previous = vec![usize::MAX; count];
     let mut settled = vec![false; count];
-    for &s in sources {
-        distance[s] = 0.0;
+    for &(s, start) in sources {
+        distance[s] = distance[s].min(start);
     }
     for _ in 0..count {
         let mut current = None;

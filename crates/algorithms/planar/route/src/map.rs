@@ -73,6 +73,11 @@ pub enum MapError {
         /// Its index in the cost regions given.
         index: usize,
     },
+    /// A target's weight is negative or not finite.
+    InvalidWeight {
+        /// Its index in the targets given.
+        index: usize,
+    },
     /// The spacing of points along cost edges is not positive and finite.
     InvalidSpacing,
     /// A cost region's edge properly crosses a region edge, a barrier or
@@ -110,6 +115,8 @@ pub struct DistanceMap {
     target: Vec<usize>,
     /// The targets given.
     sites: Vec<Point2>,
+    /// Their weights: the distance each starts at.
+    weights: Vec<f64>,
 }
 
 /// The nearest target from a point, and the route there.
@@ -119,8 +126,13 @@ pub struct Reach {
     /// Index of the nearest target in the targets given. Ties go to the
     /// route through the lowest graph vertex, deterministically.
     pub target: usize,
-    /// The route, from the query point to the target.
+    /// The route, from the query point to the target. Its `length` is the
+    /// route's own, without the target's weight.
     pub route: Route,
+    /// The distance: the route's length plus the target's weight (see
+    /// [`distance_map_weighted`]); the route's length when all weights are
+    /// zero.
+    pub distance: f64,
 }
 
 /// A distance map from `targets` over `region`, avoiding `barriers`.
@@ -148,12 +160,50 @@ pub fn distance_map_within(
     targets: &[Point2],
     budget: usize,
 ) -> Result<DistanceMap, MapError> {
+    let weighted: Vec<(Point2, f64)> = targets.iter().map(|t| (*t, 0.0)).collect();
+    distance_map_within_weighted(region, barriers, &weighted, budget)
+}
+
+/// A distance map whose targets each start at their own distance: the
+/// distance from a point is the least, over targets, of the route's
+/// length to the target plus the target's weight (#197). For a way out
+/// that carries the rest of a walk beyond it, such as a stair landing.
+/// With every weight zero it is [`distance_map`].
+///
+/// # Errors
+///
+/// As [`distance_map`], and [`MapError::InvalidWeight`] for a weight
+/// that is negative or not finite.
+pub fn distance_map_weighted(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    targets: &[(Point2, f64)],
+) -> Result<DistanceMap, MapError> {
+    distance_map_within_weighted(region, barriers, targets, MAX_VERTICES)
+}
+
+/// [`distance_map_weighted`] with a caller-chosen vertex budget.
+///
+/// # Errors
+///
+/// As [`distance_map_weighted`], with `budget` for [`MAX_VERTICES`].
+pub fn distance_map_within_weighted(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    weighted: &[(Point2, f64)],
+    budget: usize,
+) -> Result<DistanceMap, MapError> {
     validate_region(region, barriers)?;
-    if targets.is_empty() {
+    if weighted.is_empty() {
         return Err(MapError::NoTargets);
     }
+    let targets: Vec<Point2> = weighted.iter().map(|(t, _)| *t).collect();
+    let weights: Vec<f64> = weighted.iter().map(|(_, w)| *w).collect();
     if !targets.iter().all(|t| t.is_finite()) {
         return Err(RouteError::NonFinitePoint.into());
+    }
+    if let Some(index) = weights.iter().position(|w| !(w.is_finite() && *w >= 0.0)) {
+        return Err(MapError::InvalidWeight { index });
     }
     for (index, t) in targets.iter().enumerate() {
         if !contains(region, *t)? {
@@ -180,25 +230,31 @@ pub fn distance_map_within(
     }
     let obstacles = obstacle_segments(region, barriers);
     let graph = Graph::build(&nodes, region, barriers, &obstacles)?;
-    // Every free sector of every target at distance zero, then one
-    // Dijkstra; ties go to the lowest state, as in `shortest_path`.
+    // Every free sector of every target at its weight, then one Dijkstra;
+    // ties go to the lowest state, as in `shortest_path`. Of targets on
+    // one point, the lightest (then the first) seeds it.
     let mut sources = Vec::new();
     let mut seed = vec![usize::MAX; graph.adjacency.len()];
     for (i, node) in nodes.iter().enumerate() {
-        if let Some(t) = targets.iter().position(|t| t == node) {
+        let lightest = (0..targets.len())
+            .filter(|&t| targets[t] == *node)
+            .min_by(|&a, &b| weights[a].total_cmp(&weights[b]).then(a.cmp(&b)));
+        if let Some(t) = lightest {
             for state in graph.states(i) {
-                sources.push(state);
+                sources.push((state, weights[t]));
                 seed[state] = t;
             }
         }
     }
-    let (distance, next, _) = graph::dijkstra(&graph.adjacency, &sources, |_| false);
-    // Follow each state's chain to the target that seeded it.
+    let (distance, next, _) = graph::dijkstra_from(&graph.adjacency, &sources, |_| false);
+    // Follow each state's chain to its end, the target it is reached
+    // from. A heavy target may itself be reached from a lighter one, so
+    // being seeded does not end the chain.
     let mut target = seed.clone();
     for (state, t) in target.iter_mut().enumerate() {
         let mut at = state;
         let mut steps = 0;
-        while seed[at] == usize::MAX && next[at] != usize::MAX && steps <= seed.len() {
+        while next[at] != usize::MAX && steps <= seed.len() {
             at = next[at];
             steps += 1;
         }
@@ -216,7 +272,8 @@ pub fn distance_map_within(
         distance,
         next,
         target,
-        sites: targets.to_vec(),
+        sites: targets,
+        weights,
     })
 }
 
@@ -266,6 +323,11 @@ impl DistanceMap {
         &self.sites
     }
 
+    /// The distance each target starts at.
+    pub(crate) fn weights(&self) -> &[f64] {
+        &self.weights
+    }
+
     /// Whether two maps cover the same free space: the same region and the
     /// same barriers.
     pub(crate) fn same_space(&self, other: &Self) -> bool {
@@ -302,13 +364,16 @@ impl DistanceMap {
             }
             state = self.next[state];
         }
+        let target = self.target[first];
         Ok(Ok(Reach {
-            target: self.target[first],
+            target,
             route: Route {
                 polyline,
-                length,
+                // Exactly the distance when the weight is zero.
+                length: length - self.weights[target],
                 graph_vertices: self.nodes.len(),
             },
+            distance: length,
         }))
     }
 
