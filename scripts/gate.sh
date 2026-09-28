@@ -7,6 +7,9 @@ gate_out="$(mktemp "${TMPDIR:-/tmp}/axiolid-gate.XXXXXX")" || exit 1
 trap 'rm -f "$gate_out"' EXIT
 fail=0
 step() { local name="$1"; shift; printf '%-46s' "$name"; if "$@" >"$gate_out" 2>&1; then echo ok; else echo "FAIL (exit $?)"; tail -25 "$gate_out" | sed 's/^/    /'; fail=1; fi; }
+# First, before any build rewrites it: a stale Cargo.lock passes every
+# local step and fails the release job's `cargo package --locked`.
+step "Cargo.lock current" cargo metadata --locked --offline --format-version 1
 step "fmt --check" cargo fmt --all -- --check
 step "architecture" cargo xtask architecture check
 step "architecture mutation probe" scripts/probe_layering_gate.sh
