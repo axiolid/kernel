@@ -1,4 +1,5 @@
-//! Exact signs of B-spline fields (ADR 0077), where `f64` cannot decide.
+//! Exact signs of B-spline fields (ADR 0077), where `f64` cannot decide,
+//! and the tier that dispatches to the series fields' own (`exact_series`).
 //!
 //! On one cell `[a, b] x [c, d]` of a [`PatchField2`] of degree `(p, q)`,
 //! the field times `(b - a)^p (d - c)^q` is
@@ -23,9 +24,55 @@ use axiolid_curve::{Field2, PatchField2};
 use axiolid_exact::{Arith, Dyadic, Interval};
 use axiolid_guarantees::Sign;
 
+use crate::exact_series::SeriesTier;
+
+/// A field's certified tier: exact dyadic Bernstein arithmetic for a
+/// B-spline field, certified harmonics for a series field
+/// ([`SeriesTier`]). A series field's tier answers only where the field is
+/// flat ([`SeriesTier::flat`]): elsewhere `f64` and subdivision decide, as
+/// they always have, at a fraction of the cost.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Exact<'a> {
+    Patches(PatchTier<'a>),
+    Series(SeriesTier<'a>),
+}
+
+impl<'a> Exact<'a> {
+    /// The certified tier of a field with finite coefficients.
+    pub(crate) fn of(field: &'a Field2) -> Option<Self> {
+        match field {
+            Field2::Patches(f) if f.is_finite() => Some(Self::Patches(PatchTier { field: f })),
+            Field2::Series(f) if f.is_finite() => Some(Self::Series(SeriesTier::new(f))),
+            _ => None,
+        }
+    }
+
+    /// The sign of the field's derivative of orders `d` (along `u`, `v`) at
+    /// `p`: `Zero` only where it is exactly zero.
+    pub(crate) fn sign_at(&self, p: Point2, d: (usize, usize)) -> Option<Sign> {
+        match self {
+            Self::Patches(t) => t.sign_at(p, d),
+            Self::Series(t) => t.flat(p, d).then(|| t.sign_at(p, d)).flatten(),
+        }
+    }
+
+    /// The strict sign the derivative of orders `d` keeps over the box
+    /// `[lo, hi]` (either side may be a point), or `None` where it is not
+    /// proven to keep one.
+    pub(crate) fn keeps_sign(&self, lo: Point2, hi: Point2, d: (usize, usize)) -> Option<Sign> {
+        match self {
+            Self::Patches(t) => t.keeps_sign(lo, hi, d),
+            Self::Series(t) => {
+                let centre = lo + (hi - lo) * 0.5;
+                t.flat(centre, d).then(|| t.keeps_sign(lo, hi, d)).flatten()
+            }
+        }
+    }
+}
+
 /// A B-spline field's exact tier.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Exact<'a> {
+pub(crate) struct PatchTier<'a> {
     field: &'a PatchField2,
 }
 
@@ -36,16 +83,7 @@ struct Span {
     x1: Scalar,
 }
 
-impl<'a> Exact<'a> {
-    /// The exact tier of a B-spline field; `None` for a series field, whose
-    /// harmonics no finite arithmetic evaluates exactly.
-    pub(crate) fn of(field: &'a Field2) -> Option<Self> {
-        match field {
-            Field2::Patches(f) if f.is_finite() => Some(Self { field: f }),
-            _ => None,
-        }
-    }
-
+impl PatchTier<'_> {
     fn cells(&self) -> (usize, usize) {
         (self.field.u_breaks.len() - 1, self.field.v_breaks.len() - 1)
     }

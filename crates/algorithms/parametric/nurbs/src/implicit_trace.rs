@@ -288,7 +288,9 @@ fn contact_of_order(
         // twentieth, the lines are not followed: rounding hides them.
         let mut radius = 1e-3 * size;
         let factorial: Scalar = (1..=m).map(|k| k as Scalar).product();
-        // With an exact tier nothing is hidden: the least width serves.
+        // With a certified tier (every field of finite coefficients has
+        // one, B-spline or series) nothing is hidden: the least width
+        // serves.
         let exact = Exact::of(field).is_some();
         for curve in crossing.iter().chain(&touching).filter(|_| !exact) {
             let p = curve.point(0.5 * curve.end())?;
@@ -1554,4 +1556,112 @@ fn chain(
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiolid_curve::implicit::{Basis, SeriesField2};
+
+    /// `sin(u)^k` in harmonics along `u` (`k` odd:
+    /// `2^(1-k) sum_j (-1)^((k-1)/2 - j) C(k, j) sin((k - 2j) u)`; `k` even:
+    /// `2^(1-k) (C(k, k/2)/2 + sum_j (-1)^(k/2 - j) C(k, j) cos((k - 2j) u))`),
+    /// times `along_v` (coefficients of `1, cos v, sin v`).
+    fn sine_power(k: usize, along_v: &[Scalar]) -> Field2 {
+        let mut u = vec![0.0; 2 * k + 1];
+        let mut binomial = 1.0;
+        let scale = 2f64.powi(1 - k as i32);
+        for j in 0..=k / 2 {
+            let w = k - 2 * j;
+            if k % 2 == 1 {
+                let sign = if ((k - 1) / 2 - j) % 2 == 0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+                u[2 * w] = sign * binomial * scale;
+            } else if w == 0 {
+                u[0] = binomial * scale / 2.0;
+            } else {
+                let sign = if (k / 2 - j) % 2 == 0 { 1.0 } else { -1.0 };
+                u[2 * w - 1] = sign * binomial * scale;
+            }
+            binomial = binomial * (k - j) as Scalar / (j + 1) as Scalar;
+        }
+        Field2::Series(SeriesField2 {
+            u: Basis::Fourier,
+            v: if along_v.len() > 1 {
+                Basis::Fourier
+            } else {
+                Basis::Power
+            },
+            coefficients: u
+                .iter()
+                .map(|c| along_v.iter().map(|b| c * b).collect())
+                .collect(),
+        })
+    }
+
+    fn square() -> Cell {
+        Cell {
+            lo: Point2::new(-1.0, -1.0),
+            hi: Point2::new(1.0, 1.0),
+        }
+    }
+
+    const OPEN: Periodic = Periodic { u: false, v: false };
+
+    #[test]
+    fn sine_powers_are_what_they_say() {
+        for k in [9, 12, 13] {
+            let f = sine_power(k, &[2.0, 1.0]);
+            for (x, y) in [(0.3, 0.2), (-0.7, 0.9), (1.1, -0.4)] {
+                let exact = f64::sin(x).powi(k as i32) * (2.0 + f64::cos(y));
+                assert!((f.value(Point2::new(x, y)) - exact).abs() < 1e-14, "{k}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_line_of_contact_hidden_by_rounding_is_traced() {
+        // sin(u)^13 crosses zero along u = 0, vanishing to 13th order: in
+        // `f64` its value is below rounding out to |u| ~ 0.12, more than a
+        // twentieth of the window each side. Refused before (#181); now
+        // its signs there are certified, and the line is traced.
+        let curves = trace(&sine_power(13, &[1.0]), square(), OPEN).expect("the line");
+        assert_eq!(curves.len(), 1);
+        let (mut lo, mut hi) = (Scalar::INFINITY, Scalar::NEG_INFINITY);
+        for i in 0..=200 {
+            let p = curves[0]
+                .point(curves[0].end() * i as Scalar / 200.0)
+                .expect("a point");
+            assert!(p.x.abs() < 1e-12, "{p:?}");
+            lo = lo.min(p.y);
+            hi = hi.max(p.y);
+        }
+        assert!(lo < -1.0 + 1e-9 && hi > 1.0 - 1e-9, "{lo} .. {hi}");
+    }
+
+    #[test]
+    fn a_hidden_line_of_contact_varying_along_it_is_traced() {
+        // sin(u)^9 (2 + cos v): harmonics along both parameters, so the
+        // certified boxes are two-dimensional.
+        let curves = trace(&sine_power(9, &[2.0, 1.0]), square(), OPEN).expect("the line");
+        assert_eq!(curves.len(), 1);
+        for i in 0..=200 {
+            let p = curves[0]
+                .point(curves[0].end() * i as Scalar / 200.0)
+                .expect("a point");
+            assert!(p.x.abs() < 1e-12, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_hidden_line_of_even_contact_only_touches() {
+        // sin(u)^12 is zero along u = 0 and positive either side.
+        assert!(matches!(
+            trace(&sine_power(12, &[1.0]), square(), OPEN),
+            Err(TraceRefusal::Touching(_))
+        ));
+    }
 }

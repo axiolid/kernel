@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `FixedInterval`: a real number between two big-integer bounds at a
+  chosen number of fractional bits, every operation rounded outward, and
+  `FixedInterval::sin_cos`, certified `sin` and `cos` of a dyadic angle
+  (Taylor series with the Lagrange remainder, after halving the angle).
+  For signs of values no finite arithmetic holds exactly, asked again at
+  a higher precision until they show (#181).
+
 ## [0.1.0] - 2026-09-24
 
 ### Added

@@ -51,7 +51,7 @@ E = "crates/algorithms/parametric/nurbs/src/exact_field.rs"
 EXACT = ["-p", "axiolid-nurbs", "--lib", "exact_field"]
 
 MUTANTS = [
-    ('no exact tier', E, '            Field2::Patches(f) if f.is_finite() => Some(Self { field: f }),', '            Field2::Patches(_) => None,', SPLINE),
+    ('no exact tier', E, '            Field2::Patches(f) if f.is_finite() => Some(Self::Patches(PatchTier { field: f })),', '            Field2::Patches(_) => None,', SPLINE),
     ('right split mis-indexed', E, '        out[n - r] = w[n - r].clone();', '        out[n - r] = w[0].clone();', EXACT),
     ('undecided coefficients passed over', E, '        if undecided {\n            return None;\n        }', '', EXACT),
     ('tubes widened as if nothing were exact', T, '.filter(|_| !exact)', '', SPLINE),

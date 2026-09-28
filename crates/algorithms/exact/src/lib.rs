@@ -19,6 +19,10 @@
 //! and order are decided by squaring with case analysis, never by
 //! evaluating the root.
 //!
+//! Values no finite arithmetic holds -- `sin` and `cos` of a dyadic angle
+//! -- are enclosed in [`FixedInterval`]s whose precision the caller raises
+//! until a nonzero sign shows.
+//!
 //! Expressions are written once against the [`Arith`] trait and run in both
 //! tiers, so the fast path and the exact path cannot compute different
 //! polynomials.
@@ -28,6 +32,7 @@ pub mod certify;
 pub mod conic;
 pub mod construct;
 pub mod dyadic;
+pub mod fixed;
 pub mod interval;
 pub mod poly;
 pub mod root;
@@ -44,6 +49,7 @@ pub use construct::{
     Circle, HitCount, Line, LineHit,
 };
 pub use dyadic::Dyadic;
+pub use fixed::FixedInterval;
 pub use interval::Interval;
 pub use poly::{IntPoly, RealRoot};
 pub use root::{sign_root, sign_two_roots, Root2};

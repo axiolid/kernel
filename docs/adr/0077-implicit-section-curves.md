@@ -280,10 +280,9 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
      not (touching). Curves of the derivative that are regular zeros of
      the field, or not zeros at all, are dropped.
   3. The field is traced again with tubes left out about every line of
-     contact at least a thousandth of the window wide; on a series field,
-     out to where `c n^m` is 64 times its rounding (`c` read off the
-     derivative's slope, `m! c`), and wider than a twentieth, rounding
-     hides the line and it is `Undecided`. Two branches meeting a line within rounding of each
+     contact a thousandth of the window wide: every field has a certified
+     tier (below), so no tube needs widening to where rounding stops
+     hiding the line. Two branches meeting a line within rounding of each
      other meet it at one vertex. A branch of it ending at a tube
      runs into the line: it is bridged to the line's nearest point (an end
      the line already has, within rounding, is that point), and the line
@@ -355,12 +354,34 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
     signs, lines of contact of every order the field's degree allows are
     found (`x^21` against a plane in the tests), and their tubes need no
     widening.
-  - Series fields (analytic carriers), whose harmonics no finite
-    arithmetic evaluates exactly, split the piece instead; their lines
-    of contact that rounding hides more than a twentieth of the window
-    wide are `Undecided`. Contact of high order along a curve needs
-    inflections quadrics and tori do not have; it arises with B-splines,
-    which are exact.
+  - **Series fields decide it with certified arithmetic**
+    (`exact_series`, #181). Harmonics have no exact value, but a sign
+    does not need one:
+    - *Zero at a point.* At `f64` parameters every harmonic angle is an
+      integer multiple of one dyadic angle `w`, so with `z = e^(iw)` the
+      value is a Laurent polynomial in `z` with dyadic complex
+      coefficients. `z` is transcendental (Lindemann), so the value is
+      zero exactly when every collected coefficient is: decided in dyadic
+      arithmetic.
+    - *Sign at a point.* Otherwise the value is nonzero, and fixed-point
+      intervals (`axiolid_exact::FixedInterval`: big-integer bounds
+      rounded outward, `sin` and `cos` from their Taylor series with the
+      Lagrange remainder added) at rising precision show its sign.
+    - *Sign over a box.* A Taylor form about a corner: the value and
+      derivatives there, certified, make a polynomial, and the next
+      order's derivative bounds over the box bound the remainder. Its
+      Bernstein coefficients all clearing the remainder with one sign
+      prove that sign. The order rises until they do or cannot.
+    The trace consults this tier only where the field is *flat*, its
+    gradient below `1e-4` of its terms' magnitudes: along a line of
+    contact or at a singular point, where `f64` bounds fail at every
+    size. Elsewhere `f64` and subdivision decide as before, so ordinary
+    sections are traced exactly as they were, at their old cost. Lines
+    of contact that rounding hides over more than a twentieth of the
+    window (`sin(u)^13` in the tests) are traced, no longer
+    `Undecided`. Such contact needs inflections quadrics and tori do not
+    have, so no known input needed it; the tier is there for the one
+    that does.
 - A pcurve on a face whose trace is too costly (a tacnode read far from
   the face's parameter origin) falls back to the section's own space
   curve read on the face (`Curve2::Lifted`).
@@ -375,6 +396,10 @@ is carried on both: `Curve3::PairSection` (`PairSection3`).
   interval bounds, partials.
 - `crates/algorithms/parametric/nurbs/src/implicit_trace.rs`: the certified
   trace.
+- `crates/algorithms/parametric/nurbs/src/exact_field.rs` and
+  `exact_series.rs`: the certified tiers of B-spline and series fields.
+- `crates/algorithms/exact/src/fixed.rs`: `FixedInterval`, certified
+  `sin` and `cos`.
 - `crates/algorithms/parametric/nurbs/src/implicit_section.rs`:
   `implicit_surface_intersection`, the fallback of
   `exact_surface_intersection`.

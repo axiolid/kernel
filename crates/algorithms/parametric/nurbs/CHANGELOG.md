@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Traced sections decide signs of analytic series fields with certified
+  arithmetic where `f64` cannot (#181): exact zeros by a Laurent identity
+  in the harmonics' common angle, point signs by fixed-point intervals at
+  rising precision, and box signs by the Bernstein coefficients of a
+  certified Taylor form. The tier answers only where the field is flat
+  (along a line of contact or at a singular point), so ordinary sections
+  trace exactly as before. Lines of contact that rounding hides over more
+  than a twentieth of the window, refused as `Undecided` until now, are
+  traced on analytic fields as on B-spline ones (ADR 0077).
+
 ## [0.3.2] - 2026-09-27
 
 ### Added
