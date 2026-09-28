@@ -111,6 +111,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.5 - 2026-09-28
+
+### Fixed
+
+- Structural sections mesh (#193): `profile_rings` flattens every
+  `Profile::Section` family -- I, asymmetric I, L, T, U, C, Z, trapezium --
+  from the exact contour `section_contour` builds, fillets and toe radii
+  chorded within the budget, straight edges exact. It refused them with
+  `Unsupported { ProfileTriangulation }` before. Rectangles with corner
+  radii mesh with them, through `rectangle_contour`: the mesh path used to
+  drop the radii and mesh a sharp box.
+- Circles are chorded from half a step off the axes, not from angle 0
+  (#194): the same chords, turned, so a chord's middle, inside the circle,
+  sits at every quarter turn. A circular void tangent to a face along an
+  axis direction, as openings are, leaves a sliver of material under it
+  instead of a chord point on the face, which pinched the solid.
+
 ### 0.3.4 - 2026-09-27
 
 ### Added
@@ -604,6 +621,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.5 - 2026-09-28
+
+### Fixed
+
+- A boolean whose result touches itself is refused, not returned (#194):
+  where operands meet tangentially -- a void tangent to its host's face --
+  the solid has no material between two faces, and the mesh boolean keeps
+  two copies of the vertices there, closed by index but pinched by
+  position. Consumers welding by position saw an edge with four faces. The
+  result is now checked, positions welded, for an edge with more than two
+  faces or a vertex with separate fans, and refused with
+  `GeomError::Degenerate` naming the edge or point of contact. Circular
+  voids tangent along an axis direction no longer pinch at all (construct).
+- Structural sections and rounded rectangles extrude to meshes (#193, via
+  construct).
 
 ### 0.3.4 - 2026-09-27
 

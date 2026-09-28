@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "axiolid-brep",
  "axiolid-construct",

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-28
+
 ### Fixed
 
 - A boolean whose result touches itself is refused, not returned (#194):

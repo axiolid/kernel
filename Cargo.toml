@@ -90,7 +90,7 @@ axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.0"
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.0" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.1" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.1" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.3" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.5" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.0" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.0" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.1" }
