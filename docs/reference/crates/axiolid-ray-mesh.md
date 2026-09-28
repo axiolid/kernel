@@ -8,11 +8,10 @@ Narrow-phase ray/triangle-mesh nearest-hit intersection.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
-| crates.io | [`axiolid-ray-mesh`](https://crates.io/crates/axiolid-ray-mesh) |
+| Latest release | not released (`main` is 0.4.0) |
 | Facade | [`axiolid`](./axiolid) feature `ray-mesh` |
 | Layer | algorithms (`algorithm.query`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_ray_mesh/index.html) · [docs.rs](https://docs.rs/axiolid-ray-mesh) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_ray_mesh/index.html) |
 | Source | [`crates/algorithms/query/intersection/ray-mesh/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/query/intersection/ray-mesh) |
 
 ## Overview
@@ -28,6 +27,6 @@ Narrow-phase ray/triangle-mesh intersection: the nearest hit with its parameter,
 
 ## Changes
 
-Released in the workspace-wide 0.3.0 release (2026-09-23), before crates versioned independently; its notes are in the [workspace changelog](/CHANGELOG).
+No release yet.
 
 Full history: [`crates/algorithms/query/intersection/ray-mesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/intersection/ray-mesh/CHANGELOG.md)

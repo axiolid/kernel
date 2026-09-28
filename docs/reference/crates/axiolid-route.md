@@ -8,7 +8,7 @@ Exact planar shortest path over a visibility graph.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-09-28) |
+| Latest release | 0.3.5 (2026-09-28) |
 | crates.io | [`axiolid-route`](https://crates.io/crates/axiolid-route) |
 | Facade | [`axiolid`](./axiolid) feature `route` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -30,57 +30,48 @@ Exact planar shortest paths over a visibility graph, plus distance maps, farthes
 
 ## Changes
 
-Latest release, 0.3.4 (2026-09-28):
+Latest release, 0.3.5 (2026-09-28):
 
 ### Added
 
-- Weighted targets (#197): `distance_map_weighted` and
-  `distance_map_within_weighted` take `(point, weight)` targets, each
-  starting at its own non-negative distance -- a stair landing carrying the
-  rest of a walk beyond it. `nearest` answers the least route length plus
-  weight, in the new `Reach::distance`, and names the target the route
-  ends at, which may be a lighter target the heavier one is reached from;
-  `route.length` is the route's own. `farthest_point` and `forced_walk`
-  keep their brackets (the weighted distance is still 1-Lipschitz), and
-  `ForcedWalk::shortest` counts the origins' weights. With every weight
-  zero the map is `distance_map`'s. `MapError::InvalidWeight` refuses a
-  negative or non-finite weight.
-
-- `forced_walk` (#196): the shortest walk from an origin to a target that
-  enters a polygon, `min over p of d_origin(p) + d_targets(p)`, bracketed
-  to a tolerance from two distance maps over the same free space. Branch
-  and bound as for `farthest_point`, with a second lower bound from the
-  maps' own vertices (`D(u) + D'(v) + max(|u - v|, dist(T, u) + dist(T,
-  v))` over the vertices a cell may see), which is exact on every cell the
-  walk runs straight through. `ForcedWalk::shortest` is the shortest walk
-  overall; a lower end above it proves no shortest walk enters the
-  polygon. A polygon no walk reaches is infinitely far, not an error.
-- `FarthestError::MismatchedMaps`, for two maps over different region or
-  barriers.
-- Weighted distance maps (#195): `weighted_distance_map` takes cost
-  regions (`CostRegion`: a polygon and a factor of at least 1; overlaps
-  take the greatest, and a walk along a cost edge pays its cheaper free
-  side) and points along cost edges `spacing` apart. `WeightedMap::nearest`
-  brackets the weighted distance to the nearest target
-  (`WeightedReach::cost`) and gives the walk whose cost is the upper end.
-  The upper bound is the exact visibility graph with those points added,
-  each edge costing its weighted length; the lower bound is a graph over
-  vertices and intervals of cost edges whose hops cost no more than any
-  piece of an optimal walk between them, with the states an optimal walk
-  cannot take -- turning back at a cost edge, two pieces in a row along
-  one line -- barred. Square crossings are exact; otherwise the gap is
-  first order in the spacing. `weighted_farthest_point` brackets the
-  farthest point of a subregion by the same branch and bound, each
-  triangle's slope its greatest factor.
-- `MapError::InvalidFactor`, `InvalidSpacing` and `CostCrossing`: cost
-  regions may nest, touch, share edges and run along the region's
-  boundary; one crossing an obstacle or another's edge, or running along a
-  barrier, is refused.
+- Seeded weighted maps (#198): `weighted_distance_map_seeded` and
+  `weighted_distance_map_seeded_within` take `(point, weight)` targets,
+  each starting at its own non-negative cost, as `distance_map_weighted`
+  does for plain maps (#197); both bounds start there, and
+  `WeightedReach::cost` counts the weight. With every weight zero the map
+  and its answers are `weighted_distance_map`'s exactly.
+- `weighted_forced_walk` and `weighted_forced_walk_within` (#198): the
+  cheapest walk that enters a polygon over two weighted maps with the same
+  costs, bracketed with a witness as `forced_walk` is. The cell bound falls
+  at twice the steepest factor meeting the cell, and the pair bound runs
+  over both maps' vertices and cost-edge intervals with their lower
+  bounds, at the cell's own factor when no cost edge meets it.
+  `WeightedForcedWalk::shortest` brackets the cheapest walk overall; the
+  result is never narrower than the maps' brackets at the witness, and the
+  search stops at the tolerance plus those.
 
 ### Changed
 
-- Segment crossing tests reject disjoint bounding boxes before any
-  predicate, and a segment's pass-through check visits only vertices with
-  obstacle rays: `distance_map` builds several times faster.
+- A cost region touching the region's boundary up to rounding is taken as
+  touching it (#198), no longer refused with `MapError::CostCrossing`: a
+  cost vertex within 2^-24 of the region's extent (and a few ulps) of a
+  region edge, on its free side, is moved just beyond it, and a cost edge
+  may cross a region edge that near one of either edge's ends. An edge so
+  left on or beyond a wall is wall-borne, as one exactly along it. So a
+  footprint clipped to the free region, its corners rounded by the
+  overlay, builds a map, and leaves no sliver along a wall costing 1.
+
+### Fixed
+
+- Weighted maps on cost edges at an angle (#198). The points cutting such
+  an edge are interpolated and lie off its line by rounding, which made
+  three decisions go wrong: an interval's sides were taken of its rounded
+  ends, so could both read the factor of one side; an edge could appear to
+  cross every hop to its own intervals and block them -- both could put
+  the lower bound above the distance; and every hop along the edge was
+  charged the greatest factor above. Sides are now taken of the edge's
+  exact ends, an edge never blocks hops from its own line, and a hop along
+  an edge is costed above as the walk along the edge itself, which lies
+  that close to it.
 
 Full history: [`crates/algorithms/planar/route/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/route/CHANGELOG.md)

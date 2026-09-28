@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-ray-mesh"
 description = "Narrow-phase ray/triangle-mesh nearest-hit intersection"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

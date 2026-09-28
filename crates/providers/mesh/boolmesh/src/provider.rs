@@ -8,8 +8,9 @@
 //! [`check_result`] is `BackendContractViolation`: the inputs were already
 //! validated, so a bad result is this provider's defect, never blamed on
 //! the caller. A failure inside the kernel's own solve (for example an odd
-//! edge-point count in `pair_up`, #101) is reported as `Degenerate`: the
-//! kernel refused operands it could not resolve.
+//! edge-point count in `pair_up`, #101) is `BackendContractViolation` for
+//! the same reason: the operands passed every input gate, so the solve
+//! failing on them is this provider's defect.
 
 use crate::csg::{compute_boolean, OpType};
 use axiolid_contracts::{
@@ -332,9 +333,10 @@ impl BoolmeshBoolean {
                 return Ok(BooleanOutcome::new(empty, evidence));
             }
             Err(reason) => {
-                return Err(GeomError::Degenerate(format!(
-                    "boolmesh {operation:?} failed: {reason}"
-                )))
+                return Err(GeomError::BackendContractViolation {
+                    backend: BoolmeshBoolean::ID,
+                    detail: format!("{operation:?} failed inside the solve: {reason}"),
+                })
             }
         };
 

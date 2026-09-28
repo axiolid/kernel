@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-27) |
+| Latest release | 0.3.3 (2026-09-28) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -40,20 +40,18 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-27):
+Latest release, 0.3.3 (2026-09-28):
 
-### Added
+### Changed
 
-- Surface knot removal, degree change and iso-curves (#141):
-  `remove_surface_knot_u`/`_v` remove a knot up to a requested number of
-  times, keeping the surface within a tolerance, and report how many
-  copies were removed with a deviation bound (`SurfaceKnotRemoval`). The
-  bound comes from the control nets after inserting the knot back, so it
-  holds everywhere, not only at samples; a knot that carries shape is left
-  in place. `elevate_surface_degree_u`/`_v` raise a degree exactly.
-  `reduce_surface_degree_u`/`_v` lower one within a tolerance
-  (`BoundedSurface`), or refuse; rational surfaces are refused, as for
-  curves. `iso_curve_at_u`/`_v` extract the exact iso-parameter curve.
-  Rational surfaces are handled in homogeneous coordinates.
+- Traced sections decide signs of analytic series fields with certified
+  arithmetic where `f64` cannot (#181): exact zeros by a Laurent identity
+  in the harmonics' common angle, point signs by fixed-point intervals at
+  rising precision, and box signs by the Bernstein coefficients of a
+  certified Taylor form. The tier answers only where the field is flat
+  (along a line of contact or at a singular point), so ordinary sections
+  trace exactly as before. Lines of contact that rounding hides over more
+  than a twentieth of the window, refused as `Undecided` until now, are
+  traced on analytic fields as on B-spline ones (ADR 0077).
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

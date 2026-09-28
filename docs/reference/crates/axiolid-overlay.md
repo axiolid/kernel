@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-09-27) |
+| Latest release | 0.3.5 (2026-09-28) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -21,10 +21,11 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Design notes
 
-- Straight-edged regions (`Region`, `overlay`) run on the `i_overlay` integer backend.
-- Boundaries that carry arcs (`arc_overlay`, `ArcArrangement`) run on the in-tree exact core in
-  `src/exact_arc.rs` (ADR 0070), because the integer backend cannot hold an arc without
-  tessellating it away. Its maintenance rules and verification commands are in that module's docs.
+- Straight-edged booleans (`Region`, `overlay`, `union_soup`) and arc-aware ones (`arc_overlay`,
+  `ArcArrangement`) share one exact core in `src/exact_arc.rs` (ADR 0070, #173): every
+  topological decision is an exact sign, and output is rounded once, so an input vertex comes
+  back bit-identical. `i_overlay` remains only for offsets. The core's maintenance rules and
+  verification commands are in that module's docs.
 
 ## Depends on
 
@@ -34,16 +35,27 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.4 (2026-09-27):
+Latest release, 0.3.5 (2026-09-28):
 
-### Added
+### Changed
 
-- `minimum_enclosing_circle` (#118): the least circle holding a point set,
-  by Welzl's algorithm in a fixed visiting order. Every in/out decision is
-  exact, so the support points are the exact minimum circle's; the centre
-  is enclosed from exact dyadic values and the radius rounded up, so the
-  returned circle holds every point, and `CircleEvidence::error` bounds
-  both the centre's offset and the radius's excess. Refuses empty and
-  non-finite input (`CircleError`).
+- Straight-edge booleans are exact (#173). `overlay`, `union_soup` and
+  `Region` no longer go through `i_overlay`'s integer grid, which snapped
+  every output coordinate, including untouched input vertices, to a step
+  of about 1.5e-8 of the operands' extent. They now run on the exact
+  subdivision the arc path uses: every ring of both operands cut at once,
+  each piece classified by exact signs, kept by the operand's winding
+  number under the fill rule. An input vertex the operation does not move
+  comes back bit-identical (so `[0,4]x[0,0.2]` clipped by a box around it
+  has area `0.8`, not `0.800000011920929`), and a crossing of two segments
+  is the double nearest to the exact crossing. Fill rules and ring
+  orientation keep their meaning (tested against the old backend). A vertex
+  where the boundary runs straight on is dropped only when exactly
+  straight.
+- Arc and arrangement output: rational vertices (every segment crossing)
+  are now correctly rounded instead of rounded to about 50 bits.
+- The exact subdivision indexes edges and rings in box trees, so building
+  it over thousands of rings (a projected mesh's triangles) is no longer
+  quadratic in the ring count.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

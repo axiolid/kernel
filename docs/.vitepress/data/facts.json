@@ -4,10 +4,10 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.3.0",
-      "released_date": "2026-09-23",
+      "released": null,
+      "released_date": null,
       "role": "facade",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -166,10 +166,10 @@
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
       "layer": "algorithms",
       "path": "crates/algorithms/exact",
-      "released": "0.1.0",
-      "released_date": "2026-09-24",
+      "released": "0.1.1",
+      "released_date": "2026-09-28",
       "role": "algorithm.reference",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     "axiolid-exact-compile-contract": {
       "description": "Portable graph-to-exact-B-rep compilation contract",
@@ -355,19 +355,19 @@
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/nurbs",
-      "released": "0.3.2",
-      "released_date": "2026-09-27",
+      "released": "0.3.3",
+      "released_date": "2026-09-28",
       "role": "algorithm.parametric",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-overlay": {
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.4",
-      "released_date": "2026-09-27",
+      "released": "0.3.5",
+      "released_date": "2026-09-28",
       "role": "algorithm.planar",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
@@ -436,10 +436,10 @@
       "description": "Narrow-phase ray/triangle-mesh nearest-hit intersection",
       "layer": "algorithms",
       "path": "crates/algorithms/query/intersection/ray-mesh",
-      "released": "0.3.0",
-      "released_date": "2026-09-23",
+      "released": null,
+      "released_date": null,
       "role": "algorithm.query",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     "axiolid-reference": {
       "description": "Portable scalar reference implementation and certified predicates",
@@ -463,10 +463,10 @@
       "description": "Exact planar shortest path over a visibility graph",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/route",
-      "released": "0.3.4",
+      "released": "0.3.5",
       "released_date": "2026-09-28",
       "role": "algorithm.planar",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-spatial": {
       "description": "Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates.",

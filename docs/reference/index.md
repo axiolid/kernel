@@ -58,7 +58,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.0 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.0 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.1 | Analytic and spline curve/surface evaluation, jets, and inversion |
-| [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.0 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
+| [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.1 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.0 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.0 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.3 | Mesh queries: clearance, containment, ray casting, and genus |
@@ -66,14 +66,14 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.0 | Portable, deterministic intersections for linear geometry |
 | [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.2 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.0 | Minkowski sum and difference of planar-faced solids |
-| [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.2 | General polynomial and rational B-spline analysis and transformation algorithms |
-| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.4 | Deterministic validated planar overlay contract |
+| [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.3 | General polynomial and rational B-spline analysis and transformation algorithms |
+| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.5 | Deterministic validated planar overlay contract |
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.1 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.0 | Projection of triangle meshes onto a plane, and prism intersection |
-| [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.3.0 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
+| [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | not released | Narrow-phase ray/triangle-mesh nearest-hit intersection |
 | [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.1 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.0 | Mesh refinement and smoothing with bounded, reported deviation |
-| [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.4 | Exact planar shortest path over a visibility graph |
+| [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.5 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.1 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
 | [`axiolid-triangulate`](./crates/axiolid-triangulate) | `algorithm.planar` | 0.3.1 | Constrained Delaunay triangulation with bounded quality refinement |
 
@@ -97,5 +97,5 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.3.0 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid`](./crates/axiolid) | `facade` | not released | Feature-gated facade for Axiolid's format-neutral geometry stack |
 | [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.3.0 | Versioned, memory-safe C ABI for the Axiolid application facade. |
