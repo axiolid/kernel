@@ -19,6 +19,8 @@ step "closure check" cargo xtask architecture closure check
 step "closure mutation probe" scripts/probe_closure_gate.sh
 step "context (ADR 0078)" cargo xtask context check
 step "context mutation probe" scripts/probe_context_gate.sh
+step "generated docs" cargo xtask docs --check
+step "docs mutation probe" scripts/probe_docs_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
 step "capability evidence" python3 scripts/check-capabilities.py
 step "capability evidence mutation probe" scripts/probe_capabilities_gate.sh
@@ -43,7 +45,6 @@ step "release script tests" python3 -m unittest scripts.test_release_scripts
 step "crate release script tests" python3 -m unittest scripts.test_crate_release
 step "release publish plan" python3 scripts/publish-workspace.py
 step "release package preflight" python3 scripts/verify-packages.py
-step "per-crate changelog assembly" python3 scripts/assemble-crate-changelogs.py --check
 step "semver policy" python3 scripts/check-semver.py
 step "semver mutation probe" scripts/probe_semver_gate.sh
 # Derived from `cargo metadata`, never hand-maintained: a new publishable

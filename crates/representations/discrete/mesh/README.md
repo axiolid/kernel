@@ -13,6 +13,7 @@ cargo add axiolid-mesh
 ```
 
 - API documentation: [docs.rs/axiolid-mesh](https://docs.rs/axiolid-mesh)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

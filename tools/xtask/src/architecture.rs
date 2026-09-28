@@ -1,8 +1,8 @@
 mod checks;
 mod closure;
-mod model;
+pub(crate) mod model;
 mod naming;
-mod render;
+pub(crate) mod render;
 mod source_checks;
 
 use model::{Architecture, Result};

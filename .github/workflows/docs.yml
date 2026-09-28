@@ -5,6 +5,13 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      # The reference pages are generated from each crate's manifest, README
+      # and CHANGELOG.md, and rustdoc from its doc comments, so a crate-only
+      # change still alters the published site.
+      - "crates/**"
+      - "tools/xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -22,15 +29,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.88.0
+      - name: Cache Rust build
+        # Dependencies only (rust-cache drops workspace artifacts), saved from
+        # main, which is the only ref this workflow runs on.
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: docs
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: docs/package-lock.json
+      - name: Generated docs must match the crates they are derived from
+        run: cargo xtask docs --check
       - run: npm ci
         working-directory: docs
       - run: npm run docs:build
         working-directory: docs
+      # rustdoc is nested under the VitePress output so it ships in the one
+      # Pages artifact; the crate reference pages link to it at
+      # /kernel/api/rustdoc/<crate>/. The gate builds the same docs with
+      # -D warnings, so a broken intra-doc link fails before it lands.
+      - name: Build the Rust API reference
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --all-features --no-deps
+      - name: Nest rustdoc under the site at /api/rustdoc/
+        run: |
+          mkdir -p docs/.vitepress/dist/api/rustdoc
+          cp -r target/doc/. docs/.vitepress/dist/api/rustdoc/
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

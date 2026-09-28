@@ -10,4 +10,5 @@ cargo add axiolid-mesh-section-contract
 ```
 
 - API documentation: [docs.rs/axiolid-mesh-section-contract](https://docs.rs/axiolid-mesh-section-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh-section-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

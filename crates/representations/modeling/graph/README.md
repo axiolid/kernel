@@ -14,4 +14,5 @@ cargo add axiolid-model
 ```
 
 - API documentation: [docs.rs/axiolid-model](https://docs.rs/axiolid-model)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-model)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

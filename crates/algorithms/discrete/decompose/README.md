@@ -13,4 +13,5 @@ cargo add axiolid-decompose
 ```
 
 - API documentation: [docs.rs/axiolid-decompose](https://docs.rs/axiolid-decompose)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-decompose)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

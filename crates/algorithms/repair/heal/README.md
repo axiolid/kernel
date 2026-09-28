@@ -7,4 +7,5 @@ cargo add axiolid-heal
 ```
 
 - API documentation: [docs.rs/axiolid-heal](https://docs.rs/axiolid-heal)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-heal)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

@@ -2,7 +2,7 @@
 
 Each directory is a small downstream application that depends on Axiolid the
 way a real consumer would. Each one backs one profile in
-[`architecture/closure-profiles.toml`](../../architecture/closure-profiles.toml)
+[`docs/architecture/closure-profiles.toml`](../docs/architecture/closure-profiles.toml)
 ([ADR 0036](../../docs/adr/0036-use-case-specific-compilation-closures.md)). The
 profile names the internal packages that must resolve and the ones that must
 not. A fixture proves that a focused application can build without pulling in

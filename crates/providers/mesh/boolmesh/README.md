@@ -15,6 +15,7 @@ cargo add axiolid-mesh-boolean-boolmesh
 ```
 
 - API documentation: [docs.rs/axiolid-mesh-boolean-boolmesh](https://docs.rs/axiolid-mesh-boolean-boolmesh)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh-boolean-boolmesh)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

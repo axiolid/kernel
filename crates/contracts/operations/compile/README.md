@@ -11,4 +11,5 @@ cargo add axiolid-mesh-compile-contract
 ```
 
 - API documentation: [docs.rs/axiolid-mesh-compile-contract](https://docs.rs/axiolid-mesh-compile-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh-compile-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

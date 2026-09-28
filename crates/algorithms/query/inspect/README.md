@@ -7,4 +7,5 @@ cargo add axiolid-inspect
 ```
 
 - API documentation: [docs.rs/axiolid-inspect](https://docs.rs/axiolid-inspect)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-inspect)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

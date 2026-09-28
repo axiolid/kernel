@@ -14,6 +14,7 @@ cargo add axiolid-exact
 ```
 
 - API documentation: [docs.rs/axiolid-exact](https://docs.rs/axiolid-exact)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-exact)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

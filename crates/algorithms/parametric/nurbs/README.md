@@ -15,4 +15,5 @@ cargo add axiolid-nurbs
 ```
 
 - API documentation: [docs.rs/axiolid-nurbs](https://docs.rs/axiolid-nurbs)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-nurbs)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

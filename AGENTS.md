@@ -12,8 +12,8 @@ This file is the only `AGENTS.md`. Before editing a crate, read its
   (`axiolid-core`, the dependency root), `representations/`, `contracts/`,
   `algorithms/`, `providers/`, `execution/`, `facade/` (`axiolid`, and
   `axiolid-capi`, the only unsafe C ABI boundary).
-- `tools/`: `xtask` (architecture, closure, context, FFI and ledger
-  checks), `benchmark`, `oracle`. Local-only, never published.
+- `tools/`: `xtask` (architecture, closure, context, docs, FFI and
+  ledger checks), `benchmark`, `oracle`. Local-only, never published.
 - `tests/`: black-box consumer fixtures and downstream/native probes.
 - `native/`: CMake source-build and installed-package integration.
 - `docs/`: the VitePress site. ADRs live in `docs/adr/`.
@@ -21,8 +21,9 @@ This file is the only `AGENTS.md`. Before editing a crate, read its
   `closure-profiles.toml` lists minimal downstream closures,
   `capability-ledger.toml` grades every OCCT/CGAL capability against
   Axiolid, and `semver-exceptions.toml` lists accepted breaking changes.
-  Its generated maps come from `cargo xtask architecture docs` and are
-  never edited by hand.
+  Its generated pages (the architecture maps, `docs/reference/`) come
+  from `cargo xtask docs` and are never edited by hand: change the
+  crate's manifest, `README.md` or `CHANGELOG.md` and regenerate.
 
 ## Dependency rule
 
@@ -89,6 +90,7 @@ The main steps can run alone:
 cargo xtask architecture check      # after metadata changes: cargo xtask architecture docs
 cargo xtask architecture closure check
 cargo xtask context check
+cargo xtask docs --check            # after README, CHANGELOG or metadata changes: cargo xtask docs
 cargo xtask gaps check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features

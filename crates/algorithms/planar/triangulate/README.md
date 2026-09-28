@@ -7,4 +7,5 @@ cargo add axiolid-triangulate
 ```
 
 - API documentation: [docs.rs/axiolid-triangulate](https://docs.rs/axiolid-triangulate)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-triangulate)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

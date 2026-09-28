@@ -12,4 +12,5 @@ cargo add axiolid-surface
 ```
 
 - API documentation: [docs.rs/axiolid-surface](https://docs.rs/axiolid-surface)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-surface)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

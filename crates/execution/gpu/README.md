@@ -13,6 +13,7 @@ cargo add axiolid-backend-gpu
 ```
 
 - API documentation: [docs.rs/axiolid-backend-gpu](https://docs.rs/axiolid-backend-gpu)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-backend-gpu)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

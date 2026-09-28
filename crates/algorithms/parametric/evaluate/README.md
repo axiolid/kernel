@@ -15,4 +15,5 @@ cargo add axiolid-evaluate
 ```
 
 - API documentation: [docs.rs/axiolid-evaluate](https://docs.rs/axiolid-evaluate)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-evaluate)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

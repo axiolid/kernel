@@ -11,4 +11,5 @@ cargo add axiolid-mesh-boolean-contract
 ```
 
 - API documentation: [docs.rs/axiolid-mesh-boolean-contract](https://docs.rs/axiolid-mesh-boolean-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh-boolean-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

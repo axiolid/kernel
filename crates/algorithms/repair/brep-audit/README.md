@@ -7,4 +7,5 @@ cargo add axiolid-brep-audit
 ```
 
 - API documentation: [docs.rs/axiolid-brep-audit](https://docs.rs/axiolid-brep-audit)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-brep-audit)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

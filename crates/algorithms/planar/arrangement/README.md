@@ -7,4 +7,5 @@ cargo add axiolid-arrangement
 ```
 
 - API documentation: [docs.rs/axiolid-arrangement](https://docs.rs/axiolid-arrangement)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-arrangement)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

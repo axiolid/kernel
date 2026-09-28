@@ -7,4 +7,5 @@ cargo add axiolid-collide
 ```
 
 - API documentation: [docs.rs/axiolid-collide](https://docs.rs/axiolid-collide)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-collide)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

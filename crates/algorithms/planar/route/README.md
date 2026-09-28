@@ -7,4 +7,5 @@ cargo add axiolid-route
 ```
 
 - API documentation: [docs.rs/axiolid-route](https://docs.rs/axiolid-route)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-route)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

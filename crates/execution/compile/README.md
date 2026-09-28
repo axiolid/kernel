@@ -15,6 +15,7 @@ cargo add axiolid-mesh-compile
 ```
 
 - API documentation: [docs.rs/axiolid-mesh-compile](https://docs.rs/axiolid-mesh-compile)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-mesh-compile)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

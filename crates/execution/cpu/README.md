@@ -14,6 +14,7 @@ cargo add axiolid-backend-cpu
 ```
 
 - API documentation: [docs.rs/axiolid-backend-cpu](https://docs.rs/axiolid-backend-cpu)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-backend-cpu)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 To see what the current host reports:

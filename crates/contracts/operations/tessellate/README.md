@@ -13,4 +13,5 @@ cargo add axiolid-tessellation-contract
 ```
 
 - API documentation: [docs.rs/axiolid-tessellation-contract](https://docs.rs/axiolid-tessellation-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-tessellation-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

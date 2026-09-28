@@ -14,4 +14,5 @@ cargo add axiolid-capi
 ```
 
 - API documentation: [docs.rs/axiolid-capi](https://docs.rs/axiolid-capi)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-capi)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

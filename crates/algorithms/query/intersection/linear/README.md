@@ -7,4 +7,5 @@ cargo add axiolid-linear-intersection
 ```
 
 - API documentation: [docs.rs/axiolid-linear-intersection](https://docs.rs/axiolid-linear-intersection)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-linear-intersection)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

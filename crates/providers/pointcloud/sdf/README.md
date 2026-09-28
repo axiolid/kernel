@@ -14,4 +14,5 @@ cargo add axiolid-pointcloud-reconstruction-sdf
 ```
 
 - API documentation: [docs.rs/axiolid-pointcloud-reconstruction-sdf](https://docs.rs/axiolid-pointcloud-reconstruction-sdf)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-pointcloud-reconstruction-sdf)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

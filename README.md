@@ -32,11 +32,11 @@ Read the [documentation site](https://axiolid.github.io/kernel/) for architectur
 
 ## Quick start
 
-Add the facade for core values, meshes, and the portable CPU shell:
+The facade compiles nothing until you name a capability. `standard` gives
+core values, meshes and the portable CPU shell:
 
-```toml
-[dependencies]
-axiolid = { git = "https://github.com/axiolid/kernel.git" }
+```bash
+cargo add axiolid --features standard
 ```
 
 The always-available core vocabulary is deliberately small:
@@ -51,18 +51,11 @@ assert!(origin.is_finite());
 assert!(tolerance.linear() >= 0.0);
 ```
 
-For narrow dependency graphs, depend directly on leaf crates such as `axiolid-core`, `axiolid-mesh`, or `axiolid-reference`. Feature bundles are named for capability—not an input format:
-
-```toml
-axiolid = { git = "https://github.com/axiolid/kernel.git", features = ["discrete"] }
-```
-
-General NURBS algorithms are independently opt-in and also included in the
-broader `parametric` bundle:
-
-```toml
-axiolid = { git = "https://github.com/axiolid/kernel.git", default-features = false, features = ["nurbs"] }
-```
+Feature bundles are named for capability, not an input format
+(`--features discrete`, `--features nurbs`, …). For narrow dependency
+graphs, depend on leaf crates directly, such as `cargo add axiolid-core
+axiolid-mesh`. The [crate reference](https://axiolid.github.io/kernel/reference/)
+lists every crate with its features, API documentation and latest changes.
 
 See [Getting started](https://axiolid.github.io/kernel/guide/getting-started) before selecting a bundle. Native consumers use the generated [`axiolid.h`](./crates/facade/axiolid-capi/include/axiolid.h) boundary through the stable `Axiolid::axiolid` [CMake source/package workflow](./docs/architecture/native-distribution.md); the [v0.4 ABI, ownership, refusal, and concurrency contract](./docs/architecture/c-abi-v0.4.md) is explicit.
 

@@ -7,4 +7,5 @@ cargo add axiolid-ray-mesh
 ```
 
 - API documentation: [docs.rs/axiolid-ray-mesh](https://docs.rs/axiolid-ray-mesh)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-ray-mesh)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

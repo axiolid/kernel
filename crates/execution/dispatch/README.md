@@ -13,4 +13,5 @@ cargo add axiolid-dispatch --features mesh-boolean
 ```
 
 - API documentation: [docs.rs/axiolid-dispatch](https://docs.rs/axiolid-dispatch)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-dispatch)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

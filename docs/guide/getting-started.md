@@ -4,16 +4,15 @@
 
 Axiolid is a workspace, not a mandatory all-in-one dependency. Prefer a leaf crate when its public contract is sufficient; use the `axiolid` facade when the feature-gated composition is more convenient.
 
-```toml
-[dependencies]
+```bash
 # Core scalar values, transforms, bounds, and tolerance policy.
-axiolid-core = { git = "https://github.com/axiolid/kernel.git" }
+cargo add axiolid-core
 
-# Or: a small facade with core values, meshes, and the portable CPU shell.
-axiolid = { git = "https://github.com/axiolid/kernel.git" }
+# Or: the facade with core values, meshes, and the portable CPU shell.
+cargo add axiolid --features standard
 ```
 
-The repository is currently consumed directly from Git while crates.io publication is not yet established. Pin a `rev` in reproducible applications.
+The [crate reference](/reference/) lists every crate by layer, with its latest release and the facade feature that exposes it; [Selecting a package](/reference/selecting-packages) says which to start from.
 
 ## Start with core values
 
@@ -29,21 +28,23 @@ assert_eq!(source, world);
 
 ## Opt into capabilities deliberately
 
-```toml
+```bash
 # Mesh-oriented construction, triangulation, spatial operations, and the
 # optional mesh-Boolean provider.
-axiolid = { git = "https://github.com/axiolid/kernel.git", features = ["discrete"] }
+cargo add axiolid --features discrete
 
 # Representation vocabulary plus general NURBS reference algorithms.
-axiolid = { git = "https://github.com/axiolid/kernel.git", features = ["parametric"] }
+cargo add axiolid --features parametric
 
 # Or select only curve/surface values and the general NURBS algorithms.
-axiolid = { git = "https://github.com/axiolid/kernel.git", default-features = false, features = ["nurbs"] }
+cargo add axiolid --features nurbs
 ```
+
+The facade's default feature set is empty, so a build names what it needs. The [`axiolid` reference page](/reference/crates/axiolid#features) lists every feature and what it enables; the bundles are:
 
 | Bundle | Includes | Does not imply |
 | --- | --- | --- |
-| default | core values, mesh facade, portable CPU shell | every mesh algorithm |
+| `standard` | core values, mesh facade, portable CPU shell | every mesh algorithm |
 | `discrete` | mesh-centric representations and operation contracts | a selected executable provider |
 | `application` | supported portable provider selection plus v0.4 reference workflows | exact Boolean parity |
 | `parametric` | curve, surface, topology, primitive, and graph vocabulary plus general NURBS reference algorithms | a complete CAD modeling/intersection kernel |
@@ -66,8 +67,8 @@ For the architecture-specific feature matrix and mutation probes, see [Contribut
 
 Enable `application` when a program wants one coherent portable provider path instead of assembling registries and implementation crates itself:
 
-```toml
-axiolid = { git = "https://github.com/axiolid/kernel.git", rev = "<verified-commit>", features = ["application"] }
+```bash
+cargo add axiolid --features application
 ```
 
 Provider choice is still explicit:

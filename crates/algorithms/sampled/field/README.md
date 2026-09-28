@@ -7,6 +7,7 @@ cargo add axiolid-field-ops
 ```
 
 - API documentation: [docs.rs/axiolid-field-ops](https://docs.rs/axiolid-field-ops)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-field-ops)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

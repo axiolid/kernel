@@ -13,4 +13,5 @@ cargo add axiolid-core
 ```
 
 - API documentation: [docs.rs/axiolid-core](https://docs.rs/axiolid-core)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-core)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

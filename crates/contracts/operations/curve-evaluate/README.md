@@ -13,4 +13,5 @@ cargo add axiolid-curve-evaluate-contract
 ```
 
 - API documentation: [docs.rs/axiolid-curve-evaluate-contract](https://docs.rs/axiolid-curve-evaluate-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-curve-evaluate-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

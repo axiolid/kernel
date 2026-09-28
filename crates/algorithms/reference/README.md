@@ -15,4 +15,5 @@ cargo add axiolid-reference
 ```
 
 - API documentation: [docs.rs/axiolid-reference](https://docs.rs/axiolid-reference)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-reference)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

@@ -12,4 +12,5 @@ cargo add axiolid-pointcloud-reconstruction-contract
 ```
 
 - API documentation: [docs.rs/axiolid-pointcloud-reconstruction-contract](https://docs.rs/axiolid-pointcloud-reconstruction-contract)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-pointcloud-reconstruction-contract)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

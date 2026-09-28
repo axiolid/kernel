@@ -13,4 +13,5 @@ cargo add axiolid-pointcloud
 ```
 
 - API documentation: [docs.rs/axiolid-pointcloud](https://docs.rs/axiolid-pointcloud)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-pointcloud)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

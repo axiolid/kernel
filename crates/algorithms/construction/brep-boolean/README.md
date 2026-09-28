@@ -15,6 +15,7 @@ cargo add axiolid-brep-boolean
 ```
 
 - API documentation: [docs.rs/axiolid-brep-boolean](https://docs.rs/axiolid-brep-boolean)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-brep-boolean)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
 
 ## Design notes

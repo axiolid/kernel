@@ -14,4 +14,5 @@ cargo add axiolid-curve
 ```
 
 - API documentation: [docs.rs/axiolid-curve](https://docs.rs/axiolid-curve)
+- Reference page: [axiolid.github.io/kernel](https://axiolid.github.io/kernel/reference/crates/axiolid-curve)
 - Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)
