@@ -1,4 +1,9 @@
 //! Backend-open curve evaluation capability.
+//!
+//! This crate declares the trait and implements it for nothing: it holds
+//! curve data, and evaluation is an algorithm. The scalar implementation is
+//! `axiolid_evaluate::curve::ScalarCurve` (ADR 0018), also reachable as
+//! `axiolid_reference::curve`. Do not add an evaluator here.
 
 use axiolid_core::{Interval, Scalar, Tolerance};
 

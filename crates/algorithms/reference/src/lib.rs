@@ -10,7 +10,15 @@
 //! now live in the focused `axiolid-predicates` package and are re-exported
 //! here unchanged, so an existing `axiolid_reference::orient2d` caller is
 //! unaffected while a narrow consumer can depend on the substrate directly
-//! instead of acquiring this package's whole dependency graph.
+//! instead of acquiring this package's whole dependency graph. Analytic and
+//! spline evaluation moved to `axiolid-evaluate` the same way. Do not
+//! re-inline either: adding a dependency here is cheap, adding one to an
+//! extracted package is an architectural decision.
+//!
+//! Error bounds scale with operand magnitude; a constant epsilon is a bug.
+//! Tests here include a differential gate against an oracle that shares no
+//! code with the implementation, and assert that the exact path was actually
+//! reached: a suite that never escalates proves nothing about exactness.
 
 pub mod assemble;
 pub mod boolean;

@@ -3,7 +3,13 @@
 //! Each construction's result is kept symbolically -- as its inputs plus a
 //! recipe -- and every question about it is a [`SignExpr`], answered by the
 //! interval filter or, when that cannot decide, exactly. Nothing is rounded
-//! until a caller asks for an approximate value for output.
+//! until a caller asks for an approximate value for output: the `approx_*`
+//! methods are for output only, and a decision is always asked as a sign
+//! question.
+//!
+//! Where an answer is provable from structure, it is not evaluated: the two
+//! hits of one circle are ordered by [`Branch`], because subtracting two
+//! equal intervals can never certify zero.
 
 use axiolid_core::Point2;
 use axiolid_guarantees::{Certified, Sign};

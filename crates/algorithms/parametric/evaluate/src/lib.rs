@@ -10,6 +10,10 @@
 //!
 //! No intrinsics, no threading, no feature gates: it must stay obviously
 //! correct in preference to being fast.
+//!
+//! `axiolid-reference` re-exports [`curve`] and [`surface`] unchanged, so
+//! `axiolid_reference::curve::*` paths are part of this package's public
+//! surface too: renaming or reshaping an item here breaks those callers.
 
 pub mod arc_length;
 pub mod curve;

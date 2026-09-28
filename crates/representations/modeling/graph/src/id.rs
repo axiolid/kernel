@@ -20,6 +20,12 @@ impl GraphId {
 }
 
 /// Stable index owned by one immutable [`crate::GeometryGraph`].
+///
+/// A handle carries its graph's brand. Another builder refuses it
+/// ([`crate::GraphError::ForeignReference`]) and another graph's
+/// [`crate::GeometryGraph::get`] returns `None`, so a graph that references
+/// a node it does not own cannot be built at all rather than being detected
+/// later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId {
     graph: GraphId,

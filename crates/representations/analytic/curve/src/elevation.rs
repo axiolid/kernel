@@ -201,6 +201,11 @@ fn piece_at<'a>(
 /// Composition rather than re-encoding: a `Curve3::BSpline` fitted through the
 /// pair would lose both. Storing the two laws keeps each one's own exactness
 /// and lets a consumer recover either half unchanged.
+///
+/// Only a plan whose parameter is arc length (line, circle, intrinsic) can
+/// carry a law. A B-spline's parameter is not a distance, so evaluators
+/// refuse an elevated B-spline plan rather than reinterpret the law
+/// (ADR 0060).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Elevated3 {
     /// Horizontal layout. Boxed to keep [`Curve3`](crate::Curve3) small.

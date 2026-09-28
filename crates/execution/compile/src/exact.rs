@@ -2,6 +2,10 @@
 //!
 //! Exact and mesh compilation are separate result domains. One exact batch owns
 //! a `NodeId -> ExactBRep` memo table; a discrete value cannot enter that cache.
+//!
+//! It never falls back to mesh compilation. Extrusions, revolutions and
+//! booleans of sharp rectangle prisms along +z are compiled exactly; every
+//! other family is refused with `GeomError::UnsupportedInput` naming it.
 
 use std::collections::{HashMap, HashSet};
 

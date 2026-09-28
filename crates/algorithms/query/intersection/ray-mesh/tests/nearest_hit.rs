@@ -2,6 +2,9 @@
 //!
 //! Fixtures are chosen so every expected answer is checkable by hand: unit
 //! triangles at known offsets, axis-aligned rays, and exact edge/vertex hits.
+//! Keep covering edge-on, vertex-on, parallel-in-plane, back-face,
+//! behind-origin and BVH composition: a suite that never produces an edge-on
+//! hit proves nothing about tie-breaking.
 
 use std::ops::ControlFlow;
 

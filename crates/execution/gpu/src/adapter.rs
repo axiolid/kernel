@@ -1,4 +1,13 @@
 //! Adapter from an API-specific GPU executor to graph compilation.
+//!
+//! Before anything is submitted, the adapter checks what it can check
+//! without the device: device preference, f32/f64 policy, and result
+//! residency (a device cannot deliver into another device's memory, and an
+//! unrecognized future residency is refused rather than assumed), then that
+//! every root belongs to the graph, then the executor's own
+//! option-validation hook. After the executor returns, it checks one result
+//! per root. Caller faults are `Unsupported` or `InvalidInput`; executor
+//! output that breaks the seam's contract is `BackendContractViolation`.
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, DevicePreference, ExecutionOptions, ExecutionTarget,
@@ -123,9 +132,6 @@ impl<E: GpuGraphExecutor> MeshCompiler for GpuCompiler<E> {
             })
     }
 
-    /// Overriding the `_into` seam keeps *both* batch call shapes on the
-    /// single-dispatch GPU path; overriding only `compile_mesh_batch` would leave
-    /// `compile_mesh_batch_into` silently falling back to one submission per root.
     /// Overriding the `_into` seam keeps *both* batch call shapes on the
     /// single-dispatch GPU path; overriding only `compile_mesh_batch` would leave
     /// `compile_mesh_batch_into` silently falling back to one submission per root.

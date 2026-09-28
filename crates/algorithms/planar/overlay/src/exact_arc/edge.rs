@@ -57,6 +57,11 @@ pub(crate) enum Carrier {
 /// contain the whole edge, never tightness; it is padded far beyond any
 /// rounding in its own computation, so a missed pair would need an error
 /// many orders of magnitude larger than `f64` arithmetic can make.
+///
+/// A box too small makes crossings vanish without any test noticing unless
+/// a scene exercises it, so a change to how boxes are built needs
+/// `scripts/probe_arc_overlay_mutants.py`: `tests/arc_exact_oracle.rs`
+/// includes major arcs and many-edge rings for exactly this.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Bounds {
     x0: f64,

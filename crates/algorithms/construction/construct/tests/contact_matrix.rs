@@ -328,7 +328,7 @@ fn a_shrinking_negative_overlap() {
         let a = box_solid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         let b = box_solid([1.0 - eps, 0.0, 0.0], [2.0 - eps, 1.0, 1.0]);
 
-        // KNOWN GAP, measured not assumed: from eps = 1e-12 the union comes
+        // TODO(#200): KNOWN GAP, measured not assumed: from eps = 1e-12 the union comes
         // back with 8 degenerate triangles and 8 boundary edges -- a hole in
         // the shell, so it cannot be measured. That is NOT a precision floor:
         // a 1e-12 slab on unit boxes is ~4503 ULPs wide, comfortably

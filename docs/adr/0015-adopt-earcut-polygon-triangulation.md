@@ -69,7 +69,8 @@ gates.
 - Extend the differential oracle to holes if `axiolid-reference` ever grows a working
   hole path, so the audit is total rather than partial.
 - Corner radii on rectangle profiles are not yet approximated; they currently
-  produce sharp corners. Tracked in `axiolid-mesh-compile/PLAN.md`.
+  produce sharp corners. *(Amended 2026-09-28: done under kernel#111; see
+  `crates/algorithms/construction/construct/tests/rounded_rectangle.rs`.)*
 
 ## Relation to existing code
 

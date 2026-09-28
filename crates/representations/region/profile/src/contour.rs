@@ -9,6 +9,9 @@ pub struct ProfileSegment {
     /// Exact supporting curve.
     pub curve: Curve2,
     /// Parameter interval on `curve`.
+    ///
+    /// Always a finite span: a contour edge is bounded, so an unbounded
+    /// support such as a line contributes only this interval, never itself.
     pub domain: Interval,
     /// Whether parameter direction follows contour orientation.
     pub same_sense: bool,

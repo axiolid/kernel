@@ -1,4 +1,15 @@
 //! The `MeshBoolean` implementation.
+//!
+//! # Whose fault an error is
+//!
+//! Input faults are the caller's: an operand that fails the orientation
+//! gate (`InvalidInput`, `Degenerate`, naming which argument) or that the
+//! kernel cannot build as a manifold (`NotManifold`). A result that fails
+//! [`check_result`] is `BackendContractViolation`: the inputs were already
+//! validated, so a bad result is this provider's defect, never blamed on
+//! the caller. A failure inside the kernel's own solve (for example an odd
+//! edge-point count in `pair_up`, #101) is reported as `Degenerate`: the
+//! kernel refused operands it could not resolve.
 
 use crate::csg::{compute_boolean, OpType};
 use axiolid_contracts::{
@@ -14,10 +25,13 @@ use axiolid_mesh_boolean_contract::{
 use crate::attributes::{carry, sources_by_plane, FaceSource};
 use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 
-/// Mesh boolean backed by `boolmesh` (pure Rust, `glam`-only, MPL-2.0).
+/// Mesh boolean built on the algorithm absorbed from `boolmesh` (pure Rust,
+/// `glam`-only, MPL-2.0).
 ///
-/// Adopted rather than written: see `docs/adr/0014`. This type owns the
-/// conversion and contract enforcement; the algorithm itself is upstream's.
+/// Adopted in `docs/adr/0014` and absorbed into this crate's private `csg`
+/// module by `docs/adr/0047`. This type owns conversion and contract
+/// enforcement; no `csg` type is part of the public API, so the kernel can
+/// be replaced without a consumer noticing.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BoolmeshBoolean;
 
@@ -196,13 +210,6 @@ impl MeshBoolean for BoolmeshBoolean {
         }
     }
 
-    /// Group mutually disjoint cutters and remove each group with one
-    /// boolean, instead of one boolean per cutter.
-    ///
-    /// Rests on `(S \ A) \ B == S \ (A union B)` and on a concatenation of
-    /// disjoint solids being their union. Bounding-box grouping over-separates
-    /// but never wrongly fuses, so the result is identical to the sequential
-    /// default -- gated by volume equality in `tests/batch.rs`.
     /// `boolmesh` takes no cancellation handle, so nothing can interrupt a
     /// single boolean once it starts. Declared honestly: the batch override
     /// polls between groups, which is the only real poll point available.
@@ -210,6 +217,13 @@ impl MeshBoolean for BoolmeshBoolean {
         CancellationGranularity::BetweenOperations
     }
 
+    /// Group mutually disjoint cutters and remove each group with one
+    /// boolean, instead of one boolean per cutter.
+    ///
+    /// Rests on `(S \ A) \ B == S \ (A union B)` and on a concatenation of
+    /// disjoint solids being their union. Bounding-box grouping over-separates
+    /// but never wrongly fuses, so the result is identical to the sequential
+    /// default -- gated by volume equality in `tests/batch.rs`.
     fn subtract_many(
         &self,
         subject: &TriMesh,

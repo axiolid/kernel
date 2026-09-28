@@ -15,6 +15,11 @@
 //! surface, sections running along existing edges, tangent contact, and
 //! solids meeting along an edge or at a point are all handled, not
 //! refused.
+//!
+//! Nothing is approximated. A configuration a step cannot build exactly is
+//! refused by name ([`BooleanError`]), never meshed or fitted, and every
+//! decision comes from an exact predicate or certified membership: a point
+//! too close to a boundary to decide is refused, not guessed.
 
 mod assemble;
 mod classify;

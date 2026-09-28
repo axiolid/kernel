@@ -3,6 +3,12 @@
 //! The oracle here is deliberately independent of the implementation: it uses
 //! rational arithmetic over exactly-representable inputs, so agreement is
 //! evidence rather than a restatement of the same float expression.
+//!
+//! A random suite must assert that it generated every branch it classifies:
+//! a suite that silently never produces a coincident pair proves nothing
+//! about coincidence. Operand-swap comparisons use a relative bound, because
+//! the two orders evaluate differently ordered float expressions and bitwise
+//! equality would fail spuriously.
 
 use axiolid_core::{Point2, Tolerance, Vec2};
 use axiolid_linear::{Line2, Segment2};

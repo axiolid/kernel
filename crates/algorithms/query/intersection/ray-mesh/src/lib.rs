@@ -34,6 +34,12 @@
 //! because normalising a caller's ray silently changes the meaning of every
 //! distance they compare against.
 //!
+//! # What the tolerance decides
+//!
+//! `Tolerance::linear()` bounds only the parallel-ray rejection and the
+//! barycentric slack that keeps edge and vertex hits. It never decides the
+//! front/back branch: [`FaceSide`] comes from the certified `orient3d` sign.
+//!
 //! [`SpatialIndex::visit_ray`]: https://docs.rs/axiolid-spatial
 
 use core::fmt;
@@ -137,7 +143,10 @@ pub fn nearest_hit(
 ///
 /// This is the composition point with a broad phase: feed it the triangle
 /// indices a BVH walk produced. Candidates may repeat and may arrive in any
-/// order; the result does not depend on that order.
+/// order; the result does not depend on that order. A candidate index at or
+/// beyond `mesh.triangle_count()` is skipped, not refused; a triangle that
+/// references a missing position is refused with
+/// [`RayMeshError::PositionIndexOutOfRange`].
 ///
 /// # Determinism
 ///

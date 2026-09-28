@@ -6,6 +6,23 @@
 //! here derives one. The only loss is a channel name that two inputs define
 //! incompatibly (different width or blend): that is dropped by name and
 //! reported, never guessed at.
+//!
+//! The compiler caches a [`Built`], never a bare `TriMesh`, so every node
+//! kind has to state what it did to each channel. A new graph path goes
+//! through [`transform()`], [`merge()`] or [`after_boolean`], or wraps a mesh it
+//! made itself in [`Built::leaf`] / [`Built::with_closure`]. Rebuilding a
+//! mesh from positions and indices on an `Instance` or `Collection` path is
+//! the #115 bug: it silently drops every channel. Gate:
+//! `tests/graph_channels.rs`.
+//!
+//! # Closure rides along too (#161)
+//!
+//! [`Built::leaf`] claims a solid. Anything that may not bound one goes
+//! through [`Built::with_closure`]: a B-rep is a solid only when it declares
+//! one, never because its shells happen to be watertight, since a surface
+//! model's mesh can be closed. A collection is a solid only if every member
+//! is ([`combined_closure`]), and a boolean refuses a surface operand.
+//! Gate: `tests/surface_models.rs`.
 
 mod boolean;
 mod merge;

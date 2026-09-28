@@ -203,7 +203,8 @@ fn a_ragged_index_buffer_is_refused() {
 /// Verified by mutation: removing the link condition makes this test fail.
 /// The normal-inversion guard alongside it is NOT verified by this fixture
 /// -- the link condition rejects first, so the inversion branch never runs.
-/// See the crate PLAN.md for that gap.
+/// TODO(#201): add a fixture that passes the link condition and still flips a
+/// normal.
 #[test]
 fn an_unsafe_collapse_is_refused_not_performed() {
     let positions = vec![

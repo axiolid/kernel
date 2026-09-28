@@ -17,6 +17,14 @@
 //! precision on a single panel, versus roughly 1e-3 relative for a comparable
 //! trapezoid budget. Panels are subdivided by total turning so a tight spiral
 //! gets more of them.
+//!
+//! A panel must never straddle a seam of a piecewise law: Gauss-Legendre
+//! assumes a smooth integrand, and a joined curve was wrong by 3.0e-3 until
+//! panels were split at seams. Any new integrator splits at
+//! `CurvatureLaw::seams_within` too. Pin a change to this quadrature against
+//! an independent closed form (Fresnel for the clothoid, the elementary arc
+//! for constant curvature), never against another run of the quadrature
+//! (ADR 0060).
 
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};

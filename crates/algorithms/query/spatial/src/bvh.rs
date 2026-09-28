@@ -2,7 +2,8 @@
 //!
 //! The tree stores only caller-owned keys and axis-aligned bounds. It is a
 //! broad-phase structure: overlap and ray results are candidates, never an
-//! assertion about exact geometry. The immutable representation is deliberately
+//! assertion about exact geometry. Build and queries are serial. The
+//! immutable representation is deliberately
 //! provider-neutral; a parallel or GPU builder can implement the same
 //! [`crate::SpatialIndex`] contract later without exposing hardware concepts.
 

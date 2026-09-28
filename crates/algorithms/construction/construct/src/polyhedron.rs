@@ -11,6 +11,16 @@
 //! input planes, so a vertex is at worst one intersection away from input
 //! data. Classification then asks a certified predicate which side of the
 //! other solid a fragment lies on.
+//!
+//! # Collapsed fragments are not dropped
+//!
+//! Split points are constructed in f64 (ADR 0045, `plane_crossing`), so
+//! after many operations a vertex two operands should share can land a few
+//! ULPs apart, and a split through it emits a fragment that encloses no
+//! area. Deleting such fragments was tried and reverted (`40b5069`): the
+//! chain then completes, but the holes it leaves make the shell integrate to
+//! a plausibly wrong volume. A refusal is actionable; a wrong volume is
+//! silent. Do not reintroduce a drop-based fix (#199).
 
 use crate::boolean_exact::unsupported;
 use axiolid_contracts::{GeomError, GeomResult};

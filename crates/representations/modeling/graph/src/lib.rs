@@ -6,6 +6,10 @@
 //! exact curve, surface, topology, instancing, and construction intent; kernels
 //! choose how to evaluate or tessellate them. Typed append-only handles replace
 //! recursive `Box` trees and make mapped-item/CSG cycles impossible.
+//!
+//! Source identifiers stay outside the graph: an adapter keeps its own map
+//! from source entities to [`NodeId`]s. The graph never lowers anything to a
+//! mesh; compilation lives in the execution tier.
 
 pub mod curve_relation;
 pub mod graph;

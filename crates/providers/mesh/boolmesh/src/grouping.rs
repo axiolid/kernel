@@ -17,6 +17,19 @@
 //! in a group overlap. Optimal colouring is NP-hard, so a greedy first-fit is
 //! used; the result only needs to be good, not optimal, and any partition is
 //! CORRECT because each group is verified disjoint before fusing.
+//!
+//! Three things are load-bearing, each gated in `tests/batch.rs`:
+//! only disjoint cutters may be fused (concatenated overlapping solids are
+//! self-intersecting, and subtracting them gives a wrong answer that still
+//! looks valid); [`fuse`] must rebase indices (forgetting the offset
+//! silently duplicates the first mesh's triangles); and every group must be
+//! subtracted, the single-member fast path with that group's own tool.
+//!
+//! The override runs unconditionally because its worst case (a complete
+//! overlap graph) costs no more than the sequential loop (0.99x in ADR 0014).
+//! It stays only while it beats the sequential baseline ADR 0014 records;
+//! `benches/subtract_many.rs` measures both in one run. If it stops
+//! winning, it no longer earns its complexity and should be removed.
 
 use axiolid_core::Aabb;
 use axiolid_mesh::{AttributeChannel, TriMesh};

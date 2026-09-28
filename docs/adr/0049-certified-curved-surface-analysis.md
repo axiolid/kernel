@@ -140,7 +140,8 @@ exact fast case, unchanged.
 
 - `crates/algorithms/parametric/nurbs/src/certified_surface_arcs.rs`
 - `crates/algorithms/parametric/nurbs/tests/curved_arcs.rs`
-- `docs/plans/certified-boundary-roots.md`
+- `docs/plans/certified-boundary-roots.md` (removed by ADR 0078; see the
+  amendment below)
 
 ## Exact elementary curves (addendum)
 
@@ -313,3 +314,18 @@ Consequence for future work: a bare floating-point threshold in a
 structural predicate should be treated as a bug unless it is comparing
 dimensionless quantities. Scale invariance is now asserted directly, by
 deriving the same shape at three scales and requiring one verdict.
+
+## Amendment 2026-09-28: the boundary-roots plan is closed
+
+`docs/plans/certified-boundary-roots.md` was removed under
+[ADR 0078](./0078-context-lives-beside-the-code.md). It found that a root
+lying exactly on a patch edge cannot be certified by the 3x3 Krawczyk operator
+at any budget or tolerance, because strict containment in the box is
+unsatisfiable there. This was a limit of the proof, not of the budget. The fix
+it proposed landed: `PinnedEdge` and `krawczyk_root_on_edge` in
+`certified_curve_surface_intersection.rs` pin the edge parameter and certify
+the reduced system, and a chord ending on the boundary of both patches splits
+both of them (`CertifiedSurfacePairSplit3::DualSplit` in `axiolid-construct`). The affine trace in
+`certified_surface_surface_intersection.rs` stays single-span and degree 1.
+General B-spline pairs are traced by `spline_pair_intersection` instead
+(capability ledger row B10).

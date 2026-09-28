@@ -153,12 +153,11 @@ fn main() {
     // 3.0 leaves clear air between boxes; 0.6 makes every neighbour
     // overlap, so each union does real cutting work.
     // Sizes are per-case. The overlapping sweep stops at 64: a 125-box
-    // overlapping grid trips an assert inside the absorbed kernel
-    // (`boolean45.rs`'s `pair_up`, odd edge-point count). That fault is
-    // PRE-EXISTING and unrelated to reduction order -- verified by
-    // reproducing it on the sequential fold, which this override does not
-    // touch. Benching up to the cliff measures what is measurable without
-    // pretending the cliff is not there.
+    // overlapping grid tripped an assert inside the absorbed kernel
+    // (`boolean45.rs`'s `pair_up`, odd edge-point count), reproduced on the
+    // sequential fold too, so unrelated to reduction order. Since #101
+    // `pair_up` refuses with a typed error instead of panicking; the sweep
+    // has not been extended past the old cliff.
     let cases: [(&str, f64, &[usize]); 2] = [
         ("disjoint grid (multi-component result)", 3.0, &[2, 3, 4, 5]),
         ("overlapping grid (fuses into one solid)", 0.6, &[2, 3, 4]),

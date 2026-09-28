@@ -9,6 +9,10 @@
 //! `standard` reproduces the pre-0.4 default (`mesh + cpu + integration`) for
 //! consumers who want the old behaviour in one line.
 //!
+//! Features are additive and named for geometry capabilities. No feature or
+//! bundle is named after a source format, vendor or downstream product, and
+//! every package behind a feature stays usable as a direct dependency.
+//!
 //! # Exact geometry is the primary currency
 //!
 //! No entry point in this facade converts exact geometry into a mesh

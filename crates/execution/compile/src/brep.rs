@@ -331,15 +331,11 @@ fn append_face(
     total_curved_records: &mut usize,
 ) -> GeomResult<()> {
     let (brep, graph) = (ctx.brep, ctx.graph);
-    // A face carrying a curved support surface cannot be tessellated by
-    // projecting its boundary onto a plane: the interior curves away from
-    // that plane and the error is invisible in the output. Refuse instead.
-    // `axiolid-mesh-compile/AGENTS.md`: a missing wall is cheap, a wrong wall
-    // corrupts every downstream quantity.
     // A curved support cannot be tessellated by projecting the boundary onto
     // a plane: the interior curves away from it and the error is invisible in
     // the output. Sample the surface itself when the face states its boundary
-    // in surface parameters, and refuse when it does not.
+    // in surface parameters, and refuse when it does not: a missing wall is
+    // cheap, a wrong wall corrupts every downstream quantity.
     if let Some(surface) = face_surface(graph, face)? {
         if !surface_is_planar(surface) {
             return with_curved_face_transaction(
