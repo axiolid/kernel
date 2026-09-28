@@ -27,6 +27,36 @@
 //!    where several leave, which yields minimal rings.
 //! 6. Counter-clockwise rings are outer boundaries; each clockwise ring is
 //!    a hole of the smallest outer that contains it.
+//!
+//! # Rules for changing it
+//!
+//! - No decision here may read a tolerance. The caller's tolerance only
+//!   validates operands and cleans up output rounding (`presented` in
+//!   `arc_overlay.rs`).
+//! - Every predicate goes through `point::sign`: cached boxes first, then
+//!   the `axiolid-exact` interval tier, then exact arithmetic. The only
+//!   exceptions are certified `f64` filters on input vertices
+//!   (`edge.rs::segments_quick`, `orient_f64`), and each must return `None`
+//!   when its sign is not certain. `Sign` is `#[non_exhaustive]`; match
+//!   `Positive` and `Negative` and treat anything else as zero.
+//! - Output vertices are rounded once (`XPoint::rounded`, correctly rounded
+//!   for rational points). Rounded output must never be fed back into a
+//!   decision.
+//!
+//! # Verification
+//!
+//! `tests/arc_exact_oracle.rs` checks area identities and point membership
+//! against tessellated operands on random grid-snapped and decimal scenes.
+//! `scripts/probe_arc_overlay_mutants.py` and
+//! `scripts/probe_exact_overlay_mutants.py` (repository root) list faults
+//! the suite must catch; run them after changing a decision or the edge
+//! boxes. The straight path ([`crate::exact_overlay`]) is tested against
+//! `i_overlay` by point membership away from boundaries, and
+//! `tests/exact_straight.rs` pins bit-identical vertices and correctly
+//! rounded crossings.
+//! `cargo bench -p axiolid-overlay --bench arc_overlay` measures per-call
+//! cost, and `SCALE=1` runs the edge-count scaling scenes instead; quote it
+//! when claiming a speed change.
 
 pub(crate) mod arrangement;
 mod boxes;

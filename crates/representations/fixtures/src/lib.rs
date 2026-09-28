@@ -35,6 +35,10 @@ pub struct Provenance {
     /// principles. Specific enough that a reader can go and check it.
     pub source: &'static str,
     /// Licence covering redistribution of this fixture's data.
+    ///
+    /// Every fixture so far is original work under the repository licence. A
+    /// fixture taken from an external corpus must name that corpus's licence
+    /// here.
     pub licence: &'static str,
     /// What an implementation must do with it, stated as a requirement.
     pub expectation: &'static str,

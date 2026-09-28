@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Regression tests for prepare-crate-release.py and assemble-crate-changelogs.py.
+"""Regression tests for prepare-crate-release.py.
 
 Network-free and side-effect-free: no subprocess, no cargo metadata call, only
-the pure functions each script exposes, mirroring test_release_scripts.py's
-pattern for prepare-release.py.
+the pure functions the script exposes, mirroring test_release_scripts.py's
+pattern for prepare-release.py. The per-crate changelog page it feeds is
+assembled and tested by `cargo xtask docs` (tools/xtask/src/docs/changelog.rs).
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ def load_script(name: str, filename: str):
 
 
 prepare_crate = load_script("prepare_crate_release", "prepare-crate-release.py")
-assemble = load_script("assemble_crate_changelogs", "assemble-crate-changelogs.py")
 
 
 class PrepareCrateReleaseTests(unittest.TestCase):
@@ -110,55 +110,6 @@ class PrepareCrateReleaseTests(unittest.TestCase):
             self.assertIn("- pending", body)
             self.assertNotIn("- shipped", body)
             self.assertIn("## [0.3.0]", suffix)
-
-
-class AssembleCrateChangelogsTests(unittest.TestCase):
-    def test_released_sections_skips_unreleased_and_orders_by_appearance(self) -> None:
-        text = (
-            "# Changelog\n\n"
-            "## [Unreleased]\n\n- pending, must not appear\n\n"
-            "## [0.3.1] - 2026-09-20\n\n### Added\n\n- b\n\n"
-            "## [0.3.0] - 2026-09-01\n\n### Added\n\n- a\n"
-        )
-        sections = assemble.released_sections(text)
-        self.assertEqual([s[0] for s in sections], ["0.3.1", "0.3.0"])
-        self.assertEqual([s[1] for s in sections], ["2026-09-20", "2026-09-01"])
-        self.assertIn("- b", sections[0][2])
-        self.assertNotIn("pending", "".join(s[2] for s in sections))
-
-    def test_released_sections_is_empty_when_only_unreleased_exists(self) -> None:
-        text = "# Changelog\n\n## [Unreleased]\n\n- pending\n"
-        self.assertEqual(assemble.released_sections(text), [])
-
-    def test_render_skips_crates_with_no_dated_release(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            unreleased_only = Path(temporary) / "unreleased.md"
-            unreleased_only.write_text("# Changelog\n\n## [Unreleased]\n\n- pending\n", encoding="utf-8")
-            released = Path(temporary) / "released.md"
-            released.write_text(
-                "# Changelog\n\n## [Unreleased]\n\n## [0.3.1] - 2026-09-20\n\n- shipped\n",
-                encoding="utf-8",
-            )
-            output = assemble.render(
-                [("axiolid-unreleased", unreleased_only), ("axiolid-released", released)]
-            )
-            self.assertNotIn("axiolid-unreleased", output)
-            self.assertIn("axiolid-released", output)
-            self.assertIn("0.3.1", output)
-            self.assertIn("shipped", output)
-
-    def test_render_reports_when_nothing_has_shipped_yet(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            unreleased_only = Path(temporary) / "unreleased.md"
-            unreleased_only.write_text("# Changelog\n\n## [Unreleased]\n\n- pending\n", encoding="utf-8")
-            output = assemble.render([("axiolid-probe", unreleased_only)])
-            self.assertIn("No crate has a dated release yet", output)
-
-    def test_render_skips_a_crate_with_no_changelog_file(self) -> None:
-        missing = Path(tempfile.gettempdir()) / "axiolid-does-not-exist-CHANGELOG.md"
-        self.assertFalse(missing.exists())
-        output = assemble.render([("axiolid-missing", missing)])
-        self.assertIn("No crate has a dated release yet", output)
 
 
 if __name__ == "__main__":

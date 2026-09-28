@@ -34,6 +34,12 @@
 //! because normalising a caller's ray silently changes the meaning of every
 //! distance they compare against.
 //!
+//! # What the tolerance decides
+//!
+//! `Tolerance::linear()` bounds only the parallel-ray rejection and the
+//! barycentric slack that keeps edge and vertex hits. It never decides the
+//! front/back branch: [`FaceSide`] comes from the certified `orient3d` sign.
+//!
 //! [`SpatialIndex::visit_ray`]: https://docs.rs/axiolid-spatial
 
 use core::fmt;
@@ -96,6 +102,16 @@ pub enum RayMeshError {
         /// Offending triangle.
         triangle: usize,
     },
+    /// A candidate triangle index is at or beyond the mesh's triangle count.
+    ///
+    /// Reported rather than skipped: a broad phase built over a different
+    /// mesh would otherwise answer "no hit" for triangles it never tested.
+    TriangleIndexOutOfRange {
+        /// Offending candidate index.
+        triangle: usize,
+        /// Triangles in the mesh.
+        triangle_count: usize,
+    },
 }
 
 impl fmt::Display for RayMeshError {
@@ -106,6 +122,13 @@ impl fmt::Display for RayMeshError {
             Self::InvalidTolerance => {
                 formatter.write_str("ray/mesh tolerance must be finite and non-negative")
             }
+            Self::TriangleIndexOutOfRange {
+                triangle,
+                triangle_count,
+            } => write!(
+                formatter,
+                "triangle {triangle} is out of range for a mesh of {triangle_count} triangles"
+            ),
             Self::PositionIndexOutOfRange { triangle } => {
                 write!(
                     formatter,
@@ -137,7 +160,10 @@ pub fn nearest_hit(
 ///
 /// This is the composition point with a broad phase: feed it the triangle
 /// indices a BVH walk produced. Candidates may repeat and may arrive in any
-/// order; the result does not depend on that order.
+/// order; the result does not depend on that order. A candidate index at or
+/// beyond `mesh.triangle_count()` is refused with
+/// [`RayMeshError::TriangleIndexOutOfRange`], and a triangle that references
+/// a missing position with [`RayMeshError::PositionIndexOutOfRange`].
 ///
 /// # Determinism
 ///
@@ -155,9 +181,6 @@ pub fn nearest_hit_among(
 
     let mut best: Option<RayHit3> = None;
     for triangle in candidates {
-        if triangle >= mesh.triangle_count() {
-            continue;
-        }
         let Some(hit) = triangle_hit(mesh, ray, tolerance, triangle)? else {
             continue;
         };
@@ -277,6 +300,13 @@ fn is_closer(candidate: &RayHit3, current: &RayHit3) -> bool {
 }
 
 fn corners(mesh: &impl TriangleMeshView, triangle: usize) -> Result<[Point3; 3], RayMeshError> {
+    let triangle_count = mesh.triangle_count();
+    if triangle >= triangle_count {
+        return Err(RayMeshError::TriangleIndexOutOfRange {
+            triangle,
+            triangle_count,
+        });
+    }
     let indices = mesh.triangle(triangle);
     let mut corners = [Point3::ZERO; 3];
     for (slot, index) in corners.iter_mut().zip(indices) {

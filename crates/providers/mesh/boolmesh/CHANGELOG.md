@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour change:** a refusal inside the solve (an odd edge-point
+  count in `pair_up`, #101) is reported as
+  `GeomError::BackendContractViolation` naming `boolmesh`, not
+  `Degenerate`. The operands passed every input gate, so the failure is
+  this provider's defect and no longer reads as the caller's.
+  `tests/solve_failure.rs` pins it on a grid union that still reaches the
+  refusal (#203).
+
 ## [0.3.1] - 2026-09-27
 
 ### Fixed

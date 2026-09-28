@@ -105,3 +105,28 @@ size:
 - The gap to CGAL below 1e-12 remains open and is now documented rather than
   unmeasured. Closing it would require exact constructions, which this ADR
   declines.
+
+## Amendment 2026-09-28: coordinate magnitude, and no RTC facility
+
+A boolean measured at survey coordinates (1e6 to 1e7) looked badly wrong,
+which was first read as a case for exact construction. Probes showed the
+error was already present in the input's volume, before any boolean ran. It
+came from catastrophic cancellation in a divergence-theorem sum taken about
+the world origin. `volume_properties` and `surface_properties` in
+`axiolid-measure` now sum about the mesh's first vertex, and
+`tests/conditioning.rs` there holds thin plates at 1e7 to within 1e-12
+relative. Re-basing per triangle was also measured. It was worse by up to six
+orders of magnitude because it leaves one operand of `a . (b x c)` at world
+magnitude, so it was not adopted. `second_moments` stays about the origin
+because its value depends on that origin by contract.
+
+Two further arguments for a relative-to-centre (RTC) coordinate facility were
+measured and refuted (`axiolid-predicates` and
+`axiolid-mesh-boolean-boolmesh`, `tests/survey_scale.rs`). Coincidence that
+both sides author the same way survives rounding at every magnitude, so
+`orient3d` still certifies `Zero` and a flush union is exact at 1e7. The
+filter's escalation rate does not change with magnitude either, so RTC would
+not make predicates faster. Axiolid therefore has no RTC or local-origin
+facility and no offset ownership model. The input's own grid, about 1.9e-9 m
+at 1e7, is a property of the caller's coordinates. Revisit this only if a
+real workload fails in a way these probes do not cover.

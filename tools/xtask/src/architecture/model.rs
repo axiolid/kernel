@@ -13,6 +13,8 @@ pub struct PackageArchitecture {
     pub role: String,
     pub domain: String,
     pub public: bool,
+    /// `publish` is not `false`: the package ships to crates.io.
+    pub publish: bool,
     pub format_neutral: bool,
     pub declared_dependency_packages: BTreeSet<String>,
     pub allowed_internal_dependencies: BTreeSet<String>,
@@ -32,10 +34,11 @@ impl Architecture {
             .no_deps()
             .exec()
             .map_err(|error| format!("cargo metadata failed: {error}"))?;
-        Self::from_metadata(metadata)
+        Self::from_metadata(&metadata)
     }
 
-    fn from_metadata(metadata: Metadata) -> Result<Self> {
+    /// Shared with `cargo xtask docs`, which reads the same metadata once.
+    pub fn from_metadata(metadata: &Metadata) -> Result<Self> {
         let root = PathBuf::from(metadata.workspace_root.as_str());
         let workspace: BTreeMap<String, &Package> = metadata
             .workspace_packages()
@@ -96,6 +99,7 @@ impl Architecture {
                     role: string(table, "role", &name)?,
                     domain: string(table, "domain", &name)?,
                     public: boolean(table, "public", &name)?,
+                    publish: package.publish.as_ref().is_none_or(|r| !r.is_empty()),
                     format_neutral: boolean(table, "format-neutral", &name)?,
                     declared_dependency_packages,
                     allowed_internal_dependencies,

@@ -100,6 +100,26 @@ All notable changes to Axiolid are documented in this file.
   parallel-axis moments, hemispheres, cones, a half torus) and an 18-fault
   mutation probe.
 
+### Changed
+
+- Context lives beside the code (ADR 0078). The root `AGENTS.md` is the
+  only one; the nested `AGENTS.md` files, every `PLAN.md`, `docs/plans/`
+  and root-level session plans are gone, their content moved into module
+  docs, ADR amendments, tests and issues (#199-#202).
+  `cargo xtask context check` keeps it that way and runs in the gate.
+- Every crate has its own `README.md`, declared as its crates.io page,
+  with links to docs.rs, its reference page and the source.
+- The crate reference on the documentation site is generated:
+  `cargo xtask docs` writes one page per crate from its manifest, README
+  and changelog, the grouped index, the sidebar and the per-crate
+  changelog page (replacing `scripts/assemble-crate-changelogs.py`);
+  `--check` runs in the gate and in the Pages workflow, which now also
+  hosts rustdoc under `/api/rustdoc/`.
+- The machine-checked declarations moved from `architecture/` to
+  `docs/architecture/`.
+- The README quick start uses `cargo add axiolid --features standard`;
+  the plain facade compiles no geometry.
+
 ### Fixed
 
 - Exact revolutions were built inside out (#125): their surface frames were

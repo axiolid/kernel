@@ -1,6 +1,6 @@
 //! Capability ledger: what Axiolid can do, measured against OCCT and CGAL.
 //!
-//! `architecture/capability-ledger.toml` is the durable record of a one-off
+//! `docs/architecture/capability-ledger.toml` is the durable record of a one-off
 //! like-for-like audit. It exists so the next contributor does not rerun
 //! that audit: `cargo xtask gaps` answers "what is missing, where does the
 //! reference implementation live, which issue tracks it" in one command.

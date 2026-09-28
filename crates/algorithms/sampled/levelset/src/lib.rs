@@ -46,41 +46,6 @@
 //! so no sample sits exactly at the level and every crossing is strictly
 //! interior to its edge. See `SOS_DELTA` for the numeric stand-in and why
 //! its magnitude matters.
-//!
-//! # What this is not
-//!
-//! Extraction is an approximation. The mesh interpolates the field
-//! linearly along each edge, so a curved surface is faceted and the error
-//! shrinks with the grid, it does not vanish. This is not a certified
-//! path and does not claim to be.
-//!
-//! # Known limitation: grid tangency
-//!
-//! The closed-manifold guarantee holds when the surface passes BETWEEN
-//! grid samples. It does not currently hold when the level set is exactly
-//! tangent to a grid plane -- a sphere of radius 1 with samples landing
-//! exactly on 1.0, for instance. Two edges of the same tetrahedron then
-//! interpolate to the same point, the triangle between them has zero area,
-//! and the surface is left with unmatched edges.
-//!
-//! Measured, so the boundary of the guarantee is known rather than
-//! assumed: a unit sphere in bounds of half-extent 1.45 is closed at edge
-//! lengths 0.4, 0.2 and 0.1, while the same sphere in half-extent 1.4 is
-//! closed at 0.4 and open at 0.2 and 0.1 -- exactly the resolutions whose
-//! samples land on the radius.
-//!
-//! Two fixes were tried and rejected. Offsetting an exactly-zero sample by
-//! `Scalar::MIN_POSITIVE` produced vertices a SUBNORMAL distance apart:
-//! distinct in bits, identical in geometry, so it reproduced the
-//! degeneracy it was meant to remove. Offsetting by a fraction of the cell
-//! instead flips the sample's side and changes the topology, which broke
-//! the general case to patch the special one. The remaining candidate is
-//! symbolic perturbation (simulation of simplicity), which decides ties by
-//! index rather than by value; that is a larger change and is not done
-//! here.
-//!
-//! A caller who needs the guarantee unconditionally should offset the
-//! bounds so no grid plane is tangent to the surface.
 
 use ahash::AHashMap;
 

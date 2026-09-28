@@ -29,7 +29,7 @@ The feature matrix protects minimal builds. The probe mutates the declared layer
 - Treat scalar paths as correctness oracles; benchmark and differentially test a faster path before claiming a performance win.
 - Keep operation capability tied to an executable provider implementation.
 - Record irreversible architecture choices under [`docs/adr/`](../adr/README.md).
-- Update a crate `PLAN.md` only with concrete next work, not aspirational coverage claims.
+- Put open work in a GitHub issue, not in a checked-in plan. A code marker is written `TODO(#N)`. A crate's `README.md` says what the crate is for and makes no coverage claim that the code and tests do not back ([ADR 0078](../adr/0078-context-lives-beside-the-code.md)).
 
 ## Documentation
 
@@ -39,6 +39,14 @@ The site is VitePress and deploys from `main` through GitHub Pages. Preview it l
 npm --prefix docs ci
 npm --prefix docs run docs:dev
 ```
+
+### Records
+
+- `CHANGELOG.md` files follow [Keep a Changelog](https://keepachangelog.com/).
+- Write an ADR from `docs/adr/_template.md` before an irreversible boundary or dependency change.
+- A research record in `docs/research/` keeps measured evidence apart from proposals.
+- `cargo xtask docs` generates every page derived from the crates: the [crate reference](/reference/) (from each crate's manifest, `README.md` and `CHANGELOG.md`), the [per-crate changelog](/reference/changelog), and `docs/architecture/crate-map.md` and `dependency-graph.md`. Do not edit them by hand; change the source and regenerate. `cargo xtask docs --check` runs in the gate and before every deploy. Package metadata does not prove a capability: the implementation and its conformance tests do.
+- A published crate's `README.md` is its crates.io page. It ends with its docs.rs, reference-page and source links, and states no version or publication status; `cargo xtask docs --check` enforces both.
 
 ### Diagrams, geometry, and equations
 

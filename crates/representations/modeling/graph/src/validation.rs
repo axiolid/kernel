@@ -1,4 +1,10 @@
 //! Semantic validation for graph references.
+//!
+//! Every reference must name a node of the family its edge accepts. Curve
+//! dimensionality is followed through `Instance` nodes and trimmed, offset
+//! and composite curve relations, so an instance keeps its source's
+//! `Curve2`/`Curve3` family and cannot be used to smuggle a 3D curve into a
+//! 2D slot.
 
 use std::collections::HashSet;
 

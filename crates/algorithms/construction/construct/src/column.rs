@@ -5,7 +5,9 @@
 //! each cell the solid occupies a stack of height intervals, each bounded
 //! below and above by a plane (flat, or sloped as in ADR 0071). The cells
 //! come from one exact [`ArcArrangement`], so every face shares its vertices
-//! with every other face by index.
+//! with every other face by index. Building bands separately and gluing them
+//! does not work: their crossings are rounded independently and will not
+//! agree.
 //!
 //! # Faces
 //!

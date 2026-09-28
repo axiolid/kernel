@@ -10,8 +10,14 @@
 //! B-rep, provider, or execution dependency, so a consumer that needs only
 //! certified signs — linear intersection, polygon orientation, NURBS root
 //! isolation, topology classification — pays for arithmetic and nothing else.
-//! The broad `axiolid-reference` oracle re-exports these items unchanged
+//! That includes big integers: the exact tier here is expansion arithmetic
+//! (plus a fixed-size dyadic fallback for `orient3d`), and exact
+//! *constructions* over big integers live in `axiolid-exact` instead. The
+//! broad `axiolid-reference` oracle re-exports these items unchanged
 //! (ADR 0036).
+//!
+//! A `*_filter` function may return `Certified::Uncertain`; a public
+//! predicate never does.
 
 pub mod arithmetic;
 pub mod expansion;

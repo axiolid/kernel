@@ -15,6 +15,10 @@
 //! tuning decision made on a number nobody measured. Callers must supply
 //! their own fallback explicitly, so the guess is visible at the call site.
 //!
+//! Detection is Linux sysfs plus `available_parallelism`: no dependency, no
+//! `unsafe`, no CPUID, and the same code on x86_64 and aarch64. Other
+//! targets report no caches and undetermined core heterogeneity.
+//!
 //! # Evidence this matters
 //!
 //! A radix sort in the mesh audit executed 18.9% fewer instructions than the

@@ -22,6 +22,9 @@
 //! `cargo bench --bench regression` needs `valgrind` on PATH. It is therefore
 //! not part of the default gate; see `scripts/bench-regression.sh`, which skips
 //! with a clear message rather than failing when valgrind is absent.
+//!
+//! `#[library_benchmark]` rejects `///` doc comments on the function it
+//! wraps, so each benchmark below is described with a plain `//` comment.
 
 use axiolid::application::Application;
 use axiolid::contracts::ExecutionOptions;

@@ -96,3 +96,10 @@ small operation traits, and physically separate execution/adaptor crates.
 - `crates/facade/axiolid-backend-{cpu,gpu}/`
 - `packages/ifc/ifc-geometry/references/ifc4-add2-tc1-geometry-declarations.tsv`
 - `packages/ifc/ifc-geometry/tests/declaration_manifest.rs`
+
+## Amendment 2026-09-28: `crates/AGENTS.md` and `crates/PLAN.md` retired
+
+[ADR 0078](./0078-context-lives-beside-the-code.md) removed both files. The
+layer DAG and exact dependency allowlists are enforced by
+`cargo xtask architecture check`. The standing rules are in the root
+`AGENTS.md`, and open work is tracked in GitHub issues.

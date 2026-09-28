@@ -32,6 +32,9 @@ pub enum Profile {
     /// Arbitrary exact contour with holes.
     Contour(ContourProfile),
     /// Profile transformed from another profile.
+    ///
+    /// Placement is recorded as a transform over the exact basis, not by
+    /// transforming tessellated points, so a placed circle stays a circle.
     Derived {
         /// Base profile.
         basis: Box<Profile>,

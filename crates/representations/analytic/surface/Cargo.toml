@@ -6,9 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 authors.workspace = true
-description = "Surface evaluation: elementary surfaces, swept surfaces, NURBS patches."
+description = "Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches."
 
 [dependencies]
 axiolid-core.workspace = true

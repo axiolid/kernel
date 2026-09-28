@@ -3,9 +3,15 @@
 
 //! General NURBS algorithms over Axiolid's format-neutral B-spline values.
 //!
-//! This crate builds on the portable scalar oracle. It owns differential
+//! This crate builds on the portable scalar oracle: evaluation comes from
+//! `axiolid-evaluate` and is not reimplemented here. It owns differential
 //! geometry and exact shape-preserving transformations; importers and
 //! tessellators are consumers, not the capability boundary.
+//!
+//! Every tolerance-sensitive solver takes explicit, bounded options (work
+//! ceilings, resolutions, tolerances) and reports an unresolved outcome or
+//! refuses when they run out. A shape-preserving transform is tested against
+//! independent evaluation samples of the original, not its own recurrence.
 
 mod axis;
 mod certified_bezier;

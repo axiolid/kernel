@@ -3,9 +3,12 @@
 //! Certified intersections for linear geometry.
 //!
 //! This package exists so a line-query application can compile intersection
-//! logic with a three-package internal closure — `axiolid-core`,
-//! `axiolid-linear`, `axiolid-predicates` — and no curves, surfaces, NURBS,
-//! meshes, B-rep, topology, providers, or execution machinery (ADR 0036).
+//! logic with a four-package internal closure — `axiolid-core`,
+//! `axiolid-guarantees`, `axiolid-linear`, `axiolid-predicates` — and no
+//! curves, surfaces, NURBS, meshes, B-rep, topology, providers, or execution
+//! machinery (ADR 0036). The `linear-intersection-minimal` profile in
+//! `docs/architecture/closure-profiles.toml` pins that closure, so any new
+//! internal dependency fails `cargo xtask architecture closure check`.
 //!
 //! # Classification, not `Option<Point2>`
 //!

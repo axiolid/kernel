@@ -1,6 +1,10 @@
 //! Explicit repair plans and reports.
 
 /// One opt-in repair. There is deliberately no `All` variant.
+///
+/// No action removes self-intersections. [`crate::self_intersections`]
+/// detects them, but removing them cuts and re-triangulates faces, and that
+/// is deliberately not offered as a repair.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RepairAction {

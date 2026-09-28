@@ -1,4 +1,6 @@
 mod architecture;
+mod context;
+mod docs;
 mod ffi;
 mod gaps;
 
@@ -7,6 +9,8 @@ use std::env;
 fn usage() -> ! {
     eprintln!("usage: cargo xtask architecture <check|list|graph|docs>");
     eprintln!("       cargo xtask architecture closure <check|docs|explain <profile>>");
+    eprintln!("       cargo xtask context check");
+    eprintln!("       cargo xtask docs [--check]");
     eprintln!("       cargo xtask ffi <header|check>");
     eprintln!(
         "       cargo xtask gaps [next|list [--open] [--area <a>]|show <id|issue-key>|check]"
@@ -30,6 +34,22 @@ fn main() {
             _ => usage(),
         };
         finish("gaps", result);
+        return;
+    }
+    if command.as_deref() == Some("context") {
+        match args.next().as_deref() {
+            Some("check") => finish("context", context::check()),
+            _ => usage(),
+        }
+        return;
+    }
+    if command.as_deref() == Some("docs") {
+        let check = match args.next().as_deref() {
+            None => false,
+            Some("--check") => true,
+            _ => usage(),
+        };
+        finish("docs", docs::run(check));
         return;
     }
     if command.as_deref() == Some("ffi") {

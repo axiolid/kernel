@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 
 [dependencies]
 axiolid-core.workspace = true
@@ -23,9 +23,9 @@ rayon = { version = "1.11", optional = true }
 
 [features]
 # Upstream multi-threading. OFF by default: the parallel path has not been
-# audited for run-to-run byte stability, and `determinism()` drops to
-# `BestEffort` when it is on, so `Plan::admit` refuses a stronger request
-# rather than silently returning a schedule-dependent result.
+# audited for run-to-run byte stability. `determinism()` is `Topological`
+# either way (the general path is not bitwise-stable even single-threaded),
+# and `tests/determinism.rs` holds that enabling threads cannot weaken it.
 parallel = ["dep:rayon"]
 
 # Inter-boolean batch parallelism: independent tree nodes in `union_many`

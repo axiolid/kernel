@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 authors.workspace = true
 # Never published. This is measurement scaffolding for the kernel's own
 # development, not a public capability, and keeping it unpublished keeps it out

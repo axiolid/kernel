@@ -41,15 +41,22 @@ impl AlignedBox {
 /// the cube around it share a bounding box and must not share an answer.
 ///
 /// Requirements, all necessary:
-/// * exactly 8 distinct corner positions, each a combination of the min/max
-///   coordinate on every axis
-/// * exactly 12 triangles
+/// * exactly 36 indices (12 triangles)
+/// * every position, referenced or not, lies on the min/max lattice of each
+///   axis
 /// * every triangle lies in one of the 6 axis-aligned face planes
 /// * each face plane carries exactly 2 triangles
 ///
 /// Together these exclude a box with a dent (wrong triangle count), a sheared
 /// box (corners off the min/max lattice), and a box with an interior void
 /// (extra triangles).
+///
+/// None of the checks is redundant. `chunks_exact(3)` drops a trailing
+/// partial triangle, so a malformed 38-index buffer presents a perfect box
+/// to the plane loop and only the length check sees it. The plane loop sees
+/// only referenced positions, so an unused off-lattice vertex is caught only
+/// by the lattice walk. Each decline case is pinned in
+/// `tests/analytic_boxes.rs`.
 pub fn recognise(mesh: &TriMesh, eps: f64) -> Option<AlignedBox> {
     if mesh.indices.len() != 36 {
         return None;
@@ -77,8 +84,8 @@ pub fn recognise(mesh: &TriMesh, eps: f64) -> Option<AlignedBox> {
         return None;
     }
 
-    // Every referenced position must sit on a corner of the lattice: each
-    // coordinate equals that axis's min or max. This is what rejects a sphere,
+    // Every position, referenced or not, must sit on a corner of the
+    // lattice: each coordinate equals that axis's min or max. This is what rejects a sphere,
     // a sheared box, or any mesh that merely happens to span the same extent.
     for v in p {
         let c = [v.x, v.y, v.z];

@@ -4,27 +4,7 @@ Implemented from base `372b16f64fa9be962df48751a654f8cda3f3b4a0` under ADR 0035.
 
 ## Physical ownership
 
-| Package | Path | Role |
-| --- | --- | --- |
-| `axiolid-core` | `crates/foundation/core` | dependency root |
-| `axiolid-curve`, `axiolid-surface`, `axiolid-primitive` | `crates/representations/analytic/*` | analytic values |
-| `axiolid-profile` | `crates/representations/region/profile` | bounded region values |
-| `axiolid-topology`, `axiolid-brep` | `crates/representations/{topology,brep}` | topology/exact B-rep values |
-| `axiolid-mesh` | `crates/representations/discrete/mesh` | discrete mesh values |
-| `axiolid-field` | `crates/representations/sampled/field` | sampled-field values/configuration/evidence |
-| `axiolid-model` | `crates/representations/modeling/graph` | authored immutable graph |
-| `axiolid-guarantees` | `crates/contracts/guarantees` | certification/escalation/precision vocabulary |
-| `axiolid-contracts` | `crates/contracts/common/base` | common backend/execution/diagnostic contracts |
-| `axiolid-mesh-contracts` | `crates/contracts/common/mesh` | shared mesh admissibility |
-| operation contract packages | `crates/contracts/operations/*` | tessellation, mesh Boolean, mesh section, graph-to-mesh compile schemas |
-| focused algorithm packages | `crates/algorithms/*` | reference, NURBS, construction, query, planar, sampled, repair |
-| `axiolid-mesh-boolean-boolmesh` | `crates/providers/mesh/boolmesh` | concrete optional provider |
-| `axiolid-dispatch` | `crates/execution/dispatch` | registration/fallback/device/budget policy |
-| `axiolid-mesh-compile` | `crates/execution/compile` | reference graph-to-mesh execution |
-| CPU/GPU packages | `crates/execution/{cpu,gpu}` | execution contexts/adapters |
-| `axiolid` | `crates/facade/axiolid` | additive public feature facade |
-
-The generated [crate map](./crate-map.md) and [dependency graph](./dependency-graph.md) are authoritative and freshness-checked by `cargo xtask architecture check`.
+The [crate reference](/reference/) lists every package by layer, and the generated [crate map](./crate-map.md) and [dependency graph](./dependency-graph.md) give each package's path, role and allowed dependencies. They are freshness-checked by `cargo xtask docs --check`.
 
 ## Public migration table
 

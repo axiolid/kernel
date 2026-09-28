@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 authors.workspace = true
 description = "Metric properties: area, volume, centroid, moments of inertia."
 

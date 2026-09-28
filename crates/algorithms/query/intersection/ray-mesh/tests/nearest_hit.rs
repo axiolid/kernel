@@ -2,13 +2,16 @@
 //!
 //! Fixtures are chosen so every expected answer is checkable by hand: unit
 //! triangles at known offsets, axis-aligned rays, and exact edge/vertex hits.
+//! Keep covering edge-on, vertex-on, parallel-in-plane, back-face,
+//! behind-origin and BVH composition: a suite that never produces an edge-on
+//! hit proves nothing about tie-breaking.
 
 use std::ops::ControlFlow;
 
 use axiolid_core::{Aabb, Point3, Ray3, Tolerance, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_ray_mesh::{
-    intersect_triangle, nearest_hit, nearest_hit_among, FaceSide, RayMeshError,
+    intersect_triangle, nearest_hit, nearest_hit_among, triangle_hit, FaceSide, RayMeshError,
 };
 use axiolid_spatial::{Bvh, SpatialIndex, SpatialItem};
 
@@ -285,6 +288,26 @@ fn an_out_of_range_triangle_index_is_reported_not_ignored() {
             Tolerance::METRE
         ),
         Err(RayMeshError::PositionIndexOutOfRange { triangle: 0 })
+    );
+}
+
+#[test]
+fn an_out_of_range_candidate_is_refused_not_skipped() {
+    let mesh = stacked_planes();
+    let query = ray([0.5, 0.5, 0.0], [0.0, 0.0, 1.0]);
+    let count = axiolid_mesh::TriangleMeshView::triangle_count(&mesh);
+    let refused = Err(RayMeshError::TriangleIndexOutOfRange {
+        triangle: count,
+        triangle_count: count,
+    });
+    // Even alongside a candidate that hits: a skipped index would hide it.
+    assert_eq!(
+        nearest_hit_among(&mesh, &query, Tolerance::METRE, [0, count]),
+        refused
+    );
+    assert_eq!(
+        triangle_hit(&mesh, &query, Tolerance::METRE, count),
+        refused
     );
 }
 

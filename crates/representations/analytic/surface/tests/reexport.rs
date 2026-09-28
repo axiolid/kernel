@@ -1,5 +1,5 @@
 //! `BSplineSurface` still resolves from both of its published paths, with
-//! every published field (architecture/semver-exceptions.toml).
+//! every published field (docs/architecture/semver-exceptions.toml).
 
 use axiolid_core::Point3;
 use axiolid_curve::KnotSpec;

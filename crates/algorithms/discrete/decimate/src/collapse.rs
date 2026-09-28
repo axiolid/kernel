@@ -193,7 +193,7 @@ fn run(
 
 /// Attempt one collapse, returning the new triangle list or nothing.
 ///
-/// Rejects the three ways a collapse damages a mesh:
+/// Rejects the two ways a collapse damages a mesh:
 ///
 /// - **Inversion.** A triangle whose normal flips has turned inside out. A
 ///   decimator that permits this produces exactly the defect
@@ -201,8 +201,10 @@ fn run(
 /// - **Non-manifold edges.** Collapsing an edge whose endpoints share
 ///   neighbours other than the two triangles on it welds unrelated sheets
 ///   together.
-/// - **Boundary loss.** A vertex on a boundary keeps its position rather
-///   than being averaged inward, so the silhouette survives.
+///
+/// Boundary vertices are not pinned: a collapse may move a vertex on an open
+/// boundary to an edge midpoint like any other vertex, and the deviation
+/// bound is what limits how far the silhouette moves.
 fn try_collapse(
     triangles: &[[u32; 3]],
     positions: &[Point3],

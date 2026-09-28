@@ -227,7 +227,6 @@ impl ExactBRepBuilder {
         self.pcurve_intervals.insert((loop_id, use_index), interval);
     }
 
-    /// Validate and freeze the exact B-rep result.
     /// Copy every vertex, edge, loop, face and shell of `other` into this
     /// builder, with its curves, surfaces, intervals and names, and return
     /// the new handles of `other`'s shells in order.
@@ -349,6 +348,13 @@ impl ExactBRepBuilder {
             .collect()
     }
 
+    /// Validate and freeze the exact B-rep result.
+    ///
+    /// Refuses a result with no faces, topology that fails
+    /// [`axiolid_topology::audit_brep`], and any edge, edge use or face whose
+    /// support or finite non-zero interval is missing or does not resolve in
+    /// its catalog (see [`ExactBRepError`]). Closure is not required: an open
+    /// sheet is a valid exact result.
     pub fn finish(self) -> Result<ExactBRep, ExactBRepError> {
         validate(&self)?;
         Ok(ExactBRep {

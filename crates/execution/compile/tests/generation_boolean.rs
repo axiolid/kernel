@@ -25,6 +25,13 @@ fn volume_at(mesh: &TriMesh, tolerance: Tolerance) -> Scalar {
 }
 
 /// A tolerance proportional to a chord budget, floored at f64 sanity.
+///
+/// The mesh audit calls a triangle degenerate when its doubled area is at
+/// most `tolerance.linear()²`. A cylinder flattened at chord `c` has side
+/// quads about `sqrt(8 r c)` wide and cap slivers far smaller, so a fixed
+/// `Tolerance::MILLIMETRE` rejects correct geometry as soon as the chord
+/// budget goes sub-millimetre. The measuring tolerance has to follow the
+/// budget that drove flattening.
 fn tolerance_for(chord: Scalar) -> Tolerance {
     Tolerance::new((chord * 1e-3).max(1e-12), 1e-9).expect("valid tolerance")
 }

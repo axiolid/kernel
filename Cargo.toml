@@ -75,7 +75,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Format-agnostic Axiolid geometry kernel. Leaf crates remain independently consumable.
-axiolid = { path = "crates/facade/axiolid", version = "0.3.0", default-features = false }
+axiolid = { path = "crates/facade/axiolid", version = "0.4.0", default-features = false }
 axiolid-core = { path = "crates/foundation/core", version = "0.3.0" }
 axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.0" }
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.0" }
@@ -117,7 +117,7 @@ num-integer = { version = "0.1.46", default-features = false, features = ["std"]
 axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.1", default-features = false }
 axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.1" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.0", default-features = false }
-axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.3.0", default-features = false }
+axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.0" }
 axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.4" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and

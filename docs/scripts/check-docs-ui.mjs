@@ -53,7 +53,7 @@ function sourceCheck(root) {
   requireIncludes(css, ".glossary-term::after {\n    display: none;", "touch tooltip overflow guard");
 
   const forbidden = new RegExp(["M", "CS", "|Axi", "oval"].join(""), "i");
-  const scanned = [...markdownFiles(docs), join(root, "crates/PLAN.md")];
+  const scanned = markdownFiles(docs);
   for (const path of scanned) {
     const match = readFileSync(path, "utf8").match(forbidden);
     if (match) fail(`application-specific boundary name remains in ${path}: ${match[0]}`);

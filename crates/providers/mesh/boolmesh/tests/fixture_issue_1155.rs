@@ -72,9 +72,9 @@ fn bounds(mesh: &TriMesh) -> (Point3, Point3) {
 
 /// A bounded stand-in for the half-space whose boundary plane is `x = c - t*y`.
 ///
-/// A true `IfcHalfSpaceSolid` is unbounded; mesh booleans need it bounded, and
-/// PLAN.md tracks moving that bounding into `axiolid-model`. Until it lives
-/// there the bound is constructed here.
+/// A true `IfcHalfSpaceSolid` is unbounded; mesh booleans need it bounded.
+/// Graph compilation bounds one in `axiolid_construct::half_space`; this
+/// provider-level fixture has no graph, so it builds its own bound.
 ///
 /// Sizing matters and is easy to get wrong. The bound must comfortably cover
 /// the column so a flyaway cannot be masked by a tight cutter, but it must NOT

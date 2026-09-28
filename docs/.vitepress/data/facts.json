@@ -1,0 +1,621 @@
+{
+  "crate": {
+    "axiolid": {
+      "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
+      "layer": "facade",
+      "path": "crates/facade/axiolid",
+      "released": null,
+      "released_date": null,
+      "role": "facade",
+      "version": "0.4.0"
+    },
+    "axiolid-arrangement": {
+      "description": "Editable planar subdivision with persistent half-edge topology",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/arrangement",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.planar",
+      "version": "0.3.0"
+    },
+    "axiolid-backend-cpu": {
+      "description": "Portable and runtime-optimized CPU execution context for Axiolid geometry",
+      "layer": "execution",
+      "path": "crates/execution/cpu",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "execution.context",
+      "version": "0.3.0"
+    },
+    "axiolid-backend-gpu": {
+      "description": "GPU executor adapter contract for batched Axiolid geometry",
+      "layer": "execution",
+      "path": "crates/execution/gpu",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "execution.context",
+      "version": "0.3.0"
+    },
+    "axiolid-brep": {
+      "description": "Exact analytic B-rep result contracts over neutral topology",
+      "layer": "representations",
+      "path": "crates/representations/brep",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "representation.composed",
+      "version": "0.3.1"
+    },
+    "axiolid-brep-audit": {
+      "description": "Geometric consistency auditing for exact boundary representations",
+      "layer": "algorithms",
+      "path": "crates/algorithms/repair/brep-audit",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.repair",
+      "version": "0.3.1"
+    },
+    "axiolid-brep-boolean": {
+      "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
+      "layer": "algorithms",
+      "path": "crates/algorithms/construction/brep-boolean",
+      "released": "0.1.0",
+      "released_date": "2026-09-27",
+      "role": "algorithm.construction",
+      "version": "0.1.0"
+    },
+    "axiolid-capi": {
+      "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
+      "layer": "facade",
+      "path": "crates/facade/axiolid-capi",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "facade.native-c",
+      "version": "0.3.0"
+    },
+    "axiolid-collide": {
+      "description": "Convex collision queries: separating axis, overlap, and separation distance",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/collide",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.query",
+      "version": "0.3.0"
+    },
+    "axiolid-construct": {
+      "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
+      "layer": "algorithms",
+      "path": "crates/algorithms/construction/construct",
+      "released": "0.3.5",
+      "released_date": "2026-09-28",
+      "role": "algorithm.construction",
+      "version": "0.3.5"
+    },
+    "axiolid-contracts": {
+      "description": "Common backend-neutral execution and diagnostic contracts",
+      "layer": "contracts",
+      "path": "crates/contracts/common/base",
+      "released": "0.3.1",
+      "released_date": "2026-09-25",
+      "role": "contract.common",
+      "version": "0.3.1"
+    },
+    "axiolid-core": {
+      "description": "Geometry data types and tolerance policy. No algorithms, no backends.",
+      "layer": "foundation",
+      "path": "crates/foundation/core",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "foundation.values",
+      "version": "0.3.0"
+    },
+    "axiolid-curve": {
+      "description": "Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves.",
+      "layer": "representations",
+      "path": "crates/representations/analytic/curve",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "representation.atomic",
+      "version": "0.3.1"
+    },
+    "axiolid-curve-evaluate-contract": {
+      "description": "Portable curve evaluation capability contract: point, tangent and oriented frame at a distance",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/curve-evaluate",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-decimate": {
+      "description": "Edge-collapse mesh decimation with a bounded, reported deviation",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/decimate",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-decompose": {
+      "description": "Convex decomposition of a solid, exact or approximate and always labelled",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/decompose",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-dispatch": {
+      "description": "Provider registration, ordering, fallback, and execution policy",
+      "layer": "execution",
+      "path": "crates/execution/dispatch",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "execution.dispatch",
+      "version": "0.3.0"
+    },
+    "axiolid-evaluate": {
+      "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
+      "layer": "algorithms",
+      "path": "crates/algorithms/parametric/evaluate",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.parametric",
+      "version": "0.3.1"
+    },
+    "axiolid-exact": {
+      "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
+      "layer": "algorithms",
+      "path": "crates/algorithms/exact",
+      "released": "0.1.1",
+      "released_date": "2026-09-28",
+      "role": "algorithm.reference",
+      "version": "0.1.1"
+    },
+    "axiolid-exact-compile-contract": {
+      "description": "Portable graph-to-exact-B-rep compilation contract",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/exact-compile",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-field": {
+      "description": "Frame-neutral layered spatial-field values and validated sampling configuration.",
+      "layer": "representations",
+      "path": "crates/representations/sampled/field",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.sampled",
+      "version": "0.3.0"
+    },
+    "axiolid-field-ops": {
+      "description": "Sampling, morphology, clearance, and navigation over Axiolid layered fields.",
+      "layer": "algorithms",
+      "path": "crates/algorithms/sampled/field",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.sampled",
+      "version": "0.3.0"
+    },
+    "axiolid-fixtures": {
+      "description": "Shared adversarial and degenerate geometry fixtures with provenance",
+      "layer": "representations",
+      "path": "crates/representations/fixtures",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.fixtures",
+      "version": "0.3.0"
+    },
+    "axiolid-guarantees": {
+      "description": "Certified-value and escalation vocabulary for geometry contracts",
+      "layer": "contracts",
+      "path": "crates/contracts/guarantees",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.guarantees",
+      "version": "0.3.0"
+    },
+    "axiolid-heal": {
+      "description": "Explicit diagnosis and opt-in repair contracts for dirty geometry",
+      "layer": "algorithms",
+      "path": "crates/algorithms/repair/heal",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.repair",
+      "version": "0.3.0"
+    },
+    "axiolid-inspect": {
+      "description": "Mesh queries: clearance, containment, ray casting, and genus",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/inspect",
+      "released": "0.3.3",
+      "released_date": "2026-09-27",
+      "role": "algorithm.query",
+      "version": "0.3.3"
+    },
+    "axiolid-levelset": {
+      "description": "Level-set extraction: a closed manifold mesh from a sampled scalar field",
+      "layer": "algorithms",
+      "path": "crates/algorithms/sampled/levelset",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.sampled",
+      "version": "0.3.0"
+    },
+    "axiolid-linear": {
+      "description": "Format-neutral line, ray, segment, and polyline representations",
+      "layer": "representations",
+      "path": "crates/representations/analytic/linear",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.atomic",
+      "version": "0.3.0"
+    },
+    "axiolid-linear-intersection": {
+      "description": "Portable, deterministic intersections for linear geometry",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/intersection/linear",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.query",
+      "version": "0.3.0"
+    },
+    "axiolid-measure": {
+      "description": "Metric properties: area, volume, centroid, moments of inertia.",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/measure",
+      "released": "0.3.2",
+      "released_date": "2026-09-27",
+      "role": "algorithm.query",
+      "version": "0.3.2"
+    },
+    "axiolid-mesh": {
+      "description": "Triangle meshes: the discrete representation every backend consumes.",
+      "layer": "representations",
+      "path": "crates/representations/discrete/mesh",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-mesh-boolean-boolmesh": {
+      "description": "boolmesh-backed MeshBoolean provider",
+      "layer": "providers",
+      "path": "crates/providers/mesh/boolmesh",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "provider.mesh",
+      "version": "0.3.1"
+    },
+    "axiolid-mesh-boolean-contract": {
+      "description": "Portable mesh boolean request, result, evidence, and conformance contract",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/mesh-boolean",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-mesh-compile": {
+      "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
+      "layer": "execution",
+      "path": "crates/execution/compile",
+      "released": "0.3.5",
+      "released_date": "2026-09-28",
+      "role": "execution.orchestration",
+      "version": "0.3.5"
+    },
+    "axiolid-mesh-compile-contract": {
+      "description": "Portable graph-to-mesh compilation contract",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/compile",
+      "released": "0.3.1",
+      "released_date": "2026-09-24",
+      "role": "contract.operation",
+      "version": "0.3.1"
+    },
+    "axiolid-mesh-contracts": {
+      "description": "Shared mesh admissibility contracts",
+      "layer": "contracts",
+      "path": "crates/contracts/common/mesh",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.common.mesh",
+      "version": "0.3.0"
+    },
+    "axiolid-mesh-section-contract": {
+      "description": "Portable mesh plane-section request, result, and evidence contract",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/mesh-section",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-minkowski": {
+      "description": "Minkowski sum and difference of planar-faced solids",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/minkowski",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-model": {
+      "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
+      "layer": "representations",
+      "path": "crates/representations/modeling/graph",
+      "released": "0.3.2",
+      "released_date": "2026-09-27",
+      "role": "representation.graph",
+      "version": "0.3.2"
+    },
+    "axiolid-nurbs": {
+      "description": "General polynomial and rational B-spline analysis and transformation algorithms",
+      "layer": "algorithms",
+      "path": "crates/algorithms/parametric/nurbs",
+      "released": "0.3.3",
+      "released_date": "2026-09-28",
+      "role": "algorithm.parametric",
+      "version": "0.3.3"
+    },
+    "axiolid-overlay": {
+      "description": "Deterministic validated planar overlay contract",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/overlay",
+      "released": "0.3.5",
+      "released_date": "2026-09-28",
+      "role": "algorithm.planar",
+      "version": "0.3.5"
+    },
+    "axiolid-pointcloud": {
+      "description": "Portable point-sampled geometry values with optional per-point channels.",
+      "layer": "representations",
+      "path": "crates/representations/discrete/pointcloud",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-pointcloud-reconstruction-contract": {
+      "description": "Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite.",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/pointcloud-reconstruction",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-pointcloud-reconstruction-sdf": {
+      "description": "Reference pointcloud reconstruction: signed-distance field from samples, extracted as a level set.",
+      "layer": "providers",
+      "path": "crates/providers/pointcloud/sdf",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "provider.pointcloud",
+      "version": "0.3.0"
+    },
+    "axiolid-predicates": {
+      "description": "Certified exact-arithmetic geometric predicates",
+      "layer": "algorithms",
+      "path": "crates/algorithms/predicates",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.reference",
+      "version": "0.3.1"
+    },
+    "axiolid-primitive": {
+      "description": "Exact parametric primitive solids used as CSG leaves",
+      "layer": "representations",
+      "path": "crates/representations/analytic/primitive",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "representation.atomic",
+      "version": "0.3.1"
+    },
+    "axiolid-profile": {
+      "description": "Exact 2D profile representations for sweeps and sectioned solids",
+      "layer": "representations",
+      "path": "crates/representations/region/profile",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.region",
+      "version": "0.3.0"
+    },
+    "axiolid-project": {
+      "description": "Projection of triangle meshes onto a plane, and prism intersection",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/project",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.planar",
+      "version": "0.3.0"
+    },
+    "axiolid-ray-mesh": {
+      "description": "Narrow-phase ray/triangle-mesh nearest-hit intersection",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/intersection/ray-mesh",
+      "released": null,
+      "released_date": null,
+      "role": "algorithm.query",
+      "version": "0.4.0"
+    },
+    "axiolid-reference": {
+      "description": "Portable scalar reference implementation and certified predicates",
+      "layer": "algorithms",
+      "path": "crates/algorithms/reference",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.reference",
+      "version": "0.3.1"
+    },
+    "axiolid-refine": {
+      "description": "Mesh refinement and smoothing with bounded, reported deviation",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/refine",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "algorithm.discrete",
+      "version": "0.3.0"
+    },
+    "axiolid-route": {
+      "description": "Exact planar shortest path over a visibility graph",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/route",
+      "released": "0.3.5",
+      "released_date": "2026-09-28",
+      "role": "algorithm.planar",
+      "version": "0.3.5"
+    },
+    "axiolid-spatial": {
+      "description": "Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates.",
+      "layer": "algorithms",
+      "path": "crates/algorithms/query/spatial",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.query",
+      "version": "0.3.1"
+    },
+    "axiolid-surface": {
+      "description": "Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches.",
+      "layer": "representations",
+      "path": "crates/representations/analytic/surface",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "representation.atomic",
+      "version": "0.3.1"
+    },
+    "axiolid-tessellation-contract": {
+      "description": "Curves, surfaces and B-reps to triangles under an explicit tolerance.",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/tessellate",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "contract.operation",
+      "version": "0.3.0"
+    },
+    "axiolid-topology": {
+      "description": "Typed-handle B-rep topology independent of curve and surface implementations",
+      "layer": "representations",
+      "path": "crates/representations/topology",
+      "released": "0.3.0",
+      "released_date": "2026-09-23",
+      "role": "representation.topology",
+      "version": "0.3.0"
+    },
+    "axiolid-triangulate": {
+      "description": "Constrained Delaunay triangulation with bounded quality refinement",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/triangulate",
+      "released": "0.3.1",
+      "released_date": "2026-09-27",
+      "role": "algorithm.planar",
+      "version": "0.3.1"
+    }
+  },
+  "crates": {
+    "groups": [
+      {
+        "crates": [
+          "axiolid-core"
+        ],
+        "key": "foundation",
+        "title": "Foundation"
+      },
+      {
+        "crates": [
+          "axiolid-brep",
+          "axiolid-curve",
+          "axiolid-field",
+          "axiolid-fixtures",
+          "axiolid-linear",
+          "axiolid-mesh",
+          "axiolid-model",
+          "axiolid-pointcloud",
+          "axiolid-primitive",
+          "axiolid-profile",
+          "axiolid-surface",
+          "axiolid-topology"
+        ],
+        "key": "representations",
+        "title": "Representations"
+      },
+      {
+        "crates": [
+          "axiolid-contracts",
+          "axiolid-curve-evaluate-contract",
+          "axiolid-exact-compile-contract",
+          "axiolid-guarantees",
+          "axiolid-mesh-boolean-contract",
+          "axiolid-mesh-compile-contract",
+          "axiolid-mesh-contracts",
+          "axiolid-mesh-section-contract",
+          "axiolid-pointcloud-reconstruction-contract",
+          "axiolid-tessellation-contract"
+        ],
+        "key": "contracts",
+        "title": "Contracts"
+      },
+      {
+        "crates": [
+          "axiolid-arrangement",
+          "axiolid-brep-audit",
+          "axiolid-brep-boolean",
+          "axiolid-collide",
+          "axiolid-construct",
+          "axiolid-decimate",
+          "axiolid-decompose",
+          "axiolid-evaluate",
+          "axiolid-exact",
+          "axiolid-field-ops",
+          "axiolid-heal",
+          "axiolid-inspect",
+          "axiolid-levelset",
+          "axiolid-linear-intersection",
+          "axiolid-measure",
+          "axiolid-minkowski",
+          "axiolid-nurbs",
+          "axiolid-overlay",
+          "axiolid-predicates",
+          "axiolid-project",
+          "axiolid-ray-mesh",
+          "axiolid-reference",
+          "axiolid-refine",
+          "axiolid-route",
+          "axiolid-spatial",
+          "axiolid-triangulate"
+        ],
+        "key": "algorithms",
+        "title": "Algorithms"
+      },
+      {
+        "crates": [
+          "axiolid-mesh-boolean-boolmesh",
+          "axiolid-pointcloud-reconstruction-sdf"
+        ],
+        "key": "providers",
+        "title": "Providers"
+      },
+      {
+        "crates": [
+          "axiolid-backend-cpu",
+          "axiolid-backend-gpu",
+          "axiolid-dispatch",
+          "axiolid-mesh-compile"
+        ],
+        "key": "execution",
+        "title": "Execution"
+      },
+      {
+        "crates": [
+          "axiolid",
+          "axiolid-capi"
+        ],
+        "key": "facade",
+        "title": "Facade"
+      }
+    ],
+    "total": 57
+  }
+}

@@ -1,13 +1,13 @@
 [package]
 name = "axiolid"
 description = "Feature-gated facade for Axiolid's format-neutral geometry stack"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 
 [features]
 # Pay-for-what-you-use: naming no feature compiles no geometry (kernel#9).

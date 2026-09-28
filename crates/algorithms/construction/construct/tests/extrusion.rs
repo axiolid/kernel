@@ -1,8 +1,9 @@
 //! Gates for profile flattening and extrusion.
 //!
-//! Signed volume is the single check that catches wrong winding, missing caps,
-//! and inverted sides simultaneously: it is positive exactly when the solid is
-//! closed and outward-oriented, and its magnitude is `area * depth`.
+//! Signed volume catches missing caps and inverted sides at once: its
+//! magnitude is `area * depth` and its sign is the orientation. It cannot see
+//! a flipped cap in the z = 0 plane, which contributes nothing to the
+//! integral, so directed-edge parity (`assert_edge_manifold`) gates winding.
 
 use axiolid_construct::extrude::{extrude, extrude_profile, outward_orientation};
 use axiolid_construct::profile::{profile_rings, triangulate, Rings};

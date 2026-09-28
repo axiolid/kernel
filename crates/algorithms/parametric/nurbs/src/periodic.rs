@@ -1,4 +1,8 @@
 //! Verified periodic parameter semantics for closed NURBS curves.
+//!
+//! A `closed` flag is metadata, not proof of periodicity. Wrapping a
+//! parameter goes through a view whose constructor has checked the seam
+//! (at least positional continuity), never through the flag alone.
 
 use crate::{
     axis::active_spans,
