@@ -72,7 +72,27 @@
 //!
 //! Every exact decision -- sides, crossings, containment -- is made with
 //! certified predicates; lengths are rounded down for the lower bound and
-//! up for the upper.
+//! up for the upper. The points cutting a cost edge at an angle are
+//! interpolated, so they lie off its line by rounding: the sides of an
+//! interval are taken of its edge's exact ends, an edge never blocks a
+//! hop from its own intervals, and a hop along an edge is costed above as
+//! the walk along the edge itself, which is that close to it.
+//!
+//! # At the walls
+//!
+//! A cost region clipped to the free region meets the walls only up to
+//! rounding. A vertex left a hair inside would open a sliver along the
+//! wall, costing 1; so a vertex that near a wall, on its free side, is
+//! moved just beyond it, where the region costs nothing (see
+//! [`weighted_distance_map`]). An edge left so on or beyond a wall is
+//! wall-borne: it gets no intervals, and along the wall its free side's
+//! factor counts.
+//!
+//! # Seeded targets
+//!
+//! Each target may start at its own cost (see
+//! [`weighted_distance_map_seeded`]): both searches start there, so both
+//! bounds count it.
 
 use core::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap};
@@ -120,8 +140,10 @@ impl CostRegion {
 pub struct WeightedReach {
     /// Index of the target the walk reaches, in the targets given.
     pub target: usize,
-    /// Contains the weighted distance to the nearest target. `upper` is
-    /// the weighted cost of `route`, rounded up.
+    /// Contains the weighted distance to the nearest target, counting the
+    /// target's start weight (see [`weighted_distance_map_seeded`]).
+    /// `upper` is the weighted cost of `route` plus that weight, rounded
+    /// up.
     pub cost: LengthInterval,
     /// The walk, from the query point to the target. Its `length` is its
     /// plain Euclidean length.
@@ -140,6 +162,10 @@ enum Kind {
     Interval {
         a: Point2,
         b: Point2,
+        /// The piece's own ends, exact: `a` and `b` are interpolated and
+        /// may lie off its line by rounding, so sides are taken of this.
+        p: Point2,
+        q: Point2,
         line: u32,
         piece: u32,
         left: f64,
@@ -172,6 +198,10 @@ pub struct WeightedMap {
     /// reached the state (`NO_LINE` for none).
     lower: Vec<Vec<(Tag, f64)>>,
     sites: Vec<Point2>,
+    /// The distance each target starts at.
+    seeds: Vec<f64>,
+    /// The cost regions, as snapped (see [`weighted_distance_map`]).
+    costs: Vec<CostRegion>,
     scale: f64,
 }
 
@@ -179,14 +209,22 @@ pub struct WeightedMap {
 /// `barriers`, with travel inside `costs` weighted by their factors and
 /// points along cost edges at most `spacing` apart.
 ///
+/// A cost region may touch the region's boundary up to rounding, as one
+/// clipped to the free region does (#198): a cost vertex within 2^-24 of
+/// the region's extent (and a few ulps) of a region edge, on its free
+/// side, is moved just across it, and a cost edge may cross a region edge
+/// that near one of either edge's ends. The map is the one for the
+/// regions so moved: no sliver along a wall is left for a walk to slip
+/// through at factor 1.
+///
 /// # Errors
 ///
 /// [`MapError`] for malformed input, no targets, a target outside the
 /// region, a factor below 1 or not finite ([`MapError::InvalidFactor`]), a
 /// spacing not positive and finite ([`MapError::InvalidSpacing`]), a cost
-/// edge that crosses an obstacle or another cost edge, or lies along a
-/// barrier ([`MapError::CostCrossing`]), or more than
-/// [`MAX_WEIGHTED_NODES`] graph nodes.
+/// edge that crosses an obstacle or another cost edge other than by such
+/// a touch, or lies along a barrier ([`MapError::CostCrossing`]), or more
+/// than [`MAX_WEIGHTED_NODES`] graph nodes.
 pub fn weighted_distance_map(
     region: &[Polygon],
     barriers: &[Vec<Point2>],
@@ -217,12 +255,62 @@ pub fn weighted_distance_map_within(
     spacing: f64,
     budget: usize,
 ) -> Result<WeightedMap, MapError> {
+    let seeded: Vec<(Point2, f64)> = targets.iter().map(|t| (*t, 0.0)).collect();
+    weighted_distance_map_seeded_within(region, barriers, &seeded, costs, spacing, budget)
+}
+
+/// A weighted distance map whose targets each start at their own cost:
+/// the distance from a point is the least, over targets, of the weighted
+/// cost of a walk to the target plus the target's weight (#198), as
+/// [`crate::distance_map_weighted`] is for plain maps. With every weight
+/// zero it is [`weighted_distance_map`].
+///
+/// # Errors
+///
+/// As [`weighted_distance_map`], and [`MapError::InvalidWeight`] for a
+/// weight that is negative or not finite.
+pub fn weighted_distance_map_seeded(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    targets: &[(Point2, f64)],
+    costs: &[CostRegion],
+    spacing: f64,
+) -> Result<WeightedMap, MapError> {
+    weighted_distance_map_seeded_within(
+        region,
+        barriers,
+        targets,
+        costs,
+        spacing,
+        MAX_WEIGHTED_NODES,
+    )
+}
+
+/// [`weighted_distance_map_seeded`] with a caller-chosen node budget.
+///
+/// # Errors
+///
+/// As [`weighted_distance_map_seeded`], with `budget` for
+/// [`MAX_WEIGHTED_NODES`].
+pub fn weighted_distance_map_seeded_within(
+    region: &[Polygon],
+    barriers: &[Vec<Point2>],
+    seeded: &[(Point2, f64)],
+    costs: &[CostRegion],
+    spacing: f64,
+    budget: usize,
+) -> Result<WeightedMap, MapError> {
     validate_region(region, barriers)?;
-    if targets.is_empty() {
+    if seeded.is_empty() {
         return Err(MapError::NoTargets);
     }
+    let targets: Vec<Point2> = seeded.iter().map(|(t, _)| *t).collect();
+    let seeds: Vec<f64> = seeded.iter().map(|(_, w)| *w).collect();
     if !targets.iter().all(|t| t.is_finite()) {
         return Err(RouteError::NonFinitePoint.into());
+    }
+    if let Some(index) = seeds.iter().position(|w| !(w.is_finite() && *w >= 0.0)) {
+        return Err(MapError::InvalidWeight { index });
     }
     if !(spacing.is_finite() && spacing > 0.0) {
         return Err(MapError::InvalidSpacing);
@@ -232,6 +320,12 @@ pub fn weighted_distance_map_within(
             return Err(MapError::InvalidFactor { index });
         }
     }
+    validate_region(
+        &costs.iter().map(|c| c.polygon.clone()).collect::<Vec<_>>(),
+        &[],
+    )?;
+    let reach = touch_reach(region);
+    let costs = &touch_walls(costs, region, reach)?;
     let polygons: Vec<Polygon> = costs.iter().map(|c| c.polygon.clone()).collect();
     validate_region(&polygons, &[])?;
     for (index, t) in targets.iter().enumerate() {
@@ -245,7 +339,7 @@ pub fn weighted_distance_map_within(
         .flat_map(|b| b.windows(2).map(|w| (w[0], w[1])))
         .collect();
     // Vertices first, then the points along cost edges.
-    let mut nodes = targets.to_vec();
+    let mut nodes = targets.clone();
     for polygon in region.iter().chain(polygons.iter()) {
         for ring in core::iter::once(&polygon.outer).chain(polygon.holes.iter()) {
             nodes.extend(ring.points.iter().copied());
@@ -258,7 +352,7 @@ pub fn weighted_distance_map_within(
     // Cost edges are cut at every vertex on them, so no interval's point
     // is a vertex.
     let weights = Weights::new(costs, &nodes, region)?;
-    weights.check_crossings(&obstacles, &walls)?;
+    weights.check_crossings(&obstacles, &walls, reach)?;
     let mut kinds = vec![Kind::Vertex; nodes.len()];
     let mut spans: Vec<(Point2, Point2, u32)> = Vec::new();
     for piece in &weights.pieces {
@@ -273,9 +367,10 @@ pub fn weighted_distance_map_within(
         }
     }
     for (piece, (p, q, line)) in spans.into_iter().enumerate() {
-        // Along a wall no walk crosses, and none bends except at a
-        // vertex: the one free side has one factor, so a chord is shorter.
-        if weights.free_sides(p, q)? != (true, true) {
+        // Along a wall (or a hair beyond it) no walk crosses, and none
+        // bends except at a vertex: the one free side has one factor, so a
+        // chord is shorter. Every other piece has both sides free.
+        if weights.beyond_wall(p, q, reach)? {
             continue;
         }
         let count = ((q - p).length() / spacing).ceil().max(1.0) as usize;
@@ -312,16 +407,13 @@ pub fn weighted_distance_map_within(
         for k in 0..count {
             let (a, b) = (at(k), at(k + 1));
             nodes.push(Point2::new(0.5 * a.x + 0.5 * b.x, 0.5 * a.y + 0.5 * b.y));
-            let (left, right) = weights.sides(a, b)?;
-            let (free_left, free_right) = weights.free_sides(a, b)?;
-            let along = match (free_left, free_right) {
-                (true, false) => left,
-                (false, true) => right,
-                _ => left.min(right),
-            };
+            let (left, right) = weights.sides(p, q, a, b)?;
+            let along = left.min(right);
             kinds.push(Kind::Interval {
                 a,
                 b,
+                p,
+                q,
                 line,
                 piece: piece as u32,
                 left,
@@ -368,15 +460,22 @@ pub fn weighted_distance_map_within(
         next: Vec::new(),
         target: Vec::new(),
         lower: Vec::new(),
-        sites: targets.to_vec(),
+        sites: targets.clone(),
+        seeds: seeds.clone(),
+        costs: costs.to_vec(),
         scale,
     };
+    // Every state of every target at its weight; of targets on one point,
+    // the lightest (then the first) seeds it.
     let mut sources = Vec::new();
     let mut seed = vec![usize::MAX; map.graph.adjacency.len()];
     for (i, node) in map.nodes.iter().enumerate() {
-        if let Some(t) = targets.iter().position(|t| t == node) {
+        let lightest = (0..targets.len())
+            .filter(|&t| targets[t] == *node)
+            .min_by(|&a, &b| seeds[a].total_cmp(&seeds[b]).then(a.cmp(&b)));
+        if let Some(t) = lightest {
             for state in map.graph.states(i) {
-                sources.push(state);
+                sources.push((state, seeds[t]));
                 seed[state] = t;
             }
         }
@@ -443,9 +542,72 @@ impl WeightedMap {
         }))
     }
 
+    /// The region the map covers.
+    pub(crate) fn region(&self) -> &[Polygon] {
+        &self.region
+    }
+
+    /// Region edges and barrier segments.
+    pub(crate) fn obstacles(&self) -> &[(Point2, Point2)] {
+        &self.obstacles
+    }
+
+    /// Barrier segments.
+    pub(crate) fn walls(&self) -> &[(Point2, Point2)] {
+        &self.walls
+    }
+
+    /// The targets given, and the cost each starts at.
+    pub(crate) fn seeded(&self) -> impl Iterator<Item = (Point2, f64)> + '_ {
+        self.sites.iter().copied().zip(self.seeds.iter().copied())
+    }
+
+    /// Whether two maps cover the same free space at the same costs.
+    pub(crate) fn same_space(&self, other: &Self) -> bool {
+        self.region == other.region && self.walls == other.walls && self.costs == other.costs
+    }
+
+    /// The greatest factor meeting the closed triangle: the most a metre
+    /// can cost in it.
+    pub(crate) fn steepest(&self, t: &[Point2; 3]) -> Result<f64, RouteError> {
+        self.weights.steepest(t)
+    }
+
+    /// The factor all through the closed triangle when no cost edge meets
+    /// it, else 1: what a straight piece inside it costs a metre at least.
+    pub(crate) fn inside_factor(&self, t: &[Point2; 3]) -> Result<f64, RouteError> {
+        for piece in &self.weights.pieces {
+            if meets_triangle(piece.p, piece.q, t)? {
+                return Ok(1.0);
+            }
+        }
+        let mut best = 1.0f64;
+        for (polygon, &factor) in self.weights.polygons.iter().zip(&self.weights.factors) {
+            if factor > best && in_polygon(polygon, t[0])? {
+                best = factor;
+            }
+        }
+        Ok(best)
+    }
+
+    /// Every node's span -- a vertex twice, or an interval -- with the
+    /// least lower bound a walk from a point of it has, when finite.
+    pub(crate) fn spans(&self) -> Vec<((Point2, Point2), f64)> {
+        (0..self.nodes.len())
+            .filter_map(|i| {
+                let least = self
+                    .graph
+                    .states(i)
+                    .flat_map(|s| self.lower[s].iter().map(|(_, d)| *d))
+                    .fold(f64::INFINITY, f64::min);
+                least.is_finite().then(|| (self.span(i), least))
+            })
+            .collect()
+    }
+
     /// The bracket at a point known to be inside the region; `None` when
     /// no target is reached.
-    fn bracket(&self, point: Point2) -> Result<Option<(f64, f64)>, RouteError> {
+    pub(crate) fn bracket(&self, point: Point2) -> Result<Option<(f64, f64)>, RouteError> {
         let Some((upper, _)) = self.upper_at(point)? else {
             return Ok(None);
         };
@@ -454,7 +616,7 @@ impl WeightedMap {
 
     /// Upper-bound Dijkstra over the exact graph, each edge costing its
     /// segment's weighted length rounded up.
-    fn upper_bounds(&mut self, sources: &[usize], seed: &[usize]) -> Result<(), RouteError> {
+    fn upper_bounds(&mut self, sources: &[(usize, f64)], seed: &[usize]) -> Result<(), RouteError> {
         let states = self.graph.adjacency.len();
         let mut cost: HashMap<(usize, usize), f64> = HashMap::new();
         let mut adjacency: Vec<Vec<(usize, f64)>> = vec![Vec::new(); states];
@@ -478,11 +640,13 @@ impl WeightedMap {
             }
         }
         let (distance, previous) = dijkstra(&adjacency, sources);
+        // Follow each state's chain to its end: a heavy target may itself
+        // be reached from a lighter one, so being seeded does not end it.
         let mut target = seed.to_vec();
         for (state, t) in target.iter_mut().enumerate() {
             let mut at = state;
             let mut steps = 0;
-            while seed[at] == usize::MAX && previous[at] != usize::MAX && steps <= seed.len() {
+            while previous[at] != usize::MAX && steps <= seed.len() {
                 at = previous[at];
                 steps += 1;
             }
@@ -559,8 +723,15 @@ impl WeightedMap {
             };
             return Ok(Some(self.weights.segment(u, v, self.scale)?.0));
         }
+        // A piece on an interval's own line never crosses a piece from it;
+        // its interpolated ends may lie a rounding off that line, beyond.
+        let own = |kind: Kind| match kind {
+            Kind::Interval { line, .. } => line,
+            Kind::Vertex => NO_LINE,
+        };
+        let (la, lb) = (own(ka), own(kb));
         for piece in &self.weights.pieces {
-            if blocks(piece.p, piece.q)? {
+            if piece.line != la && piece.line != lb && blocks(piece.p, piece.q)? {
                 return Ok(None);
             }
         }
@@ -570,8 +741,8 @@ impl WeightedMap {
         let factor = self
             .weights
             .hull_factor(&[a1, a2, b1, b2])?
-            .max(leaving(ka, (a1, a2), (b1, b2), eb)?)
-            .max(leaving(kb, (b1, b2), (a1, a2), ea)?);
+            .max(leaving(ka, (b1, b2), eb)?)
+            .max(leaving(kb, (a1, a2), ea)?);
         let d = span_distance((a1, a2), (b1, b2))?;
         Ok(Some(round_down(factor * d, self.scale)))
     }
@@ -597,10 +768,10 @@ impl WeightedMap {
         (u, v): (Point2, Point2),
         (skip_u, skip_v): (bool, bool),
     ) -> Result<u8, RouteError> {
-        let Kind::Interval { a, b, .. } = self.kinds[k] else {
+        let Kind::Interval { p, q, .. } = self.kinds[k] else {
             return Ok(NONE);
         };
-        let (su, sv) = (side(a, b, u)?, side(a, b, v)?);
+        let (su, sv) = (side(p, q, u)?, side(p, q, v)?);
         let su = if su == Sign::Zero && skip_u { sv } else { su };
         let sv = if sv == Sign::Zero && skip_v { su } else { sv };
         Ok(match (su, sv) {
@@ -637,7 +808,7 @@ impl WeightedMap {
     /// weighted length rounded down, and hops to and between intervals,
     /// over states that remember the first hop's line and side (see
     /// [`allowed`]).
-    fn lower_bounds(&mut self, sources: &[usize]) -> Result<(), RouteError> {
+    fn lower_bounds(&mut self, sources: &[(usize, f64)]) -> Result<(), RouteError> {
         let states = self.graph.adjacency.len();
         let mut incoming: Vec<Vec<Edge>> = vec![Vec::new(); states];
         let is_vertex = |i: usize, kinds: &[Kind]| matches!(kinds[i], Kind::Vertex);
@@ -842,16 +1013,19 @@ impl WeightedMap {
     }
 }
 
-/// Dijkstra with a binary heap from several sources: distance and the
-/// previous state. Ties break on the lowest state.
-fn dijkstra(adjacency: &[Vec<(usize, f64)>], sources: &[usize]) -> (Vec<f64>, Vec<usize>) {
+/// Dijkstra with a binary heap from several sources, each at its start
+/// distance: distance and the previous state. Ties break on the lowest
+/// state.
+fn dijkstra(adjacency: &[Vec<(usize, f64)>], sources: &[(usize, f64)]) -> (Vec<f64>, Vec<usize>) {
     let n = adjacency.len();
     let mut distance = vec![f64::INFINITY; n];
     let mut previous = vec![usize::MAX; n];
     let mut heap = BinaryHeap::new();
-    for &s in sources {
-        distance[s] = 0.0;
-        heap.push(Reverse((Ordered(0.0), s)));
+    for &(s, start) in sources {
+        if start < distance[s] {
+            distance[s] = start;
+            heap.push(Reverse((Ordered(start), s)));
+        }
     }
     while let Some(Reverse((Ordered(d), u))) = heap.pop() {
         if d > distance[u] {
@@ -956,7 +1130,7 @@ fn tag_before(source: Kind, tag: Tag, edge: &Edge) -> Tag {
 /// tag.
 fn tagged_dijkstra(
     incoming: &[Vec<Edge>],
-    sources: &[usize],
+    sources: &[(usize, f64)],
     kind: impl Fn(usize) -> Kind,
 ) -> Vec<Vec<(Tag, f64)>> {
     let mut settled: Vec<Vec<(Tag, f64)>> = vec![Vec::new(); incoming.len()];
@@ -966,9 +1140,11 @@ fn tagged_dijkstra(
         line: NO_LINE,
         side: NONE,
     };
-    for &s in sources {
-        best.insert((s, start), 0.0);
-        heap.push(Reverse((Ordered(0.0), s, start)));
+    for &(s, weight) in sources {
+        if best.get(&(s, start)).is_none_or(|b| weight < *b) {
+            best.insert((s, start), weight);
+            heap.push(Reverse((Ordered(weight), s, start)));
+        }
     }
     while let Some(Reverse((Ordered(d), k, tag))) = heap.pop() {
         if settled[k].iter().any(|(t, _)| *t == tag) {
@@ -1026,14 +1202,16 @@ fn round_up(value: f64, scale: f64) -> f64 {
 /// a vertex.
 fn leaving(
     kind: Kind,
-    (a, b): (Point2, Point2),
     (o1, o2): (Point2, Point2),
     (skip1, skip2): (bool, bool),
 ) -> Result<f64, RouteError> {
-    let Kind::Interval { left, right, .. } = kind else {
+    let Kind::Interval {
+        p, q, left, right, ..
+    } = kind
+    else {
         return Ok(1.0);
     };
-    let (s1, s2) = (side(a, b, o1)?, side(a, b, o2)?);
+    let (s1, s2) = (side(p, q, o1)?, side(p, q, o2)?);
     // An end of the other span that is a vertex does not count.
     let s1 = if s1 == Sign::Zero && skip1 { s2 } else { s1 };
     let s2 = if s2 == Sign::Zero && skip2 { s1 } else { s2 };
@@ -1097,7 +1275,7 @@ fn gap((a1, a2): (Point2, Point2), (b1, b2): (Point2, Point2)) -> Option<(Point2
 
 /// The least distance between two closed segments (either may be a
 /// point): zero when they meet, decided exactly.
-fn span_distance(
+pub(crate) fn span_distance(
     (a1, a2): (Point2, Point2),
     (b1, b2): (Point2, Point2),
 ) -> Result<f64, RouteError> {
@@ -1226,16 +1404,30 @@ impl Weights {
     }
 
     /// Refuse a cost edge that properly crosses an obstacle or another
-    /// cost edge, or runs along or through a barrier.
+    /// cost edge, or runs along or through a barrier. A crossing of a
+    /// region edge within `reach` of an end of either edge is a touch
+    /// rounding moved (see [`touch_walls`]), and stands.
     fn check_crossings(
         &self,
         obstacles: &[(Point2, Point2)],
         walls: &[(Point2, Point2)],
+        reach: f64,
     ) -> Result<(), MapError> {
         for piece in &self.pieces {
             let index = piece.polygon;
             for &(r, s) in obstacles {
                 if crosses(piece.p, piece.q, r, s)? {
+                    let region_edge = self
+                        .walls
+                        .iter()
+                        .any(|&(p, q, _)| (p, q) == (r, s) || (p, q) == (s, r));
+                    let near = point_segment(piece.p, r, s) <= reach
+                        || point_segment(piece.q, r, s) <= reach
+                        || point_segment(r, piece.p, piece.q) <= reach
+                        || point_segment(s, piece.p, piece.q) <= reach;
+                    if region_edge && near {
+                        continue;
+                    }
                     return Err(MapError::CostCrossing { index });
                 }
             }
@@ -1261,11 +1453,15 @@ impl Weights {
         Ok(())
     }
 
-    /// The factors just left and right of the stretch `a`-`b` of a cost
-    /// piece, which no vertex interrupts.
-    fn sides(&self, a: Point2, b: Point2) -> Result<(f64, f64), RouteError> {
+    /// The factors just left and right of the stretch `a`-`b` of the cost
+    /// piece `p`-`q`, which no vertex interrupts. Which edges the stretch
+    /// runs along is decided on the piece's own exact ends: `a` and `b`
+    /// are interpolated, and on an edge at an angle rounding puts them off
+    /// its line.
+    fn sides(&self, p: Point2, q: Point2, a: Point2, b: Point2) -> Result<(f64, f64), RouteError> {
         let m = Point2::new(0.5 * a.x + 0.5 * b.x, 0.5 * a.y + 0.5 * b.y);
-        let d = b - a;
+        let d = q - p;
+        let (a, b) = (p, q);
         let (mut left, mut right) = (1.0f64, 1.0f64);
         for (index, polygon) in self.polygons.iter().enumerate() {
             let factor = self.factors[index];
@@ -1292,25 +1488,21 @@ impl Weights {
         Ok((left, right))
     }
 
-    /// Which sides of the stretch `a`-`b` of a cost piece are free space:
-    /// both, unless it runs along a region edge.
-    fn free_sides(&self, a: Point2, b: Point2) -> Result<(bool, bool), RouteError> {
-        let m = Point2::new(0.5 * a.x + 0.5 * b.x, 0.5 * a.y + 0.5 * b.y);
-        let d = b - a;
-        let (mut left, mut right) = (false, false);
-        let mut walled = false;
-        for &(p, q, region_left) in &self.walls {
-            if side(p, q, a)? == Sign::Zero && side(p, q, b)? == Sign::Zero && within(p, q, m) {
-                walled = true;
-                let same = (q - p).dot(d) > 0.0;
-                if region_left == same {
-                    left = true;
-                } else {
-                    right = true;
-                }
+    /// Whether the stretch `p`-`q` lies within `reach` of one region edge,
+    /// on or beyond it: out of the free space, a cost edge touching the
+    /// wall (see [`touch_walls`]) that no walk crosses, only runs along.
+    fn beyond_wall(&self, p: Point2, q: Point2, reach: f64) -> Result<bool, RouteError> {
+        for &(r, s, left) in &self.walls {
+            let free = if left { Sign::Positive } else { Sign::Negative };
+            if point_segment(p, r, s) <= reach
+                && point_segment(q, r, s) <= reach
+                && side(r, s, p)? != free
+                && side(r, s, q)? != free
+            {
+                return Ok(true);
             }
         }
-        Ok(if walled { (left, right) } else { (true, true) })
+        Ok(false)
     }
 
     /// The lines of cost pieces that pass through `v`.
@@ -1370,7 +1562,12 @@ impl Weights {
     /// meets cost edges. Along a cost edge the cheaper side counts. A piece
     /// whose factor rounding could misjudge -- shorter than a few ulps, or
     /// whose middle lies within rounding of a cost edge -- counts 1 below
-    /// and the greatest factor above.
+    /// and the greatest factor above, with two exceptions for a piece
+    /// within rounding of a cost edge all along. Above, it counts as the
+    /// walk along that edge, which is off it by no more than rounding:
+    /// the upper end bounds a walk that close to the segment, not the
+    /// segment itself. Below, a piece exactly along a region edge, the
+    /// cost edge on or beyond it, counts its free side's factor.
     fn segment(&self, a: Point2, b: Point2, scale: f64) -> Result<(f64, f64), RouteError> {
         let length = (b - a).length();
         if length == 0.0 {
@@ -1384,9 +1581,12 @@ impl Weights {
         let mut breaks = vec![0.0, 1.0];
         // Stretches along cost pieces: (from, to, polygon, inside left of a-b).
         let mut along: Vec<(f64, f64, usize, bool)> = Vec::new();
-        let mut near: Vec<(Point2, Point2)> = Vec::new();
+        // Pieces not along `a`-`b`: (p, q, polygon, inside left of p-q).
+        let mut near: Vec<(Point2, Point2, usize, bool)> = Vec::new();
         // Stretches along region edges: (from, to, region left of a-b).
         let mut walled: Vec<(f64, f64, bool)> = Vec::new();
+        // Region edges not along `a`-`b`: (p, q, region left of p-q).
+        let mut near_walls: Vec<(Point2, Point2, bool)> = Vec::new();
         for &(p, q, left) in &self.walls {
             if p != q && side(a, b, p)? == Sign::Zero && side(a, b, q)? == Sign::Zero {
                 let (tp, tq) = (param(p), param(q));
@@ -1395,6 +1595,8 @@ impl Weights {
                     walled.push((lo, hi, left == ((q - p).dot(d) > 0.0)));
                     breaks.extend([lo, hi]);
                 }
+            } else if p != q {
+                near_walls.push((p, q, left));
             }
         }
         for piece in &self.pieces {
@@ -1409,7 +1611,7 @@ impl Weights {
                 }
                 continue;
             }
-            near.push((piece.p, piece.q));
+            near.push((piece.p, piece.q, piece.polygon, piece.inside_left));
             let (sa, sb) = (side(piece.p, piece.q, a)?, side(piece.p, piece.q, b)?);
             if sp != sq && sa != sb {
                 // The lines cross between the ends of both: at the
@@ -1428,6 +1630,7 @@ impl Weights {
         breaks.dedup();
         let (mut lower, mut upper) = (0.0, 0.0);
         let tiny = 64.0 * f64::EPSILON * scale;
+        let mut hugged = false;
         for pair in breaks.windows(2) {
             let (t0, t1) = (pair[0], pair[1]);
             let stretch = (t1 - t0) * length;
@@ -1435,17 +1638,79 @@ impl Weights {
                 continue;
             }
             let tm = 0.5 * t0 + 0.5 * t1;
-            let m = Point2::new(a.x + d.x * tm, a.y + d.y * tm);
-            let on: Vec<&(f64, f64, usize, bool)> = along
+            let at = |t: f64| Point2::new(a.x + d.x * t, a.y + d.y * t);
+            let m = at(tm);
+            // Along cost pieces: polygon and whether its inside lies left
+            // of `a`-`b`.
+            let mut on: Vec<(usize, bool)> = along
                 .iter()
                 .filter(|(lo, hi, ..)| *lo <= tm && tm <= *hi)
+                .map(|(_, _, p, l)| (*p, *l))
                 .collect();
-            let doubtful =
-                stretch <= tiny || near.iter().any(|&(p, q)| point_segment(m, p, q) <= tiny);
+            // Along region edges: whether the region lies left of `a`-`b`.
+            let mut free: Vec<bool> = walled
+                .iter()
+                .filter(|(lo, hi, _)| *lo <= tm && tm <= *hi)
+                .map(|(_, _, l)| *l)
+                .collect();
+            let doubtful = stretch <= tiny
+                || near
+                    .iter()
+                    .any(|&(p, q, ..)| point_segment(m, p, q) <= tiny);
+            let mut resolved = !doubtful;
             if doubtful {
-                lower += stretch;
-                upper += self.greatest * stretch;
-                continue;
+                // A stretch within rounding of a cost piece all along --
+                // `a`-`b` joins two points interpolated on a cost edge at
+                // an angle -- may be on either side of it. The walk along
+                // the piece itself, off the stretch by at most `tiny` at
+                // each end, costs the piece's along factor: take that one
+                // instead, above. Otherwise the greatest factor.
+                let (s0, s1) = (at(t0), at(t1));
+                let hugs = |p: Point2, q: Point2| {
+                    point_segment(s0, p, q) <= tiny && point_segment(s1, p, q) <= tiny
+                };
+                let mut all_hug = stretch > tiny;
+                // Along a region edge, with every hugged piece exactly on
+                // or beyond it -- as a cost edge touching a wall is left
+                // (see [`touch_walls`]) -- the free side lies on the
+                // piece's inside side, and its factor is known below too.
+                let beyond = match (free.contains(&true), free.contains(&false)) {
+                    (true, false) => Some(Sign::Negative),
+                    (false, true) => Some(Sign::Positive),
+                    _ => None,
+                };
+                let mut known = beyond.is_some();
+                for &(p, q, polygon, inside_left) in &near {
+                    if point_segment(m, p, q) > tiny {
+                        continue;
+                    }
+                    if !hugs(p, q) {
+                        all_hug = false;
+                        break;
+                    }
+                    if let Some(solid) = beyond {
+                        for end in [p, q] {
+                            let s = side(a, b, end)?;
+                            known &= s == Sign::Zero || s == solid;
+                        }
+                    }
+                    on.push((polygon, inside_left == ((q - p).dot(d) > 0.0)));
+                }
+                if !all_hug {
+                    lower += stretch;
+                    upper += self.greatest * stretch;
+                    continue;
+                }
+                resolved = known;
+                if !resolved {
+                    lower += stretch;
+                }
+                for &(p, q, left) in &near_walls {
+                    if hugs(p, q) {
+                        free.push(left == ((q - p).dot(d) > 0.0));
+                    }
+                }
+                hugged = true;
             }
             // Extra factor on each side of the segment at this stretch.
             let (mut left, mut right) = (0.0f64, 0.0f64);
@@ -1456,8 +1721,8 @@ impl Weights {
                 }
                 let sides: Vec<bool> = on
                     .iter()
-                    .filter(|(_, _, p, _)| *p == index)
-                    .map(|(_, _, _, l)| *l)
+                    .filter(|(p, _)| *p == index)
+                    .map(|(_, l)| *l)
                     .collect();
                 if sides.is_empty() {
                     if in_polygon(polygon, m)? {
@@ -1477,11 +1742,6 @@ impl Weights {
             }
             // Along a cost edge the cheaper side counts -- of the sides a
             // walk can move to: along a wall, only the region's.
-            let free: Vec<bool> = walled
-                .iter()
-                .filter(|(lo, hi, _)| *lo <= tm && tm <= *hi)
-                .map(|(_, _, l)| *l)
-                .collect();
             let (free_left, free_right) = if free.is_empty() {
                 (true, true)
             } else {
@@ -1498,8 +1758,14 @@ impl Weights {
                         (false, false) => left.max(right),
                     }
                 };
-            lower += factor * stretch;
+            if resolved {
+                lower += factor * stretch;
+            }
             upper += factor * stretch;
+        }
+        if hugged {
+            // The steps between the stretch and the piece it hugs.
+            upper += 4.0 * self.greatest * tiny * breaks.len() as f64;
         }
         // Each break's parameter is rounded: a stretch may be off by a few
         // ulps of the length at each end.
@@ -1509,6 +1775,89 @@ impl Weights {
             round_up(upper + slack, scale),
         ))
     }
+}
+
+/// How far off a region edge a cost vertex may lie and still be taken to
+/// touch it: 2^-24 of the region's extent, four steps of the grid overlay
+/// results were once rounded to, and a few ulps of its coordinates.
+fn touch_reach(region: &[Polygon]) -> f64 {
+    let (mut lo, mut hi) = (
+        Point2::new(f64::INFINITY, f64::INFINITY),
+        Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+    );
+    let mut scale = 0.0f64;
+    for polygon in region {
+        for p in core::iter::once(&polygon.outer)
+            .chain(polygon.holes.iter())
+            .flat_map(|r| r.points.iter())
+        {
+            lo = Point2::new(lo.x.min(p.x), lo.y.min(p.y));
+            hi = Point2::new(hi.x.max(p.x), hi.y.max(p.y));
+            scale = scale.max(p.x.abs()).max(p.y.abs());
+        }
+    }
+    let extent = (hi.x - lo.x).max(hi.y - lo.y).max(0.0);
+    extent / f64::from(1u32 << 24) + 64.0 * f64::EPSILON * scale
+}
+
+/// The cost regions with every vertex that lies strictly on the free side
+/// of a region edge and within `reach` of it moved just across that
+/// edge's line: a cost region clipped to the free region touches its walls
+/// only up to rounding, and a vertex left a hair inside would open a
+/// sliver along the wall a walk could slip through at factor 1. Beyond the
+/// wall the region costs nothing, so moving out is taking it as touching.
+/// A vertex in a corner crosses each wall it is that near to, moving by at
+/// most `reach` and a few ulps for each.
+fn touch_walls(
+    costs: &[CostRegion],
+    region: &[Polygon],
+    reach: f64,
+) -> Result<Vec<CostRegion>, RouteError> {
+    let mut edges = Vec::new();
+    for polygon in region {
+        for (hole, ring) in
+            core::iter::once((false, &polygon.outer)).chain(polygon.holes.iter().map(|h| (true, h)))
+        {
+            let left = region_left(ring, hole)?;
+            for (p, q) in ring_edges(ring) {
+                if p != q {
+                    edges.push((p, q, left));
+                }
+            }
+        }
+    }
+    let mut out = costs.to_vec();
+    for cost in &mut out {
+        for ring in core::iter::once(&mut cost.polygon.outer).chain(cost.polygon.holes.iter_mut()) {
+            for v in &mut ring.points {
+                for &(p, q, left) in edges.iter().chain(edges.iter()) {
+                    let free = if left { Sign::Positive } else { Sign::Negative };
+                    if point_segment(*v, p, q) > reach || side(p, q, *v)? != free {
+                        continue;
+                    }
+                    // The foot on the line, then out along the normal until
+                    // the exact side says it is no longer on the free side.
+                    let d = q - p;
+                    let t = (*v - p).dot(d) / d.dot(d);
+                    let foot = Point2::new(p.x + d.x * t, p.y + d.y * t);
+                    let out = if left {
+                        Point2::new(d.y, -d.x)
+                    } else {
+                        Point2::new(-d.y, d.x)
+                    };
+                    let unit = Point2::new(out.x / d.length(), out.y / d.length());
+                    let mut step = f64::EPSILON * foot.x.abs().max(foot.y.abs()).max(reach);
+                    let mut moved = foot;
+                    while side(p, q, moved)? == free {
+                        moved = Point2::new(foot.x + unit.x * step, foot.y + unit.y * step);
+                        step *= 2.0;
+                    }
+                    *v = moved;
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// The corners of the convex hull of `points`, counter-clockwise, or
@@ -1829,16 +2178,46 @@ mod tests {
     fn a_stretch_within_rounding_of_a_cost_edge_is_bracketed_both_ways() {
         let weights = square();
         let tiny = 1e-17;
-        // Just inside the square along its lower edge: 1 + 2 + 1.
+        // Just inside the square along its lower edge: 1 + 2 + 1 below.
+        // Above, the walk along the edge itself, a rounding off the
+        // segment, where the cheaper side counts: 3.
         let (lo, hi) = weights
             .segment(Point2::new(-1.0, tiny), Point2::new(2.0, tiny), 2.0)
             .unwrap();
-        assert!(lo <= 4.0 && hi >= 4.0, "[{lo}, {hi}]");
+        assert!(lo <= 3.0 && (hi - 3.0).abs() < 1e-12, "[{lo}, {hi}]");
         // Just outside it: 3 at factor 1.
         let (lo, hi) = weights
             .segment(Point2::new(-1.0, -tiny), Point2::new(2.0, -tiny), 2.0)
             .unwrap();
         assert!(lo <= 3.0 && hi >= 3.0, "[{lo}, {hi}]");
+        // Inside a notched polygon, the notch's tip a rounding above the
+        // middle: doubtful there, and hugging nothing, so the greatest
+        // factor above, which is the true one.
+        let p = |x: f64, y: f64| Point2::new(x, y);
+        let notched = Polygon {
+            outer: Ring {
+                points: vec![
+                    p(0.0, 0.0),
+                    p(4.0, 0.0),
+                    p(4.0, 2.0),
+                    p(2.5, 2.0),
+                    p(2.0, 1.0 + f64::EPSILON),
+                    p(1.5, 2.0),
+                    p(0.0, 2.0),
+                ],
+            },
+            holes: Vec::new(),
+        };
+        let weights = Weights::new(&[CostRegion::new(notched, 2.0)], &[], &[]).unwrap();
+        let (lo, hi) = weights.segment(p(0.5, 1.0), p(3.5, 1.0), 4.0).unwrap();
+        assert!(lo <= 6.0 && hi >= 6.0, "[{lo}, {hi}]");
+        let weights = square();
+        // Crossing the edge within rounding of it, not along it: the
+        // greatest factor above.
+        let (lo, hi) = weights
+            .segment(Point2::new(0.5, -tiny), Point2::new(0.5, tiny), 2.0)
+            .unwrap();
+        assert!(lo <= 2.0 * tiny && hi >= 2.0 * 2.0 * tiny, "[{lo}, {hi}]");
         // Clear of every edge the stretches are decided.
         let (lo, hi) = weights
             .segment(Point2::new(-1.0, 0.5), Point2::new(2.0, 0.5), 2.0)

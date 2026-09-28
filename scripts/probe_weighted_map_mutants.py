@@ -12,7 +12,9 @@ Equivalent mutants, deliberately not listed:
   reflection along a piece unless along is cheaper), relaxed: they only
   tighten the lower bound, so dropping one loosens it, which only the
   tightness assertions could see, and those hold at the spacings tested
-  for the scenes whose walks never touch a cost edge twice on one side.
+  for the scenes whose walks never touch a cost edge twice on one side;
+- which sides of an interval are free: every edge along a wall is
+  wall-borne and gets no intervals, so both are, always.
 """
 import pathlib, subprocess, sys
 
@@ -27,12 +29,11 @@ MUTANTS = [
     ('a hull across a notch held', W, '    Ok(!on_boundary && in_polygon(polygon, centre)?)', '    let _ = on_boundary;\n    Ok(true)', TESTS),
     ('a touch counted with an end on the line', W, '    if side(p, q, u)? == Sign::Zero || side(p, q, v)? == Sign::Zero {\n        return Ok(false);\n    }', '', TESTS),
     ('collinear hop at its full length', W, '            return Ok(Some(self.weights.segment(u, v, self.scale)?.0));', '            return Ok(Some(self.weights.segment(a1, b1, self.scale)?.0.max(self.weights.segment(a2, b2, self.scale)?.0)));', TESTS),
-    ('a doubtful stretch at the greatest factor below', W, '                lower += stretch;', '                lower += self.greatest * stretch;', TESTS),
-    ('a doubtful stretch at factor 1 above', W, '                upper += self.greatest * stretch;', '                upper += stretch;', TESTS),
-    ('both sides of a wall free', W, '        Ok(if walled { (left, right) } else { (true, true) })', '        Ok((true, true))', TESTS),
-    ('no points on any cost edge', W, '        if weights.free_sides(p, q)? != (true, true) {', '        if true {', TESTS),
+    ('a doubtful stretch at the greatest factor below', W, '                    lower += stretch;\n                    upper += self.greatest * stretch;', '                    lower += self.greatest * stretch;\n                    upper += self.greatest * stretch;', TESTS),
+    ('a doubtful stretch at factor 1 above', W, '                    lower += stretch;\n                    upper += self.greatest * stretch;', '                    lower += stretch;\n                    upper += stretch;', TESTS),
+    ('no points on any cost edge', W, '        if weights.beyond_wall(p, q, reach)? {', '        if true {', TESTS),
     ('every interval end a vertex', W, '                a_vertex: k == 0,', '                a_vertex: true,', TESTS),
-    ('cost edges do not block a cell hop', W, '        for piece in &self.weights.pieces {\n            if blocks(piece.p, piece.q)? {\n                return Ok(None);\n            }\n        }', '', TESTS),
+    ('cost edges do not block a cell hop', W, '            if piece.line != la && piece.line != lb && blocks(piece.p, piece.q)? {', '            if false {', TESTS),
     ('any end touching a blocker blocks', W, '!((skip_u || skip_v) && through_end(u, v, p, q)?)', '!through_end(u, v, p, q)?', TESTS),
     ('overlap takes the lesser factor', W, '                    if in_polygon(polygon, m)? {\n                        left = left.max(extra);\n                        right = right.max(extra);', '                    if in_polygon(polygon, m)? {\n                        left = if left == 0.0 { extra } else { left.min(extra) };\n                        right = if right == 0.0 { extra } else { right.min(extra) };', TESTS),
     ('farthest point ignores the factor', W, '        let k = steep[root];', '        let k = 1.0;', TESTS),

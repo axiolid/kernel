@@ -51,7 +51,10 @@ mod weighted;
 
 use graph::Graph;
 
-pub use forced::{forced_walk, forced_walk_within, ForcedWalk};
+pub use forced::{
+    forced_walk, forced_walk_within, weighted_forced_walk, weighted_forced_walk_within, ForcedWalk,
+    WeightedForcedWalk,
+};
 pub use map::{
     distance_map, distance_map_weighted, distance_map_within, distance_map_within_weighted,
     farthest_point, farthest_point_within, DistanceMap, Farthest, FarthestError, LengthInterval,
@@ -59,8 +62,9 @@ pub use map::{
 };
 pub use skeleton::{skeleton, NodeKind, Skeleton, SkeletonError, SkeletonNode, Wall};
 pub use weighted::{
-    weighted_distance_map, weighted_distance_map_within, weighted_farthest_point,
-    weighted_farthest_point_within, CostRegion, WeightedMap, WeightedReach, MAX_WEIGHTED_NODES,
+    weighted_distance_map, weighted_distance_map_seeded, weighted_distance_map_seeded_within,
+    weighted_distance_map_within, weighted_farthest_point, weighted_farthest_point_within,
+    CostRegion, WeightedMap, WeightedReach, MAX_WEIGHTED_NODES,
 };
 
 /// Maximum vertices, counting region, barrier and endpoint vertices.

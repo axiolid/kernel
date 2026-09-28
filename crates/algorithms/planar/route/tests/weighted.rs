@@ -410,3 +410,108 @@ fn a_coarse_farthest_point_still_holds_the_steepest_slope() {
         );
     }
 }
+
+#[test]
+fn turned_scenes_keep_their_brackets() {
+    // The scenes above, turned: cost edges at an angle, whose points along
+    // them are interpolated off their lines by rounding, and cost regions
+    // meeting the walls only up to rounding (#198). Every bracket must
+    // still hold the closed form.
+    let refraction = {
+        let g =
+            |x: f64| 2.0 * x / (x * x + 4.0).sqrt() - (6.0 - x) / ((6.0 - x).powi(2) + 4.0).sqrt();
+        let (mut lo, mut hi) = (0.0, 6.0);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if g(mid) > 0.0 {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        let x = 0.5 * (lo + hi);
+        2.0 * (x * x + 4.0).sqrt() + ((6.0 - x).powi(2) + 4.0).sqrt()
+    };
+    // (room, cost region, factor, target, query, exact, gap allowed)
+    let scenes = [
+        (
+            (0.0, 0.0, 10.0, 1.0),
+            (3.0, 0.0, 7.0, 1.0),
+            2.0,
+            (0.0, 0.5),
+            (10.0, 0.5),
+            14.0,
+            0.1,
+        ),
+        (
+            (0.0, 0.0, 10.0, 4.0),
+            (4.0, 0.0, 6.0, 3.0),
+            2.0,
+            (0.0, 1.0),
+            (10.0, 1.0),
+            2.0 * 20f64.sqrt() + 2.0,
+            0.2,
+        ),
+        (
+            (0.0, 0.0, 10.0, 4.0),
+            (0.0, 0.0, 10.0, 2.0),
+            2.0,
+            (0.0, 0.0),
+            (6.0, 4.0),
+            refraction,
+            0.2,
+        ),
+        // Clear of the walls: round the square's corners.
+        (
+            (0.0, 0.0, 10.0, 4.0),
+            (4.0, 1.0, 6.0, 3.0),
+            2.0,
+            (0.0, 2.0),
+            (10.0, 2.0),
+            2.0 * 17f64.sqrt() + 2.0,
+            0.2,
+        ),
+    ];
+    // Turned by the 3-4-5 angle and scaled by 5, every corner stays on
+    // the integer grid: the walls and cost edges meet exactly, and only
+    // the points along the cost edges are rounded. At other angles the
+    // corners round too; the square clear of the walls, in a larger room
+    // so that no query lies on a wall, is turned by those.
+    let mut cases: Vec<(f64, f64, usize)> = (0..scenes.len()).map(|k| (4.0, 3.0, k)).collect();
+    for degrees in [30.0f64, 17.0, 45.0] {
+        let (s, c) = degrees.to_radians().sin_cos();
+        cases.push((c, s, 3));
+    }
+    for (c, s, k) in cases {
+        let scale = (c * c + s * s).sqrt();
+        let turn = |x: f64, y: f64| p(c * x - s * y, s * x + c * y);
+        let turned = |(x0, y0, x1, y1): (f64, f64, f64, f64)| Polygon {
+            outer: Ring {
+                points: vec![turn(x0, y0), turn(x1, y0), turn(x1, y1), turn(x0, y1)],
+            },
+            holes: Vec::new(),
+        };
+        let (mut room, cost, factor, from, to, exact, gap) = scenes[k];
+        if k == 3 {
+            room = (room.0 - 1.0, room.1 - 1.0, room.2 + 1.0, room.3 + 1.0);
+        }
+        let map = weighted_distance_map(
+            &[turned(room)],
+            &[],
+            &[turn(from.0, from.1)],
+            &[CostRegion::new(turned(cost), factor)],
+            0.05 * scale,
+        )
+        .unwrap_or_else(|e| panic!("scene {k} turned ({c}, {s}): {e:?}"));
+        let reach = map.nearest(turn(to.0, to.1)).unwrap().unwrap();
+        let (lower, upper) = (reach.cost.lower / scale, reach.cost.upper / scale);
+        assert!(
+            lower <= exact + 1e-9 && exact <= upper + 1e-9,
+            "scene {k} turned ({c}, {s}): [{lower}, {upper}] misses {exact}"
+        );
+        assert!(
+            upper - lower <= gap,
+            "scene {k} turned ({c}, {s}): [{lower}, {upper}]"
+        );
+    }
+}

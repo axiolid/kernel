@@ -9,6 +9,48 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Seeded weighted maps (#198): `weighted_distance_map_seeded` and
+  `weighted_distance_map_seeded_within` take `(point, weight)` targets,
+  each starting at its own non-negative cost, as `distance_map_weighted`
+  does for plain maps (#197); both bounds start there, and
+  `WeightedReach::cost` counts the weight. With every weight zero the map
+  and its answers are `weighted_distance_map`'s exactly.
+- `weighted_forced_walk` and `weighted_forced_walk_within` (#198): the
+  cheapest walk that enters a polygon over two weighted maps with the same
+  costs, bracketed with a witness as `forced_walk` is. The cell bound falls
+  at twice the steepest factor meeting the cell, and the pair bound runs
+  over both maps' vertices and cost-edge intervals with their lower
+  bounds, at the cell's own factor when no cost edge meets it.
+  `WeightedForcedWalk::shortest` brackets the cheapest walk overall; the
+  result is never narrower than the maps' brackets at the witness, and the
+  search stops at the tolerance plus those.
+
+### Changed
+
+- A cost region touching the region's boundary up to rounding is taken as
+  touching it (#198), no longer refused with `MapError::CostCrossing`: a
+  cost vertex within 2^-24 of the region's extent (and a few ulps) of a
+  region edge, on its free side, is moved just beyond it, and a cost edge
+  may cross a region edge that near one of either edge's ends. An edge so
+  left on or beyond a wall is wall-borne, as one exactly along it. So a
+  footprint clipped to the free region, its corners rounded by the
+  overlay, builds a map, and leaves no sliver along a wall costing 1.
+
+### Fixed
+
+- Weighted maps on cost edges at an angle (#198). The points cutting such
+  an edge are interpolated and lie off its line by rounding, which made
+  three decisions go wrong: an interval's sides were taken of its rounded
+  ends, so could both read the factor of one side; an edge could appear to
+  cross every hop to its own intervals and block them -- both could put
+  the lower bound above the distance; and every hop along the edge was
+  charged the greatest factor above. Sides are now taken of the edge's
+  exact ends, an edge never blocks hops from its own line, and a hop along
+  an edge is costed above as the walk along the edge itself, which lies
+  that close to it.
+
 ## [0.3.4] - 2026-09-28
 
 ### Added
