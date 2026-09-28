@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-28
+
 ### Added
 
 - Seeded weighted maps (#198): `weighted_distance_map_seeded` and
