@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-exact"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-nurbs"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",

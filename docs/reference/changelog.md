@@ -388,6 +388,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-exact
 
+### 0.1.1 - 2026-09-28
+
+### Added
+
+- `FixedInterval`: a real number between two big-integer bounds at a
+  chosen number of fractional bits, every operation rounded outward, and
+  `FixedInterval::sin_cos`, certified `sin` and `cos` of a dyadic angle
+  (Taylor series with the Lagrange remainder, after halving the angle).
+  For signs of values no finite arithmetic holds exactly, asked again at
+  a higher precision until they show (#181).
+
 ### 0.1.0 - 2026-09-24
 
 ### Added
@@ -807,6 +818,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-nurbs
 
+### 0.3.3 - 2026-09-28
+
+### Changed
+
+- Traced sections decide signs of analytic series fields with certified
+  arithmetic where `f64` cannot (#181): exact zeros by a Laurent identity
+  in the harmonics' common angle, point signs by fixed-point intervals at
+  rising precision, and box signs by the Bernstein coefficients of a
+  certified Taylor form. The tier answers only where the field is flat
+  (along a line of contact or at a singular point), so ordinary sections
+  trace exactly as before. Lines of contact that rounding hides over more
+  than a twentieth of the window, refused as `Undecided` until now, are
+  traced on analytic fields as on B-spline ones (ADR 0077).
+
 ### 0.3.2 - 2026-09-27
 
 ### Added
@@ -989,6 +1014,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.5 - 2026-09-28
+
+### Changed
+
+- Straight-edge booleans are exact (#173). `overlay`, `union_soup` and
+  `Region` no longer go through `i_overlay`'s integer grid, which snapped
+  every output coordinate, including untouched input vertices, to a step
+  of about 1.5e-8 of the operands' extent. They now run on the exact
+  subdivision the arc path uses: every ring of both operands cut at once,
+  each piece classified by exact signs, kept by the operand's winding
+  number under the fill rule. An input vertex the operation does not move
+  comes back bit-identical (so `[0,4]x[0,0.2]` clipped by a box around it
+  has area `0.8`, not `0.800000011920929`), and a crossing of two segments
+  is the double nearest to the exact crossing. Fill rules and ring
+  orientation keep their meaning (tested against the old backend). A vertex
+  where the boundary runs straight on is dropped only when exactly
+  straight.
+- Arc and arrangement output: rational vertices (every segment crossing)
+  are now correctly rounded instead of rounded to about 50 bits.
+- The exact subdivision indexes edges and rings in box trees, so building
+  it over thousands of rings (a projected mesh's triangles) is no longer
+  quadratic in the ring count.
 
 ### 0.3.4 - 2026-09-27
 

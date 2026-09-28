@@ -89,7 +89,7 @@ axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.0" }
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.0" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.1" }
-axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.1" }
+axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.3" }
 axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.5" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.0" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.0" }
@@ -105,7 +105,7 @@ axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.2" 
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.1" }
 axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.0" }
 axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.0" }
-axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.4" }
+axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.5" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.0" }
 axiolid-route = { path = "crates/algorithms/planar/route", version = "0.3.5" }
 axiolid-triangulate = { path = "crates/algorithms/planar/triangulate", version = "0.3.1" }
@@ -115,7 +115,7 @@ i_overlay = "4.5.2"
 num-bigint = { version = "0.5.1", default-features = false, features = ["std"] }
 num-integer = { version = "0.1.46", default-features = false, features = ["std"] }
 axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.1", default-features = false }
-axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.0" }
+axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.1" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.0", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.3.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.0" }

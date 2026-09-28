@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-28
+
 ### Changed
 
 - Traced sections decide signs of analytic series fields with certified

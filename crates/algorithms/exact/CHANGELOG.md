@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-28
+
 ### Added
 
 - `FixedInterval`: a real number between two big-integer bounds at a

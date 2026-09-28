@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-28
+
 ### Changed
 
 - Straight-edge booleans are exact (#173). `overlay`, `union_soup` and
