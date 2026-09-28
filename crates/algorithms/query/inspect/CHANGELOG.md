@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ## [0.3.3] - 2026-09-27
 
 ### Added

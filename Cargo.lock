@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-arrangement"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -142,14 +142,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-backend-cpu"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "axiolid-backend-gpu"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep-audit"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-brep",
  "axiolid-contracts",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep-boolean"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -218,21 +218,21 @@ dependencies = [
 
 [[package]]
 name = "axiolid-capi"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid",
 ]
 
 [[package]]
 name = "axiolid-collide"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-contracts"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -270,14 +270,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glam 0.29.3",
 ]
 
 [[package]]
 name = "axiolid-curve"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-linear",
@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve-evaluate-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-decimate"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-heal",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-decompose"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash",
  "axiolid-construct",
@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-dispatch"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-backend-cpu",
  "axiolid-contracts",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-exact"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-exact-compile-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-brep",
  "axiolid-contracts",
@@ -368,14 +368,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-field"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-field-ops"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-field",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-fixtures"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-mesh",
@@ -391,11 +391,11 @@ dependencies = [
 
 [[package]]
 name = "axiolid-guarantees"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "axiolid-heal"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-inspect"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-levelset"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash",
  "axiolid-core",
@@ -433,14 +433,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-linear"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-linear-intersection"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-measure"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-brep",
  "axiolid-core",
@@ -463,14 +463,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-mesh-boolean-boolmesh"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -490,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-boolean-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-brep",
  "axiolid-construct",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile-contract"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-mesh",
@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-contracts"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-section-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-minkowski"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-construct",
  "axiolid-contracts",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-model"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-nurbs"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -621,14 +621,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-pointcloud"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-pointcloud-reconstruction-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-pointcloud-reconstruction-sdf"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-predicates"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -660,14 +660,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-primitive"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-profile"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-project"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
  "axiolid-mesh",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-refine"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ahash",
  "axiolid-contracts",
@@ -731,7 +731,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-route"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -744,14 +744,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-spatial"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-surface"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-tessellation-contract"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -769,14 +769,14 @@ dependencies = [
 
 [[package]]
 name = "axiolid-topology"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axiolid-core",
 ]
 
 [[package]]
 name = "axiolid-triangulate"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",

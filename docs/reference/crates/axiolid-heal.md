@@ -8,7 +8,7 @@ Explicit diagnosis and opt-in repair contracts for dirty geometry.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-heal`](https://crates.io/crates/axiolid-heal) |
 | Facade | [`axiolid`](./axiolid) feature `heal` |
 | Layer | algorithms (`algorithm.repair`) |
@@ -30,15 +30,11 @@ Explicit diagnosis and opt-in repair of triangle meshes. `diagnose` reports non-
 
 ## Changes
 
-Latest release, 0.3.0 (2026-09-23):
+Latest release, 0.3.1 (2026-09-28):
 
-### Added
+### Changed
 
-- Repairs carry corner-indexed channels: weld leaves them untouched (they index values, not positions, so a seam is lossless), dropping and flipping triangles move their entries (#112).
-
-### Fixed
-
-- Repairs keep attribute channels and normals in step with the geometry they rewrite (#114). Weld compacts per-vertex channels and normals; a seam drops the channel by name, a hard edge switches normals to corner-indexed. Dropping or flipping triangles moves corner-indexed normals with them.
-- `RepairReport::attribute_fates` names every input channel's fate.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/repair/heal/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/repair/heal/CHANGELOG.md)

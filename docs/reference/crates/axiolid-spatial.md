@@ -8,7 +8,7 @@ Acceleration structures: BVH and uniform point grid, and their queries; barycent
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-spatial`](https://crates.io/crates/axiolid-spatial) |
 | Facade | [`axiolid`](./axiolid) feature `spatial` |
 | Layer | algorithms (`algorithm.query`) |
@@ -25,16 +25,11 @@ Deterministic, callback-based spatial acceleration: a median-split BVH over boun
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- Barycentric coordinates (#143): `triangle_barycentric2`,
-  `triangle_barycentric3` (for the point's projection onto the triangle's
-  plane) and `tetrahedron_barycentric`, exact at corners; and
-  `mean_value_coordinates2` for simple polygons, convex or not, which
-  interpolate the boundary linearly and reproduce points inside. Shapes
-  thinner than the linear tolerance, non-simple polygons and points where
-  mean-value weights cancel are refused with `BarycentricError`.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/query/spatial/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/spatial/CHANGELOG.md)

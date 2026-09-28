@@ -8,10 +8,11 @@ Narrow-phase ray/triangle-mesh nearest-hit intersection.
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.4.0) |
+| Latest release | 0.4.0 (2026-09-28) |
+| crates.io | [`axiolid-ray-mesh`](https://crates.io/crates/axiolid-ray-mesh) |
 | Facade | [`axiolid`](./axiolid) feature `ray-mesh` |
 | Layer | algorithms (`algorithm.query`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_ray_mesh/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_ray_mesh/index.html) · [docs.rs](https://docs.rs/axiolid-ray-mesh) |
 | Source | [`crates/algorithms/query/intersection/ray-mesh/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/query/intersection/ray-mesh) |
 
 ## Overview
@@ -27,6 +28,18 @@ Narrow-phase ray/triangle-mesh intersection: the nearest hit with its parameter,
 
 ## Changes
 
-No release yet.
+Latest release, 0.4.0 (2026-09-28):
+
+### Changed
+
+- **Breaking:** a candidate triangle index at or beyond the mesh's
+  triangle count is refused with the new
+  `RayMeshError::TriangleIndexOutOfRange` instead of being skipped by
+  `nearest_hit_among`; a broad phase built over a different mesh would
+  otherwise report "no hit" for triangles it never tested.
+  `triangle_hit` refuses the same index instead of panicking in the
+  mesh view.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/query/intersection/ray-mesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/intersection/ray-mesh/CHANGELOG.md)

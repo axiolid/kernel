@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -31,6 +31,11 @@ selects one. See ADR 0033.
 
 ## Changes
 
-Released in the workspace-wide 0.3.0 release (2026-09-23), before crates versioned independently; its notes are in the [workspace changelog](/CHANGELOG).
+Latest release, 0.3.1 (2026-09-28):
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

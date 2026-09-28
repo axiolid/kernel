@@ -8,9 +8,10 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.4.0) |
+| Latest release | 0.4.0 (2026-09-28) |
+| crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
 | Source | [`crates/facade/axiolid/`](https://github.com/axiolid/kernel/tree/main/crates/facade/axiolid) |
 
 ## Overview
@@ -125,6 +126,16 @@ Default: none.
 
 ## Changes
 
-No release yet.
+Latest release, 0.4.0 (2026-09-28):
+
+### Changed
+
+- **Breaking:** requires `axiolid-ray-mesh` 0.4, so `axiolid::ray_mesh`
+  (re-exported under the ray features) carries the new
+  `RayMeshError::TriangleIndexOutOfRange`, and `RayIndex` queries refuse an
+  out-of-range candidate instead of skipping it. An exhaustive `match` on
+  `RayMeshError` needs the new arm.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -37,33 +37,11 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- Evaluation, derivatives and inversion of `Curve3::PairSection`. A
-  `Curve2::Lifted` reading a pair section on one of its own B-spline
-  surfaces takes that surface's parameters straight from the solve.
-- `surface::locate`, `curve::locate2` and `curve::locate3`: parameters of
-  a point, iterating where no closed form exists (B-spline surfaces and
-  curves: seeded Newton, verified by the round trip). `invert`, `invert2`
-  and `invert3` keep their closed-form-only contract.
-- Evaluation, derivatives and inversion of `Curve2::Lifted`. An
-  `ImplicitSection` on a B-spline carrier is inverted through the
-  surface's `locate`.
-
-- Evaluation, derivatives and inversion of `Curve2::Implicit` and
-  `Curve3::ImplicitSection` (ADR 0077). `invert2` and `invert3` now also
-  cover `QuadraticGraph`, `AngleGraph`, `RuledSection` and `TorusSection`,
-  reading the angle off the point and trying whole turns.
-
-- Evaluation, first and second derivatives of `Curve2::QuadraticGraph`,
-  `Curve3::RuledSection`, `Curve2::AngleGraph` and `Curve3::TorusSection`
-  (#119, ADR 0076); a parameter outside the graph's
-  spans is refused, not extrapolated.
-
-- `Curve2::Sinusoid` evaluation: point, first and second derivative, a
-  one-turn domain, and exact inversion (the parameter is the point's first
-  coordinate, then its height is checked) (ADR 0071).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

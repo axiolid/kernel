@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.0 (2026-09-27) |
+| Latest release | 0.1.1 (2026-09-28) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -47,81 +47,11 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.0 (2026-09-27):
+Latest release, 0.1.1 (2026-09-28):
 
-### Added
+### Changed
 
-- Surfaces tangent along a whole curve and crossing there: the line of
-  contact is a section edge (the tangent-contact rule now applies to
-  closed forms only), and pieces leaving a vertex with the same direction
-  and bend are ordered by their chords a small way out.
-- A traced pair that only touches adds no section, as the closed forms'
-  touching does. A pcurve whose trace on its face cannot be decided falls
-  back to the section's own space curve read on the face, and failed
-  traces are not repeated. Each surface pair's closed form is computed
-  once per boolean.
-- Two B-spline faces meeting each other: their section is traced in both
-  faces' parameter boxes and carried on both (`Curve3::PairSection`), its
-  pcurve on each read from the solve. The last refusal by face type is
-  gone; sections whose branches cross where the surfaces touch stay
-  refused by name.
-- Faces that wind round their surface without a seam edge (a dome bounded
-  by its rim alone, a can by its two rims), as files may deliver them. The
-  boolean first gives each a seam edge along the iso-curve where its loops
-  wrap, joining the lower loop, the seam, the upper loop or a pole, and the
-  seam back into one loop.
-- Sections through a sphere's pole or a cone's apex are cut there, and the
-  collapsed pole piece is split where they end. Meridians and latitudes,
-  cone rulings and circles, and a torus's tube and ring circles get their
-  straight pcurves, affine in the curve's own parameter.
-
-- B-spline faces (#167, ADR 0075 stage 3) against planes, quadrics and
-  tori:
-  - The section is traced on the spline (ADR 0077).
-  - On the analytic face its pcurve is the same space curve read in the
-    face's parameters (`Curve2::Lifted`), so it shares the edge's
-    parameter.
-  - An edge next to a B-spline face is cut where it meets the section's
-    other surface.
-  - Classification rays meet B-spline faces through the spline trace.
-  - Two B-spline faces meeting each other are refused by name
-    (`UnsupportedSection`).
-
-- Faces on spheres, cones, tori and elliptical cylinders (#167, ADR 0075
-  stage 2), meeting in any section #119 builds:
-  - A section with no line or conic is traced inside one face's parameter
-    box (ADR 0077).
-  - Every section on every analytic face gets an exact implicit pcurve, cut
-    out of the other surface's traced equation between the section's ends.
-  - A sphere's pole or a cone's apex closes loops as a collapsed piece that
-    is no edge.
-  - Seam circles are cut by the cone of normals along them.
-  - Section branches that cross (a Steinmetz pair) are split where they
-    meet.
-  - Frame components that are only rounding residue are cleared before
-    intersecting.
-
-- Operands that touch (#167, ADR 0075 stage 2): faces on one surface share
-  their overlap (each face's edges are imprinted on the other, and a region
-  on the other solid's boundary is kept once by normal agreement); sections
-  along an existing edge split only the other face; tangent contact adds no
-  section; pieces leaving a vertex in one direction are ordered by
-  curvature; solids meeting along an edge are paired radially around it so
-  each stays manifold. Cavities go to the smallest solid around them, in
-  results of several solids too.
-
-- `section_edges` (#167, ADR 0075 stage 1): the exact intersection curves of
-  two exact B-reps' faces, each trimmed to where it lies inside both faces.
-  Crossings with a boundary edge are found against the adjacent face's
-  surface, or across a seam against the plane through the ruling.
-- `boolean(a, b, operator, tolerance)` (#167, ADR 0075 stage 1): the exact
-  union, intersection and difference of two exact solids whose faces lie on
-  planes and cylinders and meet in lines, circles and ellipses -- not only
-  vertical columns. Regions are classified by exact ray parity with
-  certified face membership and sewn into shells; cavities become voids.
-  Every result audits clean and measures exactly.
-- `split_face` (#167): a plane or cylinder face cut along its section edges
-  into regions, traced in the face's parameters with exact pcurves (lines,
-  conics, rulings, circles about the axis, `Sinusoid2` for oblique cuts).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

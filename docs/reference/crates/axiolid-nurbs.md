@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-09-28) |
+| Latest release | 0.3.4 (2026-09-28) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -40,18 +40,11 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-09-28):
+Latest release, 0.3.4 (2026-09-28):
 
 ### Changed
 
-- Traced sections decide signs of analytic series fields with certified
-  arithmetic where `f64` cannot (#181): exact zeros by a Laurent identity
-  in the harmonics' common angle, point signs by fixed-point intervals at
-  rising precision, and box signs by the Bernstein coefficients of a
-  certified Taylor form. The tier answers only where the field is flat
-  (along a line of contact or at a singular point), so ordinary sections
-  trace exactly as before. Lines of contact that rounding hides over more
-  than a twentieth of the window, refused as `Undecided` until now, are
-  traced on analytic fields as on B-spline ones (ADR 0077).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

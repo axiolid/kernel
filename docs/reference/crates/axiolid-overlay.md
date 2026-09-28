@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-09-28) |
+| Latest release | 0.3.6 (2026-09-28) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -35,27 +35,11 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.5 (2026-09-28):
+Latest release, 0.3.6 (2026-09-28):
 
 ### Changed
 
-- Straight-edge booleans are exact (#173). `overlay`, `union_soup` and
-  `Region` no longer go through `i_overlay`'s integer grid, which snapped
-  every output coordinate, including untouched input vertices, to a step
-  of about 1.5e-8 of the operands' extent. They now run on the exact
-  subdivision the arc path uses: every ring of both operands cut at once,
-  each piece classified by exact signs, kept by the operand's winding
-  number under the fill rule. An input vertex the operation does not move
-  comes back bit-identical (so `[0,4]x[0,0.2]` clipped by a box around it
-  has area `0.8`, not `0.800000011920929`), and a crossing of two segments
-  is the double nearest to the exact crossing. Fill rules and ring
-  orientation keep their meaning (tested against the old backend). A vertex
-  where the boundary runs straight on is dropped only when exactly
-  straight.
-- Arc and arrangement output: rational vertices (every segment crossing)
-  are now correctly rounded instead of rounded to about 50 bits.
-- The exact subdivision indexes edges and rings in box trees, so building
-  it over thousands of rings (a projected mesh's triangles) is no longer
-  quadratic in the ring count.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

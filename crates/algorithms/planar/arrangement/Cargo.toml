@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-arrangement"
 description = "Editable planar subdivision with persistent half-edge topology"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

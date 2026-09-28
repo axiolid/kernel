@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-09-28) |
+| Latest release | 0.3.6 (2026-09-28) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -56,20 +56,11 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.5 (2026-09-28):
+Latest release, 0.3.6 (2026-09-28):
 
-### Fixed
+### Changed
 
-- A boolean whose result touches itself is refused, not returned (#194):
-  where operands meet tangentially -- a void tangent to its host's face --
-  the solid has no material between two faces, and the mesh boolean keeps
-  two copies of the vertices there, closed by index but pinched by
-  position. Consumers welding by position saw an edge with four faces. The
-  result is now checked, positions welded, for an edge with more than two
-  faces or a vertex with separate fans, and refused with
-  `GeomError::Degenerate` naming the edge or point of contact. Circular
-  voids tangent along an axis direction no longer pinch at all (construct).
-- Structural sections and rounded rectangles extrude to meshes (#193, via
-  construct).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

@@ -8,7 +8,7 @@ Common backend-neutral execution and diagnostic contracts.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-25) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-contracts`](https://crates.io/crates/axiolid-contracts) |
 | Facade | [`axiolid`](./axiolid) feature `contracts` |
 | Layer | contracts (`contract.common`) |
@@ -31,16 +31,11 @@ provider selection or fallback, which belong to `axiolid-dispatch`.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-25):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `ExecutionOptions::with_chord_error` and `ExecutionOptions::chord_error`
-  (#165): an explicit bound on how far a provider's straight chords may sit
-  from the curve they replace, separate from the linear tolerance. The
-  tolerance is a coincidence test; used as a chord budget it leaves a 5 mm
-  arc a few chords at `Tolerance::MILLIMETRE`, and small profiles mesh
-  percent-level off. `None` (the default) keeps each provider's previous
-  behaviour. A non-finite or non-positive budget is refused (`None`).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/contracts/common/base/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/common/base/CHANGELOG.md)

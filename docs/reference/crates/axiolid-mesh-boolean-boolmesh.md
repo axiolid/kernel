@@ -8,7 +8,7 @@ boolmesh-backed MeshBoolean provider.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-mesh-boolean-boolmesh`](https://crates.io/crates/axiolid-mesh-boolean-boolmesh) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | providers (`provider.mesh`) |
@@ -56,13 +56,18 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Fixed
+### Changed
 
-- The scratch probe discards one warmup boolean before measuring, and
-  measures peaks above the bytes already live, so the first operation is
-  no longer charged for process startup (#110). A `scratch_bound` test
-  fails if any measured peak exceeds the declared 4 KiB per triangle.
+- **Behaviour change:** a refusal inside the solve (an odd edge-point
+  count in `pair_up`, #101) is reported as
+  `GeomError::BackendContractViolation` naming `boolmesh`, not
+  `Degenerate`. The operands passed every input gate, so the failure is
+  this provider's defect and no longer reads as the caller's.
+  `tests/solve_failure.rs` pins it on a grid union that still reaches the
+  refusal (#203).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/providers/mesh/boolmesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/mesh/boolmesh/CHANGELOG.md)
