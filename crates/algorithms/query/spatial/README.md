@@ -1,0 +1,10 @@
+# axiolid-spatial
+
+Deterministic, callback-based spatial acceleration: a median-split BVH over bounded objects and a uniform grid for point KNN and radius search, both behind the `SpatialIndex` query contract. They return candidates only, never exact intersections. It also provides barycentric and mean-value coordinates for interpolating values given at triangle, tetrahedron and polygon corners.
+
+```bash
+cargo add axiolid-spatial
+```
+
+- API documentation: [docs.rs/axiolid-spatial](https://docs.rs/axiolid-spatial)
+- Source and issues: [github.com/axiolid/kernel](https://github.com/axiolid/kernel)

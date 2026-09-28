@@ -6,9 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 authors.workspace = true
-description = "Curve evaluation: lines, conics, composite curves, NURBS, trimming."
+description = "Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves."
 
 [dependencies]
 axiolid-core.workspace = true
