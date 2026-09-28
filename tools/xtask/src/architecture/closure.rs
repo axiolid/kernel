@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const PROFILES: &str = "architecture/closure-profiles.toml";
+const PROFILES: &str = "docs/architecture/closure-profiles.toml";
 
 #[derive(Debug, Clone)]
 pub struct ClosureProfile {

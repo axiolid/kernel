@@ -20,6 +20,16 @@
 # - `issue` is a key from [[issue]]; the issue's number is recorded there.
 #   `blocked_by` mirrors GitHub's native issue dependencies; `gaps next`
 #   skips an issue until every blocker's rows are implemented.
+# - The gate rejects evidence that no longer resolves, reference paths
+#   outside the pinned trees, and dangling issue keys. It does not judge
+#   whether a grade is true; review does.
+# - Reopening a `scoped` row is a maintainer decision: argue against its
+#   `scope_rationale` in an issue first. An [[issue]] with `needs_decision`
+#   is listed apart by `gaps`; ask the maintainer rather than picking an
+#   option.
+# - Re-pinning OCCT or CGAL means regenerating reference-packages.toml from
+#   the new tree and re-checking every row's reference paths. The sources are
+#   needed for nothing else: the rows carry what the comparison learned.
 #
 # Grades came from reading public functions and tests at `cb8d203`; see
 # docs/research/geometry-capability-comparison-occt-cgal.md.

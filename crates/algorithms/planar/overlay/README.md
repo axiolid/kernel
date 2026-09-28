@@ -11,7 +11,8 @@ cargo add axiolid-overlay
 
 ## Design notes
 
-- Straight-edged regions (`Region`, `overlay`) run on the `i_overlay` integer backend.
-- Boundaries that carry arcs (`arc_overlay`, `ArcArrangement`) run on the in-tree exact core in
-  `src/exact_arc.rs` (ADR 0070), because the integer backend cannot hold an arc without
-  tessellating it away. Its maintenance rules and verification commands are in that module's docs.
+- Straight-edged booleans (`Region`, `overlay`, `union_soup`) and arc-aware ones (`arc_overlay`,
+  `ArcArrangement`) share one exact core in `src/exact_arc.rs` (ADR 0070, #173): every
+  topological decision is an exact sign, and output is rounded once, so an input vertex comes
+  back bit-identical. `i_overlay` remains only for offsets. The core's maintenance rules and
+  verification commands are in that module's docs.

@@ -48,7 +48,7 @@ rc=$?
 check "gate rejects a removed public method" 1 $rc
 
 echo "=== mutation: an exception covers only its own items ==="
-# axiolid-surface has an accepted finding (architecture/semver-exceptions.toml).
+# axiolid-surface has an accepted finding (docs/architecture/semver-exceptions.toml).
 # Renaming a public field of another struct in the same crate is still a
 # break, so the gate MUST fail: the exception excuses items, not crates.
 SURF=crates/representations/analytic/surface/src/elementary.rs

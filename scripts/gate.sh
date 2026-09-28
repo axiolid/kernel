@@ -17,6 +17,8 @@ step "naming mutation probe" scripts/probe_naming_gate.sh
 step "isolated build mutation probe" scripts/probe_isolated_build_gate.sh
 step "closure check" cargo xtask architecture closure check
 step "closure mutation probe" scripts/probe_closure_gate.sh
+step "context (ADR 0078)" cargo xtask context check
+step "context mutation probe" scripts/probe_context_gate.sh
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
 step "capability evidence" python3 scripts/check-capabilities.py
 step "capability evidence mutation probe" scripts/probe_capabilities_gate.sh

@@ -121,7 +121,7 @@ def run_semver_checks(crates, baseline):
     return process.returncode, process.stdout
 
 
-EXCEPTIONS = ROOT / "architecture" / "semver-exceptions.toml"
+EXCEPTIONS = ROOT / "docs" / "architecture" / "semver-exceptions.toml"
 
 
 def load_exceptions() -> list[dict]:

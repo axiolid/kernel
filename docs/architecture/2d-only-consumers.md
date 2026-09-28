@@ -29,7 +29,7 @@ excludes:
 
 This is a dependency-graph guarantee, not merely a feature convention. CI
 resolves the isolated fixture as its own workspace, compares the complete
-resolved package set with `architecture/closure-profiles.toml`, compiles and
+resolved package set with `docs/architecture/closure-profiles.toml`, compiles and
 runs it, and mutation-tests the closure gate.
 
 ## Choose a larger profile only for a larger job

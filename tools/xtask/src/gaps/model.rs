@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 pub type Result<T> = std::result::Result<T, String>;
 
-pub const LEDGER: &str = "architecture/capability-ledger.toml";
-pub const PACKAGES: &str = "architecture/reference-packages.toml";
+pub const LEDGER: &str = "docs/architecture/capability-ledger.toml";
+pub const PACKAGES: &str = "docs/architecture/reference-packages.toml";
 
 /// Every package path that exists in the pinned OCCT and CGAL trees.
 ///

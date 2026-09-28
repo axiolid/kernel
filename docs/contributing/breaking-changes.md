@@ -77,7 +77,7 @@ prepared.)
 
 ### Exceptions
 
-`architecture/semver-exceptions.toml` accepts findings the tool gets
+`docs/architecture/semver-exceptions.toml` accepts findings the tool gets
 wrong, by name: the crate, the lint and the exact item paths, with the
 reason each still resolves as before, and a test that proves it. The gate
 prints every accepted finding; anything not listed still fails, and so

@@ -4,7 +4,7 @@
 # reject every one, and accept the untouched file.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-LEDGER=architecture/capability-ledger.toml
+LEDGER=docs/architecture/capability-ledger.toml
 BAK="${TMPDIR:-/tmp}/gapsprobe.bak"
 cp "$LEDGER" "$BAK"
 restore() { cp "$BAK" "$LEDGER"; }

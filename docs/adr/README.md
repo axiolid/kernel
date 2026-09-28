@@ -62,3 +62,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0075](./0075-general-brep-boolean.md) | General B-rep boolean: our own general-fuse pipeline |
 | [0076](./0076-ruled-quadric-sections.md) | Ruled quadric sections: exact quartic intersection curves |
 | [0077](./0077-implicit-section-curves.md) | Implicit section curves: certified tracing of analytic sections |
+| [0078](./0078-context-lives-beside-the-code.md) | Context lives beside the code; open work lives in issues |
