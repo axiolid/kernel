@@ -18,6 +18,22 @@ MUTANTS = [
     ("turning vertices dropped as straight", "exact_arc/arrangement.rs",
      "        ask(true) == Sign::Zero && ask(false) == Sign::Positive",
      "        ask(false) == Sign::Positive"),
+    # Chain reduction of a soup: cancel only edges given both ways, and
+    # keep only simple cycles.
+    ("edges given the same way cancel too", "exact_overlay.rs",
+     "            let (edge, step) = if a < b { ((a, b), 1) } else { ((b, a), -1) };",
+     "            let (edge, step) = if a < b { ((a, b), 1) } else { ((b, a), 1) };"),
+    ("any cycle taken as simple", "exact_overlay.rs",
+     "    if cycles.iter().all(|cycle| simple(cycle)) {",
+     "    if true {"),
+    ("neighbours folding back taken as simple", "exact_overlay.rs",
+     "                    if (du.0 == dw.0 && u.x != v.x) || (du.1 == dw.1 && u.y != v.y) {",
+     "                    if false {"),
+    # One touch clause alone is equivalent in `simple`: a touching vertex
+    # ends two edges, and one of them presents it to another clause.
+    ("touches taken as apart", "exact_overlay.rs",
+     "    (o1 == Sign::Zero && within(a, b, c))\n        || (o2 == Sign::Zero && within(a, b, d))\n        || (o3 == Sign::Zero && within(c, d, a))\n        || (o4 == Sign::Zero && within(c, d, b))",
+     "    false"),
     # Output rounding: crossings to the nearest double, inputs untouched.
     ("rounding never corrects the guess upwards", "exact_arc/point.rs",
      "            Sign::Positive => r = up,",

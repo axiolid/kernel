@@ -128,14 +128,24 @@ fn merge_short(ring: &mut Vec<Point2>, eps: f64) {
 
 /// Two positions of the ring at the same point.
 fn split_point(ring: &[Point2]) -> Option<(usize, usize)> {
-    for i in 0..ring.len() {
-        for j in i + 1..ring.len() {
-            if ring[i] == ring[j] {
-                return Some((i, j));
+    // The first position of each point, by its bits (`-0.0` read as `0.0`,
+    // as `==` does); the first pair in order is the least repeat's.
+    let mut first: std::collections::HashMap<(u64, u64), usize> = std::collections::HashMap::new();
+    let mut best: Option<(usize, usize)> = None;
+    for (j, p) in ring.iter().enumerate() {
+        let key = ((p.x + 0.0).to_bits(), (p.y + 0.0).to_bits());
+        match first.get(&key) {
+            Some(&i) => {
+                if best.is_none_or(|b| (i, j) < b) {
+                    best = Some((i, j));
+                }
+            }
+            None => {
+                first.insert(key, j);
             }
         }
     }
-    None
+    best
 }
 
 fn cut(ring: &[Point2], i: usize, j: usize) -> (Vec<Point2>, Vec<Point2>) {
@@ -150,18 +160,51 @@ fn cut(ring: &[Point2], i: usize, j: usize) -> (Vec<Point2>, Vec<Point2>) {
 /// and edges crossing outright meet at their crossing. The ring then
 /// passes that point twice and is split there next. `None` when no pair
 /// touches.
+/// The first pair of edges `(i, j)`, `i < j`, not neighbours, that meet
+/// within `eps`. Only edges whose boxes, widened by `eps`, overlap can:
+/// a sweep over the boxes finds them without asking every pair.
+fn first_touch(ring: &[Point2], eps: f64) -> Option<(usize, usize)> {
+    let n = ring.len();
+    let edge = |i: usize| (ring[i], ring[(i + 1) % n]);
+    let meets = |i: usize, j: usize| {
+        let (first, second) = (i.min(j), i.max(j));
+        if second == first + 1 || (first == 0 && second + 1 == n) {
+            return false;
+        }
+        let ((a, b), (c, d)) = (edge(first), edge(second));
+        segments_intersect(a, b, c, d, eps)
+    };
+    let low = |i: usize| edge(i).0.x.min(edge(i).1.x) - eps;
+    let high = |i: usize| edge(i).0.x.max(edge(i).1.x) + eps;
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| low(i).total_cmp(&low(j)));
+    let mut active: Vec<usize> = Vec::new();
+    let mut best: Option<(usize, usize)> = None;
+    for &i in &order {
+        active.retain(|&j| high(j) >= low(i));
+        let (a, b) = edge(i);
+        for &j in &active {
+            let (c, d) = edge(j);
+            if a.y.max(b.y) + eps < c.y.min(d.y) || c.y.max(d.y) + eps < a.y.min(b.y) {
+                continue;
+            }
+            let pair = (i.min(j), i.max(j));
+            if best.is_none_or(|b| pair < b) && meets(i, j) {
+                best = Some(pair);
+            }
+        }
+        active.push(i);
+    }
+    best
+}
+
 fn touching(ring: &[Point2], eps: f64) -> Option<Vec<Point2>> {
     let n = ring.len();
-    for i in 0..n {
-        for j in i + 1..n {
-            if j == i + 1 || (i == 0 && j + 1 == n) {
-                continue;
-            }
+    {
+        {
+            let (i, j) = first_touch(ring, eps)?;
             let (a, b) = (ring[i], ring[(i + 1) % n]);
             let (c, d) = (ring[j], ring[(j + 1) % n]);
-            if !segments_intersect(a, b, c, d, eps) {
-                continue;
-            }
             let on = |p: Point2, q: Point2, v: Point2| {
                 cross(p, q, v).abs() <= eps && within_extent(p, q, v, eps)
             };
@@ -192,8 +235,7 @@ fn touching(ring: &[Point2], eps: f64) -> Option<Vec<Point2>> {
                 out.insert(j + 1, x);
                 out.insert(i + 1, x);
             }
-            return Some(out);
+            Some(out)
         }
     }
-    None
 }

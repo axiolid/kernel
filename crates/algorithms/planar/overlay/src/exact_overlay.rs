@@ -20,12 +20,25 @@
 //! 4. Round once: an input vertex is a double already and comes back
 //!    bit-identical, and a crossing is the double nearest to it.
 //!
+//! Before step 1, each operand's rings are reduced as a chain: a winding
+//! number is a sum over directed edges, so an edge given once each way
+//! between the same two exact points cancels without changing any winding
+//! number off it. A mesh given as a soup of its triangles shrinks to its
+//! outline this way. What is left is split into cycles through distinct
+//! vertices; if every one is simple, decided exactly, they replace the
+//! operand's rings, else the rings are kept as given.
+//!
 //! The tolerance does not enter any decision. It validates operands, and
 //! the result is settled like every other output ([`crate::settle`]), which
 //! merges edges that rounding left shorter than the tolerance.
 
+use std::collections::HashMap;
+
+use axiolid_core::Point2;
+use axiolid_guarantees::Sign;
+
 use crate::arc::{ArcRing, ArcVertex};
-use crate::exact_arc::arrangement;
+use crate::exact_arc::{arrangement, orient_doubles};
 use crate::{signed, FillRule, OverlayError, OverlayOperation, Polygon, Ring};
 
 /// Which operand a ring belongs to, and how it counts.
@@ -65,15 +78,30 @@ pub(crate) fn boolean(
     operation: OverlayOperation,
     fill: FillRule,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
+    boolean_reduced(subject, clip, operation, fill, true)
+}
+
+/// [`boolean`], with the chain reduction on or off.
+fn boolean_reduced(
+    subject: &[Polygon],
+    clip: &[Polygon],
+    operation: OverlayOperation,
+    fill: FillRule,
+    reduced: bool,
+) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
     let mut rings: Vec<ArcRing> = Vec::new();
     let mut counted: Vec<Counted> = Vec::new();
     for (is_clip, polygons) in [(false, subject), (true, clip)] {
-        for ring in polygons
+        let given: Vec<Vec<Point2>> = polygons
             .iter()
             .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
-        {
-            let positive = signed(ring) > 0.0;
-            let mut points = ring.points.clone();
+            .map(|ring| ring.points.clone())
+            .collect();
+        let rings_of = if reduced { reduce(given) } else { given };
+        for points in rings_of {
+            let ring = Ring { points };
+            let positive = signed(&ring) > 0.0;
+            let mut points = ring.points;
             if !positive {
                 points.reverse();
             }
@@ -140,6 +168,170 @@ pub(crate) fn boolean(
         .iter()
         .map(|(outer, holes)| (to_ring(outer), holes.iter().map(to_ring).collect()))
         .collect())
+}
+
+/// An exact point's identity: its coordinates' bits, `-0.0` read as `0.0`.
+fn identity(p: Point2) -> (u64, u64) {
+    ((p.x + 0.0).to_bits(), (p.y + 0.0).to_bits())
+}
+
+/// One operand's rings, as a chain with every edge given both ways
+/// cancelled, split into cycles through distinct vertices -- or the rings
+/// as given, when nothing cancels or a cycle is not simple.
+fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
+    let mut ids: HashMap<(u64, u64), usize> = HashMap::new();
+    let mut points: Vec<Point2> = Vec::new();
+    // Net multiplicity of each edge, `+` from the lower vertex id.
+    let mut net: HashMap<(usize, usize), i64> = HashMap::new();
+    let mut total = 0usize;
+    for ring in &rings {
+        let mut id = |p: Point2| {
+            *ids.entry(identity(p)).or_insert_with(|| {
+                points.push(p);
+                points.len() - 1
+            })
+        };
+        let n = ring.len();
+        let vertices: Vec<usize> = ring.iter().map(|p| id(*p)).collect();
+        for i in 0..n {
+            let (a, b) = (vertices[i], vertices[(i + 1) % n]);
+            if a == b {
+                continue;
+            }
+            total += 1;
+            let (edge, step) = if a < b { ((a, b), 1) } else { ((b, a), -1) };
+            *net.entry(edge).or_default() += step;
+        }
+    }
+    let left: i64 = net.values().map(|m| m.abs()).sum();
+    if usize::try_from(left).is_ok_and(|left| left == total) {
+        return rings;
+    }
+    let mut edges: Vec<((usize, usize), i64)> = net.into_iter().filter(|(_, m)| *m != 0).collect();
+    edges.sort_unstable();
+    let mut out: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
+    for ((lo, hi), m) in edges {
+        let (from, to) = if m > 0 { (lo, hi) } else { (hi, lo) };
+        for _ in 0..m.unsigned_abs() {
+            out[from].push(to);
+        }
+    }
+    // Every vertex has as many edges in as out, so a walk only stops where
+    // it started. A walk returning to a vertex it passed closes a cycle
+    // there, which is cut off: each cycle meets each vertex once.
+    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    let mut position = vec![usize::MAX; points.len()];
+    for start in 0..points.len() {
+        while !out[start].is_empty() {
+            let mut path = vec![start];
+            position[start] = 0;
+            let mut at = start;
+            loop {
+                let Some(next) = out[at].pop() else {
+                    return rings;
+                };
+                if position[next] == usize::MAX {
+                    position[next] = path.len();
+                    path.push(next);
+                    at = next;
+                    continue;
+                }
+                let from = position[next];
+                let cycle: Vec<usize> = path.drain(from..).collect();
+                for &v in &cycle {
+                    position[v] = usize::MAX;
+                }
+                cycles.push(cycle);
+                if path.is_empty() {
+                    break;
+                }
+                position[next] = path.len();
+                path.push(next);
+                at = next;
+            }
+        }
+    }
+    let cycles: Vec<Vec<Point2>> = cycles
+        .into_iter()
+        .map(|cycle| cycle.into_iter().map(|v| points[v]).collect())
+        .collect();
+    if cycles.iter().all(|cycle| simple(cycle)) {
+        cycles
+    } else {
+        rings
+    }
+}
+
+/// Whether the closed segments `a-b` and `c-d` share a point, exactly.
+fn segments_meet(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
+    let within = |p: Point2, q: Point2, r: Point2| {
+        r.x >= p.x.min(q.x) && r.x <= p.x.max(q.x) && r.y >= p.y.min(q.y) && r.y <= p.y.max(q.y)
+    };
+    let (o1, o2) = (orient_doubles(a, b, c), orient_doubles(a, b, d));
+    let (o3, o4) = (orient_doubles(c, d, a), orient_doubles(c, d, b));
+    let opposite = |p: Sign, q: Sign| {
+        matches!(
+            (p, q),
+            (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive)
+        )
+    };
+    if opposite(o1, o2) && opposite(o3, o4) {
+        return true;
+    }
+    (o1 == Sign::Zero && within(a, b, c))
+        || (o2 == Sign::Zero && within(a, b, d))
+        || (o3 == Sign::Zero && within(c, d, a))
+        || (o4 == Sign::Zero && within(c, d, b))
+}
+
+/// Whether a ring through distinct vertices is simple, exactly: edges
+/// apart from their neighbours, and each pair of neighbours sharing only
+/// their common vertex.
+fn simple(ring: &[Point2]) -> bool {
+    let n = ring.len();
+    if n < 3 {
+        return false;
+    }
+    let edge = |i: usize| (ring[i], ring[(i + 1) % n]);
+    let mut order: Vec<usize> = (0..n).collect();
+    let low = |i: usize| edge(i).0.x.min(edge(i).1.x);
+    order.sort_by(|&i, &j| low(i).total_cmp(&low(j)));
+    let mut active: Vec<usize> = Vec::new();
+    for &i in &order {
+        let (a, b) = edge(i);
+        active.retain(|&j| {
+            let (c, d) = edge(j);
+            c.x.max(d.x) >= low(i)
+        });
+        for &j in &active {
+            let (c, d) = edge(j);
+            if a.y.max(b.y) < c.y.min(d.y) || c.y.max(d.y) < a.y.min(b.y) {
+                continue;
+            }
+            let (first, second) = (i.min(j), i.max(j));
+            let neighbours = second == first + 1 || (first == 0 && second == n - 1);
+            if neighbours {
+                // The shared vertex, and the far ends: on one line and on
+                // one side of it, the edges overlap.
+                let (v, u, w) = if second == first + 1 {
+                    (ring[second], ring[first], ring[(second + 1) % n])
+                } else {
+                    (ring[0], ring[1], ring[n - 1])
+                };
+                if orient_doubles(u, v, w) == Sign::Zero {
+                    let ahead = |p: Point2| ((p.x - v.x).signum(), (p.y - v.y).signum());
+                    let (du, dw) = (ahead(u), ahead(w));
+                    if (du.0 == dw.0 && u.x != v.x) || (du.1 == dw.1 && u.y != v.y) {
+                        return false;
+                    }
+                }
+            } else if segments_meet(a, b, c, d) {
+                return false;
+            }
+        }
+        active.push(i);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -228,6 +420,244 @@ mod tests {
             }
         }
         best
+    }
+
+    /// A jittered grid of `n x n` cells from `(x0, y0)`, two triangles
+    /// each, clockwise when asked: a mesh as a soup of its triangles.
+    fn mesh(rng: &mut Lcg, n: usize, x0: f64, y0: f64, clockwise: bool) -> Vec<Polygon> {
+        let at: Vec<Vec<Point2>> = (0..=n)
+            .map(|i| {
+                (0..=n)
+                    .map(|j| {
+                        let jitter = if i % n == 0 || j % n == 0 { 0.0 } else { 0.04 };
+                        Point2::new(
+                            x0 + i as f64 * 0.25 + jitter * (rng.next() - 0.5),
+                            y0 + j as f64 * 0.25 + jitter * (rng.next() - 0.5),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut out = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let (a, b, c, d) = (at[i][j], at[i + 1][j], at[i + 1][j + 1], at[i][j + 1]);
+                for mut points in [vec![a, b, c], vec![a, c, d]] {
+                    if clockwise {
+                        points.reverse();
+                    }
+                    out.push(Polygon {
+                        outer: Ring { points },
+                        holes: Vec::new(),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Cancelling a soup's shared edges changes no result: every operation
+    /// and fill rule, on meshes (overlapping, touching at a corner, with a
+    /// cell missing, clockwise), triangles, and polygons with holes, gives
+    /// the same polygons, bit for bit, with the reduction as without.
+    #[test]
+    fn the_reduction_changes_nothing() {
+        let mut rng = Lcg(198);
+        let operations = [
+            OverlayOperation::Intersection,
+            OverlayOperation::Union,
+            OverlayOperation::Difference,
+            OverlayOperation::Xor,
+        ];
+        let fills = [
+            FillRule::EvenOdd,
+            FillRule::NonZero,
+            FillRule::Positive,
+            FillRule::Negative,
+        ];
+        let mut reduced_somewhere = false;
+        for case in 0..64 {
+            let mut subject = mesh(&mut rng, 3 + case % 4, 0.0, 0.0, case % 5 == 4);
+            if case % 3 == 0 {
+                // A cell missing: the outline has a hole.
+                subject.remove(2 * (1 + case % 3) + 1);
+                subject.remove(2 * (1 + case % 3));
+            }
+            if case % 4 == 1 {
+                // A second mesh touching the first at a corner only.
+                subject.extend(mesh(&mut rng, 2, -0.5, -0.5, false));
+            }
+            let mut clip = if case % 2 == 0 {
+                let x0 = 0.3 + 0.1 * rng.next();
+                mesh(&mut rng, 3, x0, 0.2, case % 7 == 6)
+            } else {
+                (0..4)
+                    .map(|_| {
+                        let (cx, cy, cw) = (rng.next(), rng.next(), rng.next() < 0.3);
+                        Polygon {
+                            outer: star(&mut rng, cx, cy, 3, cw),
+                            holes: Vec::new(),
+                        }
+                    })
+                    .collect()
+            };
+            if case % 6 == 5 {
+                clip.push(Polygon {
+                    outer: Ring {
+                        points: vec![
+                            Point2::new(-1.0, -1.0),
+                            Point2::new(2.0, -1.0),
+                            Point2::new(2.0, 2.0),
+                            Point2::new(-1.0, 2.0),
+                        ],
+                    },
+                    holes: vec![Ring {
+                        points: vec![
+                            Point2::new(0.25, 0.25),
+                            Point2::new(0.25, 0.5),
+                            Point2::new(0.5, 0.5),
+                            Point2::new(0.5, 0.25),
+                        ],
+                    }],
+                });
+            }
+            let given = |polygons: &[Polygon]| -> Vec<Vec<Point2>> {
+                polygons
+                    .iter()
+                    .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+                    .map(|r| r.points.clone())
+                    .collect()
+            };
+            reduced_somewhere |= reduce(given(&subject)).len() < given(&subject).len();
+            let operation = operations[case % 4];
+            let fill = fills[(case / 4) % 4];
+            let with = boolean_reduced(&subject, &clip, operation, fill, true).unwrap();
+            let without = boolean_reduced(&subject, &clip, operation, fill, false).unwrap();
+            let canonical = |rings: Vec<(Ring, Vec<Ring>)>| {
+                crate::canonical_polygons(rings)
+                    .into_iter()
+                    .map(|p| {
+                        std::iter::once(p.outer)
+                            .chain(p.holes)
+                            .map(|r| {
+                                r.points
+                                    .iter()
+                                    .map(|q| (q.x.to_bits(), q.y.to_bits()))
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                canonical(with),
+                canonical(without),
+                "case {case}: {operation:?} {fill:?}"
+            );
+        }
+        assert!(reduced_somewhere);
+    }
+
+    /// A mesh reduces to its outline: one ring, and one more per hole.
+    #[test]
+    fn a_mesh_reduces_to_its_outline() {
+        let mut rng = Lcg(1);
+        let mut soup = mesh(&mut rng, 6, 0.0, 0.0, false);
+        let rings = |polygons: &[Polygon]| -> Vec<Vec<Point2>> {
+            polygons.iter().map(|p| p.outer.points.clone()).collect()
+        };
+        let outline = reduce(rings(&soup));
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].len(), 24);
+        // A cell missing inside: its two triangles out, a hole in.
+        let k = 2 * (6 * 2 + 2);
+        soup.drain(k..k + 2);
+        assert_eq!(reduce(rings(&soup)).len(), 2);
+        // Crossing triangles cancel nothing: kept as given.
+        let crossing = vec![
+            vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(2.0, 0.0),
+                Point2::new(1.0, 2.0),
+            ],
+            vec![
+                Point2::new(0.0, 1.0),
+                Point2::new(2.0, 1.0),
+                Point2::new(1.0, -1.0),
+            ],
+        ];
+        assert_eq!(reduce(crossing.clone()), crossing);
+    }
+
+    /// A ring whose vertex touches another of its edges is not simple,
+    /// however it is started or run; one that only comes near is.
+    #[test]
+    fn a_ring_touching_itself_is_not_simple() {
+        let p = Point2::new;
+        let touching = [
+            p(0.0, 0.0),
+            p(4.0, 0.0),
+            p(4.0, 2.0),
+            p(2.0, 0.0),
+            p(0.0, 2.0),
+        ];
+        let near = [
+            p(0.0, 0.0),
+            p(4.0, 0.0),
+            p(4.0, 2.0),
+            p(2.0, 0.5),
+            p(0.0, 2.0),
+        ];
+        for shift in 0..5 {
+            for reversed in [false, true] {
+                let turn = |ring: &[Point2]| {
+                    let mut out: Vec<Point2> = (0..5).map(|i| ring[(i + shift) % 5]).collect();
+                    if reversed {
+                        out.reverse();
+                    }
+                    out
+                };
+                assert!(!simple(&turn(&touching)), "{shift} {reversed}");
+                assert!(simple(&turn(&near)), "{shift} {reversed}");
+            }
+        }
+    }
+
+    /// Two simple rings sharing an edge each way, the second reaching back
+    /// over the first: the cycle left crosses itself, so the reduction
+    /// keeps the rings as given -- and the result is the same either way.
+    #[test]
+    fn a_crossing_cycle_keeps_the_rings() {
+        let p = Point2::new;
+        let square = vec![p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)];
+        let hook = vec![
+            p(1.0, 1.0),
+            p(1.0, 0.0),
+            p(2.0, 0.0),
+            p(2.0, 2.0),
+            p(0.5, 2.0),
+            p(0.5, 0.5),
+            p(0.7, 0.5),
+            p(0.7, 1.5),
+        ];
+        let polygon = |points: &Vec<Point2>| Polygon {
+            outer: Ring {
+                points: points.clone(),
+            },
+            holes: Vec::new(),
+        };
+        let given = vec![square.clone(), hook.clone()];
+        assert_eq!(reduce(given.clone()), given);
+        let soup = [polygon(&square), polygon(&hook)];
+        let with = boolean_reduced(&soup, &[], OverlayOperation::Union, FillRule::NonZero, true);
+        let without = boolean_reduced(
+            &soup,
+            &[],
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            false,
+        );
+        assert_eq!(format!("{with:?}"), format!("{without:?}"));
     }
 
     #[test]

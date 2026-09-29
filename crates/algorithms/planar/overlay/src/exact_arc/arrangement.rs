@@ -325,16 +325,33 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
     // One vertex per distinct exact point, so every face built from this
     // subdivision names a shared vertex by the same index.
     let mut vertices: Vec<XPoint> = Vec::new();
-    let mut by_lo: Vec<(f64, f64, usize)> = Vec::new();
+    // Interned points by the low end of their `x` box, in a tree: a point
+    // equal to `x` has a box meeting `x`'s, so its low end lies within the
+    // widest box seen of `x`'s.
+    let mut by_lo: std::collections::BTreeMap<(u64, usize), (f64, usize)> =
+        std::collections::BTreeMap::new();
+    // Ordered keys for finite floats: flip the sign bit, or every bit of a
+    // negative number.
+    let key = |v: f64| {
+        let bits = v.to_bits();
+        if bits >> 63 == 1 {
+            !bits
+        } else {
+            bits | (1 << 63)
+        }
+    };
     let mut reach = 0.0f64;
     let mut intern = |x: &XPoint| -> usize {
         let ((lo, hi), _) = x.enclosures();
         let floor = lo - reach;
-        let first = by_lo.partition_point(|entry| entry.0 < floor);
-        for &(_, _, index) in by_lo[first..].iter().take_while(|entry| entry.0 <= hi) {
-            if same_point(&vertices[index], x) {
-                return index;
+        if floor.is_finite() && hi.is_finite() {
+            for (_, &(_, index)) in by_lo.range((key(floor), 0)..=(key(hi), usize::MAX)) {
+                if same_point(&vertices[index], x) {
+                    return index;
+                }
             }
+        } else if let Some(index) = vertices.iter().position(|v| same_point(v, x)) {
+            return index;
         }
         let index = vertices.len();
         vertices.push(x.clone());
@@ -344,8 +361,9 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         } else {
             reach.max(width)
         };
-        let at = by_lo.partition_point(|entry| entry.0 < lo);
-        by_lo.insert(at, (lo, hi, index));
+        if lo.is_finite() {
+            by_lo.insert((key(lo), index), (hi, index));
+        }
         index
     };
     for (piece, edge) in pieces.iter().zip(out.iter_mut()) {

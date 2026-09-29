@@ -70,7 +70,19 @@ use axiolid_guarantees::Sign;
 use crate::arc::{arc_ring_area, ArcRing, ArcVertex};
 use crate::{OverlayError, OverlayOperation};
 
-use edge::{crossings, Carrier, Edge};
+use edge::{crossings, orient_f64, Carrier, Edge};
+
+/// The exact orientation of three doubles: positive when `c` lies left
+/// of the line `a -> b`. The `f64` filter answers almost always.
+pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
+    orient_f64(a, b, c).unwrap_or_else(|| {
+        orient(
+            &XPoint::from_f64(a),
+            &XPoint::from_f64(b),
+            &XPoint::from_f64(c),
+        )
+    })
+}
 use point::{cmp_y, dy, orient, same_point, sign, Circle, Pred, Tangent, XPoint};
 
 /// Which operand a piece came from.
@@ -282,7 +294,20 @@ fn approx_param(edge: &Edge, p: Point2) -> f64 {
     let (mut lo, mut hi) = (0.0f64, 1.0f64);
     let p0 = edge.p0.approx();
     let turn = match &edge.carrier {
-        Carrier::Segment => None,
+        // Along a segment the parameter is the projection: a seed only,
+        // which the caller verifies exactly.
+        Carrier::Segment => {
+            let d = edge.p1.approx();
+            let (dx, dy) = (d.x - p0.x, d.y - p0.y);
+            let length2 = dx * dx + dy * dy;
+            if length2 > 0.0 {
+                let t = ((p.x - p0.x) * dx + (p.y - p0.y) * dy) / length2;
+                if t.is_finite() {
+                    return t.clamp(0.0, 1.0);
+                }
+            }
+            None
+        }
         Carrier::Arc { turn, .. } => Some(if *turn == Sign::Negative { -1.0 } else { 1.0 }),
     };
     let before = |q: Point2| -> bool {

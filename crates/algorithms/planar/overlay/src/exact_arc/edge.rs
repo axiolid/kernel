@@ -382,7 +382,7 @@ pub(crate) fn line_meets_circle(
 /// is Shewchuk's for the fast orientation test. `None` when the value may
 /// be zero or its sign is not certain (including overflow and values near
 /// underflow, where the bound does not hold).
-fn orient_f64(a: Point2, b: Point2, c: Point2) -> Option<Sign> {
+pub(super) fn orient_f64(a: Point2, b: Point2, c: Point2) -> Option<Sign> {
     let left = (b.x - a.x) * (c.y - a.y);
     let right = (b.y - a.y) * (c.x - a.x);
     let det = left - right;
