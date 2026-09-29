@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-09-27) |
+| Latest release | 0.3.4 (2026-09-28) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,18 +30,11 @@ Queries over triangle meshes: clearance between meshes, point containment and wi
 
 ## Changes
 
-Latest release, 0.3.3 (2026-09-27):
+Latest release, 0.3.4 (2026-09-28):
 
-### Added
+### Changed
 
-- `topology` (#144): every connected component of a two-manifold triangle
-  mesh, classified exactly from its connectivity -- counts, Euler
-  characteristic, boundary loops, orientability and consistent winding, and
-  the surface (`SurfaceKind::Orientable { genus }` or
-  `NonOrientable { crosscaps }`). A closed orientable component also gets a
-  basis of its first homology: `2g` simple closed edge loops, by the
-  tree-cotree construction. Meshes with an edge on three or more triangles,
-  or a vertex whose triangles form several fans, are refused
-  (`TopologyError::NonManifold`). `genus` is unchanged.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

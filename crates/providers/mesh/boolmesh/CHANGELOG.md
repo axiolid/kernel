@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-28
+
 ### Changed
 
 - **Behaviour change:** a refusal inside the solve (an odd edge-point
@@ -18,6 +20,8 @@ caret rule for `0.x` versions.
   this provider's defect and no longer reads as the caller's.
   `tests/solve_failure.rs` pins it on a grid union that still reaches the
   refusal (#203).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ## [0.3.1] - 2026-09-27
 

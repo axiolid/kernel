@@ -8,7 +8,7 @@ Projection of triangle meshes onto a plane, and prism intersection.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-project`](https://crates.io/crates/axiolid-project) |
 | Facade | [`axiolid`](./axiolid) feature `project` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -27,6 +27,11 @@ Projection of triangle meshes onto a plane and intersection with prisms: the bri
 
 ## Changes
 
-Released in the workspace-wide 0.3.0 release (2026-09-23), before crates versioned independently; its notes are in the [workspace changelog](/CHANGELOG).
+Latest release, 0.3.1 (2026-09-28):
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/planar/project/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/project/CHANGELOG.md)

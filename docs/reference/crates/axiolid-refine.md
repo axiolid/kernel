@@ -8,7 +8,7 @@ Mesh refinement and smoothing with bounded, reported deviation.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-refine`](https://crates.io/crates/axiolid-refine) |
 | Layer | algorithms (`algorithm.discrete`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_refine/index.html) · [docs.rs](https://docs.rs/axiolid-refine) |
@@ -34,10 +34,11 @@ does not implement limit-surface subdivision schemes.
 
 ## Changes
 
-Latest release, 0.3.0 (2026-09-23):
+Latest release, 0.3.1 (2026-09-28):
 
-### Fixed
+### Changed
 
-- A refinement that creates no vertex returns the input's channels and normals. It previously reported them `Preserved` and returned a mesh without them.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/discrete/refine/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/refine/CHANGELOG.md)

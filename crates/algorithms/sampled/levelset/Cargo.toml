@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-levelset"
 description = "Level-set extraction: a closed manifold mesh from a sampled scalar field"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

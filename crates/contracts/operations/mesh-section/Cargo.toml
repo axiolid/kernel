@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-mesh-section-contract"
 description = "Portable mesh plane-section request, result, and evidence contract"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

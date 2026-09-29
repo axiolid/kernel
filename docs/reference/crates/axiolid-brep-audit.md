@@ -8,7 +8,7 @@ Geometric consistency auditing for exact boundary representations.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-brep-audit`](https://crates.io/crates/axiolid-brep-audit) |
 | Layer | algorithms (`algorithm.repair`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_audit/index.html) · [docs.rs](https://docs.rs/axiolid-brep-audit) |
@@ -30,14 +30,11 @@ Geometric consistency auditing for exact B-reps. It evaluates curves and surface
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
 ### Changed
 
-- An implicit pcurve (ADR 0077) is parameterised by its cells, not in
-  proportion to its edge. It passes when every lifted sample projects onto
-  the edge within tolerance, inside the edge's span, in the order the use
-  runs, and starting and ending at the use's ends. Every other pcurve is
-  still checked against the edge at proportional parameters.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/repair/brep-audit/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/repair/brep-audit/CHANGELOG.md)

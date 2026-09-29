@@ -8,7 +8,7 @@ Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-surface`](https://crates.io/crates/axiolid-surface) |
 | Facade | [`axiolid`](./axiolid) feature `surfaces` |
 | Layer | representations (`representation.atomic`) |
@@ -31,12 +31,11 @@ here.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
 ### Changed
 
-- `BSplineSurface` is defined in `axiolid-curve` (so a curve traced on a
-  B-spline surface can carry its carrier, ADR 0077) and re-exported here
-  unchanged: same fields, same derives. Requires `axiolid-curve` 0.3.1.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/representations/analytic/surface/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/surface/CHANGELOG.md)

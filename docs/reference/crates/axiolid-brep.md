@@ -8,7 +8,7 @@ Exact analytic B-rep result contracts over neutral topology.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-brep`](https://crates.io/crates/axiolid-brep) |
 | Facade | [`axiolid`](./axiolid) feature `brep` |
 | Layer | representations (`representation.composed`) |
@@ -33,13 +33,11 @@ traverse geometry.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `ExactBRepBuilder::append`: copy another exact B-rep's vertices, edges,
-  loops, faces and shells, with their curves, surfaces, intervals and
-  names, and return the new shell handles; optionally with every face used
-  reversed, which turns an outer shell into a void (#111).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/representations/brep/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/brep/CHANGELOG.md)

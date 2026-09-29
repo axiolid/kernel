@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,16 +46,11 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `tessellate_primitive` meshes `Primitive::Torus` and `Primitive::Wedge`
-  (#142). The torus is a grid of planar trapezoids sized by the chord
-  budget, round the axis for the outer equator and round the tube for the
-  tube; horn and spindle tori, and non-positive or non-finite radii, are
-  refused by name. The wedge's faces are planar and shared corners of a
-  collapsed top are merged, so a ridge or apex wedge is still a closed,
-  outward-wound solid; a reversed or non-finite top range is refused.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

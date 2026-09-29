@@ -8,7 +8,7 @@ Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-09-28) |
+| Latest release | 0.1.2 (2026-09-28) |
 | crates.io | [`axiolid-exact`](https://crates.io/crates/axiolid-exact) |
 | Layer | algorithms (`algorithm.reference`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_exact/index.html) · [docs.rs](https://docs.rs/axiolid-exact) |
@@ -39,15 +39,11 @@ about a *constructed* point (a crossing, a line/circle hit), use this crate.
 
 ## Changes
 
-Latest release, 0.1.1 (2026-09-28):
+Latest release, 0.1.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `FixedInterval`: a real number between two big-integer bounds at a
-  chosen number of fractional bits, every operation rounded outward, and
-  `FixedInterval::sin_cos`, certified `sin` and `cos` of a dyadic angle
-  (Taylor series with the Lagrange remainder, after halving the angle).
-  For signs of values no finite arithmetic holds exactly, asked again at
-  a higher precision until they show (#181).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/exact/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/exact/CHANGELOG.md)

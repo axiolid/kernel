@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-28
+
 ### Changed
 
 - **Breaking:** a candidate triangle index at or beyond the mesh's
@@ -18,3 +20,6 @@ caret rule for `0.x` versions.
   otherwise report "no hit" for triangles it never tested.
   `triangle_hit` refuses the same index instead of panicking in the
   mesh view.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+

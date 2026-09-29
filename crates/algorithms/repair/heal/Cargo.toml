@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-heal"
 description = "Explicit diagnosis and opt-in repair contracts for dirty geometry"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

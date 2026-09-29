@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-27) |
+| Latest release | 0.3.3 (2026-09-28) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -39,15 +39,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-27):
+Latest release, 0.3.3 (2026-09-28):
 
-### Added
+### Changed
 
-- Fréchet distance between polylines (#147): `frechet_distance` (the
-  continuous distance: the least critical value of the free space that the
-  Alt-Godau decision accepts), `discrete_frechet_distance` (Eiter-Mannila,
-  `O(nm)` time, `O(m)` memory) and the decision `frechet_at_most`, each
-  with a `_2d` form. Empty polylines, non-finite points and an invalid
-  leash are `FrechetError`s. Floating point, not certified.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

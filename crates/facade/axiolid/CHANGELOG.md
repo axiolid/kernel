@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-28
+
 ### Changed
 
 - **Breaking:** requires `axiolid-ray-mesh` 0.4, so `axiolid::ray_mesh`
@@ -16,3 +18,6 @@ caret rule for `0.x` versions.
   `RayMeshError::TriangleIndexOutOfRange`, and `RayIndex` queries refuse an
   out-of-range candidate instead of skipping it. An exhaustive `match` on
   `RayMeshError` needs the new arm.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+

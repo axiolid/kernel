@@ -8,7 +8,7 @@ Portable mesh boolean request, result, evidence, and conformance contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-mesh-boolean-contract`](https://crates.io/crates/axiolid-mesh-boolean-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-boolean` |
 | Layer | contracts (`contract.operation`) |
@@ -32,14 +32,11 @@ implement it, and `axiolid-dispatch` chooses between them.
 
 ## Changes
 
-Latest release, 0.3.0 (2026-09-23):
+Latest release, 0.3.1 (2026-09-28):
 
-### Added
+### Changed
 
-- `merge_fates`: compose per-channel fates across sequential steps (#116).
-
-### Fixed
-
-- Composed evidence reported only the last step's attribute fates: `BooleanEvidence::absorb` (the `subtract_many`/`union_many` defaults) and `symmetric_difference_via_composition` now compose them, so a channel a middle step derived or dropped is reported that way.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/contracts/operations/mesh-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-boolean/CHANGELOG.md)

@@ -8,7 +8,7 @@ Exact parametric primitive solids used as CSG leaves.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-primitive`](https://crates.io/crates/axiolid-primitive) |
 | Facade | [`axiolid`](./axiolid) feature `primitives` |
 | Layer | representations (`representation.atomic`) |
@@ -29,16 +29,11 @@ mesh or kernel dependency.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `Primitive::Torus` (#142): a ring torus about local +z, by major and
-  minor radius. Horn and spindle tori are not solids and are refused by
-  the tessellator.
-- `Primitive::Wedge` (#142): OCCT's `MakeWedge` general form with the
-  height along local +z -- a base rectangle at z = 0 and a top rectangle,
-  narrowed or shifted, at z = height. The top may collapse to a ridge or
-  an apex.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/representations/analytic/primitive/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/primitive/CHANGELOG.md)

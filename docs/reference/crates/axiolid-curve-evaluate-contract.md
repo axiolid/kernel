@@ -8,7 +8,7 @@ Portable curve evaluation capability contract: point, tangent and oriented frame
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-curve-evaluate-contract`](https://crates.io/crates/axiolid-curve-evaluate-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_curve_evaluate_contract/index.html) · [docs.rs](https://docs.rs/axiolid-curve-evaluate-contract) |
@@ -32,6 +32,11 @@ scalar implementation. See ADR 0063.
 
 ## Changes
 
-Released in the workspace-wide 0.3.0 release (2026-09-23), before crates versioned independently; its notes are in the [workspace changelog](/CHANGELOG).
+Latest release, 0.3.1 (2026-09-28):
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/contracts/operations/curve-evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/curve-evaluate/CHANGELOG.md)

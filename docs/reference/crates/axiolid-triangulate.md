@@ -8,7 +8,7 @@ Constrained Delaunay triangulation with bounded quality refinement.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-27) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-triangulate`](https://crates.io/crates/axiolid-triangulate) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_triangulate/index.html) · [docs.rs](https://docs.rs/axiolid-triangulate) |
@@ -26,25 +26,11 @@ Constrained Delaunay triangulation with bounded quality refinement. Every constr
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-27):
+Latest release, 0.3.2 (2026-09-28):
 
-### Fixed
+### Changed
 
-- `triangulate`: after recovering constraint edges, unconstrained edges are
-  flipped back to locally Delaunay (Lawson's flips). Recovery used to leave
-  long triangles whose circumcircles held points no constraint hid, so the
-  result was not constrained Delaunay as documented -- with finely sampled
-  walls, triangles spanned whole rooms (#139).
-- `triangulate` no longer loops for ever on outlines like a square turned
-  45 degrees (#190): legalisation after inserting a point checked the new
-  diagonal instead of the two edges across from the point, so the real
-  edges were never checked and thin quadrilaterals flipped back and forth.
-  It now checks those edges, flips only strictly convex quadrilaterals,
-  splits the edge (and both triangles beside it) when a point lands on
-  one, and carries a flip bound.
-- Constraint recovery no longer gives up at the first crossing edge it
-  cannot flip (#190): it follows Anglada's queue, retrying edges that
-  cannot flip yet and requeuing new diagonals that still cross, and
-  reports `CrossingConstraints` only when a full pass flips nothing.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/algorithms/planar/triangulate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/triangulate/CHANGELOG.md)

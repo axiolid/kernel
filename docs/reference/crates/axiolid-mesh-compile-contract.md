@@ -8,7 +8,7 @@ Portable graph-to-mesh compilation contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-24) |
+| Latest release | 0.3.2 (2026-09-28) |
 | crates.io | [`axiolid-mesh-compile-contract`](https://crates.io/crates/axiolid-mesh-compile-contract) |
 | Facade | [`axiolid`](./axiolid) feature `graph-compile` |
 | Layer | contracts (`contract.operation`) |
@@ -31,16 +31,11 @@ is the exact counterpart.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-24):
+Latest release, 0.3.2 (2026-09-28):
 
-### Added
+### Changed
 
-- `MeshClosure` and `CompileOutcome::closure` (#161): whether a compiled mesh
-  bounds a solid (`Solid`), is a surface model with area but no volume
-  (`Surface`), or was not reported (`Unknown`, the default for `untracked`
-  and `tracked`, so existing compilers build unchanged).
-  `CompileOutcome::solid_mesh` returns the mesh only for `Solid`, so volume
-  readers refuse a surface model instead of measuring a closed shell the
-  source never declared a solid. `with_closure` sets it.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/contracts/operations/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/compile/CHANGELOG.md)

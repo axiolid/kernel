@@ -8,7 +8,7 @@ Reference pointcloud reconstruction: signed-distance field from samples, extract
 
 | | |
 | --- | --- |
-| Latest release | 0.3.0 (2026-09-23) |
+| Latest release | 0.3.1 (2026-09-28) |
 | crates.io | [`axiolid-pointcloud-reconstruction-sdf`](https://crates.io/crates/axiolid-pointcloud-reconstruction-sdf) |
 | Facade | [`axiolid`](./axiolid) feature `pointcloud-provider` |
 | Layer | providers (`provider.pointcloud`) |
@@ -38,6 +38,11 @@ replace it behind the same contract.
 
 ## Changes
 
-Released in the workspace-wide 0.3.0 release (2026-09-23), before crates versioned independently; its notes are in the [workspace changelog](/CHANGELOG).
+Latest release, 0.3.1 (2026-09-28):
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/providers/pointcloud/sdf/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/pointcloud/sdf/CHANGELOG.md)

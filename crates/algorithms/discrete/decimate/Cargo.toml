@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-decimate"
 description = "Edge-collapse mesh decimation with a bounded, reported deviation"
-version = "0.3.0"
+version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

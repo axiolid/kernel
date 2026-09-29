@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-27) |
+| Latest release | 0.3.3 (2026-09-28) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -38,13 +38,11 @@ identifiers outside the graph.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-27):
+Latest release, 0.3.3 (2026-09-28):
 
-### Fixed
+### Changed
 
-- A `SolidOperation::BoundedHalfSpace` boundary must be a 2D curve (#162).
-  The graph accepted a 3D curve, which the compiler refuses, so such a
-  graph validated and then could never compile; it is now refused when the
-  graph is built.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

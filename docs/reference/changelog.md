@@ -6,7 +6,59 @@
 
 Every publishable crate versions and publishes independently ([ADR 0067](/adr/0067-crates-version-independently)); this page collects each crate's own `CHANGELOG.md`, newest release first per crate. Workspace-wide narrative — breaking bumps and coordinated releases — stays in the [top-level changelog](/CHANGELOG).
 
+## axiolid
+
+### 0.4.0 - 2026-09-28
+
+### Changed
+
+- **Breaking:** requires `axiolid-ray-mesh` 0.4, so `axiolid::ray_mesh`
+  (re-exported under the ray features) carries the new
+  `RayMeshError::TriangleIndexOutOfRange`, and `RayIndex` queries refuse an
+  out-of-range candidate instead of skipping it. An exhaustive `match` on
+  `RayMeshError` needs the new arm.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-arrangement
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-backend-cpu
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-backend-gpu
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-brep
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -20,6 +72,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-audit
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-27
 
 ### Changed
@@ -32,6 +91,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-brep-boolean
+
+### 0.1.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.1.0 - 2026-09-27
 
@@ -111,7 +177,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   conics, rulings, circles about the axis, `Sinusoid2` for oblique cuts).
 
 
+## axiolid-capi
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-collide
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-construct
+
+### 0.3.6 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.5 - 2026-09-28
 
@@ -282,6 +375,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-contracts
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-25
 
 ### Added
@@ -295,7 +395,24 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   behaviour. A non-finite or non-positive budget is refused (`None`).
 
 
+## axiolid-core
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-curve
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -356,7 +473,54 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `Curve2` is `#[non_exhaustive]`.
 
 
+## axiolid-curve-evaluate-contract
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-decimate
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-decompose
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-dispatch
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-evaluate
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -389,6 +553,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-exact
+
+### 0.1.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.1.1 - 2026-09-28
 
@@ -429,7 +600,64 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `Interval::{quotient, disjoint}`.
 
 
+## axiolid-exact-compile-contract
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-field
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-field-ops
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-fixtures
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-guarantees
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-heal
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.0 - 2026-09-23
 
@@ -444,6 +672,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-inspect
+
+### 0.3.4 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.3 - 2026-09-27
 
@@ -487,7 +722,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   named (`OverlapError`); either winding is accepted.
 
 
+## axiolid-levelset
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-linear
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-linear-intersection
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-measure
+
+### 0.3.3 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.2 - 2026-09-27
 
@@ -581,6 +853,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh
 
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.0 - 2026-09-23
 
 ### Added
@@ -598,6 +877,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-boolean-boolmesh
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- **Behaviour change:** a refusal inside the solve (an odd edge-point
+  count in `pair_up`, #101) is reported as
+  `GeomError::BackendContractViolation` naming `boolmesh`, not
+  `Degenerate`. The operands passed every input gate, so the failure is
+  this provider's defect and no longer reads as the caller's.
+  `tests/solve_failure.rs` pins it on a grid union that still reaches the
+  refusal (#203).
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -622,6 +915,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-contract
 
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.0 - 2026-09-23
 
 ### Added
@@ -634,6 +934,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.6 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.5 - 2026-09-28
 
@@ -777,6 +1084,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile-contract
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-24
 
 ### Added
@@ -796,7 +1110,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - `CompileOutcome` and the provided method `MeshCompiler::compile_mesh_reported` (#115): a compiled mesh with the fate of each attribute channel. The default wraps `compile_mesh` and reports `attribute_fates: None` ("not tracked", not "nothing dropped"), so existing implementations compile unchanged.
 
 
+## axiolid-mesh-contracts
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-mesh-section-contract
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-minkowski
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-model
+
+### 0.3.3 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.2 - 2026-09-27
 
@@ -819,6 +1170,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-nurbs
+
+### 0.3.4 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.3 - 2026-09-28
 
@@ -1017,6 +1375,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-overlay
 
+### 0.3.6 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.5 - 2026-09-28
 
 ### Changed
@@ -1168,7 +1533,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   (ADR 0069). Superseded by the exact core above, which needs no scaling.
 
 
+## axiolid-pointcloud
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-pointcloud-reconstruction-contract
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-pointcloud-reconstruction-sdf
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-predicates
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -1185,6 +1587,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-primitive
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-27
 
 ### Added
@@ -1198,7 +1607,51 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   an apex.
 
 
+## axiolid-profile
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-project
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-ray-mesh
+
+### 0.4.0 - 2026-09-28
+
+### Changed
+
+- **Breaking:** a candidate triangle index at or beyond the mesh's
+  triangle count is refused with the new
+  `RayMeshError::TriangleIndexOutOfRange` instead of being skipped by
+  `nearest_hit_among`; a broad phase built over a different mesh would
+  otherwise report "no hit" for triangles it never tested.
+  `triangle_hit` refuses the same index instead of panicking in the
+  mesh view.
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-reference
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
@@ -1215,6 +1668,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-refine
 
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.0 - 2026-09-23
 
 ### Fixed
@@ -1223,6 +1683,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-route
+
+### 0.3.6 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.5 - 2026-09-28
 
@@ -1381,6 +1848,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-spatial
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-27
 
 ### Added
@@ -1396,6 +1870,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-surface
 
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
 ### 0.3.1 - 2026-09-27
 
 ### Changed
@@ -1405,7 +1886,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   unchanged: same fields, same derives. Requires `axiolid-curve` 0.3.1.
 
 
+## axiolid-tessellation-contract
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-topology
+
+### 0.3.1 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
+
+
 ## axiolid-triangulate
+
+### 0.3.2 - 2026-09-28
+
+### Changed
+
+- The crates.io page is this crate's own `README.md`, with links to its
+  API documentation, its reference page and the source (ADR 0078).
 
 ### 0.3.1 - 2026-09-27
 
