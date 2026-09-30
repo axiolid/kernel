@@ -16,6 +16,7 @@ mod exact_face;
 pub mod frechet;
 pub mod measure;
 pub mod mesh;
+pub mod mesh_hausdorff;
 pub mod mesh_measure;
 pub mod mesh_proximity;
 pub mod properties;
@@ -39,6 +40,9 @@ pub use measure::Measure;
 pub use mesh::{
     second_moments, surface_properties, volume_properties, MeshMeasureError, SurfaceProperties,
     VolumeProperties,
+};
+pub use mesh_hausdorff::{
+    hausdorff_distance, one_sided_hausdorff, HausdorffBounds, HausdorffError, MeshHausdorff,
 };
 pub use mesh_measure::MeshMeasure;
 pub use mesh_proximity::{

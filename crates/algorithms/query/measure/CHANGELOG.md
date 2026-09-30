@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Certified mesh Hausdorff distance (#148). `hausdorff_distance` returns
+  `MeshHausdorff`: intervals certain to contain the two-sided Hausdorff
+  distance between two triangle-mesh surfaces and both one-sided ones,
+  refined to a requested absolute accuracy; `one_sided_hausdorff` measures
+  one direction. Each `HausdorffBounds` carries witnesses: the sample
+  realising the lower bound and its nearest point on the other mesh. Lower
+  bounds are sampled points' distances bounded below through each
+  triangle's support function; upper bounds come from branch and bound over
+  subdivided triangles (the distance to a triangle is convex, so a piece's
+  maximum is at a corner) with a best-first BVH, and flat convex patches of
+  the target (edge pairs, closed fans) bound pieces across seams with a
+  certified hull excess. Rounding is accounted for with explicit margins,
+  including the drift of rounded subdivision midpoints. Open, non-manifold
+  and degenerate meshes are measured; empty meshes, bad indices, non-finite
+  positions and invalid accuracies are refused with `HausdorffError`.
+
 ## [0.3.4] - 2026-09-30
 
 ### Added

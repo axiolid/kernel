@@ -217,13 +217,6 @@ effort = "Low"
 number = 147
 
 [[issue]]
-key = "mesh-hausdorff"
-title = "Two-sided mesh Hausdorff distance with a certified error bound"
-priority = "Medium"
-effort = "Medium"
-number = 148
-
-[[issue]]
 key = "isotropic-remeshing"
 title = "Isotropic remeshing: split, collapse, flip and tangential relaxation"
 priority = "Medium"
@@ -871,10 +864,9 @@ cgal = ["Polygon_mesh_processing"]
 id = "D15"
 area = "mesh"
 name = "mesh distance (Hausdorff), inside test, ray cast"
-issue = "mesh-hausdorff"
-level = "narrow"
-summary = "Inside test (winding number, exact via orient3d) and ray cast (BVH-accelerated nearest hit) are IMPL and general. Mesh-to-mesh proximity/clearance (mesh_proximity.rs) is a min-gap/clash measure, not a full two-sided Hausdorff distance metric — reports nearest gap, \"clash\" as 0.0, out-of-range as ..."
-evidence = ["crates/algorithms/query/inspect/src/containment.rs::winding_number", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs::nearest_hit", "crates/algorithms/query/measure/src/mesh_proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
+level = "implemented"
+summary = "Inside test (winding number, exact via orient3d) and ray cast (BVH-accelerated nearest hit) are general. hausdorff_distance and one_sided_hausdorff (axiolid-measure, #148) return intervals certain to contain the one-sided h(A, B), h(B, A) and the two-sided Hausdorff distance between two triangle-mesh surfaces, refined to a requested absolute accuracy, with witnesses (the sample realising the lower bound and its nearest point on the other mesh). Lower bounds are sampled points' distances bounded below through the triangle's support function (tight in the direction of the computed nearest point); upper bounds come from branch and bound over subdivided triangles, using that the distance to a convex set is convex so a piece's maximum is at a corner, with a private BVH for best-first nearest queries. Flat convex patches (edge pairs forming a convex quadrilateral, closed fans with a convex link winding once) bound pieces across seams as one convex set with a certified hull excess, so finely triangulated flat faces close without splitting every seam. All rounding is accounted for with explicit standard-model margins (point evaluation, support dot products, box gaps, rounded midpoints as per-corner drift). Open, non-manifold and degenerate meshes are measured (thin triangles as their edges); empty meshes, out-of-range indices, non-finite positions and invalid accuracies are refused by name. A fixed split budget can end refinement early; the interval stays sound, only wider. Surface distance only: containment is the separate inside test. mesh_distance / proximity_components (min gap, clash as 0.0) remain."
+evidence = ["crates/algorithms/query/inspect/src/containment.rs::winding_number", "crates/algorithms/query/intersection/ray-mesh/src/lib.rs::nearest_hit", "crates/algorithms/query/measure/src/mesh_hausdorff.rs::hausdorff_distance", "crates/algorithms/query/measure/src/mesh_hausdorff.rs::one_sided_hausdorff", "crates/algorithms/query/measure/src/mesh_hausdorff/patches.rs::flat_patches", "crates/algorithms/query/measure/tests/mesh_hausdorff.rs", "scripts/probe_mesh_hausdorff_mutants.py", "crates/algorithms/query/measure/src/mesh_proximity.rs", "crates/algorithms/query/measure/tests/mesh_proximity.rs"]
 occt = ["src/ModelingAlgorithms/TKTopAlgo/BRepExtrema"]
 cgal = ["Polygon_mesh_processing"]
 
