@@ -58,8 +58,8 @@ MUTANTS = [
     (
         'one-sided Hausdorff refusals skipped',
         F,
-        'pub fn one_sided_polyline_hausdorff_distance(a: &[Point3], b: &[Point3]) -> Result<f64, FrechetError> {\n    check(a)?;\n    check(b)?;',
-        'pub fn one_sided_polyline_hausdorff_distance(a: &[Point3], b: &[Point3]) -> Result<f64, FrechetError> {\n    let _ = check(a);\n    let _ = check(b);',
+        ') -> Result<f64, FrechetError> {\n    check(a)?;\n    check(b)?;\n    if a.len() == 1 {',
+        ') -> Result<f64, FrechetError> {\n    let _ = check(a);\n    let _ = check(b);\n    if a.len() == 1 {',
         TESTS,
     ),
     (
