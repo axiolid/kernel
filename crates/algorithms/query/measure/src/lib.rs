@@ -19,6 +19,7 @@ pub mod mesh;
 pub mod mesh_hausdorff;
 pub mod mesh_measure;
 pub mod mesh_proximity;
+pub mod polyline_hausdorff;
 pub mod properties;
 pub mod proximity;
 pub mod winding;
@@ -47,6 +48,11 @@ pub use mesh_hausdorff::{
 pub use mesh_measure::MeshMeasure;
 pub use mesh_proximity::{
     mesh_distance, proximity_components, MeshDistance, MeshProximityError, ProximityComponent,
+};
+pub use polyline_hausdorff::{
+    frechet_decide_certified, frechet_decide_certified_2d, one_sided_polyline_hausdorff_distance,
+    one_sided_polyline_hausdorff_distance_2d, polyline_hausdorff_distance,
+    polyline_hausdorff_distance_2d, FrechetDecision,
 };
 pub use properties::MassProperties;
 pub use proximity::{

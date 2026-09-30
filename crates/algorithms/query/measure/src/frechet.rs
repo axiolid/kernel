@@ -127,7 +127,7 @@ pub fn frechet_distance_2d(a: &[Point2], b: &[Point2]) -> Result<f64, FrechetErr
     frechet_distance(&lift(a), &lift(b))
 }
 
-fn check(points: &[Point3]) -> Result<(), FrechetError> {
+pub(crate) fn check(points: &[Point3]) -> Result<(), FrechetError> {
     if points.is_empty() {
         return Err(FrechetError::EmptyPolyline);
     }
@@ -137,11 +137,11 @@ fn check(points: &[Point3]) -> Result<(), FrechetError> {
     Ok(())
 }
 
-fn lift(points: &[Point2]) -> Vec<Point3> {
+pub(crate) fn lift(points: &[Point2]) -> Vec<Point3> {
     points.iter().map(|p| Point3::new(p.x, p.y, 0.0)).collect()
 }
 
-fn distance(p: Point3, q: Point3) -> f64 {
+pub(crate) fn distance(p: Point3, q: Point3) -> f64 {
     (p - q).length()
 }
 
@@ -168,7 +168,7 @@ fn discrete(a: &[Point3], b: &[Point3]) -> f64 {
 
 /// The foot of `c` on the line through segment `(a, b)`: its parameter
 /// (unclamped) and its distance to `c`. `None` for a zero-length segment.
-fn foot(c: Point3, a: Point3, b: Point3) -> Option<(f64, f64)> {
+pub(crate) fn foot(c: Point3, a: Point3, b: Point3) -> Option<(f64, f64)> {
     let d = b - a;
     let length_squared = d.length_squared();
     if length_squared == 0.0 {
@@ -227,7 +227,7 @@ fn free(c: Point3, a: Point3, b: Point3, eps: f64) -> Span {
 
 /// Alt-Godau: is the top-right corner of the free space reachable from the
 /// bottom-left by a monotone path?
-fn decide(a: &[Point3], b: &[Point3], eps: f64) -> bool {
+pub(crate) fn decide(a: &[Point3], b: &[Point3], eps: f64) -> bool {
     if distance(a[0], b[0]) > eps || distance(a[a.len() - 1], b[b.len() - 1]) > eps {
         return false;
     }

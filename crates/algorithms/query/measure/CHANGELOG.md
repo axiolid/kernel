@@ -26,6 +26,17 @@ caret rule for `0.x` versions.
   including the drift of rounded subdivision midpoints. Open, non-manifold
   and degenerate meshes are measured; empty meshes, bad indices, non-finite
   positions and invalid accuracies are refused with `HausdorffError`.
+- Hausdorff distance between polylines (#147), one-sided and two-sided,
+  in 2D and 3D: `polyline_hausdorff_distance`,
+  `one_sided_polyline_hausdorff_distance` and their `_2d` forms. The
+  supremum over a segment of the distance to the other polyline is found
+  among its ends and the points where two features of the other polyline
+  -- vertices, segment interiors -- are equally near, since the distance
+  to one feature is convex along a line.
+- `frechet_decide_certified` and `frechet_decide_certified_2d` answer
+  whether the Fréchet distance is at most `eps` only when rounding cannot
+  change the answer: `FrechetDecision::AtMost`, `MoreThan`, or
+  `Undecided` within the error margin of the floating-point decision.
 
 ## [0.3.4] - 2026-09-30
 
