@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-09-28) |
+| Latest release | 0.3.5 (2026-09-30) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,11 +30,18 @@ Queries over triangle meshes: clearance between meshes, point containment and wi
 
 ## Changes
 
-Latest release, 0.3.4 (2026-09-28):
+Latest release, 0.3.5 (2026-09-30):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `topology` (#144): `ComponentTopology::homology_basis` now also covers a
+  closed non-orientable component and any component with boundary,
+  orientable or not, not only the closed orientable case -- `k` generators
+  for `k` crosscaps, and `2g + (b - 1)` or `k + (b - 1)` with `b >= 1`
+  boundary loops, all with `Z2` (GF(2)) coefficients. Built by the same
+  tree-cotree construction, generalised: it never needed orientability,
+  and boundary edges now attach to a virtual dual node per boundary loop
+  so every edge has a well-defined dual side. Still not provided: homotopy
+  questions.
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

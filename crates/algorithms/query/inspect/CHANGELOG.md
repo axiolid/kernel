@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-30
+
 ### Added
 
 - `topology` (#144): `ComponentTopology::homology_basis` now also covers a

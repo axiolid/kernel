@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-09-30) |
+| Latest release | 0.3.9 (2026-09-30) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -39,16 +39,31 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.8 (2026-09-30):
+Latest release, 0.3.9 (2026-09-30):
 
-### Changed
+### Fixed
 
-- Exact points share their coefficients, so copying one costs no
-  arithmetic, and an input vertex builds its exact form only when a
-  question about it gets past the interval filter, which most never do.
-  Only the vertices of the result are rounded, not every vertex of the
-  subdivision, and settling checks a hole against an outer ring's box
-  before its edges. Results are unchanged; a soup of 2,000 overlapping
-  triangles that share no edges takes about a fifth fewer instructions.
+- A ring whose vertices all lie on one line -- the plan shadow of a
+  vertical face -- is left out of a boolean, as it encloses nothing (#219).
+  Its rounded area need not be zero, so validation let it through, and
+  since 0.3.5 the exact subdivision refused it as self-intersecting; the
+  grid backend before had answered as if it were absent. A union of such a
+  ring with itself is empty again, and one with a polygon is that polygon.
+
+### Added
+
+- `segment_intersections` reports every intersection among many segments
+  with a Bentley-Ottmann sweep (#146): each point where two or more
+  segments meet, with every segment through it and where on it (start,
+  end, interior, or a zero-length segment), and each collinear overlap
+  with the segments covering it, in `O((n + k) log n)` time for `k`
+  reported incidences. Every decision is exact (interval filter, then
+  dyadic arithmetic), so shared endpoints, T-junctions, verticals, many
+  segments through one point, overlaps and zero-length segments are
+  handled rather than assumed away. Crossings are `ExactPoint2` rationals,
+  rounded once and correctly on request; input endpoints come back bit for
+  bit. Non-finite input is refused with the segment's index. 64,000 short
+  grid segments take about 0.2-0.4 s (`cargo bench -p axiolid-overlay
+  --bench segment_sweep`).
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

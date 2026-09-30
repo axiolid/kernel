@@ -199,6 +199,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.7 - 2026-09-30
+
+### Fixed
+
+- `boolean_polyhedra_exact` completes long chains of grid-aligned
+  subtraction (#199). The depth-2 Menger sponge, 147 differences from a
+  unit cube, refused at subtraction 82 with "every probe direction met a
+  vertex or edge exactly"; it now finishes closed, with no face enclosing
+  zero area, and with exactly the volume of its inputs. Two causes, both
+  fixed at the root rather than by dropping fragments:
+  - A split point is now the double nearest the exact crossing, not the
+    result of `a + (b - a) * t` rounded twice. The old formula cut the
+    plane `z = 1/3` at `0.33333333333333326`, so two splits of one exact
+    point landed ULPs apart and a later split through the pair emitted a
+    ring enclosing no area. Correct rounding depends on the exact point
+    alone, and a crossing that is a double comes back exactly.
+  - A fragment one ULP wide has no double strictly inside it, so its f64
+    centroid rounded onto its own edge and was classified as the wrong
+    point, leaving a hole in the shell. Such fragments are now classified
+    at an exact dyadic interior point, with every predicate evaluated
+    exactly. A fragment that encloses no area at all is refused by name
+    ("a split fragment encloses no area") instead of failing later in ray
+    classification.
+- Coplanar contact on slanted planes. A fragment was classified at its f64
+  centroid even when rounding put that point off the fragment's plane, so
+  a face lying in the other solid's surface read as inside or outside it:
+  a slanted tetrahedron united with itself came back with four faces whose
+  windings disagreed, a silently broken solid. The classification point
+  must now be certified in the fragment's plane (else the exact probe is
+  used), and whether coplanar normals agree is an exact sign rather than an
+  f64 dot product.
+- The contact-matrix thin-overlap sweep (#200) passes at every overlap down
+  to 1e-15: union, intersection and difference are closed and measure the
+  exact slab. The boolean was closed all along; the test measured it with
+  the 1 um `Tolerance::METRE`, which calls a real 1e-12-wide face
+  degenerate, drops it and reports the gap as a hole. It now measures with
+  `Tolerance::ZERO`, and the assertions are relative to the slab.
+
 ### 0.3.6 - 2026-09-28
 
 ### Changed
@@ -485,6 +523,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-decimate
 
+### 0.3.2 - 2026-09-30
+
+### Added
+
+- A test whose collapse passes the link condition and is refused by the
+  normal-inversion guard, with `scripts/probe_decimate_mutants.py` showing
+  that dropping either guard turns the suite red (#201).
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -673,6 +719,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
+### 0.3.5 - 2026-09-30
+
+### Added
+
+- `topology` (#144): `ComponentTopology::homology_basis` now also covers a
+  closed non-orientable component and any component with boundary,
+  orientable or not, not only the closed orientable case -- `k` generators
+  for `k` crosscaps, and `2g + (b - 1)` or `k + (b - 1)` with `b >= 1`
+  boundary loops, all with `Z2` (GF(2)) coefficients. Built by the same
+  tree-cotree construction, generalised: it never needed orientability,
+  and boundary edges now attach to a virtual dual node per boundary loop
+  so every edge has a well-defined dual side. Still not provided: homotopy
+  questions.
+
 ### 0.3.4 - 2026-09-28
 
 ### Changed
@@ -753,6 +813,37 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.5 - 2026-09-30
+
+### Added
+
+- Certified mesh Hausdorff distance (#148). `hausdorff_distance` returns
+  `MeshHausdorff`: intervals certain to contain the two-sided Hausdorff
+  distance between two triangle-mesh surfaces and both one-sided ones,
+  refined to a requested absolute accuracy; `one_sided_hausdorff` measures
+  one direction. Each `HausdorffBounds` carries witnesses: the sample
+  realising the lower bound and its nearest point on the other mesh. Lower
+  bounds are sampled points' distances bounded below through each
+  triangle's support function; upper bounds come from branch and bound over
+  subdivided triangles (the distance to a triangle is convex, so a piece's
+  maximum is at a corner) with a best-first BVH, and flat convex patches of
+  the target (edge pairs, closed fans) bound pieces across seams with a
+  certified hull excess. Rounding is accounted for with explicit margins,
+  including the drift of rounded subdivision midpoints. Open, non-manifold
+  and degenerate meshes are measured; empty meshes, bad indices, non-finite
+  positions and invalid accuracies are refused with `HausdorffError`.
+- Hausdorff distance between polylines (#147), one-sided and two-sided,
+  in 2D and 3D: `polyline_hausdorff_distance`,
+  `one_sided_polyline_hausdorff_distance` and their `_2d` forms. The
+  supremum over a segment of the distance to the other polyline is found
+  among its ends and the points where two features of the other polyline
+  -- vertices, segment interiors -- are equally near, since the distance
+  to one feature is convex along a line.
+- `frechet_decide_certified` and `frechet_decide_certified_2d` answer
+  whether the Fréchet distance is at most `eps` only when rounding cannot
+  change the answer: `FrechetDecision::AtMost`, `MoreThan`, or
+  `Undecided` within the error margin of the floating-point decision.
 
 ### 0.3.4 - 2026-09-30
 
@@ -893,6 +984,28 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-boolean-boolmesh
+
+### 0.3.3 - 2026-09-30
+
+### Fixed
+
+- Unions of overlapping axis-aligned boxes no longer refuse inside the
+  solve with an odd edge-point count (#203). The winding number's xy
+  broad phase rejected queries beyond `min + cell * dim`, a rounded
+  product that can fall one ulp short of the operand's true bounding box,
+  so a vertex lying exactly on the other operand's extreme plane lost a
+  face from its winding number. The grid now rejects against the exact
+  bounding box. Grid unions at pitches 0.6 to 0.8 with k = 5 and 6
+  complete, sequentially, through `union_many` and on the fast winding
+  path, with the exact volume and a closed, consistently wound result
+  (`tests/overlapping_grid.rs`).
+
+### Changed
+
+- `tests/solve_failure.rs` is replaced: no admissible input is known to
+  reach a refusal inside the solve now, so the mapping to
+  `BackendContractViolation` is pinned by a unit test where
+  `compute_boolean`'s error lands.
 
 ### 0.3.2 - 2026-09-28
 
@@ -1390,6 +1503,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.9 - 2026-09-30
+
+### Fixed
+
+- A ring whose vertices all lie on one line -- the plan shadow of a
+  vertical face -- is left out of a boolean, as it encloses nothing (#219).
+  Its rounded area need not be zero, so validation let it through, and
+  since 0.3.5 the exact subdivision refused it as self-intersecting; the
+  grid backend before had answered as if it were absent. A union of such a
+  ring with itself is empty again, and one with a polygon is that polygon.
+
+### Added
+
+- `segment_intersections` reports every intersection among many segments
+  with a Bentley-Ottmann sweep (#146): each point where two or more
+  segments meet, with every segment through it and where on it (start,
+  end, interior, or a zero-length segment), and each collinear overlap
+  with the segments covering it, in `O((n + k) log n)` time for `k`
+  reported incidences. Every decision is exact (interval filter, then
+  dyadic arithmetic), so shared endpoints, T-junctions, verticals, many
+  segments through one point, overlaps and zero-length segments are
+  handled rather than assumed away. Crossings are `ExactPoint2` rationals,
+  rounded once and correctly on request; input endpoints come back bit for
+  bit. Non-finite input is refused with the segment's index. 64,000 short
+  grid segments take about 0.2-0.4 s (`cargo bench -p axiolid-overlay
+  --bench segment_sweep`).
 
 ### 0.3.8 - 2026-09-30
 
@@ -1895,6 +2035,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-spatial
+
+### 0.3.3 - 2026-09-30
+
+### Added
+
+- Wachspress and discrete harmonic coordinates (#143, ledger row H5):
+  `wachspress_coordinates2` and `discrete_harmonic_coordinates2`, both for a
+  strictly convex polygon (refused by name otherwise, `BarycentricError::NotConvex`),
+  positive and smooth inside, boundary-linear on the edges, and refused as
+  `BarycentricError::Undefined` at a pole (a denominator vanishing on the
+  line through a non-adjacent edge, or discrete harmonic's own collinear
+  fan angle). And `mean_value_coordinates3` (Floater, Kos and Reimers 2005),
+  extending mean-value coordinates to a closed triangle mesh in space, one
+  weight per vertex, exact at vertices and on a face's own plane inside its
+  triangle.
 
 ### 0.3.2 - 2026-09-28
 

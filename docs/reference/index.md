@@ -54,34 +54,34 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-brep-audit`](./crates/axiolid-brep-audit) | `algorithm.repair` | 0.3.2 | Geometric consistency auditing for exact boundary representations |
 | [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.1 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.1 | Convex collision queries: separating axis, overlap, and separation distance |
-| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.6 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
-| [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.1 | Edge-collapse mesh decimation with a bounded, reported deviation |
+| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.7 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
+| [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.2 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.1 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.2 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.2 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.1 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.1 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.4 | Mesh queries: clearance, containment, ray casting, and genus |
+| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.5 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.1 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.1 | Portable, deterministic intersections for linear geometry |
-| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.4 | Metric properties: area, volume, centroid, moments of inertia. |
+| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.5 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.1 | Minkowski sum and difference of planar-faced solids |
 | [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.4 | General polynomial and rational B-spline analysis and transformation algorithms |
-| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.8 | Deterministic validated planar overlay contract |
+| [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.9 | Deterministic validated planar overlay contract |
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.2 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.1 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.0 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
 | [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.2 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.1 | Mesh refinement and smoothing with bounded, reported deviation |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.6 | Exact planar shortest path over a visibility graph |
-| [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.2 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
+| [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.3 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
 | [`axiolid-triangulate`](./crates/axiolid-triangulate) | `algorithm.planar` | 0.3.2 | Constrained Delaunay triangulation with bounded quality refinement |
 
 ## Providers
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.2 | boolmesh-backed MeshBoolean provider |
+| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.3 | boolmesh-backed MeshBoolean provider |
 | [`axiolid-pointcloud-reconstruction-sdf`](./crates/axiolid-pointcloud-reconstruction-sdf) | `provider.pointcloud` | 0.3.1 | Reference pointcloud reconstruction: signed-distance field from samples, extracted as a level set. |
 
 ## Execution

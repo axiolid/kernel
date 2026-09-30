@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-30
+
 ### Fixed
 
 - Unions of overlapping axis-aligned boxes no longer refuse inside the

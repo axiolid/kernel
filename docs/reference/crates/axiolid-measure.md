@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-09-30) |
+| Latest release | 0.3.5 (2026-09-30) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -39,20 +39,35 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-09-30):
+Latest release, 0.3.5 (2026-09-30):
 
 ### Added
 
-- Plan relations between exact bodies (#217). `plan_boundary_distance`
-  and `plan_boundary_clearance` certify the distance between the bodies'
-  projections onto the XY plane, with the contract of `boundary_distance`:
-  the interval contains the distance, and the witnesses lie on the
-  boundaries with their projections `upper` apart. A shadow is its
-  boundary's, so the same search runs with horizontal gaps, directions and
-  enclosing discs; the result is zero where the shadows overlap, including
-  a body standing inside another's footprint. `plan_overlap` returns
-  `PlanOverlap::Overlapping` with a plan point inside both shadows when two
-  planar faces, not vertical, share an open patch in plan (a column on a
-  slab), `Disjoint` with a certified gap, or `Undecided`.
+- Certified mesh Hausdorff distance (#148). `hausdorff_distance` returns
+  `MeshHausdorff`: intervals certain to contain the two-sided Hausdorff
+  distance between two triangle-mesh surfaces and both one-sided ones,
+  refined to a requested absolute accuracy; `one_sided_hausdorff` measures
+  one direction. Each `HausdorffBounds` carries witnesses: the sample
+  realising the lower bound and its nearest point on the other mesh. Lower
+  bounds are sampled points' distances bounded below through each
+  triangle's support function; upper bounds come from branch and bound over
+  subdivided triangles (the distance to a triangle is convex, so a piece's
+  maximum is at a corner) with a best-first BVH, and flat convex patches of
+  the target (edge pairs, closed fans) bound pieces across seams with a
+  certified hull excess. Rounding is accounted for with explicit margins,
+  including the drift of rounded subdivision midpoints. Open, non-manifold
+  and degenerate meshes are measured; empty meshes, bad indices, non-finite
+  positions and invalid accuracies are refused with `HausdorffError`.
+- Hausdorff distance between polylines (#147), one-sided and two-sided,
+  in 2D and 3D: `polyline_hausdorff_distance`,
+  `one_sided_polyline_hausdorff_distance` and their `_2d` forms. The
+  supremum over a segment of the distance to the other polyline is found
+  among its ends and the points where two features of the other polyline
+  -- vertices, segment interiors -- are equally near, since the distance
+  to one feature is convex along a line.
+- `frechet_decide_certified` and `frechet_decide_certified_2d` answer
+  whether the Fréchet distance is at most `eps` only when rounding cannot
+  change the answer: `FrechetDecision::AtMost`, `MoreThan`, or
+  `Undecided` within the error margin of the floating-point decision.
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

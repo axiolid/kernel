@@ -8,7 +8,7 @@ Edge-collapse mesh decimation with a bounded, reported deviation.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-09-30) |
 | crates.io | [`axiolid-decimate`](https://crates.io/crates/axiolid-decimate) |
 | Layer | algorithms (`algorithm.discrete`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_decimate/index.html) · [docs.rs](https://docs.rs/axiolid-decimate) |
@@ -34,11 +34,12 @@ is the edge midpoint. For adding triangles instead, see `axiolid-refine`.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-09-30):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- A test whose collapse passes the link condition and is refused by the
+  normal-inversion guard, with `scripts/probe_decimate_mutants.py` showing
+  that dropping either guard turns the suite red (#201).
 
 Full history: [`crates/algorithms/discrete/decimate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/decimate/CHANGELOG.md)

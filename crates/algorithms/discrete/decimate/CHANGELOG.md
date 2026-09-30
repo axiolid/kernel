@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-30
+
 ### Added
 
 - A test whose collapse passes the link condition and is refused by the

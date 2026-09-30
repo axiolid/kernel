@@ -8,7 +8,7 @@ boolmesh-backed MeshBoolean provider.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-28) |
+| Latest release | 0.3.3 (2026-09-30) |
 | crates.io | [`axiolid-mesh-boolean-boolmesh`](https://crates.io/crates/axiolid-mesh-boolean-boolmesh) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | providers (`provider.mesh`) |
@@ -56,18 +56,26 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-28):
+Latest release, 0.3.3 (2026-09-30):
+
+### Fixed
+
+- Unions of overlapping axis-aligned boxes no longer refuse inside the
+  solve with an odd edge-point count (#203). The winding number's xy
+  broad phase rejected queries beyond `min + cell * dim`, a rounded
+  product that can fall one ulp short of the operand's true bounding box,
+  so a vertex lying exactly on the other operand's extreme plane lost a
+  face from its winding number. The grid now rejects against the exact
+  bounding box. Grid unions at pitches 0.6 to 0.8 with k = 5 and 6
+  complete, sequentially, through `union_many` and on the fast winding
+  path, with the exact volume and a closed, consistently wound result
+  (`tests/overlapping_grid.rs`).
 
 ### Changed
 
-- **Behaviour change:** a refusal inside the solve (an odd edge-point
-  count in `pair_up`, #101) is reported as
-  `GeomError::BackendContractViolation` naming `boolmesh`, not
-  `Degenerate`. The operands passed every input gate, so the failure is
-  this provider's defect and no longer reads as the caller's.
-  `tests/solve_failure.rs` pins it on a grid union that still reaches the
-  refusal (#203).
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `tests/solve_failure.rs` is replaced: no admissible input is known to
+  reach a refusal inside the solve now, so the mapping to
+  `BackendContractViolation` is pinned by a unit test where
+  `compute_boolean`'s error lands.
 
 Full history: [`crates/providers/mesh/boolmesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/mesh/boolmesh/CHANGELOG.md)

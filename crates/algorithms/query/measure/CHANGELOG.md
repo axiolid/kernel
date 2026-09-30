@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-30
+
 ### Added
 
 - Certified mesh Hausdorff distance (#148). `hausdorff_distance` returns

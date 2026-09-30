@@ -85,10 +85,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.6",
-      "released_date": "2026-09-28",
+      "released": "0.3.7",
+      "released_date": "2026-09-30",
       "role": "algorithm.construction",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -130,10 +130,10 @@
       "description": "Edge-collapse mesh decimation with a bounded, reported deviation",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/decimate",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-09-30",
       "role": "algorithm.discrete",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-decompose": {
       "description": "Convex decomposition of a solid, exact or approximate and always labelled",
@@ -229,10 +229,10 @@
       "description": "Mesh queries: clearance, containment, ray casting, and genus",
       "layer": "algorithms",
       "path": "crates/algorithms/query/inspect",
-      "released": "0.3.4",
-      "released_date": "2026-09-28",
+      "released": "0.3.5",
+      "released_date": "2026-09-30",
       "role": "algorithm.query",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-levelset": {
       "description": "Level-set extraction: a closed manifold mesh from a sampled scalar field",
@@ -265,10 +265,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.4",
+      "released": "0.3.5",
       "released_date": "2026-09-30",
       "role": "algorithm.query",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -283,10 +283,10 @@
       "description": "boolmesh-backed MeshBoolean provider",
       "layer": "providers",
       "path": "crates/providers/mesh/boolmesh",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-09-30",
       "role": "provider.mesh",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-mesh-boolean-contract": {
       "description": "Portable mesh boolean request, result, evidence, and conformance contract",
@@ -364,10 +364,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.8",
+      "released": "0.3.9",
       "released_date": "2026-09-30",
       "role": "algorithm.planar",
-      "version": "0.3.8"
+      "version": "0.3.9"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
@@ -472,10 +472,10 @@
       "description": "Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/spatial",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-09-30",
       "role": "algorithm.query",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-surface": {
       "description": "Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches.",
