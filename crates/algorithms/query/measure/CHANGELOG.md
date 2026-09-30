@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-30
+
 ### Added
 
 - Plan relations between exact bodies (#217). `plan_boundary_distance`

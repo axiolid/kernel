@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-measure"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-brep",
  "axiolid-core",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",

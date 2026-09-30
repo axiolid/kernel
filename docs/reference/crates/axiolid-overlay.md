@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-09-30) |
+| Latest release | 0.3.8 (2026-09-30) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -35,24 +35,16 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.7 (2026-09-30):
+Latest release, 0.3.8 (2026-09-30):
 
 ### Changed
 
-- Straight-edge booleans on soups are much faster, with results bit for
-  bit the same. Each operand's rings are first reduced as a chain: an edge
-  given once each way between the same two exact points cancels, which
-  changes no winding number, so a mesh given as a soup of its triangles
-  shrinks to its outline before the exact subdivision. What is left is
-  split into cycles through distinct vertices and used when every cycle is
-  simple, decided exactly; otherwise the rings are kept as given. The
-  union of two overlapping 60 x 60 triangle meshes (14,400 triangles) now
-  takes about 10 ms, from about 1 s in 0.3.5 (the grid backend before it:
-  about 2.5 ms); 160,000 triangles take about 85 ms. Also: the
-  subdivision interns its vertices in a tree instead of a sorted vector,
-  seeds a point's parameter on a segment in closed form, and settling finds
-  repeated vertices and touching edges by hashing and a sweep instead of
-  asking every pair. Soups of triangles that share no edges gain less
-  (2,000 random triangles: about 370 ms, from about 430 ms).
+- Exact points share their coefficients, so copying one costs no
+  arithmetic, and an input vertex builds its exact form only when a
+  question about it gets past the interval filter, which most never do.
+  Only the vertices of the result are rounded, not every vertex of the
+  subdivision, and settling checks a hole against an outer ring's box
+  before its edges. Results are unchanged; a soup of 2,000 overlapping
+  triangles that share no edges takes about a fifth fewer instructions.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

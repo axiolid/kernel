@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-30
+
 ### Changed
 
 - Exact points share their coefficients, so copying one costs no

@@ -265,10 +265,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.3",
-      "released_date": "2026-09-28",
+      "released": "0.3.4",
+      "released_date": "2026-09-30",
       "role": "algorithm.query",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -364,10 +364,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.7",
+      "released": "0.3.8",
       "released_date": "2026-09-30",
       "role": "algorithm.planar",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
