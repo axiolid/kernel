@@ -5,21 +5,25 @@
 //! two-manifold mesh, with or without boundary and whether or not it is
 //! orientable: its counts, Euler characteristic, boundary loops,
 //! orientability and the surface it is (genus `g` orientable, or `k`
-//! crosscaps). For a closed orientable component it also gives a basis of
-//! its first homology: `2g` closed edge loops, by the tree-cotree
+//! crosscaps). Every component also gets a basis of its first homology
+//! with `Z2` (GF(2)) coefficients: closed edge loops by the tree-cotree
 //! construction (Eppstein, "Dynamic generators of topologically embedded
-//! graphs", 2003).
+//! graphs", 2003), generalised past its closed-orientable origin to a
+//! closed non-orientable component (the construction never reads
+//! orientability, only that every interior edge is shared by exactly two
+//! triangles) and to a component with `b >= 1` boundary loops (`b - 1` of
+//! them close out the rest; all `b` sum to zero over `Z2`, being the
+//! boundary of the component's triangles taken all at once).
 //!
 //! Everything is combinatorial: positions are never read, so the answers
 //! are exact. A mesh that is not a two-manifold -- an edge on three or more
 //! triangles, or a vertex whose triangles form more than one fan -- is
 //! refused, since the classification of surfaces does not describe it.
 //!
-//! Not provided: homology generators of surfaces with boundary or of
-//! non-orientable surfaces, and homotopy questions (whether a given closed
-//! path is contractible, or two paths homotopic).
+//! Not provided: homotopy questions (whether a given closed path is
+//! contractible, or two paths homotopic).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axiolid_mesh::TriMesh;
 use thiserror::Error;
@@ -100,9 +104,13 @@ pub struct ComponentTopology {
     /// The surface, from `euler_characteristic = 2 - 2g - b` (orientable)
     /// or `2 - k - b` (non-orientable).
     pub surface: SurfaceKind,
-    /// For a closed orientable component, `2g` closed edge loops forming a
-    /// basis of its first homology; cutting along all of them leaves a
-    /// disc. `None` for a component with boundary or a non-orientable one.
+    /// A basis of the component's first homology with `Z2` coefficients:
+    /// `2g` closed edge loops for a closed orientable component of genus
+    /// `g`, `k` for a closed non-orientable one with `k` crosscaps, and
+    /// `2g + (b - 1)` or `k + (b - 1)` with `b >= 1` boundary loops.
+    /// Cutting along all of them leaves a disc (closed) or a disc with the
+    /// one boundary loop left out of the basis (with boundary). Always
+    /// `Some` for a classified component; kept optional for stability.
     pub homology_basis: Option<Vec<EdgeLoop>>,
 }
 
@@ -245,8 +253,7 @@ pub fn topology(mesh: &TriMesh) -> Result<MeshTopology, TopologyError> {
                 crosscaps: u32::try_from(deficit).unwrap_or(0),
             }
         };
-        let homology_basis =
-            (orientable && boundary.is_empty()).then(|| tree_cotree(&members, &own_edges));
+        let homology_basis = Some(homology_generators(&members, &own_edges, &boundary));
         out.push(ComponentTopology {
             triangles: members,
             vertices: used.len(),
@@ -339,11 +346,22 @@ fn count_loops(boundary: &[(u32, u32)]) -> usize {
         .count()
 }
 
-/// A homology basis of a closed orientable component by tree-cotree: a
-/// spanning tree `T` of its vertices, a spanning tree of its triangles
-/// across edges not in `T`, and one loop for each edge in neither -- the
-/// edge closed through `T`. There are `E - (V - 1) - (F - 1) = 2g` of them.
-fn tree_cotree(members: &[usize], own_edges: &[(&(u32, u32), &Vec<Use>)]) -> Vec<EdgeLoop> {
+/// A homology basis of one connected two-manifold component by tree-cotree:
+/// a spanning tree `T` of its vertices, a spanning tree of its dual graph
+/// (triangles, plus one virtual node per boundary loop that its boundary
+/// edges attach to) across edges not in `T`, and one loop for each edge in
+/// neither -- closed through `T`. Boundary edges give the virtual nodes
+/// somewhere to attach, so every edge has a well-defined dual side; this
+/// makes the leftover count exactly `E - (V - 1) - (F + b - 1) = 2 - chi -
+/// b`, which is `2g` (orientable) or `k` (non-orientable) regardless of
+/// boundary. `b - 1` of the `b` boundary loops (any one dropped; all `b`
+/// together are the boundary of the component's triangles taken at once,
+/// so they sum to zero) complete the basis.
+fn homology_generators(
+    members: &[usize],
+    own_edges: &[(&(u32, u32), &Vec<Use>)],
+    boundary: &[(u32, u32)],
+) -> Vec<EdgeLoop> {
     // Primal spanning tree, breadth first from the smallest vertex, so the
     // loops come out short and the result is deterministic.
     let mut adjacent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -369,45 +387,113 @@ fn tree_cotree(members: &[usize], own_edges: &[(&(u32, u32), &Vec<Use>)]) -> Vec
     // The root is its own parent, and no edge joins a vertex to itself.
     let in_tree = |a: u32, b: u32| parent[&a] == b || parent[&b] == a;
 
-    // Dual spanning tree over the edges left: union-find on triangles.
+    // The boundary's own loops, and which loop each boundary edge belongs
+    // to, so a boundary edge's dual side is that loop's virtual node.
+    let loops = boundary_edge_loops(boundary);
+    let mut loop_of: BTreeMap<(u32, u32), usize> = BTreeMap::new();
+    for (index, l) in loops.iter().enumerate() {
+        for k in 0..l.len() {
+            let (a, b) = (l[k], l[(k + 1) % l.len()]);
+            loop_of.insert((a.min(b), a.max(b)), index);
+        }
+    }
+
+    // Dual spanning tree over triangles and boundary-loop nodes, across
+    // edges left out of T: union-find on triangles (0..members.len()) and,
+    // after them, one node per boundary loop.
     let slot: BTreeMap<usize, usize> = members.iter().enumerate().map(|(i, &t)| (t, i)).collect();
-    let mut dual: Vec<usize> = (0..members.len()).collect();
+    let mut dual: Vec<usize> = (0..members.len() + loops.len()).collect();
     let mut leftover = Vec::new();
     for (&(a, b), uses) in own_edges {
         if in_tree(a, b) {
             continue;
         }
-        let (s, t) = (slot[&uses[0].triangle], slot[&uses[1].triangle]);
+        let (s, t) = if let [x, y] = uses[..] {
+            (slot[&x.triangle], slot[&y.triangle])
+        } else {
+            let node = members.len() + loop_of[&(a, b)];
+            (slot[&uses[0].triangle], node)
+        };
         if find(&mut dual, s) == find(&mut dual, t) {
             leftover.push((a, b));
         } else {
             union(&mut dual, s, t);
         }
     }
-    leftover
+    let mut basis: Vec<EdgeLoop> = leftover
         .into_iter()
-        .map(|(a, b)| {
-            // Walk both ends up to their lowest common ancestor.
-            let (mut up_a, mut up_b) = (vec![a], vec![b]);
-            let (mut x, mut y) = (a, b);
-            while depth[&x] > depth[&y] {
-                x = parent[&x];
-                up_a.push(x);
+        .map(|(a, b)| close_through_tree(a, b, &parent, &depth))
+        .collect();
+    let keep = loops.len().saturating_sub(1);
+    basis.extend(loops.into_iter().take(keep));
+    basis
+}
+
+/// The closed edge loop `a - b - ... - a` formed by the edge `(a, b)`
+/// closed through the spanning tree `parent`/`depth`: walk both ends up to
+/// their lowest common ancestor.
+fn close_through_tree(
+    a: u32,
+    b: u32,
+    parent: &BTreeMap<u32, u32>,
+    depth: &BTreeMap<u32, usize>,
+) -> EdgeLoop {
+    let (mut up_a, mut up_b) = (vec![a], vec![b]);
+    let (mut x, mut y) = (a, b);
+    while depth[&x] > depth[&y] {
+        x = parent[&x];
+        up_a.push(x);
+    }
+    while depth[&y] > depth[&x] {
+        y = parent[&y];
+        up_b.push(y);
+    }
+    while x != y {
+        x = parent[&x];
+        y = parent[&y];
+        up_a.push(x);
+        up_b.push(y);
+    }
+    // a .. lca, then back down to b; the loop closes over (b, a).
+    up_b.pop();
+    up_a.extend(up_b.into_iter().rev());
+    up_a
+}
+
+/// The boundary's closed loops, as ordered vertex cycles: on a
+/// two-manifold every boundary vertex has exactly two boundary edges, so
+/// each connected boundary component traces out to one simple cycle.
+fn boundary_edge_loops(boundary: &[(u32, u32)]) -> Vec<EdgeLoop> {
+    let mut adjacent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for &(a, b) in boundary {
+        adjacent.entry(a).or_default().push(b);
+        adjacent.entry(b).or_default().push(a);
+    }
+    let mut used: BTreeSet<(u32, u32)> = BTreeSet::new();
+    let mut loops = Vec::new();
+    for start in adjacent.keys().copied().collect::<Vec<_>>() {
+        while let Some(&first) = adjacent[&start]
+            .iter()
+            .find(|&&n| !used.contains(&(start.min(n), start.max(n))))
+        {
+            let mut vertices = vec![start];
+            let (mut cur, mut next) = (start, first);
+            loop {
+                used.insert((cur.min(next), cur.max(next)));
+                if next == start {
+                    break;
+                }
+                vertices.push(next);
+                let after = adjacent[&next]
+                    .iter()
+                    .copied()
+                    .find(|&n| !used.contains(&(next.min(n), next.max(n))))
+                    .expect("a boundary loop closes on a two-manifold");
+                cur = next;
+                next = after;
             }
-            while depth[&y] > depth[&x] {
-                y = parent[&y];
-                up_b.push(y);
-            }
-            while x != y {
-                x = parent[&x];
-                y = parent[&y];
-                up_a.push(x);
-                up_b.push(y);
-            }
-            // a .. lca, then back down to b; the loop closes over (b, a).
-            up_b.pop();
-            up_a.extend(up_b.into_iter().rev());
-            up_a
-        })
-        .collect()
+            loops.push(vertices);
+        }
+    }
+    loops
 }

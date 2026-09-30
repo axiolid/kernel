@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `topology` (#144): `ComponentTopology::homology_basis` now also covers a
+  closed non-orientable component and any component with boundary,
+  orientable or not, not only the closed orientable case -- `k` generators
+  for `k` crosscaps, and `2g + (b - 1)` or `k + (b - 1)` with `b >= 1`
+  boundary loops, all with `Z2` (GF(2)) coefficients. Built by the same
+  tree-cotree construction, generalised: it never needed orientability,
+  and boundary edges now attach to a virtual dual node per boundary loop
+  so every edge has a well-defined dual side. Still not provided: homotopy
+  questions.
+
 ## [0.3.4] - 2026-09-28
 
 ### Changed

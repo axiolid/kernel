@@ -137,14 +137,15 @@ fn slab_with_holes(w: i64, holes: &[i64]) -> TriMesh {
     voxels(&cells)
 }
 
-/// Checks a claimed homology basis of a closed orientable component:
-/// `2g` simple closed edge loops, independent as edge chains mod 2, whose
-/// union does not separate the surface. A sum of loops bounding a set of
-/// triangles `S` would cut `S` off from the rest, so together these make
-/// the loops independent in homology, and `2g` of them a basis.
-fn assert_basis(mesh: &TriMesh, component: &ComponentTopology, genus: u32) {
+/// Checks a claimed homology basis (`Z2` coefficients) of a component,
+/// closed or with boundary, orientable or not: `expected_rank` simple
+/// closed edge loops, independent as edge chains mod 2, whose union does
+/// not separate the surface. A sum of loops bounding a set of triangles
+/// `S` would cut `S` off from the rest, so together these make the loops
+/// independent in homology, and `expected_rank` of them a basis.
+fn assert_basis(mesh: &TriMesh, component: &ComponentTopology, expected_rank: usize) {
     let loops = component.homology_basis.as_ref().expect("a basis");
-    assert_eq!(loops.len(), 2 * genus as usize);
+    assert_eq!(loops.len(), expected_rank);
     let mut edges: BTreeMap<(u32, u32), Vec<usize>> = BTreeMap::new();
     for (t, tri) in mesh.indices.chunks_exact(3).enumerate() {
         for k in 0..3 {
@@ -226,7 +227,7 @@ fn a_ring_of_voxels_is_a_torus_with_two_generators() {
     let c = only(&mesh);
     assert_eq!(c.euler_characteristic, 0);
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 1 });
-    assert_basis(&mesh, &c, 1);
+    assert_basis(&mesh, &c, 2);
 }
 
 #[test]
@@ -235,11 +236,11 @@ fn a_slab_with_two_holes_is_a_double_torus_with_four_generators() {
     let c = only(&mesh);
     assert_eq!(c.euler_characteristic, -2);
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 2 });
-    assert_basis(&mesh, &c, 2);
+    assert_basis(&mesh, &c, 4);
     let mesh = slab_with_holes(7, &[1, 3, 5]);
     let c = only(&mesh);
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 3 });
-    assert_basis(&mesh, &c, 3);
+    assert_basis(&mesh, &c, 6);
 }
 
 #[test]
@@ -255,7 +256,7 @@ fn a_triangle_is_a_disc() {
     let c = only(&mesh);
     assert_eq!((c.euler_characteristic, c.boundary_loops), (1, 1));
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 0 });
-    assert_eq!(c.homology_basis, None, "no basis with boundary");
+    assert_basis(&mesh, &c, 0);
 }
 
 #[test]
@@ -264,33 +265,127 @@ fn a_square_ring_is_an_annulus() {
         .flat_map(|x| (0..3).map(move |y| [x, y]))
         .filter(|&c| c != [1, 1])
         .collect();
-    let c = only(&pixels(&cells));
+    let mesh = pixels(&cells);
+    let c = only(&mesh);
     assert_eq!((c.euler_characteristic, c.boundary_loops), (0, 2));
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 0 });
+    // One core loop: the annulus's two boundary circles are homologous, so
+    // one of them (dropping the other) is the whole basis.
+    assert_basis(&mesh, &c, 1);
 }
 
 #[test]
 fn a_twisted_strip_is_a_mobius_band() {
-    let c = only(&glued_grid(6, 1, true, false));
+    let mesh = glued_grid(6, 1, true, false);
+    let c = only(&mesh);
     assert_eq!((c.euler_characteristic, c.boundary_loops), (0, 1));
     assert!(!c.orientable && !c.consistently_oriented);
     assert_eq!(c.surface, SurfaceKind::NonOrientable { crosscaps: 1 });
-    assert_eq!(c.homology_basis, None);
+    // One crosscap generator; its single boundary loop contributes none.
+    assert_basis(&mesh, &c, 1);
     // The same strip untwisted is an annulus.
-    let c = only(&glued_grid(6, 1, false, false));
+    let mesh = glued_grid(6, 1, false, false);
+    let c = only(&mesh);
     assert_eq!(c.boundary_loops, 2);
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 0 });
+    assert_basis(&mesh, &c, 1);
 }
 
 #[test]
 fn a_twisted_torus_is_a_klein_bottle() {
-    let c = only(&glued_grid(6, 6, true, true));
+    let mesh = glued_grid(6, 6, true, true);
+    let c = only(&mesh);
     assert_eq!((c.euler_characteristic, c.boundary_loops), (0, 0));
     assert_eq!(c.surface, SurfaceKind::NonOrientable { crosscaps: 2 });
+    assert_basis(&mesh, &c, 2);
     let mesh = glued_grid(6, 6, false, true);
     let c = only(&mesh);
     assert_eq!(c.surface, SurfaceKind::Orientable { genus: 1 });
+    assert_basis(&mesh, &c, 2);
+}
+
+/// The 6-vertex, 10-triangle minimal triangulation of the real projective
+/// plane: the icosahedron's faces and vertices, identified with their
+/// antipodes (a hemi-icosahedron). Closed and non-orientable, `chi = 1`.
+fn projective_plane() -> TriMesh {
+    let mut b = Builder::default();
+    // Positions are placeholders (a regular pentagon's five vertices plus
+    // its centre); only the face/vertex incidence matters.
+    let p = |i: i64| -> [i64; 3] {
+        if i == 5 {
+            [0, 0, 1]
+        } else {
+            [i, i * i % 5, 0]
+        }
+    };
+    let faces: [[i64; 3]; 10] = [
+        [0, 1, 4],
+        [0, 1, 5],
+        [0, 2, 3],
+        [0, 2, 4],
+        [0, 3, 5],
+        [1, 2, 3],
+        [1, 2, 5],
+        [1, 3, 4],
+        [2, 4, 5],
+        [3, 4, 5],
+    ];
+    for [x, y, z] in faces {
+        let [a, c, d] = [p(x), p(y), p(z)];
+        let (a, c, d) = (b.vertex(a), b.vertex(c), b.vertex(d));
+        b.indices.extend_from_slice(&[a, c, d]);
+    }
+    b.finish()
+}
+
+#[test]
+fn a_hemi_icosahedron_is_a_projective_plane() {
+    let mesh = projective_plane();
+    let c = only(&mesh);
+    assert_eq!((c.vertices, c.edges, c.triangles.len()), (6, 15, 10));
+    assert_eq!(c.euler_characteristic, 1);
+    assert_eq!(c.boundary_loops, 0);
+    assert!(!c.orientable);
+    assert_eq!(c.surface, SurfaceKind::NonOrientable { crosscaps: 1 });
     assert_basis(&mesh, &c, 1);
+}
+
+/// Removes `count` triangles with pairwise disjoint vertex sets from
+/// `mesh`, each opening one boundary loop without changing genus: every
+/// edge of a removed triangle was shared with exactly one other triangle
+/// (the mesh was closed), so it becomes a boundary edge instead.
+fn punch_holes(mesh: &mut TriMesh, count: usize) {
+    let mut used_vertices: BTreeSet<u32> = BTreeSet::new();
+    let mut victims = Vec::new();
+    for t in 0..mesh.indices.len() / 3 {
+        if victims.len() == count {
+            break;
+        }
+        let tri = &mesh.indices[t * 3..t * 3 + 3];
+        if tri.iter().all(|v| !used_vertices.contains(v)) {
+            used_vertices.extend(tri.iter().copied());
+            victims.push(t);
+        }
+    }
+    assert_eq!(
+        victims.len(),
+        count,
+        "not enough disjoint triangles to remove"
+    );
+    for t in victims.into_iter().rev() {
+        mesh.indices.drain(t * 3..t * 3 + 3);
+    }
+}
+
+#[test]
+fn a_triple_holed_double_torus_has_six_generators() {
+    let mut mesh = slab_with_holes(5, &[1, 3]);
+    punch_holes(&mut mesh, 3);
+    let c = only(&mesh);
+    assert_eq!(c.boundary_loops, 3);
+    assert_eq!(c.surface, SurfaceKind::Orientable { genus: 2 });
+    // 2g + (b - 1) = 4 + 2.
+    assert_basis(&mesh, &c, 6);
 }
 
 #[test]

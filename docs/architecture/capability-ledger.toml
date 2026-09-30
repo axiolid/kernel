@@ -918,8 +918,8 @@ area = "mesh"
 name = "topology queries (genus, homotopy, cycles)"
 issue = "mesh-topology-invariants"
 level = "narrow"
-summary = "Exact, combinatorial classification of every connected component of a two-manifold triangle mesh (axiolid-inspect::topology): vertex/edge/triangle counts, Euler characteristic, boundary loops, orientability and consistent winding, and the surface (genus g orientable or k crosscaps non-orientable); non-manifold edges and vertices are refused. Closed orientable components get a first-homology basis of 2g simple edge loops by tree-cotree, tested independent and non-separating. Refused: homology generators with boundary or on non-orientable surfaces, and homotopy queries (contractibility, homotopy of two paths)."
-evidence = ["crates/algorithms/query/inspect/src/topology.rs::topology", "crates/algorithms/query/inspect/tests/topology.rs", "scripts/probe_mesh_topology_mutants.py", "crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
+summary = "Exact, combinatorial classification of every connected component of a two-manifold triangle mesh (axiolid-inspect::topology): vertex/edge/triangle counts, Euler characteristic, boundary loops, orientability and consistent winding, and the surface (genus g orientable or k crosscaps non-orientable); non-manifold edges and vertices are refused. Every component gets a first-homology basis with Z2 (GF(2)) coefficients by tree-cotree: 2g simple edge loops closed and orientable, k closed and non-orientable, and 2g + (b - 1) or k + (b - 1) with b >= 1 boundary loops (boundary edges attach to a virtual dual node per loop; b - 1 of the loops complete the basis), tested independent and non-separating. Refused: homotopy queries (contractibility, homotopy of two paths)."
+evidence = ["crates/algorithms/query/inspect/src/topology.rs::topology", "crates/algorithms/query/inspect/tests/topology.rs", "scripts/probe_mesh_topology_mutants.py", "scripts/probe_homology_boundary_mutants.py", "crates/algorithms/query/inspect/src/genus.rs::genus", "crates/algorithms/query/inspect/tests/queries.rs"]
 occt = []
 cgal = ["Surface_mesh_topology"]
 

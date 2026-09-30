@@ -18,9 +18,9 @@ MUTANTS = [
     ('boundary loops left out of the genus', T, '        let deficit = 2 - characteristic - boundary_loops as i64;', '        let deficit = 2 - characteristic;', TESTS),
     ('boundary loops counted as one', T, '        let boundary_loops = count_loops(&boundary);', '        let boundary_loops = usize::from(!boundary.is_empty());', TESTS),
     ('crosscaps halved like a genus', T, '                crosscaps: u32::try_from(deficit).unwrap_or(0),', '                crosscaps: u32::try_from(deficit / 2).unwrap_or(0),', TESTS),
-    ('basis offered with boundary', T, '(orientable && boundary.is_empty()).then(', '(orientable).then(', TESTS),
+    ('all boundary loops kept, not b - 1', T, 'let keep = loops.len().saturating_sub(1);', 'let keep = loops.len();', TESTS),
     ('no dual tree: every non-tree edge a loop', T, '        if find(&mut dual, s) == find(&mut dual, t) {', '        if true {', TESTS),
-    ('loop repeats its common ancestor', T, '            up_b.pop();\n', '', TESTS),
+    ('loop repeats its common ancestor', T, '    up_b.pop();\n', '', TESTS),
 ]
 
 def run(target):
