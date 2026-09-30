@@ -805,7 +805,7 @@ area = "mesh"
 name = "simplification / decimation"
 level = "implemented"
 summary = "Edge-collapse decimation with caller bound on deviation; rejects collapses that would invert a triangle, create non-manifold edges, or open the boundary."
-evidence = ["crates/algorithms/discrete/decimate/src/collapse.rs::decimate", "crates/algorithms/discrete/decimate/tests/decimation.rs::decimation_reduces_and_reports_its_deviation"]
+evidence = ["crates/algorithms/discrete/decimate/src/collapse.rs::decimate", "crates/algorithms/discrete/decimate/tests/decimation.rs::decimation_reduces_and_reports_its_deviation", "crates/algorithms/discrete/decimate/tests/decimation.rs::a_collapse_that_would_flip_a_normal_is_refused"]
 occt = []
 cgal = ["Surface_mesh_simplification"]
 

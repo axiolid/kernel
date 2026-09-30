@@ -201,10 +201,8 @@ fn a_ragged_index_buffer_is_refused() {
 /// it would weld the fan into a non-manifold configuration.
 ///
 /// Verified by mutation: removing the link condition makes this test fail.
-/// The normal-inversion guard alongside it is NOT verified by this fixture
-/// -- the link condition rejects first, so the inversion branch never runs.
-/// TODO(#201): add a fixture that passes the link condition and still flips a
-/// normal.
+/// The link condition rejects first here, so the normal-inversion guard is
+/// covered by `a_collapse_that_would_flip_a_normal_is_refused` instead.
 #[test]
 fn an_unsafe_collapse_is_refused_not_performed() {
     let positions = vec![
@@ -249,4 +247,66 @@ fn an_unsafe_collapse_is_refused_not_performed() {
             props.signed_volume
         );
     }
+}
+
+/// A collapse that passes the link condition and still turns a triangle
+/// inside out is refused by the normal-inversion guard (#201).
+///
+/// A flat, open fan around `v`, wound counter-clockwise seen from `+z`. The
+/// edge `u`-`v` is the only candidate the deviation bound admits, and its
+/// endpoints share exactly the two triangles on it (`y` and `b`), so the link
+/// condition passes. The fan edge `x`-`y` leans so that its supporting line
+/// crosses the edge `u`-`v` between `v` and the midpoint: moving `v` to the
+/// midpoint pushes it across that line and flips the triangle `v`-`x`-`y`.
+///
+/// Verified by mutation: deleting the `before.dot(after) <= 0.0` condition
+/// makes this test fail (`scripts/probe_decimate_mutants.py`).
+#[test]
+fn a_collapse_that_would_flip_a_normal_is_refused() {
+    let positions = vec![
+        Point3::new(0.0, 0.0, 0.0),  // u
+        Point3::new(1.0, 0.0, 0.0),  // v
+        Point3::new(3.0, 0.0, 0.0),  // c
+        Point3::new(1.05, 3.0, 0.0), // x
+        Point3::new(0.9, 1.5, 0.0),  // y
+        Point3::new(0.5, -2.0, 0.0), // b
+    ];
+    let (u, v, c, x, y, b) = (0, 1, 2, 3, 4, 5);
+    let indices = vec![
+        v, c, x, // fan around v, counter-clockwise from +z
+        v, x, y, // the triangle the collapse would invert
+        v, y, u, // on the edge u-v
+        v, u, b, // on the edge u-v
+        v, b, c,
+    ];
+    let fan = TriMesh::new(positions, indices);
+
+    // Every triangle starts facing +z, so the fixture is not already folded.
+    let facing_up = |mesh: &TriMesh| -> Vec<f64> {
+        mesh.indices
+            .chunks_exact(3)
+            .map(|t| {
+                let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize]);
+                (b - a).cross(c - a).z
+            })
+            .collect()
+    };
+    assert!(facing_up(&fan).iter().all(|&z| z > 0.0));
+
+    // Half of u-v is 0.5; every other edge is longer than 1.2, so u-v is the
+    // only collapse the bound admits and the only one the guard can refuse.
+    let (out, report) =
+        decimate(&fan, DecimateTarget::MaxDeviation(0.6), tol()).expect("valid request");
+
+    assert_eq!(
+        report.rejected_unsafe, 1,
+        "the inversion guard did not refuse the collapse: {report:?}"
+    );
+    assert_eq!(report.collapses, 0, "an inverting collapse ran: {report:?}");
+    let normals = facing_up(&out);
+    assert_eq!(normals.len(), 5, "the fan lost triangles: {report:?}");
+    assert!(
+        normals.iter().all(|&z| z > 0.0),
+        "decimation inverted a triangle: {normals:?}"
+    );
 }
