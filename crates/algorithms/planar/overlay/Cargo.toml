@@ -27,3 +27,7 @@ allowed-internal-dependencies = ["axiolid-core", "axiolid-exact", "axiolid-guara
 [[bench]]
 name = "arc_overlay"
 harness = false
+
+[[bench]]
+name = "segment_sweep"
+harness = false

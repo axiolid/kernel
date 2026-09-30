@@ -210,13 +210,6 @@ effort = "Medium"
 number = 145
 
 [[issue]]
-key = "segment-sweep"
-title = "Bentley-Ottmann sweep for many-segment intersection"
-priority = "Medium"
-effort = "Medium"
-number = 146
-
-[[issue]]
 key = "frechet-distance"
 title = "Discrete and continuous Frechet distance between polylines"
 priority = "Low"
@@ -1159,10 +1152,9 @@ issue = "polygon-partition-simplify"
 id = "F11"
 area = "planar"
 name = "sweep-line segment intersection"
-issue = "segment-sweep"
-level = "narrow"
-summary = "Only pairwise segment-segment and line-line intersection exist (axiolid-intersection-linear), certified via predicates; there is no Bentley-Ottmann-style sweep-line algorithm to report all intersections among a set of N segments in better-than-quadratic time — a caller needing that must call the ..."
-evidence = ["crates/algorithms/query/intersection/linear/src/segment_segment.rs", "crates/algorithms/query/intersection/linear/tests/segment_segment.rs"]
+level = "implemented"
+summary = "segment_intersections (axiolid-overlay, #146) is a Bentley-Ottmann sweep reporting every point where two or more of n segments meet, with every segment through it (start, end, interior or zero-length), and every maximal collinear overlap with its covering segments, in O((n + k) log n) for k reported incidences. Every decision is an exact sign (interval filter, then dyadic arithmetic): event order, point-versus-segment side, proper crossing, direction order. Crossings are kept exactly as homogeneous dyadic rationals (ExactPoint2) and rounded once, correctly (nearest, ties to even); input endpoints come back bit for bit. Degeneracies handled, not assumed away: lexicographic sweep (verticals need no special case), shared endpoints, T-junctions, many segments through one point, collinear overlaps (split only where the covering set changes), zero-length segments reported as points; non-finite input refused by index. Tested against a brute-force O(n^2) exact oracle on random grids, float scenes, power-of-two extreme scales, line grids, stars through dyadic and non-dyadic points, and collinear chains. Segments only: circular arcs and the explicit subcurve split of CGAL's compute_subcurves are not provided (the split follows from the incidences); pairwise classification stays in axiolid-linear-intersection."
+evidence = ["crates/algorithms/planar/overlay/src/segment_sweep.rs::segment_intersections", "crates/algorithms/planar/overlay/tests/segment_sweep.rs", "scripts/probe_segment_sweep_mutants.py", "crates/algorithms/planar/overlay/benches/segment_sweep.rs", "crates/algorithms/query/intersection/linear/src/segment_segment.rs"]
 occt = []
 cgal = ["Surface_sweep_2", "Intersections_2"]
 

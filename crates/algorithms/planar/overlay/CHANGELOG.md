@@ -9,6 +9,22 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `segment_intersections` reports every intersection among many segments
+  with a Bentley-Ottmann sweep (#146): each point where two or more
+  segments meet, with every segment through it and where on it (start,
+  end, interior, or a zero-length segment), and each collinear overlap
+  with the segments covering it, in `O((n + k) log n)` time for `k`
+  reported incidences. Every decision is exact (interval filter, then
+  dyadic arithmetic), so shared endpoints, T-junctions, verticals, many
+  segments through one point, overlaps and zero-length segments are
+  handled rather than assumed away. Crossings are `ExactPoint2` rationals,
+  rounded once and correctly on request; input endpoints come back bit for
+  bit. Non-finite input is refused with the segment's index. 64,000 short
+  grid segments take about 0.2-0.4 s (`cargo bench -p axiolid-overlay
+  --bench segment_sweep`).
+
 ## [0.3.8] - 2026-09-30
 
 ### Changed

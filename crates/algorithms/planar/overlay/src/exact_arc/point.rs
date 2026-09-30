@@ -78,7 +78,7 @@ fn approx(a: &Dyadic, b: &Dyadic, d: &Dyadic, w: &Dyadic) -> f64 {
 /// Each step compares the exact value with the midpoint between the guess
 /// and its neighbour, which is a dyadic and so exact: the guess moves
 /// towards the value until neither midpoint lies between them.
-fn round_ratio(a: &Dyadic, w: &Dyadic, guess: f64) -> f64 {
+pub(crate) fn round_ratio(a: &Dyadic, w: &Dyadic, guess: f64) -> f64 {
     if !guess.is_finite() {
         return guess;
     }

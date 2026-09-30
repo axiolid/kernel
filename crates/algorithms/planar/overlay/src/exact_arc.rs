@@ -83,6 +83,7 @@ pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
         )
     })
 }
+pub(crate) use point::round_ratio;
 use point::{cmp_y, dy, orient, same_point, sign, Circle, Pred, Tangent, XPoint};
 
 /// Which operand a piece came from.

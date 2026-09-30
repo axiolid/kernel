@@ -10,6 +10,7 @@ mod minkowski;
 mod offset;
 mod rectangle;
 mod region;
+mod segment_sweep;
 mod settle;
 mod visibility;
 
@@ -32,6 +33,10 @@ pub use rectangle::{
     minimum_area_rectangle, MinimumRectangle, OrientedRectangle, RectangleError, RectangleEvidence,
 };
 pub use region::{Region, RegionEvidence};
+pub use segment_sweep::{
+    segment_intersections, ExactPoint2, Incidence, IntersectionPoint, SegmentIntersections,
+    SegmentLocation, SegmentOverlap, SegmentSweepError, SweepEvidence,
+};
 pub use visibility::VisibilityError;
 
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
