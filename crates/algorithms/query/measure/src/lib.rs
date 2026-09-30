@@ -25,7 +25,10 @@ pub mod winding;
 #[cfg(feature = "exact")]
 pub use exact::{exact_properties, ExactMeasureError};
 #[cfg(feature = "exact")]
-pub use exact_distance::{boundary_clearance, boundary_distance, Clearance, DistanceBounds};
+pub use exact_distance::{
+    boundary_clearance, boundary_distance, plan_boundary_clearance, plan_boundary_distance,
+    plan_overlap, Clearance, DistanceBounds, PlanOverlap,
+};
 #[cfg(feature = "exact")]
 pub use exact_domain::FaceDomain;
 pub use frechet::{

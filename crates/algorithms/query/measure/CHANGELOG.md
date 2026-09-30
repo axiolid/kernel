@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Plan relations between exact bodies (#217). `plan_boundary_distance`
+  and `plan_boundary_clearance` certify the distance between the bodies'
+  projections onto the XY plane, with the contract of `boundary_distance`:
+  the interval contains the distance, and the witnesses lie on the
+  boundaries with their projections `upper` apart. A shadow is its
+  boundary's, so the same search runs with horizontal gaps, directions and
+  enclosing discs; the result is zero where the shadows overlap, including
+  a body standing inside another's footprint. `plan_overlap` returns
+  `PlanOverlap::Overlapping` with a plan point inside both shadows when two
+  planar faces, not vertical, share an open patch in plan (a column on a
+  slab), `Disjoint` with a certified gap, or `Undecided`.
+
 ## [0.3.3] - 2026-09-28
 
 ### Changed

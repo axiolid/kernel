@@ -48,6 +48,19 @@
 //! the limit is cleared. The step budget is fixed; when it runs out the
 //! interval returned is still sound, only wider.
 //!
+//! # In plan
+//!
+//! [`plan_boundary_distance`] measures between the bodies' projections
+//! onto the XY plane (#217). A solid's shadow is its boundary's, so the
+//! same search applies with every gap, direction and enclosing disc
+//! horizontal: elements carry a plan radius from their horizontal speeds,
+//! lower bounds project onto horizontal directions only (a normal by its
+//! horizontal part), and a face patch is dropped only where no normal of
+//! it is horizontal and along the plan offset. [`plan_overlap`] shows two
+//! shadows overlap over a patch of positive area from two planar faces,
+//! not vertical, whose shadows share an open patch, and shows them apart
+//! once the lower bound is positive.
+//!
 //! # Scope
 //!
 //! This is the distance between BOUNDARIES. Two solids that overlap measure
@@ -70,6 +83,9 @@ use crate::exact_domain::Domain;
 
 /// Pairs refined before a query stops and reports what it has.
 const MAX_STEPS: usize = 400_000;
+
+/// Pairs refined before [`plan_overlap`] reports it could not decide.
+const OVERLAP_STEPS: usize = 20_000;
 
 /// An interval certain to contain the distance between two boundaries.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,8 +139,112 @@ pub fn boundary_distance(
     tolerance: Tolerance,
 ) -> Result<DistanceBounds, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
-    search(a, b, tolerance, &mut |lower, upper| {
+    Ok(search(a, b, tolerance, Metric::Space, &mut |lower, upper| {
         upper - lower <= accuracy
+    })?
+    .bounds)
+}
+
+/// Distance between the plan projections of `a` and `b` -- their shadows
+/// on the XY plane -- to within `accuracy` (#217).
+///
+/// A solid's shadow is its boundary's: a vertical line through a point of
+/// the solid meets the boundary. So this is the least horizontal distance
+/// between two boundary points, found by the same certified search as
+/// [`boundary_distance`] with horizontal gaps, directions and enclosing
+/// discs. It is zero when the shadows overlap, and unlike the distance in
+/// space it is zero for a body standing inside another's footprint.
+/// `point_a` and `point_b` lie on the boundaries, their projections
+/// `upper` apart. When two planar faces show the shadows overlap over a
+/// patch of positive area, the interval is `[0, 0]` and the points project
+/// into that patch (see [`plan_overlap`]).
+///
+/// # Errors
+///
+/// As [`boundary_distance`].
+pub fn plan_boundary_distance(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    accuracy: Scalar,
+    tolerance: Tolerance,
+) -> Result<DistanceBounds, ExactMeasureError> {
+    let accuracy = accuracy.max(0.0);
+    Ok(search(a, b, tolerance, Metric::Plan, &mut |lower, upper| {
+        upper - lower <= accuracy
+    })?
+    .bounds)
+}
+
+/// [`plan_boundary_distance`] refined only until it clears `limit`.
+///
+/// # Errors
+///
+/// As [`boundary_distance`].
+pub fn plan_boundary_clearance(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    limit: Scalar,
+    tolerance: Tolerance,
+) -> Result<(DistanceBounds, Clearance), ExactMeasureError> {
+    let bounds = search(a, b, tolerance, Metric::Plan, &mut |lower, upper| {
+        upper < limit || lower > limit
+    })?
+    .bounds;
+    let clearance = bounds.against(limit);
+    Ok((bounds, clearance))
+}
+
+/// Whether the plan projections of two bodies overlap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlanOverlap {
+    /// Over a patch of positive area: `at` and a disc around it lie in
+    /// both shadows, shown by a planar face of each that is not vertical.
+    Overlapping {
+        /// A plan point inside both shadows.
+        at: Point2,
+    },
+    /// Certainly apart: the plan distance is at least `gap`, positive.
+    Disjoint {
+        /// A certified lower bound on the plan distance.
+        gap: Scalar,
+    },
+    /// Neither shown: the shadows may only touch, overlap where no planar
+    /// face covers both, or lie closer than the search resolves.
+    Undecided,
+}
+
+/// Whether the plan projections of `a` and `b` overlap over a patch of
+/// positive area, are certainly apart, or neither could be shown (#217).
+///
+/// Overlap is shown by two planar faces, one of each body, not vertical,
+/// whose shadows share an open patch: a slab under a column's base, two
+/// slabs, a beam's soffit over a wall's top. Curved faces never show it;
+/// their shadows are still measured by [`plan_boundary_distance`].
+///
+/// # Errors
+///
+/// As [`boundary_distance`].
+pub fn plan_overlap(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+) -> Result<PlanOverlap, ExactMeasureError> {
+    // Overlap on curved faces alone is never shown, so the search is
+    // bounded more tightly than a distance query's.
+    let found = search_within(
+        a,
+        b,
+        tolerance,
+        Metric::Plan,
+        OVERLAP_STEPS,
+        &mut |lower, _| lower > 0.0,
+    )?;
+    Ok(match found.overlap {
+        Some(at) => PlanOverlap::Overlapping { at },
+        None if found.bounds.lower > 0.0 => PlanOverlap::Disjoint {
+            gap: found.bounds.lower,
+        },
+        None => PlanOverlap::Undecided,
     })
 }
 
@@ -139,11 +259,32 @@ pub fn boundary_clearance(
     limit: Scalar,
     tolerance: Tolerance,
 ) -> Result<(DistanceBounds, Clearance), ExactMeasureError> {
-    let bounds = search(a, b, tolerance, &mut |lower, upper| {
+    let bounds = search(a, b, tolerance, Metric::Space, &mut |lower, upper| {
         upper < limit || lower > limit
-    })?;
+    })?
+    .bounds;
     let clearance = bounds.against(limit);
     Ok((bounds, clearance))
+}
+
+/// Which distance a search measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Metric {
+    /// In space.
+    Space,
+    /// Between projections onto the XY plane: every gap, direction and
+    /// enclosing radius horizontal.
+    Plan,
+}
+
+/// The horizontal part of a vector.
+fn flat(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, v.y, 0.0)
+}
+
+/// Length of the horizontal part of a vector.
+fn flat_length(v: Vec3) -> Scalar {
+    v.x.hypot(v.y)
 }
 
 /// What an element covers.
@@ -167,6 +308,9 @@ struct Element {
     shape: Shape,
     centre: Point3,
     radius: Scalar,
+    /// A disc about the centre's projection holding the element's
+    /// projection onto the XY plane; never above `radius`.
+    plan_radius: Scalar,
     /// A point certainly on the boundary, when one is known.
     witness: Option<Point3>,
     /// The surface normal at the centre of a face patch.
@@ -180,6 +324,7 @@ struct Element {
 /// One B-rep, prepared for bounding.
 struct Side<'a> {
     brep: &'a ExactBRep,
+    metric: Metric,
     domains: Vec<Option<Domain<'a>>>,
     /// Whether every edge on the face's boundary is an element, so a
     /// closest point on that boundary is found through the edges.
@@ -188,10 +333,11 @@ struct Side<'a> {
 }
 
 impl<'a> Side<'a> {
-    fn new(brep: &'a ExactBRep, linear: Scalar) -> Result<Self, ExactMeasureError> {
+    fn new(brep: &'a ExactBRep, linear: Scalar, metric: Metric) -> Result<Self, ExactMeasureError> {
         let topology = brep.topology();
         let mut side = Side {
             brep,
+            metric,
             domains: Vec::with_capacity(topology.faces().len()),
             edges_bounded: Vec::with_capacity(topology.faces().len()),
             elements: Vec::new(),
@@ -275,6 +421,7 @@ impl<'a> Side<'a> {
             }
         }
         let (centre, radius) = patch_sphere(surface, lo, hi)?;
+        let plan_radius = patch_plan_radius(surface, lo, hi, centre, radius)?;
         let witness = if inside {
             Some(point_on(surface, mid)?)
         } else {
@@ -297,8 +444,17 @@ impl<'a> Side<'a> {
             },
             centre,
             radius,
+            plan_radius,
             witness,
         }))
+    }
+
+    /// The radius a search by this side's metric refines by.
+    fn size(&self, element: &Element) -> Scalar {
+        match self.metric {
+            Metric::Space => element.radius,
+            Metric::Plan => element.plan_radius,
+        }
     }
 
     /// The element's two halves, less any certified outside the face: a
@@ -313,7 +469,10 @@ impl<'a> Side<'a> {
                 inside,
             } => {
                 let surface = surface_of(self.brep, self.brep.topology().faces()[face].surface)?;
-                let (lu, lv) = lipschitz(surface, lo, hi)?;
+                let (lu, lv) = match self.metric {
+                    Metric::Space => lipschitz(surface, lo, hi)?,
+                    Metric::Plan => plan_lipschitz(surface, lo, hi)?,
+                };
                 let mid = (lo + hi) * 0.5;
                 let halves = if (hi.x - lo.x).abs() * lu >= (hi.y - lo.y).abs() * lv {
                     [
@@ -431,6 +590,71 @@ fn lipschitz(
     }
 }
 
+/// Bounds on `|P S_u|` and `|P S_v|` over the patch, `P` dropping the
+/// vertical: the horizontal speeds, never above [`lipschitz`]'s.
+fn plan_lipschitz(
+    surface: &Surface,
+    lo: Point2,
+    hi: Point2,
+) -> Result<(Scalar, Scalar), ExactMeasureError> {
+    let full = lipschitz(surface, lo, hi)?;
+    // |P (a X + b Y)| <= sqrt(a^2 |P X|^2 + b^2 |P Y|^2) when a^2 + b^2 <= 1.
+    let turning = |frame: &axiolid_core::Frame3, a: Scalar, b: Scalar| {
+        (a * flat_length(frame.x)).hypot(b * flat_length(frame.y))
+    };
+    let bounds = match surface {
+        Surface::Plane(p) => (flat_length(p.frame.x), flat_length(p.frame.y)),
+        Surface::Cylinder(c) => (
+            turning(&c.frame, c.radius.abs(), c.radius.abs()),
+            flat_length(c.frame.z),
+        ),
+        Surface::EllipticalCylinder(c) => (
+            turning(&c.frame, c.semi_axis_x.abs(), c.semi_axis_y.abs()),
+            flat_length(c.frame.z),
+        ),
+        Surface::Cone(c) => {
+            let slope = c.semi_angle.tan();
+            let radius = (c.radius + lo.y * slope)
+                .abs()
+                .max((c.radius + hi.y * slope).abs());
+            (
+                turning(&c.frame, radius, radius),
+                turning(&c.frame, slope.abs(), slope.abs()) + flat_length(c.frame.z),
+            )
+        }
+        _ => return Ok(full),
+    };
+    if bounds.0.is_finite() && bounds.1.is_finite() {
+        Ok((bounds.0.min(full.0), bounds.1.min(full.1)))
+    } else {
+        Ok(full)
+    }
+}
+
+/// A radius about the centre's projection holding the patch's projection:
+/// as [`patch_sphere`], from the horizontal speeds, and never above the
+/// sphere's own `radius`.
+fn patch_plan_radius(
+    surface: &Surface,
+    lo: Point2,
+    hi: Point2,
+    centre: Point3,
+    radius: Scalar,
+) -> Result<Scalar, ExactMeasureError> {
+    if let Surface::BSpline(spline) = surface {
+        let reach = spline
+            .control_points
+            .iter()
+            .flatten()
+            .map(|p| flat_length(*p - centre))
+            .fold(0.0, Scalar::max);
+        return Ok(pad(centre, reach).min(radius));
+    }
+    let (lu, lv) = plan_lipschitz(surface, lo, hi)?;
+    let plan = 0.5 * ((hi.x - lo.x).abs() * lu + (hi.y - lo.y).abs() * lv);
+    Ok(pad(centre, plan).min(radius))
+}
+
 /// Largest `|cos v|` over `[a, b]`.
 fn max_cos(a: Scalar, b: Scalar) -> Scalar {
     let (a, b) = (a.min(b), a.max(b));
@@ -504,14 +728,30 @@ fn edge_element(
         }
         _ => return Ok(None),
     };
+    // The horizontal speed, as for a patch (see `plan_lipschitz`).
+    let plan_speed = match curve {
+        Curve3::Line(line) => flat_length(line.direction),
+        Curve3::Circle(c) => {
+            (c.radius.abs() * flat_length(c.frame.x)).hypot(c.radius.abs() * flat_length(c.frame.y))
+        }
+        Curve3::Ellipse(e) => (e.semi_axis_x.abs() * flat_length(e.frame.x))
+            .hypot(e.semi_axis_y.abs() * flat_length(e.frame.y)),
+        _ => speed,
+    };
     let centre = evaluate3(curve, 0.5 * (t0 + t1)).map_err(|_| crate::exact::EVALUATION)?;
     let radius = pad(centre, 0.5 * (t1 - t0).abs() * speed);
+    let plan_radius = if plan_speed.is_finite() {
+        pad(centre, 0.5 * (t1 - t0).abs() * plan_speed).min(radius)
+    } else {
+        radius
+    };
     Ok(Some(Element {
         normal: None,
         spread: None,
         shape: Shape::Edge { edge, t0, t1 },
         centre,
         radius,
+        plan_radius,
         witness: Some(centre),
     }))
 }
@@ -558,13 +798,23 @@ fn normal_spread(surface: &Surface, lo: Point2, hi: Point2) -> Option<Scalar> {
 /// lets the bound close where the nearest points run along an edge: the
 /// patches straddling that edge also hold points just outside the face,
 /// closer than the true distance, that no bound on the patch can exclude.
-fn critical_possible(face: &Element, other: &Element) -> bool {
+///
+/// Between plan projections the same holds with the offset horizontal: a
+/// point inside a face is critical for the horizontal distance only where
+/// its normal is horizontal and along the plan offset, as on a vertical
+/// wall or at a silhouette.
+fn critical_possible(face: &Element, other: &Element, metric: Metric) -> bool {
     let (Some(normal), Some(spread)) = (face.normal, face.spread) else {
         return true;
     };
-    let offset = other.centre - face.centre;
+    let (offset, reach) = match metric {
+        Metric::Space => (other.centre - face.centre, face.radius + other.radius),
+        Metric::Plan => (
+            flat(other.centre - face.centre),
+            face.plan_radius + other.plan_radius,
+        ),
+    };
     let gap = offset.length();
-    let reach = face.radius + other.radius;
     if gap.is_nan() || gap <= reach {
         return true;
     }
@@ -606,7 +856,15 @@ impl Side<'_> {
     /// Exact range of `d . x` over the element where the family allows,
     /// else the enclosing sphere's.
     fn project(&self, element: &Element, d: Vec3) -> Result<(Scalar, Scalar), ExactMeasureError> {
-        let sphere = sphere_range(element, d);
+        let sphere = match self.metric {
+            Metric::Space => sphere_range(element, d),
+            // A horizontal direction reads only the projection, which the
+            // plan disc holds.
+            Metric::Plan => {
+                let c = element.centre.dot(d);
+                (c - element.plan_radius, c + element.plan_radius)
+            }
+        };
         let exact = match element.shape {
             Shape::Face { face, lo, hi, .. } => {
                 let surface = surface_of(self.brep, self.brep.topology().faces()[face].surface)?;
@@ -691,7 +949,7 @@ impl Side<'_> {
                         // takes its ends.
                         let (big, small) = (torus.major_radius, torus.minor_radius);
                         if big.is_nan() || big <= small.abs() {
-                            return Ok(sphere_range(element, d));
+                            return Ok(sphere);
                         }
                         let base = torus.frame.origin.dot(d);
                         let (w_lo, w_hi) =
@@ -767,13 +1025,30 @@ fn lower_bound(
     side_b: &Side<'_>,
     b: &Element,
 ) -> Result<Scalar, ExactMeasureError> {
-    let gap = (a.centre - b.centre).length();
+    let plan = side_a.metric == Metric::Plan;
+    let (offset, reach) = if plan {
+        (flat(b.centre - a.centre), a.plan_radius + b.plan_radius)
+    } else {
+        (b.centre - a.centre, a.radius + b.radius)
+    };
+    let gap = offset.length();
     let rounding = 1e-12 * (a.centre.length() + b.centre.length() + gap);
-    let mut best = (gap - a.radius - b.radius - rounding).max(0.0);
+    let mut best = (gap - reach - rounding).max(0.0);
+    // Between projections only horizontal directions separate them: a
+    // normal counts by its horizontal part.
+    let direction = |n: Option<Vec3>| -> Option<Vec3> {
+        let n = n?;
+        if !plan {
+            return Some(n);
+        }
+        let h = flat(n);
+        let length = h.length();
+        (length > 1e-6 * n.length()).then(|| h / length)
+    };
     let directions = [
-        (gap > 0.0).then(|| (b.centre - a.centre) / gap),
-        a.normal,
-        b.normal,
+        (gap > 0.0).then(|| offset / gap),
+        direction(a.normal),
+        direction(b.normal),
     ];
     for d in directions.into_iter().flatten() {
         let (a_lo, a_hi) = side_a.project(a, d)?;
@@ -801,21 +1076,46 @@ impl Ord for Key {
     }
 }
 
+/// What a search found: the bounds, and a plan point shown inside both
+/// shadows when planar faces show them overlapping.
+struct Found {
+    bounds: DistanceBounds,
+    overlap: Option<Point2>,
+}
+
 fn search(
     a: &ExactBRep,
     b: &ExactBRep,
     tolerance: Tolerance,
+    metric: Metric,
     done: &mut dyn FnMut(Scalar, Scalar) -> bool,
-) -> Result<DistanceBounds, ExactMeasureError> {
+) -> Result<Found, ExactMeasureError> {
+    search_within(a, b, tolerance, metric, MAX_STEPS, done)
+}
+
+fn search_within(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+    metric: Metric,
+    max_steps: usize,
+    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+) -> Result<Found, ExactMeasureError> {
     let linear = tolerance.linear().max(1e-12);
-    let side_a = Side::new(a, linear)?;
-    let side_b = Side::new(b, linear)?;
+    let side_a = Side::new(a, linear, metric)?;
+    let side_b = Side::new(b, linear, metric)?;
+    let apart = |p: Point3, q: Point3| match metric {
+        Metric::Space => (p - q).length(),
+        Metric::Plan => flat_length(p - q),
+    };
     let mut elements_a = side_a.elements.clone();
     let mut elements_b = side_b.elements.clone();
 
     let mut best: Option<(Scalar, Point3, Point3)> = None;
     let mut heap = BinaryHeap::new();
-    let viable = |a: &Element, b: &Element| critical_possible(a, b) && critical_possible(b, a);
+    let viable = |a: &Element, b: &Element| {
+        critical_possible(a, b, metric) && critical_possible(b, a, metric)
+    };
     for (i, ea) in elements_a.iter().enumerate() {
         for (j, eb) in elements_b.iter().enumerate() {
             if viable(ea, eb) {
@@ -826,11 +1126,19 @@ fn search(
 
     let mut lower = 0.0;
     let mut steps = 0;
+    let mut overlap = None;
     while let Some(Reverse((Key(bound), i, j))) = heap.pop() {
         lower = bound;
         let (ea, eb) = (elements_a[i], elements_b[j]);
+        if metric == Metric::Plan && bound == 0.0 {
+            if let Some((at, wa, wb)) = plan_patches_overlap(&side_a, &ea, &side_b, &eb)? {
+                overlap = Some(at);
+                best = Some((0.0, wa, wb));
+                break;
+            }
+        }
         if let (Some(wa), Some(wb)) = (ea.witness, eb.witness) {
-            let d = (wa - wb).length();
+            let d = apart(wa, wb);
             if best.is_none_or(|(current, _, _)| d < current) {
                 best = Some((d, wa, wb));
             }
@@ -840,21 +1148,25 @@ fn search(
             break;
         }
         steps += 1;
-        if steps > MAX_STEPS {
+        if steps > max_steps {
             break;
         }
         // Refine the larger of the two; a pair that can shrink no further
         // holds the lower bound where it is.
         // Refine the larger of the two; a pair that can shrink no further
         // holds the lower bound where it is.
-        let split_a = ea.radius >= eb.radius;
+        let split_a = side_a.size(&ea) >= side_b.size(&eb);
         let children = if split_a {
             side_a.split(&ea)?
         } else {
             side_b.split(&eb)?
         };
-        let parent = if split_a { ea.radius } else { eb.radius };
-        if children.iter().any(|child| child.radius >= parent) {
+        let (side, parent) = if split_a {
+            (&side_a, side_a.size(&ea))
+        } else {
+            (&side_b, side_b.size(&eb))
+        };
+        if children.iter().any(|child| side.size(child) >= parent) {
             heap.push(Reverse((Key(bound), i, j)));
             break;
         }
@@ -887,12 +1199,121 @@ fn search(
         lower = lower.min(*bound);
     }
     let (upper, point_a, point_b) = best.ok_or(crate::exact::NOT_CONVERGED)?;
-    Ok(DistanceBounds {
-        lower: lower.min(upper),
-        upper,
-        point_a,
-        point_b,
+    if overlap.is_some() {
+        lower = 0.0;
+    }
+    Ok(Found {
+        bounds: DistanceBounds {
+            lower: lower.min(upper),
+            upper,
+            point_a,
+            point_b,
+        },
+        overlap,
     })
+}
+
+/// When both elements are patches certified inside planar faces that are
+/// not vertical, and their shadows -- parallelograms -- share an open
+/// patch: a plan point in it with a margin, and the boundary points above
+/// it on each face.
+fn plan_patches_overlap(
+    side_a: &Side<'_>,
+    a: &Element,
+    side_b: &Side<'_>,
+    b: &Element,
+) -> Result<Option<(Point2, Point3, Point3)>, ExactMeasureError> {
+    // The shadow of an inside patch of a planar face: its corners in plan,
+    // counter-clockwise, and the plane's plan map to invert.
+    let shadow = |side: &Side<'_>,
+                  e: &Element|
+     -> Result<Option<([Point2; 4], axiolid_core::Frame3)>, ExactMeasureError> {
+        let Shape::Face {
+            face,
+            lo,
+            hi,
+            inside: true,
+        } = e.shape
+        else {
+            return Ok(None);
+        };
+        let surface = surface_of(side.brep, side.brep.topology().faces()[face].surface)?;
+        let Surface::Plane(plane) = surface else {
+            return Ok(None);
+        };
+        let f = plane.frame;
+        let map = |u: Scalar, v: Scalar| {
+            let p = f.origin + f.x * u + f.y * v;
+            Point2::new(p.x, p.y)
+        };
+        let mut corners = [
+            map(lo.x, lo.y),
+            map(hi.x, lo.y),
+            map(hi.x, hi.y),
+            map(lo.x, hi.y),
+        ];
+        let det = f.x.x * f.y.y - f.x.y * f.y.x;
+        let scale = f.x.length() * f.y.length();
+        // A vertical or near-vertical plane casts no area worth trusting.
+        if det.abs().is_nan() || det.abs() <= 1e-9 * scale {
+            return Ok(None);
+        }
+        if (hi.x - lo.x) * (hi.y - lo.y) * det < 0.0 {
+            corners.reverse();
+        }
+        Ok(Some((corners, f)))
+    };
+    let (Some((pa, fa)), Some((pb, fb))) = (shadow(side_a, a)?, shadow(side_b, b)?) else {
+        return Ok(None);
+    };
+    // Clip one parallelogram by the other; the clip's centroid, if it
+    // clears every edge of both by a margin, sits in an open patch of both.
+    let cross =
+        |o: Point2, p: Point2, q: Point2| (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+    let mut poly: Vec<Point2> = pa.to_vec();
+    for k in 0..4 {
+        let (e0, e1) = (pb[k], pb[(k + 1) % 4]);
+        let input = core::mem::take(&mut poly);
+        for m in 0..input.len() {
+            let (p, q) = (input[m], input[(m + 1) % input.len()]);
+            let (sp, sq) = (cross(e0, e1, p), cross(e0, e1, q));
+            if sp >= 0.0 {
+                poly.push(p);
+            }
+            if (sp >= 0.0) != (sq >= 0.0) {
+                let t = sp / (sp - sq);
+                poly.push(p + (q - p) * t);
+            }
+        }
+        if poly.is_empty() {
+            return Ok(None);
+        }
+    }
+    let at = poly.iter().fold(Point2::ZERO, |s, p| s + *p) / poly.len() as Scalar;
+    let scale = pa
+        .iter()
+        .chain(pb.iter())
+        .fold(1.0f64, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    let margin = 1e-9 * scale;
+    let clears = |ring: &[Point2; 4]| {
+        (0..4).all(|k| {
+            let (e0, e1) = (ring[k], ring[(k + 1) % 4]);
+            let length = (e1 - e0).length();
+            length > 0.0 && cross(e0, e1, at) / length > margin
+        })
+    };
+    if !(clears(&pa) && clears(&pb)) {
+        return Ok(None);
+    }
+    // The points above `at` on each plane, for witnesses.
+    let lift = |f: axiolid_core::Frame3| {
+        let det = f.x.x * f.y.y - f.x.y * f.y.x;
+        let (dx, dy) = (at.x - f.origin.x, at.y - f.origin.y);
+        let u = (dx * f.y.y - dy * f.y.x) / det;
+        let v = (f.x.x * dy - f.x.y * dx) / det;
+        f.origin + f.x * u + f.y * v
+    };
+    Ok(Some((at, lift(fa), lift(fb))))
 }
 
 #[cfg(test)]
@@ -901,8 +1322,12 @@ mod tests {
     //! every point of a patch lies in its sphere, and every normal lies in
     //! its cone.
 
-    use super::{normal_spread, patch_sphere};
+    use super::{
+        critical_possible, flat_length, normal_spread, patch_plan_radius, patch_sphere,
+        plan_lipschitz, Element, Metric, Shape,
+    };
     use axiolid_core::{Frame3, Point2, Point3, Vec3};
+    use axiolid_evaluate::surface::partials;
     use axiolid_evaluate::surface::{evaluate, normal};
     use axiolid_surface::{Cone, Cylinder, EllipticalCylinder, Plane, Sphere, Surface, Torus};
 
@@ -1003,6 +1428,127 @@ mod tests {
                 "{surface:?}: {radius} vs {reach}"
             );
         }
+    }
+
+    /// Every point of a patch projects within its plan radius of the
+    /// centre's projection -- for the frame of `families` and for one
+    /// tilted off the vertical, where every axis has a horizontal part --
+    /// and the plan radius is not vacuous.
+    #[test]
+    fn every_patch_projection_lies_in_its_plan_disc() {
+        let tilt = |surface: Surface| -> Surface {
+            let x = Vec3::new(0.6, 0.64, 0.48);
+            let z = Vec3::new(0.0, -0.6, 0.8);
+            let y = z.cross(x);
+            let f = Frame3 {
+                origin: Point3::new(1.5, -2.0, 0.75),
+                x,
+                y,
+                z,
+            };
+            match surface {
+                Surface::Plane(_) => Surface::Plane(Plane { frame: f }),
+                Surface::Cylinder(c) => Surface::Cylinder(Cylinder { frame: f, ..c }),
+                Surface::EllipticalCylinder(c) => {
+                    Surface::EllipticalCylinder(EllipticalCylinder { frame: f, ..c })
+                }
+                Surface::Cone(c) => Surface::Cone(Cone { frame: f, ..c }),
+                Surface::Sphere(c) => Surface::Sphere(Sphere { frame: f, ..c }),
+                Surface::Torus(c) => Surface::Torus(Torus { frame: f, ..c }),
+                other => other,
+            }
+        };
+        let cases = families()
+            .into_iter()
+            .flat_map(|(s, lo, hi)| [(s.clone(), lo, hi), (tilt(s), lo, hi)]);
+        for (surface, lo, hi) in cases {
+            let (centre, radius) = patch_sphere(&surface, lo, hi).expect("bounded");
+            let plan = patch_plan_radius(&surface, lo, hi, centre, radius).expect("bounded");
+            assert!(plan <= radius);
+            let mut reach: f64 = 0.0;
+            for p in samples(lo, hi) {
+                let point = evaluate(&surface, p.x, p.y).expect("point");
+                reach = reach.max((point.x - centre.x).hypot(point.y - centre.y));
+            }
+            assert!(
+                reach <= plan,
+                "{surface:?}: reach {reach} > plan radius {plan}"
+            );
+            assert!(plan <= 4.0 * reach + 1e-9, "{surface:?}: {plan} vs {reach}");
+        }
+    }
+
+    /// The horizontal speeds bound every horizontal derivative, over a whole
+    /// turn, on a frame tilted so the axes' shadows are not orthogonal:
+    /// there the steepest horizontal turn exceeds either axis's shadow.
+    #[test]
+    fn plan_speeds_bound_every_horizontal_derivative() {
+        let x = Vec3::new(0.6, 0.64, 0.48);
+        let z = Vec3::new(0.0, -0.6, 0.8);
+        let f = Frame3 {
+            origin: Point3::new(1.5, -2.0, 0.75),
+            x,
+            y: z.cross(x),
+            z,
+        };
+        let (lo, hi) = (
+            Point2::new(0.0, 0.2),
+            Point2::new(core::f64::consts::TAU, 1.5),
+        );
+        for surface in [
+            Surface::Cylinder(Cylinder {
+                frame: f,
+                radius: 2.5,
+            }),
+            Surface::EllipticalCylinder(EllipticalCylinder {
+                frame: f,
+                semi_axis_x: 3.0,
+                semi_axis_y: 1.0,
+            }),
+            Surface::Cone(Cone {
+                frame: f,
+                radius: 1.5,
+                semi_angle: 0.4,
+            }),
+        ] {
+            let (lu, lv) = plan_lipschitz(&surface, lo, hi).expect("bounded");
+            let (mut su, mut sv) = (0.0f64, 0.0f64);
+            for i in 0..=720 {
+                for j in 0..=8 {
+                    let u = lo.x + (hi.x - lo.x) * f64::from(i) / 720.0;
+                    let v = lo.y + (hi.y - lo.y) * f64::from(j) / 8.0;
+                    let (du, dv) = partials(&surface, u, v).expect("partials");
+                    su = su.max(flat_length(du));
+                    sv = sv.max(flat_length(dv));
+                }
+            }
+            assert!(su <= lu * (1.0 + 1e-12), "{surface:?}: {su} > {lu}");
+            assert!(sv <= lv * (1.0 + 1e-12), "{surface:?}: {sv} > {lv}");
+        }
+    }
+
+    /// A wall patch is kept for an element across from it in plan, however
+    /// far above: only the plan offset has to meet its normal.
+    #[test]
+    fn a_wall_patch_faces_an_element_high_above_in_plan() {
+        let element = |centre: Point3, normal: Option<Vec3>, spread: Option<f64>| Element {
+            shape: Shape::Edge {
+                edge: 0,
+                t0: 0.0,
+                t1: 1.0,
+            },
+            centre,
+            radius: 0.1,
+            plan_radius: 0.1,
+            witness: None,
+            normal,
+            spread,
+        };
+        let wall = element(Point3::ZERO, Some(Vec3::X), Some(0.01));
+        let above = element(Point3::new(10.0, 0.0, 10.0), None, None);
+        assert!(critical_possible(&wall, &above, Metric::Plan));
+        // In space the offset turns 45 degrees off the normal: dropped.
+        assert!(!critical_possible(&wall, &above, Metric::Space));
     }
 
     #[test]
