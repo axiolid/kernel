@@ -96,6 +96,9 @@ fn boolean_reduced(
             .iter()
             .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
             .map(|ring| ring.points.clone())
+            // A ring on one line -- the shadow of a vertical face, say --
+            // encloses nothing and changes no winding number (#219).
+            .filter(|points| !on_one_line(points))
             .collect();
         let rings_of = if reduced { reduce(given) } else { given };
         for points in rings_of {
@@ -174,6 +177,22 @@ fn boolean_reduced(
         .iter()
         .map(|(outer, holes)| (to_ring(outer), holes.iter().map(to_ring).collect()))
         .collect())
+}
+
+/// Whether every vertex of a ring lies on one line, exactly: then the
+/// ring encloses no area, whatever its rounded area says, and a boolean
+/// leaves it out. The exact subdivision assumes simple rings, and a ring
+/// running back over itself along a line is not one (#219).
+fn on_one_line(points: &[Point2]) -> bool {
+    let Some(&a) = points.first() else {
+        return true;
+    };
+    let Some(&b) = points.iter().find(|p| **p != a) else {
+        return true;
+    };
+    points
+        .iter()
+        .all(|&p| orient_doubles(a, b, p) == Sign::Zero)
 }
 
 /// An exact point's identity: its coordinates' bits, `-0.0` read as `0.0`.

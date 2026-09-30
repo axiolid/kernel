@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A ring whose vertices all lie on one line -- the plan shadow of a
+  vertical face -- is left out of a boolean, as it encloses nothing (#219).
+  Its rounded area need not be zero, so validation let it through, and
+  since 0.3.5 the exact subdivision refused it as self-intersecting; the
+  grid backend before had answered as if it were absent. A union of such a
+  ring with itself is empty again, and one with a polygon is that polygon.
+
 ### Added
 
 - `segment_intersections` reports every intersection among many segments

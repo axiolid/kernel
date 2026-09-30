@@ -34,6 +34,9 @@ MUTANTS = [
     ("touches taken as apart", "exact_overlay.rs",
      "    (o1 == Sign::Zero && within(a, b, c))\n        || (o2 == Sign::Zero && within(a, b, d))\n        || (o3 == Sign::Zero && within(c, d, a))\n        || (o4 == Sign::Zero && within(c, d, b))",
      "    false"),
+    ("a ring on one line kept (#219)", "exact_overlay.rs",
+     "            .filter(|points| !on_one_line(points))",
+     "            .filter(|points| points.len() > 0)"),
     # Output rounding: crossings to the nearest double, inputs untouched.
     ("rounding never corrects the guess upwards", "exact_arc/point.rs",
      "            Sign::Positive => r = up,",

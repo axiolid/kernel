@@ -208,3 +208,37 @@ fn rectangles_sharing_a_corner_and_two_half_sides() {
     let result = boolean(big, small, OverlayOperation::Difference);
     same_points(&result[0].outer, &rect(1.0, 0.0, 2.0, 1.0));
 }
+
+/// The shadow of a vertical face: three points on the line x = 4.2, whose
+/// rounded area is not quite zero, so validation lets it through. It
+/// encloses nothing: a union with it is the other operand, a union of it
+/// with itself is empty -- as the grid backend answered before 0.3.5,
+/// where the exact boolean refused it as self-intersecting (#219).
+#[test]
+fn a_ring_on_one_line_encloses_nothing() {
+    let sliver = Polygon {
+        outer: Ring {
+            points: vec![
+                Point2::new(4.2, 3.37),
+                Point2::new(4.2, 4.0),
+                Point2::new(4.2, 1.9),
+            ],
+        },
+        holes: vec![],
+    };
+    assert!(boolean(sliver.clone(), sliver.clone(), OverlayOperation::Union).is_empty());
+    let room = rect(0.0, 0.0, 4.2, 4.0);
+    let union = boolean(room.clone(), sliver.clone(), OverlayOperation::Union);
+    assert_eq!(union.len(), 1);
+    same_points(&union[0].outer, &room);
+    assert!(boolean(room.clone(), sliver.clone(), OverlayOperation::Intersection).is_empty());
+    let difference = boolean(room.clone(), sliver.clone(), OverlayOperation::Difference);
+    assert_eq!(difference.len(), 1);
+    same_points(&difference[0].outer, &room);
+    // In a soup, and through a region, alike.
+    let soup = union_soup(&[room.outer.clone(), sliver.outer.clone()], tol()).expect("valid rings");
+    assert_eq!(soup.len(), 1);
+    same_points(&soup[0].outer, &room);
+    let region = Region::new(vec![sliver.clone()], tol()).expect("a valid ring");
+    assert!(region.union(&region, tol()).expect("a union").is_empty());
+}
