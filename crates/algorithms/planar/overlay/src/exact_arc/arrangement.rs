@@ -68,6 +68,11 @@ impl Raw {
         self.vertices.iter().map(XPoint::rounded).collect()
     }
 
+    /// The rounded position of one vertex (see [`Raw::vertex_positions`]).
+    pub(crate) fn vertex_position(&self, index: usize) -> axiolid_core::Point2 {
+        self.vertices[index].rounded()
+    }
+
     /// Whether a boundary arriving along one use and leaving along the next
     /// goes straight on: both pieces straight, exactly parallel and the
     /// same way. Such a vertex only marks where another ring's boundary

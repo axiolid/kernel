@@ -47,14 +47,33 @@ pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygo
             holes: Vec::new(),
         })
         .collect();
+    // Boxes of the outer rings: a point outside one, widened by the
+    // tolerance, is not strictly inside that ring.
+    let boxes: Vec<(Point2, Point2)> = out
+        .iter()
+        .map(|p| {
+            p.outer.points.iter().fold(
+                (
+                    Point2::new(f64::INFINITY, f64::INFINITY),
+                    Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+                ),
+                |(lo, hi), q| (lo.min(*q), hi.max(*q)),
+            )
+        })
+        .collect();
     for hole in holes {
         let ring = Ring { points: hole };
         // The smallest outer ring holding a vertex of the hole strictly.
         let owner = (0..out.len())
             .filter(|&i| {
-                ring.points
-                    .iter()
-                    .any(|&p| strictly_inside(&out[i].outer, p, eps))
+                let (lo, hi) = boxes[i];
+                ring.points.iter().any(|&p| {
+                    p.x >= lo.x - eps
+                        && p.x <= hi.x + eps
+                        && p.y >= lo.y - eps
+                        && p.y <= hi.y + eps
+                        && strictly_inside(&out[i].outer, p, eps)
+                })
             })
             .min_by(|&i, &j| {
                 area(&out[i].outer.points)

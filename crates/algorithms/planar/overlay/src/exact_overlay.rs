@@ -150,7 +150,9 @@ fn boolean_reduced(
         })
         .collect();
 
-    let positions = raw.vertex_positions();
+    // Only the vertices of kept pieces are rounded: rounding a crossing
+    // exactly is not free, and most vertices of a soup are discarded.
+    let positions: std::cell::RefCell<HashMap<usize, Point2>> = Default::default();
     let to_ring = |uses: &arrangement::RingUses| {
         let n = uses.len();
         let points = (0..n)
@@ -158,7 +160,11 @@ fn boolean_reduced(
             .map(|i| {
                 let (piece, reversed) = uses[i];
                 let edge = &raw.edges[piece];
-                positions[if reversed { edge.to } else { edge.from }]
+                let vertex = if reversed { edge.to } else { edge.from };
+                *positions
+                    .borrow_mut()
+                    .entry(vertex)
+                    .or_insert_with(|| raw.vertex_position(vertex))
             })
             .collect();
         Ring { points }

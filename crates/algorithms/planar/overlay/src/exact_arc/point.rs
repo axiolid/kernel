@@ -14,6 +14,8 @@
 //! distinct radicand) and runs the interval filter first, exact arithmetic
 //! only when the filter cannot decide.
 
+use std::sync::{Arc, OnceLock};
+
 use axiolid_core::Point2;
 use axiolid_exact::{certify, Arith, Dyadic, Interval, Nested, SignExpr, Tower};
 use axiolid_guarantees::Sign;
@@ -161,9 +163,9 @@ impl Circle {
     }
 }
 
-/// An exact point; see the module documentation.
-#[derive(Debug, Clone)]
-pub(crate) struct XPoint {
+/// The exact coefficients of a point; see the module documentation.
+#[derive(Debug)]
+struct Coeffs {
     xa: Dyadic,
     xb: Dyadic,
     ya: Dyadic,
@@ -171,6 +173,51 @@ pub(crate) struct XPoint {
     w: Dyadic,
     /// Zero for rational points, which then embed without a radical.
     d: Dyadic,
+}
+
+/// A point whose coefficients wait until a question needs them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Recipe {
+    /// Built eagerly.
+    Built,
+    /// An input vertex: `(x, y) / 1`.
+    Input(Point2),
+}
+
+/// The coefficients with `w > 0`, and none of a radical a point does not
+/// need.
+fn normalise(xa: Dyadic, xb: Dyadic, ya: Dyadic, yb: Dyadic, w: Dyadic, d: Dyadic) -> Coeffs {
+    debug_assert_ne!(sgn(&w), Sign::Zero, "a point needs a non-zero weight");
+    debug_assert_ne!(sgn(&d), Sign::Negative, "a radicand must not be negative");
+    let flip = sgn(&w) == Sign::Negative;
+    let fix = |v: Dyadic| if flip { v.neg() } else { v };
+    let (xa, xb, ya, yb, w) = (fix(xa), fix(xb), fix(ya), fix(yb), fix(w));
+    let radical = sgn(&d) != Sign::Zero && (sgn(&xb) != Sign::Zero || sgn(&yb) != Sign::Zero);
+    let (xb, yb, d) = if radical {
+        (xb, yb, d)
+    } else {
+        (Dyadic::zero(), Dyadic::zero(), Dyadic::zero())
+    };
+    Coeffs {
+        xa,
+        xb,
+        ya,
+        yb,
+        w,
+        d,
+    }
+}
+
+/// An exact point; see the module documentation.
+///
+/// The coefficients are shared, so a copy of a point costs no arithmetic,
+/// and an input vertex builds them only when a question about it gets
+/// past the interval filter: most never do.
+#[derive(Debug, Clone)]
+pub(crate) struct XPoint {
+    exact: Arc<OnceLock<Coeffs>>,
+    /// How to build the coefficients on first use, when they wait.
+    recipe: Recipe,
     approx: Point2,
     /// Sound boxes around `x` and `y`: cheap early answers for coordinate
     /// comparisons and point identity, which dominate the overlay's work.
@@ -199,31 +246,35 @@ impl XPoint {
         w: Dyadic,
         d: Dyadic,
     ) -> Self {
-        debug_assert_ne!(sgn(&w), Sign::Zero, "a point needs a non-zero weight");
-        debug_assert_ne!(sgn(&d), Sign::Negative, "a radicand must not be negative");
-        let flip = sgn(&w) == Sign::Negative;
-        let fix = |v: Dyadic| if flip { v.neg() } else { v };
-        let (xa, xb, ya, yb, w) = (fix(xa), fix(xb), fix(ya), fix(yb), fix(w));
-        let radical = sgn(&d) != Sign::Zero && (sgn(&xb) != Sign::Zero || sgn(&yb) != Sign::Zero);
-        let (xb, yb, d) = if radical {
-            (xb, yb, d)
-        } else {
-            (Dyadic::zero(), Dyadic::zero(), Dyadic::zero())
-        };
-        let approx = Point2::new(approx(&xa, &xb, &d, &w), approx(&ya, &yb, &d, &w));
-        let bx = enclose(&xa, &xb, &d, &w);
-        let by = enclose(&ya, &yb, &d, &w);
+        let c = normalise(xa, xb, ya, yb, w, d);
+        let approx = Point2::new(
+            approx(&c.xa, &c.xb, &c.d, &c.w),
+            approx(&c.ya, &c.yb, &c.d, &c.w),
+        );
+        let bx = enclose(&c.xa, &c.xb, &c.d, &c.w);
+        let by = enclose(&c.ya, &c.yb, &c.d, &c.w);
         Self {
             bx,
             by,
-            xa,
-            xb,
-            ya,
-            yb,
-            w,
-            d,
+            exact: Arc::new(OnceLock::from(c)),
+            recipe: Recipe::Built,
             approx,
         }
+    }
+
+    /// The exact coefficients, built on first use for an input vertex.
+    fn c(&self) -> &Coeffs {
+        self.exact.get_or_init(|| match self.recipe {
+            Recipe::Input(p) => Coeffs {
+                xa: dy(p.x),
+                xb: Dyadic::zero(),
+                ya: dy(p.y),
+                yb: Dyadic::zero(),
+                w: dy(1.0),
+                d: Dyadic::zero(),
+            },
+            Recipe::Built => unreachable!("a built point has its coefficients"),
+        })
     }
 
     /// `(x / w, y / w)`.
@@ -233,18 +284,23 @@ impl XPoint {
 
     /// An input vertex, exactly.
     pub(crate) fn from_f64(p: Point2) -> Self {
-        let mut point = Self::rational(dy(p.x), dy(p.y), dy(1.0));
-        // Exact boxes: the quotient by `w = 1` widens them by rounding,
-        // and single-point boxes let equality of input vertices be read
-        // off without arithmetic (see `same_point`).
-        point.bx = Interval::point(p.x);
-        point.by = Interval::point(p.y);
-        point
+        // Exact boxes, and single-point boxes let equality of input
+        // vertices be read off without arithmetic (see `same_point`). The
+        // coefficients `(x, y) / 1` wait until a question needs them; the
+        // approximation is the vertex itself, `-0.0` read as `0.0` as the
+        // coefficients would give it.
+        Self {
+            exact: Arc::new(OnceLock::new()),
+            recipe: Recipe::Input(p),
+            approx: Point2::new(p.x + 0.0, p.y + 0.0),
+            bx: Interval::point(p.x),
+            by: Interval::point(p.y),
+        }
     }
 
     /// True when the point carries no square root.
     pub(crate) fn is_rational(&self) -> bool {
-        sgn(&self.d) == Sign::Zero
+        self.recipe != Recipe::Built || sgn(&self.c().d) == Sign::Zero
     }
 
     /// A nearby double pair, for output only; never for decisions.
@@ -258,12 +314,14 @@ impl XPoint {
     /// to the true crossing (#173). A point carrying a square root keeps
     /// [`XPoint::approx`].
     pub(crate) fn rounded(&self) -> Point2 {
-        if !self.is_rational() {
+        if matches!(self.recipe, Recipe::Input(_)) || !self.is_rational() {
+            // An input vertex is a double already.
             return self.approx;
         }
+        let c = self.c();
         Point2::new(
-            round_ratio(&self.xa, &self.w, self.approx.x),
-            round_ratio(&self.ya, &self.w, self.approx.y),
+            round_ratio(&c.xa, &c.w, self.approx.x),
+            round_ratio(&c.ya, &c.w, self.approx.y),
         )
     }
 
@@ -326,8 +384,10 @@ impl<T: Arith> Embed<T> {
 
     /// `[X, Y, W]` with `x = X / W`, `y = Y / W`, `W > 0`.
     fn point(&mut self, p: &XPoint) -> Option<[Nested<T>; 3]> {
+        let rational = p.is_rational();
+        let p = p.c();
         let w = self.k(&p.w);
-        if p.is_rational() {
+        if rational {
             return Some([self.k(&p.xa), self.k(&p.ya), w]);
         }
         let known = self
@@ -520,12 +580,15 @@ pub(crate) fn same_point(a: &XPoint, b: &XPoint) -> bool {
     // again from the other edge, a vertex shared by both operands) ends
     // here without building a tower. Not proportional does not prove
     // unequal (a square radicand, say), so that falls through.
-    if a.d == b.d {
+    let rational = a.is_rational();
+    let (a_, b_) = (a.c(), b.c());
+    if a_.d == b_.d {
+        let (a, b) = (a_, b_);
         let prop = |p: &Dyadic, q: &Dyadic| sgn(&p.mul(&b.w).sub(&q.mul(&a.w))) == Sign::Zero;
         if prop(&a.xa, &b.xa) && prop(&a.xb, &b.xb) && prop(&a.ya, &b.ya) && prop(&a.yb, &b.yb) {
             return true;
         }
-        if a.is_rational() {
+        if rational {
             // Both rational: proportionality is also necessary.
             return false;
         }

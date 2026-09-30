@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Exact points share their coefficients, so copying one costs no
+  arithmetic, and an input vertex builds its exact form only when a
+  question about it gets past the interval filter, which most never do.
+  Only the vertices of the result are rounded, not every vertex of the
+  subdivision, and settling checks a hole against an outer ring's box
+  before its edges. Results are unchanged; a soup of 2,000 overlapping
+  triangles that share no edges takes about a fifth fewer instructions.
+
 ## [0.3.7] - 2026-09-30
 
 ### Changed
