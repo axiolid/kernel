@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-30
+
 ### Changed
 
 - Straight-edge booleans on soups are much faster, with results bit for

@@ -1375,6 +1375,26 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-overlay
 
+### 0.3.7 - 2026-09-30
+
+### Changed
+
+- Straight-edge booleans on soups are much faster, with results bit for
+  bit the same. Each operand's rings are first reduced as a chain: an edge
+  given once each way between the same two exact points cancels, which
+  changes no winding number, so a mesh given as a soup of its triangles
+  shrinks to its outline before the exact subdivision. What is left is
+  split into cycles through distinct vertices and used when every cycle is
+  simple, decided exactly; otherwise the rings are kept as given. The
+  union of two overlapping 60 x 60 triangle meshes (14,400 triangles) now
+  takes about 10 ms, from about 1 s in 0.3.5 (the grid backend before it:
+  about 2.5 ms); 160,000 triangles take about 85 ms. Also: the
+  subdivision interns its vertices in a tree instead of a sorted vector,
+  seeds a point's parameter on a segment in closed form, and settling finds
+  repeated vertices and touching edges by hashing and a sweep instead of
+  asking every pair. Soups of triangles that share no edges gain less
+  (2,000 random triangles: about 370 ms, from about 430 ms).
+
 ### 0.3.6 - 2026-09-28
 
 ### Changed
