@@ -331,3 +331,43 @@ fn accumulated_grid_aligned_subtraction_is_answered() {
         );
     }
 }
+
+/// A tetrahedron on awkward coordinates, outward-wound.
+fn slanted_tetrahedron() -> Polyhedron {
+    let v = [
+        Point3::new(0.1, 0.2, 0.3),
+        Point3::new(1.7, 0.25, 0.35),
+        Point3::new(0.3, 1.9, 0.15),
+        Point3::new(0.45, 0.5, 1.3),
+    ];
+    let faces = [[0, 1, 2, 3], [0, 1, 3, 2], [0, 2, 3, 1], [1, 2, 3, 0]]
+        .iter()
+        .map(|&[a, b, c, opposite]| {
+            let (a, mut b, mut c) = (v[a], v[b], v[c]);
+            // Outward: the opposite vertex lies behind the face.
+            if (b - a).cross(c - a).dot(v[opposite] - a) > 0.0 {
+                std::mem::swap(&mut b, &mut c);
+            }
+            vec![a, b, c]
+        })
+        .collect();
+    Polyhedron::new(faces).expect("tetrahedron is a valid solid")
+}
+
+/// Coplanar contact on slanted planes keeps exactly one copy of each face.
+///
+/// The f64 centroid of a slanted triangle is generally NOT in its plane, so
+/// classifying at it calls a coplanar fragment inside or outside the other
+/// solid instead of on its boundary, and a self-union keeps both copies.
+/// The fragment's probe point must lie in the fragment's plane (#199).
+#[test]
+fn a_slanted_solid_combined_with_itself_keeps_one_copy_of_each_face() {
+    let t = slanted_tetrahedron();
+    let own = volume(&t);
+    for op in [BooleanOp::Union, BooleanOp::Intersection] {
+        let result = boolean_polyhedra_exact(&t, &t, op).expect("self-combination");
+        assert_eq!(result.faces().len(), 4, "{op:?} kept duplicate faces");
+        let v = volume(&result);
+        assert!((v - own).abs() <= own * 1e-12, "{op:?}: {v} != {own}");
+    }
+}

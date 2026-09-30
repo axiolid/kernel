@@ -69,6 +69,7 @@ pub mod hull;
 pub mod loft;
 pub mod offset;
 pub mod polyhedron;
+mod polyhedron_exact;
 pub mod profile;
 pub mod profile_lower;
 pub mod result;

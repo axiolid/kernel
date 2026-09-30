@@ -737,8 +737,8 @@ id = "D3"
 area = "mesh"
 name = "exact polyhedral booleans (Nef)"
 level = "narrow"
-summary = "boolean_polyhedra_exact handles general planar-faced solids (convex or non-convex) for union/intersection/difference, constructing intersection coordinates in f64 (not exact rational/interval arithmetic despite the name); curved faces refused. No Nef-style open/half-space set representation (no ..."
-evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs"]
+summary = "boolean_polyhedra_exact handles general planar-faced solids (convex or non-convex) for union/intersection/difference with certified classification. Intersection coordinates are stored in f64, each the double nearest the exact crossing (not exact rational output), and fragments too thin to hold a double are classified at an exact dyadic interior point, so long grid-aligned subtraction chains (the 147-step depth-2 Menger sponge) close with the exact volume of their inputs (#199); curved faces refused. No Nef-style open/half-space set representation."
+evidence = ["crates/algorithms/construction/construct/src/polyhedron.rs::boolean_polyhedra_exact", "crates/algorithms/construction/construct/src/polyhedron_exact.rs::plane_crossing", "crates/algorithms/construction/construct/tests/boolean_polyhedra.rs", "crates/algorithms/construction/construct/tests/grid_subtraction.rs", "crates/algorithms/construction/construct/tests/contact_matrix.rs", "scripts/probe_polyhedron_mutants.py"]
 occt = []
 cgal = ["Nef_3", "Nef_2", "Nef_S2"]
 

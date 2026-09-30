@@ -110,7 +110,13 @@ fn run(a: &Polyhedron, b: &Polyhedron, op: BooleanOp) -> Outcome {
             if solid.faces().is_empty() {
                 return Outcome::Empty;
             }
-            match volume_properties(&to_mesh(&solid), Tolerance::METRE) {
+            // The exact-coordinate policy, not `METRE`: the boolean's output
+            // is exact geometry, and a 1 um degeneracy threshold calls a
+            // real 1e-12-wide face degenerate, drops it, and reports the
+            // gap it leaves as a hole in the shell (#200). With `ZERO` only
+            // a triangle of exactly zero area is degenerate, so a genuine
+            // collapse still reads as `Unmeasurable`.
+            match volume_properties(&to_mesh(&solid), Tolerance::ZERO) {
                 Ok(p) => Outcome::Volume(p.signed_volume),
                 Err(e) => Outcome::Unmeasurable(e.to_string()),
             }
@@ -328,35 +334,42 @@ fn a_shrinking_negative_overlap() {
         let a = box_solid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
         let b = box_solid([1.0 - eps, 0.0, 0.0], [2.0 - eps, 1.0, 1.0]);
 
-        // TODO(#200): KNOWN GAP, measured not assumed: from eps = 1e-12 the union comes
-        // back with 8 degenerate triangles and 8 boundary edges -- a hole in
-        // the shell, so it cannot be measured. That is NOT a precision floor:
-        // a 1e-12 slab on unit boxes is ~4503 ULPs wide, comfortably
-        // resolvable. It is a defect in how a very thin overlap is split.
-        //
-        // Recorded here rather than hidden behind a loosened assertion. When
-        // it is fixed this branch should be deleted, and the sweep will hold
-        // the fix in place.
+        // The operands are what the literals round to, so the exact answers
+        // are taken from the stored coordinates: the slab is
+        // `1 - fl(1 - eps)` wide (Sterbenz: that subtraction is exact) and
+        // the union spans `[0, fl(2 - eps)]`.
+        let slab = 1.0 - (1.0 - eps);
+        let span = 2.0 - eps;
+
+        // #200: from eps = 1e-12 these cells used to read `Unmeasurable`,
+        // 8 degenerate triangles and 8 boundary edges. The boolean was
+        // closed all along; the 1 um measurement tolerance called the
+        // slab's 1e-12-wide side faces degenerate and dropped them. `run`
+        // now measures with the exact-coordinate policy, and the
+        // assertions are RELATIVE to the slab so a thin answer cannot pass
+        // by being near zero.
         match run(&a, &b, BooleanOp::Union) {
-            Outcome::Volume(v) => {
-                let want = 2.0 - eps;
-                assert!(
-                    (v - want).abs() <= want.abs().max(1.0) * 1e-9,
-                    "overlap -{eps:e} union: volume {v}, expected {want}"
-                );
-            }
-            Outcome::Unmeasurable(_) if eps <= 1e-12 => {}
+            Outcome::Volume(v) => assert!(
+                (v - span).abs() <= span * 1e-12,
+                "overlap -{eps:e} union: volume {v}, expected {span}"
+            ),
             other => panic!("overlap -{eps:e} union: {other:?}"),
         }
-        // Same known gap as the union above: the thin slab is the shared
-        // region itself here, so it fails at the same threshold.
         match run(&a, &b, BooleanOp::Intersection) {
             Outcome::Volume(v) => assert!(
-                (v - eps).abs() <= eps.max(1.0) * 1e-9,
-                "overlap -{eps:e} intersection: volume {v}, expected {eps}"
+                (v - slab).abs() <= slab * 1e-9,
+                "overlap -{eps:e} intersection: volume {v}, expected {slab}"
             ),
-            Outcome::Unmeasurable(_) if eps <= 1e-12 => {}
             other => panic!("overlap -{eps:e} intersection: {other:?}"),
+        }
+        // The difference is the subject less the slab.
+        let rest = 1.0 - eps;
+        match run(&a, &b, BooleanOp::Difference) {
+            Outcome::Volume(v) => assert!(
+                (v - rest).abs() <= rest * 1e-12,
+                "overlap -{eps:e} difference: volume {v}, expected {rest}"
+            ),
+            other => panic!("overlap -{eps:e} difference: {other:?}"),
         }
     }
 }
