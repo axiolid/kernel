@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Unions of overlapping axis-aligned boxes no longer refuse inside the
+  solve with an odd edge-point count (#203). The winding number's xy
+  broad phase rejected queries beyond `min + cell * dim`, a rounded
+  product that can fall one ulp short of the operand's true bounding box,
+  so a vertex lying exactly on the other operand's extreme plane lost a
+  face from its winding number. The grid now rejects against the exact
+  bounding box. Grid unions at pitches 0.6 to 0.8 with k = 5 and 6
+  complete, sequentially, through `union_many` and on the fast winding
+  path, with the exact volume and a closed, consistently wound result
+  (`tests/overlapping_grid.rs`).
+
+### Changed
+
+- `tests/solve_failure.rs` is replaced: no admissible input is known to
+  reach a refusal inside the solve now, so the mapping to
+  `BackendContractViolation` is pinned by a unit test where
+  `compute_boolean`'s error lands.
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

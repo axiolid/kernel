@@ -332,12 +332,7 @@ impl BoolmeshBoolean {
                     evidence_for(subject, &[tool], &empty, 1).with_attribute_fates(fates);
                 return Ok(BooleanOutcome::new(empty, evidence));
             }
-            Err(reason) => {
-                return Err(GeomError::BackendContractViolation {
-                    backend: BoolmeshBoolean::ID,
-                    detail: format!("{operation:?} failed inside the solve: {reason}"),
-                })
-            }
+            Err(reason) => return Err(solve_refusal(operation, &reason)),
         };
 
         let mut result = from_boolean_mesh(&output);
@@ -350,6 +345,19 @@ impl BoolmeshBoolean {
         let fates = carry(subject, tool, &mut result, &sources);
         let evidence = evidence_for(subject, &[tool], &result, 1).with_attribute_fates(fates);
         Ok(BooleanOutcome::new(result, evidence))
+    }
+}
+
+/// The error for a refusal inside the solve.
+///
+/// Every operand reaching the solve has passed the input gates, so a
+/// refusal there (an unpairable edge-point count in `pair_up`, #101) is this
+/// provider's defect: `BackendContractViolation`, never `Degenerate`, which
+/// would blame operands that were admissible.
+fn solve_refusal(operation: BooleanOperator, reason: &str) -> GeomError {
+    GeomError::BackendContractViolation {
+        backend: BoolmeshBoolean::ID,
+        detail: format!("{operation:?} failed inside the solve: {reason}"),
     }
 }
 
@@ -812,6 +820,29 @@ mod tests {
             matches!(error, GeomError::BackendContractViolation { backend, ref detail }
                 if backend == BoolmeshBoolean::ID && detail.contains("non-finite signed volume")),
             "must blame the backend, got {error:?}"
+        );
+    }
+
+    /// A refusal inside the solve blames this provider, not the operands.
+    ///
+    /// Replaces the grid-union reproducer that reached the refusal until
+    /// #203 was fixed; no admissible input is known to reach it now, so the
+    /// mapping is pinned at the seam where `compute_boolean`'s error lands.
+    #[test]
+    fn a_refusal_inside_the_solve_is_a_backend_contract_violation() {
+        let error = solve_refusal(
+            BooleanOperator::Union,
+            "boolean produced 3 edge points, which cannot be paired into halfedges",
+        );
+        assert!(
+            matches!(
+                &error,
+                GeomError::BackendContractViolation { backend, detail }
+                    if *backend == BoolmeshBoolean::ID
+                        && detail.contains("Union failed inside the solve")
+                        && detail.contains("cannot be paired")
+            ),
+            "{error:?}"
         );
     }
 

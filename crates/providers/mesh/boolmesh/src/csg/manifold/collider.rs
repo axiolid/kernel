@@ -189,6 +189,15 @@ fn build_internal_boxes(
 #[derive(Clone, Debug)]
 pub struct PlanarGrid {
     min: Vec3,
+    /// The faces' bounding box maximum, kept exactly.
+    ///
+    /// Not recomputed as `min + cell * dim`: that product rounds, and can
+    /// land below the true maximum. A query on the maximum face of the box
+    /// -- a vertex exactly on the other operand's extreme plane, which
+    /// coplanar solids produce all the time -- was then rejected as
+    /// outside the grid, dropped a face from its winding number, and left
+    /// `pair_up` an odd edge-point count (#203).
+    max: Vec3,
     cell: Real,
     dim: u32,
     /// CSR row offsets: cell `(cx, cy)` at index `cy * dim + cx` owns
@@ -254,6 +263,7 @@ impl PlanarGrid {
 
         PlanarGrid {
             min,
+            max: bb.max,
             cell,
             dim,
             start,
@@ -272,13 +282,11 @@ impl PlanarGrid {
     where
         F: FnMut(usize, usize),
     {
-        let hi_x = self.min.x + self.cell * self.dim as Real;
-        let hi_y = self.min.y + self.cell * self.dim as Real;
         for q in queries {
             let Some(qid) = q.id else { continue };
             let px = q.pos.x as Real;
             let py = q.pos.y as Real;
-            if px < self.min.x || py < self.min.y || px > hi_x || py > hi_y {
+            if px < self.min.x || py < self.min.y || px > self.max.x || py > self.max.y {
                 continue;
             }
             let cx = (((px - self.min.x) / self.cell) as i64).clamp(0, self.dim as i64 - 1) as u32;
@@ -431,5 +439,46 @@ fn find_collisions<Q, F>(
                 stack[top as usize] = c2;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::csg::Vec2;
+
+    /// #203: a query on the far edge of the grid's box is not dropped.
+    ///
+    /// The box spans y in [-0.5, 1.3] and 52 faces give a 6 x 6 grid, so
+    /// `min + cell * dim` is `-0.5 + (1.8 / 6) * 6 = 1.2999999999999998`,
+    /// one ulp below the true maximum. A point at y = 1.3 lies on the box
+    /// and inside every face's footprint, yet the rounded bound rejected it.
+    #[test]
+    fn a_query_on_the_maximum_edge_is_not_dropped() {
+        let lo = Vec3::new(-0.5, -0.5, -0.5);
+        let hi = Vec3::new(0.5, 1.3, 0.5);
+        let faces: Vec<BBox> = (0..52).map(|i| BBox::new(Some(i), &[lo, hi])).collect();
+        let grid = PlanarGrid::new(&faces, &BBox::new(None, &[lo, hi]));
+        assert_eq!(grid.dim, 6, "fixture must reproduce the rounding");
+        assert!(grid.min.y + grid.cell * Real::from(grid.dim) < hi.y);
+
+        for pos in [
+            Vec2::new(-0.5, 1.3),
+            Vec2::new(0.5, 0.0),
+            Vec2::new(0.5, 1.3),
+        ] {
+            let mut hits = 0;
+            grid.collision(&[BPos { id: Some(0), pos }], &mut |_, _| hits += 1);
+            assert_eq!(hits, faces.len(), "query at {pos:?} missed faces");
+        }
+
+        // Points genuinely outside still find nothing.
+        let mut hits = 0;
+        let outside = BPos {
+            id: Some(0),
+            pos: Vec2::new(0.0, 1.3 + 1e-9),
+        };
+        grid.collision(&[outside], &mut |_, _| hits += 1);
+        assert_eq!(hits, 0);
     }
 }
