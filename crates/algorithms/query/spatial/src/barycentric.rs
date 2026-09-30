@@ -1,5 +1,6 @@
 //! Barycentric and mean-value coordinates, for interpolating values given at
-//! the corners of a triangle, a tetrahedron or a polygon (#143).
+//! the corners of a triangle, a tetrahedron, a polygon or a closed triangle
+//! mesh (#143).
 //!
 //! Every function returns one weight per corner. The weights sum to one and
 //! reproduce the point: `sum(w_i * corner_i) == point`, up to rounding. A
@@ -11,6 +12,15 @@
 //! thinness is its least altitude. Weights outside `[0, 1]` are not an
 //! error: they place the point outside the triangle or tetrahedron, which is
 //! how callers extrapolate or test containment.
+//!
+//! Four polygon schemes are offered, trading generality for positivity:
+//! [`mean_value_coordinates2`] answers for any simple polygon, convex or
+//! not; [`wachspress_coordinates2`] and [`discrete_harmonic_coordinates2`]
+//! require a strictly convex polygon (refused by name otherwise), and the
+//! latter can still produce an infinite or cancelled weight at a pole, which
+//! is refused the same way mean-value cancellation is.
+//! [`mean_value_coordinates3`] extends the 2D mean-value scheme to a closed
+//! triangle mesh in space.
 
 use axiolid_core::{Point2, Point3, Polygon2, Scalar, Tolerance, Triangle2, Triangle3};
 
@@ -49,6 +59,22 @@ pub enum BarycentricError {
     /// The mean-value weights cancel at this point, which can happen only
     /// outside a non-convex polygon: the coordinates are undefined there.
     Undefined,
+    /// Wachspress and discrete harmonic coordinates require a strictly
+    /// convex polygon; vertex `index` turns the other way.
+    NotConvex {
+        /// The reflex (or ambiguous) vertex.
+        index: usize,
+    },
+    /// A face of a triangle mesh names vertex `index`, but the mesh has only
+    /// `len` vertices.
+    VertexIndex {
+        /// The face's index.
+        face: usize,
+        /// The out-of-range vertex index it named.
+        index: usize,
+        /// The number of vertices given.
+        len: usize,
+    },
 }
 
 impl core::fmt::Display for BarycentricError {
@@ -70,6 +96,12 @@ impl core::fmt::Display for BarycentricError {
             }
             Self::Undefined => {
                 f.write_str("mean-value weights cancel here (outside a non-convex polygon)")
+            }
+            Self::NotConvex { index } => {
+                write!(f, "polygon is not convex at vertex {index}")
+            }
+            Self::VertexIndex { face, index, len } => {
+                write!(f, "face {face} names vertex {index}, but only {len} exist")
             }
         }
     }
@@ -339,4 +371,333 @@ fn point_segment(x: Point2, p: Point2, q: Point2) -> Scalar {
     let d = q - p;
     let t = ((x - p).dot(d) / d.dot(d)).clamp(0.0, 1.0);
     (p + d * t - x).length()
+}
+
+/// `point` on a vertex or an edge of `v`, answered by that boundary's own
+/// linear interpolation: shared by [`wachspress_coordinates2`] and
+/// [`discrete_harmonic_coordinates2`], both of which reduce to ordinary
+/// barycentric interpolation on the boundary, same as
+/// [`mean_value_coordinates2`].
+fn vertex_or_edge_weights(
+    v: &[Point2],
+    point: Point2,
+    tolerance: Tolerance,
+) -> Option<Vec<Scalar>> {
+    let n = v.len();
+    let linear = tolerance.linear();
+    let mut weights = vec![0.0; n];
+    let r: Vec<Scalar> = v.iter().map(|&q| (q - point).length()).collect();
+    if let Some(i) = (0..n)
+        .filter(|&i| r[i] <= linear)
+        .min_by(|&i, &j| r[i].total_cmp(&r[j]))
+    {
+        weights[i] = 1.0;
+        return Some(weights);
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let edge = v[j] - v[i];
+        let length = edge.length();
+        let t = (point - v[i]).dot(edge) / (length * length);
+        let s_i = v[i] - point;
+        let s_j = v[j] - point;
+        if (0.0..=1.0).contains(&t) && s_i.perp_dot(s_j).abs() / length <= linear {
+            weights[i] = 1.0 - t;
+            weights[j] = t;
+            return Some(weights);
+        }
+    }
+    None
+}
+
+/// Refuse a polygon with a reflex vertex: Wachspress and discrete harmonic
+/// coordinates are defined here only for a strictly convex polygon (as
+/// CGAL's `Wachspress_coordinates_2` requires), any winding.
+///
+/// Each turn `area2(prev, cur, next)` is compared to the polygon's own
+/// orientation, with a threshold in the same area units as the linear
+/// tolerance times the perimeter, so a numerically flat corner (near-180
+/// degrees) is accepted rather than flagged on rounding noise.
+fn check_convex(v: &[Point2], tolerance: Tolerance) -> Result<(), BarycentricError> {
+    let n = v.len();
+    let signed_area: Scalar = (0..n)
+        .map(|i| v[i].perp_dot(v[(i + 1) % n]))
+        .sum::<Scalar>()
+        * 0.5;
+    let orientation = if signed_area >= 0.0 { 1.0 } else { -1.0 };
+    let perimeter: Scalar = (0..n).map(|i| (v[(i + 1) % n] - v[i]).length()).sum();
+    let threshold = tolerance.linear() * perimeter;
+    for i in 0..n {
+        let prev = v[(i + n - 1) % n];
+        let next = v[(i + 1) % n];
+        let turn = area2(prev, v[i], next);
+        if turn * orientation < -threshold {
+            return Err(BarycentricError::NotConvex { index: i });
+        }
+    }
+    Ok(())
+}
+
+/// Wachspress coordinates of `point` in a strictly convex polygon, one
+/// weight per vertex (Wachspress 1975, in the determinant form of Meyer,
+/// Lee, Barr and Desbrun 2002).
+///
+/// For vertex `i`, `w_i = C_i / (A_{i-1} * A_i)` where `C_i` is twice the
+/// area of the corner triangle `(v_{i-1}, v_i, v_{i+1})` and `A_i` is twice
+/// the area of `(v_i, v_{i+1}, point)`; the result is `w_i` normalized to sum
+/// to one. Inside the polygon the weights are positive, smooth, and
+/// reproduce the point; on the boundary, within the linear tolerance, they
+/// are the boundary's own linear interpolation. Outside the polygon they are
+/// the formula's rational extension wherever it does not divide by zero. The
+/// polygon may wind either way.
+///
+/// # Errors
+///
+/// [`BarycentricError::NonFinite`], [`BarycentricError::TooFewVertices`],
+/// [`BarycentricError::ShortEdge`], [`BarycentricError::SelfIntersecting`],
+/// [`BarycentricError::Degenerate`] for a polygon with no area to speak of,
+/// [`BarycentricError::NotConvex`] for a polygon that is not strictly
+/// convex, and [`BarycentricError::Undefined`] where a denominator vanishes
+/// (on the line through a non-adjacent edge, extended past its endpoints).
+pub fn wachspress_coordinates2(
+    polygon: &Polygon2,
+    point: Point2,
+    tolerance: Tolerance,
+) -> Result<Vec<Scalar>, BarycentricError> {
+    let v = &polygon.vertices;
+    let n = v.len();
+    if !point.is_finite() || !v.iter().all(|p| p.is_finite()) {
+        return Err(BarycentricError::NonFinite);
+    }
+    if n < 3 {
+        return Err(BarycentricError::TooFewVertices { count: n });
+    }
+    check_simple(v, tolerance)?;
+    let perimeter: Scalar = (0..n).map(|i| (v[(i + 1) % n] - v[i]).length()).sum();
+    thick_enough(2.0 * polygon.signed_area().abs(), perimeter, tolerance)?;
+    check_convex(v, tolerance)?;
+    if let Some(w) = vertex_or_edge_weights(v, point, tolerance) {
+        return Ok(w);
+    }
+
+    let a: Vec<Scalar> = (0..n).map(|i| area2(v[i], v[(i + 1) % n], point)).collect();
+    let mut weights = vec![0.0; n];
+    let mut sum = 0.0;
+    let mut magnitude = 0.0;
+    for i in 0..n {
+        let prev = (i + n - 1) % n;
+        let c = area2(v[prev], v[i], v[(i + 1) % n]);
+        let w = c / (a[prev] * a[i]);
+        weights[i] = w;
+        sum += w;
+        magnitude += w.abs();
+    }
+    if !sum.is_finite() || sum.abs() <= Scalar::EPSILON * n as Scalar * magnitude {
+        return Err(BarycentricError::Undefined);
+    }
+    for w in &mut weights {
+        *w /= sum;
+    }
+    Ok(weights)
+}
+
+/// Discrete harmonic coordinates of `point` in a strictly convex polygon,
+/// one weight per vertex (Pinkall and Polthier's cotangent weights, applied
+/// to the triangle fan `(point, v_i, v_{i+1})`; Floater's survey calls this
+/// scheme "discrete harmonic").
+///
+/// For vertex `i`, sharing a fan edge with the two triangles on either side
+/// of it, `w_i = (cot(gamma) + cot(beta)) / r_i^2`, where `beta` and `gamma`
+/// are the unsigned angles at `v_i` in those two triangles and `r_i =
+/// |point - v_i|`; the result is `w_i` normalized to sum to one. On the
+/// boundary, within the linear tolerance, the weights are the boundary's own
+/// linear interpolation. Unlike Wachspress coordinates, discrete harmonic
+/// weights are not guaranteed positive inside a convex polygon, and have
+/// poles where a fan angle is a multiple of a straight angle (point,
+/// vertex and a neighbor collinear): both refused as
+/// [`BarycentricError::Undefined`], since the caller cannot act on an
+/// infinite or cancelled weight either way. The polygon may wind either
+/// way.
+///
+/// # Errors
+///
+/// As [`wachspress_coordinates2`].
+pub fn discrete_harmonic_coordinates2(
+    polygon: &Polygon2,
+    point: Point2,
+    tolerance: Tolerance,
+) -> Result<Vec<Scalar>, BarycentricError> {
+    let v = &polygon.vertices;
+    let n = v.len();
+    if !point.is_finite() || !v.iter().all(|p| p.is_finite()) {
+        return Err(BarycentricError::NonFinite);
+    }
+    if n < 3 {
+        return Err(BarycentricError::TooFewVertices { count: n });
+    }
+    check_simple(v, tolerance)?;
+    let perimeter: Scalar = (0..n).map(|i| (v[(i + 1) % n] - v[i]).length()).sum();
+    thick_enough(2.0 * polygon.signed_area().abs(), perimeter, tolerance)?;
+    check_convex(v, tolerance)?;
+    if let Some(w) = vertex_or_edge_weights(v, point, tolerance) {
+        return Ok(w);
+    }
+
+    let mut weights = vec![0.0; n];
+    let mut sum = 0.0;
+    let mut magnitude = 0.0;
+    for i in 0..n {
+        let u = point - v[i];
+        let prev = v[(i + n - 1) % n] - v[i];
+        let next = v[(i + 1) % n] - v[i];
+        let cot_prev = u.dot(prev) / u.perp_dot(prev).abs();
+        let cot_next = u.dot(next) / u.perp_dot(next).abs();
+        let r2 = u.length_squared();
+        let w = (cot_prev + cot_next) / r2;
+        weights[i] = w;
+        sum += w;
+        magnitude += w.abs();
+    }
+    if !sum.is_finite() || sum.abs() <= Scalar::EPSILON * n as Scalar * magnitude {
+        return Err(BarycentricError::Undefined);
+    }
+    for w in &mut weights {
+        *w /= sum;
+    }
+    Ok(weights)
+}
+
+/// Mean-value coordinates of `point` in a closed triangle mesh, one weight
+/// per vertex (Floater, Kos and Reimers 2005).
+///
+/// `faces` lists each triangle as three indices into `vertices`. The mesh's
+/// closedness (every edge shared by exactly two faces, consistently
+/// wound) is the caller's responsibility, same as `mean_value_coordinates2`
+/// leaves polygon repair to its caller: this function does not audit
+/// topology, only computes weights from the faces given. On a vertex, that
+/// vertex alone gets weight one. When `point` lies exactly on a face's
+/// plane, inside that triangle, the weights are that triangle's own 2D
+/// barycentric coordinates (all other vertices zero) -- the formula's own
+/// closed form for the coplanar case, not a fallback. Elsewhere on a face's
+/// plane but outside its triangle, that face contributes nothing (its
+/// spherical angles fold flat without enclosing `point`); a mesh with no
+/// other face to carry the point returns [`BarycentricError::Undefined`].
+///
+/// # Errors
+///
+/// [`BarycentricError::NonFinite`] for a non-finite vertex or point,
+/// [`BarycentricError::TooFewVertices`] for fewer than three vertices or no
+/// faces, [`BarycentricError::VertexIndex`] for a face naming a vertex index
+/// past the end of `vertices`, and [`BarycentricError::Undefined`] where the
+/// weights do not sum to a nonzero, finite total.
+pub fn mean_value_coordinates3(
+    vertices: &[Point3],
+    faces: &[[usize; 3]],
+    point: Point3,
+    tolerance: Tolerance,
+) -> Result<Vec<Scalar>, BarycentricError> {
+    let n = vertices.len();
+    if !point.is_finite() || !vertices.iter().all(|p| p.is_finite()) {
+        return Err(BarycentricError::NonFinite);
+    }
+    if n < 3 || faces.is_empty() {
+        return Err(BarycentricError::TooFewVertices { count: n });
+    }
+    for (f, face) in faces.iter().enumerate() {
+        for &index in face {
+            if index >= n {
+                return Err(BarycentricError::VertexIndex {
+                    face: f,
+                    index,
+                    len: n,
+                });
+            }
+        }
+    }
+
+    let linear = tolerance.linear();
+    let d: Vec<Scalar> = vertices.iter().map(|&q| (q - point).length()).collect();
+    if let Some(i) = (0..n)
+        .filter(|&i| d[i] <= linear)
+        .min_by(|&i, &j| d[i].total_cmp(&d[j]))
+    {
+        let mut weights = vec![0.0; n];
+        weights[i] = 1.0;
+        return Ok(weights);
+    }
+    let u: Vec<Point3> = vertices
+        .iter()
+        .zip(&d)
+        .map(|(&q, &r)| (q - point) / r)
+        .collect();
+
+    let mut weights = vec![0.0; n];
+    for &[fi, fj, fk] in faces {
+        let (ui, uj, uk) = (u[fi], u[fj], u[fk]);
+        let l = [(uj - uk).length(), (uk - ui).length(), (ui - uj).length()];
+        let theta = [
+            2.0 * (l[0] / 2.0).clamp(-1.0, 1.0).asin(),
+            2.0 * (l[1] / 2.0).clamp(-1.0, 1.0).asin(),
+            2.0 * (l[2] / 2.0).clamp(-1.0, 1.0).asin(),
+        ];
+        let h = (theta[0] + theta[1] + theta[2]) / 2.0;
+        if core::f64::consts::PI - h < linear {
+            // `point` is coplanar with, and inside, this triangle: its own
+            // 2D barycentric coordinates, exact at corners.
+            let tri = Triangle3 {
+                a: vertices[fi],
+                b: vertices[fj],
+                c: vertices[fk],
+            };
+            let w = triangle_barycentric3(&tri, point, tolerance)?;
+            let mut weights = vec![0.0; n];
+            weights[fi] = w[0];
+            weights[fj] = w[1];
+            weights[fk] = w[2];
+            return Ok(weights);
+        }
+        let sin_theta = [theta[0].sin(), theta[1].sin(), theta[2].sin()];
+        if sin_theta.iter().any(|s| s.abs() <= Scalar::EPSILON) {
+            // A fan angle at 0 or pi: this face's spherical triangle is
+            // degenerate at `point`, so it cannot enclose it. Skip.
+            continue;
+        }
+        let c = [
+            2.0 * h.sin() * (h - theta[0]).sin() / (sin_theta[1] * sin_theta[2]) - 1.0,
+            2.0 * h.sin() * (h - theta[1]).sin() / (sin_theta[2] * sin_theta[0]) - 1.0,
+            2.0 * h.sin() * (h - theta[2]).sin() / (sin_theta[0] * sin_theta[1]) - 1.0,
+        ];
+        let sign = ui.dot(uj.cross(uk)).signum();
+        let mut degenerate = false;
+        let s: Vec<Scalar> = c
+            .iter()
+            .map(|&ci| {
+                let value = sign * (1.0 - ci * ci).max(0.0).sqrt();
+                if value.abs() <= Scalar::EPSILON {
+                    degenerate = true;
+                }
+                value
+            })
+            .collect();
+        if degenerate {
+            // `point` is on this face's plane but outside its triangle: no
+            // contribution from this face.
+            continue;
+        }
+        weights[fi] +=
+            (theta[0] - c[1] * theta[2] - c[2] * theta[1]) / (d[fi] * sin_theta[1] * s[2]);
+        weights[fj] +=
+            (theta[1] - c[2] * theta[0] - c[0] * theta[2]) / (d[fj] * sin_theta[2] * s[0]);
+        weights[fk] +=
+            (theta[2] - c[0] * theta[1] - c[1] * theta[0]) / (d[fk] * sin_theta[0] * s[1]);
+    }
+    let sum: Scalar = weights.iter().sum();
+    let magnitude: Scalar = weights.iter().map(|w| w.abs()).sum();
+    if !sum.is_finite() || sum.abs() <= Scalar::EPSILON * n as Scalar * magnitude {
+        return Err(BarycentricError::Undefined);
+    }
+    for w in &mut weights {
+        *w /= sum;
+    }
+    Ok(weights)
 }

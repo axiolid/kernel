@@ -7,7 +7,8 @@
 
 use axiolid_core::{Point2, Point3, Polygon2, Tolerance, Triangle2, Triangle3, Vec3};
 use axiolid_spatial::{
-    mean_value_coordinates2, tetrahedron_barycentric, triangle_barycentric2, triangle_barycentric3,
+    discrete_harmonic_coordinates2, mean_value_coordinates2, mean_value_coordinates3,
+    tetrahedron_barycentric, triangle_barycentric2, triangle_barycentric3, wachspress_coordinates2,
     BarycentricError,
 };
 
@@ -280,5 +281,309 @@ fn polygons_that_bound_nothing_are_refused() {
     assert_eq!(
         mean_value_coordinates2(&nan, origin, TOL),
         Err(BarycentricError::NonFinite)
+    );
+}
+
+fn square() -> Polygon2 {
+    Polygon2::new(vec![p2(0.0, 0.0), p2(2.0, 0.0), p2(2.0, 2.0), p2(0.0, 2.0)])
+}
+
+fn pentagon() -> Vec<Point2> {
+    (0..5)
+        .map(|k| {
+            let a = core::f64::consts::TAU * k as f64 / 5.0;
+            p2(a.cos(), a.sin())
+        })
+        .collect()
+}
+
+#[test]
+fn wachspress_on_a_triangle_is_barycentric() {
+    let t = right_triangle();
+    let polygon = Polygon2::new(vec![t.a, t.b, t.c]);
+    for (x, y) in [(1.0, 0.5), (0.3, 1.1), (0.01, 0.01)] {
+        let got = wachspress_coordinates2(&polygon, p2(x, y), TOL).unwrap();
+        close(&got, &closed_form(x, y), 1e-12);
+    }
+}
+
+#[test]
+fn wachspress_reproduces_points_in_a_convex_polygon() {
+    let vertices = pentagon();
+    let polygon = Polygon2::new(vertices.clone());
+    for point in [p2(0.0, 0.0), p2(0.1, 0.2), p2(-0.2, 0.05)] {
+        let got = wachspress_coordinates2(&polygon, point, TOL).unwrap();
+        reproduces2(&got, &vertices, point);
+        assert!(got.iter().all(|&w| w > 0.0), "{got:?}");
+    }
+    // A square's centre weighs every corner equally, either winding.
+    let got = wachspress_coordinates2(&square(), p2(1.0, 1.0), TOL).unwrap();
+    close(&got, &[0.25; 4], 1e-14);
+    let reversed = Polygon2::new(square().vertices.iter().rev().copied().collect());
+    let mut back = wachspress_coordinates2(&reversed, p2(1.0, 1.0), TOL).unwrap();
+    back.reverse();
+    close(&got, &back, 1e-14);
+}
+
+#[test]
+fn wachspress_reproduces_points_in_an_irregular_convex_polygon() {
+    // Corner triangle areas differ vertex to vertex here (unlike the
+    // regular pentagon and square above), so a numerator that names the
+    // wrong corner triangle changes the answer.
+    let vertices = vec![p2(0.0, 0.0), p2(5.0, 0.0), p2(4.0, 3.0), p2(0.0, 2.0)];
+    let polygon = Polygon2::new(vertices.clone());
+    for point in [p2(2.0, 1.0), p2(1.0, 0.5), p2(3.0, 2.0), p2(0.5, 1.5)] {
+        let got = wachspress_coordinates2(&polygon, point, TOL).unwrap();
+        reproduces2(&got, &vertices, point);
+    }
+}
+
+#[test]
+fn wachspress_reproduces_the_boundary_and_refuses_reflex_polygons() {
+    let square = square();
+    for (k, &corner) in square.vertices.iter().enumerate() {
+        let got = wachspress_coordinates2(&square, corner, TOL).unwrap();
+        let mut want = vec![0.0; 4];
+        want[k] = 1.0;
+        assert_eq!(got, want);
+    }
+    let got = wachspress_coordinates2(&square, p2(2.0, 1.0), TOL).unwrap();
+    assert_eq!(got, vec![0.0, 0.5, 0.5, 0.0]);
+
+    let l_shape = Polygon2::new(l_shape());
+    assert!(matches!(
+        wachspress_coordinates2(&l_shape, p2(0.5, 0.5), TOL),
+        Err(BarycentricError::NotConvex { .. })
+    ));
+}
+
+#[test]
+fn wachspress_and_discrete_harmonic_refuse_a_collinear_pole() {
+    // Beyond vertex b, still on the line through edge a-b: a-b's own signed
+    // area is zero, and both weights it appears in blow up.
+    let t = right_triangle();
+    let polygon = Polygon2::new(vec![t.a, t.b, t.c]);
+    let pole = p2(10.0, 0.0);
+    assert_eq!(
+        wachspress_coordinates2(&polygon, pole, TOL),
+        Err(BarycentricError::Undefined)
+    );
+    assert_eq!(
+        discrete_harmonic_coordinates2(&polygon, pole, TOL),
+        Err(BarycentricError::Undefined)
+    );
+}
+
+#[test]
+fn discrete_harmonic_reproduces_points_and_the_boundary() {
+    let vertices = pentagon();
+    let polygon = Polygon2::new(vertices.clone());
+    for point in [p2(0.0, 0.0), p2(0.1, 0.2), p2(-0.2, 0.05)] {
+        let got = discrete_harmonic_coordinates2(&polygon, point, TOL).unwrap();
+        reproduces2(&got, &vertices, point);
+    }
+    let square = square();
+    let got = discrete_harmonic_coordinates2(&square, p2(1.0, 1.0), TOL).unwrap();
+    close(&got, &[0.25; 4], 1e-13);
+    for (k, &corner) in square.vertices.iter().enumerate() {
+        let got = discrete_harmonic_coordinates2(&square, corner, TOL).unwrap();
+        let mut want = vec![0.0; 4];
+        want[k] = 1.0;
+        assert_eq!(got, want);
+    }
+    let l_shape = Polygon2::new(l_shape());
+    assert!(matches!(
+        discrete_harmonic_coordinates2(&l_shape, p2(0.5, 0.5), TOL),
+        Err(BarycentricError::NotConvex { .. })
+    ));
+}
+
+#[test]
+fn wachspress_and_discrete_harmonic_reject_non_finite_and_thin_input() {
+    let nan_polygon = Polygon2::new(vec![p2(0.0, 0.0), p2(1.0, 0.0), p2(f64::NAN, 1.0)]);
+    let origin = p2(0.25, 0.25);
+    assert_eq!(
+        wachspress_coordinates2(&nan_polygon, origin, TOL),
+        Err(BarycentricError::NonFinite)
+    );
+    assert_eq!(
+        discrete_harmonic_coordinates2(&nan_polygon, origin, TOL),
+        Err(BarycentricError::NonFinite)
+    );
+    let two = Polygon2::new(vec![p2(0.0, 0.0), p2(1.0, 0.0)]);
+    assert_eq!(
+        wachspress_coordinates2(&two, origin, TOL),
+        Err(BarycentricError::TooFewVertices { count: 2 })
+    );
+}
+
+// -- 3D mean-value coordinates over closed triangle meshes -----------------
+
+fn reproduces3(weights: &[f64], vertices: &[Point3], point: Point3) {
+    let sum: f64 = weights.iter().sum();
+    assert!((sum - 1.0).abs() < 1e-9, "sum {sum}");
+    let back = vertices
+        .iter()
+        .zip(weights)
+        .fold(Point3::ZERO, |acc, (v, w)| acc + *v * *w);
+    assert!((back - point).length() < 1e-9, "{back} vs {point}");
+}
+
+fn tetrahedron_mesh() -> (Vec<Point3>, Vec<[usize; 3]>) {
+    let vertices = vec![
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(0.0, 0.0, 1.0),
+    ];
+    // Outward-wound faces of the corner tetrahedron.
+    let faces = vec![[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+    (vertices, faces)
+}
+
+fn cube_mesh() -> (Vec<Point3>, Vec<[usize; 3]>) {
+    let vertices = vec![
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(0.0, 0.0, 1.0),
+        Point3::new(1.0, 0.0, 1.0),
+        Point3::new(1.0, 1.0, 1.0),
+        Point3::new(0.0, 1.0, 1.0),
+    ];
+    let faces = vec![
+        [0, 2, 1],
+        [0, 3, 2],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [3, 7, 6],
+        [3, 6, 2],
+        [0, 4, 7],
+        [0, 7, 3],
+        [1, 2, 6],
+        [1, 6, 5],
+    ];
+    (vertices, faces)
+}
+
+#[test]
+fn mean_value3_on_a_tetrahedron_reproduces_interior_points() {
+    let (vertices, faces) = tetrahedron_mesh();
+    for [x, y, z] in [[0.25, 0.25, 0.25], [0.1, 0.2, 0.3], [0.5, 0.1, 0.1]] {
+        let point = Point3::new(x, y, z);
+        let got = mean_value_coordinates3(&vertices, &faces, point, TOL).unwrap();
+        reproduces3(&got, &vertices, point);
+    }
+    for (k, &corner) in vertices.iter().enumerate() {
+        let got = mean_value_coordinates3(&vertices, &faces, corner, TOL).unwrap();
+        let mut want = vec![0.0; 4];
+        want[k] = 1.0;
+        assert_eq!(got, want);
+    }
+}
+
+fn octahedron_mesh() -> (Vec<Point3>, Vec<[usize; 3]>) {
+    // +X, -X, +Y, -Y, +Z, -Z: the only triangulation of the octahedron, so
+    // its centre's weights are equal by symmetry with no diagonal choice to
+    // get wrong (unlike the cube, whose face diagonals break the corners'
+    // symmetry unless chosen with care).
+    let vertices = vec![
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(-1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(0.0, -1.0, 0.0),
+        Point3::new(0.0, 0.0, 1.0),
+        Point3::new(0.0, 0.0, -1.0),
+    ];
+    let faces = vec![
+        [0, 2, 4],
+        [2, 1, 4],
+        [1, 3, 4],
+        [3, 0, 4],
+        [0, 3, 5],
+        [3, 1, 5],
+        [1, 2, 5],
+        [2, 0, 5],
+    ];
+    (vertices, faces)
+}
+
+#[test]
+fn mean_value3_on_an_octahedron_centre_weighs_every_vertex_equally() {
+    let (vertices, faces) = octahedron_mesh();
+    let centre = Point3::ZERO;
+    let got = mean_value_coordinates3(&vertices, &faces, centre, TOL).unwrap();
+    close(&got, &[1.0 / 6.0; 6], 1e-9);
+    reproduces3(&got, &vertices, centre);
+}
+
+#[test]
+fn mean_value3_reproduces_other_interior_points_of_a_cube() {
+    let (vertices, faces) = cube_mesh();
+    for point in [
+        Point3::new(0.5, 0.5, 0.5),
+        Point3::new(0.2, 0.3, 0.4),
+        Point3::new(0.9, 0.1, 0.5),
+        Point3::new(0.5, 0.5, 0.9),
+    ] {
+        let got = mean_value_coordinates3(&vertices, &faces, point, TOL).unwrap();
+        reproduces3(&got, &vertices, point);
+    }
+}
+
+#[test]
+fn mean_value3_on_a_face_plane_is_that_triangles_own_barycentric_coordinates() {
+    let (vertices, faces) = cube_mesh();
+    // Interior of the bottom face's first triangle (0, 2, 1), avoiding the
+    // shared diagonal.
+    let point = Point3::new(0.6, 0.2, 0.0);
+    let got = mean_value_coordinates3(&vertices, &faces, point, TOL).unwrap();
+    let tri = Triangle3::new(vertices[0], vertices[2], vertices[1]);
+    let want = triangle_barycentric3(&tri, point, TOL).unwrap();
+    let mut expected = vec![0.0; 8];
+    expected[0] = want[0];
+    expected[2] = want[1];
+    expected[1] = want[2];
+    close(&got, &expected, 1e-12);
+}
+
+#[test]
+fn mean_value3_rejects_bad_input() {
+    let (vertices, faces) = cube_mesh();
+    let point = Point3::new(0.5, 0.5, 0.5);
+    assert_eq!(
+        mean_value_coordinates3(&vertices, &faces, Point3::new(f64::NAN, 0.0, 0.0), TOL),
+        Err(BarycentricError::NonFinite)
+    );
+    assert_eq!(
+        mean_value_coordinates3(&vertices, &[], point, TOL),
+        Err(BarycentricError::TooFewVertices { count: 8 })
+    );
+    let bad_faces = vec![[0usize, 1, 99]];
+    assert_eq!(
+        mean_value_coordinates3(&vertices, &bad_faces, point, TOL),
+        Err(BarycentricError::VertexIndex {
+            face: 0,
+            index: 99,
+            len: 8
+        })
+    );
+    let two_points = vec![Point3::ZERO, Point3::X];
+    assert_eq!(
+        mean_value_coordinates3(&two_points, &faces, point, TOL),
+        Err(BarycentricError::TooFewVertices { count: 2 })
+    );
+    // The index one past the last valid vertex: still out of range.
+    let boundary_faces = vec![[0usize, 1, vertices.len()]];
+    assert_eq!(
+        mean_value_coordinates3(&vertices, &boundary_faces, point, TOL),
+        Err(BarycentricError::VertexIndex {
+            face: 0,
+            index: vertices.len(),
+            len: vertices.len(),
+        })
     );
 }

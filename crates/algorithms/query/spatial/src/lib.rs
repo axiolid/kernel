@@ -31,7 +31,8 @@ pub mod index;
 pub mod points;
 
 pub use barycentric::{
-    mean_value_coordinates2, tetrahedron_barycentric, triangle_barycentric2, triangle_barycentric3,
+    discrete_harmonic_coordinates2, mean_value_coordinates2, mean_value_coordinates3,
+    tetrahedron_barycentric, triangle_barycentric2, triangle_barycentric3, wachspress_coordinates2,
     BarycentricError,
 };
 pub use bvh::{Bvh, CandidatePair, NearestCandidate, PairCandidates, SpatialQueryStats};
