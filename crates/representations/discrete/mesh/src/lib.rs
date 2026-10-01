@@ -4,12 +4,15 @@
 //!
 //! N-gons remain [`PolygonMesh`] until explicit triangulation. [`TriMesh`] is
 //! the compact exchange type for render, spatial, and mesh-kernel algorithms.
+//! [`HalfedgeMesh`] is the editable surface mesh with O(1) adjacency for
+//! algorithms that rewrite connectivity in place.
 
 pub mod adjacency;
 pub mod attribute;
 pub mod audit;
 pub mod component;
 pub mod error;
+pub mod halfedge;
 pub mod polygon;
 pub mod triangle;
 pub mod view;
@@ -19,6 +22,10 @@ pub use attribute::{AttributeChannel, AttributeFate, Blend, DropReason};
 pub use audit::{audit_mesh, audit_mesh_scratch_bytes, try_audit_mesh, MeshAuditError, MeshHealth};
 pub use component::{component_count, compose, decompose};
 pub use error::MeshValidationError;
+pub use halfedge::{
+    EdgeId, FaceId, HalfedgeBuildError, HalfedgeEditError, HalfedgeId, HalfedgeInvariantError,
+    HalfedgeMesh, HalfedgeRemap, VertexId,
+};
 pub use polygon::{PolygonFace, PolygonMesh};
 pub use triangle::{NormalAttribute, TriMesh};
 pub use view::{MeshView, TriangleMeshView};

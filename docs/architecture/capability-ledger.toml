@@ -717,8 +717,8 @@ area = "mesh"
 name = "mesh data structure (halfedge/surface mesh)"
 issue = "halfedge-mesh"
 level = "narrow"
-summary = "TriMesh/PolygonMesh are index-buffer structures with derived EdgeAdjacency, not a persistent halfedge/DCEL mesh type; the only true halfedge DCEL in the repo is 2D (axiolid-arrangement), not a 3D mesh."
-evidence = ["crates/representations/discrete/mesh/src/lib.rs", "crates/representations/discrete/mesh/src/adjacency.rs::build", "crates/representations/discrete/mesh/tests/adjacency.rs::a_boundary_edge_is_used_once"]
+summary = "axiolid-mesh HalfedgeMesh: index-based halfedge structure in CGAL Surface_mesh layout (edge e owns halfedges 2e and 2e+1) over oriented 2-manifolds with boundary and polygonal faces. O(1) next/prev/opposite/source/target/face/edge, counter-clockwise vertex circulators, face loops, boundary loops; local edits that keep every invariant and the Euler characteristic: flip_edge, split_edge, collapse_edge (Dey et al. link condition, tetrahedron and lone-triangle guards), split_face, split_face_diagonal, plus fill_hole and compact; exact round-trip with TriMesh. Refused by name: edges shared by three or more faces, pinched vertices (CGAL represents these as multiple umbrellas), inconsistent winding and so non-orientable surfaces, degenerate faces. Not provided: per-element property maps (normals and attribute channels are not carried into the halfedge mesh) and face or vertex removal."
+evidence = ["crates/representations/discrete/mesh/src/halfedge.rs::HalfedgeMesh", "crates/representations/discrete/mesh/src/halfedge/edit.rs::collapse_edge", "crates/representations/discrete/mesh/src/halfedge/build.rs::HalfedgeBuildError", "crates/representations/discrete/mesh/tests/halfedge.rs::random_edits_on_a_torus_keep_every_invariant", "crates/representations/discrete/mesh/tests/halfedge.rs::a_collapse_violating_the_link_condition_is_refused", "crates/representations/discrete/mesh/tests/halfedge.rs::two_closed_fans_at_one_vertex_are_refused_by_name"]
 occt = ["src/FoundationClasses/TKMath/Poly"]
 cgal = ["Surface_mesh", "Polyhedron", "HalfedgeDS"]
 

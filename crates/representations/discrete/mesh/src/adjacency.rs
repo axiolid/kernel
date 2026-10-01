@@ -23,8 +23,9 @@
 //! nothing needs mutable topology, and a mutable structure would add an
 //! invariant to maintain for no consumer.
 //!
-//! The name says what it is. If in-place connectivity editing ever appears,
-//! that is a separate type, not a field bolted onto this one.
+//! The name says what it is. In-place connectivity editing is the separate
+//! type [`HalfedgeMesh`](crate::HalfedgeMesh), not a field bolted onto this
+//! one.
 //!
 //! # Degenerate triangles
 //!
