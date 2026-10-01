@@ -772,6 +772,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-tetrahedralize"
+version = "0.1.0"
+dependencies = [
+ "axiolid-core",
+ "axiolid-guarantees",
+ "axiolid-predicates",
+]
+
+[[package]]
 name = "axiolid-topology"
 version = "0.3.1"
 dependencies = [

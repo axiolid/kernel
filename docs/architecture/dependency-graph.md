@@ -68,6 +68,7 @@ graph TD
     axiolid_spatial["axiolid-spatial\nalgorithm.query"]
     axiolid_surface["axiolid-surface\nrepresentation.atomic"]
     axiolid_tessellation_contract["axiolid-tessellation-contract\ncontract.operation"]
+    axiolid_tetrahedralize["axiolid-tetrahedralize\nalgorithm.discrete"]
     axiolid_topology["axiolid-topology\nrepresentation.topology"]
     axiolid_triangulate["axiolid-triangulate\nalgorithm.planar"]
     xtask["xtask\ntool.architecture"]
@@ -386,6 +387,9 @@ graph TD
     axiolid_tessellation_contract --> axiolid_core
     axiolid_tessellation_contract --> axiolid_mesh
     axiolid_tessellation_contract --> axiolid_model
+    axiolid_tetrahedralize --> axiolid_core
+    axiolid_tetrahedralize --> axiolid_guarantees
+    axiolid_tetrahedralize --> axiolid_predicates
     axiolid_topology --> axiolid_core
     axiolid_triangulate --> axiolid_core
     axiolid_triangulate --> axiolid_guarantees

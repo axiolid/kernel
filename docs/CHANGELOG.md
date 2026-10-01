@@ -110,6 +110,19 @@ All notable changes to Axiolid are documented in this file.
   closed forms (clustered and multiple roots, endpoint-singular integrals,
   Hilbert systems, Rosenbrock and Powell's singular function) with each
   error estimate compared to the true error, plus a mutation probe.
+- `axiolid-tetrahedralize` 0.1.0 (#126): exact incremental 3D Delaunay
+  tetrahedralization (`Delaunay3`). Bowyer-Watson insertion in Hilbert
+  order, located by a stochastic visibility walk, with an infinite vertex
+  for the convex hull. `orient3d` and `insphere` decide every step exactly;
+  ties (cospherical points, points in a hull face's plane, decided by the
+  new `in_diametral_sphere`) are broken by a symbolic perturbation of the
+  lifted points, so a point set has one triangulation whatever the
+  insertion order. Duplicates are merged; fewer than three dimensions and
+  coordinates outside `[2^-100, 2^100]` are refused by name. Checked
+  against brute force (empty spheres, orientation, adjacency, Euler,
+  convex hull, sampled coverage) on grids, lattice spheres, coplanar
+  layers and random sets, plus a 21-fault mutation probe. Constraints
+  (segments, faces) are not recovered yet.
 
 ### Changed
 
@@ -133,6 +146,10 @@ All notable changes to Axiolid are documented in this file.
 
 ### Fixed
 
+- `axiolid-predicates`: the `insphere` filter's error bound used the rounded
+  3x3 minors instead of Shewchuk's permanent, and certified a non-zero sign
+  for exactly cospherical points (#126). Found by the 3D Delaunay tests;
+  the bound is now Shewchuk's.
 - Exact revolutions were built inside out (#125): their surface frames were
   left-handed, so every face pointed into the solid. Both audits passed it;
   measuring the result gave `-2 pi R A`. The frames are now right-handed.

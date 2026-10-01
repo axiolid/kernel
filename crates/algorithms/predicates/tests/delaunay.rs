@@ -244,3 +244,74 @@ fn near_degenerate_delaunay_cases_recover_a_definite_sign() {
     assert!(deferred > 1_000, "insphere: only {deferred} deferred");
     assert!(definite > 1_000, "insphere: only {definite} definite");
 }
+
+/// Lattice points of the sphere of radius `m^2 + 2` from the Pythagorean
+/// quadruple `(m^2, 2, 2m)`: every sign and permutation, plus the six axis
+/// points. All exactly cospherical, with coordinate differences spanning
+/// many bits.
+fn quadruple_sphere(m: f64) -> Vec<Point3> {
+    let r = m * m + 2.0;
+    let base = [m * m, 2.0, 2.0 * m];
+    let mut points = Vec::new();
+    for perm in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        for signs in 0..8u32 {
+            let s = |k: u32| if (signs >> k) & 1 == 1 { -1.0 } else { 1.0 };
+            points.push(Point3::new(
+                s(0) * base[perm[0]],
+                s(1) * base[perm[1]],
+                s(2) * base[perm[2]],
+            ));
+        }
+    }
+    for axis in 0..3 {
+        for sign in [-1.0, 1.0] {
+            let mut c = [0.0; 3];
+            c[axis] = sign * r;
+            points.push(Point3::new(c[0], c[1], c[2]));
+        }
+    }
+    points
+}
+
+/// The `insphere` filter must never certify a sign for exactly cospherical
+/// points (#126). It used to bound its error by the rounded 3x3 minors
+/// instead of by the absolute values of the elementary products, and
+/// certified "outside" for five points of one sphere whose tetrahedron was
+/// thin.
+#[test]
+fn insphere_never_certifies_a_sign_for_cospherical_points() {
+    let (m, k) = (16_785_409.0, 8194.0);
+    let thin = [
+        Point3::new(-2.0, -k, -m),
+        Point3::new(-k, 2.0, -m),
+        Point3::new(2.0, -k, -m),
+        Point3::new(-k, -m, 2.0),
+        Point3::new(2.0, -m, -k),
+    ];
+    assert!(!insphere_filter(thin[0], thin[1], thin[2], thin[3], thin[4]).is_certain());
+    assert_eq!(
+        insphere(thin[0], thin[1], thin[2], thin[3], thin[4]).sign(),
+        Some(Sign::Zero)
+    );
+
+    for m in [65.0, 1025.0, 4097.0] {
+        let points = quadruple_sphere(m);
+        let mut state = 0x5DEE_CE66_D1CE_4E5Bu64;
+        for _ in 0..50_000 {
+            let mut pick = || points[(rng(&mut state) as usize) % points.len()];
+            let (a, b, c, d, e) = (pick(), pick(), pick(), pick(), pick());
+            assert_eq!(
+                insphere(a, b, c, d, e).sign(),
+                Some(Sign::Zero),
+                "{a:?} {b:?} {c:?} {d:?} {e:?}"
+            );
+        }
+    }
+}

@@ -217,7 +217,7 @@ fn determinant_terms_are_representable(
 }
 
 #[must_use]
-fn highest_bit_exponent(value: f64) -> i32 {
+pub(crate) fn highest_bit_exponent(value: f64) -> i32 {
     let bits = value.abs().to_bits();
     let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
     if encoded_exponent == 0 {
@@ -229,7 +229,7 @@ fn highest_bit_exponent(value: f64) -> i32 {
 }
 
 #[must_use]
-fn least_significant_bit_exponent(value: f64) -> i32 {
+pub(crate) fn least_significant_bit_exponent(value: f64) -> i32 {
     let bits = value.abs().to_bits();
     let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
     let fraction = bits & ((1_u64 << 52) - 1);

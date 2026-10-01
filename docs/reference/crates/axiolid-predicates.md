@@ -17,9 +17,10 @@ Certified exact-arithmetic geometric predicates.
 
 ## Overview
 
-Certified geometric predicates: `orient2d`, `orient3d`, `incircle` and
-`insphere`, built on error-free transformations and expansion arithmetic,
-with static filters for callers that can bound their coordinates. Every
+Certified geometric predicates: `orient2d`, `orient3d`, `incircle`,
+`insphere` and `in_diametral_sphere`, built on error-free transformations
+and expansion arithmetic, with static filters for callers that can bound
+their coordinates. Every
 public predicate is a filtered cascade that escalates to exact arithmetic
 instead of comparing against an epsilon, and returns a `Certified` sign.
 The crate is deliberately narrow: no curve, surface, mesh, B-rep, provider

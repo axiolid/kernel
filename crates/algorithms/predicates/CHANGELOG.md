@@ -9,6 +9,32 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `in_diametral_sphere` and `in_diametral_sphere_filter` (#126): is a point
+  inside the smallest sphere through a triangle? For a point in the
+  triangle's plane this is the coplanar in-circle test in 3D, which a 3D
+  Delaunay triangulation needs for points in the plane of a hull face. A
+  running-error filter, then exact expansions; `Uncertain` outside the
+  exactly evaluable range (non-zero coordinates beyond `[2^-100, 2^100]`).
+
+### Fixed
+
+- `insphere_filter` bounded its rounding error by the rounded 3x3 minors
+  instead of by the absolute values of the elementary products (Shewchuk's
+  permanent). When a minor cancelled, the bound was far too small, and the
+  filter certified a non-zero sign for exactly cospherical points -- five
+  lattice points of one sphere, four of them on a thin tetrahedron, were
+  reported strictly outside (#126). The permanent is now Shewchuk's.
+
+### Changed
+
+- `insphere`'s exact path first tries `i128` arithmetic when every
+  coordinate difference is exact and all lie on one dyadic grid spanning
+  fewer than 20 bits (integer lattices, for instance), and falls back to the
+  expansions otherwise. Exactly cospherical lattice points reach the exact
+  path on every call; this keeps it from allocating there.
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

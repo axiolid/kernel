@@ -50,6 +50,7 @@ members = [
     "crates/algorithms/discrete/decompose",
     "crates/algorithms/discrete/minkowski",
     "crates/algorithms/discrete/refine",
+    "crates/algorithms/discrete/tetrahedralize",
     "crates/algorithms/sampled/levelset",
     "crates/providers/mesh/boolmesh",
     "crates/providers/pointcloud/sdf",
@@ -88,6 +89,7 @@ axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.3.1" }
 axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.3.1" }
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.1" }
+axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", version = "0.1.0" }
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.2" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.4" }

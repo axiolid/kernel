@@ -504,6 +504,15 @@
       "role": "contract.operation",
       "version": "0.3.1"
     },
+    "axiolid-tetrahedralize": {
+      "description": "Exact 3D Delaunay tetrahedralization with symbolic perturbation",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/tetrahedralize",
+      "released": null,
+      "released_date": null,
+      "role": "algorithm.discrete",
+      "version": "0.1.0"
+    },
     "axiolid-topology": {
       "description": "Typed-handle B-rep topology independent of curve and surface implementations",
       "layer": "representations",
@@ -594,6 +603,7 @@
           "axiolid-refine",
           "axiolid-route",
           "axiolid-spatial",
+          "axiolid-tetrahedralize",
           "axiolid-triangulate"
         ],
         "key": "algorithms",

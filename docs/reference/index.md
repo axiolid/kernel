@@ -76,6 +76,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.1 | Mesh refinement and smoothing with bounded, reported deviation |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.6 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.3 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
+| [`axiolid-tetrahedralize`](./crates/axiolid-tetrahedralize) | `algorithm.discrete` | not released | Exact 3D Delaunay tetrahedralization with symbolic perturbation |
 | [`axiolid-triangulate`](./crates/axiolid-triangulate) | `algorithm.planar` | 0.3.2 | Constrained Delaunay triangulation with bounded quality refinement |
 
 ## Providers
