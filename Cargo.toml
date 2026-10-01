@@ -27,6 +27,7 @@ members = [
     "crates/contracts/operations/tessellate",
     "crates/algorithms/predicates",
     "crates/algorithms/exact",
+    "crates/algorithms/numeric",
     "crates/algorithms/reference",
     "crates/algorithms/parametric/evaluate",
     "crates/algorithms/parametric/nurbs",
@@ -116,6 +117,7 @@ num-bigint = { version = "0.5.1", default-features = false, features = ["std"] }
 num-integer = { version = "0.1.46", default-features = false, features = ["std"] }
 axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.2", default-features = false }
 axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.2" }
+axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.0" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.2" }

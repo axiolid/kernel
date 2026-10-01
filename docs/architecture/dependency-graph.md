@@ -50,6 +50,7 @@ graph TD
     axiolid_mesh_section_contract["axiolid-mesh-section-contract\ncontract.operation"]
     axiolid_minkowski["axiolid-minkowski\nalgorithm.discrete"]
     axiolid_model["axiolid-model\nrepresentation.graph"]
+    axiolid_numeric["axiolid-numeric\nalgorithm.numeric"]
     axiolid_nurbs["axiolid-nurbs\nalgorithm.parametric"]
     axiolid_oracle["axiolid-oracle\ntool.oracle"]
     axiolid_overlay["axiolid-overlay\nalgorithm.planar"]

@@ -351,6 +351,15 @@
       "role": "representation.graph",
       "version": "0.3.3"
     },
+    "axiolid-numeric": {
+      "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
+      "layer": "algorithms",
+      "path": "crates/algorithms/numeric",
+      "released": null,
+      "released_date": null,
+      "role": "algorithm.numeric",
+      "version": "0.1.0"
+    },
     "axiolid-nurbs": {
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
@@ -575,6 +584,7 @@
           "axiolid-linear-intersection",
           "axiolid-measure",
           "axiolid-minkowski",
+          "axiolid-numeric",
           "axiolid-nurbs",
           "axiolid-overlay",
           "axiolid-predicates",
@@ -616,6 +626,6 @@
         "title": "Facade"
       }
     ],
-    "total": 57
+    "total": 58
   }
 }

@@ -4,7 +4,7 @@
 
 # Crate reference
 
-Axiolid publishes 57 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
+Axiolid publishes 58 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
 
 Every page here is generated from the crate itself: its manifest, its crate documentation and its changelog. Sections follow the layers of the [crate map](/architecture/crate-map).
 
@@ -66,6 +66,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.1 | Portable, deterministic intersections for linear geometry |
 | [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.5 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.1 | Minkowski sum and difference of planar-faced solids |
+| [`axiolid-numeric`](./crates/axiolid-numeric) | `algorithm.numeric` | not released | Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates |
 | [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.4 | General polynomial and rational B-spline analysis and transformation algorithms |
 | [`axiolid-overlay`](./crates/axiolid-overlay) | `algorithm.planar` | 0.3.9 | Deterministic validated planar overlay contract |
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.2 | Certified exact-arithmetic geometric predicates |

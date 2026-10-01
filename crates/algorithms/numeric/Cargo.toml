@@ -1,0 +1,22 @@
+[package]
+name = "axiolid-numeric"
+description = "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+authors.workspace = true
+
+[dependencies]
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.numeric"
+domain = "numeric.substrate"
+public = true
+format-neutral = true
+allowed-internal-dependencies = []

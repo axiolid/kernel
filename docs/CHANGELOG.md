@@ -99,6 +99,17 @@ All notable changes to Axiolid are documented in this file.
   parameters instead of refusing them. Checked against closed forms (Pappus,
   parallel-axis moments, hemispheres, cones, a half torus) and an 18-fault
   mutation probe.
+- `axiolid-numeric` 0.1.0 (#136): a shared numeric substrate with no
+  dependencies. Brent root finding returning a proven bracket; every real
+  root of a polynomial in an interval, with multiple roots and inseparable
+  clusters reported as unresolved regions rather than guessed; adaptive
+  Gauss-Kronrod quadrature with an error estimate and Gauss-Legendre rules;
+  LU, Cholesky and column-pivoted QR with condition and error estimates;
+  linear least squares with and without equality constraints;
+  Levenberg-Marquardt and a bounded scalar minimiser. Checked against
+  closed forms (clustered and multiple roots, endpoint-singular integrals,
+  Hilbert systems, Rosenbrock and Powell's singular function) with each
+  error estimate compared to the true error, plus a mutation probe.
 
 ### Changed
 
