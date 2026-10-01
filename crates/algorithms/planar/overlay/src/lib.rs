@@ -4,6 +4,7 @@ mod arc;
 mod arc_overlay;
 mod arrangement;
 mod circle;
+mod convex_parts;
 mod exact_arc;
 mod exact_overlay;
 mod minkowski;

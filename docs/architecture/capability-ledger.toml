@@ -203,13 +203,6 @@ effort = "Low"
 number = 144
 
 [[issue]]
-key = "minkowski-2d"
-title = "2D Minkowski sum for non-convex polygons"
-priority = "Medium"
-effort = "Medium"
-number = 145
-
-[[issue]]
 key = "frechet-distance"
 title = "Discrete and continuous Frechet distance between polylines"
 priority = "Low"
@@ -1090,10 +1083,9 @@ scope_rationale = "Lower and upper envelopes serve computational-geometry resear
 id = "F6"
 area = "planar"
 name = "Minkowski sum 2D"
-issue = "minkowski-2d"
-level = "narrow"
-summary = "Region::minkowski_sum and Region::minkowski_erosion (axiolid-overlay): the sum and erosion of a straight-edged region -- non-convex, with holes -- by a convex polygon (any rotation), decided exactly in one ArcArrangement (ADR 0070): the region translated by a vertex of the polygon united with the convex hull of the polygon at both ends of every boundary edge, erosion as the region minus the sum of its complement with the reflected polygon. Vertex sums are rounded once, output vertices once. Refused by name (MinkowskiError::NotConvex): a non-convex structuring polygon, i.e. non-convex with non-convex. The 3D axiolid-minkowski crate covers planar-faced solids (H2)."
-evidence = ["crates/algorithms/planar/overlay/src/minkowski.rs::minkowski_sum", "crates/algorithms/planar/overlay/tests/minkowski.rs", "crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum"]
+level = "implemented"
+summary = "Region::minkowski_sum and Region::minkowski_erosion by a polygon, and Region::minkowski_sum_region and Region::minkowski_erosion_region by a region (axiolid-overlay): sums and erosions of straight-edged regions -- non-convex, with holes, several components -- by polygons or regions that are equally general, decided exactly in one ArcArrangement (ADR 0070). A convex polygon is summed whole (the region translated by a vertex of it, united with the convex hull of the polygon at both ends of every boundary edge). A non-convex polygon (holes bridged in) is ear-clipped and merged across diagonals while convex (Hertel-Mehlhorn), every decision an exact orientation and the cut certified to tile it (the triangles' boundaries sum to the polygon's); each convex piece is summed with every boundary edge in the same arrangement. Without a certified cut the sum is taken from edge-pair parallelograms plus a translate of each operand by a vertex of the other. Erosion is the region minus the sum of its complement with the reflected shape, anchored by the region moved by a point of the shape (so a shape away from the origin erodes correctly). The region sum cuts the operand with fewer vertices. Vertex sums are rounded once, output vertices once. Straight edges only: curved operands are served by Region::dilate and the disc bounds. The 3D axiolid-minkowski crate covers planar-faced solids (H2)."
+evidence = ["crates/algorithms/planar/overlay/src/minkowski.rs::minkowski_sum", "crates/algorithms/planar/overlay/src/minkowski.rs::minkowski_sum_region", "crates/algorithms/planar/overlay/src/minkowski.rs::minkowski_erosion_region", "crates/algorithms/planar/overlay/src/convex_parts.rs::convex_parts", "scripts/probe_minkowski_mutants.py", "crates/algorithms/planar/overlay/tests/minkowski.rs", "crates/algorithms/discrete/minkowski/src/lib.rs::minkowski_sum"]
 occt = []
 cgal = ["Minkowski_sum_2"]
 

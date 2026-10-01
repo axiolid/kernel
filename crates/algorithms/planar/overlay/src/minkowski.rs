@@ -1,9 +1,10 @@
-//! Minkowski sums and erosions of a region by a convex polygon (#145), and
-//! disc morphology with a known side of error (#163).
+//! Minkowski sums and erosions of a region by a polygon or a region,
+//! convex or not (#145), and disc morphology with a known side of error
+//! (#163).
 //!
 //! # One arrangement per operation
 //!
-//! For a region `R` and a convex polygon `K`, and any vertex `k0` of `K`,
+//! For a region `R`, a connected shape `K` and any point `k0` of `K`,
 //!
 //! ```text
 //! R + K = (R + k0)  union  (union over boundary edges e of R: e + K)
@@ -11,10 +12,22 @@
 //!
 //! since a point `x` has `x - K` meeting `R` either through the boundary
 //! (then `x` lies in some `e + K`) or wholly inside (then `x - k0` is in
-//! `R`). Each `e + K` is the convex hull of `K + a` and `K + b`, `e` running
-//! from `a` to `b`. The erosion `R - K` (the points `x` with `x + K` inside
-//! `R`) is `R` minus the sum of its complement with `-K`, the complement
-//! taken within a box large enough that nothing beyond it matters.
+//! `R`). For a convex `K`, `e + K` is the convex hull of `K + a` and
+//! `K + b`, `e` running from `a` to `b`. A non-convex `K` -- with holes, if
+//! it is a region's polygon -- is cut into convex pieces `P` with its own
+//! vertices (`convex_parts`: ear clipping and Hertel-Mehlhorn
+//! merging, the cut certified to tile `K`), and `e + K` is the union of the
+//! hulls `e + P`. A shape of several polygons is the union of their sums.
+//! Should no certified cut be found, `R + B` is taken from the
+//! parallelograms `f + g` of boundary edge pairs, `R` moved by a vertex of
+//! `B`, and `B` moved by a vertex of every ring of `R`: if neither
+//! boundary meets the other yet the two sets do, an outer ring of one lies
+//! inside the other.
+//!
+//! The erosion `R - K` (the points `x` with `x + K` inside `R`) is `R - k0`
+//! minus the sum of the complement of `R` with `-K`, the complement taken
+//! within a box large enough that nothing beyond it matters; when `K`
+//! holds the origin, `R` itself stands in for `R - k0`.
 //!
 //! All the rings -- the region's own, the translated ones and the pieces --
 //! go into one [`ArcArrangement`] (ADR 0070): where boundaries cross, which
@@ -52,11 +65,14 @@ use crate::{validate_ring, OverlayError, Polygon, Ring};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MinkowskiError {
-    /// The structuring polygon is not convex. Sums with a non-convex
-    /// polygon are not built yet (#145).
+    /// The structuring polygon is not convex. No longer returned: sums
+    /// and erosions with a non-convex polygon are built since 0.3.10
+    /// (#145); kept so that matches on it still compile.
     NotConvex,
     /// An operand or the result failed the overlay's own checks.
     Overlay(OverlayError),
+    /// An erosion by an empty region, under which every point qualifies.
+    EmptyStructuring,
 }
 
 impl From<OverlayError> for MinkowskiError {
@@ -104,7 +120,7 @@ impl SignExpr for Orient {
     }
 }
 
-fn orient(a: Point2, b: Point2, c: Point2) -> Sign {
+pub(crate) fn orient(a: Point2, b: Point2, c: Point2) -> Sign {
     certify(&Orient { a, b, c }).unwrap_or(Sign::Zero)
 }
 
@@ -206,30 +222,184 @@ fn tidy(points: Vec<Point2>, tolerance: Tolerance) -> Option<ArcRing> {
     (out.len() >= 3).then(|| ArcRing::from_points(&out))
 }
 
-/// The rings whose union with the translated set is the sum of the set
-/// bounded by `rings` with `k`: the rings translated by `k[0]`, and each
-/// boundary edge's piece.
-fn sum_rings(
-    rings: &[Vec<Point2>],
-    k: &[Point2],
+/// One polygon of a structuring shape, as the sum takes it.
+#[derive(Debug, Clone)]
+pub(crate) enum Part {
+    /// Convex pieces, counter-clockwise, whose union is the polygon.
+    Pieces(Vec<Vec<Point2>>),
+    /// The polygon's rings, outer first: when no certified convex
+    /// decomposition was found, the sum is taken edge by edge instead.
+    Rings(Vec<Vec<Point2>>),
+}
+
+impl Part {
+    /// The part reflected through the origin.
+    fn flipped(&self) -> Self {
+        let flip = |v: &Vec<Point2>| v.iter().map(|q| Point2::new(-q.x, -q.y)).collect();
+        match self {
+            Self::Pieces(p) => Self::Pieces(p.iter().map(flip).collect()),
+            Self::Rings(r) => Self::Rings(r.iter().map(flip).collect()),
+        }
+    }
+
+    /// A point of the part, by which the other operand is translated.
+    fn anchor(&self) -> Point2 {
+        match self {
+            Self::Pieces(p) => p[0][0],
+            Self::Rings(r) => r[0][0],
+        }
+    }
+
+    fn points(&self) -> impl Iterator<Item = &Point2> {
+        match self {
+            Self::Pieces(p) | Self::Rings(p) => p.iter().flatten(),
+        }
+    }
+
+    /// Whether the origin lies in one of the convex pieces (closed). A
+    /// part taken by its rings answers `false`, which is always safe.
+    fn holds_origin(&self) -> bool {
+        let o = Point2::new(0.0, 0.0);
+        match self {
+            Self::Pieces(pieces) => pieces.iter().any(|piece| {
+                let h = hull(piece.clone());
+                h.len() >= 3
+                    && (0..h.len()).all(|i| orient(h[i], h[(i + 1) % h.len()], o) != Sign::Negative)
+            }),
+            Self::Rings(_) => false,
+        }
+    }
+}
+
+/// The part for one polygon: its convex hull when it is convex (the
+/// convex path, unchanged), else certified convex pieces, else its rings.
+fn polygon_part(
+    outer: &Ring,
+    holes: &[Ring],
     tolerance: Tolerance,
-) -> (Vec<ArcRing>, Vec<ArcRing>) {
+) -> Result<Part, MinkowskiError> {
+    if holes.is_empty() {
+        match convex(outer, tolerance) {
+            Ok(k) => return Ok(Part::Pieces(vec![k])),
+            Err(MinkowskiError::NotConvex) => {}
+            Err(other) => return Err(other),
+        }
+    }
+    let holes: Vec<Vec<Point2>> = holes.iter().map(|h| h.points.clone()).collect();
+    Ok(
+        match crate::convex_parts::convex_parts(&outer.points, &holes) {
+            Some(pieces) => Part::Pieces(pieces),
+            None => Part::Rings(std::iter::once(outer.points.clone()).chain(holes).collect()),
+        },
+    )
+}
+
+/// A set given by rings in the arrangement, read from the flags starting
+/// at its first ring.
+#[derive(Debug, Clone)]
+enum Set {
+    /// Polygons with holes laid out as [`rings_of`] lays them out (the
+    /// hole count per polygon).
+    Region(Vec<usize>),
+    /// A frame (the first ring) minus such polygons (the rings after it).
+    Outside(Vec<usize>),
+}
+
+impl Set {
+    fn holds(&self, flags: &[bool]) -> bool {
+        match self {
+            Self::Region(shape) => member(shape, flags),
+            Self::Outside(shape) => flags[0] && !member(shape, &flags[1..]),
+        }
+    }
+}
+
+/// The rings whose union is the sum of a set with a structuring shape,
+/// and how to read it from an arrangement's ring flags.
+struct Terms {
+    rings: Vec<ArcRing>,
+    /// Translated copies of a set: the first ring's index, and the set.
+    sets: Vec<(usize, Set)>,
+    /// Index of the first convex piece; every ring from there on is one.
+    pieces: usize,
+}
+
+impl Terms {
+    fn holds(&self, flags: &[bool]) -> bool {
+        self.sets.iter().any(|(at, set)| set.holds(&flags[*at..]))
+            || flags[self.pieces..].iter().any(|&f| f)
+    }
+}
+
+/// The sum of the set `set`, bounded by `rings`, with the union of `parts`.
+///
+/// For a connected part `K` and a point `k0` of it,
+/// `S + K = (S + k0) union (union over boundary edges e of S: e + K)`, and
+/// `e + K` is the union of `e + P` over convex pieces `P` of `K`, each the
+/// convex hull of `P + a` and `P + b`. A part taken by its rings `B` uses
+/// `S + B = (dS + dB) union (S + b0) union (a + B for a vertex a of every
+/// ring of S)`, `dS + dB` the parallelograms of edge pairs: if the
+/// boundaries of `x - B` and `S` do not meet yet the two do, an outer ring
+/// of one lies inside the other.
+fn sum_terms(rings: &[Vec<Point2>], set: &Set, parts: &[Part], tolerance: Tolerance) -> Terms {
     let shift = |p: Point2, by: Point2| Point2::new(p.x + by.x, p.y + by.y);
-    let translated = rings
-        .iter()
-        .map(|r| ArcRing::from_points(&r.iter().map(|&p| shift(p, k[0])).collect::<Vec<_>>()))
-        .collect();
-    let mut pieces = Vec::new();
-    for ring in rings {
-        for i in 0..ring.len() {
-            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
-            let points: Vec<Point2> = k.iter().flat_map(|&q| [shift(a, q), shift(b, q)]).collect();
-            if let Some(piece) = tidy(hull(points), tolerance) {
-                pieces.push(piece);
+    let moved = |r: &[Point2], by: Point2| {
+        ArcRing::from_points(&r.iter().map(|&p| shift(p, by)).collect::<Vec<_>>())
+    };
+    let mut out = Vec::new();
+    let mut sets = Vec::new();
+    for part in parts {
+        sets.push((out.len(), set.clone()));
+        out.extend(rings.iter().map(|r| moved(r, part.anchor())));
+        if let Part::Rings(own) = part {
+            let shape = vec![own.len() - 1];
+            for ring in rings {
+                sets.push((out.len(), Set::Region(shape.clone())));
+                out.extend(own.iter().map(|r| moved(r, ring[0])));
             }
         }
     }
-    (translated, pieces)
+    let pieces = out.len();
+    for ring in rings {
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            for part in parts {
+                match part {
+                    Part::Pieces(convex) => {
+                        for k in convex {
+                            let points: Vec<Point2> =
+                                k.iter().flat_map(|&q| [shift(a, q), shift(b, q)]).collect();
+                            out.extend(tidy(hull(points), tolerance));
+                        }
+                    }
+                    Part::Rings(own) => {
+                        for r in own {
+                            for j in 0..r.len() {
+                                let (p, q) = (r[j], r[(j + 1) % r.len()]);
+                                let points =
+                                    vec![shift(a, p), shift(a, q), shift(b, p), shift(b, q)];
+                                out.extend(tidy(hull(points), tolerance));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Terms {
+        rings: out,
+        sets,
+        pieces,
+    }
+}
+
+/// One part per polygon of a region.
+fn parts_of(region: &Region, tolerance: Tolerance) -> Result<Vec<Part>, MinkowskiError> {
+    region
+        .polygons()
+        .iter()
+        .map(|p| polygon_part(&p.outer, &p.holes, tolerance))
+        .collect()
 }
 
 /// The faces of `arrangement` where `inside` holds, as a region.
@@ -266,60 +436,121 @@ pub(crate) fn region_of(
 }
 
 impl Region {
-    /// The Minkowski sum with a convex polygon `convex`: every point of the
-    /// region moved by every point of the polygon.
+    /// The Minkowski sum with a polygon `ring`: every point of the region
+    /// moved by every point of the polygon. The polygon may be non-convex.
     ///
     /// Decided exactly (ADR 0070), with each vertex sum `a + k` rounded
-    /// once to `f64` and output vertices rounded once.
+    /// once to `f64` and output vertices rounded once. A convex polygon is
+    /// summed whole; a non-convex one is cut into convex pieces (its own
+    /// vertices, the cut certified to tile it) whose sums are united in
+    /// the same arrangement.
     ///
     /// # Errors
     ///
-    /// [`MinkowskiError::NotConvex`] for a polygon that is not convex; the
-    /// sum with a non-convex one is not built yet (#145).
-    pub fn minkowski_sum(
-        &self,
-        convex_ring: &Ring,
-        tolerance: Tolerance,
-    ) -> Result<Self, MinkowskiError> {
-        let k = convex(convex_ring, tolerance)?;
-        Ok(self.sum_with(&k, tolerance)?)
+    /// [`MinkowskiError::Overlay`] for a polygon the overlay refuses or a
+    /// refusal of the arrangement.
+    pub fn minkowski_sum(&self, ring: &Ring, tolerance: Tolerance) -> Result<Self, MinkowskiError> {
+        let part = polygon_part(ring, &[], tolerance)?;
+        Ok(self.sum_parts(&[part], tolerance)?)
     }
 
-    /// The Minkowski erosion by a convex polygon: the points `x` for which
-    /// the polygon moved by `x` lies within the region.
+    /// The Minkowski erosion by a polygon `ring`, convex or not: the points
+    /// `x` for which the polygon moved by `x` lies within the region.
     ///
     /// # Errors
     ///
     /// As [`Self::minkowski_sum`].
     pub fn minkowski_erosion(
         &self,
-        convex_ring: &Ring,
+        ring: &Ring,
         tolerance: Tolerance,
     ) -> Result<Self, MinkowskiError> {
-        let k = convex(convex_ring, tolerance)?;
-        Ok(self.erode_with(&k, tolerance)?)
+        let part = polygon_part(ring, &[], tolerance)?;
+        Ok(self.erode_parts(&[part], tolerance)?)
+    }
+
+    /// The Minkowski sum with another region -- both may be non-convex,
+    /// have holes and several components: every point of one moved by
+    /// every point of the other. Symmetric in the two regions.
+    ///
+    /// The region with fewer vertices is cut into convex pieces and the
+    /// other summed with each, all in one exact arrangement, rounded as
+    /// [`Self::minkowski_sum`] rounds.
+    ///
+    /// # Errors
+    ///
+    /// [`MinkowskiError::Overlay`] for a refusal of the arrangement.
+    pub fn minkowski_sum_region(
+        &self,
+        other: &Self,
+        tolerance: Tolerance,
+    ) -> Result<Self, MinkowskiError> {
+        if self.is_empty() || other.is_empty() {
+            return Ok(Self::empty());
+        }
+        let size = |r: &Self| {
+            r.polygons()
+                .iter()
+                .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+                .map(|r| r.points.len())
+                .sum::<usize>()
+        };
+        let (base, cut) = if size(self) < size(other) {
+            (other, self)
+        } else {
+            (self, other)
+        };
+        let parts = parts_of(cut, tolerance)?;
+        Ok(base.sum_parts(&parts, tolerance)?)
+    }
+
+    /// The Minkowski erosion by another region: the points `x` for which
+    /// the other region moved by `x` lies within this one.
+    ///
+    /// # Errors
+    ///
+    /// [`MinkowskiError::EmptyStructuring`] for an empty `other` (every
+    /// point would qualify), and as [`Self::minkowski_sum_region`].
+    pub fn minkowski_erosion_region(
+        &self,
+        other: &Self,
+        tolerance: Tolerance,
+    ) -> Result<Self, MinkowskiError> {
+        if other.is_empty() {
+            return Err(MinkowskiError::EmptyStructuring);
+        }
+        let parts = parts_of(other, tolerance)?;
+        Ok(self.erode_parts(&parts, tolerance)?)
     }
 
     fn sum_with(&self, k: &[Point2], tolerance: Tolerance) -> Result<Self, OverlayError> {
+        self.sum_parts(&[Part::Pieces(vec![k.to_vec()])], tolerance)
+    }
+
+    fn erode_with(&self, k: &[Point2], tolerance: Tolerance) -> Result<Self, OverlayError> {
+        self.erode_parts(&[Part::Pieces(vec![k.to_vec()])], tolerance)
+    }
+
+    pub(crate) fn sum_parts(
+        &self,
+        parts: &[Part],
+        tolerance: Tolerance,
+    ) -> Result<Self, OverlayError> {
         if self.is_empty() {
             return Ok(Self::empty());
         }
         let own = rings_of(self.polygons());
         let shape: Vec<usize> = self.polygons().iter().map(|p| p.holes.len()).collect();
-        let (translated, pieces) = sum_rings(&own, k, tolerance);
-        let n = translated.len();
-        let mut rings = translated;
-        rings.extend(pieces);
-        let arrangement = ArcArrangement::new(&rings, tolerance)?;
-        region_of(
-            &arrangement,
-            |flags| member(&shape, &flags[..n]) || flags[n..].iter().any(|&f| f),
-            true,
-            tolerance,
-        )
+        let terms = sum_terms(&own, &Set::Region(shape), parts, tolerance);
+        let arrangement = ArcArrangement::new(&terms.rings, tolerance)?;
+        region_of(&arrangement, |flags| terms.holds(flags), true, tolerance)
     }
 
-    fn erode_with(&self, k: &[Point2], tolerance: Tolerance) -> Result<Self, OverlayError> {
+    pub(crate) fn erode_parts(
+        &self,
+        parts: &[Part],
+        tolerance: Tolerance,
+    ) -> Result<Self, OverlayError> {
         if self.is_empty() {
             return Ok(Self::empty());
         }
@@ -335,8 +566,9 @@ impl Region {
             lo = lo.min(*p);
             hi = hi.max(*p);
         }
-        let reach = k
+        let reach = parts
             .iter()
+            .flat_map(Part::points)
             .fold(0.0_f64, |m, q| m.max(q.x.abs()).max(q.y.abs()));
         let pad = 2.0 * reach + (hi - lo).max_element() + 1.0;
         let frame = vec![
@@ -347,20 +579,28 @@ impl Region {
         ];
         let mut outside = vec![frame];
         outside.extend(own.iter().cloned());
-        let flipped: Vec<Point2> = k.iter().map(|q| Point2::new(-q.x, -q.y)).collect();
-        let (translated, pieces) = sum_rings(&outside, &flipped, tolerance);
+        let flipped: Vec<Part> = parts.iter().map(Part::flipped).collect();
+        let terms = sum_terms(&outside, &Set::Outside(shape.clone()), &flipped, tolerance);
         let m = own.len();
-        let t = translated.len();
         let mut rings: Vec<ArcRing> = own.iter().map(|r| ArcRing::from_points(r)).collect();
-        rings.extend(translated);
-        rings.extend(pieces);
+        rings.extend(terms.rings.iter().cloned());
         let arrangement = ArcArrangement::new(&rings, tolerance)?;
-        let in_outside = |flags: &[bool]| flags[0] && !member(&shape, &flags[1..]);
+        // A point of the erosion moved by the anchor `k0` of the first
+        // part lies in the region: when the origin is in K that is implied
+        // by the region itself; otherwise it is read from the region moved
+        // by `-k0`, whose rings follow the frame's in the first translated
+        // copy (frame minus region).
+        let origin = parts.iter().any(Part::holds_origin);
+        let first = m + terms.sets[0].0 + 1;
         region_of(
             &arrangement,
             |flags| {
-                member(&shape, &flags[..m])
-                    && !(in_outside(&flags[m..m + t]) || flags[m + t..].iter().any(|&f| f))
+                let anchored = if origin {
+                    member(&shape, &flags[..m])
+                } else {
+                    member(&shape, &flags[first..])
+                };
+                anchored && !terms.holds(&flags[m..])
             },
             true,
             tolerance,
@@ -478,5 +718,120 @@ impl Region {
         };
         out.set_bound(MorphologyBound { side, deviation });
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Polygon;
+
+    fn ring(points: &[(f64, f64)]) -> Ring {
+        Ring {
+            points: points.iter().map(|&(x, y)| Point2::new(x, y)).collect(),
+        }
+    }
+
+    fn u_with_hole() -> Region {
+        Region::new(
+            vec![Polygon {
+                outer: ring(&[
+                    (0.0, 0.0),
+                    (6.0, 0.0),
+                    (6.0, 5.0),
+                    (4.0, 5.0),
+                    (4.0, 2.0),
+                    (2.0, 2.0),
+                    (2.0, 5.0),
+                    (0.0, 5.0),
+                ]),
+                holes: vec![ring(&[(0.5, 0.5), (1.5, 0.5), (1.5, 1.5), (0.5, 1.5)])],
+            }],
+            Tolerance::METRE,
+        )
+        .unwrap()
+    }
+
+    fn shapes() -> Vec<(Ring, Vec<Ring>)> {
+        vec![
+            // An L-shape.
+            (
+                ring(&[
+                    (0., 0.),
+                    (0.8, 0.),
+                    (0.8, 0.4),
+                    (0.4, 0.4),
+                    (0.4, 0.8),
+                    (0., 0.8),
+                ]),
+                vec![],
+            ),
+            // A dart off the origin, clockwise.
+            (
+                ring(&[(0.6, 0.4), (0.3, 1.0), (1.5, 0.4), (0.3, -0.2)]),
+                vec![],
+            ),
+            // A square ring.
+            (
+                ring(&[(-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)]),
+                vec![ring(&[(-0.3, -0.3), (0.3, -0.3), (0.3, 0.3), (-0.3, 0.3)])],
+            ),
+        ]
+    }
+
+    fn apart(a: &Region, b: &Region) -> f64 {
+        let t = Tolerance::METRE;
+        a.difference(b, t).unwrap().area() + b.difference(a, t).unwrap().area()
+    }
+
+    #[test]
+    fn non_convex_polygons_are_cut_into_few_convex_pieces() {
+        let pieces: Vec<usize> = shapes()
+            .iter()
+            .map(
+                |(outer, holes)| match polygon_part(outer, holes, Tolerance::METRE).unwrap() {
+                    Part::Pieces(p) => p.len(),
+                    Part::Rings(_) => panic!("not decomposed"),
+                },
+            )
+            .collect();
+        assert_eq!(pieces[0], 2);
+        assert_eq!(pieces[1], 2);
+        assert!(pieces[2] <= 6, "{pieces:?}");
+    }
+
+    #[test]
+    fn the_edge_pair_route_agrees_with_the_convex_pieces() {
+        // The route taken when no certified decomposition is found. The
+        // small square fits wholly inside the shapes, where only the shape
+        // moved by its vertex finds it.
+        let t = Tolerance::METRE;
+        let small = Region::new(
+            vec![Polygon {
+                outer: ring(&[(3.0, 3.0), (3.1, 3.0), (3.1, 3.1), (3.0, 3.1)]),
+                holes: vec![],
+            }],
+            t,
+        )
+        .unwrap();
+        let r = u_with_hole().union(&small, t).unwrap();
+        for (outer, holes) in shapes() {
+            let cut = polygon_part(&outer, &holes, t).unwrap();
+            let whole = Part::Rings(
+                std::iter::once(outer.points.clone())
+                    .chain(holes.iter().map(|h| h.points.clone()))
+                    .collect(),
+            );
+            let (a, b) = (
+                r.sum_parts(std::slice::from_ref(&cut), t).unwrap(),
+                r.sum_parts(std::slice::from_ref(&whole), t).unwrap(),
+            );
+            assert!(!a.is_empty() && apart(&a, &b) < 1e-9, "{}", apart(&a, &b));
+            let (a, b) = (
+                r.erode_parts(std::slice::from_ref(&cut), t).unwrap(),
+                r.erode_parts(std::slice::from_ref(&whole), t).unwrap(),
+            );
+            assert!(!a.is_empty() && apart(&a, &b) < 1e-9, "{}", apart(&a, &b));
+        }
     }
 }
