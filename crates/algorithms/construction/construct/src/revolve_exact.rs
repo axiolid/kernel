@@ -8,15 +8,25 @@
 //! already carries, so the result is exact -- no tessellation, no sampled
 //! approximation.
 //!
-//! # What is refused, and why that is the honest answer
+//! # Partial turns
 //!
 //! A PARTIAL turn is not this shape. It has two extra planar walls at the
-//! start and end angles, and its cap loops are not closed circles but
-//! circular arcs joined by radial segments. That is a different topology, not
-//! a parameter change, so it is refused rather than approximated.
+//! start and end angles, its walls are bounded by circular arcs rather than
+//! closed by seams, and nothing closes round the axis. That different
+//! topology lives in [`crate::revolve_partial`] (#172); every profile that
+//! revolves a full turn through the contour path also revolves partially,
+//! and a partial turn may additionally touch the axis along straight
+//! segments or at vertices.
 //!
-//! A profile crossing the axis degenerates: the inner cylinder collapses to
-//! the axis line and the caps stop being annuli. Refused for the same reason.
+//! # What is refused, and why that is the honest answer
+//!
+//! A turn beyond a full turn sweeps through itself and is refused by name;
+//! a zero or non-finite angle is invalid input.
+//!
+//! A FULL turn of a profile touching or crossing the axis degenerates: the
+//! inner wall collapses to the axis line and the caps stop being annuli.
+//! Refused for the same reason. A partial turn crossing the axis sweeps
+//! through itself and is refused too.
 //!
 //! The mesh path in `revolve.rs` handles all of these. Refusing here means a
 //! caller asking for exactness gets a typed refusal naming the gap instead of
@@ -48,13 +58,21 @@ fn unsupported(input: &'static str) -> GeomError {
 
 /// Revolve a supported profile into an exact, closed analytic B-rep.
 ///
-/// Supported: a sharp filled rectangle, revolved a full turn about an axis
-/// parallel to the profile's local y and offset from it, so the profile does
-/// not cross the axis. The result is an annular tube of two cylinders and two
-/// annular planar caps.
+/// The axis must be the profile's local y (either sense) and lie in the
+/// profile plane. `angle` is in radians, by the right-hand rule about
+/// `axis_direction`.
 ///
-/// Every other case -- partial turns, profiles crossing the axis, rounded or
-/// hollow rectangles, other profile families -- returns a typed refusal.
+/// A full turn (`|angle|` within tolerance of `2 pi`) revolves every profile
+/// that lowers to a contour, provided it does not touch the axis: a sharp
+/// rectangle becomes an annular tube of two cylinders and two annular caps,
+/// a hole becomes a void shell. A partial turn (`0 < |angle| < 2 pi`)
+/// revolves the same profiles into a solid capped by the profile at both
+/// ends, each hole a tunnel between the caps, and may touch the axis along
+/// straight segments (see [`crate::revolve_partial`]).
+///
+/// Refused by name: an ellipse, a turn beyond a full turn, a profile crossing
+/// the axis, an arc whose circle reaches the axis. A zero or non-finite angle
+/// is invalid input.
 pub fn revolve_profile_exact(
     profile: &Profile,
     axis_origin: Point3,
@@ -62,15 +80,19 @@ pub fn revolve_profile_exact(
     angle: Scalar,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
-    if !angle.is_finite() {
-        return Err(GeomError::InvalidInput(
-            "revolution angle must be finite".to_owned(),
-        ));
+    if !angle.is_finite() || angle == 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "revolution angle must be finite and non-zero, got {angle}"
+        )));
+    }
+    // More than a full turn sweeps the solid through itself.
+    if angle.abs() > TAU + tolerance.linear() {
+        return Err(unsupported("exact revolution beyond a full turn"));
     }
     // A partial turn has two extra planar walls and arc-bounded caps: a
-    // different topology, not a different parameter.
+    // different topology, not a different parameter (#172).
     if (angle.abs() - TAU).abs() > tolerance.linear() {
-        return Err(unsupported("partial-turn exact revolution"));
+        return revolve_partial(profile, axis_origin, axis_direction, angle, tolerance);
     }
 
     match profile {
@@ -79,7 +101,9 @@ pub fn revolve_profile_exact(
         }
         // A circle lowers to four quarter arcs, each sweeping a torus
         // quarter; a hollow circle's bore becomes a toroidal void (#111).
-        Profile::Circle(_) => revolve_via_contour(profile, axis_origin, axis_direction, tolerance),
+        Profile::Circle(_) => {
+            revolve_via_contour(profile, axis_origin, axis_direction, None, tolerance)
+        }
         Profile::Ellipse(_) => Err(unsupported("ellipse exact revolution")),
         // Every one of these lowers to a contour, and a contour revolves.
         // The refusals they carried described a missing module, not missing
@@ -90,7 +114,7 @@ pub fn revolve_profile_exact(
         | Profile::Derived { .. }
         | Profile::Composite(_)
         | Profile::CenterLine(_) => {
-            revolve_via_contour(profile, axis_origin, axis_direction, tolerance)
+            revolve_via_contour(profile, axis_origin, axis_direction, None, tolerance)
         }
         _ => Err(unsupported("unknown profile exact revolution")),
     }
@@ -113,6 +137,7 @@ fn revolve_rectangle(
             &Profile::Rectangle(*rectangle),
             axis_origin,
             axis_direction,
+            None,
             tolerance,
         );
     }
@@ -493,7 +518,31 @@ pub fn fixed_reference_sweep_exact(
     extrude_profile_exact(profile, direction, length, tolerance)
 }
 
-/// Revolve any profile that lowers to a contour.
+/// Revolve a profile through a partial turn: every family the contour path
+/// revolves a full turn, routed through [`crate::revolve_partial`].
+fn revolve_partial(
+    profile: &Profile,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    angle: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<ExactBRep> {
+    match profile {
+        Profile::Ellipse(_) => return Err(unsupported("ellipse exact revolution")),
+        Profile::Rectangle(_)
+        | Profile::Circle(_)
+        | Profile::Section(_)
+        | Profile::Contour(_)
+        | Profile::Derived { .. }
+        | Profile::Composite(_)
+        | Profile::CenterLine(_) => {}
+        _ => return Err(unsupported("unknown profile exact revolution")),
+    }
+    revolve_via_contour(profile, axis_origin, axis_direction, Some(angle), tolerance)
+}
+
+/// Revolve any profile that lowers to a contour, a full turn (`angle` is
+/// `None`) or partially.
 ///
 /// The axis must be the profile's local y and must lie in the profile plane,
 /// the same restriction `revolve_rectangle` carries: any other axis sweeps a
@@ -502,6 +551,7 @@ fn revolve_via_contour(
     profile: &Profile,
     axis_origin: Point3,
     axis_direction: Vec3,
+    angle: Option<Scalar>,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     let axis = axis_direction.normalize_or_zero();
@@ -516,6 +566,10 @@ fn revolve_via_contour(
         ));
     }
 
+    // The sections are built about world +y; an axis pointing down turns
+    // the right-hand sweep the other way.
+    let angle = angle.map(|angle| if axis.y < 0.0 { -angle } else { angle });
+
     // A composite is unioned exactly first; members that do not touch
     // revolve into separate solids of one `ExactBRep` (#111).
     if let Profile::Composite(members) = profile {
@@ -526,6 +580,7 @@ fn revolve_via_contour(
                 &region.outer,
                 &region.holes,
                 axis_origin,
+                angle,
                 tolerance,
             )?);
         }
@@ -539,17 +594,27 @@ fn revolve_via_contour(
         .iter()
         .map(|hole| crate::contour_lower::contour_to_arc_ring(hole, tolerance))
         .collect::<GeomResult<Vec<_>>>()?;
-    revolve_region(&outer, &holes, axis_origin, tolerance)
+    revolve_region(&outer, &holes, axis_origin, angle, tolerance)
 }
 
-/// Revolve one section a full turn: its outer ring as the solid, each hole
-/// as a void.
+/// Revolve one section a full turn -- its outer ring as the solid, each hole
+/// as a void -- or partially, each hole a tunnel between the caps.
 fn revolve_region(
     outer: &ArcRing,
     holes: &[ArcRing],
     axis_origin: Point3,
+    angle: Option<Scalar>,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    if let Some(angle) = angle {
+        return crate::revolve_partial::revolve_section_partial(
+            outer,
+            holes,
+            axis_origin,
+            angle,
+            tolerance,
+        );
+    }
     let solid = crate::revolve_contour::revolve_arc_ring(outer, axis_origin, tolerance)?;
     if holes.is_empty() {
         return Ok(solid);

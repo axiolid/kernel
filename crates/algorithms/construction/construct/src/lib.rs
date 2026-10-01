@@ -25,13 +25,13 @@
 //! Broad sweep families still produce meshes by default, but exact generation
 //! is no longer a narrow slice. Every `Profile` variant extrudes exactly:
 //! rectangle (including through-holes), circle, ellipse, contour (with holes
-//! and arcs), section, centre-line, derived and composite. Revolution covers
-//! any profile that lowers to a contour, sweeping cylinders, cones, planar
-//! annuli and tori.
+//! and arcs), section, centre-line, derived and composite. Revolution, a
+//! full turn or a partial one, covers any profile that lowers to a contour,
+//! sweeping cylinders, cones, planar annuli and tori.
 //!
 //! What still refuses is stated per call site and is about geometry the
-//! kernel cannot represent exactly rather than work not yet done -- a partial
-//! turn, a section straddling the revolution axis, an offset with no
+//! kernel cannot represent exactly rather than work not yet done -- a turn
+//! beyond a full turn, a section straddling the revolution axis, an offset with no
 //! same-kind result, a non-conformal transform. None of this implies general
 //! exact booleans.
 //!
@@ -76,6 +76,7 @@ pub mod result;
 pub mod revolve;
 pub mod revolve_contour;
 pub mod revolve_exact;
+pub mod revolve_partial;
 pub mod section_lower;
 pub mod sweep;
 pub mod trimmed_intersection;

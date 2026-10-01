@@ -21,8 +21,9 @@ Solid generation from exact inputs: extrusion, revolution, sweeps, lofts,
 centre-line profiles, half-space clipping proxies, offsets, fillets and
 chamfers on supported families, and focused exact booleans (planar
 polyhedra, coaxial column solids). Every `Profile` variant extrudes to an
-exact B-rep, and full-turn revolution covers any profile that lowers to a
-contour; sweeps and lofts produce meshes by default. Geometry the kernel cannot
+exact B-rep, and revolution -- a full turn, or a partial turn capped by
+the profile at both ends -- covers any profile that lowers to a contour;
+sweeps and lofts produce meshes by default. Geometry the kernel cannot
 represent exactly is refused, never tessellated in its place. The crate
 takes geometry and returns geometry: it owns no operation graph, cache,
 execution context or provider dispatch (ADR 0023); `axiolid-mesh-compile`

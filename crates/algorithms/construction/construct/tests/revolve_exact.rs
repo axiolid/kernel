@@ -64,33 +64,29 @@ fn the_revolved_volume_matches_pappus() {
     assert!((sorted[1] - 6.0).abs() < 1e-12, "outer radius: {sorted:?}");
 }
 
-/// A partial turn is refused, not approximated.
+/// A partial turn is a different topology, built exactly rather than
+/// substituted by a full turn (#172).
 ///
-/// It is a different topology: two extra planar walls at the start and end
-/// angles, and caps bounded by arcs rather than closed circles. The mesh path
-/// handles it; the exact path must say so rather than substitute a full turn
-/// or a tessellation.
+/// Two extra planar walls at the start and end angles and arc-bounded
+/// walls: a quarter turn is a quarter of the Pappus volume, not the whole
+/// annular tube. `revolve_partial.rs` owns the breadth.
 #[test]
-fn a_partial_turn_is_refused() {
-    let error = revolve_profile_exact(
+fn a_partial_turn_is_a_quarter_of_the_tube() {
+    let brep = revolve_profile_exact(
         &rect(2.0, 3.0),
         Point3::new(5.0, 0.0, 0.0),
         Vec3::Y,
         TAU / 4.0,
         Tolerance::METRE,
     )
-    .expect_err("a quarter turn is not an annular tube");
+    .expect("a quarter turn revolves exactly");
 
-    assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                input: "partial-turn exact revolution",
-                ..
-            }
-        ),
-        "the refusal must name the gap, got {error:?}"
-    );
+    assert_eq!(brep.topology().faces().len(), 6, "four walls, two caps");
+    let volume = axiolid_measure::exact_properties(&brep, Tolerance::METRE)
+        .expect("measurable")
+        .signed_volume;
+    let pappus = TAU / 4.0 * 5.0 * 6.0;
+    assert!((volume - pappus).abs() < 1e-9, "{volume} vs {pappus}");
 }
 
 /// A profile crossing the axis degenerates, so it is refused.

@@ -9,6 +9,34 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Exact partial-turn revolution (#172). `revolve_profile_exact` now builds
+  a revolution through `0 < |angle| < 2 pi` instead of refusing it: every
+  profile the full turn revolves (rectangles, circles, sections, contours
+  with arcs and holes, derived, centre-line and composite profiles) becomes
+  a closed exact B-rep whose walls are cylinder, cone, plane and torus
+  patches trimmed to the swept angle, capped at both ends by the profile
+  itself; each hole is a tunnel between the caps. Unlike the full turn, a
+  partial turn may touch the axis: a vertex on it sweeps no arc (a cone
+  closes at its apex, a planar wall becomes a sector) and a straight
+  segment on it sweeps no wall, its edge shared by the two caps. The angle
+  follows the right-hand rule about the axis direction, as the mesh path
+  does; a section on either side of the axis is accepted. The new
+  `revolve_partial::revolve_section_partial` builds one lowered section.
+  Volume (`theta R A`) and area (`theta integral(r ds) + 2 A`) match
+  Pappus at 90, 180, 270 degrees and small angles
+  (`tests/revolve_partial.rs`); `scripts/probe_partial_revolve_mutants.py`
+  lists the faults the tests must catch.
+
+### Changed
+
+- `revolve_profile_exact` refuses a turn beyond a full turn by name
+  (`"exact revolution beyond a full turn"`) and a zero angle as invalid
+  input; both were previously reported as the partial-turn refusal, which
+  no longer exists. A section crossing the axis, an arc whose circle
+  reaches the axis, and an ellipse remain refused by name.
+
 ## [0.3.7] - 2026-09-30
 
 ### Fixed
