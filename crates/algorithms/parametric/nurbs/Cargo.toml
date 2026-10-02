@@ -16,6 +16,7 @@ axiolid-contracts.workspace = true
 axiolid-guarantees.workspace = true
 axiolid-evaluate.workspace = true
 axiolid-exact.workspace = true
+axiolid-numeric.workspace = true
 axiolid-predicates.workspace = true
 axiolid-surface.workspace = true
 
@@ -32,4 +33,4 @@ role = "algorithm.parametric"
 domain = "parametric.nurbs"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-core", "axiolid-curve", "axiolid-contracts", "axiolid-guarantees", "axiolid-evaluate", "axiolid-exact", "axiolid-oracle", "axiolid-predicates", "axiolid-surface"]
+allowed-internal-dependencies = ["axiolid-core", "axiolid-curve", "axiolid-contracts", "axiolid-guarantees", "axiolid-evaluate", "axiolid-exact", "axiolid-numeric", "axiolid-oracle", "axiolid-predicates", "axiolid-surface"]

@@ -20,9 +20,10 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 Format-neutral algorithms over polynomial and rational B-spline curves and
 surfaces: differential geometry, exact shape-preserving transforms (knot
 insertion, reversal, splitting, Bezier decomposition, degree elevation),
-tolerance-bounded knot removal and degree reduction, interpolation and
-lofting, certified projection, inversion and intersection queries, exact
-analytic curve and surface intersection, and verified periodic seams.
+tolerance-bounded knot removal and degree reduction, interpolation,
+least-squares curve and surface approximation, lofting, certified
+projection, inversion and intersection queries, exact analytic curve and
+surface intersection, and verified periodic seams.
 Lossy operations measure their deviation and refuse above the caller's
 tolerance. It owns no importer, tessellator or file-format vocabulary, and
 it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
@@ -35,6 +36,7 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 - [`axiolid-evaluate`](./axiolid-evaluate)
 - [`axiolid-exact`](./axiolid-exact)
 - [`axiolid-guarantees`](./axiolid-guarantees)
+- [`axiolid-numeric`](./axiolid-numeric)
 - [`axiolid-predicates`](./axiolid-predicates)
 - [`axiolid-surface`](./axiolid-surface)
 

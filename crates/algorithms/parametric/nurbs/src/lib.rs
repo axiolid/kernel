@@ -13,6 +13,7 @@
 //! refuses when they run out. A shape-preserving transform is tested against
 //! independent evaluation samples of the original, not its own recurrence.
 
+mod approximate;
 mod axis;
 mod certified_bezier;
 mod certified_curve_distance;
@@ -56,6 +57,10 @@ mod surface_transform;
 mod torus_section;
 mod transform;
 
+pub use approximate::{
+    fit_curve3, fit_curve3_to_tolerance, fit_surface_grid, CurveFit3, CurveFitOptions,
+    CurveFitTolerance, Parameterisation, SurfaceFit, SurfaceFitOptions,
+};
 pub use certified_curve_distance::{distance_curve2_certified, distance_curve3_certified};
 pub use certified_curve_intersection::{
     intersect_curve2_certified, CertifiedCurveIntersection2, CertifiedCurveIntersectionOptions,

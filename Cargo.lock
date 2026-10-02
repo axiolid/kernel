@@ -606,6 +606,7 @@ dependencies = [
  "axiolid-evaluate",
  "axiolid-exact",
  "axiolid-guarantees",
+ "axiolid-numeric",
  "axiolid-oracle",
  "axiolid-predicates",
  "axiolid-surface",

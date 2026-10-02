@@ -429,8 +429,8 @@ area = "curves-surfaces"
 name = "approximation/interpolation (fit curve/surface to points)"
 issue = "curve-surface-fitting"
 level = "narrow"
-summary = "Only INTERPOLATION (curve passes exactly through points, chord-length parameterised, C2 cubic) and section-based lofting exist; no least-squares APPROXIMATION to a tolerance for scattered points"
-evidence = ["crates/algorithms/parametric/nurbs/src/fit.rs::interpolate_curve3"]
+summary = "Interpolation (fit.rs) plus least-squares curve and surface APPROXIMATION to a fixed or tolerance-driven control count (fit_curve3, fit_curve3_to_tolerance, fit_surface_grid): uniform/chord-length/centripetal parameterisation, Piegl and Tiller approximation knot placement, QR-based least squares via axiolid-numeric, optional equality-constrained endpoints, an optional second-difference smoothing term, and optional Newton parameter correction. Narrow because: the surface fit is separable (row then column curve fits), not a joint two-dimensional least squares; tolerance search only grows the control count uniformly, never inserting a knot at the worst-error span the way OCCT's Approx_BSplComputeLine does; there is no periodic/closed-curve fit and no per-point weighting"
+evidence = ["crates/algorithms/parametric/nurbs/src/approximate.rs::fit_curve3", "crates/algorithms/parametric/nurbs/src/approximate.rs::fit_curve3_to_tolerance", "crates/algorithms/parametric/nurbs/src/approximate.rs::fit_surface_grid", "crates/algorithms/parametric/nurbs/src/fit.rs::interpolate_curve3"]
 occt = ["src/ModelingData/TKGeomBase/AppDef", "src/ModelingData/TKGeomBase/AppCont", "src/ModelingData/TKGeomBase/Approx", "src/ModelingAlgorithms/TKGeomAlgo/GeomAPI"]
 cgal = []
 

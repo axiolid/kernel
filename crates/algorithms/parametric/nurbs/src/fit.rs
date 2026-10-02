@@ -55,7 +55,7 @@ pub fn interpolate_curve3(points: &[Point3]) -> GeomResult<BSplineCurve3> {
 }
 
 /// Chord-length parameters normalised to `[0, 1]`.
-fn chord_parameters(points: &[Point3]) -> GeomResult<Vec<Scalar>> {
+pub(crate) fn chord_parameters(points: &[Point3]) -> GeomResult<Vec<Scalar>> {
     let mut distances = Vec::with_capacity(points.len());
     distances.push(0.0);
     let mut total = 0.0;
@@ -104,7 +104,7 @@ fn averaged_knots(parameters: &[Scalar], degree: usize) -> Vec<Scalar> {
 }
 
 /// Knot span containing `t`, clamped to the last non-empty span.
-fn span_of(knots: &[Scalar], n: usize, degree: usize, t: Scalar) -> usize {
+pub(crate) fn span_of(knots: &[Scalar], n: usize, degree: usize, t: Scalar) -> usize {
     if t >= knots[n + 1] {
         return n;
     }
@@ -122,7 +122,7 @@ fn span_of(knots: &[Scalar], n: usize, degree: usize, t: Scalar) -> usize {
 }
 
 /// Non-zero basis functions at `t`, by the Cox-de Boor recurrence.
-fn basis_at(span: usize, t: Scalar, degree: usize, knots: &[Scalar]) -> Vec<Scalar> {
+pub(crate) fn basis_at(span: usize, t: Scalar, degree: usize, knots: &[Scalar]) -> Vec<Scalar> {
     let mut basis = vec![0.0; degree + 1];
     let mut left = vec![0.0; degree + 1];
     let mut right = vec![0.0; degree + 1];
@@ -235,7 +235,7 @@ fn interpolate_with(points: &[Point3], parameters: &[Scalar]) -> GeomResult<BSpl
 }
 
 /// Group a repeated knot vector into distinct values and multiplicities.
-fn collapse(expanded: &[Scalar]) -> (Vec<Scalar>, Vec<u32>) {
+pub(crate) fn collapse(expanded: &[Scalar]) -> (Vec<Scalar>, Vec<u32>) {
     let mut knots: Vec<Scalar> = Vec::new();
     let mut multiplicities: Vec<u32> = Vec::new();
     for &knot in expanded {

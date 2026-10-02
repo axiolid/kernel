@@ -318,6 +318,7 @@ graph TD
     axiolid_nurbs --> axiolid_evaluate
     axiolid_nurbs --> axiolid_exact
     axiolid_nurbs --> axiolid_guarantees
+    axiolid_nurbs --> axiolid_numeric
     axiolid_nurbs --> axiolid_oracle
     axiolid_nurbs --> axiolid_predicates
     axiolid_nurbs --> axiolid_surface
