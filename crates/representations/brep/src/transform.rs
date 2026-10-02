@@ -196,20 +196,50 @@ impl Reparam {
 impl ExactBRep {
     /// This B-rep moved by the rigid motion `transform` (#223).
     ///
-    /// Every vertex, curve and surface is mapped onto the same family; the
-    /// topology, structural names and parameter intervals are kept, apart
-    /// from the reparameterisation a reflection needs (see the module
-    /// docs). A reflection flips every face, so a solid stays outward
-    /// oriented. Coordinates are mapped once in `f64`; nothing is
-    /// tessellated or refitted.
+    /// # Exactness
+    ///
+    /// The result is exact for the transform *as given in `f64`*, after one
+    /// rounding per coordinate -- not for the ideal rotation the matrix
+    /// approximates. Every vertex position, frame origin and axis, line
+    /// origin and direction, and control point is `transform` applied once
+    /// in `f64`, so each coordinate carries a few units in the last place
+    /// of error relative to the ideal placement, and a rotated frame is
+    /// orthonormal only to that rounding. A matrix accepted within
+    /// [`RIGID_TOLERANCE`] is applied as given, not re-orthonormalised.
+    /// What IS exact: every curve and surface stays in its own family with
+    /// its radii, semi-axes, angles, knots and weights unchanged; the
+    /// topology, structural names and parameter intervals are kept (a
+    /// reflection reparameterises as below); nothing is tessellated,
+    /// sampled or refitted. Vertices and the curves through them are
+    /// mapped by the same rounded transform, so they agree to the same
+    /// rounding they agreed to before.
+    ///
+    /// A rotation and a translation keep every parameter. A reflection
+    /// (determinant -1) keeps each frame right-handed: curved surfaces
+    /// (cylinders, elliptical cylinders, cones, spheres, tori) then read
+    /// their angle as `u -> 2 pi - u` and their pcurves are reflected to
+    /// match, and every face is flipped, so a solid stays outward oriented
+    /// (see the module docs).
     ///
     /// # Errors
     ///
-    /// [`TransformError::NonFinite`] for a non-finite transform,
-    /// [`TransformError::NotRigid`] for a linear part that is not
-    /// orthonormal within [`RIGID_TOLERANCE`], and
-    /// [`TransformError::Unsupported`] naming a support the transform
-    /// cannot carry exactly.
+    /// For every transform:
+    /// - [`TransformError::NonFinite`]: a NaN or infinite matrix entry or
+    ///   translation;
+    /// - [`TransformError::NotRigid`]: a linear part whose columns are not
+    ///   orthonormal within [`RIGID_TOLERANCE`] in every dot product -- any
+    ///   scale (uniform or not) or shear;
+    /// - [`TransformError::Unsupported`]: an elevated alignment curve
+    ///   (`Curve3::Elevated`), or an unknown curve or surface family.
+    ///
+    /// Additionally under a reflection, [`TransformError::Unsupported`] for:
+    /// - an intrinsic space curve (its torsion would change sign);
+    /// - a ruled or torus section curve, and a traced or paired section on a
+    ///   ruled, spherical or toroidal carrier;
+    /// - a lifted pcurve on any face;
+    /// - on a curved (non-planar, non-B-spline) face, any pcurve other than
+    ///   a line, circle, ellipse, polyline, B-spline or sinusoid;
+    /// - a pcurve shared by faces that would need different reflections.
     pub fn transformed(&self, transform: &Transform3) -> Result<ExactBRep, TransformError> {
         let rigid = Rigid::new(transform)?;
         let source = &self.topology;
