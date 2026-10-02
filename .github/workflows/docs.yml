@@ -13,6 +13,19 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/docs.yml"
+  # Build (never deploy) on pull requests too: a docs dependency bump that
+  # breaks the site must fail on its own PR, not on main after the merge.
+  pull_request:
+    paths:
+      - "docs/**"
+      # The reference pages are generated from each crate's manifest, README
+      # and CHANGELOG.md, and rustdoc from its doc comments, so a crate-only
+      # change still alters the published site.
+      - "crates/**"
+      - "tools/xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -21,8 +34,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -33,11 +46,12 @@ jobs:
         with:
           toolchain: 1.88.0
       - name: Cache Rust build
-        # Dependencies only (rust-cache drops workspace artifacts), saved from
-        # main, which is the only ref this workflow runs on.
+        # Dependencies only (rust-cache drops workspace artifacts). Saved from
+        # main only; pull requests read it.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: docs
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
@@ -61,12 +75,15 @@ jobs:
         run: |
           mkdir -p docs/.vitepress/dist/api/rustdoc
           cp -r target/doc/. docs/.vitepress/dist/api/rustdoc/
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs/.vitepress/dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

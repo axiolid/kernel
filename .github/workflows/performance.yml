@@ -9,9 +9,16 @@ name: Performance
 # reproducible run-to-run, so a change in it is a change in work done.
 
 on:
+  # Prose and the docs site execute no measured code.
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
