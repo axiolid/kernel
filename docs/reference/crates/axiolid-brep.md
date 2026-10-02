@@ -21,8 +21,9 @@ The strict exact B-rep result: an `axiolid-topology` graph bound to owned
 catalogs of `Curve3` edge supports, `Curve2` pcurves and `Surface` face
 supports, with every edge and pcurve interval stated explicitly and checked
 before the value can exist. Faces and edges can carry persistent structural
-names that survive rebuilds. It does not evaluate, intersect, tessellate or
-traverse geometry.
+names that survive rebuilds. `ExactBRep::transformed` places a B-rep under a
+rigid motion, family for family, and refuses a scale or shear. It does not
+evaluate, intersect, tessellate or traverse geometry.
 
 ## Depends on
 

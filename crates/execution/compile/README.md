@@ -5,7 +5,8 @@ The scalar reference compilers for an `axiolid-model` geometry graph.
 it resolves instances and collections, composes transforms, tessellates
 profiles, sweeps, B-reps and authored meshes, and hands booleans to whichever
 `MeshBoolean` provider it is given. `ReferenceExactCompiler` compiles the
-families it supports to exact B-reps and refuses the rest by name. This crate
+families it supports to exact B-reps, places instances under rigid
+transforms, and refuses the rest by name. This crate
 owns graph traversal and dispatch; the construction algorithms themselves
 (profile flattening, extrusion, revolution, sweeps) belong to
 `axiolid-construct`.

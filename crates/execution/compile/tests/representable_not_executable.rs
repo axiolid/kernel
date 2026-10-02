@@ -141,21 +141,19 @@ fn different_unsupported_families_are_named_differently() {
     type BuildFamily = Box<dyn Fn(&mut GeometryGraphBuilder) -> axiolid_model::NodeId>;
     let families: Vec<(&str, BuildFamily)> = vec![
         (
-            "swept disk",
+            "tapered revolution",
             Box::new(|b: &mut GeometryGraphBuilder| {
-                let directrix = b
-                    .push_value(Curve3::Polyline(Polyline3 {
-                        points: vec![Point3::ZERO, Point3::new(0.0, 0.0, 3.0)],
-                        closed: false,
-                    }))
-                    .unwrap();
-                b.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
-                    directrix,
-                    radius: 0.5,
-                    inner_radius: None,
-                    parameter_range: None,
-                    fillet_radius: None,
-                }))
+                let start_profile = b.push(GeometryNode::Profile(rect())).unwrap();
+                let end_profile = b.push(GeometryNode::Profile(rect())).unwrap();
+                b.push(GeometryNode::SolidOperation(
+                    SolidOperation::TaperedRevolution {
+                        start_profile,
+                        end_profile,
+                        axis_origin: Point3::new(-3.0, 0.0, 0.0),
+                        axis_direction: Vec3::Y,
+                        angle: 1.0,
+                    },
+                ))
                 .unwrap()
             }),
         ),

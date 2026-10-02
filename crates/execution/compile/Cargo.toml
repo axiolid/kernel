@@ -34,8 +34,9 @@ earcut = "0.4"
 # The measurement oracle. `volume_properties` audits closed-two-manifoldness
 # before it integrates, so using it makes the extrusion tests assert
 # watertightness and volume in one call instead of trusting a hand-rolled
-# divergence sum that would happily integrate a broken mesh.
-axiolid-measure.workspace = true
+# divergence sum that would happily integrate a broken mesh. `exact`
+# measures and certifies distances on the exact compiler's B-reps.
+axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-boolean-boolmesh.workspace = true
 axiolid-mesh-section-contract.workspace = true
 axiolid-dispatch = { workspace = true, features = ["mesh-section"] }

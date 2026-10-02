@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceExactCompiler` compiles `Instance` nodes (#223): the source's
+  exact B-rep is placed with `ExactBRep::transformed`, so extrusions,
+  revolutions and swept disks under rotated, reflected and translated
+  placements (nested instances compose) stay exact. A scaled or sheared
+  instance is refused by name, never approximated.
+- `ReferenceExactCompiler` compiles `SweptDisk` exactly along one segment
+  or one arc (#223): a bounded line, a two-point polyline, a circle or a
+  sub-range of one, a trim of a line or circle (across the seam, as the
+  mesh path reads it) and a one-segment composite. A directrix with
+  corners, any other curve, an unbounded line and a disk reaching its
+  arc's axis are refused by name.
+
 ## [0.3.6] - 2026-09-28
 
 ### Changed

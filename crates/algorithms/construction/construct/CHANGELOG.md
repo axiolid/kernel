@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Exact swept disks (#223). `swept_disk_exact::swept_disk_along_line_exact`
+  sweeps a disk, optionally with a bore, along a straight segment into a
+  capped cylinder; `swept_disk_along_arc_exact` sweeps it along a circular
+  arc into a capped torus wedge, or a whole torus (with a toroidal bore for
+  a hollow disk) for a full turn. Both are the exact extrusion and
+  revolution of the disk placed with `ExactBRep::transformed`. Volumes
+  match `pi r^2 L` and Pappus, every solid audits clean, and certified
+  distances under tilted placements match their closed forms. Refused by
+  name: a disk reaching the arc's axis, an arc beyond a full turn; invalid
+  input: a non-positive radius, a bore not strictly inside the disk, a zero
+  span or segment, a non-orthonormal arc frame.
+
 ### Fixed
 
 - `revolve::revolve` (the mesh path) no longer builds an inside-out mesh

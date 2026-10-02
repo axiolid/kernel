@@ -79,6 +79,7 @@ pub mod revolve_exact;
 pub mod revolve_partial;
 pub mod section_lower;
 pub mod sweep;
+pub mod swept_disk_exact;
 pub mod trimmed_intersection;
 mod trimmed_intersection_assembly;
 mod trimmed_intersection_builder;

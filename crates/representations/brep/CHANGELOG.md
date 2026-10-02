@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ExactBRep::transformed`: place an exact B-rep under a rigid motion
+  (#223). Every vertex, curve and surface maps onto the same family --
+  planes, cylinders, elliptical cylinders, cones, spheres, tori, circles,
+  ellipses, B-splines and the section curves that carry their surface --
+  with the topology, structural names and intervals kept; nothing is
+  tessellated or refitted. A reflection keeps every frame right-handed
+  (curved surfaces then read their angle backwards, `u -> 2 pi - u`, and
+  their pcurves are reflected to match) and flips every face, so a solid
+  stays outward oriented. Refused with the new `TransformError`: a
+  non-finite transform, a linear part not orthonormal within
+  `RIGID_TOLERANCE` (a scale or shear), an elevated alignment curve, and
+  under a reflection the pcurve and carrier families with no closed-form
+  reflection here (quadric and torus section graphs, traced, lifted and
+  intrinsic curves on curved faces).
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

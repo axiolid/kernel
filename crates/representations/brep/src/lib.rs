@@ -17,8 +17,11 @@ use axiolid_topology::{audit_brep, BRep, BRepHealth, EdgeId, FaceId, LoopId, She
 
 /// Persistent structural names for faces and edges.
 pub mod name;
+/// Rigid placement of an exact B-rep.
+pub mod transform;
 
 pub use name::{EdgeName, FaceName, Operand, SweptFace};
+pub use transform::{TransformError, RIGID_TOLERANCE};
 
 macro_rules! geometry_id {
     ($name:ident, $label:literal) => {

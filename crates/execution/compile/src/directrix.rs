@@ -246,6 +246,25 @@ fn sample_periodic_trim(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<Point3>> {
+    let (lo, hi) = periodic_trim_interval(period, a, b, sense, range, options)?;
+    axiolid_reference::curve::flatten3(
+        curve,
+        axiolid_core::Interval { start: lo, end: hi },
+        crate::compiler::chord_error(options),
+        MAX_FLATTEN_DEPTH,
+    )
+}
+
+/// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
+/// a sweep `range` when one is given (see [`sample_periodic_trim`]).
+fn periodic_trim_interval(
+    period: Scalar,
+    a: Scalar,
+    b: Scalar,
+    sense: bool,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<(Scalar, Scalar)> {
     let travelled = if sense { b - a } else { a - b };
     let span = if travelled > 0.0 && travelled <= period * (1.0 + PERIOD_SLACK) {
         travelled
@@ -257,8 +276,8 @@ fn sample_periodic_trim(
         }
     };
     let (lo, hi) = if sense { (a, a + span) } else { (a - span, a) };
-    let (lo, hi) = match range {
-        None => (lo, hi),
+    match range {
+        None => Ok((lo, hi)),
         Some((start, end)) => {
             if !(start.is_finite() && end.is_finite()) {
                 return Err(GeomError::InvalidInput(
@@ -291,15 +310,9 @@ fn sample_periodic_trim(
             // An end ON the trim's far end maps back to `lo` when the arc is
             // a full turn; a range is never empty by that accident.
             let (s, e) = if s == e { (lo, hi) } else { (s, e) };
-            (s.min(e), s.max(e))
+            Ok((s.min(e), s.max(e)))
         }
-    };
-    axiolid_reference::curve::flatten3(
-        curve,
-        axiolid_core::Interval { start: lo, end: hi },
-        crate::compiler::chord_error(options),
-        MAX_FLATTEN_DEPTH,
-    )
+    }
 }
 
 fn as_parameter(selector: &TrimSelector) -> Option<Scalar> {
@@ -439,4 +452,176 @@ fn point_at_length(points: &[Point3], cumulative: &[Scalar], target: Scalar) -> 
         .last()
         .copied()
         .ok_or_else(|| GeomError::Degenerate("directrix has no points".into()))
+}
+
+/// A directrix an exact swept disk can follow: one straight segment or one
+/// circular arc (#223).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ExactDirectrix {
+    /// From the first point to the second.
+    Segment(Point3, Point3),
+    /// Over an angle span of the circle, start to end.
+    Arc(axiolid_curve::Circle3, axiolid_core::Interval),
+}
+
+/// Resolve a directrix to one segment or one arc, read with the same
+/// parameter conventions as [`points`]; anything with corners, or curved
+/// other than a circle, is refused by name through `unsupported`.
+pub(crate) fn exact(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+    unsupported: fn(&'static str) -> GeomError,
+) -> GeomResult<ExactDirectrix> {
+    exact_at(graph, id, range, options, unsupported, 0)
+}
+
+fn finite_range((start, end): (Scalar, Scalar)) -> GeomResult<(Scalar, Scalar)> {
+    if !(start.is_finite() && end.is_finite()) {
+        return Err(GeomError::InvalidInput(
+            "sweep parameter range must be finite".into(),
+        ));
+    }
+    if start == end {
+        return Err(GeomError::Degenerate(
+            "sweep parameter range is empty".into(),
+        ));
+    }
+    Ok((start, end))
+}
+
+fn exact_at(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+    unsupported: fn(&'static str) -> GeomError,
+    depth: usize,
+) -> GeomResult<ExactDirectrix> {
+    use axiolid_curve::Curve3;
+    use core::f64::consts::TAU;
+    if depth > MAX_DEPTH {
+        return Err(GeomError::BudgetExceeded {
+            resource: "directrix relation depth",
+        });
+    }
+    let slack = options.tolerance().linear();
+    let other = "exact swept disk along a directrix other than one segment or one arc";
+    match graph.get(id) {
+        Some(GeometryNode::Curve3(Curve3::Line(line))) => {
+            let range =
+                range.ok_or_else(|| unsupported("exact swept disk along an unbounded line"))?;
+            let (start, end) = finite_range(range)?;
+            Ok(ExactDirectrix::Segment(
+                line.origin + line.direction * start,
+                line.origin + line.direction * end,
+            ))
+        }
+        Some(GeometryNode::Curve3(Curve3::Polyline(polyline)))
+            if polyline.points.len() == 2 && !polyline.closed && range.is_none() =>
+        {
+            Ok(ExactDirectrix::Segment(
+                polyline.points[0],
+                polyline.points[1],
+            ))
+        }
+        Some(GeometryNode::Curve3(Curve3::Circle(circle))) => {
+            let span = match range {
+                None => axiolid_core::Interval::new(0.0, TAU),
+                Some(range) => {
+                    // As the mesh path reads it: an increasing span inside
+                    // the circle's natural domain `[0, 2 pi]`.
+                    let (start, end) = finite_range(range)?;
+                    let (lo, hi) = (start.min(end), start.max(end));
+                    if lo < -slack || hi > TAU + slack {
+                        return Err(GeomError::InvalidInput(
+                            "sweep parameter range falls outside curve domain".into(),
+                        ));
+                    }
+                    axiolid_core::Interval::new(lo.max(0.0), hi.min(TAU))
+                }
+            };
+            Ok(ExactDirectrix::Arc(*circle, span))
+        }
+        Some(GeometryNode::Curve3(_)) => Err(unsupported(other)),
+        Some(GeometryNode::CurveRelation(CurveRelation::SurfaceCurve {
+            curve_3d,
+            master: MasterRepresentation::Curve3d,
+            ..
+        })) => exact_at(graph, *curve_3d, range, options, unsupported, depth + 1),
+        Some(GeometryNode::CurveRelation(CurveRelation::Composite { segments }))
+            if segments.len() == 1 && range.is_none() =>
+        {
+            // One segment has no corners, and its sense does not change
+            // the swept solid.
+            exact_at(
+                graph,
+                segments[0].curve,
+                None,
+                options,
+                unsupported,
+                depth + 1,
+            )
+        }
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+            basis,
+            start,
+            end,
+            sense_agreement,
+            preference,
+        })) => {
+            let Some(GeometryNode::Curve3(curve)) = graph.get(*basis) else {
+                return Err(unsupported(
+                    "exact swept disk along a trim of a curve relation",
+                ));
+            };
+            let a = parameter(start, *preference, "start", curve, options.tolerance())?;
+            let b = parameter(end, *preference, "end", curve, options.tolerance())?;
+            if a == b {
+                return Err(GeomError::Degenerate(
+                    "trimmed directrix has an empty interval".into(),
+                ));
+            }
+            match curve {
+                Curve3::Line(line) => {
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    let (s, e) = match range {
+                        None => (a, b),
+                        Some(range) => {
+                            let (s, e) = finite_range(range)?;
+                            if s.min(e) < lo - slack || s.max(e) > hi + slack {
+                                return Err(GeomError::InvalidInput(
+                                    "sweep range exceeds trimmed directrix".into(),
+                                ));
+                            }
+                            (s.clamp(lo, hi), e.clamp(lo, hi))
+                        }
+                    };
+                    Ok(ExactDirectrix::Segment(
+                        line.origin + line.direction * s,
+                        line.origin + line.direction * e,
+                    ))
+                }
+                Curve3::Circle(circle) => {
+                    let (lo, hi) =
+                        periodic_trim_interval(TAU, a, b, *sense_agreement, range, options)?;
+                    Ok(ExactDirectrix::Arc(
+                        *circle,
+                        axiolid_core::Interval::new(lo, hi),
+                    ))
+                }
+                _ => Err(unsupported(
+                    "exact swept disk along a trim of a curve other than a line or circle",
+                )),
+            }
+        }
+        Some(GeometryNode::CurveRelation(_)) => Err(unsupported(other)),
+        Some(_) => Err(GeomError::InvalidInput(format!(
+            "sweep directrix {id:?} is not a 3D curve"
+        ))),
+        None => Err(GeomError::InvalidInput(format!(
+            "directrix {id:?} is outside the graph"
+        ))),
+    }
 }

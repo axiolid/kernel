@@ -3,16 +3,26 @@
 //! Exact and mesh compilation are separate result domains. One exact batch owns
 //! a `NodeId -> ExactBRep` memo table; a discrete value cannot enter that cache.
 //!
-//! It never falls back to mesh compilation. Extrusions, revolutions and
-//! booleans of sharp rectangle prisms along +z are compiled exactly; every
-//! other family is refused with `GeomError::UnsupportedInput` naming it.
+//! It never falls back to mesh compilation. Extrusions, revolutions,
+//! booleans of sharp rectangle prisms along +z, disks swept along one
+//! segment or one arc, and instances of any of these under a rigid
+//! transform are compiled exactly; every other family is refused with
+//! `GeomError::UnsupportedInput` naming it.
+//!
+//! An instance places its source's exact B-rep with
+//! [`ExactBRep::transformed`] (#223): a rotation, a reflection and a
+//! translation are exact, and a scale or shear is refused, never
+//! approximated.
 
 use std::collections::{HashMap, HashSet};
 
-use axiolid_brep::ExactBRep;
+use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_construct::revolve_exact::revolve_profile_exact;
+use axiolid_construct::swept_disk_exact::{
+    swept_disk_along_arc_exact, swept_disk_along_line_exact,
+};
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, ExecutionOptions, ExecutionTarget, GeomError,
     GeomResult, Operation,
@@ -106,7 +116,7 @@ impl<'a> ExactCompilation<'a> {
         Ok(exact)
     }
 
-    fn compile_uncached(&self, root: NodeId) -> GeomResult<ExactBRep> {
+    fn compile_uncached(&mut self, root: NodeId) -> GeomResult<ExactBRep> {
         let node = self.graph.get(root).ok_or_else(|| {
             GeomError::InvalidInput(format!("node {root:?} does not belong to this graph"))
         })?;
@@ -149,6 +159,45 @@ impl<'a> ExactCompilation<'a> {
                     *angle,
                     self.options.tolerance(),
                 )
+                .map_err(remap_construction_error)
+            }
+            GeometryNode::Instance(instance) => {
+                let instance = *instance;
+                let source = self.compile(instance.source)?;
+                source
+                    .transformed(&instance.transform)
+                    .map_err(|error| match error {
+                        TransformError::NotRigid => {
+                            unsupported("exact instance under a scaled or sheared transform")
+                        }
+                        TransformError::Unsupported(what) => unsupported(what),
+                        other => GeomError::InvalidInput(format!("instance transform: {other}")),
+                    })
+            }
+            // A single segment or arc has no corners, so a fillet radius
+            // has nothing to round there; one with corners is refused.
+            GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+                directrix,
+                radius,
+                inner_radius,
+                parameter_range,
+                fillet_radius: _,
+            }) => {
+                let tolerance = self.options.tolerance();
+                match crate::directrix::exact(
+                    self.graph,
+                    *directrix,
+                    *parameter_range,
+                    self.options,
+                    unsupported,
+                )? {
+                    crate::directrix::ExactDirectrix::Segment(start, end) => {
+                        swept_disk_along_line_exact(start, end, *radius, *inner_radius, tolerance)
+                    }
+                    crate::directrix::ExactDirectrix::Arc(circle, span) => {
+                        swept_disk_along_arc_exact(&circle, span, *radius, *inner_radius, tolerance)
+                    }
+                }
                 .map_err(remap_construction_error)
             }
             GeometryNode::SolidOperation(SolidOperation::Boolean {
