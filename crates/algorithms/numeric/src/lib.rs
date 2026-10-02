@@ -16,6 +16,7 @@
 //! | fixed Gauss rule for an integrand of known degree | [`GaussLegendre`] |
 //! | square system | [`Lu`] |
 //! | symmetric positive definite system | [`Cholesky`] |
+//! | large sparse symmetric positive definite system | [`conjugate_gradient`] on a [`SparseMatrix`] |
 //! | linear least squares, rank | [`Qr`], [`least_squares`] |
 //! | least squares with equality constraints | [`constrained_least_squares`] |
 //! | nonlinear least squares, nonlinear equations | [`levenberg_marquardt`] |
@@ -37,7 +38,8 @@
 //!   refused, never solved into infinities.
 //!
 //! There are no geometry types here and no dependencies: values are plain
-//! `f64` slices and a small row-major [`Matrix`].
+//! `f64` slices, a small row-major [`Matrix`] and a compressed-row
+//! [`SparseMatrix`].
 
 pub mod error;
 pub mod linalg;
@@ -45,6 +47,7 @@ pub mod optimize;
 pub mod poly;
 pub mod quad;
 pub mod root;
+pub mod sparse;
 
 pub use error::{NumericError, NumericResult, Status};
 pub use linalg::{
@@ -58,3 +61,6 @@ pub use optimize::{
 pub use poly::{Polynomial, PolynomialRoot, RootKind};
 pub use quad::{integrate, GaussLegendre, Integral, IntegrationOptions};
 pub use root::{find_root, Root};
+pub use sparse::{
+    conjugate_gradient, ConjugateGradientOptions, ConjugateGradientSolution, SparseMatrix,
+};

@@ -19,7 +19,8 @@ Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, d
 General numeric routines that geometry algorithms build on: bracketed root
 finding (Brent) and every real root of a polynomial in an interval,
 adaptive Gauss-Kronrod quadrature and fixed Gauss-Legendre rules, LU,
-Cholesky and column-pivoted QR solves, linear least squares with and
+Cholesky and column-pivoted QR solves, Jacobi-preconditioned conjugate
+gradients on a compressed-row sparse matrix, linear least squares with and
 without equality constraints, Levenberg-Marquardt for nonlinear least
 squares, and Brent's bounded scalar minimiser. Each result carries a
 bracket, an error estimate or a condition estimate, and each iterative

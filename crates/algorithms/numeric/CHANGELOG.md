@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SparseMatrix`: compressed sparse rows assembled from triplets, with
+  duplicates summed in input order so storage and products do not depend
+  on triplet order.
+- `conjugate_gradient`: Jacobi-preconditioned conjugate gradients for a
+  sparse symmetric positive definite system (#129). Convergence is judged
+  on the recomputed true residual, a spent budget is reported as
+  `Status::BudgetExhausted` and refused by `converged()`, and an
+  asymmetric matrix, a non-positive diagonal or a direction of
+  non-positive curvature is refused by name.
+
 ## [0.1.0] - 2026-10-02
 
 ### Added
