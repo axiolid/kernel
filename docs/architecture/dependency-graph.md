@@ -20,6 +20,7 @@ graph TD
     axiolid_brep_boolean["axiolid-brep-boolean\nalgorithm.construction"]
     axiolid_capi["axiolid-capi\nfacade.native-c"]
     axiolid_collide["axiolid-collide\nalgorithm.query"]
+    axiolid_constraint2d["axiolid-constraint2d\nalgorithm.planar"]
     axiolid_construct["axiolid-construct\nalgorithm.construction"]
     axiolid_contracts["axiolid-contracts\ncontract.common"]
     axiolid_core["axiolid-core\nfoundation.values"]
@@ -152,6 +153,9 @@ graph TD
     axiolid_brep_boolean --> axiolid_topology
     axiolid_capi --> axiolid
     axiolid_collide --> axiolid_core
+    axiolid_constraint2d --> axiolid_core
+    axiolid_constraint2d --> axiolid_curve
+    axiolid_constraint2d --> axiolid_linear
     axiolid_construct --> axiolid_brep
     axiolid_construct --> axiolid_brep_audit
     axiolid_construct --> axiolid_contracts

@@ -1,0 +1,25 @@
+[package]
+name = "axiolid-constraint2d"
+description = "Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+authors.workspace = true
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-curve.workspace = true
+axiolid-linear.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.planar"
+domain = "planar.constraint2d"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core", "axiolid-curve", "axiolid-linear"]

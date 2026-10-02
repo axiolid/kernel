@@ -4,7 +4,7 @@
 
 # Crate reference
 
-Axiolid publishes 59 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
+Axiolid publishes 60 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
 
 Every page here is generated from the crate itself: its manifest, its crate documentation and its changelog. Sections follow the layers of the [crate map](/architecture/crate-map).
 
@@ -54,6 +54,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-brep-audit`](./crates/axiolid-brep-audit) | `algorithm.repair` | 0.3.2 | Geometric consistency auditing for exact boundary representations |
 | [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.1 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.1 | Convex collision queries: separating axis, overlap, and separation distance |
+| [`axiolid-constraint2d`](./crates/axiolid-constraint2d) | `algorithm.planar` | not released | Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination |
 | [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.7 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.2 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.1 | Convex decomposition of a solid, exact or approximate and always labelled |

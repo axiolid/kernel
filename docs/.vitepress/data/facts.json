@@ -81,6 +81,15 @@
       "role": "algorithm.query",
       "version": "0.3.1"
     },
+    "axiolid-constraint2d": {
+      "description": "Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/constraint2d",
+      "released": null,
+      "released_date": null,
+      "role": "algorithm.planar",
+      "version": "0.1.0"
+    },
     "axiolid-construct": {
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
@@ -581,6 +590,7 @@
           "axiolid-brep-audit",
           "axiolid-brep-boolean",
           "axiolid-collide",
+          "axiolid-constraint2d",
           "axiolid-construct",
           "axiolid-decimate",
           "axiolid-decompose",
@@ -636,6 +646,6 @@
         "title": "Facade"
       }
     ],
-    "total": 58
+    "total": 60
   }
 }

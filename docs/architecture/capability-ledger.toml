@@ -465,9 +465,9 @@ id = "B14"
 area = "curves-surfaces"
 name = "2D constraint solving (tangent circles/lines, Apollonius)"
 issue = "apollonius-constructions"
-level = "absent"
-summary = "No GccAna/Apollonius/tangency-solving code found"
-evidence = []
+level = "narrow"
+summary = "axiolid-constraint2d::tangent_circles solves Apollonius' problem and its degenerate variants: every circle tangent to three given points, lines or circles, in any combination, by eliminating the three (up to eight, by sign choice) tangency equations in closed form and returning every real, positive-radius root, deduplicated. Confirmed against the classic counts: three mutually external circles give all eight Apollonius solutions, a triangle's three side lines give its incircle and three excircles (four solutions), three non-collinear points give a unique circumcircle. A well-posed configuration with no tangent circle answers empty, not an error. Refused by name: non-finite input, a non-positive circle radius, a zero-length line direction, and a configuration whose elimination is singular under every sign choice (three coincident/parallel/identical constraints, or two circle- or point-type constraints sharing a centre, which collapses two equations to a radius-only statement this crate's elimination order does not resolve). Not built: general point/line/circle tangency systems beyond three unknowns-in-three-constraints (e.g. OCCT's iterative Geom2dGcc tier), and the CGAL-style incremental Apollonius diagram."
+evidence = ["crates/algorithms/planar/constraint2d/src/lib.rs::tangent_circles", "crates/algorithms/planar/constraint2d/tests/tangent_circles.rs", "scripts/probe_constraint2d_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKGeomAlgo/GccAna", "src/ModelingAlgorithms/TKGeomAlgo/Geom2dGcc"]
 cgal = ["Apollonius_graph_2"]
 

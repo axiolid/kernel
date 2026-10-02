@@ -231,6 +231,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-constraint2d"
+version = "0.1.0"
+dependencies = [
+ "axiolid-core",
+ "axiolid-curve",
+ "axiolid-linear",
+]
+
+[[package]]
 name = "axiolid-construct"
 version = "0.3.7"
 dependencies = [
