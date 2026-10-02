@@ -100,7 +100,6 @@ title = "Mesh hole filling with fairing, and subdivision surfaces"
 priority = "Medium"
 effort = "Medium"
 number = 129
-blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "mesh-geodesic-param"
@@ -108,7 +107,6 @@ title = "Mesh geodesics and UV parameterisation"
 priority = "Low"
 effort = "High"
 number = 130
-blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "mesh-segmentation-shape"
@@ -215,7 +213,6 @@ title = "Isotropic remeshing: split, collapse, flip and tangential relaxation"
 priority = "Medium"
 effort = "Medium"
 number = 149
-blocked_by = ["halfedge-mesh"]
 
 [[issue]]
 key = "curve-surface-fitting"
@@ -223,7 +220,6 @@ title = "Least-squares curve and surface fitting to points"
 priority = "Medium"
 effort = "Medium"
 number = 150
-blocked_by = ["numeric-substrate"]
 
 [[issue]]
 key = "fair-curves"
@@ -231,7 +227,6 @@ title = "Fair curves: minimum-energy interpolation and batten curves"
 priority = "Low"
 effort = "Medium"
 number = 151
-blocked_by = ["numeric-substrate"]
 
 [[issue]]
 key = "form-features"
