@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-02
+
 ### Added
 
 - `fit_curve3` and `fit_curve3_to_tolerance`: least-squares B-spline curve

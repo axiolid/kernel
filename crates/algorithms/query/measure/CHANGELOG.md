@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-02
+
 ### Added
 
 - Certified Hausdorff distance between exact boundaries (#224), behind the

@@ -53,6 +53,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep
 
+### 0.3.3 - 2026-10-02
+
+### Added
+
+- `ExactBRep::transformed`: place an exact B-rep under a rigid motion
+  (#223). Every vertex, curve and surface maps onto the same family --
+  planes, cylinders, elliptical cylinders, cones, spheres, tori, circles,
+  ellipses, B-splines and the section curves that carry their surface --
+  with the topology, structural names and intervals kept; nothing is
+  tessellated or refitted. A reflection keeps every frame right-handed
+  (curved surfaces then read their angle backwards, `u -> 2 pi - u`, and
+  their pcurves are reflected to match) and flips every face, so a solid
+  stays outward oriented. Refused with the new `TransformError`: a
+  non-finite transform, a linear part not orthonormal within
+  `RIGID_TOLERANCE` (a scale or shear), an elevated alignment curve, and
+  under a reflection the pcurve and carrier families with no closed-form
+  reflection here (quadric and torus section graphs, traced, lifted and
+  intrinsic curves on curved faces).
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -216,6 +235,41 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.9 - 2026-10-02
+
+### Added
+
+- Exact swept disks (#223). `swept_disk_exact::swept_disk_along_line_exact`
+  sweeps a disk, optionally with a bore, along a straight segment into a
+  capped cylinder; `swept_disk_along_arc_exact` sweeps it along a circular
+  arc into a capped torus wedge, or a whole torus (with a toroidal bore for
+  a hollow disk) for a full turn. Both are the exact extrusion and
+  revolution of the disk placed with `ExactBRep::transformed`. Volumes
+  match `pi r^2 L` and Pappus, every solid audits clean, and certified
+  distances under tilted placements match their closed forms. Refused by
+  name: a disk reaching the arc's axis, an arc beyond a full turn; invalid
+  input: a non-positive radius, a bore not strictly inside the disk, a zero
+  span or segment, a non-orthonormal arc frame.
+
+### Fixed
+
+- `revolve::revolve` (the mesh path) no longer builds an inside-out mesh
+  for a negative sweep angle (#221). The station order it winds its walls
+  from gave a positive signed volume only for a positive angle; since
+  `angle` and `axis_direction` only matter through their product (the
+  axis-angle rotation vector), a sign-of-`angle` check alone could not be
+  made consistent with a sign flip in the axis direction too. The mesh's
+  orientation is now settled from its own computed volume instead, so it
+  matches `revolve_profile_exact`'s positive sign for either sign of angle
+  and either axis direction. `tests/revolve_partial.rs` compared only
+  `|volume|` between the two paths because of this; it now compares the
+  signed volumes.
+- `sweep::tapered_revolve` shared the same unconditional station reversal
+  as `revolve::revolve` and so built the same inside-out mesh for a
+  negative sweep angle (#221). Fixed the same way: orientation is settled
+  from the built mesh's own signed volume rather than guessed from the
+  station order.
 
 ### 0.3.8 - 2026-10-02
 
@@ -862,6 +916,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-measure
 
+### 0.3.6 - 2026-10-02
+
+### Added
+
+- Certified Hausdorff distance between exact boundaries (#224), behind the
+  `exact` feature. `boundary_hausdorff_distance` returns
+  `BoundaryHausdorff`: intervals certain to contain the two-sided
+  Hausdorff distance between the boundaries of two `ExactBRep`s and both
+  one-sided ones, refined to a requested absolute accuracy;
+  `one_sided_boundary_hausdorff` measures one direction. Each interval is a
+  `HausdorffBounds`, as for meshes, with witnesses: a point certainly on
+  the measured boundary realising the lower bound, and its nearest point
+  found on the other. Lower bounds are such points' distances bounded below
+  by the certified distance search; upper bounds come from branch and bound
+  over face patches, each bounded by a matched face of the other boundary
+  (same family, same trim: `|S_A - S_B|` over the patch, exact for a
+  translation) or by the 1-Lipschitz distance about a point. Copies offset
+  by a translation and identical copies close in a few dozen splits at any
+  accuracy (two columns 0.1 mm apart to 1e-6, an arched opening moved
+  0.2 m, a re-export within the accuracy); other pairs close at first order
+  in the patch size. A fixed budget can end refinement early; the interval
+  stays sound, only wider.
+
 ### 0.3.5 - 2026-09-30
 
 ### Added
@@ -1123,6 +1200,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.7 - 2026-10-02
+
+### Added
+
+- `ReferenceExactCompiler` compiles `Instance` nodes (#223): the source's
+  exact B-rep is placed with `ExactBRep::transformed`, so extrusions,
+  revolutions and swept disks under rotated, reflected and translated
+  placements (nested instances compose) stay exact. A scaled or sheared
+  instance is refused by name, never approximated.
+- `ReferenceExactCompiler` compiles `SweptDisk` exactly along one segment
+  or one arc (#223): a bounded line, a two-point polyline, a circle or a
+  sub-range of one, a trim of a line or circle (across the seam, as the
+  mesh path reads it) and a one-segment composite. A directrix with
+  corners, any other curve, an unbounded line and a disk reaching its
+  arc's axis are refused by name.
+
 ### 0.3.6 - 2026-09-28
 
 ### Changed
@@ -1359,6 +1452,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-numeric
 
+### 0.1.1 - 2026-10-02
+
+### Added
+
+- `SparseMatrix`: compressed sparse rows assembled from triplets, with
+  duplicates summed in input order so storage and products do not depend
+  on triplet order.
+- `conjugate_gradient`: Jacobi-preconditioned conjugate gradients for a
+  sparse symmetric positive definite system (#129). Convergence is judged
+  on the recomputed true residual, a spent budget is reported as
+  `Status::BudgetExhausted` and refused by `converged()`, and an
+  asymmetric matrix, a non-positive diagonal or a direction of
+  non-positive curvature is refused by name.
+
 ### 0.1.0 - 2026-10-02
 
 ### Added
@@ -1386,6 +1493,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-nurbs
+
+### 0.3.5 - 2026-10-02
+
+### Added
+
+- `fit_curve3` and `fit_curve3_to_tolerance`: least-squares B-spline curve
+  approximation to scattered points (#150, ledger B11), distinct from
+  `interpolate_curve3`'s exact pass-through. Uniform, chord-length and
+  centripetal parameterisation; knot placement by the Piegl and Tiller
+  averaging formula for approximation (eq. 9.68); optional equality-
+  constrained endpoint interpolation and a second-difference smoothing
+  term; optional Newton parameter-correction passes. Solves go through
+  `axiolid-numeric`'s QR-based least squares and equality-constrained
+  least squares rather than normal equations. Every fit reports the
+  achieved max and RMS deviation, computed by evaluating the result at
+  the input points' own parameters, never estimated from the solver's
+  algebraic residual. Refuses non-finite input, too few points for the
+  requested degree or control count, coincident consecutive points under
+  chord-length or centripetal parameterisation, invalid (zero) degree,
+  and rank-deficient systems (reporting the numeric rank found and the
+  rank required). `fit_curve3_to_tolerance` adds control points until the
+  max deviation meets the caller's tolerance, refusing with
+  `GeomError::BudgetExceeded` rather than returning a fit that silently
+  misses it.
+- `fit_surface_grid`: separable tensor-product B-spline surface
+  approximation to a rectangular grid of points (#150, ledger B11): fits
+  each row along `u` sharing one design matrix, then each column of the
+  result along `v`, reusing the curve fit's solver and deviation
+  reporting. Refuses ragged grids and the same input and rank failures as
+  the curve fit, on either axis.
 
 ### 0.3.4 - 2026-09-28
 
@@ -2018,6 +2155,40 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-refine
+
+### 0.3.2 - 2026-10-02
+
+### Added
+
+- `remesh::remesh` (#149): isotropic remeshing towards a target edge length `L` in the Botsch–Kobbelt scheme CGAL's `isotropic_remeshing` follows. Each iteration splits edges longer than `4/3 L`, collapses edges shorter than `4/5 L` where no edge longer than `4/3 L` results, flips edges to bring valences towards 6 (4 on a boundary), and moves free vertices towards the area-weighted centroid of their triangles in the tangent plane before projecting them onto the input. Works on a `HalfedgeMesh`; deterministic.
+- Boundary edges and, by default, edges sharper than 60 degrees (`RemeshOptions::feature_angle`) are protected: never flipped, split on their own segment, collapsed only where their line runs straight, so feature corners stay bit-identical and the Euler characteristic, boundary loops and orientation are kept. Free vertices are projected only onto their own patch of the input (the pieces between protected edges), with a bounding-volume hierarchy per patch.
+- A collapse, flip or move that would turn a triangle's normal by a right angle or more, or leave it flatter than a height-to-longest-edge ratio of `1e-3`, is skipped, never forced; so is a collapse or flip that would lower the smallest angle of the triangles it rewrites below 15 degrees.
+- `RemeshReport` measures the result: edits made, the fraction of edges within `[4/5 L, 4/3 L]`, mean valence deviation before and after, the smallest angle, and the largest distance of an output vertex from the input.
+- `RemeshError` refuses non-manifold, inconsistently wound, ragged or out-of-range input (wrapping `HalfedgeBuildError`), non-finite positions, degenerate input triangles, a non-positive target, a feature angle outside `[0, pi]` and an output over the triangle budget.
+- `fill_hole` (#129): closes one hole of a `HalfedgeMesh` by Liepa's
+  method: a triangulation of the boundary loop whose largest dihedral
+  angle is the exact minimum (Liepa's and CGAL's recurrence only
+  approximates it; the state here also names the triangle above each
+  diagonal, at `O(n^4)` time), area breaking ties; then centroid
+  refinement to the density of the surrounding edges with Delaunay edge
+  flips, and biharmonic fairing of the new vertices. The patch is wound like its surroundings and shares
+  the hole's edges. Refused by name, with the mesh unchanged: a halfedge
+  that bounds no hole, a loop over `max_boundary_vertices`, a loop with no
+  area or one whose projection onto its mean plane is not simple, a hole
+  every triangulation of which needs a degenerate triangle or an existing
+  edge, a refinement over `max_new_vertices`, and a fairing that does not
+  converge.
+- `fair`: places chosen vertices where the harmonic or biharmonic
+  Laplacian vanishes with every other vertex fixed, with cotangent or
+  uniform weights, solved by conjugate gradients from `axiolid-numeric`.
+  Affine functions are reproduced, so a planar border keeps the faired
+  vertices in its plane.
+- `subdivide` and `limit_positions`: Loop subdivision of triangle meshes
+  and Catmull-Clark subdivision of polygon meshes, with cubic B-spline
+  rules on boundaries, a face budget, and the limit position of every
+  vertex from the schemes' limit masks.
+- New dependencies on `axiolid-numeric` (the sparse solve) and
+  `axiolid-predicates` (exact orientation in the boundary-loop check).
 
 ### 0.3.1 - 2026-09-28
 

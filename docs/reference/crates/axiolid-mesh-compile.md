@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-09-28) |
+| Latest release | 0.3.7 (2026-10-02) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -57,11 +57,20 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.6 (2026-09-28):
+Latest release, 0.3.7 (2026-10-02):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `ReferenceExactCompiler` compiles `Instance` nodes (#223): the source's
+  exact B-rep is placed with `ExactBRep::transformed`, so extrusions,
+  revolutions and swept disks under rotated, reflected and translated
+  placements (nested instances compose) stay exact. A scaled or sheared
+  instance is refused by name, never approximated.
+- `ReferenceExactCompiler` compiles `SweptDisk` exactly along one segment
+  or one arc (#223): a bounded line, a two-point polyline, a circle or a
+  sub-range of one, a trim of a line or circle (across the seam, as the
+  mesh path reads it) and a one-segment composite. A directrix with
+  corners, any other curve, an unbounded line and a disk reaching its
+  arc's axis are refused by name.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

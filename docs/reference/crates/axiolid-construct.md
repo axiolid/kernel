@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-02) |
+| Latest release | 0.3.9 (2026-10-02) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -62,34 +62,39 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-02):
+Latest release, 0.3.9 (2026-10-02):
 
 ### Added
 
-- Exact partial-turn revolution (#172). `revolve_profile_exact` now builds
-  a revolution through `0 < |angle| < 2 pi` instead of refusing it: every
-  profile the full turn revolves (rectangles, circles, sections, contours
-  with arcs and holes, derived, centre-line and composite profiles) becomes
-  a closed exact B-rep whose walls are cylinder, cone, plane and torus
-  patches trimmed to the swept angle, capped at both ends by the profile
-  itself; each hole is a tunnel between the caps. Unlike the full turn, a
-  partial turn may touch the axis: a vertex on it sweeps no arc (a cone
-  closes at its apex, a planar wall becomes a sector) and a straight
-  segment on it sweeps no wall, its edge shared by the two caps. The angle
-  follows the right-hand rule about the axis direction, as the mesh path
-  does; a section on either side of the axis is accepted. The new
-  `revolve_partial::revolve_section_partial` builds one lowered section.
-  Volume (`theta R A`) and area (`theta integral(r ds) + 2 A`) match
-  Pappus at 90, 180, 270 degrees and small angles
-  (`tests/revolve_partial.rs`); `scripts/probe_partial_revolve_mutants.py`
-  lists the faults the tests must catch.
+- Exact swept disks (#223). `swept_disk_exact::swept_disk_along_line_exact`
+  sweeps a disk, optionally with a bore, along a straight segment into a
+  capped cylinder; `swept_disk_along_arc_exact` sweeps it along a circular
+  arc into a capped torus wedge, or a whole torus (with a toroidal bore for
+  a hollow disk) for a full turn. Both are the exact extrusion and
+  revolution of the disk placed with `ExactBRep::transformed`. Volumes
+  match `pi r^2 L` and Pappus, every solid audits clean, and certified
+  distances under tilted placements match their closed forms. Refused by
+  name: a disk reaching the arc's axis, an arc beyond a full turn; invalid
+  input: a non-positive radius, a bore not strictly inside the disk, a zero
+  span or segment, a non-orthonormal arc frame.
 
-### Changed
+### Fixed
 
-- `revolve_profile_exact` refuses a turn beyond a full turn by name
-  (`"exact revolution beyond a full turn"`) and a zero angle as invalid
-  input; both were previously reported as the partial-turn refusal, which
-  no longer exists. A section crossing the axis, an arc whose circle
-  reaches the axis, and an ellipse remain refused by name.
+- `revolve::revolve` (the mesh path) no longer builds an inside-out mesh
+  for a negative sweep angle (#221). The station order it winds its walls
+  from gave a positive signed volume only for a positive angle; since
+  `angle` and `axis_direction` only matter through their product (the
+  axis-angle rotation vector), a sign-of-`angle` check alone could not be
+  made consistent with a sign flip in the axis direction too. The mesh's
+  orientation is now settled from its own computed volume instead, so it
+  matches `revolve_profile_exact`'s positive sign for either sign of angle
+  and either axis direction. `tests/revolve_partial.rs` compared only
+  `|volume|` between the two paths because of this; it now compares the
+  signed volumes.
+- `sweep::tapered_revolve` shared the same unconditional station reversal
+  as `revolve::revolve` and so built the same inside-out mesh for a
+  negative sweep angle (#221). Fixed the same way: orientation is settled
+  from the built mesh's own signed volume rather than guessed from the
+  station order.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

@@ -8,7 +8,7 @@ Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdi
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-02) |
 | crates.io | [`axiolid-refine`](https://crates.io/crates/axiolid-refine) |
 | Layer | algorithms (`algorithm.discrete`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_refine/index.html) · [docs.rs](https://docs.rs/axiolid-refine) |
@@ -43,11 +43,38 @@ not reduce triangle counts (see `axiolid-decimate`).
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-02):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `remesh::remesh` (#149): isotropic remeshing towards a target edge length `L` in the Botsch–Kobbelt scheme CGAL's `isotropic_remeshing` follows. Each iteration splits edges longer than `4/3 L`, collapses edges shorter than `4/5 L` where no edge longer than `4/3 L` results, flips edges to bring valences towards 6 (4 on a boundary), and moves free vertices towards the area-weighted centroid of their triangles in the tangent plane before projecting them onto the input. Works on a `HalfedgeMesh`; deterministic.
+- Boundary edges and, by default, edges sharper than 60 degrees (`RemeshOptions::feature_angle`) are protected: never flipped, split on their own segment, collapsed only where their line runs straight, so feature corners stay bit-identical and the Euler characteristic, boundary loops and orientation are kept. Free vertices are projected only onto their own patch of the input (the pieces between protected edges), with a bounding-volume hierarchy per patch.
+- A collapse, flip or move that would turn a triangle's normal by a right angle or more, or leave it flatter than a height-to-longest-edge ratio of `1e-3`, is skipped, never forced; so is a collapse or flip that would lower the smallest angle of the triangles it rewrites below 15 degrees.
+- `RemeshReport` measures the result: edits made, the fraction of edges within `[4/5 L, 4/3 L]`, mean valence deviation before and after, the smallest angle, and the largest distance of an output vertex from the input.
+- `RemeshError` refuses non-manifold, inconsistently wound, ragged or out-of-range input (wrapping `HalfedgeBuildError`), non-finite positions, degenerate input triangles, a non-positive target, a feature angle outside `[0, pi]` and an output over the triangle budget.
+- `fill_hole` (#129): closes one hole of a `HalfedgeMesh` by Liepa's
+  method: a triangulation of the boundary loop whose largest dihedral
+  angle is the exact minimum (Liepa's and CGAL's recurrence only
+  approximates it; the state here also names the triangle above each
+  diagonal, at `O(n^4)` time), area breaking ties; then centroid
+  refinement to the density of the surrounding edges with Delaunay edge
+  flips, and biharmonic fairing of the new vertices. The patch is wound like its surroundings and shares
+  the hole's edges. Refused by name, with the mesh unchanged: a halfedge
+  that bounds no hole, a loop over `max_boundary_vertices`, a loop with no
+  area or one whose projection onto its mean plane is not simple, a hole
+  every triangulation of which needs a degenerate triangle or an existing
+  edge, a refinement over `max_new_vertices`, and a fairing that does not
+  converge.
+- `fair`: places chosen vertices where the harmonic or biharmonic
+  Laplacian vanishes with every other vertex fixed, with cotangent or
+  uniform weights, solved by conjugate gradients from `axiolid-numeric`.
+  Affine functions are reproduced, so a planar border keeps the faired
+  vertices in its plane.
+- `subdivide` and `limit_positions`: Loop subdivision of triangle meshes
+  and Catmull-Clark subdivision of polygon meshes, with cubic B-spline
+  rules on boundaries, a face budget, and the limit position of every
+  vertex from the schemes' limit masks.
+- New dependencies on `axiolid-numeric` (the sparse solve) and
+  `axiolid-predicates` (exact orientation in the boundary-loop check).
 
 Full history: [`crates/algorithms/discrete/refine/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/refine/CHANGELOG.md)

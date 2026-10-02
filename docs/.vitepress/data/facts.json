@@ -40,10 +40,10 @@
       "description": "Exact analytic B-rep result contracts over neutral topology",
       "layer": "representations",
       "path": "crates/representations/brep",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-02",
       "role": "representation.composed",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-brep-audit": {
       "description": "Geometric consistency auditing for exact boundary representations",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.8",
+      "released": "0.3.9",
       "released_date": "2026-10-02",
       "role": "algorithm.construction",
-      "version": "0.3.8"
+      "version": "0.3.9"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -274,10 +274,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.5",
-      "released_date": "2026-09-30",
+      "released": "0.3.6",
+      "released_date": "2026-10-02",
       "role": "algorithm.query",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.6",
-      "released_date": "2026-09-28",
+      "released": "0.3.7",
+      "released_date": "2026-10-02",
       "role": "execution.orchestration",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -364,19 +364,19 @@
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
       "layer": "algorithms",
       "path": "crates/algorithms/numeric",
-      "released": "0.1.0",
+      "released": "0.1.1",
       "released_date": "2026-10-02",
       "role": "algorithm.numeric",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     "axiolid-nurbs": {
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/nurbs",
-      "released": "0.3.4",
-      "released_date": "2026-09-28",
+      "released": "0.3.5",
+      "released_date": "2026-10-02",
       "role": "algorithm.parametric",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-overlay": {
       "description": "Deterministic validated planar overlay contract",
@@ -472,10 +472,10 @@
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/refine",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-02",
       "role": "algorithm.discrete",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-route": {
       "description": "Exact planar shortest path over a visibility graph",

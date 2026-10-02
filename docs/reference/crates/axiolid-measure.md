@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-09-30) |
+| Latest release | 0.3.6 (2026-10-02) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -39,35 +39,27 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-09-30):
+Latest release, 0.3.6 (2026-10-02):
 
 ### Added
 
-- Certified mesh Hausdorff distance (#148). `hausdorff_distance` returns
-  `MeshHausdorff`: intervals certain to contain the two-sided Hausdorff
-  distance between two triangle-mesh surfaces and both one-sided ones,
-  refined to a requested absolute accuracy; `one_sided_hausdorff` measures
-  one direction. Each `HausdorffBounds` carries witnesses: the sample
-  realising the lower bound and its nearest point on the other mesh. Lower
-  bounds are sampled points' distances bounded below through each
-  triangle's support function; upper bounds come from branch and bound over
-  subdivided triangles (the distance to a triangle is convex, so a piece's
-  maximum is at a corner) with a best-first BVH, and flat convex patches of
-  the target (edge pairs, closed fans) bound pieces across seams with a
-  certified hull excess. Rounding is accounted for with explicit margins,
-  including the drift of rounded subdivision midpoints. Open, non-manifold
-  and degenerate meshes are measured; empty meshes, bad indices, non-finite
-  positions and invalid accuracies are refused with `HausdorffError`.
-- Hausdorff distance between polylines (#147), one-sided and two-sided,
-  in 2D and 3D: `polyline_hausdorff_distance`,
-  `one_sided_polyline_hausdorff_distance` and their `_2d` forms. The
-  supremum over a segment of the distance to the other polyline is found
-  among its ends and the points where two features of the other polyline
-  -- vertices, segment interiors -- are equally near, since the distance
-  to one feature is convex along a line.
-- `frechet_decide_certified` and `frechet_decide_certified_2d` answer
-  whether the Fréchet distance is at most `eps` only when rounding cannot
-  change the answer: `FrechetDecision::AtMost`, `MoreThan`, or
-  `Undecided` within the error margin of the floating-point decision.
+- Certified Hausdorff distance between exact boundaries (#224), behind the
+  `exact` feature. `boundary_hausdorff_distance` returns
+  `BoundaryHausdorff`: intervals certain to contain the two-sided
+  Hausdorff distance between the boundaries of two `ExactBRep`s and both
+  one-sided ones, refined to a requested absolute accuracy;
+  `one_sided_boundary_hausdorff` measures one direction. Each interval is a
+  `HausdorffBounds`, as for meshes, with witnesses: a point certainly on
+  the measured boundary realising the lower bound, and its nearest point
+  found on the other. Lower bounds are such points' distances bounded below
+  by the certified distance search; upper bounds come from branch and bound
+  over face patches, each bounded by a matched face of the other boundary
+  (same family, same trim: `|S_A - S_B|` over the patch, exact for a
+  translation) or by the 1-Lipschitz distance about a point. Copies offset
+  by a translation and identical copies close in a few dozen splits at any
+  accuracy (two columns 0.1 mm apart to 1e-6, an arched opening moved
+  0.2 m, a re-export within the accuracy); other pairs close at first order
+  in the patch size. A fixed budget can end refinement early; the interval
+  stays sound, only wider.
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

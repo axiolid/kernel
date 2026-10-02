@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-02
+
 ### Added
 
 - `remesh::remesh` (#149): isotropic remeshing towards a target edge length `L` in the Botsch–Kobbelt scheme CGAL's `isotropic_remeshing` follows. Each iteration splits edges longer than `4/3 L`, collapses edges shorter than `4/5 L` where no edge longer than `4/3 L` results, flips edges to bring valences towards 6 (4 on a boundary), and moves free vertices towards the area-weighted centroid of their triangles in the tangent plane before projecting them onto the input. Works on a `HalfedgeMesh`; deterministic.

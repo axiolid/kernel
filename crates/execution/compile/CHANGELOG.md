@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-02
+
 ### Added
 
 - `ReferenceExactCompiler` compiles `Instance` nodes (#223): the source's

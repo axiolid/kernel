@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-02
+
 ### Added
 
 - `ExactBRep::transformed`: place an exact B-rep under a rigid motion

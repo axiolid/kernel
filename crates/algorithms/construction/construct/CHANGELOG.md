@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-02
+
 ### Added
 
 - Exact swept disks (#223). `swept_disk_exact::swept_disk_along_line_exact`
