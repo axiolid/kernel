@@ -16,6 +16,7 @@
 //! Keeping the analytic surface alongside the mesh is what makes that
 //! possible, so it is the capability this module is really for.
 
+pub mod remesh;
 pub mod smooth;
 
 use ahash::AHashMap;

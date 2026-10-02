@@ -5,8 +5,13 @@ Refinement splits triangles; when the source surface of a tessellated
 B-rep is supplied, each new vertex is placed on that surface instead of at
 the edge midpoint, so refinement converges on the real geometry rather than
 subdividing the facets. Smoothing keeps boundary vertices bit-identical by
-default. It does not reduce triangle counts (see `axiolid-decimate`) and
-does not implement limit-surface subdivision schemes.
+default. Isotropic remeshing (`remesh`) splits, collapses, flips and relaxes
+towards one target edge length on a halfedge mesh, keeping boundary and
+sharp feature lines exactly and projecting every free vertex back onto the
+input; its report measures how close the result came. Remeshing sizes edges
+uniformly, not by curvature, and does not implement limit-surface
+subdivision schemes; for decimation under a deviation bound see
+`axiolid-decimate`.
 
 ```bash
 cargo add axiolid-refine
