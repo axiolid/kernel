@@ -34,6 +34,14 @@
 //!     an identical copy zero up to rounding. For a rotation it is the
 //!     displacement of the rotation, which may exceed the distance: it then
 //!     only caps what the Lipschitz bound must refine;
+//!   - the same bound for a face of `B` that is a translate of `A`'s but
+//!     trimmed in another chart (#227), as a builder that trims in world
+//!     coordinates makes it: same family, axes and shape, and trims equal
+//!     after the parameter shift the translation induces, to within a
+//!     measured residue. `S_B` re-charted by the shift is again one domain
+//!     with `S_A`, the residue is folded in, and the bound is `|t|`. A
+//!     turned or resized face is never matched this way (the derivation and
+//!     the gate are in the private `exact_hausdorff/translate.rs`);
 //!   - a *Lipschitz* bound: `d(., dB)` is 1-Lipschitz, so over a patch inside
 //!     a sphere of radius `r` about `c` it is at most `d(c, dB) + r`, with
 //!     `d(c, dB)` bounded above by a point found on `dB`.
@@ -51,14 +59,23 @@
 //! is approached along the edge. Point queries walk a tree of `B`'s
 //! elements that is refined once and shared by every query.
 //!
+//! Before any split, each translation `t` a matched face carries seeds the
+//! lower bound with `A`'s support point against `t` on its edges: for a
+//! translate that point is exactly `|t|` from `B`'s boundary, whatever the
+//! shape, so a farthest point isolated at a corner is not left to edge
+//! bisection.
+//!
 //! # Convergence and refusal
 //!
 //! Copies offset by a translation (and identical copies) close in a few
-//! dozen splits whatever the accuracy, because the matched bound does not
-//! depend on the patch size there. Elsewhere the Lipschitz bound closes at
+//! dozen splits whatever the accuracy, and usually in none: the matched
+//! bound holds every patch at `|t|` at once, and the support point is `|t|`
+//! from the other boundary when the solid's support against `t` is on an
+//! edge (faces on planes, cylinders and cones). Elsewhere the Lipschitz bound closes at
 //! first order: an accuracy `e` needs patches of radius about `e` wherever
 //! the distance comes within `e` of the farthest, so the work grows with
-//! that area over `e^2`. Refinement stops at a fixed budget; the interval
+//! that area over `e^2`. Refinement stops at a fixed budget, or at the
+//! caller's ([`one_sided_boundary_hausdorff_with_budget`]); the interval
 //! returned is then still sound, only wider than asked -- a caller decides
 //! by its width, never by a guess. A face whose domain cannot be bounded is
 //! refused as by [`crate::boundary_distance`].
@@ -83,12 +100,21 @@ use crate::exact_distance::{
 };
 use crate::mesh_hausdorff::HausdorffBounds;
 
+mod translate;
+
+use axiolid_evaluate::surface::evaluate;
+use translate::{support_point, translate, Shifted};
+
 /// Splits of the measured boundary's patches and edge spans before a
 /// one-sided query reports what it has.
 const MAX_SPLITS: usize = 200_000;
 
 /// Refinement steps one point query may take.
 const POINT_STEPS: usize = 20_000;
+
+/// Translations of matched faces whose support points seed the lower
+/// bound; a translate gives one.
+const MAX_DISPLACEMENTS: usize = 16;
 
 /// The two-sided Hausdorff distance between two exact boundaries and both
 /// one-sided ones.
@@ -125,11 +151,32 @@ pub fn one_sided_boundary_hausdorff(
     accuracy: Scalar,
     tolerance: Tolerance,
 ) -> Result<HausdorffBounds, ExactMeasureError> {
+    one_sided_boundary_hausdorff_with_budget(from, to, accuracy, tolerance, MAX_SPLITS)
+}
+
+/// [`one_sided_boundary_hausdorff`] with the caller's refinement budget: at
+/// most `max_splits` splits of `from`'s face patches and edge spans (#227).
+///
+/// The interval is sound whatever the budget; a small one only leaves it
+/// wider than `accuracy`. Translated and identical copies close in a few
+/// dozen splits, so a caller comparing versions of a model can cap the work
+/// per pair and read an interval left open as "not evaluated".
+///
+/// # Errors
+///
+/// As [`one_sided_boundary_hausdorff`].
+pub fn one_sided_boundary_hausdorff_with_budget(
+    from: &ExactBRep,
+    to: &ExactBRep,
+    accuracy: Scalar,
+    tolerance: Tolerance,
+    max_splits: usize,
+) -> Result<HausdorffBounds, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
     let linear = tolerance.linear().max(1e-12);
     let source = Side::new(from, linear, Metric::Space)?;
     let mut target = Nearest::new(Side::new(to, linear, Metric::Space)?);
-    search(&source, &mut target, accuracy)
+    search(&source, &mut target, accuracy, max_splits)
 }
 
 /// Two-sided Hausdorff distance between the boundaries of `a` and `b`, to
@@ -294,16 +341,35 @@ impl<'a> Nearest<'a> {
     }
 }
 
-/// A face of `B` matched to each face of `A` (see the module docs).
-fn matches(a: &ExactBRep, b: &ExactBRep) -> Vec<Vec<usize>> {
+/// A face of `B` matched to a face of `A`: on the same parameters, or on
+/// `A`'s parameters once re-charted by a translate's shift.
+#[derive(Debug, Clone)]
+struct Match {
+    face: usize,
+    shifted: Option<Shifted>,
+}
+
+/// The faces of `B` matched to each face of `A` (see the module docs).
+fn matches(a: &ExactBRep, b: &ExactBRep) -> Vec<Vec<Match>> {
     let fa = a.topology().faces();
     let fb = b.topology().faces();
     fa.iter()
         .map(|face_a| {
             fb.iter()
                 .enumerate()
-                .filter(|(_, face_b)| same_face(a, face_a, b, face_b))
-                .map(|(index, _)| index)
+                .filter_map(|(face, face_b)| {
+                    if same_face(a, face_a, b, face_b) {
+                        Some(Match {
+                            face,
+                            shifted: None,
+                        })
+                    } else {
+                        translate(a, face_a, b, face_b).map(|shifted| Match {
+                            face,
+                            shifted: Some(shifted),
+                        })
+                    }
+                })
                 .collect()
         })
         .collect()
@@ -520,6 +586,54 @@ fn matched_bound(a: &Surface, b: &Surface, lo: Point2, hi: Point2) -> Option<Sca
     bound.is_finite().then_some(bound)
 }
 
+/// Distinct translations matched faces carry: `S_B - S_A` where it is the
+/// same at the centre and two corners of a matched face's parameter box,
+/// at most [`MAX_DISPLACEMENTS`] of them. For a translate every face gives
+/// the translation; a turned face gives none.
+fn displacements(
+    source: &Side<'_>,
+    target: &ExactBRep,
+    matched: &[Vec<Match>],
+) -> Result<Vec<Vec3>, ExactMeasureError> {
+    let mut found: Vec<Vec3> = Vec::new();
+    for element in &source.elements {
+        let Shape::Face { face, lo, hi, .. } = element.shape else {
+            continue;
+        };
+        let surface = surface_of(source.brep, source.brep.topology().faces()[face].surface)?;
+        for other in &matched[face] {
+            let theirs = match &other.shifted {
+                Some(shifted) => &shifted.surface,
+                None => surface_of(target, target.topology().faces()[other.face].surface)?,
+            };
+            // The displacement at the centre and two corners of the box:
+            // only a translation, the same at all three, is a seed.
+            let moves: Vec<Vec3> = [(lo + hi) * 0.5, lo, hi]
+                .iter()
+                .filter_map(|q| {
+                    let here = evaluate(surface, q.x, q.y).ok()?;
+                    let there = evaluate(theirs, q.x, q.y).ok()?;
+                    Some(there - here)
+                })
+                .collect();
+            let [t, a, b] = moves[..] else {
+                continue;
+            };
+            let rigid = (a - t).length().max((b - t).length()) <= 1e-9 * (1.0 + t.length());
+            let fresh = rigid
+                && t.is_finite()
+                && t.length() > 0.0
+                && found
+                    .iter()
+                    .all(|seen| (*seen - t).length() > 1e-9 * (1.0 + t.length()));
+            if fresh && found.len() < MAX_DISPLACEMENTS {
+                found.push(t);
+            }
+        }
+    }
+    Ok(found)
+}
+
 /// What the search has certified so far.
 struct State {
     lower: Scalar,
@@ -530,6 +644,7 @@ fn search(
     source: &Side<'_>,
     target: &mut Nearest<'_>,
     accuracy: Scalar,
+    max_splits: usize,
 ) -> Result<HausdorffBounds, ExactMeasureError> {
     let matched = matches(source.brep, target.side.brep);
     let point_accuracy = 0.25 * accuracy;
@@ -542,6 +657,20 @@ fn search(
     // Every element queued, by index; a queue holds its bound.
     let mut pieces: Vec<Element> = Vec::new();
 
+    // A matched face moved by `t` puts the farthest point of a translate at
+    // `A`'s support point against `t` (see `translate::support_point`).
+    for t in displacements(source, target.side.brep, &matched)? {
+        let Some(p) = support_point(source.brep, -t) else {
+            continue;
+        };
+        if let Some(found) = target.query(p, point_accuracy)? {
+            if found.lower > state.lower || state.witness.is_none() {
+                state.lower = state.lower.max(found.lower);
+                state.witness = Some((p, found.nearest));
+            }
+        }
+    }
+
     // Bound one element and queue it; measure its witness if it may raise
     // the lower bound.
     let mut admit = |element: Element,
@@ -553,12 +682,19 @@ fn search(
         let mut upper = Scalar::INFINITY;
         if let Shape::Face { face, lo, hi, .. } = element.shape {
             let surface = surface_of(source.brep, source.brep.topology().faces()[face].surface)?;
-            for &other in &matched[face] {
-                let target_surface = surface_of(
-                    target.side.brep,
-                    target.side.brep.topology().faces()[other].surface,
-                )?;
-                if let Some(bound) = matched_bound(surface, target_surface, lo, hi) {
+            for other in &matched[face] {
+                let bound = match &other.shifted {
+                    None => {
+                        let target_surface = surface_of(
+                            target.side.brep,
+                            target.side.brep.topology().faces()[other.face].surface,
+                        )?;
+                        matched_bound(surface, target_surface, lo, hi)
+                    }
+                    Some(shifted) => matched_bound(surface, &shifted.surface, lo, hi)
+                        .and_then(|bound| shifted.bound(bound, lo, hi)),
+                };
+                if let Some(bound) = bound {
                     upper = upper.min(bound);
                 }
             }
@@ -605,7 +741,7 @@ fn search(
         // one already bounded below `lower`.
         let face_top = faces.peek().map_or(Scalar::NEG_INFINITY, |(key, _)| key.0);
         let upper = face_top.max(state.lower);
-        if upper - state.lower <= accuracy || splits >= MAX_SPLITS {
+        if upper - state.lower <= accuracy || splits >= max_splits {
             break;
         }
         splits += 1;
@@ -994,6 +1130,10 @@ mod tests {
             line(1.0),
             Interval::new(0.0, 0.5)
         )));
-        assert_eq!(super::matches(&a, &a), vec![vec![0]]);
+        let found = super::matches(&a, &a);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].len(), 1);
+        assert_eq!(found[0][0].face, 0);
+        assert!(found[0][0].shifted.is_none());
     }
 }

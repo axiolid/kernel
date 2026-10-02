@@ -1,5 +1,7 @@
 """Mutation probe for the certified Hausdorff distance between exact
-boundaries (#224).
+boundaries (#224), and its faces matched as translates trimmed in another
+chart (#227; `exact_hausdorff/translate.rs`, unit-tested there, and the
+prisms of `boolean_arc_prisms_exact` in the construct tests).
 
 Each mutant makes a bound unsound -- a matched bound below the gap it
 claims to hold, a face matched across a different domain or chart, a
@@ -17,13 +19,22 @@ Not killed, and so not listed: the Lipschitz bound about the centre of a
 patch with no witness (one straddling its face's boundary) losing its
 radius. That bound is unsound, but in every fixture tried, including a
 farthest point isolated at a vertex, the sound bounds of neighbouring
-patches keep the interval above the true value until it closes.
+patches keep the interval above the true value until it closes. Nor the
+re-charted bound of a translate losing its trim residue `L delta`: the
+gate keeps the residue below 1e-9 relative, and no fixture's distance
+depends on the sliver of domain it covers. Nor, since #227, edges never
+split for witnesses: the translates whose farthest points sit on rims
+(columns moved by 0.1 mm) now get them from the seeded support point,
+and in the fixtures without a seed (turned, mirrored, resized pairs)
+face patches next to the edge reach the farthest point within the
+accuracy as fast.
 """
 import pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 H = "crates/algorithms/query/measure/src/exact_hausdorff.rs"
 D = "crates/algorithms/query/measure/src/exact_distance.rs"
+T = "crates/algorithms/query/measure/src/exact_hausdorff/translate.rs"
 TESTS = [
     ["-p", "axiolid-measure", "--all-features", "--lib", "exact_hausdorff"],
     ["-p", "axiolid-construct", "--test", "boundary_hausdorff"],
@@ -63,9 +74,6 @@ MUTANTS = [
     ("Lipschitz bound about a witness without its radius", H,
      "                    upper = upper.min(found.upper + element.radius);",
      "                    upper = upper.min(found.upper);"),
-    ("edges never split for witnesses", H,
-     "        let take_edge = edge_worth && (splits % 2 == 0 || faces.is_empty());",
-     "        let take_edge = false;"),
     ("two-sided upper from one side", H,
      "    distance.upper = forward.upper.max(backward.upper);",
      "    distance.upper = forward.upper;"),
@@ -78,6 +86,34 @@ MUTANTS = [
     ("a point prunes patches it lies within", D,
      "    critical_along(face, p - face.centre, face.radius)",
      "    critical_along(face, p - face.centre, 0.0)"),
+    # Translates trimmed in another chart (#227).
+    ("a turned face matched as a translate", T,
+     "        .all(|(p, q)| (*p - *q).length() <= GATE)",
+     "        .all(|_| true)"),
+    ("a cylinder shifted round its axis", T,
+     "close(p.radius, q.radius)).then_some([false, true])",
+     "close(p.radius, q.radius)).then_some([true, true])"),
+    ("any trim matched as a translate", T,
+     "        delta = delta.max(gap);",
+     "        delta = delta.max(0.0);"),
+    ("a plane re-charted without the trim shift", T,
+     "frame: moved(&p.frame, p.frame.x * s.x + p.frame.y * s.y),",
+     "frame: moved(&p.frame, Vec3::ZERO),"),
+    ("re-charted bound without |S_A - S'|", T,
+     "        let bound = matched + lipschitz * self.delta + self.slack;",
+     "        let bound = lipschitz * self.delta + self.slack;"),
+    ("a cone's apex move not folded in", T,
+     "            delta = delta.max(pole + 1e-12 * (p.radius / pa).abs());",
+     "            delta = delta.max(0.0 * pole);"),
+    ("a cone of another radius matched", T,
+     "        if !close(p.radius, q.radius) {",
+     "        if false {"),
+    ("a conic edge's support taken at its ends only", T,
+     "            if inside <= hi {",
+     "            if false {"),
+    ("support point toward t, not against it", H,
+     "        let Some(p) = support_point(source.brep, -t) else {",
+     "        let Some(p) = support_point(source.brep, t) else {"),
 ]
 
 def run(target):

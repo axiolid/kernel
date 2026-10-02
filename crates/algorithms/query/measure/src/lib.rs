@@ -37,7 +37,8 @@ pub use exact_distance::{
 pub use exact_domain::FaceDomain;
 #[cfg(feature = "exact")]
 pub use exact_hausdorff::{
-    boundary_hausdorff_distance, one_sided_boundary_hausdorff, BoundaryHausdorff,
+    boundary_hausdorff_distance, one_sided_boundary_hausdorff,
+    one_sided_boundary_hausdorff_with_budget, BoundaryHausdorff,
 };
 pub use frechet::{
     discrete_frechet_distance, discrete_frechet_distance_2d, frechet_at_most, frechet_at_most_2d,

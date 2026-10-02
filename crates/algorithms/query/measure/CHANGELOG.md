@@ -9,6 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `one_sided_boundary_hausdorff_with_budget` (#227): the one-sided
+  boundary Hausdorff distance with the caller's cap on the splits, so a
+  consumer bounds the work per pair. The interval is sound at any budget,
+  only wider when it runs out.
+
+### Fixed
+
+- `boundary_hausdorff_distance` took its matched fast path only for faces
+  with identical pcurves (#227). Prisms from `boolean_arc_prisms_exact`
+  are trimmed in world coordinates, so two of them a translation apart
+  were treated as unmatched and closed at first order: [1.0, 1.59] mm at
+  accuracy 1e-4 after the whole 200k-split budget. Faces are now also
+  matched as translates, independently of how the B-rep was built: same
+  family, axes and shape (radius, semi-axes, angle, a cone's apex), and
+  trims equal after the parameter shift the translation induces (for a
+  plane the shift across its axes, for a cylinder, elliptical cylinder or
+  cone along its axis only), to within a gate of 1e-9 relative. The other
+  face is re-charted by the shift and bounded as before, the measured trim
+  residue folded in, so the bound is `|t|`; a turned or resized face, by
+  however little, is never matched this way. The lower bound is seeded
+  with the support point against each matched displacement, exactly `|t|`
+  from a translate's boundary. Those prisms, square, round or with an arc
+  in the section, moved by 1 mm or 0.2 m in any direction, now close to
+  1e-6 without a split.
+
 ## [0.3.6] - 2026-10-02
 
 ### Added

@@ -11,12 +11,19 @@
 use std::f64::consts::FRAC_PI_2;
 
 use axiolid_brep::ExactBRep;
+use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_construct::extrude::extrude_profile_exact;
-use axiolid_core::{Frame2, Interval, Point2, Tolerance, Transform3, Vec2, Vec3};
+use axiolid_core::{
+    BooleanOperator, Frame2, Interval, Point2, Point3, Tolerance, Transform3, Vec2, Vec3,
+};
 use axiolid_curve::{Circle2, Curve2, Line2};
 use axiolid_measure::exact_hausdorff::BoundaryHausdorff;
 use axiolid_measure::HausdorffBounds;
-use axiolid_measure::{boundary_hausdorff_distance, one_sided_boundary_hausdorff};
+use axiolid_measure::{
+    boundary_hausdorff_distance, one_sided_boundary_hausdorff,
+    one_sided_boundary_hausdorff_with_budget,
+};
+use axiolid_overlay::{ArcRing, ArcVertex};
 use axiolid_profile::{
     CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
 };
@@ -279,4 +286,256 @@ fn a_mirrored_copy_on_itself_is_zero_through_the_lipschitz_bound() {
     let accuracy = 0.05;
     let result = boundary_hausdorff_distance(&a, &b, accuracy, tol()).expect("bounded");
     contains(&result.distance, 0.0, accuracy);
+}
+
+#[test]
+fn a_mirrored_copy_moved_is_witnessed_along_its_rims() {
+    // Mirrored and then moved by `t` across and along the axis: the point
+    // set is a translate, `|t|` apart, but no wall matches and no face
+    // carries the translation, so no support point is seeded. The farthest
+    // points are rim points, reached by splitting the rims.
+    let a = column(0.3, 1.0);
+    let t = Vec3::new(0.03, 0.0, 0.04);
+    let b = a
+        .transformed(
+            &(Transform3::from_translation(t) * Transform3::from_scale(Vec3::new(-1.0, 1.0, 1.0))),
+        )
+        .expect("rigid");
+    let accuracy = 2e-3;
+    let forward = one_sided_boundary_hausdorff(&a, &b, accuracy, tol()).expect("bounded");
+    contains(&forward, t.length(), accuracy);
+    witnessed(&forward);
+}
+
+// Prisms trimmed in world coordinates (#227). `boolean_arc_prisms_exact`
+// builds its caps on the world `xy` frame, so a translate's cap pcurves are
+// moved by the translation's plan part, and its wall pcurves are rebuilt
+// from moved points: no trim is identical, and every face must be matched
+// as a translate.
+
+/// Splits a translate may take: the matched bound holds every face patch
+/// at `|t|` at once, so only the witnesses need placing, by halving the
+/// edges near the farthest point.
+const TRANSLATE_BUDGET: usize = 200;
+
+fn square_section(half: f64) -> ArcRing {
+    ArcRing::from_points(&[
+        Point2::new(-half, -half),
+        Point2::new(half, -half),
+        Point2::new(half, half),
+        Point2::new(-half, half),
+    ])
+}
+
+fn round_section(radius: f64) -> ArcRing {
+    ArcRing::circle(Point2::new(0.0, 0.0), radius)
+}
+
+/// A square of half-side 0.4 with its right side bowed out by a quarter
+/// turn's bulge: convex, three straight walls and one round one.
+fn arched_section() -> ArcRing {
+    ArcRing::new(vec![
+        ArcVertex::straight(Point2::new(-0.4, -0.4)),
+        ArcVertex::bulged(
+            Point2::new(0.4, -0.4),
+            (std::f64::consts::FRAC_PI_2 / 4.0).tan(),
+        ),
+        ArcVertex::straight(Point2::new(0.4, 0.4)),
+        ArcVertex::straight(Point2::new(-0.4, 0.4)),
+    ])
+}
+
+/// The prism over `section` moved by `at`, from `at.z` to `at.z + height`,
+/// as the arc prism boolean builds it: intersected with itself.
+fn prism_solid(section: &ArcRing, at: Vec3, height: f64) -> ExactBRep {
+    let moved = ArcRing::new(
+        section
+            .vertices
+            .iter()
+            .map(|v| ArcVertex {
+                point: Point2::new(v.point.x + at.x, v.point.y + at.y),
+                bulge: v.bulge,
+            })
+            .collect(),
+    );
+    let prism = ArcPrism {
+        section: moved,
+        bottom: at.z,
+        top: at.z + height,
+    };
+    boolean_arc_prisms_exact(&prism, &prism, BooleanOperator::Intersection, tol()).expect("a prism")
+}
+
+/// Translations of 1 mm and 0.2 m: across the axis, along it, and oblique.
+fn translations() -> Vec<Vec3> {
+    let mut all = Vec::new();
+    for length in [1e-3, 0.2] {
+        for direction in [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 2.0, 2.0) / 3.0,
+            Vec3::new(-0.48, 0.6, -0.64),
+        ] {
+            all.push(direction * length);
+        }
+    }
+    all
+}
+
+#[test]
+fn prisms_trimmed_in_world_coordinates_match_as_translates() {
+    // Copies of one convex solid offset by `t` are `|t|` apart, both ways.
+    let at = Vec3::new(3.25, -1.5, 0.4);
+    for (name, section) in [
+        ("square", square_section(0.5)),
+        ("round", round_section(0.3)),
+        ("arched", arched_section()),
+    ] {
+        let a = prism_solid(&section, at, 1.2);
+        for t in translations() {
+            let b = prism_solid(&section, at + t, 1.2);
+            for accuracy in [1e-4, 1e-6] {
+                for (from, to) in [(&a, &b), (&b, &a)] {
+                    let bounds = one_sided_boundary_hausdorff_with_budget(
+                        from,
+                        to,
+                        accuracy,
+                        tol(),
+                        TRANSLATE_BUDGET,
+                    )
+                    .expect("bounded");
+                    assert!(
+                        bounds.lower <= t.length() + 1e-12 && t.length() <= bounds.upper + 1e-12,
+                        "{name} by {t:?}: [{}, {}] must contain {}",
+                        bounds.lower,
+                        bounds.upper,
+                        t.length()
+                    );
+                    assert!(
+                        bounds.width() <= accuracy,
+                        "{name} by {t:?}: [{}, {}] did not close to {accuracy} in \
+                         {TRANSLATE_BUDGET} splits",
+                        bounds.lower,
+                        bounds.upper
+                    );
+                    witnessed(&bounds);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_translate_closes_before_any_split() {
+    // The support point against an oblique `t` lies inside a rim arc, not
+    // at its ends: found there, the interval closes without refinement.
+    let t = Vec3::new(1.0, 2.0, 2.0) * (1e-3 / 3.0);
+    for section in [round_section(0.3), arched_section(), square_section(0.5)] {
+        let a = prism_solid(&section, Vec3::ZERO, 1.2);
+        let b = prism_solid(&section, t, 1.2);
+        let bounds =
+            one_sided_boundary_hausdorff_with_budget(&a, &b, 1e-6, tol(), 0).expect("bounded");
+        contains(&bounds, t.length(), 1e-6);
+    }
+}
+
+#[test]
+fn a_translated_prism_closes_two_sided() {
+    let at = Vec3::new(-7.0, 12.5, 1.0);
+    let t = Vec3::new(0.6e-3, -0.8e-3, 0.0);
+    let a = prism_solid(&round_section(0.25), at, 2.5);
+    let b = prism_solid(&round_section(0.25), at + t, 2.5);
+    let result = boundary_hausdorff_distance(&a, &b, 1e-6, tol()).expect("bounded");
+    check_all(&result, t.length(), 1e-6);
+}
+
+#[test]
+fn the_farthest_point_of_a_translated_box_is_its_corner_against_t() {
+    let t = Vec3::new(1.0, 2.0, 2.0) * (1e-3 / 3.0);
+    let a = prism_solid(&square_section(0.5), Vec3::ZERO, 1.2);
+    let b = prism_solid(&square_section(0.5), t, 1.2);
+    let bounds = one_sided_boundary_hausdorff_with_budget(&a, &b, 1e-6, tol(), TRANSLATE_BUDGET)
+        .expect("bounded");
+    let corner = Point3::new(-0.5, -0.5, 0.0);
+    assert!(
+        (bounds.point_from - corner).length() < 1e-4,
+        "{:?} is not the corner extreme against t",
+        bounds.point_from
+    );
+}
+
+/// The interval of a pair that is not a translate: sound, whatever the
+/// budget.
+fn sound(from: &ExactBRep, to: &ExactBRep, expected: f64) {
+    let bounds =
+        one_sided_boundary_hausdorff_with_budget(from, to, 1e-7, tol(), 2_000).expect("bounded");
+    assert!(
+        bounds.lower <= expected + 1e-12 && expected <= bounds.upper + 1e-12,
+        "[{}, {}] must contain {expected}",
+        bounds.lower,
+        bounds.upper
+    );
+    witnessed(&bounds);
+}
+
+#[test]
+fn a_slightly_turned_prism_is_not_a_translate() {
+    // Turned by `theta` about its axis and lifted by `lift`: a corner of
+    // either sticks out `s = a (cos theta + sin theta - 1)` past a side of
+    // the other and is `lift` above or below its cap, so the farthest
+    // corners are `sqrt(s^2 + lift^2)` from the other boundary, both ways.
+    let half = 0.5;
+    let at = Vec3::new(1.0, 2.0, 0.0);
+    let lift = 1e-3;
+    for theta in [1e-6_f64, 1e-3] {
+        let (sin, cos) = theta.sin_cos();
+        let turned = ArcRing::from_points(
+            &square_section(half)
+                .vertices
+                .iter()
+                .map(|v| {
+                    Point2::new(
+                        cos * v.point.x - sin * v.point.y,
+                        sin * v.point.x + cos * v.point.y,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let a = prism_solid(&square_section(half), at, 1.2);
+        let b = prism_solid(&turned, at + Vec3::new(0.0, 0.0, lift), 1.2);
+        let expected = (half * (cos + sin - 1.0)).hypot(lift);
+        sound(&a, &b, expected);
+        sound(&b, &a, expected);
+    }
+}
+
+#[test]
+fn a_prism_of_another_radius_is_not_a_translate() {
+    // Radii r and r + e, centres d apart across the axis, one height: the
+    // wall point of either nearest the other's centre line is `d + e` from
+    // the other's wall and farther from its caps; nothing strays farther.
+    let (radius, grow) = (0.3, 1e-6);
+    let at = Vec3::new(0.5, 0.5, 0.0);
+    let t = Vec3::new(1e-3, 0.0, 0.0);
+    let a = prism_solid(&round_section(radius), at, 1.2);
+    let b = prism_solid(&round_section(radius + grow), at + t, 1.2);
+    let expected = t.length() + grow;
+    sound(&a, &b, expected);
+    sound(&b, &a, expected);
+}
+
+#[test]
+fn a_prism_taller_by_a_little_is_not_a_translate_of_its_walls() {
+    // The second prism is moved by `t` across the axis and is `e` taller:
+    // its walls are trimmed at other heights, and only its top cap is a
+    // translate, by `(t, e)`. The first strays `max(|t|, e)` (its wall
+    // facing away from `t`, or its top cap under the other's), the second
+    // `sqrt(|t|^2 + e^2)` at its top corners.
+    let at = Vec3::new(-2.0, 0.0, 0.0);
+    let t = Vec3::new(1e-3, 0.0, 0.0);
+    let taller = 1e-6;
+    let a = prism_solid(&square_section(0.5), at, 1.2);
+    let b = prism_solid(&square_section(0.5), at + t, 1.2 + taller);
+    sound(&a, &b, t.length().max(taller));
+    sound(&b, &a, t.length().hypot(taller));
 }
