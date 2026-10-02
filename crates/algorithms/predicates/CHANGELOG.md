@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-02
+
 ### Added
 
 - `in_diametral_sphere` and `in_diametral_sphere_filter` (#126): is a point

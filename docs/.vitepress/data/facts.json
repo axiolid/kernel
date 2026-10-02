@@ -85,8 +85,8 @@
       "description": "Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/constraint2d",
-      "released": null,
-      "released_date": null,
+      "released": "0.1.0",
+      "released_date": "2026-10-02",
       "role": "algorithm.planar",
       "version": "0.1.0"
     },
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.7",
-      "released_date": "2026-09-30",
+      "released": "0.3.8",
+      "released_date": "2026-10-02",
       "role": "algorithm.construction",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -283,10 +283,10 @@
       "description": "Triangle meshes: the discrete representation every backend consumes.",
       "layer": "representations",
       "path": "crates/representations/discrete/mesh",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-02",
       "role": "representation.discrete",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-mesh-boolean-boolmesh": {
       "description": "boolmesh-backed MeshBoolean provider",
@@ -364,8 +364,8 @@
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
       "layer": "algorithms",
       "path": "crates/algorithms/numeric",
-      "released": null,
-      "released_date": null,
+      "released": "0.1.0",
+      "released_date": "2026-10-02",
       "role": "algorithm.numeric",
       "version": "0.1.0"
     },
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.9",
-      "released_date": "2026-09-30",
+      "released": "0.3.10",
+      "released_date": "2026-10-02",
       "role": "algorithm.planar",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
@@ -418,10 +418,10 @@
       "description": "Certified exact-arithmetic geometric predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/predicates",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-02",
       "role": "algorithm.reference",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-primitive": {
       "description": "Exact parametric primitive solids used as CSG leaves",
@@ -481,10 +481,10 @@
       "description": "Exact planar shortest path over a visibility graph",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/route",
-      "released": "0.3.6",
-      "released_date": "2026-09-28",
+      "released": "0.3.7",
+      "released_date": "2026-10-02",
       "role": "algorithm.planar",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-spatial": {
       "description": "Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates.",
@@ -517,8 +517,8 @@
       "description": "Exact 3D Delaunay tetrahedralization with symbolic perturbation",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/tetrahedralize",
-      "released": null,
-      "released_date": null,
+      "released": "0.1.0",
+      "released_date": "2026-10-02",
       "role": "algorithm.discrete",
       "version": "0.1.0"
     },

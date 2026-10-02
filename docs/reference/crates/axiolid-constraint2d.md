@@ -8,9 +8,10 @@ Apollonius and tangent-circle constructions: circles tangent to three points, li
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.1.0) |
+| Latest release | 0.1.0 (2026-10-02) |
+| crates.io | [`axiolid-constraint2d`](https://crates.io/crates/axiolid-constraint2d) |
 | Layer | algorithms (`algorithm.planar`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_constraint2d/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_constraint2d/index.html) · [docs.rs](https://docs.rs/axiolid-constraint2d) |
 | Source | [`crates/algorithms/planar/constraint2d/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/planar/constraint2d) |
 
 ## Overview
@@ -25,6 +26,19 @@ Apollonius and tangent-circle constructions (#159, ledger row B14): every circle
 
 ## Changes
 
-No release yet.
+Latest release, 0.1.0 (2026-10-02):
+
+### Added
+
+- `tangent_circles` (#159, ledger row B14): every circle tangent to three
+  given points, lines or circles, in any combination (Apollonius' problem
+  and its degenerate cases), returning every real solution. Each of the
+  three constraints may independently require internal or external
+  tangency for a circle constraint, or either side for a line constraint,
+  enumerated as sign choices; solutions are deduplicated and sorted for a
+  deterministic order. Refused by name: non-finite input, a non-positive
+  circle radius, a zero line direction, and a configuration whose
+  elimination system is singular for every sign choice (three coincident
+  or otherwise inseparable constraints).
 
 Full history: [`crates/algorithms/planar/constraint2d/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/constraint2d/CHANGELOG.md)

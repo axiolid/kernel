@@ -8,7 +8,7 @@ Exact planar shortest path over a visibility graph.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-09-28) |
+| Latest release | 0.3.7 (2026-10-02) |
 | crates.io | [`axiolid-route`](https://crates.io/crates/axiolid-route) |
 | Facade | [`axiolid`](./axiolid) feature `route` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -30,11 +30,17 @@ Exact planar shortest paths over a visibility graph, plus distance maps, farthes
 
 ## Changes
 
-Latest release, 0.3.6 (2026-09-28):
+Latest release, 0.3.7 (2026-10-02):
 
-### Changed
+### Fixed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- A weighted map counts the free side of a cost edge left just beyond a
+  wall (#222). The exact overlay leaves a cost region cut to a turned wall
+  with corners a rounding step beyond it, so no wall runs exactly along
+  the edge between them, and a walk along that edge was counted at the
+  cheaper side -- outside the free space -- at factor 1. Along an edge on
+  or beyond a wall within the touching reach, only the region's side is
+  now free, as along the wall itself. A factor-2 square on a wall turned by
+  the 3-4-5 angle brackets 10.054..10.062 again, from 9.28..10.062.
 
 Full history: [`crates/algorithms/planar/route/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/route/CHANGELOG.md)

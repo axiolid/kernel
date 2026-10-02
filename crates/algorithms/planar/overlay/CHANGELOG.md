@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-10-02
+
 ### Fixed
 
 - Features closer than the tolerance touch (#222). Before the exact

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-02
+
 ### Added
 
 - `tangent_circles` (#159, ledger row B14): every circle tangent to three

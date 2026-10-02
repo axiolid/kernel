@@ -8,9 +8,10 @@ Exact 3D Delaunay tetrahedralization with symbolic perturbation.
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.1.0) |
+| Latest release | 0.1.0 (2026-10-02) |
+| crates.io | [`axiolid-tetrahedralize`](https://crates.io/crates/axiolid-tetrahedralize) |
 | Layer | algorithms (`algorithm.discrete`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_tetrahedralize/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_tetrahedralize/index.html) · [docs.rs](https://docs.rs/axiolid-tetrahedralize) |
 | Source | [`crates/algorithms/discrete/tetrahedralize/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/discrete/tetrahedralize) |
 
 ## Overview
@@ -33,6 +34,21 @@ are not recovered.
 
 ## Changes
 
-No release yet.
+Latest release, 0.1.0 (2026-10-02):
+
+### Added
+
+- `Delaunay3` (#126): exact incremental 3D Delaunay tetrahedralization.
+  Bowyer-Watson insertion in Hilbert-curve order, located by a stochastic
+  visibility walk, with an infinite vertex for the convex hull.
+  `from_points`, `insert`, `tetrahedra` (positively oriented, with
+  adjacency), `hull_triangles` (outward), `vertex_of`, `dimension`.
+  `orient3d` and `insphere` decide every step exactly; cospherical points,
+  points in the plane of a hull face (decided by `in_diametral_sphere`) and
+  other ties are broken by a symbolic perturbation of the lifted points,
+  so the result is unique for a point set whatever the insertion order.
+  Exact duplicates are merged (`Insertion::Duplicate`). Refused by name
+  (`Delaunay3Error`): fewer than three dimensions, non-finite coordinates,
+  and non-zero coordinates outside `[2^-100, 2^100]`.
 
 Full history: [`crates/algorithms/discrete/tetrahedralize/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/tetrahedralize/CHANGELOG.md)

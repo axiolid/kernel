@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-02
+
 ### Added
 
 - `HalfedgeMesh` (#140): an editable halfedge surface mesh with O(1) adjacency, laid out like CGAL's `Surface_mesh` (edge `e` owns halfedges `2e` and `2e + 1`, so `opposite` stores nothing). Built from a `TriMesh` (`from_tri_mesh`) or polygonal faces (`from_faces`) keeping the input numbering, converted back with `to_tri_mesh`, which reproduces the input index buffer exactly.

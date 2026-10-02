@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-09-30) |
+| Latest release | 0.3.8 (2026-10-02) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -61,42 +61,34 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-09-30):
+Latest release, 0.3.8 (2026-10-02):
 
-### Fixed
+### Added
 
-- `boolean_polyhedra_exact` completes long chains of grid-aligned
-  subtraction (#199). The depth-2 Menger sponge, 147 differences from a
-  unit cube, refused at subtraction 82 with "every probe direction met a
-  vertex or edge exactly"; it now finishes closed, with no face enclosing
-  zero area, and with exactly the volume of its inputs. Two causes, both
-  fixed at the root rather than by dropping fragments:
-  - A split point is now the double nearest the exact crossing, not the
-    result of `a + (b - a) * t` rounded twice. The old formula cut the
-    plane `z = 1/3` at `0.33333333333333326`, so two splits of one exact
-    point landed ULPs apart and a later split through the pair emitted a
-    ring enclosing no area. Correct rounding depends on the exact point
-    alone, and a crossing that is a double comes back exactly.
-  - A fragment one ULP wide has no double strictly inside it, so its f64
-    centroid rounded onto its own edge and was classified as the wrong
-    point, leaving a hole in the shell. Such fragments are now classified
-    at an exact dyadic interior point, with every predicate evaluated
-    exactly. A fragment that encloses no area at all is refused by name
-    ("a split fragment encloses no area") instead of failing later in ray
-    classification.
-- Coplanar contact on slanted planes. A fragment was classified at its f64
-  centroid even when rounding put that point off the fragment's plane, so
-  a face lying in the other solid's surface read as inside or outside it:
-  a slanted tetrahedron united with itself came back with four faces whose
-  windings disagreed, a silently broken solid. The classification point
-  must now be certified in the fragment's plane (else the exact probe is
-  used), and whether coplanar normals agree is an exact sign rather than an
-  f64 dot product.
-- The contact-matrix thin-overlap sweep (#200) passes at every overlap down
-  to 1e-15: union, intersection and difference are closed and measure the
-  exact slab. The boolean was closed all along; the test measured it with
-  the 1 um `Tolerance::METRE`, which calls a real 1e-12-wide face
-  degenerate, drops it and reports the gap as a hole. It now measures with
-  `Tolerance::ZERO`, and the assertions are relative to the slab.
+- Exact partial-turn revolution (#172). `revolve_profile_exact` now builds
+  a revolution through `0 < |angle| < 2 pi` instead of refusing it: every
+  profile the full turn revolves (rectangles, circles, sections, contours
+  with arcs and holes, derived, centre-line and composite profiles) becomes
+  a closed exact B-rep whose walls are cylinder, cone, plane and torus
+  patches trimmed to the swept angle, capped at both ends by the profile
+  itself; each hole is a tunnel between the caps. Unlike the full turn, a
+  partial turn may touch the axis: a vertex on it sweeps no arc (a cone
+  closes at its apex, a planar wall becomes a sector) and a straight
+  segment on it sweeps no wall, its edge shared by the two caps. The angle
+  follows the right-hand rule about the axis direction, as the mesh path
+  does; a section on either side of the axis is accepted. The new
+  `revolve_partial::revolve_section_partial` builds one lowered section.
+  Volume (`theta R A`) and area (`theta integral(r ds) + 2 A`) match
+  Pappus at 90, 180, 270 degrees and small angles
+  (`tests/revolve_partial.rs`); `scripts/probe_partial_revolve_mutants.py`
+  lists the faults the tests must catch.
+
+### Changed
+
+- `revolve_profile_exact` refuses a turn beyond a full turn by name
+  (`"exact revolution beyond a full turn"`) and a zero angle as invalid
+  input; both were previously reported as the partial-turn refusal, which
+  no longer exists. A section crossing the axis, an arc whose circle
+  reaches the axis, and an ellipse remain refused by name.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

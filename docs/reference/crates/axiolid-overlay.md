@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-09-30) |
+| Latest release | 0.3.10 (2026-10-02) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -39,31 +39,52 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.9 (2026-09-30):
+Latest release, 0.3.10 (2026-10-02):
 
 ### Fixed
 
-- A ring whose vertices all lie on one line -- the plan shadow of a
-  vertical face -- is left out of a boolean, as it encloses nothing (#219).
-  Its rounded area need not be zero, so validation let it through, and
-  since 0.3.5 the exact subdivision refused it as self-intersecting; the
-  grid backend before had answered as if it were absent. A union of such a
-  ring with itself is empty again, and one with a polygon is that polygon.
+- Features closer than the tolerance touch (#222). Before the exact
+  boolean, a vertex within `tolerance.linear()` of an earlier vertex moves
+  onto it, and one within it of another ring's edge is inserted into that
+  edge. A door opening computed as `3.9999999999999996..4.199999999999999`
+  between rooms ending at 4 and starting at 4.2 used to leave a gap one ulp
+  wide, so the union came back in three pieces and coverage could not pass
+  through the opening; the grid backend before 0.3.5 had closed it. Inputs
+  with nothing that near another feature come back bit for bit as before.
 
 ### Added
 
-- `segment_intersections` reports every intersection among many segments
-  with a Bentley-Ottmann sweep (#146): each point where two or more
-  segments meet, with every segment through it and where on it (start,
-  end, interior, or a zero-length segment), and each collinear overlap
-  with the segments covering it, in `O((n + k) log n)` time for `k`
-  reported incidences. Every decision is exact (interval filter, then
-  dyadic arithmetic), so shared endpoints, T-junctions, verticals, many
-  segments through one point, overlaps and zero-length segments are
-  handled rather than assumed away. Crossings are `ExactPoint2` rationals,
-  rounded once and correctly on request; input endpoints come back bit for
-  bit. Non-finite input is refused with the segment's index. 64,000 short
-  grid segments take about 0.2-0.4 s (`cargo bench -p axiolid-overlay
-  --bench segment_sweep`).
+- Minkowski sums and erosions with a non-convex polygon (#145):
+  `Region::minkowski_sum` and `Region::minkowski_erosion` now take any
+  simple polygon, where a non-convex one was refused with
+  `MinkowskiError::NotConvex`. New `Region::minkowski_sum_region` and
+  `Region::minkowski_erosion_region` take a whole region as the other
+  operand -- non-convex, with holes, several components; the region sum is
+  symmetric and cuts the operand with fewer vertices. A non-convex shape is
+  cut into convex pieces of its own vertices (holes bridged in, ear
+  clipping, then Hertel-Mehlhorn merging across diagonals while convex),
+  every decision an exact orientation, and the cut is certified to tile the
+  shape (the triangles' boundaries sum to the shape's); the pieces' sums
+  with every boundary edge are united in the same exact arrangement as the
+  convex case, so vertex sums are rounded once and output vertices once.
+  Should no certified cut be found, the sum is taken from edge-pair
+  parallelograms instead. Convex polygons take the path they took before,
+  and give the same results bit for bit. A comb-shaped room of 152
+  vertices with a hole per two teeth is summed with a rectangle in about
+  30 ms, an L-shape (two pieces) in about 55 ms and a plus (three pieces)
+  in about 180 ms; erosion takes about 1.3 times as long. The cost grows
+  with the number of pieces times the region's edges.
+- `MinkowskiError::EmptyStructuring`: an erosion by an empty region, under
+  which every point would qualify.
+
+### Fixed
+
+- `Region::minkowski_erosion` by a polygon that does not hold the origin
+  was cut to the region itself, so a translate of the polygon lying
+  inside the region from a point outside it was missed (eroding
+  `[0, 1] x [0, 10]` by `[5, 5.5] x [0, 1]` came out empty instead of
+  `[-5, -4.5] x [0, 9]`). The erosion is now anchored on the region moved
+  by a point of the polygon. Polygons holding the origin, and the disc
+  erosions, are unchanged.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

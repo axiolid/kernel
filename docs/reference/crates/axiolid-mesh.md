@@ -8,7 +8,7 @@ Triangle meshes: the discrete representation every backend consumes.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-02) |
 | crates.io | [`axiolid-mesh`](https://crates.io/crates/axiolid-mesh) |
 | Facade | [`axiolid`](./axiolid) feature `mesh` |
 | Layer | representations (`representation.discrete`) |
@@ -41,11 +41,15 @@ vertex, travels as an attribute channel.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-02):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `HalfedgeMesh` (#140): an editable halfedge surface mesh with O(1) adjacency, laid out like CGAL's `Surface_mesh` (edge `e` owns halfedges `2e` and `2e + 1`, so `opposite` stores nothing). Built from a `TriMesh` (`from_tri_mesh`) or polygonal faces (`from_faces`) keeping the input numbering, converted back with `to_tri_mesh`, which reproduces the input index buffer exactly.
+- Navigation: `next`, `prev`, `opposite`, `source`, `target`, `face`, `edge`, `vertex_halfedge`, `face_halfedge`, `find_halfedge`; counter-clockwise circulators `outgoing_halfedges`, `incoming_halfedges`, `vertex_vertices`, `vertex_faces`; face and hole loops `face_halfedges`, `face_vertices`, `face_faces`, `loop_halfedges`, `boundary_halfedges`, `boundary_loops`. A boundary vertex stores, and circulates from, its boundary halfedge.
+- Local edits that refuse by name and keep every invariant and the Euler characteristic: `flip_edge`, `split_edge` (re-triangulating adjacent triangles), `collapse_edge` (link condition, with tetrahedron, lone-triangle and pillow guards), `split_face` (centre fan), `split_face_diagonal`; plus `fill_hole` and `compact`, which renumbers densely and returns a `HalfedgeRemap`.
+- `HalfedgeMesh::validate` checks every structural invariant and reports a `HalfedgeInvariantError`.
+- `HalfedgeBuildError` names the input a halfedge mesh refuses: `NonManifoldEdge`, `NonManifoldVertex` (a bowtie or two closed fans at a point), `InconsistentOrientation`, `DegenerateFace`, `FaceTooSmall`, `IndexOutOfRange`, `IncompleteTriangle`. `HalfedgeEditError` names refused edits (`LinkCondition`, `WouldDegenerate`, `EdgeExists`, `BoundaryEdge`, `NotATriangle`, ...).
+- Typed ids `VertexId`, `HalfedgeId`, `EdgeId`, `FaceId`.
 
 Full history: [`crates/representations/discrete/mesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/discrete/mesh/CHANGELOG.md)

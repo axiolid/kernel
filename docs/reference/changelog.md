@@ -197,7 +197,55 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   API documentation, its reference page and the source (ADR 0078).
 
 
+## axiolid-constraint2d
+
+### 0.1.0 - 2026-10-02
+
+### Added
+
+- `tangent_circles` (#159, ledger row B14): every circle tangent to three
+  given points, lines or circles, in any combination (Apollonius' problem
+  and its degenerate cases), returning every real solution. Each of the
+  three constraints may independently require internal or external
+  tangency for a circle constraint, or either side for a line constraint,
+  enumerated as sign choices; solutions are deduplicated and sorted for a
+  deterministic order. Refused by name: non-finite input, a non-positive
+  circle radius, a zero line direction, and a configuration whose
+  elimination system is singular for every sign choice (three coincident
+  or otherwise inseparable constraints).
+
+
 ## axiolid-construct
+
+### 0.3.8 - 2026-10-02
+
+### Added
+
+- Exact partial-turn revolution (#172). `revolve_profile_exact` now builds
+  a revolution through `0 < |angle| < 2 pi` instead of refusing it: every
+  profile the full turn revolves (rectangles, circles, sections, contours
+  with arcs and holes, derived, centre-line and composite profiles) becomes
+  a closed exact B-rep whose walls are cylinder, cone, plane and torus
+  patches trimmed to the swept angle, capped at both ends by the profile
+  itself; each hole is a tunnel between the caps. Unlike the full turn, a
+  partial turn may touch the axis: a vertex on it sweeps no arc (a cone
+  closes at its apex, a planar wall becomes a sector) and a straight
+  segment on it sweeps no wall, its edge shared by the two caps. The angle
+  follows the right-hand rule about the axis direction, as the mesh path
+  does; a section on either side of the axis is accepted. The new
+  `revolve_partial::revolve_section_partial` builds one lowered section.
+  Volume (`theta R A`) and area (`theta integral(r ds) + 2 A`) match
+  Pappus at 90, 180, 270 degrees and small angles
+  (`tests/revolve_partial.rs`); `scripts/probe_partial_revolve_mutants.py`
+  lists the faults the tests must catch.
+
+### Changed
+
+- `revolve_profile_exact` refuses a turn beyond a full turn by name
+  (`"exact revolution beyond a full turn"`) and a zero angle as invalid
+  input; both were previously reported as the partial-turn refusal, which
+  no longer exists. A section crossing the axis, an arc whose circle
+  reaches the axis, and an ellipse remain refused by name.
 
 ### 0.3.7 - 2026-09-30
 
@@ -960,6 +1008,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh
 
+### 0.3.2 - 2026-10-02
+
+### Added
+
+- `HalfedgeMesh` (#140): an editable halfedge surface mesh with O(1) adjacency, laid out like CGAL's `Surface_mesh` (edge `e` owns halfedges `2e` and `2e + 1`, so `opposite` stores nothing). Built from a `TriMesh` (`from_tri_mesh`) or polygonal faces (`from_faces`) keeping the input numbering, converted back with `to_tri_mesh`, which reproduces the input index buffer exactly.
+- Navigation: `next`, `prev`, `opposite`, `source`, `target`, `face`, `edge`, `vertex_halfedge`, `face_halfedge`, `find_halfedge`; counter-clockwise circulators `outgoing_halfedges`, `incoming_halfedges`, `vertex_vertices`, `vertex_faces`; face and hole loops `face_halfedges`, `face_vertices`, `face_faces`, `loop_halfedges`, `boundary_halfedges`, `boundary_loops`. A boundary vertex stores, and circulates from, its boundary halfedge.
+- Local edits that refuse by name and keep every invariant and the Euler characteristic: `flip_edge`, `split_edge` (re-triangulating adjacent triangles), `collapse_edge` (link condition, with tetrahedron, lone-triangle and pillow guards), `split_face` (centre fan), `split_face_diagonal`; plus `fill_hole` and `compact`, which renumbers densely and returns a `HalfedgeRemap`.
+- `HalfedgeMesh::validate` checks every structural invariant and reports a `HalfedgeInvariantError`.
+- `HalfedgeBuildError` names the input a halfedge mesh refuses: `NonManifoldEdge`, `NonManifoldVertex` (a bowtie or two closed fans at a point), `InconsistentOrientation`, `DegenerateFace`, `FaceTooSmall`, `IndexOutOfRange`, `IncompleteTriangle`. `HalfedgeEditError` names refused edits (`LinkCondition`, `WouldDegenerate`, `EdgeExists`, `BoundaryEdge`, `NotATriangle`, ...).
+- Typed ids `VertexId`, `HalfedgeId`, `EdgeId`, `FaceId`.
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -1298,6 +1357,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   are finite (ADR 0071).
 
 
+## axiolid-numeric
+
+### 0.1.0 - 2026-10-02
+
+### Added
+
+- New crate (#136): a shared numeric substrate with no dependencies.
+- `find_root`: Brent's method on a sign-change bracket, with a forced
+  bisection whenever three steps fail to halve the bracket; returns the
+  final bracket as a proven error bound.
+- `Polynomial::real_roots`: every real root in an interval, isolated by
+  derivative roots, with rigorous rounding bounds on each evaluation.
+  Multiple roots and unseparable clusters come back as `Unresolved`
+  regions with the most roots they can hold.
+- `integrate`: adaptive Gauss-Kronrod (G7/K15) with QUADPACK's error
+  estimate and a panel budget; `GaussLegendre` fixed rules up to 512
+  points.
+- `Matrix`, `Lu`, `Cholesky` and column-pivoted `Qr`, with Hager-Higham
+  condition estimates and forward error estimates; `least_squares` and
+  `constrained_least_squares` (null-space method).
+- `levenberg_marquardt` over a `Residuals` trait (analytic or
+  forward-difference Jacobian), and `minimize_scalar` (Brent's localmin).
+  Both report a `Status`; `converged()` turns a missed tolerance into an
+  error.
+- Non-finite input, singular, rank-deficient, asymmetric and indefinite
+  matrices, and unbracketed roots are refused by name.
+
+
 ## axiolid-nurbs
 
 ### 0.3.4 - 2026-09-28
@@ -1503,6 +1590,54 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.10 - 2026-10-02
+
+### Fixed
+
+- Features closer than the tolerance touch (#222). Before the exact
+  boolean, a vertex within `tolerance.linear()` of an earlier vertex moves
+  onto it, and one within it of another ring's edge is inserted into that
+  edge. A door opening computed as `3.9999999999999996..4.199999999999999`
+  between rooms ending at 4 and starting at 4.2 used to leave a gap one ulp
+  wide, so the union came back in three pieces and coverage could not pass
+  through the opening; the grid backend before 0.3.5 had closed it. Inputs
+  with nothing that near another feature come back bit for bit as before.
+
+### Added
+
+- Minkowski sums and erosions with a non-convex polygon (#145):
+  `Region::minkowski_sum` and `Region::minkowski_erosion` now take any
+  simple polygon, where a non-convex one was refused with
+  `MinkowskiError::NotConvex`. New `Region::minkowski_sum_region` and
+  `Region::minkowski_erosion_region` take a whole region as the other
+  operand -- non-convex, with holes, several components; the region sum is
+  symmetric and cuts the operand with fewer vertices. A non-convex shape is
+  cut into convex pieces of its own vertices (holes bridged in, ear
+  clipping, then Hertel-Mehlhorn merging across diagonals while convex),
+  every decision an exact orientation, and the cut is certified to tile the
+  shape (the triangles' boundaries sum to the shape's); the pieces' sums
+  with every boundary edge are united in the same exact arrangement as the
+  convex case, so vertex sums are rounded once and output vertices once.
+  Should no certified cut be found, the sum is taken from edge-pair
+  parallelograms instead. Convex polygons take the path they took before,
+  and give the same results bit for bit. A comb-shaped room of 152
+  vertices with a hole per two teeth is summed with a rectangle in about
+  30 ms, an L-shape (two pieces) in about 55 ms and a plus (three pieces)
+  in about 180 ms; erosion takes about 1.3 times as long. The cost grows
+  with the number of pieces times the region's edges.
+- `MinkowskiError::EmptyStructuring`: an erosion by an empty region, under
+  which every point would qualify.
+
+### Fixed
+
+- `Region::minkowski_erosion` by a polygon that does not hold the origin
+  was cut to the region itself, so a translate of the polygon lying
+  inside the region from a point outside it was missed (eroding
+  `[0, 1] x [0, 10]` by `[5, 5.5] x [0, 1]` came out empty instead of
+  `[-5, -4.5] x [0, 9]`). The erosion is now anchored on the region moved
+  by a point of the polygon. Polygons holding the origin, and the disc
+  erosions, are unchanged.
 
 ### 0.3.9 - 2026-09-30
 
@@ -1753,6 +1888,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-predicates
 
+### 0.3.3 - 2026-10-02
+
+### Added
+
+- `in_diametral_sphere` and `in_diametral_sphere_filter` (#126): is a point
+  inside the smallest sphere through a triangle? For a point in the
+  triangle's plane this is the coplanar in-circle test in 3D, which a 3D
+  Delaunay triangulation needs for points in the plane of a hull face. A
+  running-error filter, then exact expansions; `Uncertain` outside the
+  exactly evaluable range (non-zero coordinates beyond `[2^-100, 2^100]`).
+
+### Fixed
+
+- `insphere_filter` bounded its rounding error by the rounded 3x3 minors
+  instead of by the absolute values of the elementary products (Shewchuk's
+  permanent). When a minor cancelled, the bound was far too small, and the
+  filter certified a non-zero sign for exactly cospherical points -- five
+  lattice points of one sphere, four of them on a thin tetrahedron, were
+  reported strictly outside (#126). The permanent is now Shewchuk's.
+
+### Changed
+
+- `insphere`'s exact path first tries `i128` arithmetic when every
+  coordinate difference is exact and all lie on one dyadic grid spanning
+  fewer than 20 bits (integer lattices, for instance), and falls back to the
+  expansions otherwise. Exactly cospherical lattice points reach the exact
+  path on every call; this keeps it from allocating there.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -1871,6 +2034,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-route
+
+### 0.3.7 - 2026-10-02
+
+### Fixed
+
+- A weighted map counts the free side of a cost edge left just beyond a
+  wall (#222). The exact overlay leaves a cost region cut to a turned wall
+  with corners a rounding step beyond it, so no wall runs exactly along
+  the edge between them, and a walk along that edge was counted at the
+  cheaper side -- outside the free space -- at factor 1. Along an edge on
+  or beyond a wall within the touching reach, only the region's side is
+  now free, as along the wall itself. A factor-2 square on a wall turned by
+  the 3-4-5 angle brackets 10.054..10.062 again, from 9.28..10.062.
 
 ### 0.3.6 - 2026-09-28
 
@@ -2097,6 +2273,26 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 - The crates.io page is this crate's own `README.md`, with links to its
   API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-tetrahedralize
+
+### 0.1.0 - 2026-10-02
+
+### Added
+
+- `Delaunay3` (#126): exact incremental 3D Delaunay tetrahedralization.
+  Bowyer-Watson insertion in Hilbert-curve order, located by a stochastic
+  visibility walk, with an infinite vertex for the convex hull.
+  `from_points`, `insert`, `tetrahedra` (positively oriented, with
+  adjacency), `hull_triangles` (outward), `vertex_of`, `dimension`.
+  `orient3d` and `insphere` decide every step exactly; cospherical points,
+  points in the plane of a hull face (decided by `in_diametral_sphere`) and
+  other ties are broken by a symbolic perturbation of the lifted points,
+  so the result is unique for a point set whatever the insertion order.
+  Exact duplicates are merged (`Insertion::Duplicate`). Refused by name
+  (`Delaunay3Error`): fewer than three dimensions, non-finite coordinates,
+  and non-zero coordinates outside `[2^-100, 2^100]`.
 
 
 ## axiolid-topology

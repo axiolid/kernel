@@ -80,7 +80,7 @@ readme = "README.md"
 # Format-agnostic Axiolid geometry kernel. Leaf crates remain independently consumable.
 axiolid = { path = "crates/facade/axiolid", version = "0.4.0", default-features = false }
 axiolid-core = { path = "crates/foundation/core", version = "0.3.1" }
-axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.1" }
+axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.2" }
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.1" }
 axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.3" }
 axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.3.2" }
@@ -94,7 +94,7 @@ axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", v
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.2" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.4" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.7" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.8" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.1" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.2" }
@@ -109,9 +109,9 @@ axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.5" 
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.5" }
 axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.1" }
 axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.1" }
-axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.9" }
+axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.10" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.1" }
-axiolid-route = { path = "crates/algorithms/planar/route", version = "0.3.6" }
+axiolid-route = { path = "crates/algorithms/planar/route", version = "0.3.7" }
 axiolid-triangulate = { path = "crates/algorithms/planar/triangulate", version = "0.3.2" }
 axiolid-constraint2d = { path = "crates/algorithms/planar/constraint2d", version = "0.1.0" }
 axiolid-field = { path = "crates/representations/sampled/field", version = "0.3.1" }
@@ -119,7 +119,7 @@ axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.3.1
 i_overlay = "4.5.2"
 num-bigint = { version = "0.5.1", default-features = false, features = ["std"] }
 num-integer = { version = "0.1.46", default-features = false, features = ["std"] }
-axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.2", default-features = false }
+axiolid-predicates = { path = "crates/algorithms/predicates", version = "0.3.3", default-features = false }
 axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.2" }
 axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.0" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
