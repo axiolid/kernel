@@ -333,7 +333,13 @@ pub fn overlay(
     if subject.frame != clip.frame {
         return Err(OverlayError::InvalidFrame);
     };
-    let rings = exact_overlay::boolean(&subject.polygons, &clip.polygons, operation, fill)?;
+    let rings = exact_overlay::boolean(
+        &subject.polygons,
+        &clip.polygons,
+        operation,
+        fill,
+        tolerance.linear(),
+    )?;
     let polygons = settle::settle(canonical_polygons(rings), tolerance);
     let evidence = OverlayEvidence {
         subject_rings: subject.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
@@ -368,7 +374,13 @@ pub fn union_soup(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, 
             holes: Vec::new(),
         })
         .collect();
-    let rings = exact_overlay::boolean(&subject, &[], OverlayOperation::Union, FillRule::NonZero)?;
+    let rings = exact_overlay::boolean(
+        &subject,
+        &[],
+        OverlayOperation::Union,
+        FillRule::NonZero,
+        tolerance.linear(),
+    )?;
     // Settled like every other output, so the polygons are valid operands
     // (#191).
     Ok(settle::settle(canonical_polygons(rings), tolerance))

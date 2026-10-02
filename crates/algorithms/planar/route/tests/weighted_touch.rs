@@ -127,3 +127,57 @@ fn a_cost_edge_crossing_a_wall_far_from_its_ends_is_still_refused() {
         Err(MapError::CostCrossing { index: 0 })
     ));
 }
+
+/// A factor-2 square standing on a wall turned by the 3-4-5 angle, cut to
+/// the room by the exact overlay: its corners on the wall lie a rounding
+/// step beyond it, so no wall runs exactly along the edge between them.
+/// Along that edge only the region's side is free, as along the wall
+/// itself; counted at the cheaper side, the walk under the square cost 1
+/// a metre and the lower bound fell to 9.28 (#222).
+#[test]
+fn a_cost_edge_just_beyond_a_turned_wall_counts_its_free_side() {
+    let p = Point2::new;
+    let room = [Polygon {
+        outer: Ring {
+            points: vec![p(-2.4, 3.2), p(0.0, 0.0), p(8.0, 6.0), p(5.6, 9.2)],
+        },
+        holes: Vec::new(),
+    }];
+    let square = CostRegion::new(
+        Polygon {
+            outer: Ring {
+                points: vec![
+                    p(1.4000000000000004, 4.800000000000001),
+                    p(3.2, 2.4),
+                    p(4.800000000000001, 3.6),
+                    p(3.000000000000001, 6.0),
+                ],
+            },
+            holes: Vec::new(),
+        },
+        2.0,
+    );
+    let map = weighted_distance_map(
+        &room,
+        &[],
+        &[p(7.000000000000001, 6.5)],
+        &[square],
+        0.009765625,
+    )
+    .expect("a map");
+    let reach = map
+        .nearest(p(0.8 * 0.5 - 0.6, 0.6 * 0.5 + 0.8))
+        .unwrap()
+        .unwrap();
+    let exact = 2.0 * 3.5f64.hypot(2.0) + 2.0;
+    assert!(
+        reach.cost.lower <= exact + 1e-9 && exact <= reach.cost.upper + 1e-9,
+        "{:?} misses {exact}",
+        reach.cost
+    );
+    assert!(
+        reach.cost.upper - reach.cost.lower <= 0.05,
+        "{:?}",
+        reach.cost
+    );
+}

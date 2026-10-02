@@ -28,7 +28,9 @@
 //! vertices; if every one is simple, decided exactly, they replace the
 //! operand's rings, else the rings are kept as given.
 //!
-//! The tolerance does not enter any decision. It validates operands, and
+//! The tolerance enters once, before step 1: features closer than it are
+//! taken as touching and snapped together (see [`snap_within`], #222).
+//! Past that it enters no decision. It validates operands, and
 //! the result is settled like every other output ([`crate::settle`]), which
 //! merges edges that rounding left shorter than the tolerance.
 
@@ -77,8 +79,9 @@ pub(crate) fn boolean(
     clip: &[Polygon],
     operation: OverlayOperation,
     fill: FillRule,
+    snap: f64,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
-    boolean_reduced(subject, clip, operation, fill, true)
+    boolean_reduced(subject, clip, operation, fill, snap, true)
 }
 
 /// [`boolean`], with the chain reduction on or off.
@@ -87,18 +90,29 @@ fn boolean_reduced(
     clip: &[Polygon],
     operation: OverlayOperation,
     fill: FillRule,
+    snap: f64,
     reduced: bool,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
-    let mut rings: Vec<ArcRing> = Vec::new();
-    let mut counted: Vec<Counted> = Vec::new();
+    let mut all: Vec<(bool, Vec<Point2>)> = Vec::new();
     for (is_clip, polygons) in [(false, subject), (true, clip)] {
-        let given: Vec<Vec<Point2>> = polygons
+        for ring in polygons
             .iter()
             .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
-            .map(|ring| ring.points.clone())
+        {
+            all.push((is_clip, ring.points.clone()));
+        }
+    }
+    snap_within(&mut all, snap);
+    let mut rings: Vec<ArcRing> = Vec::new();
+    let mut counted: Vec<Counted> = Vec::new();
+    for is_clip in [false, true] {
+        let given: Vec<Vec<Point2>> = all
+            .iter()
+            .filter(|(clip, _)| *clip == is_clip)
+            .map(|(_, points)| points.clone())
             // A ring on one line -- the shadow of a vertical face, say --
             // encloses nothing and changes no winding number (#219).
-            .filter(|points| !on_one_line(points))
+            .filter(|points| points.len() >= 3 && !on_one_line(points))
             .collect();
         let rings_of = if reduced { reduce(given) } else { given };
         for points in rings_of {
@@ -177,6 +191,132 @@ fn boolean_reduced(
         .iter()
         .map(|(outer, holes)| (to_ring(outer), holes.iter().map(to_ring).collect()))
         .collect())
+}
+
+/// Take features closer than `tolerance` as touching (#222): a vertex that
+/// near an earlier one moves onto it, and a vertex that near another ring's
+/// edge is inserted into it. Coordinates computed two ways -- a door's jamb
+/// at `4.199999999999999` beside a wall face at `4.2` -- then meet exactly,
+/// as the caller meant, where the exact boolean would keep a gap one ulp
+/// wide. Inputs with nothing that near another feature come back
+/// unchanged, bit for bit. A ring snapping would pinch onto itself keeps
+/// its own vertices.
+fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return;
+    }
+    let cell = |p: Point2| -> Option<(i64, i64)> {
+        let (x, y) = ((p.x / tolerance).floor(), (p.y / tolerance).floor());
+        (x.abs() < 1e17 && y.abs() < 1e17).then_some((x as i64, y as i64))
+    };
+    let original: Vec<Vec<Point2>> = rings.iter().map(|(_, r)| r.clone()).collect();
+    // Vertices onto earlier ones, through a grid of `tolerance` cells.
+    let mut grid: HashMap<(i64, i64), Vec<Point2>> = HashMap::new();
+    let mut moved = false;
+    for (_, ring) in rings.iter_mut() {
+        for v in ring.iter_mut() {
+            let Some((cx, cy)) = cell(*v) else {
+                return;
+            };
+            let mut found = None;
+            'search: for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if let Some(reps) = grid.get(&(cx + dx, cy + dy)) {
+                        for r in reps {
+                            if (*r - *v).length() <= tolerance {
+                                found = Some(*r);
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+            }
+            match found {
+                Some(r) => {
+                    if identity(r) != identity(*v) {
+                        moved = true;
+                    }
+                    *v = r;
+                }
+                None => grid.entry((cx, cy)).or_default().push(*v),
+            }
+        }
+    }
+    // Vertices onto the edges of other rings, found by x range.
+    let mut reps: Vec<(Point2, usize)> = Vec::new();
+    for (index, (_, ring)) in rings.iter().enumerate() {
+        reps.extend(ring.iter().map(|p| (*p, index)));
+    }
+    reps.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)));
+    reps.dedup_by(|a, b| identity(a.0) == identity(b.0) && a.1 == b.1);
+    for (index, entry) in rings.iter_mut().enumerate() {
+        let ring = entry.1.clone();
+        let n = ring.len();
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let (p, q) = (ring[i], ring[(i + 1) % n]);
+            out.push(p);
+            let d = q - p;
+            let length2 = d.dot(d);
+            if length2.is_nan() || length2 <= 0.0 {
+                continue;
+            }
+            let (lo, hi) = (p.x.min(q.x) - tolerance, p.x.max(q.x) + tolerance);
+            let first = reps.partition_point(|r| r.0.x < lo);
+            let mut inside: Vec<(f64, Point2)> = Vec::new();
+            for &(r, owner) in reps[first..].iter().take_while(|r| r.0.x <= hi) {
+                if owner == index || identity(r) == identity(p) || identity(r) == identity(q) {
+                    continue;
+                }
+                let t = (r - p).dot(d) / length2;
+                if !(t > 0.0 && t < 1.0) {
+                    continue;
+                }
+                let foot = p + d * t;
+                if (r - foot).length() <= tolerance
+                    && !inside.iter().any(|(_, s)| identity(*s) == identity(r))
+                {
+                    inside.push((t, r));
+                }
+            }
+            if !inside.is_empty() {
+                moved = true;
+                inside.sort_by(|a, b| a.0.total_cmp(&b.0));
+                out.extend(inside.into_iter().map(|(_, r)| r));
+            }
+        }
+        entry.1 = out;
+    }
+    if !moved {
+        return;
+    }
+    for (index, (_, ring)) in rings.iter_mut().enumerate() {
+        // Consecutive duplicates go; a spike back along an edge goes.
+        ring.dedup_by(|a, b| identity(*a) == identity(*b));
+        while ring.len() > 1 && identity(ring[0]) == identity(ring[ring.len() - 1]) {
+            ring.pop();
+        }
+        let mut changed = true;
+        while changed && ring.len() >= 3 {
+            changed = false;
+            let n = ring.len();
+            for i in 0..n {
+                if identity(ring[i]) == identity(ring[(i + 2) % n]) {
+                    let drop = [(i + 1) % n, (i + 2) % n];
+                    let (a, b) = (drop[0].max(drop[1]), drop[0].min(drop[1]));
+                    ring.remove(a);
+                    ring.remove(b);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        // A pinched ring keeps its own vertices.
+        let mut seen = std::collections::HashSet::new();
+        if !ring.iter().all(|p| seen.insert(identity(*p))) {
+            *ring = original[index].clone();
+        }
+    }
 }
 
 /// Whether every vertex of a ring lies on one line, exactly: then the
@@ -556,8 +696,8 @@ mod tests {
             reduced_somewhere |= reduce(given(&subject)).len() < given(&subject).len();
             let operation = operations[case % 4];
             let fill = fills[(case / 4) % 4];
-            let with = boolean_reduced(&subject, &clip, operation, fill, true).unwrap();
-            let without = boolean_reduced(&subject, &clip, operation, fill, false).unwrap();
+            let with = boolean_reduced(&subject, &clip, operation, fill, 0.0, true).unwrap();
+            let without = boolean_reduced(&subject, &clip, operation, fill, 0.0, false).unwrap();
             let canonical = |rings: Vec<(Ring, Vec<Ring>)>| {
                 crate::canonical_polygons(rings)
                     .into_iter()
@@ -646,6 +786,10 @@ mod tests {
                 assert!(simple(&turn(&near)), "{shift} {reversed}");
             }
         }
+        // Neighbours folding back along one line: only the neighbour
+        // check sees it, every edge of a triangle being a neighbour.
+        assert!(!simple(&[p(0.0, 0.0), p(2.0, 0.0), p(1.0, 0.0)]));
+        assert!(!simple(&[p(0.0, 0.0), p(0.0, 2.0), p(0.0, 1.0)]));
     }
 
     /// Two simple rings sharing an edge each way, the second reaching back
@@ -674,12 +818,20 @@ mod tests {
         let given = vec![square.clone(), hook.clone()];
         assert_eq!(reduce(given.clone()), given);
         let soup = [polygon(&square), polygon(&hook)];
-        let with = boolean_reduced(&soup, &[], OverlayOperation::Union, FillRule::NonZero, true);
+        let with = boolean_reduced(
+            &soup,
+            &[],
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            0.0,
+            true,
+        );
         let without = boolean_reduced(
             &soup,
             &[],
             OverlayOperation::Union,
             FillRule::NonZero,
+            0.0,
             false,
         );
         assert_eq!(format!("{with:?}"), format!("{without:?}"));
@@ -725,7 +877,7 @@ mod tests {
             let clip = operand(1 + case % 2);
             let (operation, rule) = operations[case % 4];
             let (fill, backend_fill) = fills[(case / 4) % 4];
-            let exact = boolean(&subject, &clip, operation, fill).expect("simple rings link");
+            let exact = boolean(&subject, &clip, operation, fill, 0.0).expect("simple rings link");
             let grid: Vec<(Ring, Vec<Ring>)> = backend(&subject)
                 .overlay(&backend(&clip), rule, backend_fill)
                 .into_iter()

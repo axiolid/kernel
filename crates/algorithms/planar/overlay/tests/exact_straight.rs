@@ -242,3 +242,55 @@ fn a_ring_on_one_line_encloses_nothing() {
     let region = Region::new(vec![sliver.clone()], tol()).expect("a valid ring");
     assert!(region.union(&region, tol()).expect("a union").is_empty());
 }
+
+/// Two rooms 0.2 apart and a door opening between them whose jambs were
+/// computed another way: `3.9999999999999996` and `4.199999999999999`
+/// beside the rooms' faces at 4 and 4.2. One ulp short of either room,
+/// the exact union kept three pieces; within the tolerance they touch, so
+/// the union is one region through the opening (#222).
+#[test]
+fn features_within_the_tolerance_touch() {
+    let rooms = vec![rect(0.0, 0.0, 4.0, 4.0), rect(4.2, 0.0, 8.2, 4.0)];
+    let door = rect(3.9999999999999996, 3.0, 4.199999999999999, 4.0);
+    let union = |rooms: Vec<Polygon>, door: Polygon| {
+        overlay(
+            &OverlayInput {
+                frame: frame(),
+                polygons: rooms,
+            },
+            &OverlayInput {
+                frame: frame(),
+                polygons: vec![door],
+            },
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            tol(),
+        )
+        .expect("valid operands")
+        .polygons
+    };
+    let joined = union(rooms.clone(), door.clone());
+    assert_eq!(joined.len(), 1, "{joined:?}");
+    assert!(joined[0].holes.is_empty());
+    assert!((polygon_area(&joined[0]) - (32.0 + 0.2)).abs() < 1e-9);
+    // The rooms keep their own corners: the door snapped onto them.
+    for corner in [(0.0, 0.0), (4.2, 0.0), (8.2, 0.0), (8.2, 4.0), (0.0, 4.0)] {
+        assert!(
+            joined[0]
+                .outer
+                .points
+                .contains(&Point2::new(corner.0, corner.1)),
+            "{corner:?} in {joined:?}"
+        );
+    }
+    // In a soup, alike.
+    let rings: Vec<Ring> = rooms
+        .iter()
+        .chain([&door])
+        .map(|p| p.outer.clone())
+        .collect();
+    assert_eq!(union_soup(&rings, tol()).expect("valid rings").len(), 1);
+    // Farther apart than the tolerance, they stay apart.
+    let short = rect(3.9999999999999996, 3.0, 4.1999999, 4.0);
+    assert_eq!(union(rooms, short).len(), 2);
+}

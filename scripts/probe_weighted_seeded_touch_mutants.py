@@ -33,6 +33,7 @@ MUTANTS = [
     ('any crossing of a region edge accepted', W, '                    if region_edge && near {', '                    if region_edge {', TESTS),
     ('an edge beyond a wall gets intervals', W, '        if weights.beyond_wall(p, q, reach)? {', '        if false {', TESTS),
     ('a stretch along a wall at 1 below', W, '                resolved = known;', '                resolved = false && known;', TESTS),
+    ('an edge just beyond a wall free on both sides (#222)', W, '                    if off(s0)? && off(s1)? {', '                    if false && off(s0)? && off(s1)? {', TESTS),
     # Turned cost edges.
     ('a hop along an edge at the greatest factor above', W, '                let mut all_hug = stretch > tiny;', '                let mut all_hug = false;', TESTS),
     ('an edge blocks its own intervals', W, '            if piece.line != la && piece.line != lb && blocks(piece.p, piece.q)? {', '            if blocks(piece.p, piece.q)? {\n                let _ = (la, lb);', TESTS),

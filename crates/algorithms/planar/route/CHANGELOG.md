@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A weighted map counts the free side of a cost edge left just beyond a
+  wall (#222). The exact overlay leaves a cost region cut to a turned wall
+  with corners a rounding step beyond it, so no wall runs exactly along
+  the edge between them, and a walk along that edge was counted at the
+  cheaper side -- outside the free space -- at factor 1. Along an edge on
+  or beyond a wall within the touching reach, only the region's side is
+  now free, as along the wall itself. A factor-2 square on a wall turned by
+  the 3-4-5 angle brackets 10.054..10.062 again, from 9.28..10.062.
+
 ## [0.3.6] - 2026-09-28
 
 ### Changed

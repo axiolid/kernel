@@ -351,7 +351,8 @@ pub fn weighted_distance_map_seeded_within(
     dedup_points(&mut nodes);
     // Cost edges are cut at every vertex on them, so no interval's point
     // is a vertex.
-    let weights = Weights::new(costs, &nodes, region)?;
+    let mut weights = Weights::new(costs, &nodes, region)?;
+    weights.reach = reach;
     weights.check_crossings(&obstacles, &walls, reach)?;
     let mut kinds = vec![Kind::Vertex; nodes.len()];
     let mut spans: Vec<(Point2, Point2, u32)> = Vec::new();
@@ -1324,6 +1325,9 @@ struct Weights {
     /// along one, only that side is free.
     walls: Vec<(Point2, Point2, bool)>,
     greatest: f64,
+    /// How far off a region edge a cost vertex may lie and still touch
+    /// it (see [`touch_walls`]); 0 until the map sets it.
+    reach: f64,
 }
 
 impl Weights {
@@ -1400,6 +1404,7 @@ impl Weights {
             lines,
             walls,
             greatest,
+            reach: 0.0,
         })
     }
 
@@ -1711,6 +1716,24 @@ impl Weights {
                     }
                 }
                 hugged = true;
+            }
+            // Along a cost edge left on or beyond a wall (see
+            // [`touch_walls`]), only the region's side of it is free, as
+            // along the wall itself: the other lies outside the free
+            // space, where no walk goes (#222).
+            if !on.is_empty() {
+                let (s0, s1) = (at(t0), at(t1));
+                for &(p, q, left) in &near_walls {
+                    let solid = if left { Sign::Negative } else { Sign::Positive };
+                    let off = |s: Point2| -> Result<bool, RouteError> {
+                        let at = side(p, q, s)?;
+                        Ok(point_segment(s, p, q) <= self.reach
+                            && (at == Sign::Zero || at == solid))
+                    };
+                    if off(s0)? && off(s1)? {
+                        free.push(left == ((q - p).dot(d) > 0.0));
+                    }
+                }
             }
             // Extra factor on each side of the segment at this stretch.
             let (mut left, mut right) = (0.0f64, 0.0f64);

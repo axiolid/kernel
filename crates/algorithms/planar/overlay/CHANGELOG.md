@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Features closer than the tolerance touch (#222). Before the exact
+  boolean, a vertex within `tolerance.linear()` of an earlier vertex moves
+  onto it, and one within it of another ring's edge is inserted into that
+  edge. A door opening computed as `3.9999999999999996..4.199999999999999`
+  between rooms ending at 4 and starting at 4.2 used to leave a gap one ulp
+  wide, so the union came back in three pieces and coverage could not pass
+  through the opening; the grid backend before 0.3.5 had closed it. Inputs
+  with nothing that near another feature come back bit for bit as before.
+
 ### Added
 
 - Minkowski sums and erosions with a non-convex polygon (#145):
