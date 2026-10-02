@@ -9,6 +9,35 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `sweep::swept_disk_within`, `sweep::fixed_reference_sweep_within` and
+  `sweep::surface_curve_sweep_within`, with `sweep::SampledPath` (#231):
+  sweeps that take a directrix sampler instead of fixed samples, and keep
+  every point of the surface their section traces along a smooth
+  directrix within a chord budget. Each span is bounded by the
+  directrix's sagitta, plus the section's extra sagitta at its furthest
+  point from the directrix, plus the wall quads' twist; the directrix is
+  resampled at half the budget until every span fits. Along a circular
+  arc this is exact (the stations are rotations about the arc's axis);
+  for other smooth curves it is the second-order estimate. A path with
+  end tangents places its end sections square to the curve. A path
+  without them (a line, a polyline, a composite) is swept as given.
+
+### Fixed
+
+- `revolve::revolve` and `sweep::tapered_revolve` bound the distance from
+  every point of the surface their rings sweep to the mesh by
+  `tolerance.linear()` (#231). The step round the axis used to bound the
+  sagitta alone, which misses the twist of the walls when the axis leaves
+  the profile's plane or the section tapers: the step now also covers
+  each wall quad's distance from its two triangles (a proved bound, zero
+  for the planar trapezoids of an ordinary revolution), and a tapered
+  turn's spiral is bounded by its own curvature. The module notes carry
+  the derivation, including why a chorded profile and a chorded turn
+  each need their own share of a surface budget. A budget beyond 4096
+  steps is refused with `BudgetExceeded` instead of met by fewer steps.
+
 ## [0.3.9] - 2026-10-02
 
 ### Added

@@ -17,6 +17,29 @@ caret rule for `0.x` versions.
   that must match the compiled solids no longer duplicates the reading.
   Corners, other curve families and unbounded lines are refused by name.
 
+### Fixed
+
+- Doubly curved meshes stay within the chord budget (#231). A revolution
+  chorded its profile and its turn each to the whole budget, so the two
+  deviations added inside a triangle: a torus (R 0.5, r 0.1) at 1 mm lay
+  1.46 mm from its mesh. A revolution, a tapered one included, now chords
+  its profile to half the chord budget and its turn to the other half
+  (see `axiolid_construct::revolve` for the proof), and its turn follows
+  `ExecutionOptions::with_chord_error` instead of the linear tolerance.
+  Swept disks, fixed-reference and surface-curve sweeps along a circle or
+  ellipse, plain or trimmed, give the section half the budget and refine
+  the directrix until the section's far side fits the other half, and
+  stand their end sections square to the curve rather than to its end
+  chords (a disk r 0.1 along an arc R 0.2 lay 7 mm from its end caps at
+  1 mm). Every point of the exact surface now lies within the budget of
+  the triangles, checked by dense sampling of tori (R/r down to 1.2),
+  spheres, partial and skew-axis revolutions, a revolved rounded
+  rectangle, a tapered revolution and sweeps along arcs with r/R up to
+  0.83, at 1 mm and 0.1 mm. A torus at 1 mm has 4928 triangles instead of
+  3520. A budget beyond 4096 steps round an axis is refused with
+  `BudgetExceeded` rather than met by a coarser mesh. Polyline, composite
+  and B-spline directrices are swept as sampled, as before.
+
 ## [0.3.7] - 2026-10-02
 
 ### Added

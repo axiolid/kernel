@@ -1,7 +1,8 @@
 //! Safe resolution of graph-referenced 3D sweep directrices.
 
+use axiolid_construct::sweep::SampledPath;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
-use axiolid_core::{Point3, Scalar};
+use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_model::{
     CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, TrimSelector,
     TrimmingPreference,
@@ -17,13 +18,62 @@ pub(crate) fn points(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<Point3>> {
-    let points = resolve(graph, id, range, options, 0)?;
+    sampled(graph, id, range, options).map(|path| path.points)
+}
+
+/// The directrix sampled to the options' chord budget, with its exact end
+/// tangents when it is one smooth conic arc (#231).
+///
+/// Only a circle or an ellipse, alone or trimmed, reports its tangents:
+/// those are smooth everywhere, so a sweep may refine them until its walls
+/// fit its budget. A line or polyline is its own chords, and a composite or
+/// a B-spline may carry corners that no refinement removes, so those are
+/// swept as sampled.
+pub(crate) fn sampled(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<SampledPath> {
+    let (points, end_tangents) = resolve(graph, id, range, options, 0)?;
     if points.len() < 2 {
         return Err(GeomError::Degenerate(
             "a sweep directrix needs at least two points".into(),
         ));
     }
-    Ok(points)
+    Ok(SampledPath {
+        points,
+        end_tangents,
+    })
+}
+
+/// Samples in the direction of travel, and the exact end tangents when
+/// known (see [`sampled`]).
+type Resolved = (Vec<Point3>, Option<[Vec3; 2]>);
+
+/// Reverse a resolved path: the samples, and the tangents swapped and
+/// negated so they still point along the travel.
+fn reversed((mut points, ends): Resolved) -> Resolved {
+    points.reverse();
+    (points, ends.map(|[start, end]| [-end, -start]))
+}
+
+/// Unit tangents of a smooth conic at the ends of `[start, end]`, in the
+/// direction of increasing parameter; `None` for any other family.
+fn conic_ends(curve: &axiolid_curve::Curve3, start: Scalar, end: Scalar) -> Option<[Vec3; 2]> {
+    if !matches!(
+        curve,
+        axiolid_curve::Curve3::Circle(_) | axiolid_curve::Curve3::Ellipse(_)
+    ) {
+        return None;
+    }
+    let unit = |t| {
+        axiolid_reference::curve::derivative3(curve, t)
+            .ok()
+            .map(Vec3::normalize_or_zero)
+            .filter(|v| *v != Vec3::ZERO && v.is_finite())
+    };
+    Some([unit(start)?, unit(end)?])
 }
 
 fn resolve(
@@ -32,7 +82,7 @@ fn resolve(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
     depth: usize,
-) -> GeomResult<Vec<Point3>> {
+) -> GeomResult<Resolved> {
     if depth > MAX_DEPTH {
         return Err(GeomError::BudgetExceeded {
             resource: "directrix relation depth",
@@ -85,12 +135,9 @@ fn resolve(
             // from `a` the way `sense_agreement` says, wrapping if it must.
             // Sorting `a` and `b` would pick the complementary arc (#168).
             if let Some((curve, period)) = basis_curve.and_then(|c| period_of(c).map(|p| (c, p))) {
-                let mut out =
+                let out =
                     sample_periodic_trim(curve, period, a, b, *sense_agreement, range, options)?;
-                if !sense_agreement {
-                    out.reverse();
-                }
-                return Ok(out);
+                return Ok(if *sense_agreement { out } else { reversed(out) });
             }
             let selected = range.unwrap_or((a, b));
             let lo = a.min(b);
@@ -101,16 +148,15 @@ fn resolve(
                     "sweep range exceeds trimmed directrix".into(),
                 ));
             }
-            let mut out = resolve(graph, *basis, Some(selected), options, depth + 1)?;
-            if !sense_agreement {
-                out.reverse();
-            }
-            Ok(out)
+            let out = resolve(graph, *basis, Some(selected), options, depth + 1)?;
+            Ok(if *sense_agreement { out } else { reversed(out) })
         }
+        // A composite may turn a corner at a joint, which no refinement
+        // removes, so it reports no end tangents.
         Some(GeometryNode::CurveRelation(CurveRelation::Composite { segments })) => {
             let mut out = Vec::new();
             for segment in segments {
-                let mut child = resolve(graph, segment.curve, None, options, depth + 1)?;
+                let (mut child, _) = resolve(graph, segment.curve, None, options, depth + 1)?;
                 if !segment.same_sense {
                     child.reverse();
                 }
@@ -124,8 +170,9 @@ fn resolve(
             match range {
                 Some((start, end)) => {
                     trim_by_length(&out, start, end, options.tolerance().linear())
+                        .map(|points| (points, None))
                 }
-                None => Ok(out),
+                None => Ok((out, None)),
             }
         }
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),
@@ -245,14 +292,15 @@ fn sample_periodic_trim(
     sense: bool,
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
-) -> GeomResult<Vec<Point3>> {
+) -> GeomResult<Resolved> {
     let (lo, hi) = periodic_trim_interval(period, a, b, sense, range, options)?;
-    axiolid_reference::curve::flatten3(
+    let points = axiolid_reference::curve::flatten3(
         curve,
         axiolid_core::Interval { start: lo, end: hi },
         crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
-    )
+    )?;
+    Ok((points, conic_ends(curve, lo, hi)))
 }
 
 /// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
@@ -326,7 +374,7 @@ fn sample_curve(
     curve: &axiolid_curve::Curve3,
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
-) -> GeomResult<Vec<Point3>> {
+) -> GeomResult<Resolved> {
     let natural = axiolid_reference::curve::domain3(curve);
     let domain = match range {
         None => natural,
@@ -361,12 +409,13 @@ fn sample_curve(
             }
         }
     };
-    axiolid_reference::curve::flatten3(
+    let points = axiolid_reference::curve::flatten3(
         curve,
         domain,
         crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
-    )
+    )?;
+    Ok((points, conic_ends(curve, domain.start, domain.end)))
 }
 
 fn stitch(target: &mut Vec<Point3>, mut child: Vec<Point3>, tolerance: Scalar) -> GeomResult<()> {

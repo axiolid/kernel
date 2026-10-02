@@ -82,6 +82,21 @@ pub fn tapered_extrude(
 /// Unlike a plain revolution this can never close: a full turn would have
 /// to meet the start profile with the end profile, which are different by
 /// construction. It is always capped.
+///
+/// Every point of the surface the blended rings sweep lies within
+/// `tolerance.linear()` of the mesh (#231). With `t` in `[0, 1]` along the
+/// turn, a ring point moves as `f(t) = R(angle t) q(t)` with `q` affine in
+/// `t` (the blend), so `f'' = angle^2 R'' q + 2 angle R' q'`, and
+/// `|R'' v|` and `|R' v|` are the distance of `v` from the axis direction,
+/// at most `|v|`. Hence `|f''| <= angle^2 rho_max + 2 |angle| d_max`, with
+/// `rho_max` the largest distance of a start or end ring vertex from the
+/// axis (a convex function of the blend, so largest at an end) and `d_max`
+/// the largest distance a vertex travels between the two profiles. Taylor's
+/// remainder bounds the distance of `f` from its chord over a step of
+/// `1/n` by `|f''|_max / (8 n^2)`, and the chords between two stations span
+/// the bilinear patch of each wall quad, which is within
+/// `loft::quad_deviation` of its two triangles; the step count
+/// grows until the sum of the two fits.
 pub fn tapered_revolve(
     start: &Rings,
     end: &Rings,
@@ -103,21 +118,39 @@ pub fn tapered_revolve(
     }
     let far = blend_rings(start, end, 1.0)?;
     let mut max_r: Scalar = 0.0;
-    for p in start.outer.iter().chain(far.outer.iter()) {
-        let v = Point3::new(p.x, p.y, 0.0) - axis_origin;
-        max_r = max_r.max((v - dir * dir.dot(v)).length());
+    let starts = start.outer.iter().chain(start.holes.iter().flatten());
+    let ends = far.outer.iter().chain(far.holes.iter().flatten());
+    let mut travel: Scalar = 0.0;
+    for (p, q) in starts.zip(ends) {
+        for p in [p, q] {
+            let v = Point3::new(p.x, p.y, 0.0) - axis_origin;
+            max_r = max_r.max((v - dir * dir.dot(v)).length());
+        }
+        travel = travel.max((*q - *p).length());
     }
-    let n = crate::revolve::steps(max_r, angle, tolerance.linear());
-    let mut stations = Vec::with_capacity(n + 1);
-    for s in 0..=n {
-        let t = (s as Scalar) / (n as Scalar);
-        let ring = blend_rings(start, end, t)?;
-        let a = angle * t;
-        stations.push(loft::place(&ring, |p| {
-            crate::revolve::rotate(Point3::new(p.x, p.y, 0.0), axis_origin, dir, a)
-        }));
-    }
-    let stations: Vec<_> = stations.into_iter().rev().collect();
+    let budget = tolerance.linear();
+    let curvature = angle * angle * max_r + 2.0 * angle.abs() * travel;
+    let mut n = crate::revolve::steps(max_r, angle, budget)?;
+    let stations = loop {
+        let mut stations = Vec::with_capacity(n + 1);
+        for s in (0..=n).rev() {
+            let t = (s as Scalar) / (n as Scalar);
+            let ring = blend_rings(start, end, t)?;
+            let a = angle * t;
+            stations.push(loft::place(&ring, |p| {
+                crate::revolve::rotate(Point3::new(p.x, p.y, 0.0), axis_origin, dir, a)
+            }));
+        }
+        let chord = curvature / (8.0 * (n * n) as Scalar);
+        let twist = stations
+            .windows(2)
+            .map(|w| loft::span_deviation(&w[0], &w[1]))
+            .fold(0.0, Scalar::max);
+        if chord + twist <= budget {
+            break stations;
+        }
+        n = crate::revolve::grow(n)?;
+    };
     let mut mesh = loft::loft_tapered(&far, start, &stations)?;
     // Same cause and fix as `revolve::revolve` (#221): the station order
     // above only winds the walls outward for a positive angle, and `angle`
@@ -142,7 +175,7 @@ pub fn fixed_reference_sweep(
     path: &[Point3],
     reference: Vec3,
 ) -> GeomResult<TriMesh> {
-    let frames = frames_along(path, |_| reference)?;
+    let frames = frames_along(path, None, |_| reference)?;
     let stations: Vec<Station> = frames
         .iter()
         .map(|f| loft::place(rings, |p| loft::at(f, p)))
@@ -150,29 +183,167 @@ pub fn fixed_reference_sweep(
     loft::loft(rings, &stations, false)
 }
 
+/// A directrix sampled into chords for a sweep that bounds its walls
+/// (#231).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SampledPath {
+    /// The samples, in the direction of travel.
+    pub points: Vec<Point3>,
+    /// The exact tangents at the first and the last sample, in the
+    /// direction of travel, when the samples chord ONE smooth curve.
+    ///
+    /// `Some` places the end sections square to the curve rather than to
+    /// its end chords, which lean by half the turn of a chord and tilt an
+    /// end cap by up to `reach * sin(turn / 2)`, and opts the sweep into
+    /// its chord bound. `None` marks a path whose chords are the path
+    /// itself (a line or a polyline, whose corners have no curvature to
+    /// refine) or one this crate cannot vouch is smooth, such as a
+    /// composite; such a path is swept as given.
+    pub end_tangents: Option<[Vec3; 2]>,
+}
+
+/// Rounds of halving the directrix budget before a sweep refuses.
+const MAX_REFINEMENTS: usize = 16;
+
+/// Stations for a sweep whose walls stay within `budget` of the surface
+/// its rings trace along a smooth directrix (#231).
+///
+/// `frames_at(b)` samples the directrix to chord budget `b` and returns
+/// its frames, and whether the sampled path is smooth
+/// ([`SampledPath::end_tangents`]); a path that is not is swept once, as
+/// given. For a smooth one the bound per span between two stations is
+///
+/// - the distance of the directrix from its chord: the smaller of `b` and
+///   `(L/2) tan(phi/4)`, with `L` the chord and `phi` the turn of the
+///   tangent across it, which is exactly the sagitta `R (1 - cos(phi/2))`
+///   of a circular arc of radius `R`;
+/// - plus `reach (1 - cos(psi/2))`, with `psi` the rotation between the two
+///   frames and `reach` the furthest ring point from the directrix: the
+///   extra sagitta of a profile point swept round with the frame;
+/// - plus [`loft::quad_deviation`] over the span's wall quads.
+///
+/// Along a circular arc whose frames turn with it (a rotation-minimising
+/// frame, or a fixed reference normal to the arc's plane) consecutive
+/// stations are rotations of each other about the arc's axis, so the first
+/// two terms are the sagitta `(R + reach)(1 - cos(phi/2))` of the circle
+/// the furthest profile point runs on, and the bound is the one
+/// [`crate::revolve`] proves. For other smooth curves the same terms are
+/// the second-order estimate of the sampled curve's own deviation. The
+/// budget is halved until every span fits, and refused with
+/// `BudgetExceeded` after `MAX_REFINEMENTS` rounds.
+fn bounded_stations(
+    rings: &Rings,
+    budget: Scalar,
+    mut frames_at: impl FnMut(Scalar) -> GeomResult<(Vec<Frame>, bool)>,
+) -> GeomResult<Vec<Station>> {
+    if !(budget.is_finite() && budget > 0.0) {
+        return Err(GeomError::InvalidInput(format!(
+            "sweep chord budget must be positive and finite, got {budget}"
+        )));
+    }
+    let reach = rings
+        .outer
+        .iter()
+        .chain(rings.holes.iter().flatten())
+        .map(|p| p.x.hypot(p.y))
+        .fold(0.0, Scalar::max);
+    let mut b = budget;
+    for _ in 0..MAX_REFINEMENTS {
+        let (frames, smooth) = frames_at(b)?;
+        let stations: Vec<Station> = frames
+            .iter()
+            .map(|f| loft::place(rings, |p| loft::at(f, p)))
+            .collect();
+        if !smooth {
+            return Ok(stations);
+        }
+        let worst = frames
+            .windows(2)
+            .zip(stations.windows(2))
+            .map(|(f, s)| span_bound(&f[0], &f[1], b, reach) + loft::span_deviation(&s[0], &s[1]))
+            .fold(0.0, Scalar::max);
+        if worst <= budget {
+            return Ok(stations);
+        }
+        b *= 0.5;
+    }
+    Err(GeomError::BudgetExceeded {
+        resource: "sweep directrix refinement",
+    })
+}
+
+/// The directrix and frame terms of [`bounded_stations`]'s span bound.
+fn span_bound(from: &Frame, to: &Frame, budget: Scalar, reach: Scalar) -> Scalar {
+    let (t0, t1) = (from.x.cross(from.y), to.x.cross(to.y));
+    let turn = t0.dot(t1).clamp(-1.0, 1.0).acos();
+    let chord = (to.origin - from.origin).length();
+    let directrix = budget.min(0.5 * chord * (0.25 * turn).tan());
+    let trace = from.x.dot(to.x) + from.y.dot(to.y) + t0.dot(t1);
+    let rotation = (0.5 * (trace - 1.0)).clamp(-1.0, 1.0).acos();
+    directrix + reach * (1.0 - (0.5 * rotation).cos())
+}
+
+/// [`fixed_reference_sweep`] whose walls stay within `budget` of the
+/// surface its rings trace along a smooth directrix (#231).
+///
+/// `sample(b)` samples the directrix to chord budget `b`; it is called
+/// again with a halved budget while the walls miss (see
+/// [`SampledPath`]). The rings' own distance from a curved profile is the
+/// caller's to add: the reference compiler flattens the profile to half
+/// its chord budget and passes the other half here.
+pub fn fixed_reference_sweep_within(
+    rings: &Rings,
+    mut sample: impl FnMut(Scalar) -> GeomResult<SampledPath>,
+    reference: Vec3,
+    budget: Scalar,
+) -> GeomResult<TriMesh> {
+    let stations = bounded_stations(rings, budget, |b| {
+        let path = sample(b)?;
+        let frames = frames_along(&path.points, path.end_tangents, |_| reference)?;
+        Ok((frames, path.end_tangents.is_some()))
+    })?;
+    loft::loft(rings, &stations, false)
+}
+
+/// [`surface_curve_sweep`] whose walls stay within `budget` of the surface
+/// its rings trace along a smooth directrix (#231).
+///
+/// `sample(b)` returns the directrix sampled to chord budget `b` and the
+/// reference surface's normal at each sample; see
+/// [`fixed_reference_sweep_within`].
+pub fn surface_curve_sweep_within(
+    rings: &Rings,
+    mut sample: impl FnMut(Scalar) -> GeomResult<(SampledPath, Vec<Vec3>)>,
+    budget: Scalar,
+) -> GeomResult<TriMesh> {
+    let stations = bounded_stations(rings, budget, |b| {
+        let (path, normals) = sample(b)?;
+        if normals.len() != path.points.len() {
+            return Err(GeomError::InvalidInput(
+                "a surface curve sweep needs one surface normal per directrix point".to_owned(),
+            ));
+        }
+        let frames = frames_along(&path.points, path.end_tangents, |i| normals[i])?;
+        Ok((frames, path.end_tangents.is_some()))
+    })?;
+    loft::loft(rings, &stations, false)
+}
+
 /// Build a frame at each path sample.
 ///
 /// The tangent at an interior sample is the average of its two segment
 /// directions, which keeps the profile from kinking at a corner. Endpoints
-/// use their single adjacent segment.
-fn frames_along(path: &[Point3], up: impl Fn(usize) -> Vec3) -> GeomResult<Vec<Frame>> {
-    if path.len() < 2 {
-        return Err(GeomError::InvalidInput(format!(
-            "a sweep directrix needs at least two points, got {}",
-            path.len()
-        )));
-    }
+/// use the curve's exact tangents when `ends` gives them, else their single
+/// adjacent segment.
+fn frames_along(
+    path: &[Point3],
+    ends: Option<[Vec3; 2]>,
+    up: impl Fn(usize) -> Vec3,
+) -> GeomResult<Vec<Frame>> {
+    let tangents = tangents_along(path, ends)?;
     let mut frames = Vec::with_capacity(path.len());
-    for i in 0..path.len() {
-        let tangent = if i == 0 {
-            path[1] - path[0]
-        } else if i + 1 == path.len() {
-            path[i] - path[i - 1]
-        } else {
-            (path[i] - path[i - 1]).normalize_or_zero()
-                + (path[i + 1] - path[i]).normalize_or_zero()
-        };
-        frames.push(Frame::from_reference(path[i], tangent, up(i))?);
+    for (i, (point, tangent)) in path.iter().zip(tangents).enumerate() {
+        frames.push(Frame::from_reference(*point, tangent, up(i))?);
     }
     Ok(frames)
 }
@@ -226,7 +397,7 @@ pub fn surface_curve_sweep(
             "a surface curve sweep needs one surface normal per directrix point".to_owned(),
         ));
     }
-    let frames = frames_along(path, |i| normals[i])?;
+    let frames = frames_along(path, None, |i| normals[i])?;
     let stations: Vec<Station> = frames
         .iter()
         .map(|f| loft::place(rings, |p| loft::at(f, p)))
@@ -247,6 +418,66 @@ pub fn swept_disk(
     fillet_radius: Option<Scalar>,
     tolerance: Tolerance,
 ) -> GeomResult<TriMesh> {
+    check_disk(radius, inner_radius, fillet_radius)?;
+    // A disk is just a circular profile, so the sweep reuses the shared
+    // loft. The section needs a frame that stays perpendicular to the path,
+    // but which perpendicular does not matter for a circle. A single fixed
+    // axis is NOT enough: a leg along that axis has no perpendicular
+    // component and was refused, and a leg nearly along it projects to a
+    // residue of arbitrary direction, rotating the ring between stations
+    // so the loft connects vertex k to a rotated vertex k and the volume
+    // collapses silently (axiolid/kernel#169). The reference is therefore
+    // carried along the path by rotation-minimising frames.
+    let rings = disk_rings(radius, inner_radius, tolerance.linear())?;
+    let frames = rotation_minimising_frames(path, None)?;
+    let stations: Vec<Station> = frames
+        .iter()
+        .map(|f| loft::place(&rings, |p| loft::at(f, p)))
+        .collect();
+    loft::loft(&rings, &stations, false)
+}
+
+/// [`swept_disk`] whose surface stays within `chord` of the exact tube
+/// round a smooth directrix (#231).
+///
+/// Half the budget chords the disk: a ring of `n` points inscribed in a
+/// circle of radius `r` is within `r (1 - cos(pi/n))` of it, and every
+/// station places it rigidly, so every point of the exact tube is within
+/// that of the surface the rings sweep. The other half bounds that surface
+/// against its triangles, as [`fixed_reference_sweep_within`] does, with
+/// the disk's radius as the reach: along a circular arc of radius `R` the
+/// rotation-minimising frames turn with the arc, so the stations are
+/// rotations of one ring about the arc's axis and the outer side of the
+/// tube, `R + r` from it, sets the step. `sample(b)` samples the directrix
+/// to chord budget `b`; see [`SampledPath`].
+pub fn swept_disk_within(
+    mut sample: impl FnMut(Scalar) -> GeomResult<SampledPath>,
+    radius: Scalar,
+    inner_radius: Option<Scalar>,
+    fillet_radius: Option<Scalar>,
+    chord: Scalar,
+) -> GeomResult<TriMesh> {
+    check_disk(radius, inner_radius, fillet_radius)?;
+    let rings = disk_rings(radius, inner_radius, 0.5 * chord)?;
+    let stations = bounded_stations(&rings, 0.5 * chord, |b| {
+        let path = sample(b)?;
+        let frames = rotation_minimising_frames(&path.points, path.end_tangents)?;
+        Ok((frames, path.end_tangents.is_some()))
+    })?;
+    loft::loft(&rings, &stations, false)
+}
+
+/// Refuse a fillet and validate the disk's radii.
+///
+/// `fillet_radius` is refused rather than ignored. The model's own docs say
+/// a consumer that cannot round corners must refuse a `Some`, because
+/// silently sharpening a pipe run produces geometry that builds, renders,
+/// and is wrong.
+fn check_disk(
+    radius: Scalar,
+    inner_radius: Option<Scalar>,
+    fillet_radius: Option<Scalar>,
+) -> GeomResult<()> {
     if fillet_radius.is_some() {
         return Err(GeomError::Unsupported {
             backend: crate::BACKEND_ID,
@@ -265,22 +496,7 @@ pub fn swept_disk(
             )));
         }
     }
-    // A disk is just a circular profile, so the sweep reuses the shared
-    // loft. The section needs a frame that stays perpendicular to the path,
-    // but which perpendicular does not matter for a circle. A single fixed
-    // axis is NOT enough: a leg along that axis has no perpendicular
-    // component and was refused, and a leg nearly along it projects to a
-    // residue of arbitrary direction, rotating the ring between stations
-    // so the loft connects vertex k to a rotated vertex k and the volume
-    // collapses silently (axiolid/kernel#169). The reference is therefore
-    // carried along the path by rotation-minimising frames.
-    let rings = disk_rings(radius, inner_radius, tolerance)?;
-    let frames = rotation_minimising_frames(path)?;
-    let stations: Vec<Station> = frames
-        .iter()
-        .map(|f| loft::place(&rings, |p| loft::at(f, p)))
-        .collect();
-    loft::loft(&rings, &stations, false)
+    Ok(())
 }
 
 /// Rotation-minimising frames along a sampled path, by double reflection.
@@ -294,11 +510,12 @@ pub fn swept_disk(
 /// frame has fourth-order accuracy in the step, and no twist beyond what
 /// the path's own torsion forces.
 ///
-/// Tangents match `frames_along` (averaged at interior samples), so a
-/// corner is mitred the same way as every other sweep family.
-fn rotation_minimising_frames(path: &[Point3]) -> GeomResult<Vec<Frame>> {
+/// Tangents match `frames_along` (averaged at interior samples, the exact
+/// ones at the ends when `ends` gives them), so a corner is mitred the
+/// same way as every other sweep family.
+fn rotation_minimising_frames(path: &[Point3], ends: Option<[Vec3; 2]>) -> GeomResult<Vec<Frame>> {
     let seed = seed_reference(path)?;
-    let tangents = tangents_along(path)?;
+    let tangents = tangents_along(path, ends)?;
     let mut reference = seed;
     let mut frames = Vec::with_capacity(path.len());
     for i in 0..path.len() {
@@ -324,8 +541,9 @@ fn rotation_minimising_frames(path: &[Point3]) -> GeomResult<Vec<Frame>> {
     Ok(frames)
 }
 
-/// Unit tangent at each sample, averaged at interior samples.
-fn tangents_along(path: &[Point3]) -> GeomResult<Vec<Vec3>> {
+/// Unit tangent at each sample, averaged at interior samples; at the two
+/// ends the exact tangents when `ends` gives them, else the end chords.
+fn tangents_along(path: &[Point3], ends: Option<[Vec3; 2]>) -> GeomResult<Vec<Vec3>> {
     if path.len() < 2 {
         return Err(GeomError::InvalidInput(format!(
             "a sweep directrix needs at least two points, got {}",
@@ -335,9 +553,9 @@ fn tangents_along(path: &[Point3]) -> GeomResult<Vec<Vec3>> {
     (0..path.len())
         .map(|i| {
             let raw = if i == 0 {
-                path[1] - path[0]
+                ends.map_or(path[1] - path[0], |[start, _]| start)
             } else if i + 1 == path.len() {
-                path[i] - path[i - 1]
+                ends.map_or(path[i] - path[i - 1], |[_, end]| end)
             } else {
                 (path[i] - path[i - 1]).normalize_or_zero()
                     + (path[i + 1] - path[i]).normalize_or_zero()
@@ -354,10 +572,11 @@ fn tangents_along(path: &[Point3]) -> GeomResult<Vec<Vec3>> {
         .collect()
 }
 
-/// A circular profile, hollow when `inner` is given.
-fn disk_rings(radius: Scalar, inner: Option<Scalar>, tolerance: Tolerance) -> GeomResult<Rings> {
-    let circle = |r: Scalar, reverse: bool| -> Vec<Point2> {
-        let n = crate::revolve::steps(r, core::f64::consts::TAU, tolerance.linear());
+/// A circular profile, hollow when `inner` is given, each ring within
+/// `chord` of its circle.
+fn disk_rings(radius: Scalar, inner: Option<Scalar>, chord: Scalar) -> GeomResult<Rings> {
+    let circle = |r: Scalar, reverse: bool| -> GeomResult<Vec<Point2>> {
+        let n = crate::revolve::steps(r, core::f64::consts::TAU, chord)?;
         let mut pts: Vec<Point2> = (0..n)
             .map(|k| {
                 let a = core::f64::consts::TAU * (k as Scalar) / (n as Scalar);
@@ -367,13 +586,16 @@ fn disk_rings(radius: Scalar, inner: Option<Scalar>, tolerance: Tolerance) -> Ge
         if reverse {
             pts.reverse();
         }
-        pts
+        Ok(pts)
     };
     // A hole ring runs opposite the outer ring so the triangulator reads it
     // as a void rather than a second island.
     Ok(Rings {
-        outer: circle(radius, false),
-        holes: inner.map(|r| vec![circle(r, true)]).unwrap_or_default(),
+        outer: circle(radius, false)?,
+        holes: match inner {
+            Some(r) => vec![circle(r, true)?],
+            None => Vec::new(),
+        },
     })
 }
 

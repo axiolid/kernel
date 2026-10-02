@@ -82,8 +82,10 @@ fn disk(
 
 /// Area of the inscribed n-gon the compiler meshes the disk as (the same
 /// chord rule as `axiolid-construct`), so volumes compare path length only.
+/// The disk gets half the chord budget, the directrix the other half
+/// (#231).
 fn section_area() -> Scalar {
-    let chord = Tolerance::MILLIMETRE.linear();
+    let chord = 0.5 * Tolerance::MILLIMETRE.linear();
     let per = 2.0 * (1.0 - (chord / TUBE).min(1.0)).clamp(-1.0, 1.0).acos();
     let n = (core::f64::consts::TAU / per).ceil();
     0.5 * n * TUBE * TUBE * (core::f64::consts::TAU / n).sin()

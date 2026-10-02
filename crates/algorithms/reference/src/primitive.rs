@@ -23,7 +23,37 @@ fn segments(radius: Scalar, tolerance: Scalar) -> usize {
     (n as usize).clamp(3, 4096)
 }
 
+/// [`segments`] for one direction of a doubly curved surface, refused
+/// rather than clamped when the budget needs more than the clamp allows:
+/// a clamped count would leave the surface outside the bound the caller
+/// asked for (#231).
+fn segments_within(radius: Scalar, tolerance: Scalar) -> GeomResult<usize> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(GeomError::InvalidInput(format!(
+            "chord budget must be positive and finite, got {tolerance}"
+        )));
+    }
+    let n = segments(radius, tolerance);
+    if n == 4096 && radius * (1.0 - (core::f64::consts::PI / 4096.0).cos()) > tolerance {
+        return Err(GeomError::BudgetExceeded {
+            resource: "primitive surface segments",
+        });
+    }
+    Ok(n)
+}
+
 /// Tessellate one CSG primitive into a closed, outward-wound solid.
+///
+/// A sphere and a torus are doubly curved: every point of the exact
+/// surface lies within `tolerance.linear()` of the mesh (#231). Each is the
+/// revolution of an inscribed polygon (a meridian polygon, a tube circle
+/// polygon) about its axis, which lies in the polygon's plane. A point of
+/// the exact surface is the rotation of a point within the polygon's
+/// sagitta `s_p` of the polygon, and a point of the revolved polygon is on
+/// an arc of radius at most `rho_max` (the widest vertex) whose chord lies
+/// in a planar trapezoid of the mesh, so within `rho_max (1 - cos(h/2))`
+/// of it for a step `h` round the axis. Each direction gets half the
+/// budget, so the two add to at most the whole.
 ///
 /// Outward winding is not decoration: `axiolid-mesh-boolean-boolmesh` and the clash
 /// containment test both read signed volume, and an inverted primitive
@@ -207,10 +237,11 @@ fn wedge(
 /// Ring torus about +z, tube centre circle of radius `major` in z = 0.
 ///
 /// A grid of `n` steps round the axis by `m` round the tube, each sized by
-/// the same chord rule as the other curved primitives: `n` for the outer
-/// equator, the largest circle round the axis. Each grid cell is a planar
-/// trapezoid (its two edges round the axis are parallel chords), split in
-/// two.
+/// the same chord rule as the other curved primitives at HALF the budget
+/// (#231): `n` for the outer equator, the largest circle round the axis.
+/// Each grid cell is a planar trapezoid (its two edges round the axis are
+/// parallel chords), split in two, so the tube polygon's sagitta and the
+/// equator's are the only deviations and their sum fits the budget.
 fn torus(major: Scalar, minor: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
     let big = positive(major, "torus major radius")?;
     let r = positive(minor, "torus minor radius")?;
@@ -225,8 +256,8 @@ fn torus(major: Scalar, minor: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
              does not bound a two-manifold solid"
         )));
     }
-    let n = segments(big + r, tol);
-    let m = segments(r, tol);
+    let n = segments_within(big + r, 0.5 * tol)?;
+    let m = segments_within(r, 0.5 * tol)?;
     let mut p = Vec::with_capacity(n * m);
     for i in 0..n {
         let theta = core::f64::consts::TAU * (i as Scalar) / (n as Scalar);
@@ -307,12 +338,16 @@ fn cone(radius: Scalar, height: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
 }
 
 /// Sphere centred on the local origin, as a UV mesh.
+///
+/// Half the budget goes round the axis and half down the meridian (#231).
 fn sphere(radius: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
     let r = positive(radius, "sphere radius")?;
-    let n = segments(r, tol);
+    let n = segments_within(r, 0.5 * tol)?;
     // Half as many stacks as segments: the polar direction spans PI, not TAU,
     // so equal counts would oversample it by 2x for the same chord error.
-    let stacks = (n / 2).max(2);
+    // Rounded UP: an odd `n` halved down would make the polar step longer
+    // than `TAU / n` and its chords deeper than the budget.
+    let stacks = n.div_ceil(2).max(2);
     let mut p = Vec::with_capacity((stacks + 1) * n);
     for i in 0..=stacks {
         let v = core::f64::consts::PI * (i as Scalar) / (stacks as Scalar);

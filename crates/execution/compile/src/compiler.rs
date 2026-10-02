@@ -209,10 +209,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .collect()
     }
 
+    /// A profile's rings, chorded to `chord`.
     fn rings_of(
         &self,
         graph: &GeometryGraph,
         id: NodeId,
+        chord: Scalar,
         options: &ExecutionOptions,
         what: &str,
     ) -> GeomResult<axiolid_construct::profile::Rings> {
@@ -222,7 +224,25 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 "{what} {id:?} is not a Profile node"
             )));
         };
-        profile_rings(shape, chord_error(options), options.tolerance())
+        profile_rings(shape, chord, options.tolerance())
+    }
+
+    /// A directrix sampled to the chord budget `chord`, with its end
+    /// tangents when it is one smooth conic (#231).
+    fn directrix_sampled(
+        &self,
+        graph: &GeometryGraph,
+        id: NodeId,
+        range: Option<(Scalar, Scalar)>,
+        options: &ExecutionOptions,
+        chord: Scalar,
+    ) -> GeomResult<axiolid_construct::sweep::SampledPath> {
+        let options = options.clone().with_chord_error(chord).ok_or_else(|| {
+            GeomError::InvalidInput(format!(
+                "directrix chord budget {chord} is not positive and finite"
+            ))
+        })?;
+        crate::directrix::sampled(graph, id, range, &options)
     }
 
     /// Sample a directrix curve into a polyline.
@@ -592,13 +612,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         "revolution profile {profile:?} is not a Profile node"
                     )));
                 };
-                let rings = profile_rings(shape, chord_error(options), options.tolerance())?;
+                // Doubly curved (#231): half the budget across the profile,
+                // half round the axis, so the two chordings add to at most
+                // the whole (see `axiolid_construct::revolve`).
+                let half = 0.5 * chord_error(options);
+                let rings = profile_rings(shape, half, options.tolerance())?;
                 axiolid_construct::revolve::revolve(
                     &rings,
                     *axis_origin,
                     *axis_direction,
                     *angle,
-                    options.tolerance(),
+                    half_tolerance(options)?,
                 )
             }
             SolidOperation::TaperedExtrusion {
@@ -607,8 +631,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 direction,
                 depth,
             } => {
-                let a = self.rings_of(graph, *start_profile, options, "taper start profile")?;
-                let b = self.rings_of(graph, *end_profile, options, "taper end profile")?;
+                let chord = chord_error(options);
+                let a =
+                    self.rings_of(graph, *start_profile, chord, options, "taper start profile")?;
+                let b = self.rings_of(graph, *end_profile, chord, options, "taper end profile")?;
                 axiolid_construct::sweep::tapered_extrude(&a, &b, *direction, *depth)
             }
             SolidOperation::TaperedRevolution {
@@ -618,42 +644,51 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 axis_direction,
                 angle,
             } => {
-                let a = self.rings_of(graph, *start_profile, options, "taper start profile")?;
-                let b = self.rings_of(graph, *end_profile, options, "taper end profile")?;
+                let half = 0.5 * chord_error(options);
+                let a =
+                    self.rings_of(graph, *start_profile, half, options, "taper start profile")?;
+                let b = self.rings_of(graph, *end_profile, half, options, "taper end profile")?;
                 axiolid_construct::sweep::tapered_revolve(
                     &a,
                     &b,
                     *axis_origin,
                     *axis_direction,
                     *angle,
-                    options.tolerance(),
+                    half_tolerance(options)?,
                 )
             }
+            // Sweeps along a directrix are doubly curved too: the
+            // construction splits the budget between the section and the
+            // directrix and refines the directrix until its walls fit.
             SolidOperation::SweptDisk {
                 directrix,
                 radius,
                 inner_radius,
                 parameter_range,
                 fillet_radius,
-            } => {
-                let path = self.directrix_points(graph, *directrix, *parameter_range, options)?;
-                axiolid_construct::sweep::swept_disk(
-                    &path,
-                    *radius,
-                    *inner_radius,
-                    *fillet_radius,
-                    options.tolerance(),
-                )
-            }
+            } => axiolid_construct::sweep::swept_disk_within(
+                |chord| self.directrix_sampled(graph, *directrix, *parameter_range, options, chord),
+                *radius,
+                *inner_radius,
+                *fillet_radius,
+                chord_error(options),
+            ),
             SolidOperation::FixedReferenceSweep {
                 profile,
                 directrix,
                 reference_direction,
                 parameter_range,
             } => {
-                let rings = self.rings_of(graph, *profile, options, "sweep profile")?;
-                let path = self.directrix_points(graph, *directrix, *parameter_range, options)?;
-                axiolid_construct::sweep::fixed_reference_sweep(&rings, &path, *reference_direction)
+                let half = 0.5 * chord_error(options);
+                let rings = self.rings_of(graph, *profile, half, options, "sweep profile")?;
+                axiolid_construct::sweep::fixed_reference_sweep_within(
+                    &rings,
+                    |chord| {
+                        self.directrix_sampled(graph, *directrix, *parameter_range, options, chord)
+                    },
+                    *reference_direction,
+                    half,
+                )
             }
             SolidOperation::SurfaceCurveSweep {
                 profile,
@@ -661,11 +696,30 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 reference_surface,
                 parameter_range,
             } => {
-                let rings =
-                    self.rings_of(graph, *profile, options, "surface curve sweep profile")?;
-                let path = self.directrix_points(graph, *directrix, *parameter_range, options)?;
-                let normals = self.surface_normals(graph, *reference_surface, &path, options)?;
-                axiolid_construct::sweep::surface_curve_sweep(&rings, &path, &normals)
+                let half = 0.5 * chord_error(options);
+                let rings = self.rings_of(
+                    graph,
+                    *profile,
+                    half,
+                    options,
+                    "surface curve sweep profile",
+                )?;
+                axiolid_construct::sweep::surface_curve_sweep_within(
+                    &rings,
+                    |chord| {
+                        let path = self.directrix_sampled(
+                            graph,
+                            *directrix,
+                            *parameter_range,
+                            options,
+                            chord,
+                        )?;
+                        let normals =
+                            self.surface_normals(graph, *reference_surface, &path.points, options)?;
+                        Ok((path, normals))
+                    },
+                    half,
+                )
             }
             SolidOperation::SectionedSpine { spine, sections } => {
                 let path = self.directrix_points(graph, *spine, None, options)?;
@@ -678,8 +732,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 }
                 let mut placed = Vec::with_capacity(sections.len());
                 for (section, origin) in sections.iter().zip(&path) {
-                    let rings =
-                        self.rings_of(graph, section.profile, options, "spine section profile")?;
+                    let rings = self.rings_of(
+                        graph,
+                        section.profile,
+                        chord_error(options),
+                        options,
+                        "spine section profile",
+                    )?;
                     // The section's own placement positions its profile;
                     // the spine point supplies the station origin.
                     let pts = rings
@@ -823,6 +882,14 @@ pub(crate) fn chord_error(options: &ExecutionOptions) -> Scalar {
 /// that take one number for both (the CSG primitive tessellator).
 fn chord_tolerance(options: &ExecutionOptions) -> GeomResult<Tolerance> {
     Tolerance::new(chord_error(options), options.tolerance().angular())
+        .map_err(|error| GeomError::InvalidInput(error.to_string()))
+}
+
+/// The tolerance with HALF the chord budget as its linear part: the share
+/// a revolution's steps round the axis get, the other half having chorded
+/// its profile (#231).
+fn half_tolerance(options: &ExecutionOptions) -> GeomResult<Tolerance> {
+    Tolerance::new(0.5 * chord_error(options), options.tolerance().angular())
         .map_err(|error| GeomError::InvalidInput(error.to_string()))
 }
 
