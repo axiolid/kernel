@@ -455,9 +455,10 @@ fn point_at_length(points: &[Point3], cumulative: &[Scalar], target: Scalar) -> 
 }
 
 /// A directrix an exact swept disk can follow: one straight segment or one
-/// circular arc (#223).
+/// circular arc (#223). Returned by [`crate::exact_directrix`].
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ExactDirectrix {
+#[non_exhaustive]
+pub enum ExactDirectrix {
     /// From the first point to the second.
     Segment(Point3, Point3),
     /// Over an angle span of the circle, start to end.

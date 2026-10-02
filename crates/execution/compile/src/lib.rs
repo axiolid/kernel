@@ -18,4 +18,5 @@ mod compiler;
 pub use compiler::ReferenceMeshCompiler;
 
 mod exact;
-pub use exact::{ReferenceExactCompiler, SOLID_FAMILY_NAMES};
+pub use directrix::ExactDirectrix;
+pub use exact::{exact_directrix, ReferenceExactCompiler, SOLID_FAMILY_NAMES};

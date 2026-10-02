@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `exact_directrix` and `ExactDirectrix` are public (#230): they read a
+  swept disk's directrix as one segment or one arc, exactly as
+  `ReferenceExactCompiler` does, so a consumer building exact boundaries
+  that must match the compiled solids no longer duplicates the reading.
+  Corners, other curve families and unbounded lines are refused by name.
+
 ## [0.3.7] - 2026-10-02
 
 ### Added

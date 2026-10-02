@@ -27,6 +27,7 @@ use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, ExecutionOptions, ExecutionTarget, GeomError,
     GeomResult, Operation,
 };
+use axiolid_core::Scalar;
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
@@ -280,6 +281,27 @@ fn remap_construction_error(error: GeomError) -> GeomError {
         GeomError::UnsupportedInput { input, .. } => unsupported(input),
         error => error,
     }
+}
+
+/// Resolve a swept disk's directrix exactly as [`ReferenceExactCompiler`]
+/// reads it for `SolidOperation::SweptDisk` (#230).
+///
+/// `directrix` and `parameter_range` are the swept disk's own fields. The
+/// result is one straight segment or one circular arc, read with the same
+/// trim, sense and range conventions as the mesh compiler's sampled path, so
+/// an exact boundary built from it matches what both compilers produce.
+/// Accepted: a bounded line, a two-point polyline, a circle or a sub-range of
+/// one, a trim of a line or circle (across the seam included), and a
+/// one-segment composite. Refused with `GeomError::UnsupportedInput` naming
+/// the input: directrices with corners, other curve families and unbounded
+/// lines; invalid or empty ranges are `InvalidInput` or `Degenerate`.
+pub fn exact_directrix(
+    graph: &GeometryGraph,
+    directrix: NodeId,
+    parameter_range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<crate::directrix::ExactDirectrix> {
+    crate::directrix::exact(graph, directrix, parameter_range, options, unsupported)
 }
 
 fn unsupported(input: &'static str) -> GeomError {
