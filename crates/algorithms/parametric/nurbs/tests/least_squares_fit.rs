@@ -151,9 +151,17 @@ fn surface_fit_of_a_bicubic_sample_reproduces_the_patch() {
         parameterisation: Parameterisation::Uniform,
     };
     let fit = fit_surface_grid(&points, &options).expect("well-posed surface fit");
+    eprintln!(
+        "bicubic patch reproduction: max_deviation = {:e}, rms_deviation = {:e}",
+        fit.max_deviation, fit.rms_deviation
+    );
 
+    // Observed ~3.6e-15 (see the eprintln above); a single-span bicubic
+    // patch resampled at a matching degree/control count is essentially an
+    // exact reproduction, limited only by rounding through two sequential
+    // least-squares solves (row fit, then column fit).
     assert!(
-        fit.max_deviation < 1e-6,
+        fit.max_deviation < 5e-14,
         "max deviation too large: {}",
         fit.max_deviation
     );
@@ -165,7 +173,7 @@ fn surface_fit_of_a_bicubic_sample_reproduces_the_patch() {
             let expected = sample_surface(&original, u, v);
             let actual = sample_surface(&fit.surface, u, v);
             assert!(
-                (actual - expected).length() < 1e-5,
+                (actual - expected).length() < 1e-12,
                 "surface diverges at ({u}, {v}): expected {expected:?}, got {actual:?}"
             );
         }

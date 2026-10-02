@@ -63,3 +63,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0076](./0076-ruled-quadric-sections.md) | Ruled quadric sections: exact quartic intersection curves |
 | [0077](./0077-implicit-section-curves.md) | Implicit section curves: certified tracing of analytic sections |
 | [0078](./0078-context-lives-beside-the-code.md) | Context lives beside the code; open work lives in issues |
+| [0079](./0079-least-squares-fitting-uses-the-numeric-substrate.md) | Least-squares fitting lives in axiolid-nurbs and depends on axiolid-numeric |

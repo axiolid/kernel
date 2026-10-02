@@ -209,10 +209,11 @@ features = []
 # mesh, spatial, measure, and primitive. Rewiring NURBS to `axiolid-evaluate`
 # removed that entire branch. Reintroducing it must be a reviewed decision.
 #
-# `axiolid-numeric` joined deliberately for #150 (ledger B11): least-squares
-# curve and surface approximation in `axiolid-nurbs` solves through its
-# QR-based least squares and equality-constrained least squares rather than
-# hand-rolling normal equations. It has no further dependencies of its own.
+# `axiolid-numeric` joined deliberately for #150 (ledger B11, ADR 0079):
+# least-squares curve and surface approximation in `axiolid-nurbs` solves
+# through its QR-based least squares and equality-constrained least
+# squares rather than hand-rolling normal equations. It has no further
+# dependencies of its own.
 expected_internal = [
     "axiolid-brep",
     "axiolid-contracts",
@@ -267,7 +268,8 @@ features = []
 # continue to use the leaf profiles above and must not acquire this closure.
 # `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
 # topology exactly with it (ADR 0070). `axiolid-numeric` arrives with
-# `axiolid-nurbs` for #150 (ledger B11): see the `cad-exact` profile above.
+# `axiolid-nurbs` for #150 (ledger B11, ADR 0079): see the `cad-exact`
+# profile above.
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -314,7 +316,8 @@ features = []
 # This closure is deliberately the Rust application bundle plus only the ABI boundary.
 # `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
 # topology exactly with it (ADR 0070). `axiolid-numeric` arrives with
-# `axiolid-nurbs` for #150 (ledger B11): see the `cad-exact` profile above.
+# `axiolid-nurbs` for #150 (ledger B11, ADR 0079): see the `cad-exact`
+# profile above.
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
@@ -538,7 +541,8 @@ features = []
 # compiling; this one records the cost when nothing is avoided.
 # `axiolid-exact` arrives with `axiolid-overlay`: the arc path decides its
 # topology exactly with it (ADR 0070). `axiolid-numeric` arrives with
-# `axiolid-nurbs` for #150 (ledger B11): see the `cad-exact` profile above.
+# `axiolid-nurbs` for #150 (ledger B11, ADR 0079): see the `cad-exact`
+# profile above.
 expected_internal = [
     "axiolid",
     "axiolid-backend-cpu",
