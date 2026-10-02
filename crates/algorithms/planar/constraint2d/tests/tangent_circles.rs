@@ -5,10 +5,10 @@
 //! geometry, whether a circle touches a point, line or circle within a
 //! tight tolerance, independent of the solver's own internals.
 
+use axiolid_constraint2d::{tangent_circles, TangencyError, Tangent};
 use axiolid_core::{Frame2, Point2, Tolerance, Vec2};
 use axiolid_curve::Circle2;
 use axiolid_linear::Line2;
-use axiolid_constraint2d::{tangent_circles, TangencyError, Tangent};
 
 const TOL: Tolerance = Tolerance::METRE;
 const TIGHT: f64 = 1e-9;
