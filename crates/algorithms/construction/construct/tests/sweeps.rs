@@ -74,6 +74,101 @@ fn a_tapered_revolution_averages_its_two_profiles() {
 }
 
 #[test]
+fn a_tapered_revolution_orients_outward_for_every_angle_sign_and_axis_direction() {
+    // Same fixture as `a_tapered_revolution_averages_its_two_profiles`
+    // (equal start and end profiles, so Pappus applies exactly), but now
+    // covering every combination of angle sign and axis direction (#221):
+    // `tapered_revolve` shares `revolve::revolve`'s unconditional station
+    // reversal, which only winds the walls outward for a positive angle.
+    let chord = 1e-5;
+    let tol = tol_for(chord);
+    let mut a = profile_rings(&rect(1.0, 2.0), chord, tol).expect("start");
+    for p in &mut a.outer {
+        p.x += 4.0;
+    }
+    let b = a.clone();
+    let (inner, outer) = (3.5, 4.5);
+    let axis_origin = Point3::ZERO;
+
+    for (direction, angle) in [
+        (Vec3::Y, core::f64::consts::PI / 2.0),
+        (Vec3::Y, -core::f64::consts::PI / 2.0),
+        (Vec3::NEG_Y, core::f64::consts::PI / 2.0),
+        (Vec3::NEG_Y, -core::f64::consts::PI / 2.0),
+    ] {
+        let mesh =
+            sweep::tapered_revolve(&a, &b, axis_origin, direction, angle, tol).expect("taper");
+        let want = angle.abs() * 4.0 * 2.0;
+        let got = volume(&mesh, tol);
+        assert!(
+            got > 0.0,
+            "direction {direction:?} angle {angle}: signed volume {got} must be positive"
+        );
+        assert!(
+            (got - want).abs() / want < 1e-4,
+            "direction {direction:?} angle {angle}: volume {got} vs {want}"
+        );
+        assert_wall_normals_radial(&mesh, axis_origin, direction, inner, outer, chord);
+    }
+}
+
+/// Every wall triangle (all three vertices at the same radius from the
+/// axis) must face away from the axis at the outer radius and towards it
+/// at the inner radius. Cap and mixed triangles are skipped: their outward
+/// sense is not a pure radial statement.
+fn assert_wall_normals_radial(
+    mesh: &TriMesh,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    inner: Scalar,
+    outer: Scalar,
+    tol: Scalar,
+) {
+    let dir = axis_direction / axis_direction.length();
+    let radial = |p: Point3| -> (Scalar, Vec3) {
+        let v = p - axis_origin;
+        let r_vec = v - dir * dir.dot(v);
+        (r_vec.length(), r_vec)
+    };
+    let mut outer_checked = 0;
+    let mut inner_checked = 0;
+    for i in 0..mesh.triangle_count() {
+        let tri = [
+            mesh.indices[i * 3] as usize,
+            mesh.indices[i * 3 + 1] as usize,
+            mesh.indices[i * 3 + 2] as usize,
+        ];
+        let [p, q, r] = tri.map(|j| mesh.positions[j]);
+        let (rp, rvec_p) = radial(p);
+        let (rq, _) = radial(q);
+        let (rr, _) = radial(r);
+        let normal = (q - p).cross(r - p);
+        if normal.length() < 1e-12 {
+            continue;
+        }
+        let is_outer =
+            (rp - outer).abs() < tol && (rq - outer).abs() < tol && (rr - outer).abs() < tol;
+        let is_inner =
+            (rp - inner).abs() < tol && (rq - inner).abs() < tol && (rr - inner).abs() < tol;
+        if is_outer {
+            assert!(
+                normal.dot(rvec_p) > 0.0,
+                "triangle {i} on the outer wall has an inward normal {normal:?}"
+            );
+            outer_checked += 1;
+        } else if is_inner {
+            assert!(
+                normal.dot(rvec_p) < 0.0,
+                "triangle {i} on the inner wall has an outward normal {normal:?}"
+            );
+            inner_checked += 1;
+        }
+    }
+    assert!(outer_checked > 0, "no outer-wall triangles found to check");
+    assert!(inner_checked > 0, "no inner-wall triangles found to check");
+}
+
+#[test]
 fn a_swept_disk_on_a_straight_path_is_a_cylinder() {
     let chord = 1e-6;
     let tol = tol_for(chord);

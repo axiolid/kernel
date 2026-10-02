@@ -22,6 +22,11 @@ caret rule for `0.x` versions.
   and either axis direction. `tests/revolve_partial.rs` compared only
   `|volume|` between the two paths because of this; it now compares the
   signed volumes.
+- `sweep::tapered_revolve` shared the same unconditional station reversal
+  as `revolve::revolve` and so built the same inside-out mesh for a
+  negative sweep angle (#221). Fixed the same way: orientation is settled
+  from the built mesh's own signed volume rather than guessed from the
+  station order.
 
 ## [0.3.8] - 2026-10-02
 

@@ -118,7 +118,18 @@ pub fn tapered_revolve(
         }));
     }
     let stations: Vec<_> = stations.into_iter().rev().collect();
-    loft::loft_tapered(&far, start, &stations)
+    let mut mesh = loft::loft_tapered(&far, start, &stations)?;
+    // Same cause and fix as `revolve::revolve` (#221): the station order
+    // above only winds the walls outward for a positive angle, and `angle`
+    // and `dir` matter only through their product, so a sign-of-`angle`
+    // check alone cannot be made consistent with a sign flip of `dir` too.
+    // Settle it from the built mesh's own orientation instead.
+    if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
+        for triangle in mesh.indices.chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
+    Ok(mesh)
 }
 
 /// Sweep a profile along a sampled directrix with a fixed reference.
