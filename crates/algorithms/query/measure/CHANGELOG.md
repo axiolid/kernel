@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Certified Hausdorff distance between exact boundaries (#224), behind the
+  `exact` feature. `boundary_hausdorff_distance` returns
+  `BoundaryHausdorff`: intervals certain to contain the two-sided
+  Hausdorff distance between the boundaries of two `ExactBRep`s and both
+  one-sided ones, refined to a requested absolute accuracy;
+  `one_sided_boundary_hausdorff` measures one direction. Each interval is a
+  `HausdorffBounds`, as for meshes, with witnesses: a point certainly on
+  the measured boundary realising the lower bound, and its nearest point
+  found on the other. Lower bounds are such points' distances bounded below
+  by the certified distance search; upper bounds come from branch and bound
+  over face patches, each bounded by a matched face of the other boundary
+  (same family, same trim: `|S_A - S_B|` over the patch, exact for a
+  translation) or by the 1-Lipschitz distance about a point. Copies offset
+  by a translation and identical copies close in a few dozen splits at any
+  accuracy (two columns 0.1 mm apart to 1e-6, an arched opening moved
+  0.2 m, a re-export within the accuracy); other pairs close at first order
+  in the patch size. A fixed budget can end refinement early; the interval
+  stays sound, only wider.
+
 ## [0.3.5] - 2026-09-30
 
 ### Added

@@ -269,7 +269,7 @@ pub fn boundary_clearance(
 
 /// Which distance a search measures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Metric {
+pub(crate) enum Metric {
     /// In space.
     Space,
     /// Between projections onto the XY plane: every gap, direction and
@@ -289,7 +289,7 @@ fn flat_length(v: Vec3) -> Scalar {
 
 /// What an element covers.
 #[derive(Debug, Clone, Copy)]
-enum Shape {
+pub(crate) enum Shape {
     /// A rectangle of face `face`'s parameters; `inside` once certified to
     /// lie wholly in the face.
     Face {
@@ -304,36 +304,40 @@ enum Shape {
 
 /// A piece of one boundary with a sphere that encloses it.
 #[derive(Debug, Clone, Copy)]
-struct Element {
-    shape: Shape,
-    centre: Point3,
-    radius: Scalar,
+pub(crate) struct Element {
+    pub(crate) shape: Shape,
+    pub(crate) centre: Point3,
+    pub(crate) radius: Scalar,
     /// A disc about the centre's projection holding the element's
     /// projection onto the XY plane; never above `radius`.
-    plan_radius: Scalar,
+    pub(crate) plan_radius: Scalar,
     /// A point certainly on the boundary, when one is known.
-    witness: Option<Point3>,
+    pub(crate) witness: Option<Point3>,
     /// The surface normal at the centre of a face patch.
-    normal: Option<Vec3>,
+    pub(crate) normal: Option<Vec3>,
     /// Half-angle of a cone about `normal` holding every normal of the
     /// patch, when the patch may be dropped from a pair whose directions
     /// its normals cannot meet (see [`critical_possible`]).
-    spread: Option<Scalar>,
+    pub(crate) spread: Option<Scalar>,
 }
 
 /// One B-rep, prepared for bounding.
-struct Side<'a> {
-    brep: &'a ExactBRep,
+pub(crate) struct Side<'a> {
+    pub(crate) brep: &'a ExactBRep,
     metric: Metric,
     domains: Vec<Option<Domain<'a>>>,
     /// Whether every edge on the face's boundary is an element, so a
     /// closest point on that boundary is found through the edges.
     edges_bounded: Vec<bool>,
-    elements: Vec<Element>,
+    pub(crate) elements: Vec<Element>,
 }
 
 impl<'a> Side<'a> {
-    fn new(brep: &'a ExactBRep, linear: Scalar, metric: Metric) -> Result<Self, ExactMeasureError> {
+    pub(crate) fn new(
+        brep: &'a ExactBRep,
+        linear: Scalar,
+        metric: Metric,
+    ) -> Result<Self, ExactMeasureError> {
         let topology = brep.topology();
         let mut side = Side {
             brep,
@@ -450,7 +454,7 @@ impl<'a> Side<'a> {
     }
 
     /// The radius a search by this side's metric refines by.
-    fn size(&self, element: &Element) -> Scalar {
+    pub(crate) fn size(&self, element: &Element) -> Scalar {
         match self.metric {
             Metric::Space => element.radius,
             Metric::Plan => element.plan_radius,
@@ -460,7 +464,7 @@ impl<'a> Side<'a> {
     /// The element's two halves, less any certified outside the face: a
     /// face patch across its metrically longer side, an edge span in the
     /// middle.
-    fn split(&self, element: &Element) -> Result<Vec<Element>, ExactMeasureError> {
+    pub(crate) fn split(&self, element: &Element) -> Result<Vec<Element>, ExactMeasureError> {
         match element.shape {
             Shape::Face {
                 face,
@@ -511,7 +515,7 @@ impl<'a> Side<'a> {
     }
 }
 
-fn surface_of(
+pub(crate) fn surface_of(
     brep: &ExactBRep,
     id: Option<axiolid_brep::SurfaceId>,
 ) -> Result<&Surface, ExactMeasureError> {
@@ -708,7 +712,7 @@ fn patch_sphere(
 }
 
 /// Widen a bounding radius by the rounding its centre may carry.
-fn pad(centre: Point3, radius: Scalar) -> Scalar {
+pub(crate) fn pad(centre: Point3, radius: Scalar) -> Scalar {
     radius + 1e-12 * (centre.length() + radius) + Scalar::MIN_POSITIVE
 }
 
@@ -804,15 +808,27 @@ fn normal_spread(surface: &Surface, lo: Point2, hi: Point2) -> Option<Scalar> {
 /// its normal is horizontal and along the plan offset, as on a vertical
 /// wall or at a silhouette.
 fn critical_possible(face: &Element, other: &Element, metric: Metric) -> bool {
-    let (Some(normal), Some(spread)) = (face.normal, face.spread) else {
-        return true;
-    };
     let (offset, reach) = match metric {
         Metric::Space => (other.centre - face.centre, face.radius + other.radius),
         Metric::Plan => (
             flat(other.centre - face.centre),
             face.plan_radius + other.plan_radius,
         ),
+    };
+    critical_along(face, offset, reach)
+}
+
+/// [`critical_possible`] towards a single point `p`, in space: whether the
+/// face patch can hold a point nearest to `p` that no edge holds.
+pub(crate) fn critical_toward(face: &Element, p: Point3) -> bool {
+    critical_along(face, p - face.centre, face.radius)
+}
+
+/// Whether some normal of the face patch can meet a direction from it to
+/// a ball of `reach` about `face.centre + offset`.
+fn critical_along(face: &Element, offset: Vec3, reach: Scalar) -> bool {
+    let (Some(normal), Some(spread)) = (face.normal, face.spread) else {
+        return true;
     };
     let gap = offset.length();
     if gap.is_nan() || gap <= reach {
@@ -855,7 +871,11 @@ fn sphere_range(element: &Element, d: Vec3) -> (Scalar, Scalar) {
 impl Side<'_> {
     /// Exact range of `d . x` over the element where the family allows,
     /// else the enclosing sphere's.
-    fn project(&self, element: &Element, d: Vec3) -> Result<(Scalar, Scalar), ExactMeasureError> {
+    pub(crate) fn project(
+        &self,
+        element: &Element,
+        d: Vec3,
+    ) -> Result<(Scalar, Scalar), ExactMeasureError> {
         let sphere = match self.metric {
             Metric::Space => sphere_range(element, d),
             // A horizontal direction reads only the projection, which the
@@ -1054,6 +1074,33 @@ fn lower_bound(
         let (a_lo, a_hi) = side_a.project(a, d)?;
         let (b_lo, b_hi) = side_b.project(b, d)?;
         best = best.max(b_lo - a_hi).max(a_lo - b_hi);
+    }
+    Ok(best)
+}
+
+/// A lower bound on the distance from the point `p` to every point of
+/// `element`, in space: the enclosing sphere's, raised by the exact range
+/// of `d . x` along the line to the centre and along the patch's normal.
+pub(crate) fn point_lower_bound(
+    p: Point3,
+    side: &Side<'_>,
+    element: &Element,
+) -> Result<Scalar, ExactMeasureError> {
+    let offset = element.centre - p;
+    let gap = offset.length();
+    let rounding = 1e-12 * (p.length() + element.centre.length() + gap);
+    let mut best = (gap - element.radius - rounding).max(0.0);
+    let directions = [(gap > 0.0).then(|| offset / gap), element.normal];
+    for d in directions.into_iter().flatten() {
+        let length = d.length();
+        if length.is_nan() || length <= 0.0 {
+            continue;
+        }
+        let d = d / length;
+        let (lo, hi) = side.project(element, d)?;
+        let x = p.dot(d);
+        let pad = 1e-12 * (p.length() + x.abs());
+        best = best.max(lo - x - pad).max(x - hi - pad);
     }
     Ok(best)
 }

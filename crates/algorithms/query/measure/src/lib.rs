@@ -13,6 +13,8 @@ pub mod exact_distance;
 mod exact_domain;
 #[cfg(feature = "exact")]
 mod exact_face;
+#[cfg(feature = "exact")]
+pub mod exact_hausdorff;
 pub mod frechet;
 pub mod measure;
 pub mod mesh;
@@ -33,6 +35,10 @@ pub use exact_distance::{
 };
 #[cfg(feature = "exact")]
 pub use exact_domain::FaceDomain;
+#[cfg(feature = "exact")]
+pub use exact_hausdorff::{
+    boundary_hausdorff_distance, one_sided_boundary_hausdorff, BoundaryHausdorff,
+};
 pub use frechet::{
     discrete_frechet_distance, discrete_frechet_distance_2d, frechet_at_most, frechet_at_most_2d,
     frechet_distance, frechet_distance_2d, FrechetError,
