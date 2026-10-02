@@ -377,6 +377,8 @@ graph TD
     axiolid_refine --> axiolid_heal
     axiolid_refine --> axiolid_measure
     axiolid_refine --> axiolid_mesh
+    axiolid_refine --> axiolid_numeric
+    axiolid_refine --> axiolid_predicates
     axiolid_refine --> axiolid_surface
     axiolid_route --> axiolid_contracts
     axiolid_route --> axiolid_core

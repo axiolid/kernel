@@ -74,7 +74,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.1 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.0 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
 | [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.2 | Portable scalar reference implementation and certified predicates |
-| [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.1 | Mesh refinement, smoothing and isotropic remeshing with bounded, reported deviation |
+| [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.1 | Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.7 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.3 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
 | [`axiolid-tetrahedralize`](./crates/axiolid-tetrahedralize) | `algorithm.discrete` | 0.1.0 | Exact 3D Delaunay tetrahedralization with symbolic perturbation |

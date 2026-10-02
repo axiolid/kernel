@@ -1,6 +1,6 @@
 [package]
 name = "axiolid-refine"
-description = "Mesh refinement, smoothing and isotropic remeshing with bounded, reported deviation"
+description = "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces"
 version = "0.3.1"
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,8 @@ axiolid-mesh.workspace = true
 axiolid-surface.workspace = true
 axiolid-evaluate.workspace = true
 axiolid-contracts.workspace = true
+axiolid-numeric.workspace = true
+axiolid-predicates.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -29,4 +31,4 @@ role = "algorithm.discrete"
 domain = "discrete.refine"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-evaluate", "axiolid-heal", "axiolid-measure", "axiolid-mesh", "axiolid-surface"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-evaluate", "axiolid-heal", "axiolid-measure", "axiolid-mesh", "axiolid-numeric", "axiolid-predicates", "axiolid-surface"]

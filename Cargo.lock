@@ -739,6 +739,8 @@ dependencies = [
  "axiolid-heal",
  "axiolid-measure",
  "axiolid-mesh",
+ "axiolid-numeric",
+ "axiolid-predicates",
  "axiolid-surface",
  "thiserror",
 ]

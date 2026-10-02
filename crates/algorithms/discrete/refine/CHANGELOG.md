@@ -16,6 +16,30 @@ caret rule for `0.x` versions.
 - A collapse, flip or move that would turn a triangle's normal by a right angle or more, or leave it flatter than a height-to-longest-edge ratio of `1e-3`, is skipped, never forced; so is a collapse or flip that would lower the smallest angle of the triangles it rewrites below 15 degrees.
 - `RemeshReport` measures the result: edits made, the fraction of edges within `[4/5 L, 4/3 L]`, mean valence deviation before and after, the smallest angle, and the largest distance of an output vertex from the input.
 - `RemeshError` refuses non-manifold, inconsistently wound, ragged or out-of-range input (wrapping `HalfedgeBuildError`), non-finite positions, degenerate input triangles, a non-positive target, a feature angle outside `[0, pi]` and an output over the triangle budget.
+- `fill_hole` (#129): closes one hole of a `HalfedgeMesh` by Liepa's
+  method: a triangulation of the boundary loop whose largest dihedral
+  angle is the exact minimum (Liepa's and CGAL's recurrence only
+  approximates it; the state here also names the triangle above each
+  diagonal, at `O(n^4)` time), area breaking ties; then centroid
+  refinement to the density of the surrounding edges with Delaunay edge
+  flips, and biharmonic fairing of the new vertices. The patch is wound like its surroundings and shares
+  the hole's edges. Refused by name, with the mesh unchanged: a halfedge
+  that bounds no hole, a loop over `max_boundary_vertices`, a loop with no
+  area or one whose projection onto its mean plane is not simple, a hole
+  every triangulation of which needs a degenerate triangle or an existing
+  edge, a refinement over `max_new_vertices`, and a fairing that does not
+  converge.
+- `fair`: places chosen vertices where the harmonic or biharmonic
+  Laplacian vanishes with every other vertex fixed, with cotangent or
+  uniform weights, solved by conjugate gradients from `axiolid-numeric`.
+  Affine functions are reproduced, so a planar border keeps the faired
+  vertices in its plane.
+- `subdivide` and `limit_positions`: Loop subdivision of triangle meshes
+  and Catmull-Clark subdivision of polygon meshes, with cubic B-spline
+  rules on boundaries, a face budget, and the limit position of every
+  vertex from the schemes' limit masks.
+- New dependencies on `axiolid-numeric` (the sparse solve) and
+  `axiolid-predicates` (exact orientation in the boundary-loop check).
 
 ## [0.3.1] - 2026-09-28
 

@@ -4,7 +4,7 @@
 
 # axiolid-refine
 
-Mesh refinement, smoothing and isotropic remeshing with bounded, reported deviation.
+Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces.
 
 | | |
 | --- | --- |
@@ -25,9 +25,11 @@ default. Isotropic remeshing (`remesh`) splits, collapses, flips and relaxes
 towards one target edge length on a halfedge mesh, keeping boundary and
 sharp feature lines exactly and projecting every free vertex back onto the
 input; its report measures how close the result came. Remeshing sizes edges
-uniformly, not by curvature, and does not implement limit-surface
-subdivision schemes; for decimation under a deviation bound see
-`axiolid-decimate`.
+uniformly, not by curvature. On a `HalfedgeMesh` the crate also fills holes
+(a minimum-dihedral triangulation, refined to the surrounding density and
+faired with a biharmonic solve), fairs chosen vertices, and subdivides with
+the Loop and Catmull-Clark schemes, including their limit positions. It does
+not reduce triangle counts (see `axiolid-decimate`).
 
 ## Depends on
 
@@ -35,6 +37,8 @@ subdivision schemes; for decimation under a deviation bound see
 - [`axiolid-core`](./axiolid-core)
 - [`axiolid-evaluate`](./axiolid-evaluate)
 - [`axiolid-mesh`](./axiolid-mesh)
+- [`axiolid-numeric`](./axiolid-numeric)
+- [`axiolid-predicates`](./axiolid-predicates)
 - [`axiolid-surface`](./axiolid-surface)
 
 ## Changes

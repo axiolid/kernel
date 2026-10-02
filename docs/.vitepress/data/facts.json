@@ -469,7 +469,7 @@
       "version": "0.3.2"
     },
     "axiolid-refine": {
-      "description": "Mesh refinement, smoothing and isotropic remeshing with bounded, reported deviation",
+      "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/refine",
       "released": "0.3.1",

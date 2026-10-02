@@ -15,9 +15,25 @@
 //!
 //! Keeping the analytic surface alongside the mesh is what makes that
 //! possible, so it is the capability this module is really for.
+//!
+//! The crate also holds the operations that add or move vertices on a
+//! [`HalfedgeMesh`](axiolid_mesh::halfedge::HalfedgeMesh) to make a surface
+//! smoother rather than closer to a known one: [`fill_hole`] (triangulate,
+//! refine and fair a hole), [`fair()`] (solve for the smoothest placement of
+//! chosen vertices) and [`subdivide()`] (Loop and Catmull-Clark subdivision
+//! surfaces).
 
+pub mod fair;
+pub mod hole;
 pub mod remesh;
 pub mod smooth;
+pub mod subdivide;
+
+pub use fair::{fair, FairError, FairOptions, FairReport, FairingOrder, FairingWeights};
+pub use hole::{fill_hole, HoleFillError, HoleFillOptions, HoleFillReport};
+pub use subdivide::{
+    limit_positions, subdivide, SubdivisionError, SubdivisionOptions, SubdivisionScheme,
+};
 
 use ahash::AHashMap;
 
