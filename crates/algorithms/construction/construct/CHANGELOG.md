@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `revolve::revolve` (the mesh path) no longer builds an inside-out mesh
+  for a negative sweep angle (#221). The station order it winds its walls
+  from gave a positive signed volume only for a positive angle; since
+  `angle` and `axis_direction` only matter through their product (the
+  axis-angle rotation vector), a sign-of-`angle` check alone could not be
+  made consistent with a sign flip in the axis direction too. The mesh's
+  orientation is now settled from its own computed volume instead, so it
+  matches `revolve_profile_exact`'s positive sign for either sign of angle
+  and either axis direction. `tests/revolve_partial.rs` compared only
+  `|volume|` between the two paths because of this; it now compares the
+  signed volumes.
+
 ## [0.3.8] - 2026-10-02
 
 ### Added

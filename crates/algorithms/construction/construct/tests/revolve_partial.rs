@@ -356,6 +356,8 @@ fn the_sweep_turns_by_the_right_hand_rule_like_the_mesh_path() {
         (Vec3::Y, PI / 2.0),
         (Vec3::Y, -PI / 3.0),
         (Vec3::NEG_Y, 0.75 * PI),
+        (Vec3::Y, -PI / 2.0),
+        (Vec3::NEG_Y, -0.75 * PI),
     ] {
         let exact = measure(&revolve_about(&profile, -5.0, direction, angle));
         let mesh = revolve_mesh(
@@ -367,10 +369,12 @@ fn the_sweep_turns_by_the_right_hand_rule_like_the_mesh_path() {
         )
         .expect("mesh revolves");
         let mesh = axiolid_measure::volume_properties(&mesh, tolerance).expect("closed mesh");
-        // Magnitude only: the mesh path's winding is its own contract. The
-        // exact solid's sign is pinned positive by the other tests.
+        // Signed: the mesh path must orient its faces outward exactly like
+        // the exact path does, for either sign of angle and either axis
+        // direction (#221). A mismatched sign here means the mesh is
+        // inside out even though its magnitude happens to agree.
         assert!(
-            (exact.signed_volume - mesh.signed_volume.abs()).abs() < 1e-3 * exact.signed_volume,
+            (exact.signed_volume - mesh.signed_volume).abs() < 1e-3 * exact.signed_volume,
             "volume: exact {} mesh {}",
             exact.signed_volume,
             mesh.signed_volume
@@ -387,6 +391,134 @@ fn the_sweep_turns_by_the_right_hand_rule_like_the_mesh_path() {
     let quarter = measure(&revolve(&profile, -5.0, PI / 2.0));
     assert!(quarter.centroid.z < -1.0, "{:?}", quarter.centroid);
     assert!(quarter.centroid.x > -5.0 + 1.0, "{:?}", quarter.centroid);
+}
+
+#[test]
+fn the_mesh_path_orients_outward_for_a_full_turn_either_sense() {
+    use axiolid_construct::profile::profile_rings;
+    use axiolid_construct::revolve::revolve as revolve_mesh;
+
+    // The annular-tube fixture shared with the exact-path tests: axis 5 to
+    // the rectangle's left, so r in [4, 6]. Every wall triangle's radial
+    // sense is unambiguous regardless of sign or axis direction (#221).
+    let (axis_x, b, h) = (-5.0, 2.0, 3.0);
+    let (inner, outer) = (4.0, 6.0);
+    let chord = 1e-3;
+    let tolerance = Tolerance::new(chord, 1e-9).expect("tolerance");
+    let profile = rect(b, h);
+    let rings = profile_rings(&profile, chord, tolerance).expect("rings");
+    let axis_origin = Point3::new(axis_x, 0.0, 0.0);
+
+    for (direction, angle) in [
+        (Vec3::Y, TAU),
+        (Vec3::Y, -TAU),
+        (Vec3::NEG_Y, TAU),
+        (Vec3::NEG_Y, -TAU),
+    ] {
+        let mesh =
+            revolve_mesh(&rings, axis_origin, direction, angle, tolerance).expect("mesh revolves");
+        let props = axiolid_measure::volume_properties(&mesh, tolerance).expect("closed mesh");
+        let want = TAU * 5.0 * (outer - inner) * h;
+        assert!(
+            (props.signed_volume - want).abs() < 1e-3 * want,
+            "direction {direction:?} angle {angle}: volume {} vs {want}",
+            props.signed_volume
+        );
+        assert_wall_normals_radial(&mesh, axis_origin, direction, inner, outer, chord);
+    }
+}
+
+#[test]
+fn the_mesh_path_orients_outward_for_a_partial_turn_either_sense() {
+    use axiolid_construct::profile::profile_rings;
+    use axiolid_construct::revolve::revolve as revolve_mesh;
+
+    let (axis_x, b, h) = (-5.0, 2.0, 3.0);
+    let (inner, outer) = (4.0, 6.0);
+    let chord = 1e-3;
+    let tolerance = Tolerance::new(chord, 1e-9).expect("tolerance");
+    let profile = rect(b, h);
+    let rings = profile_rings(&profile, chord, tolerance).expect("rings");
+    let axis_origin = Point3::new(axis_x, 0.0, 0.0);
+
+    for (direction, angle) in [
+        (Vec3::Y, PI / 2.0),
+        (Vec3::Y, -PI / 2.0),
+        (Vec3::NEG_Y, PI / 2.0),
+        (Vec3::NEG_Y, -PI / 2.0),
+    ] {
+        let mesh =
+            revolve_mesh(&rings, axis_origin, direction, angle, tolerance).expect("mesh revolves");
+        let props = axiolid_measure::volume_properties(&mesh, tolerance).expect("closed mesh");
+        let want = angle.abs() * 5.0 * (outer - inner) * h;
+        assert!(
+            props.signed_volume > 0.0,
+            "direction {direction:?} angle {angle}: signed volume {} must be positive",
+            props.signed_volume
+        );
+        assert!(
+            (props.signed_volume - want).abs() < 1e-3 * want,
+            "direction {direction:?} angle {angle}: volume {} vs {want}",
+            props.signed_volume
+        );
+        assert_wall_normals_radial(&mesh, axis_origin, direction, inner, outer, chord);
+    }
+}
+
+/// Every wall triangle (all three vertices at the same radius) must face
+/// away from the axis at the outer radius and towards it at the inner
+/// radius. Cap and mixed triangles are skipped: their outward sense is not
+/// a pure radial statement.
+fn assert_wall_normals_radial(
+    mesh: &axiolid_mesh::TriMesh,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    inner: f64,
+    outer: f64,
+    tol: f64,
+) {
+    let dir = axis_direction / axis_direction.length();
+    let radial = |p: Point3| -> (f64, Vec3) {
+        let v = p - axis_origin;
+        let r_vec = v - dir * dir.dot(v);
+        (r_vec.length(), r_vec)
+    };
+    let mut outer_checked = 0;
+    let mut inner_checked = 0;
+    for i in 0..mesh.triangle_count() {
+        let tri = [
+            mesh.indices[i * 3] as usize,
+            mesh.indices[i * 3 + 1] as usize,
+            mesh.indices[i * 3 + 2] as usize,
+        ];
+        let [a, b, c] = tri.map(|j| mesh.positions[j]);
+        let (ra, rvec_a) = radial(a);
+        let (rb, _) = radial(b);
+        let (rc, _) = radial(c);
+        let normal = (b - a).cross(c - a);
+        if normal.length() < 1e-12 {
+            continue;
+        }
+        let is_outer =
+            (ra - outer).abs() < tol && (rb - outer).abs() < tol && (rc - outer).abs() < tol;
+        let is_inner =
+            (ra - inner).abs() < tol && (rb - inner).abs() < tol && (rc - inner).abs() < tol;
+        if is_outer {
+            assert!(
+                normal.dot(rvec_a) > 0.0,
+                "triangle {i} on the outer wall has an inward normal {normal:?}"
+            );
+            outer_checked += 1;
+        } else if is_inner {
+            assert!(
+                normal.dot(rvec_a) < 0.0,
+                "triangle {i} on the inner wall has an outward normal {normal:?}"
+            );
+            inner_checked += 1;
+        }
+    }
+    assert!(outer_checked > 0, "no outer-wall triangles found to check");
+    assert!(inner_checked > 0, "no inner-wall triangles found to check");
 }
 
 #[test]

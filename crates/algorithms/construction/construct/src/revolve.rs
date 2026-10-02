@@ -77,6 +77,7 @@ pub fn revolve(
     // emits n + 1 so both ends exist to be capped.
     let count = if full { n } else { n + 1 };
     let stations: Vec<crate::loft::Station> = (0..count)
+        .rev()
         .map(|s| {
             let t = angle * (s as Scalar) / (n as Scalar);
             crate::loft::place(rings, |p| {
@@ -84,6 +85,20 @@ pub fn revolve(
             })
         })
         .collect();
-    let stations: Vec<_> = stations.into_iter().rev().collect();
-    crate::loft::loft(rings, &stations, full)
+    let mut mesh = crate::loft::loft(rings, &stations, full)?;
+    // The station order above (end of the sweep first) winds the walls
+    // outward for a positive angle about `dir`. A negative angle sweeps the
+    // other way round, so the same order winds them inward instead (#221):
+    // `angle` and `dir` only matter through their product (the axis-angle
+    // rotation vector), and `(dir, angle)` and `(-dir, -angle)` describe the
+    // identical rotation, so the fix cannot key off `angle`'s stored sign
+    // alone without also depending on `dir`'s. Settling it from the built
+    // mesh's own orientation sidesteps that: whichever combination produced
+    // it, a closed solid's sign is unambiguous.
+    if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
+        for triangle in mesh.indices.chunks_exact_mut(3) {
+            triangle.swap(1, 2);
+        }
+    }
+    Ok(mesh)
 }
