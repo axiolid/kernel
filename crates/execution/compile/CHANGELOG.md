@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-02
+
 ### Added
 
 - `exact_directrix` and `ExactDirectrix` are public (#230): they read a

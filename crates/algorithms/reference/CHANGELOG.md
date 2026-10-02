@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-02
+
 ### Fixed
 
 - `tessellate_primitive` keeps every point of a sphere and a torus within

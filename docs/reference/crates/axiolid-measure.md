@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-02) |
+| Latest release | 0.3.7 (2026-10-02) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -39,27 +39,33 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-02):
+Latest release, 0.3.7 (2026-10-02):
 
 ### Added
 
-- Certified Hausdorff distance between exact boundaries (#224), behind the
-  `exact` feature. `boundary_hausdorff_distance` returns
-  `BoundaryHausdorff`: intervals certain to contain the two-sided
-  Hausdorff distance between the boundaries of two `ExactBRep`s and both
-  one-sided ones, refined to a requested absolute accuracy;
-  `one_sided_boundary_hausdorff` measures one direction. Each interval is a
-  `HausdorffBounds`, as for meshes, with witnesses: a point certainly on
-  the measured boundary realising the lower bound, and its nearest point
-  found on the other. Lower bounds are such points' distances bounded below
-  by the certified distance search; upper bounds come from branch and bound
-  over face patches, each bounded by a matched face of the other boundary
-  (same family, same trim: `|S_A - S_B|` over the patch, exact for a
-  translation) or by the 1-Lipschitz distance about a point. Copies offset
-  by a translation and identical copies close in a few dozen splits at any
-  accuracy (two columns 0.1 mm apart to 1e-6, an arched opening moved
-  0.2 m, a re-export within the accuracy); other pairs close at first order
-  in the patch size. A fixed budget can end refinement early; the interval
-  stays sound, only wider.
+- `one_sided_boundary_hausdorff_with_budget` (#227): the one-sided
+  boundary Hausdorff distance with the caller's cap on the splits, so a
+  consumer bounds the work per pair. The interval is sound at any budget,
+  only wider when it runs out.
+
+### Fixed
+
+- `boundary_hausdorff_distance` took its matched fast path only for faces
+  with identical pcurves (#227). Prisms from `boolean_arc_prisms_exact`
+  are trimmed in world coordinates, so two of them a translation apart
+  were treated as unmatched and closed at first order: [1.0, 1.59] mm at
+  accuracy 1e-4 after the whole 200k-split budget. Faces are now also
+  matched as translates, independently of how the B-rep was built: same
+  family, axes and shape (radius, semi-axes, angle, a cone's apex), and
+  trims equal after the parameter shift the translation induces (for a
+  plane the shift across its axes, for a cylinder, elliptical cylinder or
+  cone along its axis only), to within a gate of 1e-9 relative. The other
+  face is re-charted by the shift and bounded as before, the measured trim
+  residue folded in, so the bound is `|t|`; a turned or resized face, by
+  however little, is never matched this way. The lower bound is seeded
+  with the support point against each matched displacement, exactly `|t|`
+  from a translate's boundary. Those prisms, square, round or with an arc
+  in the section, moved by 1 mm or 0.2 m in any direction, now close to
+  1e-6 without a split.
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

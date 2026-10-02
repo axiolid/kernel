@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.9",
+      "released": "0.3.10",
       "released_date": "2026-10-02",
       "role": "algorithm.construction",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -274,10 +274,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.6",
+      "released": "0.3.7",
       "released_date": "2026-10-02",
       "role": "algorithm.query",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.7",
+      "released": "0.3.8",
       "released_date": "2026-10-02",
       "role": "execution.orchestration",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -463,10 +463,10 @@
       "description": "Portable scalar reference implementation and certified predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-02",
       "role": "algorithm.reference",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-refine": {
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",

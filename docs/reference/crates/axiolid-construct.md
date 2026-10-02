@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-02) |
+| Latest release | 0.3.10 (2026-10-02) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -62,39 +62,35 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-02):
+Latest release, 0.3.10 (2026-10-02):
 
 ### Added
 
-- Exact swept disks (#223). `swept_disk_exact::swept_disk_along_line_exact`
-  sweeps a disk, optionally with a bore, along a straight segment into a
-  capped cylinder; `swept_disk_along_arc_exact` sweeps it along a circular
-  arc into a capped torus wedge, or a whole torus (with a toroidal bore for
-  a hollow disk) for a full turn. Both are the exact extrusion and
-  revolution of the disk placed with `ExactBRep::transformed`. Volumes
-  match `pi r^2 L` and Pappus, every solid audits clean, and certified
-  distances under tilted placements match their closed forms. Refused by
-  name: a disk reaching the arc's axis, an arc beyond a full turn; invalid
-  input: a non-positive radius, a bore not strictly inside the disk, a zero
-  span or segment, a non-orthonormal arc frame.
+- `sweep::swept_disk_within`, `sweep::fixed_reference_sweep_within` and
+  `sweep::surface_curve_sweep_within`, with `sweep::SampledPath` (#231):
+  sweeps that take a directrix sampler instead of fixed samples, and keep
+  every point of the surface their section traces along a smooth
+  directrix within a chord budget. Each span is bounded by the
+  directrix's sagitta, plus the section's extra sagitta at its furthest
+  point from the directrix, plus the wall quads' twist; the directrix is
+  resampled at half the budget until every span fits. Along a circular
+  arc this is exact (the stations are rotations about the arc's axis);
+  for other smooth curves it is the second-order estimate. A path with
+  end tangents places its end sections square to the curve. A path
+  without them (a line, a polyline, a composite) is swept as given.
 
 ### Fixed
 
-- `revolve::revolve` (the mesh path) no longer builds an inside-out mesh
-  for a negative sweep angle (#221). The station order it winds its walls
-  from gave a positive signed volume only for a positive angle; since
-  `angle` and `axis_direction` only matter through their product (the
-  axis-angle rotation vector), a sign-of-`angle` check alone could not be
-  made consistent with a sign flip in the axis direction too. The mesh's
-  orientation is now settled from its own computed volume instead, so it
-  matches `revolve_profile_exact`'s positive sign for either sign of angle
-  and either axis direction. `tests/revolve_partial.rs` compared only
-  `|volume|` between the two paths because of this; it now compares the
-  signed volumes.
-- `sweep::tapered_revolve` shared the same unconditional station reversal
-  as `revolve::revolve` and so built the same inside-out mesh for a
-  negative sweep angle (#221). Fixed the same way: orientation is settled
-  from the built mesh's own signed volume rather than guessed from the
-  station order.
+- `revolve::revolve` and `sweep::tapered_revolve` bound the distance from
+  every point of the surface their rings sweep to the mesh by
+  `tolerance.linear()` (#231). The step round the axis used to bound the
+  sagitta alone, which misses the twist of the walls when the axis leaves
+  the profile's plane or the section tapers: the step now also covers
+  each wall quad's distance from its two triangles (a proved bound, zero
+  for the planar trapezoids of an ordinary revolution), and a tapered
+  turn's spiral is bounded by its own curvature. The module notes carry
+  the derivation, including why a chorded profile and a chorded turn
+  each need their own share of a surface budget. A budget beyond 4096
+  steps is refused with `BudgetExceeded` instead of met by fewer steps.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

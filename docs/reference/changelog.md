@@ -236,6 +236,37 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.10 - 2026-10-02
+
+### Added
+
+- `sweep::swept_disk_within`, `sweep::fixed_reference_sweep_within` and
+  `sweep::surface_curve_sweep_within`, with `sweep::SampledPath` (#231):
+  sweeps that take a directrix sampler instead of fixed samples, and keep
+  every point of the surface their section traces along a smooth
+  directrix within a chord budget. Each span is bounded by the
+  directrix's sagitta, plus the section's extra sagitta at its furthest
+  point from the directrix, plus the wall quads' twist; the directrix is
+  resampled at half the budget until every span fits. Along a circular
+  arc this is exact (the stations are rotations about the arc's axis);
+  for other smooth curves it is the second-order estimate. A path with
+  end tangents places its end sections square to the curve. A path
+  without them (a line, a polyline, a composite) is swept as given.
+
+### Fixed
+
+- `revolve::revolve` and `sweep::tapered_revolve` bound the distance from
+  every point of the surface their rings sweep to the mesh by
+  `tolerance.linear()` (#231). The step round the axis used to bound the
+  sagitta alone, which misses the twist of the walls when the axis leaves
+  the profile's plane or the section tapers: the step now also covers
+  each wall quad's distance from its two triangles (a proved bound, zero
+  for the planar trapezoids of an ordinary revolution), and a tapered
+  turn's spiral is bounded by its own curvature. The module notes carry
+  the derivation, including why a chorded profile and a chorded turn
+  each need their own share of a surface budget. A budget beyond 4096
+  steps is refused with `BudgetExceeded` instead of met by fewer steps.
+
 ### 0.3.9 - 2026-10-02
 
 ### Added
@@ -916,6 +947,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-measure
 
+### 0.3.7 - 2026-10-02
+
+### Added
+
+- `one_sided_boundary_hausdorff_with_budget` (#227): the one-sided
+  boundary Hausdorff distance with the caller's cap on the splits, so a
+  consumer bounds the work per pair. The interval is sound at any budget,
+  only wider when it runs out.
+
+### Fixed
+
+- `boundary_hausdorff_distance` took its matched fast path only for faces
+  with identical pcurves (#227). Prisms from `boolean_arc_prisms_exact`
+  are trimmed in world coordinates, so two of them a translation apart
+  were treated as unmatched and closed at first order: [1.0, 1.59] mm at
+  accuracy 1e-4 after the whole 200k-split budget. Faces are now also
+  matched as translates, independently of how the B-rep was built: same
+  family, axes and shape (radius, semi-axes, angle, a cone's apex), and
+  trims equal after the parameter shift the translation induces (for a
+  plane the shift across its axes, for a cylinder, elliptical cylinder or
+  cone along its axis only), to within a gate of 1e-9 relative. The other
+  face is re-charted by the shift and bounded as before, the measured trim
+  residue folded in, so the bound is `|t|`; a turned or resized face, by
+  however little, is never matched this way. The lower bound is seeded
+  with the support point against each matched displacement, exactly `|t|`
+  from a translate's boundary. Those prisms, square, round or with an arc
+  in the section, moved by 1 mm or 0.2 m in any direction, now close to
+  1e-6 without a split.
+
 ### 0.3.6 - 2026-10-02
 
 ### Added
@@ -1199,6 +1259,39 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.8 - 2026-10-02
+
+### Added
+
+- `exact_directrix` and `ExactDirectrix` are public (#230): they read a
+  swept disk's directrix as one segment or one arc, exactly as
+  `ReferenceExactCompiler` does, so a consumer building exact boundaries
+  that must match the compiled solids no longer duplicates the reading.
+  Corners, other curve families and unbounded lines are refused by name.
+
+### Fixed
+
+- Doubly curved meshes stay within the chord budget (#231). A revolution
+  chorded its profile and its turn each to the whole budget, so the two
+  deviations added inside a triangle: a torus (R 0.5, r 0.1) at 1 mm lay
+  1.46 mm from its mesh. A revolution, a tapered one included, now chords
+  its profile to half the chord budget and its turn to the other half
+  (see `axiolid_construct::revolve` for the proof), and its turn follows
+  `ExecutionOptions::with_chord_error` instead of the linear tolerance.
+  Swept disks, fixed-reference and surface-curve sweeps along a circle or
+  ellipse, plain or trimmed, give the section half the budget and refine
+  the directrix until the section's far side fits the other half, and
+  stand their end sections square to the curve rather than to its end
+  chords (a disk r 0.1 along an arc R 0.2 lay 7 mm from its end caps at
+  1 mm). Every point of the exact surface now lies within the budget of
+  the triangles, checked by dense sampling of tori (R/r down to 1.2),
+  spheres, partial and skew-axis revolutions, a revolved rounded
+  rectangle, a tapered revolution and sweeps along arcs with r/R up to
+  0.83, at 1 mm and 0.1 mm. A torus at 1 mm has 4928 triangles instead of
+  3520. A budget beyond 4096 steps round an axis is refused with
+  `BudgetExceeded` rather than met by a coarser mesh. Polyline, composite
+  and B-spline directrices are swept as sampled, as before.
 
 ### 0.3.7 - 2026-10-02
 
@@ -2133,6 +2226,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.3 - 2026-10-02
+
+### Fixed
+
+- `tessellate_primitive` keeps every point of a sphere and a torus within
+  the chord budget of the mesh, not only its vertices (#231). Both
+  directions of each used to get the whole budget, so their sagittas added
+  inside a triangle (a 0.3 m sphere at 1 mm lay 1.99 mm from its mesh, a
+  torus 1.90 mm); each now gets half, and the sphere's stack count is
+  rounded up rather than down, which had let an odd segment count leave
+  the polar step alone above its share. A budget that needs more than
+  4096 segments is refused with `BudgetExceeded` instead of clamped.
 
 ### 0.3.2 - 2026-09-28
 

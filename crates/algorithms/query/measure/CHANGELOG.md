@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-02
+
 ### Added
 
 - `one_sided_boundary_hausdorff_with_budget` (#227): the one-sided

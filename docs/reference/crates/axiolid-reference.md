@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-28) |
+| Latest release | 0.3.3 (2026-10-02) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,11 +46,17 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-28):
+Latest release, 0.3.3 (2026-10-02):
 
-### Changed
+### Fixed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `tessellate_primitive` keeps every point of a sphere and a torus within
+  the chord budget of the mesh, not only its vertices (#231). Both
+  directions of each used to get the whole budget, so their sagittas added
+  inside a triangle (a 0.3 m sphere at 1 mm lay 1.99 mm from its mesh, a
+  torus 1.90 mm); each now gets half, and the sphere's stack count is
+  rounded up rather than down, which had let an odd segment count leave
+  the polar step alone above its share. A budget that needs more than
+  4096 segments is refused with `BudgetExceeded` instead of clamped.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)
