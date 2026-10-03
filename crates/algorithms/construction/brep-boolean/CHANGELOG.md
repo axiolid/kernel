@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-03
+
 ### Added
 
 - `BooleanError::UnsupportedContact` (#243): a plane read as touching a

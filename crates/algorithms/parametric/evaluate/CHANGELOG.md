@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-03
+
 ### Added
 
 - `station` (#241, ADR 0082): `station_section2` and `station_section3`

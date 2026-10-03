@@ -119,6 +119,47 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.5 - 2026-10-03
+
+### Added
+
+- `BooleanError::UnsupportedContact` (#243): a plane read as touching a
+  cylinder within tolerance is crossed by a curve whose meeting with their
+  contact ruling this stage cannot place (a curve of the plane that is no
+  line, a curve of the cylinder that is no ruling or conic). Refused by
+  name rather than sewn against exact roots that disagree with the
+  reading.
+
+### Fixed
+
+- A plane touching a cylinder within tolerance is read the same way by
+  every face pair (#243). A round hole tangent to a planar face (an
+  I-beam's web hole touching the flange) placed under a general rotation,
+  or reaching a fraction of the tolerance into or short of the face (the
+  #234 roof plane in a column), was refused ("split face pieces do not
+  close", "point too close to a face boundary", "do not sew"): the
+  plane/cylinder pair read one contact ruling while the cap disks' chords,
+  the circles of faces across the axis and the plane's own edges kept the
+  exact roots, `2 sqrt(2 r d)` apart. The reading is now taken once per
+  pair of supports, over the largest common box of their faces, and every
+  crossing of a curve on one of the two by the other is placed on the
+  contact ruling, as the moved plane gives it (`TangentCrossing`); points
+  where the given and the moved plane disagree on a side never decide a
+  piece or region. The result is the exact boolean of operands whose plane
+  moved by at most the reported `PlaneTouchesCylinder` distance. Exactly
+  tangent pairs are still decided by the exact predicates, and succeed at
+  `Tolerance::ZERO` with an empty report.
+- Cuts merged within tolerance on a circle or ellipse on both sides of its
+  parameter origin (one point named at `0` and at `2 pi`) averaged to the
+  opposite side of the curve, so a flush hole's circle was split in the
+  wrong place and the result did not sew (#243). They are unwrapped to one
+  turn first.
+- A section's window reaches `2^-20` of its diagonal past the two faces'
+  common box (#243). Its planes ran through the faces' extremes, so a
+  section touching a face there (a tool resting on a face, at
+  `Tolerance::ZERO`) left the window next to the touching point, and the
+  piece between could not be classified.
+
 ### 0.1.4 - 2026-10-03
 
 ### Added
@@ -912,6 +953,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.5 - 2026-10-03
+
+### Added
+
+- `station` (#241, ADR 0082): `station_section2` and `station_section3`
+  resolve a distance along a curve -- plan distance on an elevated or
+  banked curve, arc length (through `arc_parameter`) on any other -- to a
+  `SectionFrame`: the point, the unit tangent, the lateral axis to the
+  left and `up = tangent x lateral`. A 2D curve is framed in `z = 0` with
+  `+Z` up, a banked curve by its rolled section, every other 3D curve by
+  the reference-up frame against `+Z` that `ReferenceCurveEvaluator`
+  returns. `SectionFrame::place` applies offsets, `plan` gives the upright
+  frame, `frame` the provider's layout (`x` tangent, `y` up, `z` right).
+  `station_length2`/`station_length3` give the length a station is
+  checked against; a negative, non-finite or too-long distance and a
+  vertical tangent are refused by name.
+
 ### 0.3.4 - 2026-10-03
 
 ### Added
@@ -1652,6 +1710,40 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.13 - 2026-10-03
+
+### Added
+
+- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
+  node into its point and frame (`x` tangent, `y` up, `z` right). The
+  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
+  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
+  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
+  in distance between stations and refining between them until each
+  section point's midpoint and each wall quad stay within the chord
+  budget; an `OffsetByStations` curve is sampled as a sweep directrix
+  (its parameter is the basis distance). Their deviation is reported
+  `Unbounded` by name (`DeviationPath::StationedSpine`,
+  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
+  refuses a station-placed spine by name. Refused by name: a station on
+  an instance or a curve relation, a distance beyond the curve, sections
+  whose ring structure, vertex count or tags disagree, and an open
+  section that is not a polyline.
+
+### Fixed
+
+- `ReferenceExactCompiler` compiles placed differences whose round hole
+  touches a planar face (#243): an I-beam whose web hole touches the
+  flange, a wall whose round hole touches its top face, under any rigid
+  placement and up to a fraction of the tolerance into or short of the
+  face, and a column clipped by a plane a fraction of the tolerance into
+  it (the #234 open item). Exactly tangent with exact placements the
+  report is empty, at `Tolerance::ZERO` too; otherwise it carries
+  `PlaneTouchesCylinder`. Through `compile_mesh_with_deviation` such a
+  body's mesh is certified against its exact result instead of left
+  unbounded. A curve crossing the contact where it cannot be placed is
+  refused by name (`BooleanError::UnsupportedContact`).
+
 ### 0.3.12 - 2026-10-03
 
 ### Fixed
@@ -2094,6 +2186,28 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.5 - 2026-10-03
+
+### Added
+
+- Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
+  lateral/vertical/longitudinal) along a basis curve, measured in that
+  curve's convention -- plan distance on an elevated or banked curve, arc
+  length on any other -- with offsets in its section frame
+  (`StationFrame::Section`, or the upright `StationFrame::Plan`).
+  `GeometryNode::CurveStation(CurveStation)` is a point and frame at a
+  station; `CurveRelation::OffsetByStations` a 3D curve through offsets
+  at stations, interpolated linearly in distance;
+  `SolidOperation::StationedSpine` closed profiles standing at stations
+  (`StationedSection`), matched by ring and vertex index;
+  `SurfaceRelation::SectionedSurface` open sections at stations
+  (`StationedOpenSection`) joined by tag.
+- `GraphError::InvalidStation` names a malformed station when the node is
+  pushed: a non-finite or negative distance, a non-finite offset, fewer
+  than two stations in a run, distances that do not increase strictly,
+  sections whose tags differ or repeat. A distance beyond the basis
+  curve's length is refused when the station is resolved.
 
 ### 0.3.4 - 2026-10-03
 
@@ -2817,6 +2931,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.6 - 2026-10-03
+
+### Added
+
+- `station`: `axiolid-evaluate`'s station resolution (#241), re-exported
+  on the same footing as `curve` and `surface`.
 
 ### 0.3.5 - 2026-10-03
 

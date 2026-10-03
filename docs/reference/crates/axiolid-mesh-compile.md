@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.12 (2026-10-03) |
+| Latest release | 0.3.13 (2026-10-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -60,34 +60,38 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.12 (2026-10-03):
-
-### Fixed
-
-- **Restored: swept disks along polylines and composites with sharp
-  corners compile again, mitred (#245).** From 0.3.9 to 0.3.11 a
-  `SweptDisk` whose directrix turned a corner with no fillet radius was
-  refused ("give a fillet radius"); that was a regression. Each corner
-  between two straight segments is mitred at half angle (both legs cut by
-  the bisector plane, as `IfcSweptDiskSolid` defines it), watertight, one
-  winding, the volume exactly the ring polygon's area times the
-  centreline length, and every point of the exact tube within the chord
-  budget (measured: at most 0.50 of it at 1 mm and 0.1 mm for 30, 90 and
-  150 degree corners, out of plane, hollow).
-  `compile_mesh_with_deviation` reports such pipes `Proven` at the
-  budget. A cut through a polyline corner keeps the corner. Still refused
-  by name: a mitre reaching past its leg, a reversal, a corner beside an
-  arc, a disk radius equal to the fillet or bend radius (a horn torus),
-  and a closed polyline, now `UnsupportedInput` (its closing mitre is not
-  built). The exact compiler still refuses directrices with corners.
+Latest release, 0.3.13 (2026-10-03):
 
 ### Added
 
-- `ReferenceExactCompiler::compile_exact_with_report` and
-  `compile_exact_batch_with_reports` carry each body's rounding floor
-  (`BooleanReport::rounding_floor`, #244): the largest floor of any
-  general boolean or clip beneath the body, kept unchanged through rigid
-  instances, and present on exact reports too. `ROUNDING_FACTOR` is
-  re-exported.
+- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
+  node into its point and frame (`x` tangent, `y` up, `z` right). The
+  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
+  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
+  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
+  in distance between stations and refining between them until each
+  section point's midpoint and each wall quad stay within the chord
+  budget; an `OffsetByStations` curve is sampled as a sweep directrix
+  (its parameter is the basis distance). Their deviation is reported
+  `Unbounded` by name (`DeviationPath::StationedSpine`,
+  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
+  refuses a station-placed spine by name. Refused by name: a station on
+  an instance or a curve relation, a distance beyond the curve, sections
+  whose ring structure, vertex count or tags disagree, and an open
+  section that is not a polyline.
+
+### Fixed
+
+- `ReferenceExactCompiler` compiles placed differences whose round hole
+  touches a planar face (#243): an I-beam whose web hole touches the
+  flange, a wall whose round hole touches its top face, under any rigid
+  placement and up to a fraction of the tolerance into or short of the
+  face, and a column clipped by a plane a fraction of the tolerance into
+  it (the #234 open item). Exactly tangent with exact placements the
+  report is empty, at `Tolerance::ZERO` too; otherwise it carries
+  `PlaneTouchesCylinder`. Through `compile_mesh_with_deviation` such a
+  body's mesh is certified against its exact result instead of left
+  unbounded. A curve crossing the contact where it cannot be placed is
+  refused by name (`BooleanError::UnsupportedContact`).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-03
+
 ### Added
 
 - `station`: `axiolid-evaluate`'s station resolution (#241), re-exported

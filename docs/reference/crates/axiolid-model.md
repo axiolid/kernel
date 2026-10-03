@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-03) |
+| Latest release | 0.3.5 (2026-10-03) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -38,16 +38,26 @@ identifiers outside the graph.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-03):
+Latest release, 0.3.5 (2026-10-03):
 
 ### Added
 
-- `TrimSelector::ArcLength(Scalar)` (#239): selects the basis parameter
-  where the arc length along the basis, measured from its parameter `0` in
-  the trim's sense, equals the value. Stored exactly; an evaluator resolves
-  it by quadrature and a root find to a stated tolerance. It is a
-  parameter-kind selector: it satisfies `TrimmingPreference::Parameter`,
-  a non-finite value is refused by validation, and equal arc lengths are an
-  empty trim.
+- Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
+  lateral/vertical/longitudinal) along a basis curve, measured in that
+  curve's convention -- plan distance on an elevated or banked curve, arc
+  length on any other -- with offsets in its section frame
+  (`StationFrame::Section`, or the upright `StationFrame::Plan`).
+  `GeometryNode::CurveStation(CurveStation)` is a point and frame at a
+  station; `CurveRelation::OffsetByStations` a 3D curve through offsets
+  at stations, interpolated linearly in distance;
+  `SolidOperation::StationedSpine` closed profiles standing at stations
+  (`StationedSection`), matched by ring and vertex index;
+  `SurfaceRelation::SectionedSurface` open sections at stations
+  (`StationedOpenSection`) joined by tag.
+- `GraphError::InvalidStation` names a malformed station when the node is
+  pushed: a non-finite or negative distance, a non-finite offset, fewer
+  than two stations in a run, distances that do not increase strictly,
+  sections whose tags differ or repeat. A distance beyond the basis
+  curve's length is refused when the station is resolved.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

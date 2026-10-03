@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-03
+
 ### Added
 
 - Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`

@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-03) |
+| Latest release | 0.3.6 (2026-10-03) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,11 +46,11 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-03):
+Latest release, 0.3.6 (2026-10-03):
 
 ### Added
 
-- Re-exports `axiolid_evaluate::arc_parameter` and
-  `axiolid_evaluate::chain` (#239).
+- `station`: `axiolid-evaluate`'s station resolution (#241), re-exported
+  on the same footing as `curve` and `surface`.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)
