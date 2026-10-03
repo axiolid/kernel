@@ -178,7 +178,7 @@ def copy_probe(
     source = CONSUMERS / profile
     probe = destination / profile
     shutil.copytree(
-        source, probe, ignore=shutil.ignore_patterns("Cargo.lock", ".gitignore")
+        source, probe, ignore=shutil.ignore_patterns("Cargo.lock", ".gitignore", "target")
     )
     manifest = probe / "Cargo.toml"
     manifest.write_text(
