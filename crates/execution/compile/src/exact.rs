@@ -5,8 +5,9 @@
 //!
 //! It never falls back to mesh compilation. Extrusions, revolutions,
 //! booleans of sharp rectangle prisms along +z, differences of placed
-//! extrusions ([`boolean`], #228), disks swept along one segment or one
-//! arc, and instances of any of these under a rigid transform are compiled
+//! extrusions ([`boolean`], #228), clips of those by half-spaces ([`clip`],
+//! #234), disks swept along one segment or one arc, and instances of any
+//! of these under a rigid transform are compiled
 //! exactly; every other family is refused with `GeomError::UnsupportedInput`
 //! naming it.
 //!
@@ -32,6 +33,7 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 mod boolean;
+mod clip;
 
 /// Scalar reference implementation of the exact-compilation capability.
 #[derive(Debug, Clone, Copy, Default)]

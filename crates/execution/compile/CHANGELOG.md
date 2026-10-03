@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceExactCompiler` clips by half-spaces exactly (#234): a
+  difference or intersection whose tool is a `HalfSpace`, or a
+  `BoundedHalfSpace` (a polyline boundary in the plane), read through
+  rigid placements, with the mesh compiler's semantics (`agreement` selects
+  the normal side; the boundary is framed by its placement projected into
+  the plane and swept along the normal). The half-space becomes a finite
+  prism over a sound envelope of the subject plus a margin and goes through
+  the general exact boolean under the #228 tolerance contract; the result
+  does not depend on the margin (ADR 0080, amended). Clips compose with
+  each other and with placed openings in either order: a wall minus its
+  windows, clipped by two roof planes. Unions with a half-space, a
+  half-space as the subject, a subject not built from placed extrusions, a
+  boundary that is not a polyline, scaled placements and the general
+  boolean's refusals are refused by name; a clip that removes everything
+  is `Degenerate`.
+
 ## [0.3.9] - 2026-10-03
 
 ### Added

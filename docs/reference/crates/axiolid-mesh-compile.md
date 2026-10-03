@@ -23,7 +23,8 @@ profiles, sweeps, B-reps and authored meshes, and hands booleans to whichever
 `MeshBoolean` provider it is given. `ReferenceExactCompiler` compiles the
 families it supports to exact B-reps, places instances under rigid
 transforms, cuts placed openings from placed extrusions with the general
-exact boolean, and refuses the rest by name. This crate
+exact boolean, clips them by half-spaces through the same boolean, and
+refuses the rest by name. This crate
 owns graph traversal and dispatch; the construction algorithms themselves
 (profile flattening, extrusion, revolution, sweeps) belong to
 `axiolid-construct`.

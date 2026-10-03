@@ -123,3 +123,48 @@ the general exact boolean, and `axiolid-mesh-compile` depends on
 - Tests: `crates/execution/compile/tests/exact_placed_boolean.rs`,
   `crates/algorithms/construction/brep-boolean/tests/openings.rs`; probe
   `scripts/probe_placed_boolean_mutants.py`.
+
+## Amendment 2026-10-03: half-space clipping (#234)
+
+A boolean whose tool is a half-space is dispatched first, to
+`crates/execution/compile/src/exact/clip.rs`: a difference or intersection
+whose right operand is a `HalfSpace` (`IfcHalfSpaceSolid`) or a
+`BoundedHalfSpace` (`IfcPolygonalBoundedHalfSpace`, polyline boundary),
+read through rigid placements. The subject is anything the rest of the
+dispatch compiles from placed extrusions, so clips compose with each other
+and with openings, in either order.
+
+- **Semantics.** The mesh compiler's: `agreement` selects the normal side;
+  a bounded half-space is that side within the prism of its boundary
+  swept along the plane normal, the boundary framed by its placement's
+  axes projected into the plane and its origin projected onto it.
+- **Finite tool, general boolean.** The half-space becomes a prism standing
+  on the plane over a sound envelope of the subject (the box of a placed
+  extrusion's edges, carried through placements; a difference or clip
+  keeps its subject's), plus a margin `m` (a quarter of the envelope's
+  diagonal plus four tolerances). Its footprint is the envelope's
+  projection widened by `m` (unbounded) or the boundary (bounded); it
+  reaches `m` past the envelope. Since the subject lies in the envelope,
+  `S - P = S - H` and `S ∩ P = S ∩ H` for every `m > 0`, and the faces `m`
+  moves stay more than the tolerance from the subject, so no decision of
+  the general boolean involves them: the result does not depend on `m`.
+  A subject whose envelope lies wholly off the half-space (or, unbounded,
+  wholly in it) is decided without the boolean.
+- **Not a direct plane clip.** A dedicated clip of an exact B-rep by a
+  plane would be a second section, split and classification to keep in
+  agreement with the general boolean, for a tool of six faces whose other
+  five the boolean's bounding boxes already skip.
+- **Refused by name:** a union with a half-space (unbounded), a
+  half-space as the subject, a subject not built from placed extrusions,
+  a bounded half-space whose boundary is not a polyline or whose plane is
+  placed by an instance, scaled or sheared placements, and the general
+  boolean's refusals. A curved base surface cannot be expressed: the
+  model's half-space carries a plane. A clip removing the whole subject
+  is `GeomError::Degenerate`.
+- **Known limit.** A plane within the tolerance inside a cylinder face
+  (crossing it, read as touching) is refused by the general boolean as a
+  point too close to classify; a plane tangent to it, or outside, keeps
+  the whole solid.
+
+Tests: `crates/execution/compile/tests/exact_half_space_clip.rs`; probe
+`scripts/probe_half_space_clip_mutants.py`.

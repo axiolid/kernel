@@ -60,6 +60,10 @@ impl ExactCompilation<'_> {
         right: NodeId,
         operator: BooleanOperator,
     ) -> GeomResult<ExactBRep> {
+        // A half-space tool is a clip (#234, `super::clip`).
+        if let Some(tool) = self.clip_tool(right)? {
+            return self.compile_clip(left, tool, operator);
+        }
         if let (Some(subject), Some(tool)) = (self.bare_prism(left)?, self.bare_prism(right)?) {
             return boolean_prisms_exact(&subject, &tool, operator, self.options.tolerance())
                 .map_err(remap_construction_error);
@@ -158,7 +162,7 @@ impl ExactCompilation<'_> {
 }
 
 /// A general-boolean refusal, named for the compiler's caller.
-fn remap_boolean_error(error: BooleanError) -> GeomError {
+pub(super) fn remap_boolean_error(error: BooleanError) -> GeomError {
     let input = match error {
         BooleanError::EmptyResult => {
             return GeomError::Degenerate(
