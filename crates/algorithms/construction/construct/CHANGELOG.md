@@ -30,6 +30,14 @@ caret rule for `0.x` versions.
   beside an arc are refused by name. The derivation is in the module
   notes.
 
+### Changed
+
+- Contour lowering splits a circular segment of half a turn or more into
+  equal sub-arcs below half a turn instead of refusing it (#228, ADR 0053
+  amended): an IFC arch is commonly one semicircle. The split vertices are
+  the circle evaluated at their parameters, as a segment's ends are. Only a
+  segment sweeping more than a whole turn is refused.
+
 ## [0.3.10] - 2026-10-02
 
 ### Added

@@ -147,14 +147,13 @@ fn line(a: Point2, b: Point2) -> ProfileSegment {
 }
 
 /// An arched opening: a `w x h` rectangle on `y = 0` under a half circle of
-/// radius `w / 2` centred at `(0, h)`.
-///
-/// The half circle is two quarter-turn segments: contour lowering takes a
-/// circular segment of less than half a turn (ADR 0053).
-fn arched(w: f64, h: f64) -> Profile {
+/// radius `w / 2` centred at `(0, h)`, as `parts` equal arc segments (one is
+/// how an IFC arch commonly comes: a single semicircle).
+fn arched_in(w: f64, h: f64, parts: usize) -> Profile {
     let r = w / 2.0;
     let p = |x: f64, y: f64| Point2::new(x, y);
-    let quarter = |from: f64| ProfileSegment {
+    let step = PI / parts as f64;
+    let part = |k: usize| ProfileSegment {
         curve: Curve2::Circle(Circle2 {
             frame: axiolid_core::Frame2 {
                 origin: p(0.0, h),
@@ -163,19 +162,21 @@ fn arched(w: f64, h: f64) -> Profile {
             },
             radius: r,
         }),
-        domain: Interval::new(from, from + FRAC_PI_2),
+        domain: Interval::new(k as f64 * step, (k + 1) as f64 * step),
         same_sense: true,
     };
+    let mut segments = vec![line(p(-r, 0.0), p(r, 0.0)), line(p(r, 0.0), p(r, h))];
+    segments.extend((0..parts).map(part));
+    segments.push(line(p(-r, h), p(-r, 0.0)));
     Profile::Contour(ContourProfile {
-        outer: Contour::new(vec![
-            line(p(-r, 0.0), p(r, 0.0)),
-            line(p(r, 0.0), p(r, h)),
-            quarter(0.0),
-            quarter(FRAC_PI_2),
-            line(p(-r, h), p(-r, 0.0)),
-        ]),
+        outer: Contour::new(segments),
         holes: Vec::new(),
     })
+}
+
+/// An arched opening whose half circle is one segment.
+fn arched(w: f64, h: f64) -> Profile {
+    arched_in(w, h, 1)
 }
 
 /// A wall placement as a building model has one: turned about `z` and
@@ -327,16 +328,24 @@ fn a_blind_perpendicular_recess_leaves_a_floor() {
 #[test]
 fn an_arched_opening_cuts_through_with_a_cylindrical_soffit() {
     for placement in [building(), general()] {
-        arched_opening(placement);
+        for parts in [1, 2] {
+            arched_opening(placement, parts);
+        }
     }
 }
 
-fn arched_opening(placement: Transform3) {
+fn arched_opening(placement: Transform3, parts: usize) {
     let mut g = Graph::new();
     let (w, h, cx, sill) = (1.0, 1.5, 1.0, 0.3);
     let r = w / 2.0;
     let wall = g.wall(placement);
-    let opening = g.opening(arched(w, h), T + 0.2, (cx, sill), T / 2.0 + 0.1, placement);
+    let opening = g.opening(
+        arched_in(w, h, parts),
+        T + 0.2,
+        (cx, sill),
+        T / 2.0 + 0.1,
+        placement,
+    );
     let cut = g.minus(wall, opening);
     // The probe's top corners lie inside the half circle; the arc is the
     // nearest part of the opening: r - |corner - centre|.

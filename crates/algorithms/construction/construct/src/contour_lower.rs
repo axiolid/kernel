@@ -35,7 +35,8 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
     let mut previous_end: Option<Point2> = None;
 
     for segment in &contour.segments {
-        let (start, end, bulge) = lower_segment(segment)?;
+        let (pieces, end) = lower_segment(segment)?;
+        let start = pieces[0].point;
         if let Some(previous) = previous_end {
             let gap = (start - previous).length();
             if gap > tolerance.linear() {
@@ -44,10 +45,7 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
                 )));
             }
         }
-        vertices.push(ArcVertex {
-            point: start,
-            bulge,
-        });
+        vertices.extend(pieces);
         previous_end = Some(end);
     }
 
@@ -64,8 +62,9 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
     Ok(ArcRing::new(vertices))
 }
 
-/// One segment as (start, end, bulge of the edge leaving start).
-fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Point2, Point2, Scalar)> {
+/// One segment as the ring vertices it contributes (each with the bulge of
+/// the edge leaving it) and its end point.
+fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Vec<ArcVertex>, Point2)> {
     let (from, to) = if segment.same_sense {
         (segment.domain.start, segment.domain.end)
     } else {
@@ -76,7 +75,13 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Point2, Point2, Scalar
         Curve2::Line(line) => {
             let start = line.origin + line.direction * from;
             let end = line.origin + line.direction * to;
-            Ok((start, end, 0.0))
+            Ok((
+                vec![ArcVertex {
+                    point: start,
+                    bulge: 0.0,
+                }],
+                end,
+            ))
         }
         Curve2::Circle(circle) => lower_arc(circle, from, to),
         other => Err(GeomError::UnsupportedInput {
@@ -87,14 +92,24 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Point2, Point2, Scalar
     }
 }
 
-/// A circular segment as start, end, and the bulge the extruder expects.
+/// A circular segment as ring vertices with the bulges the extruder
+/// expects, and its end point.
 ///
 /// `bulge` is `tan(sweep / 4)` for the SIGNED sweep measured in world
 /// orientation. The frame's handedness matters: a left-handed frame runs the
 /// parameter backwards relative to the plane, so the world sweep is the
 /// negation of the parameter sweep. Ignoring that flips the arc onto the
 /// wrong side of its chord.
-fn lower_arc(circle: &Circle2, from: Scalar, to: Scalar) -> GeomResult<(Point2, Point2, Scalar)> {
+///
+/// A bulge determines its arc only below half a turn, so a segment sweeping
+/// half a turn or more is split into `k` equal sub-arcs, each below half a
+/// turn: an IFC arch is commonly one semicircle (ADR 0053, amended by
+/// #228). Each split vertex is the circle evaluated at its parameter,
+/// exactly as the segment's own ends are, so every sub-arc carries the same
+/// circle to the same rounding an unsplit arc does (a few ulps of the
+/// circle's coordinates); nothing is fitted. A segment sweeping more than a
+/// whole turn overlaps itself and is refused.
+fn lower_arc(circle: &Circle2, from: Scalar, to: Scalar) -> GeomResult<(Vec<ArcVertex>, Point2)> {
     let evaluate = |t: Scalar| {
         let (sin, cos) = t.sin_cos();
         circle.frame.origin
@@ -116,16 +131,27 @@ fn lower_arc(circle: &Circle2, from: Scalar, to: Scalar) -> GeomResult<(Point2, 
             "circular profile segment has an empty parameter range".to_owned(),
         ));
     }
-    // A single bulge cannot express a half turn or more: the tangent blows up
-    // at pi and the chord no longer determines the arc.
-    if sweep.abs() >= core::f64::consts::PI {
+    if sweep.abs() > core::f64::consts::TAU {
         return Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Sweep,
-            input: "circular profile segment sweeping half a turn or more",
+            input: "circular profile segment sweeping more than a whole turn",
         });
     }
-    Ok((start, end, (sweep / 4.0).tan()))
+    // Equal sub-arcs, each below half a turn.
+    let pieces = (sweep.abs() / core::f64::consts::PI).floor() as usize + 1;
+    let bulge = (sweep / (4.0 * pieces as Scalar)).tan();
+    let vertices = (0..pieces)
+        .map(|k| ArcVertex {
+            point: if k == 0 {
+                start
+            } else {
+                evaluate(from + (to - from) * k as Scalar / pieces as Scalar)
+            },
+            bulge,
+        })
+        .collect();
+    Ok((vertices, end))
 }
 
 fn unsupported_curve_name(curve: &Curve2) -> &'static str {

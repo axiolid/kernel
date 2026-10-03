@@ -288,20 +288,68 @@ fn frame_handedness_decides_which_way_the_arc_turns() {
     );
 }
 
+/// Exact volume and a clean audit of a one-unit-high extrusion.
+fn extruded_volume(contour: Contour) -> f64 {
+    let solid = extrude_profile_exact(&profile(contour), Vec3::Z, 1.0, Tolerance::METRE)
+        .expect("extrudes exactly");
+    let health = geometric_audit(&solid, Tolerance::METRE);
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    axiolid_measure::exact_properties(&solid, Tolerance::METRE)
+        .expect("measurable")
+        .signed_volume
+}
+
 #[test]
-fn a_half_turn_segment_is_refused_not_silently_bent() {
-    // `bulge` is tan(sweep/4); at a half turn the tangent is 1 and at more
-    // than that the chord no longer determines the arc. Accepting it would
-    // silently build a different curve.
-    let contour = Contour::new(vec![
-        arc(Point2::new(0.0, 0.0), 1.0, 0.0, std::f64::consts::PI),
+fn a_half_turn_segment_is_split_into_equal_sub_arcs() {
+    // `bulge` is tan(sweep/4); at a half turn the chord no longer says which
+    // way round the arc goes, so the lowering splits it into sub-arcs below
+    // half a turn (#228) instead of refusing: an IFC arch is commonly one
+    // semicircle.
+    use std::f64::consts::PI;
+    let half_disk = Contour::new(vec![
+        arc(Point2::new(0.0, 0.0), 1.0, 0.0, PI),
         line(Point2::new(-1.0, 0.0), Point2::new(1.0, 0.0)),
     ]);
-    let error = extrude_profile_exact(&profile(contour), Vec3::Z, 1.0, Tolerance::METRE)
-        .expect_err("a half turn cannot be one bulge");
-    let text = format!("{error:?}");
+    let volume = extruded_volume(half_disk);
     assert!(
-        text.contains("half a turn"),
-        "the refusal must name the half turn, got {text}"
+        (volume - PI / 2.0).abs() < 1e-12,
+        "expected pi/2, got {volume}"
     );
+
+    // A left-handed frame runs the other way round: the same half disk
+    // below the axis.
+    let below = Contour::new(vec![
+        arc_left_handed(Point2::new(0.0, 0.0), 1.0, 0.0, PI),
+        line(Point2::new(-1.0, 0.0), Point2::new(1.0, 0.0)),
+    ]);
+    let volume = extruded_volume(below);
+    assert!(
+        (volume - PI / 2.0).abs() < 1e-12,
+        "expected pi/2, got {volume}"
+    );
+
+    // Three quarters of a turn and its chord: two sub-arcs.
+    let (s, c) = (1.5 * PI).sin_cos();
+    let major = Contour::new(vec![
+        arc(Point2::new(0.0, 0.0), 1.0, 0.0, 1.5 * PI),
+        line(Point2::new(c, s), Point2::new(1.0, 0.0)),
+    ]);
+    let volume = extruded_volume(major);
+    let expected = 0.75 * PI + 0.5;
+    assert!(
+        (volume - expected).abs() < 1e-12,
+        "expected {expected}, got {volume}"
+    );
+}
+
+#[test]
+fn a_segment_sweeping_more_than_a_whole_turn_is_refused() {
+    let contour = Contour::new(vec![
+        arc(Point2::new(0.0, 0.0), 1.0, 0.0, 2.5 * std::f64::consts::PI),
+        line(Point2::new(0.0, 1.0), Point2::new(1.0, 0.0)),
+    ]);
+    let error = extrude_profile_exact(&profile(contour), Vec3::Z, 1.0, Tolerance::METRE)
+        .expect_err("an arc over a whole turn overlaps itself");
+    let text = format!("{error:?}");
+    assert!(text.contains("whole turn"), "got {text}");
 }

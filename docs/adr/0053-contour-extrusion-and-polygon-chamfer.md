@@ -38,6 +38,13 @@ and pairwise-edge constraints, straight cut instead of an arc.
 - A circular segment sweeping half a turn or more is refused. `bulge` is
   `tan(sweep/4)`, and beyond a half turn the chord no longer determines the
   arc. Callers split such an arc into two segments, as the stadium test does.
+  **Amended (#228):** the lowering splits it itself, into `k` equal
+  sub-arcs each below half a turn, since an IFC arch is commonly one
+  semicircle and every caller would otherwise repeat the split. Each split
+  vertex is the circle evaluated at its parameter, exactly as a segment's
+  own ends are, so the sub-arcs carry the same circle to the same rounding
+  an unsplit arc does; nothing is fitted. Only a segment sweeping more than
+  a whole turn (which overlaps itself) is refused.
 - Contour extrusion results are checked by the ADR 0052 geometric audit in
   tests, not only by closure.
 
