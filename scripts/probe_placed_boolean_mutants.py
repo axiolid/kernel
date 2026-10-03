@@ -13,6 +13,12 @@ deciding a plane tangent to a cylinder exactly instead of within
 tolerance (the jamb plane tangent to an arch's soffit then cuts two
 rulings `1e-8` from the springing edge, which `runs_along` reads as
 running along that edge, so the faces split the same way).
+
+Not reached by these inputs, deliberately not listed: dropping the cuts
+where a section line or conic leaves the two faces' common box. They
+matter only when a kept cut lies outside that box and a skipped edge's
+crossing lies between it and the next kept cut; no opening here produces
+one, and the pieces are then still bounded by kept cuts inside the box.
 """
 import pathlib, subprocess, sys
 
@@ -20,12 +26,21 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/construction/brep-boolean/src/section.rs"
 F = "crates/algorithms/construction/brep-boolean/src/split.rs"
 C = "crates/execution/compile/src/exact/boolean.rs"
+B = "crates/algorithms/construction/brep-boolean/src/bounds.rs"
 TESTS = [
+    ["-p", "axiolid-brep-boolean", "--lib"],
     ["-p", "axiolid-brep-boolean", "--test", "openings"],
+    ["-p", "axiolid-brep-boolean", "--test", "contact"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"],
 ]
 
 MUTANTS = [
+    ("face boxes not enlarged by the tolerance", B,
+     "    let pad = tolerance.linear() + 8.0 * Scalar::EPSILON * (1.0 + size);",
+     "    let pad = -tolerance.linear();"),
+    ("a cylinder's box without its radius", B,
+     "            (a, b, radial(c.frame.x, c.frame.y, c.radius, c.radius))",
+     "            (a, b, Vec3::ZERO)"),
     ("a curve along an edge only when exactly contained", S,
      "                    && runs_along(curve, edge_curve, span, tolerance)?",
      "                    && false"),
@@ -33,8 +48,8 @@ MUTANTS = [
      "                        if out.len() == before {",
      "                        if false {"),
     ("split tangent roots kept apart on sections", S,
-     "                let cuts = merge_close(branch, cuts, tolerance)?;",
-     ""),
+     "                let mut cuts = merge_close(branch, cuts, tolerance)?;",
+     "                let mut cuts = cuts;"),
     ("a near-parallel plane and cylinder read exactly", S,
      "    if along.abs() > tolerance.angular() {",
      "    if along != 0.0 {"),

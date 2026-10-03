@@ -163,12 +163,17 @@ name = "axiolid-benchmark"
 version = "0.3.0"
 dependencies = [
  "axiolid",
+ "axiolid-contracts",
  "axiolid-core",
  "axiolid-curve",
+ "axiolid-exact-compile-contract",
  "axiolid-guarantees",
  "axiolid-measure",
  "axiolid-mesh",
+ "axiolid-mesh-compile",
+ "axiolid-model",
  "axiolid-predicates",
+ "axiolid-profile",
  "axiolid-spatial",
  "criterion",
  "iai-callgrind",

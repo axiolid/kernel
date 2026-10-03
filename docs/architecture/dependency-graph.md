@@ -120,12 +120,17 @@ graph TD
     axiolid_backend_gpu --> axiolid_mesh_compile_contract
     axiolid_backend_gpu --> axiolid_model
     axiolid_benchmark --> axiolid
+    axiolid_benchmark --> axiolid_contracts
     axiolid_benchmark --> axiolid_core
     axiolid_benchmark --> axiolid_curve
+    axiolid_benchmark --> axiolid_exact_compile_contract
     axiolid_benchmark --> axiolid_guarantees
     axiolid_benchmark --> axiolid_measure
     axiolid_benchmark --> axiolid_mesh
+    axiolid_benchmark --> axiolid_mesh_compile
+    axiolid_benchmark --> axiolid_model
     axiolid_benchmark --> axiolid_predicates
+    axiolid_benchmark --> axiolid_profile
     axiolid_benchmark --> axiolid_spatial
     axiolid_brep --> axiolid_core
     axiolid_brep --> axiolid_curve

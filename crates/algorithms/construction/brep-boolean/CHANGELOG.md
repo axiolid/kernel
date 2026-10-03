@@ -21,6 +21,18 @@ caret rule for `0.x` versions.
   the edge, cuts and boundary splits closer than tolerance are one point,
   and such a plane cuts the cylinder in rulings or a circle.
 
+### Changed
+
+- Work between faces that cannot meet is skipped (#228). Each face and
+  edge gets a sound box from its surface or curve in closed form, enlarged
+  by the linear tolerance; face pairs whose boxes are apart are not
+  sectioned, a section line or conic is cut only against edges whose
+  boxes meet both faces' common box (and at that box's boundary),
+  classification rays skip faces whose boxes they miss, and split faces
+  ignore cut points outside their boxes. A wall losing ten placed windows
+  one at a time went from 1.67 s to 0.28 s in release
+  (`cargo bench -p axiolid-benchmark --bench exact_openings`).
+
 ## [0.1.1] - 2026-09-28
 
 ### Changed

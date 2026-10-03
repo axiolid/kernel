@@ -26,6 +26,14 @@ axiolid-spatial.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+# The exact placed-openings benchmark (#228) compiles a graph exactly and
+# validates the volume before timing.
+axiolid-contracts.workspace = true
+axiolid-exact-compile-contract.workspace = true
+axiolid-measure = { workspace = true, features = ["exact"] }
+axiolid-mesh-compile.workspace = true
+axiolid-model.workspace = true
+axiolid-profile.workspace = true
 iai-callgrind = "0.16.1"
 
 [package.metadata.axiolid]
@@ -44,6 +52,11 @@ allowed-internal-dependencies = [
     "axiolid-guarantees",
     "axiolid-measure",
     "axiolid-spatial",
+    "axiolid-contracts",
+    "axiolid-exact-compile-contract",
+    "axiolid-mesh-compile",
+    "axiolid-model",
+    "axiolid-profile",
 ]
 
 [[bench]]
@@ -60,4 +73,8 @@ harness = false
 
 [[bench]]
 name = "regression"
+harness = false
+
+[[bench]]
+name = "exact_openings"
 harness = false

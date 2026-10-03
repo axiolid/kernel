@@ -21,6 +21,7 @@ use axiolid_nurbs::{exact_curve_surface_intersection, ExactCurveIntersection};
 use axiolid_surface::Surface;
 use axiolid_topology::Orientation;
 
+use crate::bounds::{face_box, Aabb};
 use crate::split::{Piece, Region};
 use crate::BooleanError;
 
@@ -38,6 +39,11 @@ const DIRECTIONS: [[Scalar; 3]; 6] = [
 pub(crate) struct Solid<'a> {
     brep: &'a ExactBRep,
     domains: Vec<FaceDomain<'a>>,
+    /// A sound box around each face, enlarged by the tolerance: a ray that
+    /// misses it cannot cross the face (#228).
+    boxes: Vec<Option<Aabb>>,
+    /// The box around all of them, when every face has one.
+    bounds: Option<Aabb>,
 }
 
 impl<'a> Solid<'a> {
@@ -54,7 +60,28 @@ impl<'a> Solid<'a> {
                     .ok_or(BooleanError::UnsupportedTrim)?,
             );
         }
-        Ok(Self { brep, domains })
+        let mut boxes = Vec::with_capacity(domains.len());
+        for (index, domain) in domains.iter().enumerate() {
+            let surface = topology.faces()[index]
+                .surface
+                .and_then(|id| brep.surfaces().get(id.index()))
+                .ok_or(BooleanError::DanglingReference)?;
+            let (lo, hi) = domain.bounds();
+            boxes.push(face_box(surface, lo, hi, tolerance));
+        }
+        let bounds = boxes
+            .iter()
+            .try_fold(None::<Aabb>, |all, b| {
+                let b = (*b)?;
+                Some(Some(all.map_or(b, |a| a.union(&b))))
+            })
+            .flatten();
+        Ok(Self {
+            brep,
+            domains,
+            boxes,
+            bounds,
+        })
     }
 
     fn surface(&self, face: usize) -> Result<&'a Surface, BooleanError> {
@@ -73,6 +100,12 @@ impl<'a> Solid<'a> {
         tolerance: Tolerance,
     ) -> Result<Option<Vec3>, BooleanError> {
         for &face in candidates {
+            if self.boxes[face]
+                .as_ref()
+                .is_some_and(|b| !b.contains(point))
+            {
+                continue;
+            }
             let surface = self.surface(face)?;
             let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
             match self.domains[face]
@@ -100,6 +133,10 @@ impl<'a> Solid<'a> {
         point: Point3,
         tolerance: Tolerance,
     ) -> Result<bool, BooleanError> {
+        // Outside the box around every face, the point is outside the solid.
+        if self.bounds.as_ref().is_some_and(|b| !b.contains(point)) {
+            return Ok(false);
+        }
         'direction: for direction in DIRECTIONS {
             let direction = Vec3::from_array(direction).normalize();
             let ray = Curve3::Line(Line3 {
@@ -108,6 +145,12 @@ impl<'a> Solid<'a> {
             });
             let mut crossings = 0usize;
             for face in 0..self.domains.len() {
+                if self.boxes[face]
+                    .as_ref()
+                    .is_some_and(|b| !b.met_by_ray(point, direction, tolerance.linear().max(1e-9)))
+                {
+                    continue;
+                }
                 let surface = self.surface(face)?;
                 let hits = match exact_curve_surface_intersection(&ray, surface) {
                     Ok(ExactCurveIntersection::Points(hits)) => hits,

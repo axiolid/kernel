@@ -124,7 +124,14 @@ pub fn split_face(
     // Section pieces with exact pcurves, their starts placed in the face's
     // own parameter range.
     let mut pieces: Vec<(Piece, bool)> = Vec::new();
-    let mut ends: Vec<Point3> = cuts.to_vec();
+    // Only a cut inside the face's box (enlarged by the tolerance) can lie
+    // on its boundary (#228).
+    let reach = crate::bounds::face_box(surface, lo, hi, tolerance);
+    let mut ends: Vec<Point3> = cuts
+        .iter()
+        .copied()
+        .filter(|p| reach.as_ref().is_none_or(|b| b.contains(*p)))
+        .collect();
     // One stretch of curve can reach a face from several face pairs (a
     // shared patch's edge is also where the neighbouring faces meet it).
     let mut seen: Vec<&SectionEdge> = Vec::new();

@@ -20,6 +20,7 @@ so it stays out of the release.
 | `benches/regression.rs` | Instruction counts under callgrind (iai-callgrind), the CI regression signal |
 | `benches/scenario.rs` | End-to-end cost through the public `axiolid::application` facade |
 | `benches/audit.rs` | How the mesh audit scales with triangle count |
+| `benches/exact_openings.rs` | Cost per placed opening cut exactly from a placed wall, by openings already cut (#228) |
 | `tests/scaling.rs` | Growth rate asserted from operation counts, run by `cargo test` |
 | `examples/filter_probe.rs` | Which `orient3d` inputs actually escalate past the floating-point filter |
 | `examples/grouping_probe.rs` | How much independent work the grouped wall subtraction exposes |
@@ -29,6 +30,7 @@ so it stays out of the release.
 ```bash
 cargo bench -p axiolid-benchmark --bench micro      # wall clock
 cargo bench -p axiolid-benchmark --bench scenario   # end to end
+cargo bench -p axiolid-benchmark --bench exact_openings  # exact placed openings
 scripts/bench-regression.sh                         # instruction counts
 cargo test -p axiolid-benchmark                     # scaling assertions
 ```

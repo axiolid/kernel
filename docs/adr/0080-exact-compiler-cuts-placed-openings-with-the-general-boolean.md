@@ -72,13 +72,17 @@ the general exact boolean, and `axiolid-mesh-compile` depends on
 **Negative / costs**
 
 - The general boolean is slower than the prism path: tens of milliseconds
-  per opening in release, growing with the faces earlier openings add
-  (exact section and classification over every face pair).
+  per opening in release. Exact section and classification over every
+  face pair made the cost grow with the openings already cut; sound
+  bounding boxes (enlarged by the tolerance, so a pair that touches is
+  never skipped) now skip face pairs, edges and ray tests that cannot
+  matter. `tools/benchmark/benches/exact_openings.rs`, a 6 m wall under a
+  general placement losing `n` windows, validated against the exact
+  volume, on a shared 20-core machine under load: 1 window 42 ms to 18 ms,
+  3 windows 224 ms to 85 ms, 10 windows 1.67 s to 0.28 s.
 
 **Follow-ups / risks to watch**
 
-- A face-pair bounding prefilter in `section_edges` and classification
-  would make many openings per wall cheaper.
 - Half-space clipping (`IfcHalfSpaceSolid`,
   `IfcPolygonalBoundedHalfSpace`) is the next step.
 

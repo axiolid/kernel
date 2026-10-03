@@ -33,6 +33,12 @@
 //!   shared patch becomes a region of both faces; classification then sees
 //!   it on the other solid's boundary (see `crate::boolean`).
 //!
+//! Work that cannot matter is skipped through sound boxes (`crate::bounds`,
+//! enlarged by the tolerance): face pairs whose boxes are apart are not
+//! sectioned, and a line or conic section is cut only against edges whose
+//! boxes meet the two faces' common box, plus where it leaves that box;
+//! pieces outside it lie off one of the faces.
+//!
 //! Operands placed by independent rigid motions agree only up to rounding,
 //! and the exact predicates above see that residue (#228). Within
 //! tolerance, then:
@@ -59,6 +65,7 @@ use axiolid_surface::{Plane, Surface};
 use axiolid_topology::FaceId;
 use core::f64::consts::TAU;
 
+use crate::bounds::{edge_box, face_box, Aabb};
 use crate::support::{cleaned, same_support, window};
 use crate::BooleanError;
 
@@ -119,6 +126,17 @@ pub fn section_edges(
     )> = Vec::new();
     for fa in 0..side_a.faces.len() {
         for fb in 0..side_b.faces.len() {
+            // Faces whose boxes, enlarged by the tolerance, are apart cannot
+            // cross, touch or share a patch (#228).
+            // Where both faces have boxes, the section matters only in their
+            // common part: the window.
+            let common = match (&side_a.boxes[fa], &side_b.boxes[fb]) {
+                (Some(a), Some(b)) => match a.intersection(b) {
+                    Some(common) => Some(common),
+                    None => continue,
+                },
+                _ => None,
+            };
             let (sa, sb) = (side_a.surface(fa)?, side_b.surface(fb)?);
             if same_support(sa, sb, tolerance) {
                 imprint(&side_a, fa, &side_b, fb, true, tolerance, &mut out)?;
@@ -240,8 +258,17 @@ pub fn section_edges(
                 };
                 let branch = branch.clone();
                 let branch = &branch;
-                let (mut cuts, along_a) = side_a.cuts(fa, branch, sb, tolerance)?;
-                let (more, along_b) = side_b.cuts(fb, branch, sa, tolerance)?;
+                // The window cuts lines and conics in closed form; a traced
+                // section is cut against every edge, as before.
+                let common = common.filter(|_| {
+                    matches!(
+                        branch,
+                        Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+                    )
+                });
+                let (mut cuts, along_a) =
+                    side_a.cuts(fa, branch, sb, common.as_ref(), tolerance)?;
+                let (more, along_b) = side_b.cuts(fb, branch, sa, common.as_ref(), tolerance)?;
                 cuts.extend(more);
                 // Branches of one section meet only where the surfaces touch
                 // (the two ellipses of a Steinmetz pair): such a point splits
@@ -262,7 +289,14 @@ pub fn section_edges(
                     cuts.retain(|&c| c >= lo && c <= hi);
                     cuts.extend([lo, hi].into_iter().filter(|x| x.is_finite()));
                 }
-                let cuts = merge_close(branch, cuts, tolerance)?;
+                let mut cuts = merge_close(branch, cuts, tolerance)?;
+                // The window's own crossings come after the merge: they are
+                // where the window ends, not features to be merged.
+                if let Some(w) = &common {
+                    cuts.extend(w.crossings(branch).into_iter().filter(|&c| {
+                        bounds.is_none_or(|b| c >= b.start.min(b.end) && c <= b.start.max(b.end))
+                    }));
+                }
                 for (piece_curve, span) in pieces(branch, cuts)? {
                     // Off-centre, so a symmetric section's pole or seam
                     // crossing never becomes the sample.
@@ -277,6 +311,10 @@ pub fn section_edges(
                         piece_curve,
                         Curve3::ImplicitSection(_) | Curve3::PairSection(_)
                     );
+                    // Outside the window the piece is off one of the faces.
+                    if common.as_ref().is_some_and(|w| !w.contains(mid)) {
+                        continue;
+                    }
                     if !traced && touching(sa, sb, mid, tolerance)? {
                         continue;
                     }
@@ -452,7 +490,7 @@ fn imprint(
         // The surface that bounds the imprinted edge in its own operand:
         // together with the shared surface it defines the edge's curve.
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
-        let (cuts, along) = onto.cuts(other, &curve, &bounding, tolerance)?;
+        let (cuts, along) = onto.cuts(other, &curve, &bounding, None, tolerance)?;
         for piece in pieces_within(&curve, span, cuts) {
             let mid = evaluate3(&curve, piece.start + SAMPLE * (piece.end - piece.start))
                 .map_err(|_| BooleanError::Evaluation)?;
@@ -782,6 +820,10 @@ struct Side<'a> {
     brep: &'a ExactBRep,
     faces: Vec<FaceId>,
     domains: Vec<FaceDomain<'a>>,
+    /// A sound box around each face, enlarged by the tolerance.
+    boxes: Vec<Option<Aabb>>,
+    /// A sound box around each edge, enlarged by the tolerance.
+    edge_boxes: Vec<Option<Aabb>>,
     /// For each edge, the faces whose loops use it.
     edge_faces: Vec<Vec<usize>>,
 }
@@ -813,10 +855,32 @@ impl<'a> Side<'a> {
                 }
             }
         }
+        let mut boxes = Vec::with_capacity(domains.len());
+        for (index, domain) in domains.iter().enumerate() {
+            let surface = topology.faces()[index]
+                .surface
+                .and_then(|id| brep.surfaces().get(id.index()))
+                .ok_or(BooleanError::DanglingReference)?;
+            let (lo, hi) = domain.bounds();
+            boxes.push(face_box(surface, lo, hi, tolerance));
+        }
+        let mut edge_boxes = Vec::with_capacity(topology.edges().len());
+        for (index, edge) in topology.edges().iter().enumerate() {
+            let curve = edge.curve.and_then(|id| brep.curves3().get(id.index()));
+            let span = topology
+                .edge_id_at(index)
+                .and_then(|id| brep.edge_interval(id));
+            edge_boxes.push(match (curve, span) {
+                (Some(curve), Some(span)) => edge_box(curve, span, tolerance),
+                _ => None,
+            });
+        }
         Ok(Self {
             brep,
             faces,
             domains,
+            boxes,
+            edge_boxes,
             edge_faces,
         })
     }
@@ -892,11 +956,17 @@ impl<'a> Side<'a> {
     /// be intersected with the adjacent face's surface (a B-spline), the
     /// edge is intersected with `meets` instead: the curve crosses the edge
     /// exactly where the edge crosses `meets`.
+    ///
+    /// With a `window` (a box around everything the section can matter in),
+    /// an edge whose own box misses it is skipped: any crossing with it lies
+    /// outside the window, where the caller has cut the curve at the
+    /// window's boundary and drops the pieces (#228).
     fn cuts(
         &self,
         face: usize,
         curve: &Curve3,
         meets: &Surface,
+        window: Option<&Aabb>,
         tolerance: Tolerance,
     ) -> Result<(Vec<Scalar>, Vec<(Curve3, Interval)>), BooleanError> {
         let topology = self.brep.topology();
@@ -923,6 +993,11 @@ impl<'a> Side<'a> {
                     continue;
                 }
                 seen.push(use_.edge);
+                if let (Some(w), Some(b)) = (window, &self.edge_boxes[use_.edge.index()]) {
+                    if !w.overlaps(b) {
+                        continue;
+                    }
+                }
                 let edge = &topology.edges()[use_.edge.index()];
                 let edge_curve = edge
                     .curve

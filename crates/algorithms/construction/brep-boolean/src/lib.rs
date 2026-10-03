@@ -22,6 +22,7 @@
 //! too close to a boundary to decide is refused, not guessed.
 
 mod assemble;
+mod bounds;
 mod classify;
 mod seams;
 mod section;
