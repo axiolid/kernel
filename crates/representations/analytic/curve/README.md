@@ -2,7 +2,8 @@
 
 Exact, format-neutral curve values: lines and polylines (from
 `axiolid-linear`), conics, rational and polynomial B-splines,
-natural-equation (intrinsic) curves, elevated alignment curves, banked
+natural-equation (intrinsic) curves, arc-length chains of pieces placed
+end to end, elevated alignment curves, banked
 centrelines carrying a cant law under a named convention, and the
 curves where surfaces meet. Knots, multiplicities, weights and domains are
 kept as authored. It declares the `CurveEvaluator` seam but evaluates

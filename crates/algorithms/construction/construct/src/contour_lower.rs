@@ -160,6 +160,7 @@ fn unsupported_curve_name(curve: &Curve2) -> &'static str {
         Curve2::Polyline(_) => "polyline contour segment",
         Curve2::BSpline(_) => "B-spline contour segment",
         Curve2::Intrinsic(_) => "intrinsic contour segment",
+        Curve2::Chain(_) => "arc-length chain contour segment",
         _ => "contour segment of an unsupported curve kind",
     }
 }

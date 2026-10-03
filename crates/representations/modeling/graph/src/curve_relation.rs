@@ -14,6 +14,21 @@ pub enum TrimSelector {
     Point2(Point2),
     /// Three-dimensional point.
     Point3(Point3),
+    /// Arc length along the basis curve.
+    ///
+    /// Selects the basis parameter at which the arc length along the basis,
+    /// measured from the basis curve's parameter `0` in the sense of the
+    /// trim, equals the value: in increasing parameter when the trim agrees
+    /// with the basis, in decreasing parameter when it does not. A negative
+    /// value measures the other way.
+    ///
+    /// The value is exact stored data, and it is a parameter-kind selector:
+    /// it names a position by a measure along the curve, not by a point, so
+    /// it satisfies [`TrimmingPreference::Parameter`]. Most curves have no
+    /// closed-form arc length (a cubic parabola's is elliptic), so an
+    /// evaluator resolves the parameter by quadrature and a root find to a
+    /// tolerance it states, and a path that cannot refuses by name.
+    ArcLength(Scalar),
 }
 
 /// Preference when both parameter and Cartesian trim selectors exist.

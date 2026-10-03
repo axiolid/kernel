@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Sweep directrices resolve `TrimSelector::ArcLength` (#239) against an
+  analytic basis, in the trim's sense, through
+  `axiolid_reference::arc_parameter`; the mesh, piecewise and exact sweep
+  paths read it like a parameter selector. An arc length on a
+  curve-relation basis, or past the end of its basis, is refused by name.
+
 ## [0.3.10] - 2026-10-03
 
 ### Added

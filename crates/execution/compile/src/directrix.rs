@@ -130,8 +130,22 @@ fn resolve(
             };
             let (a, b) = match basis_curve {
                 Some(curve) => (
-                    parameter(start, *preference, "start", curve, options.tolerance())?,
-                    parameter(end, *preference, "end", curve, options.tolerance())?,
+                    parameter(
+                        start,
+                        *preference,
+                        "start",
+                        curve,
+                        *sense_agreement,
+                        options.tolerance(),
+                    )?,
+                    parameter(
+                        end,
+                        *preference,
+                        "end",
+                        curve,
+                        *sense_agreement,
+                        options.tolerance(),
+                    )?,
                 ),
                 None => (
                     parameter_only(start, *preference, "start")?,
@@ -209,20 +223,36 @@ fn parameter(
     preference: TrimmingPreference,
     label: &str,
     basis: &axiolid_curve::Curve3,
+    sense: bool,
     tolerance: axiolid_core::Tolerance,
 ) -> GeomResult<Scalar> {
     // A Cartesian selector names a POINT. Some formats can only state a trim
     // that way -- a three-point arc knows its endpoints, not their parameters
     // -- so the point is inverted against the basis rather than refused.
     // Inversion is exact or it refuses; it never projects an off-curve point.
+    // An arc length is a parameter-kind selector, resolved against the basis
+    // by quadrature (`axiolid_reference::arc_parameter`); its failure is
+    // reported, never replaced by another selector.
+    let first_parameter = || -> GeomResult<Option<Scalar>> {
+        selectors
+            .iter()
+            .find(|selector| is_parameter_kind(selector))
+            .map_or(Ok(None), |selector| {
+                parameter_kind(selector, Some(basis), sense, label)
+            })
+    };
     let selected = match preference {
-        TrimmingPreference::Parameter => selectors.iter().find_map(as_parameter),
-        TrimmingPreference::Unspecified => selectors
-            .first()
-            .and_then(as_parameter)
-            .or_else(|| invert_first_point(selectors, basis, tolerance)),
-        TrimmingPreference::Cartesian => invert_first_point(selectors, basis, tolerance)
-            .or_else(|| selectors.iter().find_map(as_parameter)),
+        TrimmingPreference::Parameter => first_parameter()?,
+        TrimmingPreference::Unspecified => match selectors.first() {
+            Some(selector) if is_parameter_kind(selector) => {
+                parameter_kind(selector, Some(basis), sense, label)?
+            }
+            _ => invert_first_point(selectors, basis, tolerance),
+        },
+        TrimmingPreference::Cartesian => match invert_first_point(selectors, basis, tolerance) {
+            Some(value) => Some(value),
+            None => first_parameter()?,
+        },
     };
     selected.filter(|value| value.is_finite()).ok_or_else(|| {
         GeomError::InvalidInput(format!(
@@ -232,6 +262,55 @@ fn parameter(
     })
 }
 
+/// Whether a selector names a position by a measure along the curve
+/// (a parameter or an arc length) rather than by a point.
+fn is_parameter_kind(selector: &TrimSelector) -> bool {
+    matches!(
+        selector,
+        TrimSelector::Parameter(_) | TrimSelector::ArcLength(_)
+    )
+}
+
+/// A parameter-kind selector read as a basis parameter.
+///
+/// An arc length is measured from the basis parameter `0` in the trim's
+/// sense, to the tolerance `axiolid_reference::arc_parameter` states. It
+/// needs an analytic basis to measure along: on a relation basis it is
+/// refused by name rather than read as a parameter.
+fn parameter_kind(
+    selector: &TrimSelector,
+    basis: Option<&axiolid_curve::Curve3>,
+    sense: bool,
+    label: &str,
+) -> GeomResult<Option<Scalar>> {
+    match selector {
+        TrimSelector::Parameter(value) => Ok(Some(*value)),
+        TrimSelector::ArcLength(length) => {
+            let Some(curve) = basis else {
+                return Err(GeomError::InvalidInput(format!(
+                    "trimmed directrix {label} is an arc-length selector, but its basis \
+                     is a curve relation with no single curve to measure along"
+                )));
+            };
+            if !length.is_finite() {
+                return Err(GeomError::InvalidInput(format!(
+                    "trimmed directrix {label} arc length must be finite"
+                )));
+            }
+            let signed = if sense { *length } else { -*length };
+            axiolid_reference::arc_parameter::parameter_at_arc_length3(curve, 0.0, signed)
+                .map(Some)
+                .map_err(|error| {
+                    GeomError::InvalidInput(format!(
+                        "trimmed directrix {label} arc length {length} does not resolve on \
+                         its basis: {error}"
+                    ))
+                })
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Parameter selectors only, for a basis with no invertible analytic curve.
 fn parameter_only(
     selectors: &[TrimSelector],
@@ -239,9 +318,12 @@ fn parameter_only(
     label: &str,
 ) -> GeomResult<Scalar> {
     let selected = match preference {
-        TrimmingPreference::Parameter | TrimmingPreference::Unspecified => {
-            selectors.iter().find_map(as_parameter)
-        }
+        TrimmingPreference::Parameter | TrimmingPreference::Unspecified => selectors
+            .iter()
+            .find(|selector| is_parameter_kind(selector))
+            .map_or(Ok(None), |selector| {
+                parameter_kind(selector, None, true, label)
+            })?,
         // The basis is a relation, so there is no analytic curve to invert a
         // point against. Refusing names that, rather than silently using a
         // parameter the file did not designate as authoritative.
@@ -372,13 +454,6 @@ fn periodic_trim_interval(
             let (s, e) = if s == e { (lo, hi) } else { (s, e) };
             Ok((s.min(e), s.max(e)))
         }
-    }
-}
-
-fn as_parameter(selector: &TrimSelector) -> Option<Scalar> {
-    match selector {
-        TrimSelector::Parameter(value) => Some(*value),
-        _ => None,
     }
 }
 
@@ -638,8 +713,22 @@ fn exact_at(
                     "exact swept disk along a trim of a curve relation",
                 ));
             };
-            let a = parameter(start, *preference, "start", curve, options.tolerance())?;
-            let b = parameter(end, *preference, "end", curve, options.tolerance())?;
+            let a = parameter(
+                start,
+                *preference,
+                "start",
+                curve,
+                *sense_agreement,
+                options.tolerance(),
+            )?;
+            let b = parameter(
+                end,
+                *preference,
+                "end",
+                curve,
+                *sense_agreement,
+                options.tolerance(),
+            )?;
             if a == b {
                 return Err(GeomError::Degenerate(
                     "trimmed directrix has an empty interval".into(),
@@ -767,8 +856,22 @@ fn smooth_kind(
             if !smooth(curve) {
                 return Ok(DirectrixKind::Other("trimmed directrix curve family"));
             }
-            let a = parameter(start, *preference, "start", curve, options.tolerance())?;
-            let b = parameter(end, *preference, "end", curve, options.tolerance())?;
+            let a = parameter(
+                start,
+                *preference,
+                "start",
+                curve,
+                *sense_agreement,
+                options.tolerance(),
+            )?;
+            let b = parameter(
+                end,
+                *preference,
+                "end",
+                curve,
+                *sense_agreement,
+                options.tolerance(),
+            )?;
             if let Some(period) = period_of(curve) {
                 let (lo, hi) =
                     periodic_trim_interval(period, a, b, *sense_agreement, range, options)?;

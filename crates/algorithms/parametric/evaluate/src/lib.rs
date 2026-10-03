@@ -16,8 +16,10 @@
 //! surface too: renaming or reshaping an item here breaks those callers.
 
 pub mod arc_length;
+pub mod arc_parameter;
 pub mod banked;
 pub mod bound;
+pub mod chain;
 pub mod curve;
 pub mod elevation;
 pub mod frenet;
@@ -28,7 +30,12 @@ pub mod provider;
 pub mod surface;
 
 pub use arc_length::{elevated_point, elevated_tangent, intrinsic_point, intrinsic_tangent};
+pub use arc_parameter::{
+    arc_length2, arc_length3, parameter_at_arc_length2, parameter_at_arc_length3,
+    ARC_LENGTH_TOLERANCE,
+};
 pub use banked::{banked_derivative, banked_point, banked_section, banked_tangent, BankedSection};
+pub use chain::{chain_point, chain_tangent};
 pub use curve::{derivative2, derivative3, evaluate2, evaluate3, flatten2, ScalarCurve};
 pub use elevation::{elevation_chord_bound, elevation_grade, elevation_height};
 pub use frenet::{frenet_frame, frenet_point, frenet_tangent};

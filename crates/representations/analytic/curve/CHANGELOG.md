@@ -40,6 +40,18 @@ caret rule for `0.x` versions.
 - `ElevationLaw::circular_arc`, `ElevationLaw::intrinsic` and
   `ElevationLaw::piece_at`, the innermost piece of a composed law at a
   distance, rebased to its own start.
+- `Curve2::Chain(Chain2)` (#239): a plane curve parameterised by
+  cumulative arc length, its pieces placed rigidly end to end from a start
+  frame. `ChainPiece2::Intrinsic { curvature, length }` is a curvature-law
+  piece; `ChainPiece2::Parametric { curve, start, length }` reads any
+  `Curve2`, written in the piece's local frame (through the origin with
+  tangent `+x` at `start`), by arc length over `length`. Each piece starts
+  at the previous end point along the previous end tangent, so a chain is
+  tangent-continuous at its joins: a layout such as line, cubic parabola,
+  arc is one exact value. `Chain2::is_well_formed`, `length`, `joins` and
+  `piece_at` read the data; evaluation lives in `axiolid-evaluate`.
+  `Elevated3` takes a chain as its plan, since its parameter is plan
+  distance (ADR 0060).
 
 ## [0.3.2] - 2026-09-28
 

@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Re-exports `axiolid_evaluate::arc_parameter` and
+  `axiolid_evaluate::chain` (#239).
+
 ## [0.3.4] - 2026-10-03
 
 ### Added

@@ -40,6 +40,33 @@ caret rule for `0.x` versions.
   profiles; `None` across a piecewise seam, outside a law's domain, or for
   a family it does not bound.
 
+- `arc_parameter` (#239): `arc_length2`/`arc_length3` (signed arc length
+  between two parameters of any evaluable curve) and
+  `parameter_at_arc_length2`/`parameter_at_arc_length3` (the parameter at
+  a signed arc length from a start parameter). Adaptive 8-point
+  Gauss-Legendre of the speed, split at knots and vertices, and a
+  bracketed Newton root find, both to `ARC_LENGTH_TOLERANCE` (`1e-12`)
+  relative to `max(1, length)`; lines, intrinsic curves and chains are
+  exact. A length past the end of a bounded curve (named with the length
+  available), a start outside the domain, non-finite input and a
+  quadrature past `MAX_PANELS` are refused by name. Against the binomial
+  series of a cubic parabola the inverse lands within `1e-13` relative.
+- `chain` (#239): `chain_point` and `chain_tangent` evaluate a
+  `Curve2::Chain` by arc length; `evaluate2`, `derivative2` and `domain2`
+  take a chain, and an `Elevated3` over a chain evaluates by plan
+  distance (`elevated_point`, `elevated_tangent`, `ReferenceCurveEvaluator`,
+  and so `Curve3::Banked` over it). A piece longer than its curve, a
+  parametric piece off its local frame by more than
+  `PIECE_FRAME_TOLERANCE`, a malformed chain and a distance outside the
+  chain are refused by name.
+- Chains in the certified flattening (#232): `chord_bound2` bounds a span
+  inside one piece (an intrinsic piece by `h^2/8` times a bound on its
+  curvature law, a parametric piece by its curve's own chord bound between
+  the parameters the span reads), `continuity_breaks2` names the joins,
+  and `certifies_flattening2` accepts a chain whose intrinsic pieces have
+  bounded laws and whose parametric pieces are certified families with no
+  corner.
+
 ### Changed
 
 - `elevated_point`, `elevated_tangent` and `banked_derivative` read the

@@ -6,6 +6,7 @@
 //! `axiolid-model`; keeping them there avoids a curve/surface dependency cycle.
 
 pub mod banked;
+pub mod chain;
 pub mod conic;
 pub mod elevation;
 pub mod evaluate;
@@ -23,6 +24,7 @@ pub mod torus_section;
 pub use banked::{
     bank_angle, BankConvention, BankError, Banked3, CantForm, CantLaw, CantPiece, CantValue,
 };
+pub use chain::{Chain2, ChainPiece2};
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
@@ -86,6 +88,11 @@ pub enum Curve2 {
     /// curve's parameter: the pcurve of a B-spline's section on the analytic
     /// face it meets. See [`LiftedCurve2`] (ADR 0077).
     Lifted(LiftedCurve2),
+    /// Pieces placed rigidly end to end and parameterised by cumulative arc
+    /// length: curvature-law pieces and parametric curves read by arc
+    /// length, such as a cubic parabola between a line and an arc. Usable
+    /// as the plan of an [`Elevated3`]. See [`Chain2`].
+    Chain(Chain2),
 }
 
 /// Atomic three-dimensional curve values.

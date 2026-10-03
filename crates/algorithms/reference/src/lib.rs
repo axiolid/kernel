@@ -37,6 +37,9 @@ pub mod triangle_triangle;
 /// Certified derivative and chord bounds (#232), re-exported on the same
 /// footing as `curve` and `surface`.
 pub use axiolid_evaluate::bound;
+/// Arc length along any evaluable curve and its inverse, and arc-length
+/// chains (#239), re-exported on the same footing as `curve` and `surface`.
+pub use axiolid_evaluate::{arc_parameter, chain};
 /// Analytic and spline evaluation moved to the focused `axiolid-evaluate`
 /// package (ADR 0036). Re-exported unchanged so existing
 /// `axiolid_reference::curve::*` and `::surface::*` callers are unaffected.

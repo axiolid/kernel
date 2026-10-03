@@ -91,6 +91,14 @@ pub fn domain2(curve: &Curve2) -> Interval {
         },
         // Periodic in the angle it is parameterised by, like a circle.
         Curve2::Sinusoid(_) => full_turn(),
+        // Arc length from the chain start to its end.
+        Curve2::Chain(c) => c.length().map_or(
+            Interval {
+                start: 0.0,
+                end: 0.0,
+            },
+            |end| Interval { start: 0.0, end },
+        ),
         // Unknown family: no domain is knowable, so claim none.
         _ => Interval {
             start: 0.0,
@@ -184,6 +192,8 @@ pub fn evaluate2(curve: &Curve2, t: Scalar) -> GeomResult<Point2> {
         // (a clothoid needs Fresnel integrals), so it is quadrature over the
         // exact heading rather than a parametric formula.
         Curve2::Intrinsic(i) => crate::arc_length::intrinsic_point(i, t),
+        // Arc length too: each piece placed at the end of the one before.
+        Curve2::Chain(c) => crate::chain::chain_point(c, t),
         // The parameter is the first coordinate; closed form, no sampling.
         Curve2::Sinusoid(w) => Ok(Point2::new(t, w.height(t))),
         // Likewise, one root of a quadratic in the height (ADR 0076).
@@ -231,6 +241,7 @@ pub fn derivative2(curve: &Curve2, t: Scalar) -> GeomResult<Vec2> {
         // the heading it is built from is exact -- only position needs
         // quadrature, never the tangent.
         Curve2::Intrinsic(i) => crate::arc_length::intrinsic_tangent(i, t),
+        Curve2::Chain(c) => crate::chain::chain_tangent(c, t),
         Curve2::Sinusoid(w) => {
             let (sin, cos) = t.sin_cos();
             Ok(Vec2::new(1.0, -w.cosine * sin + w.sine * cos))

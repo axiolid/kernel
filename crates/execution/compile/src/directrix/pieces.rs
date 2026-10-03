@@ -72,8 +72,22 @@ fn resolve(
             };
             let (a, b) = match basis_curve {
                 Some(curve) => (
-                    parameter(start, *preference, "start", curve, options.tolerance())?,
-                    parameter(end, *preference, "end", curve, options.tolerance())?,
+                    parameter(
+                        start,
+                        *preference,
+                        "start",
+                        curve,
+                        *sense_agreement,
+                        options.tolerance(),
+                    )?,
+                    parameter(
+                        end,
+                        *preference,
+                        "end",
+                        curve,
+                        *sense_agreement,
+                        options.tolerance(),
+                    )?,
                 ),
                 None => (
                     parameter_only(start, *preference, "start")?,

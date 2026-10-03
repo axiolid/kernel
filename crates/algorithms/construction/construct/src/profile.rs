@@ -248,6 +248,9 @@ fn segment_deviation(curve: &Curve2, chord_error: Scalar) -> ProfileDeviation {
             ProfileDeviation::Bounded(chord_error)
         }
         Curve2::Intrinsic(_) => ProfileDeviation::Unbounded("intrinsic (clothoid) profile segment"),
+        Curve2::Chain(_) => {
+            ProfileDeviation::Unbounded("arc-length chain profile segment with an unbounded piece")
+        }
         Curve2::BSpline(_) => {
             ProfileDeviation::Unbounded("B-spline profile segment with a non-positive weight")
         }

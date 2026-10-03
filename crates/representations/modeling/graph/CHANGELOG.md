@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `TrimSelector::ArcLength(Scalar)` (#239): selects the basis parameter
+  where the arc length along the basis, measured from its parameter `0` in
+  the trim's sense, equals the value. Stored exactly; an evaluator resolves
+  it by quadrature and a root find to a stated tolerance. It is a
+  parameter-kind selector: it satisfies `TrimmingPreference::Parameter`,
+  a non-finite value is refused by validation, and equal arc lengths are an
+  empty trim.
+
 ## [0.3.3] - 2026-09-28
 
 ### Changed

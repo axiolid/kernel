@@ -152,6 +152,7 @@ fn trim_selector_is_finite_2d(selector: &TrimSelector) -> bool {
         TrimSelector::Parameter(value) => value.is_finite(),
         TrimSelector::Point2(point) => point.is_finite(),
         TrimSelector::Point3(_) => false,
+        TrimSelector::ArcLength(value) => value.is_finite(),
     }
 }
 
@@ -160,9 +161,14 @@ fn trim_end_supports_preference(
     preference: TrimmingPreference,
 ) -> bool {
     match preference {
-        TrimmingPreference::Parameter => selectors
-            .iter()
-            .any(|selector| matches!(selector, TrimSelector::Parameter(_))),
+        // An arc length names a position by a measure along the curve, so it
+        // is a parameter-kind selector.
+        TrimmingPreference::Parameter => selectors.iter().any(|selector| {
+            matches!(
+                selector,
+                TrimSelector::Parameter(_) | TrimSelector::ArcLength(_)
+            )
+        }),
         TrimmingPreference::Cartesian => selectors
             .iter()
             .any(|selector| matches!(selector, TrimSelector::Point2(_))),
@@ -175,6 +181,7 @@ fn trim_selectors_definitely_equal(start: &[TrimSelector], end: &[TrimSelector])
         end.iter().any(|right| match (left, right) {
             (TrimSelector::Parameter(a), TrimSelector::Parameter(b)) => a == b,
             (TrimSelector::Point2(a), TrimSelector::Point2(b)) => a == b,
+            (TrimSelector::ArcLength(a), TrimSelector::ArcLength(b)) => a == b,
             _ => false,
         })
     })

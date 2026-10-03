@@ -362,12 +362,18 @@ fn bspline_breaks<P>(curve: &BSplineCurve<P>, k: usize) -> Vec<Scalar> {
 
 /// Parameters strictly inside the curve's domain where a 2D curve may fail
 /// to be `C^k` (`k >= 1`): a polyline's vertices, a B-spline's knots of
-/// multiplicity above `degree - k`. Empty for the smooth families.
+/// multiplicity above `degree - k`, an arc-length chain's joins (where its
+/// curvature may jump; the chain is `C^1` there, but each piece is bounded
+/// on its own). Empty for the smooth families.
 #[must_use]
 pub fn continuity_breaks2(curve: &Curve2, k: usize) -> Vec<Scalar> {
     match curve {
         Curve2::BSpline(b) => bspline_breaks(b, k),
         Curve2::Polyline(p) if k >= 1 => polyline_breaks(p.points.len(), p.closed),
+        // A chain is tangent-continuous at its joins by construction, but
+        // each piece is bounded on its own, so the joins are named for
+        // every `k`.
+        Curve2::Chain(c) if k >= 1 => c.joins().unwrap_or_default(),
         _ => Vec::new(),
     }
 }
@@ -530,6 +536,7 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         )),
         Curve2::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y], a, b)
             .map(|(_, chord)| inflate(taylor(b - a, chord))),
+        Curve2::Chain(chain) => crate::chain::chain_chord_bound(chain, a, b),
         _ => curve_derivative_bounds2(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
 }
@@ -570,7 +577,8 @@ fn taylor(h: Scalar, second: Scalar) -> Scalar {
 /// Whether [`crate::curve::flatten2`] certifies its chords for this family:
 /// every point of the curve then lies within the chord tolerance of the
 /// returned polyline (#232). Lines, polylines, circles, ellipses,
-/// sinusoids and B-splines with positive weights; other families are
+/// sinusoids, B-splines with positive weights and arc-length chains whose
+/// pieces are all bounded ([`crate::chain::chain_certifies`]); other families are
 /// flattened on their midpoint sagitta alone, which is a measurement, not a
 /// bound.
 #[must_use]
@@ -582,6 +590,7 @@ pub fn certifies_flattening2(curve: &Curve2) -> bool {
         | Curve2::Ellipse(_)
         | Curve2::Sinusoid(_) => true,
         Curve2::BSpline(b) => spline_weights_positive(b.weights.as_deref()),
+        Curve2::Chain(c) => crate::chain::chain_certifies(c),
         _ => false,
     }
 }

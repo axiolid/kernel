@@ -177,8 +177,8 @@ fn rotate2(frame: &Frame2, local: Vec2) -> Vec2 {
 /// Position on the plan at plan distance `d`.
 ///
 /// Only families whose parameter IS arc length can carry an elevation law,
-/// because the law is written against distance along the plan. A line and an
-/// intrinsic curve qualify; a B-spline's parameter is not arc length, so
+/// because the law is written against distance along the plan. A line, an
+/// intrinsic curve and an arc-length chain qualify; a B-spline's parameter is not arc length, so
 /// pairing one would silently mean something else and is refused.
 fn plan_point(plan: &Curve2, d: Scalar) -> GeomResult<Point2> {
     match plan {
@@ -201,6 +201,7 @@ fn plan_point(plan: &Curve2, d: Scalar) -> GeomResult<Point2> {
             ))
         }
         Curve2::Intrinsic(intrinsic) => intrinsic_point(intrinsic, d),
+        Curve2::Chain(chain) => crate::chain::chain_point(chain, d),
         _ => Err(unsupported()),
     }
 }
@@ -217,6 +218,7 @@ fn plan_tangent(plan: &Curve2, d: Scalar) -> GeomResult<Vec2> {
             Ok(rotate2(&circle.frame, Vec2::new(-angle.sin(), angle.cos())))
         }
         Curve2::Intrinsic(intrinsic) => intrinsic_tangent(intrinsic, d),
+        Curve2::Chain(chain) => unit2(crate::chain::chain_tangent(chain, d)?),
         _ => Err(unsupported()),
     }
 }

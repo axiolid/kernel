@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A `Curve2::Chain` profile segment is named in deviation reports
+  (`arc-length chain profile segment with an unbounded piece`) and in
+  contour-lowering refusals (#239); a chain the flattener certifies is
+  bounded by the chord budget like any other certified family.
+
 ## [0.3.11] - 2026-10-03
 
 ### Added
