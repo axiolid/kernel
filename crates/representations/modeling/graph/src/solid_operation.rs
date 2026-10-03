@@ -84,20 +84,6 @@ pub enum SolidOperation {
         spine: NodeId,
         sections: Vec<Section>,
     },
-    /// Closed profiles standing at stations along a directrix (#241).
-    ///
-    /// Each profile is placed in the directrix's `frame` at its station
-    /// (profile `x` to the lateral axis, `y` to up, normal along the
-    /// tangent; see [`crate::station`]). Between two stations the profiles
-    /// are matched vertex for vertex, by ring and index, and interpolated
-    /// linearly in distance, as are the offsets, so every section must
-    /// flatten to the same ring structure. At least two sections, strictly
-    /// increasing in distance, are required.
-    StationedSpine {
-        directrix: NodeId,
-        sections: Vec<StationedSection>,
-        frame: StationFrame,
-    },
     /// General CSG binary operation.
     Boolean {
         left: NodeId,
@@ -120,6 +106,20 @@ pub enum SolidOperation {
         /// plane, so a component along the normal is dropped rather than
         /// tilting the profile out of its own plane.
         placement: Transform3,
+    },
+    /// Closed profiles standing at stations along a directrix (#241).
+    ///
+    /// Each profile is placed in the directrix's `frame` at its station
+    /// (profile `x` to the lateral axis, `y` to up, normal along the
+    /// tangent; see [`crate::station`]). Between two stations the profiles
+    /// are matched vertex for vertex, by ring and index, and interpolated
+    /// linearly in distance, as are the offsets, so every section must
+    /// flatten to the same ring structure. At least two sections, strictly
+    /// increasing in distance, are required.
+    StationedSpine {
+        directrix: NodeId,
+        sections: Vec<StationedSection>,
+        frame: StationFrame,
     },
 }
 
