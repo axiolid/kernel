@@ -11,6 +11,32 @@
 //! Anything else is REFUSED rather than sampled. Tessellating an ellipse or a
 //! spline into short chords would produce a solid that looks right, passes
 //! every closure check, and silently is not the requested shape.
+//!
+//! # Closure at `Tolerance::ZERO` (#250)
+//!
+//! A ring is a cycle of vertices, each carrying the bulge of the edge that
+//! leaves it, so it is closed by construction: the vertex at a joint is ONE
+//! value, the end of the edge entering it and the start of the edge leaving
+//! it. It is the leaving segment's start -- a line's stored origin bit for
+//! bit, an arc's circle at its first parameter -- and nothing is averaged
+//! or moved onto it.
+//!
+//! The segments themselves cannot meet exactly in floating point, however
+//! carefully the producer shares its points (the section router computes
+//! every corner and tangent point once and hands that one value to both
+//! segments). A line stored as `origin + t direction` ends at
+//! `origin + direction`, which rounds, and its stored direction is already
+//! the rounded difference of the two points; an arc ends at the `cos` and
+//! `sin` of a transcendental sweep. No choice of `Line2` or `Circle2` makes
+//! both ends of every segment bit-exact. So the joint check compares the
+//! entering segment's evaluated end with the leaving segment's start
+//! against the larger of the caller's tolerance and the rounding of those
+//! two evaluations: eight machine epsilons of the magnitudes they are
+//! computed from, a few ulps of the coordinates. That is what lets a
+//! section with non-dyadic sizes (IPE 300 left 2.6e-18 at the flange tip)
+//! lower at `Tolerance::ZERO`, while a contour open by more than its own
+//! rounding is still refused there. The check only decides WHETHER a ring
+//! is built, never what it is: a ring that lowered before is bit-identical.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Scalar, Tolerance};
@@ -20,9 +46,11 @@ use axiolid_profile::{Contour, ProfileSegment};
 
 /// Convert one closed contour into an arc ring.
 ///
-/// Returns the ring in contour order. Segment endpoints must already meet;
-/// gaps are reported rather than closed, because a silently bridged gap
-/// changes the profile the caller asked for.
+/// Returns the ring in contour order, one vertex per joint. Segment
+/// endpoints must already meet, within `tolerance` or within the rounding of
+/// their own evaluation, whichever is larger (see the module notes on
+/// `Tolerance::ZERO`); gaps are reported rather than closed, because a
+/// silently bridged gap changes the profile the caller asked for.
 pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResult<ArcRing> {
     if contour.segments.len() < 2 {
         return Err(GeomError::InvalidInput(format!(
@@ -32,27 +60,30 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
     }
 
     let mut vertices = Vec::with_capacity(contour.segments.len());
-    let mut previous_end: Option<Point2> = None;
+    let mut previous_end: Option<(Point2, Scalar)> = None;
+    let mut first_scale = 0.0;
 
     for segment in &contour.segments {
-        let (pieces, end) = lower_segment(segment)?;
-        let start = pieces[0].point;
-        if let Some(previous) = previous_end {
+        let lowered = lower_segment(segment)?;
+        let start = lowered.vertices[0].point;
+        if let Some((previous, previous_scale)) = previous_end {
             let gap = (start - previous).length();
-            if gap > tolerance.linear() {
+            if gap > joint_slack(tolerance, previous_scale, lowered.start_scale) {
                 return Err(GeomError::InvalidInput(format!(
                     "contour segments leave a gap of {gap} at {start:?}"
                 )));
             }
+        } else {
+            first_scale = lowered.start_scale;
         }
-        vertices.extend(pieces);
-        previous_end = Some(end);
+        vertices.extend(lowered.vertices);
+        previous_end = Some((lowered.end, lowered.end_scale));
     }
 
     // The contour must close back onto its own first vertex.
-    if let (Some(last), Some(first)) = (previous_end, vertices.first()) {
+    if let (Some((last, last_scale)), Some(first)) = (previous_end, vertices.first()) {
         let gap = (first.point - last).length();
-        if gap > tolerance.linear() {
+        if gap > joint_slack(tolerance, last_scale, first_scale) {
             return Err(GeomError::InvalidInput(format!(
                 "contour does not close: {gap} from last segment end to start"
             )));
@@ -62,9 +93,43 @@ pub fn contour_to_arc_ring(contour: &Contour, tolerance: Tolerance) -> GeomResul
     Ok(ArcRing::new(vertices))
 }
 
-/// One segment as the ring vertices it contributes (each with the bulge of
-/// the edge leaving it) and its end point.
-fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Vec<ArcVertex>, Point2)> {
+/// Rounding of one evaluated segment endpoint, per unit of the magnitudes
+/// it is computed from.
+///
+/// A line's end `origin + direction t` rounds twice (product and sum), and
+/// its stored direction is already the rounded difference of the two points
+/// the producer shared. An arc's end `centre + x r cos + y r sin` adds the
+/// `sin`/`cos` error and frame axes that are unit only to an ulp or two
+/// after normalisation. Each step is at most half an ulp of what it
+/// touches, so eight machine epsilons (~1.8e-15) of the operand magnitudes
+/// bound one side of a joint with room; a contour placed by an affine map
+/// adds the map's own few roundings and stays inside it. A joint closer
+/// than that is the representation's rounding, not a gap anyone drew.
+const JOINT_ROUNDING: Scalar = 8.0 * Scalar::EPSILON;
+
+/// The largest gap a joint may show: the caller's tolerance, or the
+/// rounding of the two endpoint evaluations that meet there when that is
+/// larger (at `Tolerance::ZERO`, or a tolerance below an ulp of the
+/// coordinates).
+fn joint_slack(tolerance: Tolerance, entering: Scalar, leaving: Scalar) -> Scalar {
+    tolerance
+        .linear()
+        .max(JOINT_ROUNDING * (entering + leaving))
+}
+
+/// One segment lowered: the ring vertices it contributes (each with the
+/// bulge of the edge leaving it), its evaluated end point, and the
+/// magnitudes its start and end are evaluated from, which bound their
+/// rounding (see `JOINT_ROUNDING`).
+struct LoweredSegment {
+    vertices: Vec<ArcVertex>,
+    end: Point2,
+    start_scale: Scalar,
+    end_scale: Scalar,
+}
+
+/// One segment as the ring vertices it contributes and its end point.
+fn lower_segment(segment: &ProfileSegment) -> GeomResult<LoweredSegment> {
     let (from, to) = if segment.same_sense {
         (segment.domain.start, segment.domain.end)
     } else {
@@ -75,15 +140,28 @@ fn lower_segment(segment: &ProfileSegment) -> GeomResult<(Vec<ArcVertex>, Point2
         Curve2::Line(line) => {
             let start = line.origin + line.direction * from;
             let end = line.origin + line.direction * to;
-            Ok((
-                vec![ArcVertex {
+            let origin = line.origin.length();
+            let direction = line.direction.length();
+            Ok(LoweredSegment {
+                vertices: vec![ArcVertex {
                     point: start,
                     bulge: 0.0,
                 }],
                 end,
-            ))
+                start_scale: origin + direction * from.abs(),
+                end_scale: origin + direction * to.abs(),
+            })
         }
-        Curve2::Circle(circle) => lower_arc(circle, from, to),
+        Curve2::Circle(circle) => {
+            let (vertices, end) = lower_arc(circle, from, to)?;
+            let scale = circle.frame.origin.length() + circle.radius.abs();
+            Ok(LoweredSegment {
+                vertices,
+                end,
+                start_scale: scale,
+                end_scale: scale,
+            })
+        }
         other => Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Sweep,

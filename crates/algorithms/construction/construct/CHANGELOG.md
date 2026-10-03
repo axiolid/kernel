@@ -9,6 +9,37 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Parametric profiles with decimal sizes lower at `Tolerance::ZERO`
+  (#250).** `contour_lower::contour_to_arc_ring` demanded bit-equal
+  segment joints at `Tolerance::ZERO`, which a `Line2`/`Circle2` contour
+  cannot give for non-dyadic sizes: a line ends at a rounded
+  `origin + direction`, an arc at the `cos`/`sin` of its sweep. So every
+  I section with IPE or HEA sizes (sharp or with root fillets), and the
+  other families with decimal sizes, was refused before any boolean ran
+  ("contour segments leave a gap of 2.6e-18"). The section router already
+  computes each corner and tangent point once and hands it to both
+  segments; the ring takes one vertex per joint (the leaving segment's
+  start, a line's stored origin bit for bit), so it is closed by
+  construction. The joint check now allows the larger of the tolerance
+  and the rounding of the two evaluations meeting there (eight machine
+  epsilons of the magnitudes they are computed from); a contour open by
+  more is still refused at `Tolerance::ZERO`. Rings are bit-identical to
+  before wherever lowering succeeded, so results at a positive tolerance
+  are unchanged. Tests: I (IPE 300/200, HEA 200, HEB 340; sharp, root
+  fillets, toe radii), asymmetric I, T, U, L, Z, C, trapezium, rounded
+  and hollow rectangles and an annulus lower at ZERO with each line's
+  shared corner as its ring vertex, and extrude at ZERO to their
+  closed-form areas, fillet terms `(1 - pi/4) r^2` included; tapered
+  I/U/L/T lower and extrude at ZERO; joints far from the origin close to
+  their own rounding; contours open by 1e-13 or 1e-9 are refused at ZERO.
+  In `axiolid-mesh-compile`, an IPE 300 beam (with and without fillets)
+  minus a round web hole clear of the fillets compiles at ZERO under
+  exact placements with an empty report and the closed-form volume.
+  Mutation probe: `scripts/probe_section_zero_tolerance_mutants.py`
+  (9/9 killed).
+
 ## [0.3.13] - 2026-10-03
 
 ### Fixed
