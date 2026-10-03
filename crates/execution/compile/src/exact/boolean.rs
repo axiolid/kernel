@@ -181,6 +181,9 @@ fn remap_boolean_error(error: BooleanError) -> GeomError {
         BooleanError::TangentSplit => "exact boolean with tangent pieces leaving one vertex",
         BooleanError::AmbiguousCavity => "exact boolean leaving a cavity inside no solid",
         BooleanError::Assembly => "exact boolean whose kept faces do not sew into a solid",
+        BooleanError::NearCoincidence => {
+            "exact boolean with features chained within tolerance over more than it"
+        }
         BooleanError::Evaluation => "exact boolean over a curve or surface it cannot evaluate",
         BooleanError::DanglingReference => "exact boolean over a dangling operand handle",
         BooleanError::Measure(_) => "exact boolean over a face whose domain cannot be built",

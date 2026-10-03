@@ -170,6 +170,15 @@ both apply, which becomes a differential test.
 - Tolerant (near-coincident) inputs from real IFC models: faces within
   tolerance but not exactly coincident need a merge policy; stage 1 treats
   them as distinct and refuses slivers below tolerance by name.
+  **Amended (#228, ADR 0080):** the policy is to read such features as
+  coincident, touching or running along within the caller's tolerance
+  (linear for distances, angular for directions, no built-in constant),
+  so that a result is the exact boolean of operands moved by at most the
+  tolerance, with every surface and curve exact for them. Readings no
+  single such perturbation explains (cuts chained over more than the
+  tolerance) are refused by name; features further apart than the
+  tolerance still go through the exact predicates. The decisions and the
+  guarantee are listed in the crate docs of `axiolid-brep-boolean`.
 
 ## Relation to existing code
 

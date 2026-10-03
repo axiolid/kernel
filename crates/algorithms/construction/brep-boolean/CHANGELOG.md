@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `BooleanError::NearCoincidence`: features chained within tolerance of
+  each other over more than the tolerance, which no single perturbation
+  within tolerance reconciles, are refused by name (#228).
+- The crate docs state what a result guarantees: which decisions are
+  exact, which are taken within the caller's tolerance, and that the
+  result is then the exact boolean of operands moved by at most it.
+
 ### Fixed
 
 - Operands placed by independent rigid motions cut each other (#228). Their
@@ -23,6 +32,11 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- Every within-tolerance decision uses the caller's `Tolerance` only:
+  distances its linear part, with no built-in `1e-9` floor, and the
+  coincidence and contact tests on normals and axes its angular part
+  instead of a fixed `1e-9`. With `Tolerance::METRE` results are
+  unchanged.
 - Work between faces that cannot meet is skipped (#228). Each face and
   edge gets a sound box from its surface or curve in closed form, enlarged
   by the linear tolerance; face pairs whose boxes are apart are not

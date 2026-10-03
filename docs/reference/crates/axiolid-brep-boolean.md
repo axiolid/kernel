@@ -22,7 +22,10 @@ and B-spline surfaces: the general-fuse pipeline of ADR 0075 (section edges,
 face splitting in each face's own parameters, certified classification,
 sewing). Operands that touch rather than cross are handled. Nothing is
 meshed or fitted: a configuration the pipeline cannot build exactly is
-refused with a typed error. It does not tessellate its result and does not
+refused with a typed error. Faces that agree only up to rounding (operands
+placed separately) are read within the caller's tolerance; the result is
+then the exact boolean of operands moved by at most that tolerance (see the
+crate docs). It does not tessellate its result and does not
 work on meshes; mesh booleans are operation providers selected through the
 execution layer.
 

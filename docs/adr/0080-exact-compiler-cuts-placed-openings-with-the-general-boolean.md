@@ -48,9 +48,38 @@ the general exact boolean, and `axiolid-mesh-compile` depends on
   raises. An emptied subject is `GeomError::Degenerate`.
 - Independently placed operands meet faces that agree only up to
   rounding. The general boolean reads them within tolerance where its
-  exact predicates would otherwise see the residue (see the
-  `section` module docs): a section along an edge, a tangent crossing, near
-  cuts, and a plane parallel or perpendicular to a cylinder's axis.
+  exact predicates would otherwise see the residue: a section along an
+  edge, a tangent crossing, near cuts and boundary splits, and a plane
+  parallel or perpendicular to, or touching, a cylinder.
+
+### What a result guarantees
+
+- **Source of the tolerance.** The caller's `ExecutionOptions` tolerance,
+  passed through unchanged: its linear part `eps` for every distance, its
+  angular part `alpha` for the coincidence and contact of normals and
+  axes. No decision uses a built-in constant; bookkeeping in face
+  parameters (welding one vertex's two evaluations, ordering pieces at a
+  vertex) uses slacks far below any tolerance and refuses what it cannot
+  order.
+- **Exact decisions.** Which section two supports have (except the
+  plane/cylinder reading below), where a section crosses the surface next
+  to an edge, whether a point lies in a face (certified) or in a solid
+  (ray parity over exact intersections).
+- **Within-tolerance decisions.** Coincident supports, contact, a point on
+  an edge, a section along an edge (proved over the whole edge for lines
+  and circles, never read for other pairs), a tangent crossing recovered
+  from the edge, cuts and splits within `eps` of each other, and a plane
+  parallel (`|n . a| * extent <= eps` over the faces' common box),
+  perpendicular (`r sin(theta) <= eps`) or touching (`eps`) a cylinder.
+- **Guarantee.** With no within-tolerance decision the result is the exact
+  boolean of the operands. Otherwise it is the exact boolean of operands
+  whose faces moved by at most `eps` (turned by at most `alpha` for a
+  direction decision), every surface and curve exact for them. A reading
+  that no single such perturbation explains is refused by name (cuts
+  chained over more than `eps`: `BooleanError::NearCoincidence`). Features
+  further apart than `eps` go through the exact predicates: a skin or a
+  sliver ten tolerances thick is kept (tests in
+  `crates/execution/compile/tests/exact_placed_boolean.rs`).
 
 ## Alternatives considered
 

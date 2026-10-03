@@ -178,7 +178,7 @@ pub(crate) fn with_seams(
     tolerance: Tolerance,
 ) -> Result<Option<ExactBRep>, BooleanError> {
     let topology = brep.topology();
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     // Per face: its loops as uses, unwrapped, and each loop's winding.
     let mut plans: Vec<Option<Plan>> = Vec::with_capacity(topology.faces().len());
     for face in topology.faces() {

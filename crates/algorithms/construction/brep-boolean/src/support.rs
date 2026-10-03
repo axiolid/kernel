@@ -8,8 +8,9 @@ use core::f64::consts::TAU;
 /// half-walls lie on one cylinder parameterised from opposite sides, and two
 /// operands' coplanar faces on one plane with unrelated frames.
 pub(crate) fn same_support(a: &Surface, b: &Surface, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear().max(1e-9);
-    let parallel = |x: Vec3, y: Vec3| x.normalize().cross(y.normalize()).length() <= 1e-9;
+    let eps = tolerance.linear();
+    let parallel =
+        |x: Vec3, y: Vec3| x.normalize().cross(y.normalize()).length() <= tolerance.angular();
     let same_way = |x: Vec3, y: Vec3| parallel(x, y) && x.dot(y) > 0.0;
     let on_axis = |o1: Point3, o2: Point3, z: Vec3| (o2 - o1).cross(z.normalize()).length() <= eps;
     let close = |x: Scalar, y: Scalar| (x - y).abs() <= eps;

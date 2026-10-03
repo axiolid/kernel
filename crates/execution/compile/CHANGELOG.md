@@ -22,6 +22,10 @@ caret rule for `0.x` versions.
   operands that are not extrusions, a tool that is itself a boolean, scaled
   placements and configurations the general boolean refuses are refused by
   name; a difference that removes the whole subject is `Degenerate`.
+  Faces that agree only up to rounding are read within the caller's
+  tolerance; the result is then the exact boolean of operands moved by at
+  most it, and a gap of ten tolerances is kept. One-segment semicircular
+  arches compile (contour lowering splits them).
 
 ### Changed
 

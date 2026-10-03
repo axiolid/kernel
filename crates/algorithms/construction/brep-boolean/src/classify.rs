@@ -147,7 +147,7 @@ impl<'a> Solid<'a> {
             for face in 0..self.domains.len() {
                 if self.boxes[face]
                     .as_ref()
-                    .is_some_and(|b| !b.met_by_ray(point, direction, tolerance.linear().max(1e-9)))
+                    .is_some_and(|b| !b.met_by_ray(point, direction, tolerance.linear()))
                 {
                     continue;
                 }
@@ -160,7 +160,7 @@ impl<'a> Solid<'a> {
                 };
                 for hit in hits {
                     let t = hit.parameter.approx();
-                    let at_start = t.abs() <= tolerance.linear().max(1e-9);
+                    let at_start = t.abs() <= tolerance.linear();
                     if t < 0.0 && !at_start {
                         continue;
                     }

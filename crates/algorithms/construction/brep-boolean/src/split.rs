@@ -329,8 +329,7 @@ fn close_poles(
         let (su, sv) = axiolid_evaluate::surface::partials(surface, a.x, a.y)
             .map_err(|_| BooleanError::Evaluation)?;
         let scale = 1.0 + sv.length();
-        let pole =
-            (pa - pb).length() <= tolerance.linear().max(1e-9) && su.length() <= 1e-9 * scale;
+        let pole = (pa - pb).length() <= tolerance.linear() && su.length() <= 1e-9 * scale;
         if !pole {
             // A gap that is not a pole: the loop winds round a seam with no
             // seam edge, which this split does not close.
@@ -355,7 +354,7 @@ fn close_poles(
 
 /// Whether two section edges are the same stretch of curve, either way.
 fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     let near = |p: Point3, q: Point3| (p - q).length() <= eps;
     let mid = |e: &SectionEdge| evaluate3(&e.curve, 0.5 * (e.span.start + e.span.end));
     let ends = (near(a.start, b.start) && near(a.end, b.end))
@@ -603,7 +602,7 @@ fn implicit_piece(
         )
         .map_err(|_| BooleanError::Evaluation)
     };
-    let closed = (section.start - section.end).length() <= tolerance.linear().max(1e-9);
+    let closed = (section.start - section.end).length() <= tolerance.linear();
     let curves = match traces.of(surface, other, lo, hi) {
         Ok(curves) => curves,
         // The other surface has no equation to read here (a B-spline), or
@@ -655,7 +654,7 @@ fn implicit_piece(
 /// ring circle -- whose pcurve is a straight line, affine in the curve's own
 /// parameter.
 fn iso_curve(surface: &Surface, curve: &Curve3, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     let parallel = |a: axiolid_core::Vec3, b: axiolid_core::Vec3| {
         a.normalize().cross(b.normalize()).length() <= 1e-12
     };
@@ -895,8 +894,9 @@ fn split_use(
     let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
     // A cut within tolerance of the piece's own ends, or of a cut already
     // taken, is that point: splitting there would leave a sliver whose
-    // ends weld into one vertex (#228).
-    let eps = tolerance.linear().max(1e-9);
+    // ends weld into one vertex (#228). The cut moves by at most the
+    // caller's linear tolerance.
+    let eps = tolerance.linear();
     let mut taken = Vec::with_capacity(ends.len() + 2);
     for t in [piece.span.start, piece.span.end] {
         taken.push(evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?);
@@ -917,7 +917,7 @@ fn split_use(
         };
         let Some(t) = t else { continue };
         let on = evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        if (on - point).length() > tolerance.linear().max(1e-9) {
+        if (on - point).length() > tolerance.linear() {
             continue;
         }
         // The same point on the pcurve, through the surface's parameters.

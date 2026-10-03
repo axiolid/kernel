@@ -16,10 +16,59 @@
 //! solids meeting along an edge or at a point are all handled, not
 //! refused.
 //!
-//! Nothing is approximated. A configuration a step cannot build exactly is
-//! refused by name ([`BooleanError`]), never meshed or fitted, and every
-//! decision comes from an exact predicate or certified membership: a point
-//! too close to a boundary to decide is refused, not guessed.
+//! Nothing is meshed or fitted. A configuration a step cannot build is
+//! refused by name ([`BooleanError`]).
+//!
+//! # What a result guarantees
+//!
+//! Every surface of the result is an operand's surface, unchanged. Every
+//! new edge lies on an exact section curve (a closed form or a certified
+//! trace); vertices are those curves evaluated in `f64`.
+//!
+//! **Exact decisions.** Which section two supports have (closed forms,
+//! ruled, torus and traced sections), where a section crosses the surface
+//! next to a face's edge (`exact_curve_surface_intersection`), whether a
+//! point lies in a face (certified membership; too close to decide is
+//! refused, not guessed) and whether it lies in a solid (ray parity over
+//! exact ray/surface intersections).
+//!
+//! **Decisions within tolerance.** Operands built or placed separately meet
+//! faces that agree only up to rounding (#228). These decisions use the
+//! caller's [`Tolerance`] and nothing else: `eps = tolerance.linear()` for
+//! distances, `alpha = tolerance.angular()` for directions; there is no
+//! built-in floor.
+//!
+//! - two supports are one surface when their normals or axes agree within
+//!   `alpha` and their offsets within `eps`;
+//! - two supports touch rather than cross where their normals agree within
+//!   `alpha`;
+//! - a point lies on an edge, or on a pole, within `eps`;
+//! - a section runs along an edge when every point of the edge is proved
+//!   within `eps` of it (two lines, or two circles, in closed form);
+//! - a section that touches the surface next to an edge, whose double root
+//!   rounding split or lost, is cut where it meets the edge itself, within
+//!   `eps`;
+//! - cuts on a section within `eps` of each other are one cut, and a
+//!   boundary split within `eps` of the boundary piece's end is that end;
+//! - a plane is parallel or perpendicular to a cylinder's axis, or touches
+//!   the cylinder, when that moves the plane by at most `eps` over where
+//!   the section can matter.
+//!
+//! When none of these fired, the result is the exact boolean of the
+//! operands. When one fired, it is the exact boolean of operands whose
+//! faces were moved by at most `eps` (and, for a coincidence or contact of
+//! directions, turned by at most `alpha`), with every surface and curve
+//! exact for those. A reading that no single such perturbation explains is
+//! refused instead: cuts chained within `eps` of each other over more than
+//! `eps` are [`BooleanError::NearCoincidence`]. Features further apart than
+//! the tolerance always go through the exact predicates: a gap of ten
+//! tolerances stays a gap.
+//!
+//! Bookkeeping in a face's parameters (welding the two evaluations of one
+//! vertex, ordering pieces leaving a vertex) uses fixed relative slacks far
+//! below any tolerance. It never decides geometry: an order it cannot
+//! settle is refused ([`BooleanError::TangentSplit`],
+//! [`BooleanError::UnclosedSplit`]).
 
 mod assemble;
 mod bounds;
@@ -232,6 +281,11 @@ pub enum BooleanError {
     AmbiguousCavity,
     /// The kept faces did not sew into a valid exact B-rep.
     Assembly,
+    /// Features lie within tolerance of each other in a chain longer than
+    /// the tolerance, so no single perturbation within tolerance makes them
+    /// one: reading them as one would move a feature further than the
+    /// caller allowed (#228).
+    NearCoincidence,
 }
 
 impl fmt::Display for BooleanError {
@@ -259,6 +313,9 @@ impl fmt::Display for BooleanError {
                 f.write_str("a cavity of the result lies inside none of its solids")
             }
             Self::Assembly => f.write_str("the kept faces did not sew into a valid exact B-rep"),
+            Self::NearCoincidence => f.write_str(
+                "features lie within tolerance of each other in a chain longer than the tolerance",
+            ),
         }
     }
 }

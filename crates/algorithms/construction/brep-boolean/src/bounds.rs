@@ -104,6 +104,11 @@ impl Aabb {
         out
     }
 
+    /// The length of the box's diagonal.
+    pub(crate) fn diagonal(&self) -> Scalar {
+        (self.hi - self.lo).length()
+    }
+
     /// The smallest box holding both.
     pub(crate) fn union(&self, other: &Aabb) -> Aabb {
         Aabb {

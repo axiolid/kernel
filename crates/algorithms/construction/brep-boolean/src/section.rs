@@ -149,7 +149,8 @@ pub fn section_edges(
             let splines = matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_)));
             // A plane parallel or perpendicular to a cylinder's axis to
             // within rounding.
-            let rulings = plane_cylinder_within_rounding(sa, sb, tolerance);
+            let extent = common.as_ref().map(Aabb::diagonal);
+            let rulings = plane_cylinder_within_rounding(sa, sb, extent, tolerance);
             if rulings.as_ref().is_some_and(Vec::is_empty) {
                 continue;
             }
@@ -348,8 +349,8 @@ pub fn section_edges(
 }
 
 /// The section of a plane and a cylinder whose axis the plane is parallel
-/// or perpendicular to within the angular tolerance, or `None` for any
-/// other pair.
+/// or perpendicular to within the linear tolerance over where the section
+/// can matter, or `None` for any other pair.
 ///
 /// The exact closed form decides parallel and perpendicular exactly, on the
 /// numbers given. Two operands placed by independent rigid motions -- an
@@ -363,11 +364,24 @@ pub fn section_edges(
 ///   (within linear tolerance), or none (an empty list);
 /// - perpendicular: the circle where the axis pierces the plane.
 ///
-/// Each curve lies on the cylinder exactly and on the plane to within the
-/// angular tolerance times its extent (#228).
+/// Each curve lies on the cylinder exactly. It lies on a copy of the plane
+/// turned (and, for a touching ruling, moved) by at most the caller's
+/// linear tolerance `eps` over the region it can matter in, so the section
+/// is the exact section of operands perturbed by at most `eps`:
+///
+/// - perpendicular when `r sin(theta) <= eps`, `theta` the angle between
+///   the normal and the axis: the circle leaves the plane by at most
+///   `r sin(theta)`;
+/// - parallel when `|n . a| * extent <= eps`, `extent` the diagonal of the
+///   two faces' common box (`None`, no common box: never read parallel): a
+///   ruling leaves the plane by at most that over the box;
+/// - one ruling when the plane is within `eps` of touching the cylinder.
+///
+/// Outside those bounds the exact closed form decides (#228).
 fn plane_cylinder_within_rounding(
     a: &Surface,
     b: &Surface,
+    extent: Option<Scalar>,
     tolerance: Tolerance,
 ) -> Option<Vec<Curve3>> {
     let (cylinder, plane) = match (a, b) {
@@ -381,8 +395,9 @@ fn plane_cylinder_within_rounding(
     if axis == Vec3::ZERO || normal == Vec3::ZERO {
         return None;
     }
+    let eps = tolerance.linear();
     let along = axis.dot(normal);
-    if axis.cross(normal).length() <= tolerance.angular() {
+    if cylinder.radius * axis.cross(normal).length() <= eps {
         // Perpendicular to the axis within rounding: the circle where the
         // axis pierces the plane, not an ellipse tilted by the residue.
         let centre = cylinder.frame.origin
@@ -401,7 +416,7 @@ fn plane_cylinder_within_rounding(
             radius: cylinder.radius,
         })]);
     }
-    if along.abs() > tolerance.angular() {
+    if extent.is_none_or(|extent| along.abs() * extent > eps) {
         return None;
     }
     // The normal with its rounding along the axis removed.
@@ -412,7 +427,7 @@ fn plane_cylinder_within_rounding(
     let distance = normal.dot(cylinder.frame.origin - plane.frame.origin);
     let foot = cylinder.frame.origin - normal * distance;
     let across = axis.cross(normal);
-    let (r, eps) = (cylinder.radius, tolerance.linear().max(1e-9));
+    let r = cylinder.radius;
     let offsets: Vec<Scalar> = if (distance.abs() - r).abs() <= eps {
         vec![0.0]
     } else if distance.abs() > r {
@@ -470,7 +485,7 @@ fn touching(
             .map_err(|_| BooleanError::Evaluation)?
             .normalize())
     };
-    Ok(at(a)?.cross(at(b)?).length() <= 1e-9)
+    Ok(at(a)?.cross(at(b)?).length() <= tolerance.angular())
 }
 
 /// The boundary edges of `from`'s face `face` that run inside `onto`'s face
@@ -552,7 +567,7 @@ fn near_crossing(
     edge: &Curve3,
     tolerance: Tolerance,
 ) -> Result<Option<Scalar>, BooleanError> {
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     let conic_plane = |c: &Curve3| match c {
         Curve3::Circle(c) => Some(c.frame),
         Curve3::Ellipse(e) => Some(e.frame),
@@ -619,6 +634,11 @@ fn near_crossing(
 /// apart, they leave a sliver piece `1e-8` long whose ends no other piece
 /// meets, and the face does not split (#228). Other curves are returned
 /// unchanged.
+///
+/// Each merged cut moves by at most the caller's linear tolerance. A chain
+/// of cuts each within tolerance of the next but spanning more than it
+/// would move one of them further, so it is refused
+/// ([`BooleanError::NearCoincidence`]).
 fn merge_close(
     curve: &Curve3,
     cuts: Vec<Scalar>,
@@ -628,7 +648,7 @@ fn merge_close(
     if !(periodic || matches!(curve, Curve3::Line(_))) {
         return Ok(cuts);
     }
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     let at = |t: Scalar| evaluate3(curve, t).map_err(|_| BooleanError::Evaluation);
     let mut placed: Vec<(Scalar, Point3)> = Vec::with_capacity(cuts.len());
     for cut in cuts {
@@ -638,19 +658,25 @@ fn merge_close(
         placed.push((cut, at(cut)?));
     }
     placed.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // (parameter sum, count, last point) per cluster.
-    let mut clusters: Vec<(Scalar, Scalar, Point3)> = Vec::new();
+    // (parameter sum, count, first point, last point) per cluster.
+    let mut clusters: Vec<(Scalar, Scalar, Point3, Point3)> = Vec::new();
     for (cut, point) in placed {
         match clusters.last_mut() {
-            Some((sum, count, last)) if (point - *last).length() <= eps => {
+            Some((sum, count, first, last)) if (point - *last).length() <= eps => {
+                if (point - *first).length() > eps {
+                    return Err(BooleanError::NearCoincidence);
+                }
                 *sum += cut;
                 *count += 1.0;
                 *last = point;
             }
-            _ => clusters.push((cut, 1.0, point)),
+            _ => clusters.push((cut, 1.0, point, point)),
         }
     }
-    let mut out: Vec<Scalar> = clusters.iter().map(|(sum, count, _)| sum / count).collect();
+    let mut out: Vec<Scalar> = clusters
+        .iter()
+        .map(|(sum, count, _, _)| sum / count)
+        .collect();
     // A closed conic's cuts either side of its parameter origin are one
     // point.
     if periodic && clusters.len() >= 2 {
@@ -978,7 +1004,7 @@ impl<'a> Side<'a> {
         for pole in poles(self.surface(face)?) {
             if let Ok(t) = locate3(curve, pole, tolerance) {
                 let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
-                if (on - pole).length() <= tolerance.linear().max(1e-9) {
+                if (on - pole).length() <= tolerance.linear() {
                     out.push(t);
                 }
             }
@@ -1064,7 +1090,7 @@ impl<'a> Side<'a> {
                             if let Ok(s) = locate3(curve, end, tolerance) {
                                 let on =
                                     evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
-                                if (on - end).length() <= tolerance.linear().max(1e-9) {
+                                if (on - end).length() <= tolerance.linear() {
                                     out.push(s);
                                 }
                             }
@@ -1084,7 +1110,7 @@ impl<'a> Side<'a> {
                             if let Ok(s) = locate3(curve, hit.point, tolerance) {
                                 let on =
                                     evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
-                                if (on - hit.point).length() <= tolerance.linear().max(1e-9) {
+                                if (on - hit.point).length() <= tolerance.linear() {
                                     out.push(s);
                                 }
                             }
@@ -1210,28 +1236,51 @@ fn normal_sweep(
     }))
 }
 
-/// Whether the edge (`edge` over `span`) lies on `curve` within tolerance:
-/// both ends and three interior points. Five points of a line or conic
-/// within tolerance of another line or conic put the whole edge there.
+/// Whether every point of the edge (`edge` over `span`) lies within the
+/// caller's linear tolerance of `curve`, proved in closed form:
+///
+/// - two lines: the distance to a line is convex along a segment, so the
+///   segment's two ends bound it;
+/// - two circles: a point of one is within `|c1 - c2| + |r1 - r2| +
+///   r2 * theta` of the other, `theta` the angle between their planes
+///   (bounded by `2 |n1 x n2|`).
+///
+/// Any other pair is never read as running along (#228).
 fn runs_along(
     curve: &Curve3,
     edge: &Curve3,
     span: Interval,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let eps = tolerance.linear().max(1e-9);
-    for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
-        let point = evaluate3(edge, span.start + f * (span.end - span.start))
-            .map_err(|_| BooleanError::Evaluation)?;
-        let Ok(t) = locate3(curve, point, tolerance) else {
-            return Ok(false);
-        };
-        let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
-        if (on - point).length() > eps {
-            return Ok(false);
+    let eps = tolerance.linear();
+    match (curve, edge) {
+        (Curve3::Line(line), Curve3::Line(_)) => {
+            let d = line.direction.normalize_or_zero();
+            if d == Vec3::ZERO {
+                return Ok(false);
+            }
+            for t in [span.start, span.end] {
+                let p = evaluate3(edge, t).map_err(|_| BooleanError::Evaluation)?;
+                let off = p - line.origin;
+                if (off - d * off.dot(d)).length() > eps {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
         }
+        (Curve3::Circle(a), Curve3::Circle(b)) => {
+            let (na, nb) = (a.frame.z.normalize_or_zero(), b.frame.z.normalize_or_zero());
+            if na == Vec3::ZERO || nb == Vec3::ZERO {
+                return Ok(false);
+            }
+            let tilt = 2.0 * na.cross(nb).length();
+            Ok((a.frame.origin - b.frame.origin).length()
+                + (a.radius - b.radius).abs()
+                + a.radius * tilt
+                <= eps)
+        }
+        _ => Ok(false),
     }
-    Ok(true)
 }
 
 /// Whether `point` lies on the edge within tolerance and inside its span.
@@ -1245,7 +1294,7 @@ fn on_edge(
         return Ok(false);
     };
     let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
-    if (on - point).length() > tolerance.linear().max(1e-9) {
+    if (on - point).length() > tolerance.linear() {
         return Ok(false);
     }
     on_span(curve, span, point, tolerance)
@@ -1271,4 +1320,130 @@ fn on_span(
     Ok(candidates
         .iter()
         .any(|c| *c >= lo - slack && *c <= hi + slack))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiolid_core::Frame3;
+    use axiolid_curve::{Circle3, Line3};
+
+    const EPS: Scalar = 1e-6;
+
+    fn tol() -> Tolerance {
+        Tolerance::METRE
+    }
+
+    fn x_axis() -> Curve3 {
+        Curve3::Line(Line3 {
+            origin: Point3::ZERO,
+            direction: Vec3::X,
+        })
+    }
+
+    #[test]
+    fn cuts_within_tolerance_merge_and_a_longer_chain_is_refused() {
+        let line = x_axis();
+        let merged = merge_close(&line, vec![1.0, 1.0 + 0.5 * EPS, 2.0], tol()).unwrap();
+        assert_eq!(merged.len(), 2);
+        assert!((merged[0] - (1.0 + 0.25 * EPS)).abs() < 1e-15);
+        // Ten tolerances apart: two cuts, decided exactly.
+        let kept = merge_close(&line, vec![1.0, 1.0 + 10.0 * EPS], tol()).unwrap();
+        assert_eq!(kept.len(), 2);
+        // Each within tolerance of the next, 1.2 tolerances end to end.
+        let chain = merge_close(&line, vec![1.0, 1.0 + 0.6 * EPS, 1.0 + 1.2 * EPS], tol());
+        assert_eq!(chain, Err(BooleanError::NearCoincidence));
+    }
+
+    #[test]
+    fn an_edge_runs_along_a_curve_only_when_proved_within_tolerance() {
+        let line = x_axis();
+        let edge = |dy: Scalar| {
+            Curve3::Line(Line3 {
+                origin: Point3::new(0.0, dy, 0.0),
+                direction: Vec3::new(1.0, dy, 0.0),
+            })
+        };
+        let span = Interval::new(0.0, 1.0);
+        // From 0.5 eps to 1.0 eps off the axis: within.
+        assert!(runs_along(&line, &edge(0.5 * EPS), span, tol()).unwrap());
+        // Its far end ten tolerances off: not.
+        assert!(!runs_along(&line, &edge(5.0 * EPS), span, tol()).unwrap());
+        let circle = |r: Scalar, tilt: Scalar| {
+            Curve3::Circle(Circle3 {
+                frame: Frame3 {
+                    origin: Point3::ZERO,
+                    x: Vec3::X,
+                    y: Vec3::new(0.0, tilt.cos(), tilt.sin()),
+                    z: Vec3::new(0.0, -tilt.sin(), tilt.cos()),
+                },
+                radius: r,
+            })
+        };
+        let whole = Interval::new(0.0, core::f64::consts::TAU);
+        assert!(runs_along(
+            &circle(1.0, 0.0),
+            &circle(1.0 + 0.5 * EPS, 0.0),
+            whole,
+            tol()
+        )
+        .unwrap());
+        assert!(!runs_along(&circle(1.0, 0.0), &circle(1.0, 10.0 * EPS), whole, tol()).unwrap());
+        // Other families are never read as running along.
+        assert!(!runs_along(&line, &circle(1.0, 0.0), whole, tol()).unwrap());
+    }
+
+    #[test]
+    fn a_plane_reads_parallel_to_an_axis_only_within_tolerance_over_its_extent() {
+        let cylinder = Surface::Cylinder(axiolid_surface::Cylinder {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius: 1.0,
+        });
+        let plane = |tilt: Scalar, offset: Scalar| {
+            let z = Vec3::new(1.0, 0.0, tilt).normalize();
+            Surface::Plane(Plane {
+                frame: Frame3 {
+                    origin: Point3::new(offset, 0.0, 0.0),
+                    x: Vec3::Y,
+                    y: z.cross(Vec3::Y),
+                    z,
+                },
+            })
+        };
+        // Tilted 1e-9 over a 10 m extent: 1e-8 off, read parallel; the
+        // plane through the axis cuts two rulings.
+        let rulings =
+            plane_cylinder_within_rounding(&plane(1e-9, 0.0), &cylinder, Some(10.0), tol());
+        assert_eq!(rulings.map(|r| r.len()), Some(2));
+        // Tilted 1e-6 over 10 m: 1e-5 off, left to the exact closed form.
+        assert!(
+            plane_cylinder_within_rounding(&plane(1e-6, 0.0), &cylinder, Some(10.0), tol())
+                .is_none()
+        );
+        // No extent: never read parallel.
+        assert!(
+            plane_cylinder_within_rounding(&plane(1e-9, 0.0), &cylinder, None, tol()).is_none()
+        );
+        // Within tolerance of touching: one ruling; ten tolerances clear:
+        // none.
+        let touching = plane_cylinder_within_rounding(
+            &plane(0.0, 1.0 + 0.5 * EPS),
+            &cylinder,
+            Some(10.0),
+            tol(),
+        );
+        assert_eq!(touching.map(|r| r.len()), Some(1));
+        let clear = plane_cylinder_within_rounding(
+            &plane(0.0, 1.0 + 10.0 * EPS),
+            &cylinder,
+            Some(10.0),
+            tol(),
+        );
+        assert_eq!(clear.map(|r| r.len()), Some(0));
+    }
 }

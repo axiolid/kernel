@@ -87,7 +87,7 @@ struct Sewing {
 }
 
 fn sew(kept: &[Kept], tolerance: Tolerance) -> Result<Sewing, BooleanError> {
-    let eps = tolerance.linear().max(1e-9);
+    let eps = tolerance.linear();
     let mut points: Vec<Point3> = Vec::new();
     let mut vertex = |p: Point3| -> usize {
         if let Some(i) = points.iter().position(|q| (*q - p).length() <= eps) {

@@ -619,3 +619,108 @@ fn a_configuration_the_general_boolean_refuses_is_refused_by_name() {
     let cut = g.minus(column, bore);
     named(&refusal(g, cut), "exact boolean");
 }
+
+/// The linear tolerance every test here runs at.
+const EPS: f64 = 1e-6;
+
+/// A wall with one window `w x h` whose far cap stops `short` before the
+/// wall's far face (negative: past it), and its compiled solid.
+fn window_stopping_short(short: f64, placement: Transform3) -> ExactBRep {
+    let mut g = Graph::new();
+    let (w, h) = (1.2, 1.4);
+    let wall = g.wall(placement);
+    // From 0.1 outside the near face to `short` before the far face.
+    let opening = g.opening(
+        rect(w, h),
+        T + 0.1 - short,
+        (0.8, 1.6),
+        T / 2.0 + 0.1,
+        placement,
+    );
+    let cut = g.minus(wall, opening);
+    let graph = g.finish(vec![cut]);
+    let solid = compile(&graph, &[cut]).expect("exact").remove(0);
+    audited(&solid);
+    solid
+}
+
+#[test]
+fn a_gap_of_ten_tolerances_is_kept_as_a_gap() {
+    // Ten tolerances is beyond every within-tolerance reading: the exact
+    // predicates decide, and the window leaves a skin 1e-5 thick.
+    for placement in [Transform3::IDENTITY, general()] {
+        let skin = 10.0 * EPS;
+        let solid = window_stopping_short(skin, placement);
+        let expected = L * T * H - 1.2 * 1.4 * (T - skin);
+        let measured = volume(&solid);
+        assert!(
+            (measured - expected).abs() <= 1e-9 * expected,
+            "volume {measured}, expected {expected}: the skin must stay"
+        );
+        // The skin is a face of the result: more faces than the through
+        // cut, which has none there.
+        let through = window_stopping_short(-0.1, placement);
+        assert!(solid.topology().faces().len() > through.topology().faces().len());
+    }
+}
+
+#[test]
+fn a_gap_within_tolerance_reads_as_flush() {
+    // A tenth of the tolerance short of the far face: the boolean of the
+    // window moved by at most the tolerance, a through cut. Its volume is
+    // within the perturbation's (w h eps) of the through cut's, and its
+    // faces are the flush cut's.
+    for placement in [Transform3::IDENTITY, general()] {
+        let solid = window_stopping_short(0.1 * EPS, placement);
+        let flush = window_stopping_short(0.0, placement);
+        let through = L * T * H - 1.2 * 1.4 * T;
+        let measured = volume(&solid);
+        assert!(
+            (measured - through).abs() <= 1.2 * 1.4 * EPS,
+            "volume {measured}, through {through}"
+        );
+        assert_eq!(
+            solid.topology().faces().len(),
+            flush.topology().faces().len()
+        );
+    }
+}
+
+/// A door `1 x 2` on the wall's base whose side stops `gap` before the
+/// wall's end, compiled.
+fn door_short_of_the_end(gap: f64) -> ExactBRep {
+    let placement = general();
+    let mut g = Graph::new();
+    let (w, h) = (1.0, 2.0);
+    let wall = g.wall(placement);
+    let opening = g.opening(
+        rect(w, h),
+        T + 0.2,
+        (L / 2.0 - w / 2.0 - gap, h / 2.0),
+        T / 2.0 + 0.1,
+        placement,
+    );
+    let cut = g.minus(wall, opening);
+    let graph = g.finish(vec![cut]);
+    let solid = compile(&graph, &[cut]).expect("exact").remove(0);
+    audited(&solid);
+    let expected = L * T * H - w * h * T;
+    let measured = volume(&solid);
+    assert!(
+        (measured - expected).abs() <= w * h * EPS,
+        "volume {measured}, expected {expected}"
+    );
+    solid
+}
+
+#[test]
+fn a_wall_end_ten_tolerances_from_an_opening_is_kept() {
+    // A door ending 1e-5 before the wall's end leaves a sliver of wall (its
+    // own end face, and the base split in two); one ending a tenth of the
+    // tolerance before it reads as touching the end, the notch.
+    let notch = door_short_of_the_end(0.0).topology().faces().len();
+    let sliver = door_short_of_the_end(10.0 * EPS).topology().faces().len();
+    let touching = door_short_of_the_end(0.1 * EPS).topology().faces().len();
+    assert!(sliver > notch, "{sliver} faces: the sliver must stay");
+    assert_eq!(touching, notch);
+}

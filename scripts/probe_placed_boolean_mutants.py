@@ -8,11 +8,7 @@ test red.
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
 conic's parameter origin); swapping the parallel/perpendicular branch
-order in `plane_cylinder_within_rounding` (a direction cannot be both);
-deciding a plane tangent to a cylinder exactly instead of within
-tolerance (the jamb plane tangent to an arch's soffit then cuts two
-rulings `1e-8` from the springing edge, which `runs_along` reads as
-running along that edge, so the faces split the same way).
+order in `plane_cylinder_within_rounding` (a direction cannot be both).
 
 Not reached by these inputs, deliberately not listed: dropping the cuts
 where a section line or conic leaves the two faces' common box. They
@@ -51,11 +47,29 @@ MUTANTS = [
      "                let mut cuts = merge_close(branch, cuts, tolerance)?;",
      "                let mut cuts = cuts;"),
     ("a near-parallel plane and cylinder read exactly", S,
-     "    if along.abs() > tolerance.angular() {",
+     "    if extent.is_none_or(|extent| along.abs() * extent > eps) {",
      "    if along != 0.0 {"),
+    ("a plane read parallel however far it turns over the faces", S,
+     "    if extent.is_none_or(|extent| along.abs() * extent > eps) {",
+     "    if along.abs() > eps {"),
     ("a near-perpendicular plane and cylinder read exactly", S,
-     "    if axis.cross(normal).length() <= tolerance.angular() {",
+     "    if cylinder.radius * axis.cross(normal).length() <= eps {",
      "    if false {"),
+    ("a near-tangent plane cuts two rulings", S,
+     "    let offsets: Vec<Scalar> = if (distance.abs() - r).abs() <= eps {",
+     "    let offsets: Vec<Scalar> = if distance.abs() == r {"),
+    ("a chain of near cuts merged past the tolerance", S,
+     "                    return Err(BooleanError::NearCoincidence);",
+     "                    let _ = 0;"),
+    ("cuts merged up to ten tolerances apart", S,
+     "            Some((sum, count, first, last)) if (point - *last).length() <= eps => {",
+     "            Some((sum, count, first, last)) if (point - *last).length() <= 10.0 * eps => {"),
+    ("coincident supports read at twenty tolerances", "crates/algorithms/construction/brep-boolean/src/support.rs",
+     "    let eps = tolerance.linear();",
+     "    let eps = 20.0 * tolerance.linear();"),
+    ("an edge read along a curve from sampled points", S,
+     "        _ => Ok(false),\n    }\n}",
+     "        _ => Ok(true),\n    }\n}"),
     ("a boundary use split next to its own end", F,
      "        if taken.iter().any(|q: &Point3| (point - *q).length() <= eps) {",
      "        if false {"),
