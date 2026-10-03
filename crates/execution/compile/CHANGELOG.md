@@ -27,6 +27,20 @@ caret rule for `0.x` versions.
   whose ring structure, vertex count or tags disagree, and an open
   section that is not a polyline.
 
+### Fixed
+
+- `ReferenceExactCompiler` compiles placed differences whose round hole
+  touches a planar face (#243): an I-beam whose web hole touches the
+  flange, a wall whose round hole touches its top face, under any rigid
+  placement and up to a fraction of the tolerance into or short of the
+  face, and a column clipped by a plane a fraction of the tolerance into
+  it (the #234 open item). Exactly tangent with exact placements the
+  report is empty, at `Tolerance::ZERO` too; otherwise it carries
+  `PlaneTouchesCylinder`. Through `compile_mesh_with_deviation` such a
+  body's mesh is certified against its exact result instead of left
+  unbounded. A curve crossing the contact where it cannot be placed is
+  refused by name (`BooleanError::UnsupportedContact`).
+
 ## [0.3.12] - 2026-10-03
 
 ### Fixed

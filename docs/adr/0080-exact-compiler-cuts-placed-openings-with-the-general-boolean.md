@@ -164,7 +164,7 @@ and with openings, in either order.
 - **Known limit.** A plane within the tolerance inside a cylinder face
   (crossing it, read as touching) is refused by the general boolean as a
   point too close to classify; a plane tangent to it, or outside, keeps
-  the whole solid.
+  the whole solid. (Lifted by the #243 amendment below.)
 
 Tests: `crates/execution/compile/tests/exact_half_space_clip.rs`; probe
 `scripts/probe_half_space_clip_mutants.py`.
@@ -218,3 +218,59 @@ had to be treated as perturbed.
 Tests: `crates/algorithms/construction/brep-boolean/tests/report.rs`,
 `crates/execution/compile/tests/exact_boolean_report.rs`; probe
 `scripts/probe_placed_boolean_mutants.py` (report mutants).
+
+## Amendment 2026-10-03: one plane/cylinder contact for every face pair (#243)
+
+A placed difference whose round hole touches a planar face (an I-beam's
+web hole tangent to the flange, consumer-reported) was refused ("split
+face pieces do not close", "a point too close to classify", "do not
+sew"), and so was the #234 known limit above. Both are a plane touching a
+cylinder along a ruling, which has to be sewn into every face it reaches.
+
+- **Why it failed.** The plane/cylinder face pair read the contact within
+  tolerance as one ruling (`PlaneTouchesCylinder`). Every other face pair
+  the two surfaces meet in kept its exact roots: the plane's chord across
+  each cap disk, the circle a face across the axis cuts from the cylinder,
+  and the plane's own edges cross the cylinder twice, `2 sqrt(2 r d)`
+  apart (`d` how far the plane reaches in: a rounding residue, or a
+  fraction of the tolerance). That is far more than the tolerance, so the
+  split faces disagreed and did not sew. The readings were also per face
+  pair, over each pair's own common box. Two bookkeeping faults made it
+  worse: cuts merged across a circle's parameter origin averaged to the
+  opposite side, and an imprinted edge (a flush hole's cap against the
+  web) kept the two roots apart, leaving a sliver too short to classify.
+- **Decision: one reading, placed on the ruling.** A plane/cylinder pair of
+  supports is read once (parallel, perpendicular, touching), over the
+  largest common box of any pair of their faces. A pair read as touching
+  within tolerance stands for the plane moved by `d` onto the cylinder;
+  wherever a curve on one of the two is cut by the other, the cut is where
+  the moved plane puts it, on the contact ruling: a conic of the cylinder
+  where the ruling pierces its plane (on the cylinder exactly), a line of
+  the plane where it passes closest to the ruling (at most `d` off,
+  `TangentCrossing`). Where the given and the moved plane disagree on a
+  side (cylinder points beyond the plane, plane points inside the
+  cylinder) no point decides whether a piece lies in a face or a region
+  in a solid. The result is the exact boolean of operands whose plane
+  moved by at most the reported distance.
+- **Refused by name.** A curve whose meeting with the ruling this reading
+  cannot place (a curve of the plane that is no line, a curve of the
+  cylinder that is no ruling or conic) is
+  `BooleanError::UnsupportedContact`, never sewn against roots that
+  disagree with the reading.
+- **Exact first, unchanged.** An exactly tangent pair (the exact predicate
+  holds) is decided by exact double roots: with exact placements and
+  dyadic sizes the difference succeeds at `Tolerance::ZERO` with an empty
+  report. A section's window now reaches `2^-20` of its diagonal past the
+  faces' common box, so a tool resting exactly on a face no longer leaves
+  the window next to the touching point at zero tolerance.
+- **Not changed.** The bound of the touching reading (`eps`), the other
+  readings, and the refusal of contacts beyond the tolerance (a groove ten
+  tolerances deep is cut exactly). A hole tangent to an I-beam with root
+  fillets is still refused: the hole is tangent to each fillet cylinder
+  where the fillet meets the flange, and that quartic with a double point
+  is a section the general boolean does not build.
+
+Tests: `crates/execution/compile/tests/exact_tangent_hole.rs`,
+`crates/algorithms/construction/brep-boolean/tests/tangent_contact.rs`,
+the I-beam case of `crates/execution/compile/tests/boolean_deviation.rs`;
+probe `scripts/probe_placed_boolean_mutants.py` (contact mutants).

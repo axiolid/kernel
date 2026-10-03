@@ -316,6 +316,41 @@ fn an_i_beam_with_round_holes_is_certified_against_its_exact_result() {
     assert!(bound <= 2.0 * budget, "{bound}");
 }
 
+/// An IPE 300-like beam without root fillets, 4 m long, under a building
+/// placement, whose round web hole of radius 0.05, flush with the web's
+/// faces, touches the top flange's inner face (#243).
+fn beam_with_a_hole_touching_its_flange(g: &mut Graph) -> NodeId {
+    let (depth, web, flange, radius) = (0.3, 0.0071, 0.0107, 0.05);
+    let section = Profile::Section(SectionProfile::I {
+        depth,
+        width: 0.15,
+        web_thickness: web,
+        flange_thickness: flange,
+        fillet_radius: None,
+        flange_edge_radius: None,
+        flange_slope: None,
+    });
+    let beam = g.extrusion(section, 4.0);
+    let beam = g.place(beam, building());
+    let hole = g.extrusion(circle(radius), web);
+    let across =
+        Transform3::from_translation(Vec3::new(-web / 2.0, depth / 2.0 - flange - radius, 2.0))
+            * Transform3::from_rotation_y(FRAC_PI_2);
+    let hole = g.place(hole, building() * across);
+    g.boolean(beam, hole, BooleanOperator::Difference)
+}
+
+#[test]
+fn an_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_exact_result() {
+    // Its exact result reads the hole as touching the flange (#243), so the
+    // mesh is measured against it rather than left unbounded.
+    let budget = 1e-3;
+    let options = options(budget);
+    let case = compile(beam_with_a_hole_touching_its_flange, &options);
+    let (bound, _) = assert_measured("I-beam, hole touching the flange", case, &options, 2.0);
+    assert!(bound <= 2.0 * budget, "{bound}");
+}
+
 #[test]
 fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
     let budget = 1e-3;

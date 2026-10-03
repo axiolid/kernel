@@ -1,10 +1,12 @@
-"""Mutation probe for exact differences of placed operands (#228, #236, #244).
+"""Mutation probe for exact differences of placed operands (#228, #236, #244,
+#243).
 
 Each mutant reintroduces a way the placed-opening path failed or could
 fail -- a rounding residue read exactly, a tangent double root split into
 a sliver, the compiler's dispatch or refusals loosened, an exact
 configuration read within tolerance, a reading or the rounding floor left
-out of the report -- and must turn a test red.
+out of the report, a plane/cylinder contact read by one face pair and not
+the others -- and must turn a test red.
 
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
@@ -16,6 +18,17 @@ where a section line or conic leaves the two faces' common box. They
 matter only when a kept cut lies outside that box and a skipped edge's
 crossing lies between it and the next kept cut; no opening here produces
 one, and the pieces are then still bounded by kept cuts inside the box.
+Matching a contact's surfaces by exact support as well as by equal
+numbers (`contact::is`): every face of one plane here carries the same
+numbers. Reading a plane/cylinder pair over the largest common box of
+their face pairs rather than the first: it changes the reading only for a
+plane within `eps` of parallel over one face pair's box and not over
+another's, which no input here has (the contact planes are parallel to
+within rounding over every box). Skipping disputed points when
+classifying a region: a region's interior points are stepped a quarter of
+its size in from its boundary, so none here falls in the strip `2 sqrt(2 r
+d)` wide where the given and moved plane disagree; the guard is kept for
+regions narrower than that.
 """
 import pathlib, subprocess, sys
 
@@ -28,6 +41,7 @@ K = "crates/execution/compile/src/exact/clip.rs"
 F = "crates/algorithms/construction/brep-boolean/src/split.rs"
 C = "crates/execution/compile/src/exact/boolean.rs"
 B = "crates/algorithms/construction/brep-boolean/src/bounds.rs"
+T = "crates/algorithms/construction/brep-boolean/src/contact.rs"
 TESTS = [
     ["-p", "axiolid-brep-boolean", "--lib"],
     ["-p", "axiolid-brep-boolean", "--test", "openings"],
@@ -35,6 +49,9 @@ TESTS = [
     ["-p", "axiolid-brep-boolean", "--test", "report"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_boolean_report"],
+    ["-p", "axiolid-brep-boolean", "--test", "tangent_contact"],
+    ["-p", "axiolid-mesh-compile", "--test", "exact_tangent_hole"],
+    ["-p", "axiolid-mesh-compile", "--test", "exact_half_space_clip"],
 ]
 
 MUTANTS = [
@@ -69,8 +86,8 @@ MUTANTS = [
      "                    return Err(BooleanError::NearCoincidence);",
      "                    let _ = 0;"),
     ("cuts merged up to ten tolerances apart", S,
-     "            Some((sum, count, first, last)) if (point - *last).length() <= eps => {",
-     "            Some((sum, count, first, last)) if (point - *last).length() <= 10.0 * eps => {"),
+     "            Some((sum, count, start, first, last)) if (point - *last).length() <= eps => {",
+     "            Some((sum, count, start, first, last)) if (point - *last).length() <= 10.0 * eps => {"),
     ("coincident supports read at twenty tolerances", "crates/algorithms/construction/brep-boolean/src/support.rs",
      "        linear,\n        angular,",
      "        linear / 20.0,\n        angular,"),
@@ -145,6 +162,34 @@ MUTANTS = [
     ("an exact body's floor dropped by the compiler", E,
      "        if !report.is_exact() || report.rounding_floor() > 0.0 {",
      "        if !report.is_exact() {"),
+    # #243: one plane/cylinder contact for every face pair.
+    ("contact crossings left to the exact roots", T,
+     "        if self.contacts.is_empty() {\n            return Ok(None);",
+     "        if true {\n            return Ok(None);"),
+    ("a touching reading not kept as a contact", S,
+     "        contact: touching == Reading::Within,",
+     "        contact: false,"),
+    ("a cylinder's curve cut at the ruling's foot, not its own plane", T,
+     "    let s = (frame.origin - ruling.origin).dot(n) / along;",
+     "    let s = 0.0;"),
+    ("a plane's line cut at its origin, not closest to the ruling", T,
+     "            vec![s]",
+     "            vec![0.0]"),
+    ("a disputed point decides a piece", S,
+     "    if !disputed(first) {",
+     "    if true {"),
+    ("the plane's side of a cylinder point read the other way", T,
+     "                point_side != 0.0 && (point_side > 0.0) != (axis_side > 0.0)",
+     "                point_side != 0.0 && (point_side > 0.0) == (axis_side > 0.0)"),
+    ("the section window not widened past the faces' boxes", S,
+     "                    Some(common) => Some(common.widened(WINDOW_PAD * common.diagonal())),",
+     "                    Some(common) => Some(common),"),
+    ("seam cuts averaged a turn apart", S,
+     "                    cut + TAU * ((*start - cut) / TAU).round()",
+     "                    cut"),
+    ("a curve of the plane that is no line left to the exact roots", T,
+     "    let Curve3::Line(line) = curve else {\n        return Err(BooleanError::UnsupportedContact);",
+     "    let Curve3::Line(line) = curve else {\n        return Ok(None);"),
 ]
 
 def run(target):

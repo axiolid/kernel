@@ -36,8 +36,9 @@
 //! Work that cannot matter is skipped through sound boxes (`crate::bounds`,
 //! enlarged by the tolerance): face pairs whose boxes are apart are not
 //! sectioned, and a line or conic section is cut only against edges whose
-//! boxes meet the two faces' common box, plus where it leaves that box;
-//! pieces outside it lie off one of the faces.
+//! boxes meet the two faces' common box (widened by `2^-20` of its
+//! diagonal, so its planes stay off the faces' extremes), plus where it
+//! leaves that box; pieces outside it lie off one of the faces.
 //!
 //! Operands placed by independent rigid motions agree only up to rounding,
 //! and the exact predicates above see that residue (#228). Within
@@ -48,7 +49,10 @@
 //! - a curve running along a boundary edge is read as running along it;
 //! - a curve that touches the edge's adjacent surface (a double root,
 //!   which rounding splits in two or loses) is cut where it meets the edge
-//!   itself, and cuts closer together than tolerance are one cut.
+//!   itself, and cuts closer together than tolerance are one cut;
+//! - a plane touching a cylinder is read once for the two supports, and a
+//!   curve on either one is cut by the other where it meets their contact
+//!   ruling, in every face pair alike (`crate::contact`, #243).
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance, Vec3};
@@ -66,6 +70,7 @@ use axiolid_topology::FaceId;
 use core::f64::consts::TAU;
 
 use crate::bounds::{edge_box, face_box, Aabb};
+use crate::contact::{Contact, Contacts};
 use crate::predicate;
 use crate::report::{self, Reading, ToleranceDecisionKind};
 use crate::support::{cleaned, same_support, window};
@@ -74,6 +79,13 @@ use crate::BooleanError;
 /// Where along a piece its inside/outside sample is taken: off-centre, so
 /// the midpoint of a symmetric section (a meridian's pole) is never it.
 const SAMPLE: Scalar = 0.414_213_562_373_095;
+
+/// How far a section's window reaches past the two faces' common box,
+/// relative to its diagonal: `2^-20`. Widening is sound (the window only
+/// skips work outside it), and keeps the window's planes off the faces'
+/// extremes, where a tangent section would leave it next to the touching
+/// point (#243).
+const WINDOW_PAD: Scalar = 1.0 / 1_048_576.0;
 
 /// A piece of an intersection curve lying on a face of each operand.
 #[derive(Debug, Clone, PartialEq)]
@@ -117,9 +129,24 @@ pub fn section_edges(
     tolerance: Tolerance,
 ) -> Result<Vec<SectionEdge>, BooleanError> {
     let _session = report::open(&[a, b]);
+    sections_and_contacts(a, b, tolerance).map(|(edges, _)| edges)
+}
+
+/// [`section_edges`], with the plane/cylinder contacts read within
+/// tolerance on the way (`crate::contact`), which classification must
+/// respect too.
+pub(crate) fn sections_and_contacts(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+) -> Result<(Vec<SectionEdge>, Contacts), BooleanError> {
     let side_a = Side::new(a, tolerance)?;
     let side_b = Side::new(b, tolerance)?;
     let mut out = Vec::new();
+    // Each plane/cylinder pair of supports is read once, over the largest
+    // window any pair of their faces needs, so every face pair of the two
+    // agrees (#243).
+    let (readings, contacts) = plane_cylinder_readings(&side_a, &side_b, tolerance)?;
     // Surfaces are shared by many faces: each pair's closed form once.
     #[allow(clippy::type_complexity)]
     let mut closed_forms: Vec<(
@@ -132,18 +159,26 @@ pub fn section_edges(
             // Faces whose boxes, enlarged by the tolerance, are apart cannot
             // cross, touch or share a patch (#228).
             // Where both faces have boxes, the section matters only in their
-            // common part: the window.
+            // common part: the window. It is widened a little past the
+            // faces' boxes, whose planes run through the faces' extremes: a
+            // section touching one there (a hole tangent to a face) would
+            // leave the window a hair from the touching point, and the
+            // piece between could not be told inside or outside (#243).
             let common = match (&side_a.boxes[fa], &side_b.boxes[fb]) {
                 (Some(a), Some(b)) => match a.intersection(b) {
-                    Some(common) => Some(common),
+                    Some(common) => Some(common.widened(WINDOW_PAD * common.diagonal())),
                     None => continue,
                 },
                 _ => None,
             };
             let (sa, sb) = (side_a.surface(fa)?, side_b.surface(fb)?);
             if same_support(sa, sb, tolerance) {
-                imprint(&side_a, fa, &side_b, fb, true, tolerance, &mut out)?;
-                imprint(&side_b, fb, &side_a, fa, false, tolerance, &mut out)?;
+                imprint(
+                    &side_a, fa, &side_b, fb, true, &contacts, tolerance, &mut out,
+                )?;
+                imprint(
+                    &side_b, fb, &side_a, fa, false, &contacts, tolerance, &mut out,
+                )?;
                 continue;
             }
             // Lines and conics in closed form; every other section traced in
@@ -151,9 +186,12 @@ pub fn section_edges(
             // of it that can matter.
             let splines = matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_)));
             // A plane parallel or perpendicular to a cylinder's axis to
-            // within rounding.
-            let extent = common.as_ref().map(Aabb::diagonal);
-            let rulings = plane_cylinder_within_rounding(sa, sb, extent, tolerance);
+            // within rounding, as read for the two supports.
+            let rulings = readings
+                .iter()
+                .find(|(x, y, _)| x == sa && y == sb)
+                .and_then(|(_, _, reading)| reading.as_ref())
+                .map(|reading| reading.curves.clone());
             if rulings.as_ref().is_some_and(Vec::is_empty) {
                 continue;
             }
@@ -271,8 +309,9 @@ pub fn section_edges(
                     )
                 });
                 let (mut cuts, along_a) =
-                    side_a.cuts(fa, branch, sb, common.as_ref(), tolerance)?;
-                let (more, along_b) = side_b.cuts(fb, branch, sa, common.as_ref(), tolerance)?;
+                    side_a.cuts(fa, branch, sb, common.as_ref(), &contacts, tolerance)?;
+                let (more, along_b) =
+                    side_b.cuts(fb, branch, sa, common.as_ref(), &contacts, tolerance)?;
                 cuts.extend(more);
                 // Branches of one section meet only where the surfaces touch
                 // (the two ellipses of a Steinmetz pair): such a point splits
@@ -304,9 +343,7 @@ pub fn section_edges(
                 for (piece_curve, span) in pieces(branch, cuts)? {
                     // Off-centre, so a symmetric section's pole or seam
                     // crossing never becomes the sample.
-                    let mid =
-                        evaluate3(&piece_curve, span.start + SAMPLE * (span.end - span.start))
-                            .map_err(|_| BooleanError::Evaluation)?;
+                    let mid = sample(&piece_curve, span, [sa, sb], &contacts)?;
                     // Tangent contact adds no section. A traced section is
                     // never mere touching (the trace drops touching points
                     // and curves), so where its surfaces are tangent they
@@ -348,7 +385,97 @@ pub fn section_edges(
             }
         }
     }
-    Ok(out)
+    Ok((out, contacts))
+}
+
+/// One reading per pair of supports, a plane of one operand and a cylinder
+/// of the other ([`plane_cylinder_within_rounding`]), over the largest
+/// common box of any pair of their faces (none when a pair has no box),
+/// with the contacts it read within tolerance.
+#[allow(clippy::type_complexity)]
+fn plane_cylinder_readings(
+    side_a: &Side<'_>,
+    side_b: &Side<'_>,
+    tolerance: Tolerance,
+) -> Result<(Vec<(Surface, Surface, Option<PlaneCylinder>)>, Contacts), BooleanError> {
+    let mut extents: Vec<(Surface, Surface, Option<Scalar>)> = Vec::new();
+    for fa in 0..side_a.faces.len() {
+        for fb in 0..side_b.faces.len() {
+            let (sa, sb) = (side_a.surface(fa)?, side_b.surface(fb)?);
+            if !matches!(
+                (sa, sb),
+                (Surface::Plane(_), Surface::Cylinder(_))
+                    | (Surface::Cylinder(_), Surface::Plane(_))
+            ) {
+                continue;
+            }
+            let extent = match (&side_a.boxes[fa], &side_b.boxes[fb]) {
+                (Some(a), Some(b)) => match a.intersection(b) {
+                    Some(common) => Some(common.diagonal()),
+                    None => continue,
+                },
+                _ => None,
+            };
+            match extents.iter_mut().find(|(x, y, _)| x == sa && y == sb) {
+                Some((_, _, known)) => *known = known.zip(extent).map(|(p, q)| p.max(q)),
+                None => extents.push((sa.clone(), sb.clone(), extent)),
+            }
+        }
+    }
+    let mut contacts = Contacts::default();
+    let mut readings = Vec::with_capacity(extents.len());
+    for (sa, sb, extent) in extents {
+        let reading = plane_cylinder_within_rounding(&sa, &sb, extent, tolerance);
+        if let Some(PlaneCylinder {
+            curves,
+            contact: true,
+        }) = &reading
+        {
+            if let [Curve3::Line(ruling)] = curves.as_slice() {
+                let (plane, cylinder) = match sa {
+                    Surface::Plane(_) => (sa.clone(), sb.clone()),
+                    _ => (sb.clone(), sa.clone()),
+                };
+                contacts.push(Contact {
+                    plane,
+                    cylinder,
+                    ruling: *ruling,
+                });
+            }
+        }
+        readings.push((sa, sb, reading));
+    }
+    Ok((readings, contacts))
+}
+
+/// The point of a piece that decides whether it lies in a face: off-centre
+/// at [`SAMPLE`], or, where that point lies where a contact one of the
+/// piece's two `surfaces` is read in is disputed (`crate::contact`), the
+/// first point further along that is not. There the given operands and the
+/// moved ones the reading stands for put the point on different sides of
+/// the plane, and the piece was cut for the moved ones (#243).
+fn sample(
+    curve: &Curve3,
+    span: Interval,
+    surfaces: [&Surface; 2],
+    contacts: &Contacts,
+) -> Result<Point3, BooleanError> {
+    let at = |f: Scalar| {
+        evaluate3(curve, span.start + f * (span.end - span.start))
+            .map_err(|_| BooleanError::Evaluation)
+    };
+    let disputed = |p: Point3| surfaces.iter().any(|s| contacts.disputed(s, p));
+    let first = at(SAMPLE)?;
+    if !disputed(first) {
+        return Ok(first);
+    }
+    for f in [0.75, 0.9, 0.25, 0.1] {
+        let p = at(f)?;
+        if !disputed(p) {
+            return Ok(p);
+        }
+    }
+    Ok(first)
 }
 
 /// The section of a plane and a cylinder whose axis the plane is parallel
@@ -376,7 +503,9 @@ pub fn section_edges(
 ///   the normal and the axis: the circle leaves the plane by at most
 ///   `r sin(theta)`;
 /// - parallel when `|n . a| * extent <= eps`, `extent` the diagonal of the
-///   two faces' common box (`None`, no common box: never read parallel): a
+///   largest common box of a pair of the two supports' faces (`None`, a
+///   pair with no box: never read parallel; one reading per pair of
+///   supports, so all their face pairs agree, #243): a
 ///   ruling leaves the plane by at most that over the box;
 /// - one ruling when the plane is within `eps` of touching the cylinder.
 ///
@@ -388,7 +517,7 @@ fn plane_cylinder_within_rounding(
     b: &Surface,
     extent: Option<Scalar>,
     tolerance: Tolerance,
-) -> Option<Vec<Curve3>> {
+) -> Option<PlaneCylinder> {
     let (cylinder, plane) = match (a, b) {
         (Surface::Cylinder(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cylinder(c)) => {
             (c, p)
@@ -424,15 +553,18 @@ fn plane_cylinder_within_rounding(
             if x == Vec3::ZERO || !centre.is_finite() {
                 return None;
             }
-            return Some(vec![Curve3::Circle(axiolid_curve::Circle3 {
-                frame: axiolid_core::Frame3 {
-                    origin: centre,
-                    x,
-                    y: axis.cross(x),
-                    z: axis,
-                },
-                radius: cylinder.radius,
-            })]);
+            return Some(PlaneCylinder {
+                curves: vec![Curve3::Circle(axiolid_curve::Circle3 {
+                    frame: axiolid_core::Frame3 {
+                        origin: centre,
+                        x,
+                        y: axis.cross(x),
+                        z: axis,
+                    },
+                    radius: cylinder.radius,
+                })],
+                contact: false,
+            });
         }
     }
     // No common box: never read parallel.
@@ -476,8 +608,8 @@ fn plane_cylinder_within_rounding(
         let half = (r * r - distance * distance).sqrt();
         vec![half, -half]
     };
-    Some(
-        offsets
+    Some(PlaneCylinder {
+        curves: offsets
             .into_iter()
             .map(|offset| {
                 Curve3::Line(axiolid_curve::Line3 {
@@ -486,7 +618,22 @@ fn plane_cylinder_within_rounding(
                 })
             })
             .collect(),
-    )
+        contact: touching == Reading::Within,
+    })
+}
+
+/// A plane/cylinder section read within rounding or tolerance
+/// ([`plane_cylinder_within_rounding`]).
+#[derive(Debug, Clone)]
+struct PlaneCylinder {
+    /// The rulings, or the circle, of the section; empty when the plane
+    /// misses the cylinder.
+    curves: Vec<Curve3>,
+    /// Whether the plane was read as touching the cylinder within
+    /// tolerance (not exactly): `curves` is then the contact ruling, which
+    /// every other crossing of the two surfaces must agree with
+    /// (`crate::contact`, #243).
+    contact: bool,
 }
 
 /// The points where a surface's angle parameter has no value: a sphere's
@@ -543,6 +690,7 @@ fn imprint(
     onto: &Side<'_>,
     other: usize,
     first: bool,
+    contacts: &Contacts,
     tolerance: Tolerance,
     out: &mut Vec<SectionEdge>,
 ) -> Result<(), BooleanError> {
@@ -550,10 +698,10 @@ fn imprint(
         // The surface that bounds the imprinted edge in its own operand:
         // together with the shared surface it defines the edge's curve.
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
-        let (cuts, along) = onto.cuts(other, &curve, &bounding, None, tolerance)?;
+        let (cuts, along) = onto.cuts(other, &curve, &bounding, None, contacts, tolerance)?;
+        let shared = onto.surface(other)?;
         for piece in pieces_within(&curve, span, cuts) {
-            let mid = evaluate3(&curve, piece.start + SAMPLE * (piece.end - piece.start))
-                .map_err(|_| BooleanError::Evaluation)?;
+            let mid = sample(&curve, piece, [shared, &bounding], contacts)?;
             let at = onto.locate(other, mid, &along, tolerance)?;
             if at == Place::Outside {
                 continue;
@@ -714,24 +862,33 @@ fn merge_close(
         placed.push((cut, at(cut)?));
     }
     placed.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // (parameter sum, count, first point, last point) per cluster.
-    let mut clusters: Vec<(Scalar, Scalar, Point3, Point3)> = Vec::new();
+    // (parameter sum, count, first parameter, first point, last point) per
+    // cluster.
+    let mut clusters: Vec<(Scalar, Scalar, Scalar, Point3, Point3)> = Vec::new();
     for (cut, point) in placed {
         match clusters.last_mut() {
-            Some((sum, count, first, last)) if (point - *last).length() <= eps => {
+            Some((sum, count, start, first, last)) if (point - *last).length() <= eps => {
                 if !merged((point - *first).length()) {
                     return Err(BooleanError::NearCoincidence);
                 }
+                // On a closed conic one point has parameters a whole turn
+                // apart (a seam cut at `0` and at `2 pi`): averaged as they
+                // are, they would name the opposite side (#243).
+                let cut = if periodic {
+                    cut + TAU * ((*start - cut) / TAU).round()
+                } else {
+                    cut
+                };
                 *sum += cut;
                 *count += 1.0;
                 *last = point;
             }
-            _ => clusters.push((cut, 1.0, point, point)),
+            _ => clusters.push((cut, 1.0, cut, point, point)),
         }
     }
     let mut out: Vec<Scalar> = clusters
         .iter()
-        .map(|(sum, count, _, _)| sum / count)
+        .map(|(sum, count, _, _, _)| sum / count)
         .collect();
     // A closed conic's cuts either side of its parameter origin are one
     // point.
@@ -1043,12 +1200,18 @@ impl<'a> Side<'a> {
     /// an edge whose own box misses it is skipped: any crossing with it lies
     /// outside the window, where the caller has cut the curve at the
     /// window's boundary and drops the pieces (#228).
+    ///
+    /// Where the edge's adjacent surface and one of the two the curve lies
+    /// on are a plane and a cylinder read as touching (`contacts`), the
+    /// curve is cut where it meets their contact ruling, as for every other
+    /// face pair of the two (`crate::contact`, #243).
     fn cuts(
         &self,
         face: usize,
         curve: &Curve3,
         meets: &Surface,
         window: Option<&Aabb>,
+        contacts: &Contacts,
         tolerance: Tolerance,
     ) -> Result<(Vec<Scalar>, Vec<(Curve3, Interval)>), BooleanError> {
         let topology = self.brep.topology();
@@ -1116,6 +1279,21 @@ impl<'a> Side<'a> {
                     && runs_along(curve, edge_curve, span, tolerance)?
                 {
                     result = Ok(ExactCurveIntersection::Contained);
+                }
+                if !matches!(result, Ok(ExactCurveIntersection::Contained)) {
+                    let own = self.surface(face)?;
+                    if let Some(hits) =
+                        contacts.crossing([own, meets], &cutter, curve, tolerance)?
+                    {
+                        for t in hits {
+                            let point =
+                                evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
+                            if on_edge(edge_curve, span, point, tolerance)? {
+                                out.push(t);
+                            }
+                        }
+                        continue;
+                    }
                 }
                 match result {
                     Ok(ExactCurveIntersection::Points(hits)) => {
@@ -1432,6 +1610,31 @@ mod tests {
     }
 
     #[test]
+    fn cuts_at_a_circles_seam_from_either_side_merge_at_the_seam() {
+        // One point named at `0` and twice at `2 pi` (a seam cut, and the
+        // ends of edges along the seam): one cut there, not their mean
+        // `4 pi / 3` on the other side of the circle (#243).
+        let circle = Curve3::Circle(Circle3 {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius: 1.0,
+        });
+        let merged = merge_close(&circle, vec![0.0, TAU, TAU], tol()).unwrap();
+        assert_eq!(merged.len(), 1);
+        let at = evaluate3(&circle, merged[0]).unwrap();
+        assert!((at - Point3::X).length() < 1e-12, "{at:?}");
+        // Close either side of the seam: their mean is at the seam.
+        let merged = merge_close(&circle, vec![TAU - 0.2 * EPS, 0.2 * EPS], tol()).unwrap();
+        assert_eq!(merged.len(), 1);
+        let at = evaluate3(&circle, merged[0]).unwrap();
+        assert!((at - Point3::X).length() < 0.25 * EPS, "{at:?}");
+    }
+
+    #[test]
     fn an_edge_runs_along_a_curve_only_when_proved_within_tolerance() {
         let line = x_axis();
         let edge = |dy: Scalar| {
@@ -1495,7 +1698,10 @@ mod tests {
         // plane through the axis cuts two rulings.
         let rulings =
             plane_cylinder_within_rounding(&plane(1e-9, 0.0), &cylinder, Some(10.0), tol());
-        assert_eq!(rulings.map(|r| r.len()), Some(2));
+        assert_eq!(
+            rulings.map(|r| (r.curves.len(), r.contact)),
+            Some((2, false))
+        );
         // Tilted 1e-6 over 10 m: 1e-5 off, left to the exact closed form.
         assert!(
             plane_cylinder_within_rounding(&plane(1e-6, 0.0), &cylinder, Some(10.0), tol())
@@ -1512,7 +1718,10 @@ mod tests {
             Some(10.0),
             tol(),
         );
-        assert_eq!(touching.map(|r| r.len()), Some(1));
+        assert_eq!(
+            touching.map(|r| (r.curves.len(), r.contact)),
+            Some((1, true))
+        );
         // Exactly parallel and ten tolerances clear, or exactly parallel
         // through the axis: no reading, the exact closed form decides
         // (#236).
@@ -1564,7 +1773,10 @@ mod tests {
         let tilted = Vec3::new(0.0, (core::f64::consts::FRAC_PI_2).cos(), 1.0);
         let circle =
             plane_cylinder_within_rounding(&plane(tilted, Vec3::X), &cylinder, Some(10.0), tol());
-        assert_eq!(circle.map(|c| c.len()), Some(1));
+        assert_eq!(
+            circle.map(|c| (c.curves.len(), c.contact)),
+            Some((1, false))
+        );
         let report = session.finish();
         assert!(report.contains(ToleranceDecisionKind::PlanePerpendicularToAxis));
         assert!(report.linear() > 0.0 && report.linear() <= EPS);

@@ -109,6 +109,14 @@ impl Aabb {
         (self.hi - self.lo).length()
     }
 
+    /// The box grown by `pad` on every side.
+    pub(crate) fn widened(&self, pad: Scalar) -> Aabb {
+        Aabb {
+            lo: self.lo - Vec3::splat(pad),
+            hi: self.hi + Vec3::splat(pad),
+        }
+    }
+
     /// The smallest box holding both.
     pub(crate) fn union(&self, other: &Aabb) -> Aabb {
         Aabb {

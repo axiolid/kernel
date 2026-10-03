@@ -505,13 +505,16 @@ fn a_plane_tangent_to_a_column_removes_nothing_and_ten_tolerances_in_cut_a_slive
             "inset {inset}: volume {measured}"
         );
     }
-    // A tenth of the tolerance inside reads as touching, but the general
-    // boolean cannot yet classify the column's face next to that line of
-    // contact: it refuses by name rather than guess. Either outcome is
-    // within the contract; a result must be the whole column.
-    match column_by_a_tangent_plane(r, 0.1 * EPS) {
-        Ok(solid) => assert!((volume(&solid) - whole).abs() <= 2.0 * r * H * EPS),
-        Err(error) => named(&error, "too close to a face boundary"),
+    // A fraction of the tolerance inside reads as touching: the plane moves
+    // out to the column, its chords across the caps meet the one contact
+    // ruling, and the whole column is kept (#243).
+    for inset in [0.1 * EPS, 0.5 * EPS, 0.9 * EPS] {
+        let solid = column_by_a_tangent_plane(r, inset).expect("read as touching");
+        let measured = volume(&solid);
+        assert!(
+            (measured - whole).abs() <= 2.0 * r * H * EPS,
+            "inset {inset}: volume {measured}"
+        );
     }
     // A circular segment of height 10 eps is cut off.
     let inset = 10.0 * EPS;

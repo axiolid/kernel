@@ -53,7 +53,21 @@
 //! - a section is an iso-parameter curve of a face within `eps`;
 //! - a plane is parallel or perpendicular to a cylinder's axis, or touches
 //!   the cylinder, when that moves the plane by at most `eps` over where
-//!   the section can matter.
+//!   the section can matter: the largest common box of any pair of their
+//!   faces, one reading per pair of supports.
+//!
+//! **One contact, every face pair (#243).** A plane read as touching a
+//! cylinder (a round hole tangent to a face, placed separately, or a
+//! fraction of the tolerance into or short of it) stands for the plane
+//! moved onto the cylinder, touching it along one ruling. Every face pair
+//! that crosses either surface near it agrees: a curve on the cylinder
+//! (a cap's circle, a face's circle across the axis) and a line in the
+//! plane (a cap's chord, the plane's own edge) are cut where they meet
+//! that contact ruling, not at their exact roots `2 sqrt(2 r d)` apart; and
+//! no point where the given and the moved plane disagree on a side decides
+//! a piece or a region. A curve whose meeting with the ruling cannot be
+//! placed is refused ([`BooleanError::UnsupportedContact`]). An exactly
+//! tangent pair is decided by the exact predicates instead.
 //!
 //! **Exact first (#236).** A reading about the operands' own surfaces --
 //! two supports are one, a plane is parallel or perpendicular to a
@@ -100,6 +114,7 @@
 mod assemble;
 mod bounds;
 mod classify;
+mod contact;
 mod predicate;
 mod report;
 mod seams;
@@ -173,7 +188,7 @@ fn run(
     let seamed_b = seams::with_seams(b, tolerance)?;
     let a = seamed_a.as_ref().unwrap_or(a);
     let b = seamed_b.as_ref().unwrap_or(b);
-    let edges = section_edges(a, b, tolerance)?;
+    let (edges, contacts) = section::sections_and_contacts(a, b, tolerance)?;
     let solid_a = classify::Solid::new(a, tolerance)?;
     let solid_b = classify::Solid::new(b, tolerance)?;
     let mut kept = Vec::new();
@@ -223,6 +238,7 @@ fn run(
                     sign,
                     other_solid,
                     &coincident,
+                    &contacts,
                     operator,
                     first,
                     tolerance,
@@ -243,6 +259,10 @@ fn run(
 
 /// Whether a region is kept, and whether it bounds the result from its
 /// other side: classified at the first interior point that decides.
+///
+/// A point within the tolerance of a surface its own is read as touching
+/// (`contacts`) does not decide: there the given operands and the moved
+/// ones the reading stands for can put it on different sides (#243).
 #[allow(clippy::too_many_arguments)]
 fn decide(
     region: &Region,
@@ -250,12 +270,16 @@ fn decide(
     sign: f64,
     other_solid: &classify::Solid<'_>,
     coincident: &[usize],
+    contacts: &contact::Contacts,
     operator: BooleanOperator,
     first: bool,
     tolerance: Tolerance,
 ) -> Result<(bool, bool), BooleanError> {
     let mut last = BooleanError::Undecided;
     for point in classify::interior_points(region, surface)? {
+        if contacts.disputed(surface, point) {
+            continue;
+        }
         match classify_point(
             point,
             surface,
@@ -351,6 +375,12 @@ pub enum BooleanError {
     /// one: reading them as one would move a feature further than the
     /// caller allowed (#228).
     NearCoincidence,
+    /// A plane read as touching a cylinder within tolerance is crossed by a
+    /// curve whose meeting with their contact ruling this stage cannot
+    /// place (a curve of the plane that is no line, a curve of the
+    /// cylinder that is no ruling or conic), so the reading could not be
+    /// made the same for every face pair (#243).
+    UnsupportedContact,
 }
 
 impl fmt::Display for BooleanError {
@@ -380,6 +410,9 @@ impl fmt::Display for BooleanError {
             Self::Assembly => f.write_str("the kept faces did not sew into a valid exact B-rep"),
             Self::NearCoincidence => f.write_str(
                 "features lie within tolerance of each other in a chain longer than the tolerance",
+            ),
+            Self::UnsupportedContact => f.write_str(
+                "a curve crosses a plane read as touching a cylinder where the contact cannot be placed",
             ),
         }
     }

@@ -192,6 +192,9 @@ pub(super) fn remap_boolean_error(error: BooleanError) -> GeomError {
         BooleanError::NearCoincidence => {
             "exact boolean with features chained within tolerance over more than it"
         }
+        BooleanError::UnsupportedContact => {
+            "exact boolean whose plane touching a cylinder within tolerance is crossed where the contact cannot be placed"
+        }
         BooleanError::Evaluation => "exact boolean over a curve or surface it cannot evaluate",
         BooleanError::DanglingReference => "exact boolean over a dangling operand handle",
         BooleanError::Measure(_) => "exact boolean over a face whose domain cannot be built",
