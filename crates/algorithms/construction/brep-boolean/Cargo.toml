@@ -14,6 +14,7 @@ axiolid-brep.workspace = true
 axiolid-core.workspace = true
 axiolid-curve.workspace = true
 axiolid-evaluate.workspace = true
+axiolid-exact.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-nurbs.workspace = true
 axiolid-surface.workspace = true
@@ -33,4 +34,4 @@ role = "algorithm.construction"
 domain = "construction.brep-boolean"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-brep", "axiolid-brep-audit", "axiolid-construct", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-measure", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-brep", "axiolid-brep-audit", "axiolid-construct", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-exact", "axiolid-measure", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-surface", "axiolid-topology"]

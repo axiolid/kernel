@@ -9,6 +9,31 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `boolean_with_report` returns, with the result, a `BooleanReport` of
+  the within-tolerance decisions that fired (#236): one
+  `ToleranceDecision` per `ToleranceDecisionKind` (coincident supports,
+  contact, a point on an edge, a section along an edge, a tangent crossing,
+  merged points, an iso-curve, a plane parallel or perpendicular to or
+  touching a cylinder), with the furthest it moved (`linear`) or turned
+  (`angular`) the operands. An empty report means the result is the exact
+  boolean of the operands as given. `boolean` is unchanged.
+
+### Fixed
+
+- Placed differences succeed at `Tolerance::ZERO` (#236). Naming a point
+  on the curve or surface it was evaluated from compared its `f64`
+  round-trip residue with the linear tolerance, so at zero every boolean
+  failed with `BooleanError::Evaluation`; that bookkeeping, and welding
+  two evaluations of one vertex, now allow the rounding of the
+  operands' extent (`2^-40` of it).
+- Readings about the operands' own surfaces (coincident supports, a plane
+  parallel or perpendicular to or touching a cylinder) ask an exact
+  dyadic predicate first: faces exactly coplanar, parallel or
+  perpendicular, as operands placed by matrices with entries `0` and
+  `+-1` meet, are decided exactly and read nothing within tolerance.
+
 ## [0.1.2] - 2026-10-03
 
 ### Added

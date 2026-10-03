@@ -35,7 +35,7 @@
 //! the whole subject is `GeomError::Degenerate`. Nothing is meshed.
 
 use axiolid_brep::ExactBRep;
-use axiolid_brep_boolean::{boolean, BooleanError};
+use axiolid_brep_boolean::{boolean_with_report, BooleanError};
 use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{BooleanOperator, Point2, Vec3};
@@ -85,7 +85,11 @@ impl ExactCompilation<'_> {
         }
         let subject = self.compile(left)?;
         let tool = self.compile(right)?;
-        boolean(&subject, &tool, operator, self.options.tolerance()).map_err(remap_boolean_error)
+        let (body, report) =
+            boolean_with_report(&subject, &tool, operator, self.options.tolerance())
+                .map_err(remap_boolean_error)?;
+        self.boolean_report = Some(report);
+        Ok(body)
     }
 
     /// Read an operand through its placements.

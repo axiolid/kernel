@@ -107,7 +107,8 @@ impl<'a> Solid<'a> {
                 continue;
             }
             let surface = self.surface(face)?;
-            let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+            let (u, v) = locate(surface, point, crate::report::floored(tolerance))
+                .map_err(|_| BooleanError::Evaluation)?;
             match self.domains[face]
                 .contains(Point2::new(u, v))
                 .map_err(BooleanError::Measure)?
@@ -137,6 +138,7 @@ impl<'a> Solid<'a> {
         if self.bounds.as_ref().is_some_and(|b| !b.contains(point)) {
             return Ok(false);
         }
+        let start_slack = tolerance.linear().max(crate::report::rounding());
         'direction: for direction in DIRECTIONS {
             let direction = Vec3::from_array(direction).normalize();
             let ray = Curve3::Line(Line3 {
@@ -147,7 +149,7 @@ impl<'a> Solid<'a> {
             for face in 0..self.domains.len() {
                 if self.boxes[face]
                     .as_ref()
-                    .is_some_and(|b| !b.met_by_ray(point, direction, tolerance.linear()))
+                    .is_some_and(|b| !b.met_by_ray(point, direction, start_slack))
                 {
                     continue;
                 }
@@ -160,11 +162,14 @@ impl<'a> Solid<'a> {
                 };
                 for hit in hits {
                     let t = hit.parameter.approx();
-                    let at_start = t.abs() <= tolerance.linear();
+                    // A hit at the ray's start: the point lies on this
+                    // face's support. Not a reading: it only skips a hit
+                    // outside the face or refuses the point.
+                    let at_start = t.abs() <= start_slack;
                     if t < 0.0 && !at_start {
                         continue;
                     }
-                    let (u, v) = locate(surface, hit.point, tolerance)
+                    let (u, v) = locate(surface, hit.point, crate::report::floored(tolerance))
                         .map_err(|_| BooleanError::Evaluation)?;
                     let on_face = self.domains[face]
                         .contains(Point2::new(u, v))

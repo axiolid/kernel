@@ -35,6 +35,14 @@ MUTANTS = [
     ('trimmed face parity inverted', BOOL,
      '        if self.inside(centre) {',
      '        if !self.inside(centre) {', [UNIT, MEASURED]),
+    # #236: the detail claims the given operands only when nothing was
+    # read within tolerance.
+    ('detail claims the given operands whatever the report', BOOL,
+     '    let detail = if report.is_exact() {',
+     '    let detail = if true {', [MEASURED]),
+    ('detail never claims the given operands', BOOL,
+     '    let detail = if report.is_exact() {',
+     '    let detail = if false {', [MEASURED]),
 ]
 
 def run(target):

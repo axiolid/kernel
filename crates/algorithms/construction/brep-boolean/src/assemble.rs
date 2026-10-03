@@ -19,7 +19,7 @@
 //! smallest solid around it.
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder};
-use axiolid_core::{Interval, Point3, Tolerance};
+use axiolid_core::{Interval, Point3, Scalar, Tolerance};
 use axiolid_evaluate::surface::locate;
 use axiolid_evaluate::{derivative3, evaluate3};
 use axiolid_surface::Surface;
@@ -27,6 +27,7 @@ use axiolid_topology::{
     Edge, EdgeId, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex, VertexId,
 };
 
+use crate::report::{self, ToleranceDecisionKind};
 use crate::split::{Piece, Region};
 use crate::BooleanError;
 
@@ -87,10 +88,14 @@ struct Sewing {
 }
 
 fn sew(kept: &[Kept], tolerance: Tolerance) -> Result<Sewing, BooleanError> {
-    let eps = tolerance.linear();
+    // Two evaluations of one vertex agree to rounding; further apart, welding
+    // them is a reading within tolerance (#236).
+    let eps = tolerance.linear().max(report::rounding());
+    let weld = |gap: Scalar| report::near(ToleranceDecisionKind::MergedPoints, gap, tolerance);
     let mut points: Vec<Point3> = Vec::new();
     let mut vertex = |p: Point3| -> usize {
         if let Some(i) = points.iter().position(|q| (*q - p).length() <= eps) {
+            weld((points[i] - p).length());
             return i;
         }
         points.push(p);
@@ -117,7 +122,10 @@ fn sew(kept: &[Kept], tolerance: Tolerance) -> Result<Sewing, BooleanError> {
                     .iter_mut()
                     .find(|((x, y, m), _)| (*x, *y) == key && (*m - mid).length() <= eps)
                 {
-                    Some((_, uses)) => uses.push(at),
+                    Some(((_, _, m), uses)) => {
+                        weld((*m - mid).length());
+                        uses.push(at);
+                    }
                     None => groups.push(((key.0, key.1, mid), vec![at])),
                 }
             }
@@ -177,13 +185,14 @@ fn radial_pairs(
     for u in uses {
         let piece = piece_of(u);
         let k = &kept[u.face];
-        let t = axiolid_evaluate::curve::locate3(&piece.curve, m, tolerance)
+        let t = axiolid_evaluate::curve::locate3(&piece.curve, m, report::floored(tolerance))
             .map_err(|_| BooleanError::Evaluation)?;
         let mut along = derivative3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?;
         if piece.span.end < piece.span.start {
             along = -along;
         }
-        let (su, sv) = locate(&k.surface, m, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (su, sv) = locate(&k.surface, m, report::floored(tolerance))
+            .map_err(|_| BooleanError::Evaluation)?;
         let n_uv = axiolid_evaluate::surface::normal(&k.surface, su, sv)
             .map_err(|_| BooleanError::Evaluation)?;
         // Loops run anticlockwise in parameters: the face lies to the left
@@ -427,7 +436,7 @@ fn along_edge(
     if piece.span.end < piece.span.start {
         d = -d;
     }
-    let s = axiolid_evaluate::curve::locate3(edge_curve, mid, tolerance)
+    let s = axiolid_evaluate::curve::locate3(edge_curve, mid, report::floored(tolerance))
         .map_err(|_| BooleanError::Evaluation)?;
     let e = derivative3(edge_curve, s).map_err(|_| BooleanError::Evaluation)?;
     Ok(d.dot(e) > 0.0)

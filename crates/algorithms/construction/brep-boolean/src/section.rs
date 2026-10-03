@@ -66,6 +66,8 @@ use axiolid_topology::FaceId;
 use core::f64::consts::TAU;
 
 use crate::bounds::{edge_box, face_box, Aabb};
+use crate::predicate;
+use crate::report::{self, Reading, ToleranceDecisionKind};
 use crate::support::{cleaned, same_support, window};
 use crate::BooleanError;
 
@@ -114,6 +116,7 @@ pub fn section_edges(
     b: &ExactBRep,
     tolerance: Tolerance,
 ) -> Result<Vec<SectionEdge>, BooleanError> {
+    let _session = report::open(&[a, b]);
     let side_a = Side::new(a, tolerance)?;
     let side_b = Side::new(b, tolerance)?;
     let mut out = Vec::new();
@@ -377,7 +380,9 @@ pub fn section_edges(
 ///   ruling leaves the plane by at most that over the box;
 /// - one ruling when the plane is within `eps` of touching the cylinder.
 ///
-/// Outside those bounds the exact closed form decides (#228).
+/// Outside those bounds the exact closed form decides (#228). Exactly
+/// parallel or perpendicular (`crate::predicate`), it decides too, unless
+/// the plane is read as touching (#236).
 fn plane_cylinder_within_rounding(
     a: &Surface,
     b: &Surface,
@@ -395,28 +400,51 @@ fn plane_cylinder_within_rounding(
     if axis == Vec3::ZERO || normal == Vec3::ZERO {
         return None;
     }
-    let eps = tolerance.linear();
     let along = axis.dot(normal);
-    if cylinder.radius * axis.cross(normal).length() <= eps {
-        // Perpendicular to the axis within rounding: the circle where the
-        // axis pierces the plane, not an ellipse tilted by the residue.
-        let centre = cylinder.frame.origin
-            + axis * (normal.dot(plane.frame.origin - cylinder.frame.origin) / along);
-        let x = (cylinder.frame.x - axis * axis.dot(cylinder.frame.x)).normalize_or_zero();
-        if x == Vec3::ZERO || !centre.is_finite() {
-            return None;
+    // Exactly perpendicular or parallel is the closed form's to decide; only
+    // a reading the exact predicates do not confirm is taken here, and
+    // reported (#236). These readings bound how far the plane moves, not how
+    // far it turns, so only the linear measure gates them.
+    let linear = Tolerance::new(tolerance.linear(), Scalar::MAX).unwrap_or(tolerance);
+    match report::support(
+        ToleranceDecisionKind::PlanePerpendicularToAxis,
+        cylinder.radius * axis.cross(normal).length(),
+        0.0,
+        linear,
+        || predicate::plane_perpendicular(plane, cylinder),
+    ) {
+        Reading::Exact => return None,
+        Reading::Apart => {}
+        Reading::Within => {
+            // Perpendicular to the axis within rounding: the circle where the
+            // axis pierces the plane, not an ellipse tilted by the residue.
+            let centre = cylinder.frame.origin
+                + axis * (normal.dot(plane.frame.origin - cylinder.frame.origin) / along);
+            let x = (cylinder.frame.x - axis * axis.dot(cylinder.frame.x)).normalize_or_zero();
+            if x == Vec3::ZERO || !centre.is_finite() {
+                return None;
+            }
+            return Some(vec![Curve3::Circle(axiolid_curve::Circle3 {
+                frame: axiolid_core::Frame3 {
+                    origin: centre,
+                    x,
+                    y: axis.cross(x),
+                    z: axis,
+                },
+                radius: cylinder.radius,
+            })]);
         }
-        return Some(vec![Curve3::Circle(axiolid_curve::Circle3 {
-            frame: axiolid_core::Frame3 {
-                origin: centre,
-                x,
-                y: axis.cross(x),
-                z: axis,
-            },
-            radius: cylinder.radius,
-        })]);
     }
-    if extent.is_none_or(|extent| along.abs() * extent > eps) {
+    // No common box: never read parallel.
+    let extent = extent?;
+    let parallel = report::support(
+        ToleranceDecisionKind::PlaneParallelToAxis,
+        along.abs() * extent,
+        0.0,
+        linear,
+        || predicate::plane_parallel(plane, cylinder),
+    );
+    if parallel == Reading::Apart {
         return None;
     }
     // The normal with its rounding along the axis removed.
@@ -428,7 +456,19 @@ fn plane_cylinder_within_rounding(
     let foot = cylinder.frame.origin - normal * distance;
     let across = axis.cross(normal);
     let r = cylinder.radius;
-    let offsets: Vec<Scalar> = if (distance.abs() - r).abs() <= eps {
+    let touching = report::support(
+        ToleranceDecisionKind::PlaneTouchesCylinder,
+        (distance.abs() - r).abs(),
+        0.0,
+        linear,
+        || predicate::plane_touches(plane, cylinder),
+    );
+    // Exactly parallel, the closed form decides, unless the plane is read
+    // as touching within tolerance.
+    if parallel == Reading::Exact && touching != Reading::Within {
+        return None;
+    }
+    let offsets: Vec<Scalar> = if touching.holds() {
         vec![0.0]
     } else if distance.abs() > r {
         Vec::new()
@@ -480,12 +520,17 @@ fn touching(
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
     let at = |s: &Surface| -> Result<axiolid_core::Vec3, BooleanError> {
-        let (u, v) = locate(s, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) =
+            locate(s, point, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
         Ok(normal(s, u, v)
             .map_err(|_| BooleanError::Evaluation)?
             .normalize())
     };
-    Ok(at(a)?.cross(at(b)?).length() <= tolerance.angular())
+    Ok(report::near_angle(
+        ToleranceDecisionKind::Contact,
+        at(a)?.cross(at(b)?).length(),
+        tolerance,
+    ))
 }
 
 /// The boundary edges of `from`'s face `face` that run inside `onto`'s face
@@ -567,7 +612,6 @@ fn near_crossing(
     edge: &Curve3,
     tolerance: Tolerance,
 ) -> Result<Option<Scalar>, BooleanError> {
-    let eps = tolerance.linear();
     let conic_plane = |c: &Curve3| match c {
         Curve3::Circle(c) => Some(c.frame),
         Curve3::Ellipse(e) => Some(e.frame),
@@ -586,7 +630,11 @@ fn near_crossing(
             let s = (ab * f - c * bb) / denominator;
             let t = (aa * f - ab * c) / denominator;
             let (p, q) = (a.origin + d1 * s, b.origin + d2 * t);
-            if (p - q).length() > eps {
+            if !report::near(
+                ToleranceDecisionKind::TangentCrossing,
+                (p - q).length(),
+                tolerance,
+            ) {
                 return Ok(None);
             }
             return Ok(Some(s));
@@ -611,14 +659,19 @@ fn near_crossing(
     } else {
         curve
     };
-    let Ok(t) = locate3(conic, point, tolerance) else {
+    let wide = report::floored(tolerance);
+    let Ok(t) = locate3(conic, point, wide) else {
         return Ok(None);
     };
     let on = evaluate3(conic, t).map_err(|_| BooleanError::Evaluation)?;
-    if (on - point).length() > eps {
+    if !report::near(
+        ToleranceDecisionKind::TangentCrossing,
+        (on - point).length(),
+        tolerance,
+    ) {
         return Ok(None);
     }
-    match locate3(curve, point, tolerance) {
+    match locate3(curve, point, wide) {
         Ok(t) => Ok(Some(t)),
         Err(_) => Ok(None),
     }
@@ -648,7 +701,10 @@ fn merge_close(
     if !(periodic || matches!(curve, Curve3::Line(_))) {
         return Ok(cuts);
     }
-    let eps = tolerance.linear();
+    // Cuts within rounding of each other are one cut and need no tolerance;
+    // further apart, merging them is a reading within tolerance (#236).
+    let eps = tolerance.linear().max(report::rounding());
+    let merged = |gap: Scalar| report::near(ToleranceDecisionKind::MergedPoints, gap, tolerance);
     let at = |t: Scalar| evaluate3(curve, t).map_err(|_| BooleanError::Evaluation);
     let mut placed: Vec<(Scalar, Point3)> = Vec::with_capacity(cuts.len());
     for cut in cuts {
@@ -663,7 +719,7 @@ fn merge_close(
     for (cut, point) in placed {
         match clusters.last_mut() {
             Some((sum, count, first, last)) if (point - *last).length() <= eps => {
-                if (point - *first).length() > eps {
+                if !merged((point - *first).length()) {
                     return Err(BooleanError::NearCoincidence);
                 }
                 *sum += cut;
@@ -681,7 +737,7 @@ fn merge_close(
     // point.
     if periodic && clusters.len() >= 2 {
         let (first, last) = (at(out[0])?, at(out[out.len() - 1])?);
-        if (first - last).length() <= eps {
+        if merged((first - last).length()) {
             out.pop();
         }
     }
@@ -932,8 +988,8 @@ impl<'a> Side<'a> {
                 return Ok(Place::Boundary);
             }
         }
-        let (u, v) =
-            locate(self.surface(face)?, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(self.surface(face)?, point, report::floored(tolerance))
+            .map_err(|_| BooleanError::Evaluation)?;
         match self.domains[face]
             .contains(Point2::new(u, v))
             .map_err(BooleanError::Measure)?
@@ -1002,9 +1058,13 @@ impl<'a> Side<'a> {
         // A pole or apex the curve passes through cuts it: its pcurve jumps
         // round the angle there.
         for pole in poles(self.surface(face)?) {
-            if let Ok(t) = locate3(curve, pole, tolerance) {
+            if let Ok(t) = locate3(curve, pole, report::floored(tolerance)) {
                 let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
-                if (on - pole).length() <= tolerance.linear() {
+                if report::near(
+                    ToleranceDecisionKind::IncidentPoint,
+                    (on - pole).length(),
+                    tolerance,
+                ) {
                     out.push(t);
                 }
             }
@@ -1087,10 +1147,14 @@ impl<'a> Side<'a> {
                         for t in [span.start, span.end] {
                             let end =
                                 evaluate3(edge_curve, t).map_err(|_| BooleanError::Evaluation)?;
-                            if let Ok(s) = locate3(curve, end, tolerance) {
+                            if let Ok(s) = locate3(curve, end, report::floored(tolerance)) {
                                 let on =
                                     evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
-                                if (on - end).length() <= tolerance.linear() {
+                                if report::near(
+                                    ToleranceDecisionKind::IncidentPoint,
+                                    (on - end).length(),
+                                    tolerance,
+                                ) {
                                     out.push(s);
                                 }
                             }
@@ -1107,10 +1171,14 @@ impl<'a> Side<'a> {
                             if !on_span(edge_curve, span, hit.point, tolerance)? {
                                 continue;
                             }
-                            if let Ok(s) = locate3(curve, hit.point, tolerance) {
+                            if let Ok(s) = locate3(curve, hit.point, report::floored(tolerance)) {
                                 let on =
                                     evaluate3(curve, s).map_err(|_| BooleanError::Evaluation)?;
-                                if (on - hit.point).length() <= tolerance.linear() {
+                                if report::near(
+                                    ToleranceDecisionKind::IncidentPoint,
+                                    (on - hit.point).length(),
+                                    tolerance,
+                                ) {
                                     out.push(s);
                                 }
                             }
@@ -1160,7 +1228,8 @@ impl Side<'_> {
         };
         let mid = evaluate3(edge_curve, 0.5 * (span.start + span.end))
             .map_err(|_| BooleanError::Evaluation)?;
-        let (u, v) = locate(own, mid, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) =
+            locate(own, mid, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
         let n = normal(own, u, v).map_err(|_| BooleanError::Evaluation)?;
         let across = line.direction.cross(n);
         let length = across.length();
@@ -1194,7 +1263,8 @@ fn normal_sweep(
     let x = f.x.normalize();
     let y = axis.cross(x);
     let p = f.origin + x * circle.radius;
-    let (u, v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let (u, v) =
+        locate(surface, p, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
     let n = normal(surface, u, v)
         .map_err(|_| BooleanError::Evaluation)?
         .normalize();
@@ -1252,21 +1322,21 @@ fn runs_along(
     span: Interval,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let eps = tolerance.linear();
+    let along =
+        |residue: Scalar| report::near(ToleranceDecisionKind::SectionAlongEdge, residue, tolerance);
     match (curve, edge) {
         (Curve3::Line(line), Curve3::Line(_)) => {
             let d = line.direction.normalize_or_zero();
             if d == Vec3::ZERO {
                 return Ok(false);
             }
+            let mut residue: Scalar = 0.0;
             for t in [span.start, span.end] {
                 let p = evaluate3(edge, t).map_err(|_| BooleanError::Evaluation)?;
                 let off = p - line.origin;
-                if (off - d * off.dot(d)).length() > eps {
-                    return Ok(false);
-                }
+                residue = residue.max((off - d * off.dot(d)).length());
             }
-            Ok(true)
+            Ok(along(residue))
         }
         (Curve3::Circle(a), Curve3::Circle(b)) => {
             let (na, nb) = (a.frame.z.normalize_or_zero(), b.frame.z.normalize_or_zero());
@@ -1274,10 +1344,11 @@ fn runs_along(
                 return Ok(false);
             }
             let tilt = 2.0 * na.cross(nb).length();
-            Ok((a.frame.origin - b.frame.origin).length()
-                + (a.radius - b.radius).abs()
-                + a.radius * tilt
-                <= eps)
+            Ok(along(
+                (a.frame.origin - b.frame.origin).length()
+                    + (a.radius - b.radius).abs()
+                    + a.radius * tilt,
+            ))
         }
         _ => Ok(false),
     }
@@ -1290,14 +1361,18 @@ fn on_edge(
     point: Point3,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let Ok(t) = locate3(curve, point, tolerance) else {
+    let Ok(t) = locate3(curve, point, report::floored(tolerance)) else {
         return Ok(false);
     };
     let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
-    if (on - point).length() > tolerance.linear() {
+    if !on_span(curve, span, point, tolerance)? {
         return Ok(false);
     }
-    on_span(curve, span, point, tolerance)
+    Ok(report::near(
+        ToleranceDecisionKind::IncidentPoint,
+        (on - point).length(),
+        tolerance,
+    ))
 }
 
 /// Whether `point`, on `curve`, lies within the edge's span (a closed
@@ -1308,7 +1383,8 @@ fn on_span(
     point: Point3,
     tolerance: Tolerance,
 ) -> Result<bool, BooleanError> {
-    let t = locate3(curve, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let t =
+        locate3(curve, point, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
     let (lo, hi) = (span.start.min(span.end), span.start.max(span.end));
     let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
     let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
@@ -1429,8 +1505,7 @@ mod tests {
         assert!(
             plane_cylinder_within_rounding(&plane(1e-9, 0.0), &cylinder, None, tol()).is_none()
         );
-        // Within tolerance of touching: one ruling; ten tolerances clear:
-        // none.
+        // Within tolerance of touching: one ruling.
         let touching = plane_cylinder_within_rounding(
             &plane(0.0, 1.0 + 0.5 * EPS),
             &cylinder,
@@ -1438,12 +1513,60 @@ mod tests {
             tol(),
         );
         assert_eq!(touching.map(|r| r.len()), Some(1));
-        let clear = plane_cylinder_within_rounding(
-            &plane(0.0, 1.0 + 10.0 * EPS),
+        // Exactly parallel and ten tolerances clear, or exactly parallel
+        // through the axis: no reading, the exact closed form decides
+        // (#236).
+        for offset in [1.0 + 10.0 * EPS, 0.0] {
+            assert!(plane_cylinder_within_rounding(
+                &plane(0.0, offset),
+                &cylinder,
+                Some(10.0),
+                tol()
+            )
+            .is_none());
+        }
+    }
+
+    #[test]
+    fn only_readings_the_exact_predicates_do_not_confirm_are_reported() {
+        let cylinder = Surface::Cylinder(axiolid_surface::Cylinder {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius: 1.0,
+        });
+        let plane = |z: Vec3, x: Vec3| {
+            Surface::Plane(Plane {
+                frame: Frame3 {
+                    origin: Point3::new(0.0, 0.0, 0.5),
+                    x,
+                    y: z.cross(x),
+                    z,
+                },
+            })
+        };
+        // Exactly perpendicular: the closed form's circle, nothing read.
+        let session = report::open(&[]);
+        assert!(plane_cylinder_within_rounding(
+            &plane(Vec3::Z, Vec3::X),
             &cylinder,
             Some(10.0),
-            tol(),
-        );
-        assert_eq!(clear.map(|r| r.len()), Some(0));
+            tol()
+        )
+        .is_none());
+        assert!(session.finish().is_exact());
+        // Tilted by a rotation's rounding residue: read perpendicular, and
+        // reported.
+        let session = report::open(&[]);
+        let tilted = Vec3::new(0.0, (core::f64::consts::FRAC_PI_2).cos(), 1.0);
+        let circle =
+            plane_cylinder_within_rounding(&plane(tilted, Vec3::X), &cylinder, Some(10.0), tol());
+        assert_eq!(circle.map(|c| c.len()), Some(1));
+        let report = session.finish();
+        assert!(report.contains(ToleranceDecisionKind::PlanePerpendicularToAxis));
+        assert!(report.linear() > 0.0 && report.linear() <= EPS);
     }
 }

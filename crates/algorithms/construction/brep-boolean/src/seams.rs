@@ -178,7 +178,6 @@ pub(crate) fn with_seams(
     tolerance: Tolerance,
 ) -> Result<Option<ExactBRep>, BooleanError> {
     let topology = brep.topology();
-    let eps = tolerance.linear();
     // Per face: its loops as uses, unwrapped, and each loop's winding.
     let mut plans: Vec<Option<Plan>> = Vec::with_capacity(topology.faces().len());
     for face in topology.faces() {
@@ -233,7 +232,7 @@ pub(crate) fn with_seams(
     if plans.iter().all(Option::is_none) {
         return Ok(None);
     }
-    rebuild(brep, &plans, eps).map(Some)
+    rebuild(brep, &plans, tolerance).map(Some)
 }
 
 /// A winding face's loops.
@@ -267,8 +266,11 @@ fn unwrap(uses: &mut [Use], pu: bool, pv: bool) -> Result<Vec2, BooleanError> {
 fn rebuild(
     brep: &ExactBRep,
     plans: &[Option<Plan>],
-    eps: Scalar,
+    tolerance: Tolerance,
 ) -> Result<ExactBRep, BooleanError> {
+    // A seam's ends are the face's own vertices to rounding; further apart,
+    // welding them is a reading within tolerance (#236).
+    let eps = tolerance.linear().max(crate::report::rounding());
     let topology = brep.topology();
     let mut b = ExactBRepBuilder::default();
     for c in brep.curves3() {
@@ -303,7 +305,15 @@ fn rebuild(
                 .iter()
                 .position(|v| (v.position - p).length() <= eps);
             match found {
-                Some(i) => vertices[i],
+                Some(i) => {
+                    let gap = (b.topology_mut().vertices()[i].position - p).length();
+                    crate::report::near(
+                        crate::report::ToleranceDecisionKind::MergedPoints,
+                        gap,
+                        tolerance,
+                    );
+                    vertices[i]
+                }
                 None => {
                     let id = b.topology_mut().add_vertex(Vertex { position: p });
                     vertices.push(id);

@@ -212,6 +212,7 @@ dependencies = [
  "axiolid-core",
  "axiolid-curve",
  "axiolid-evaluate",
+ "axiolid-exact",
  "axiolid-measure",
  "axiolid-nurbs",
  "axiolid-overlay",

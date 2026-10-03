@@ -54,6 +54,13 @@
 //! not claimed for that boolean, and the contribution's detail says what
 //! it is measured against. No perturbation term is added: none is proved.
 //!
+//! The exact compiler reports whether any such decision fired (#236,
+//! [`ReferenceExactCompiler::compile_exact_with_report`]). When none did,
+//! its result is the exact boolean of the operands as given, so the bound
+//! holds for that boolean too, and the detail says so (operands placed by
+//! exact axis matrices, or crossing only transversally). Otherwise the
+//! detail keeps "operands within tolerance".
+//!
 //! # Which booleans are measured
 //!
 //! Only those whose result is emitted ([`emitted_booleans`]): a boolean
@@ -87,7 +94,6 @@ use axiolid_brep::ExactBRep;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_curve::Curve2;
-use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_mesh::TriMesh;
 use std::collections::HashSet;
 
@@ -102,6 +108,11 @@ use crate::ReferenceExactCompiler;
 /// The detail of a boolean measured against the exact compiler's result:
 /// the exact boolean of the operands moved by at most the tolerance (#228).
 const MEASURED: &str = "measured against the exact compiler's result, operands within tolerance";
+/// The detail of a boolean measured against the exact compiler's result
+/// when no decision within tolerance fired: the exact boolean of the
+/// operands as given (#236).
+const MEASURED_EXACT: &str =
+    "measured against the exact compiler's result, the exact boolean of the given operands";
 /// The detail of a boolean with no exact result to measure against.
 const NO_EXACT: &str = "no exact result";
 
@@ -119,26 +130,30 @@ pub(crate) fn of_boolean(
     options: &ExecutionOptions,
     mesh: &TriMesh,
 ) -> Deviation {
-    let exact = match ReferenceExactCompiler::new().compile_exact(graph, id, options) {
-        Ok(exact) => exact,
-        Err(error) => {
-            return Deviation::one(
-                DeviationPath::Boolean,
-                NO_EXACT,
-                DeviationBound::Unbounded(refusal(&error)),
-            )
-        }
+    let (exact, report) =
+        match ReferenceExactCompiler::new().compile_exact_with_report(graph, id, options) {
+            Ok(compiled) => compiled,
+            Err(error) => {
+                return Deviation::one(
+                    DeviationPath::Boolean,
+                    NO_EXACT,
+                    DeviationBound::Unbounded(refusal(&error)),
+                )
+            }
+        };
+    // No decision within tolerance: the exact compiler's result is the
+    // boolean of the operands as given, and the bound holds for it (#236).
+    let detail = if report.is_exact() {
+        MEASURED_EXACT
+    } else {
+        MEASURED
     };
-    // TODO(#236): once the exact boolean reports whether any decision
-    // within tolerance fired, consult it here: if none did, the exact
-    // compiler's result is the boolean of the unperturbed operands, and the
-    // bound holds for that boolean too (a detail without the caveat).
     let target = crate::compiler::chord_error(options);
     let bound = match measure(&exact, mesh, target, target) {
         Ok(value) => DeviationBound::Certified(value),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
-    Deviation::one(DeviationPath::Boolean, MEASURED, bound)
+    Deviation::one(DeviationPath::Boolean, detail, bound)
 }
 
 /// The boolean nodes whose meshes `root` emits: reached from `root`
@@ -552,6 +567,7 @@ fn segments_cross(p: Point2, q: Point2, r: Point2, s: Point2) -> bool {
 mod tests {
     use super::*;
     use axiolid_core::{BooleanOperator, Tolerance, Transform3, Vec3};
+    use axiolid_exact_compile_contract::ExactCompiler;
     use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
     use axiolid_mesh_compile_contract::MeshCompiler;
     use axiolid_model::{GeometryGraphBuilder, Instance};

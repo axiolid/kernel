@@ -39,6 +39,7 @@ use axiolid_surface::Surface;
 use axiolid_topology::{EdgeId, FaceId, Orientation};
 use core::f64::consts::{PI, TAU};
 
+use crate::report::{self, ToleranceDecisionKind};
 use crate::section::SectionEdge;
 use crate::support::{periods, window};
 use crate::BooleanError;
@@ -107,6 +108,7 @@ pub fn split_face(
     cuts: &[Point3],
     tolerance: Tolerance,
 ) -> Result<Vec<Region>, BooleanError> {
+    let _session = report::open(&[brep]);
     let topology = brep.topology();
     let record = topology
         .faces()
@@ -329,7 +331,12 @@ fn close_poles(
         let (su, sv) = axiolid_evaluate::surface::partials(surface, a.x, a.y)
             .map_err(|_| BooleanError::Evaluation)?;
         let scale = 1.0 + sv.length();
-        let pole = (pa - pb).length() <= tolerance.linear() && su.length() <= 1e-9 * scale;
+        let pole = su.length() <= 1e-9 * scale
+            && report::near(
+                ToleranceDecisionKind::IncidentPoint,
+                (pa - pb).length(),
+                tolerance,
+            );
         if !pole {
             // A gap that is not a pole: the loop winds round a seam with no
             // seam edge, which this split does not close.
@@ -354,12 +361,16 @@ fn close_poles(
 
 /// Whether two section edges are the same stretch of curve, either way.
 fn same_stretch(a: &SectionEdge, b: &SectionEdge, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear();
-    let near = |p: Point3, q: Point3| (p - q).length() <= eps;
+    let gap = |p: Point3, q: Point3| (p - q).length();
     let mid = |e: &SectionEdge| evaluate3(&e.curve, 0.5 * (e.span.start + e.span.end));
-    let ends = (near(a.start, b.start) && near(a.end, b.end))
-        || (near(a.start, b.end) && near(a.end, b.start));
-    ends && matches!((mid(a), mid(b)), (Ok(p), Ok(q)) if near(p, q))
+    let (Ok(ma), Ok(mb)) = (mid(a), mid(b)) else {
+        return false;
+    };
+    let residue = gap(a.start, b.start)
+        .max(gap(a.end, b.end))
+        .min(gap(a.start, b.end).max(gap(a.end, b.start)))
+        .max(gap(ma, mb));
+    report::near(ToleranceDecisionKind::MergedPoints, residue, tolerance)
 }
 
 /// Traced sections of the face's surface, one set per other surface, or
@@ -535,7 +546,8 @@ fn lifted_piece(
     for i in 0..=n {
         let t = t0 + (t1 - t0) * i as Scalar / n as Scalar;
         let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        let (mut u, mut v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (mut u, mut v) =
+            locate(surface, p, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
         if let Some(last) = guide.last() {
             if pu {
                 u += ((last.x - u) / TAU).round() * TAU;
@@ -592,7 +604,8 @@ fn implicit_piece(
     tolerance: Tolerance,
 ) -> Result<Piece, BooleanError> {
     let uv = |p: Point3| -> Result<Point2, BooleanError> {
-        let (u, v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) =
+            locate(surface, p, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
         Ok(Point2::new(u, v))
     };
     let at = |f: Scalar| {
@@ -602,7 +615,11 @@ fn implicit_piece(
         )
         .map_err(|_| BooleanError::Evaluation)
     };
-    let closed = (section.start - section.end).length() <= tolerance.linear();
+    let closed = report::near(
+        ToleranceDecisionKind::MergedPoints,
+        (section.start - section.end).length(),
+        tolerance,
+    );
     let curves = match traces.of(surface, other, lo, hi) {
         Ok(curves) => curves,
         // The other surface has no equation to read here (a B-spline), or
@@ -654,46 +671,60 @@ fn implicit_piece(
 /// ring circle -- whose pcurve is a straight line, affine in the curve's own
 /// parameter.
 fn iso_curve(surface: &Surface, curve: &Curve3, tolerance: Tolerance) -> bool {
-    let eps = tolerance.linear();
     let parallel = |a: axiolid_core::Vec3, b: axiolid_core::Vec3| {
         a.normalize().cross(b.normalize()).length() <= 1e-12
     };
-    let on_axis =
-        |p: Point3, o: Point3, z: axiolid_core::Vec3| (p - o).cross(z.normalize()).length() <= eps;
-    match (surface, curve) {
+    let off_axis =
+        |p: Point3, o: Point3, z: axiolid_core::Vec3| (p - o).cross(z.normalize()).length();
+    // The largest linear residue of the reading, or `None` where its
+    // directions do not agree.
+    let residue: Option<Scalar> = match (surface, curve) {
         (Surface::Sphere(sp), Curve3::Circle(c)) => {
             let n = c.frame.x.cross(c.frame.y);
-            let meridian = (c.frame.origin - sp.frame.origin).length() <= eps
-                && (c.radius - sp.radius).abs() <= eps
-                && n.normalize().dot(sp.frame.z.normalize()).abs() <= 1e-12;
-            let latitude =
-                parallel(n, sp.frame.z) && on_axis(c.frame.origin, sp.frame.origin, sp.frame.z);
-            meridian || latitude
+            let meridian = (n.normalize().dot(sp.frame.z.normalize()).abs() <= 1e-12).then(|| {
+                (c.frame.origin - sp.frame.origin)
+                    .length()
+                    .max((c.radius - sp.radius).abs())
+            });
+            let latitude = parallel(n, sp.frame.z)
+                .then(|| off_axis(c.frame.origin, sp.frame.origin, sp.frame.z));
+            least(meridian, latitude)
         }
         (Surface::Cone(k), Curve3::Line(l)) => {
             let slope = k.semi_angle.tan();
             let apex = k.frame.origin - k.frame.z.normalize() * (k.radius / slope);
             let d = l.direction.normalize();
-            let through = (apex - l.origin).cross(d).length() <= eps;
             let axis = k.frame.z.normalize();
-            through && (d.dot(axis).abs() - k.semi_angle.cos().abs()).abs() <= 1e-12
+            ((d.dot(axis).abs() - k.semi_angle.cos().abs()).abs() <= 1e-12)
+                .then(|| (apex - l.origin).cross(d).length())
         }
         (Surface::Cone(k), Curve3::Circle(c)) => {
             let n = c.frame.x.cross(c.frame.y);
-            parallel(n, k.frame.z) && on_axis(c.frame.origin, k.frame.origin, k.frame.z)
+            parallel(n, k.frame.z).then(|| off_axis(c.frame.origin, k.frame.origin, k.frame.z))
         }
         (Surface::Torus(t), Curve3::Circle(c)) => {
             let n = c.frame.x.cross(c.frame.y);
             let z = t.frame.z.normalize();
-            let ring = parallel(n, z) && on_axis(c.frame.origin, t.frame.origin, z);
+            let ring = parallel(n, z).then(|| off_axis(c.frame.origin, t.frame.origin, z));
             let d = c.frame.origin - t.frame.origin;
-            let tube = n.normalize().dot(z).abs() <= 1e-12
-                && d.dot(z).abs() <= eps
-                && (d.length() - t.major_radius).abs() <= eps
-                && (c.radius - t.minor_radius).abs() <= eps;
-            ring || tube
+            let tube = (n.normalize().dot(z).abs() <= 1e-12).then(|| {
+                d.dot(z)
+                    .abs()
+                    .max((d.length() - t.major_radius).abs())
+                    .max((c.radius - t.minor_radius).abs())
+            });
+            least(ring, tube)
         }
-        _ => false,
+        _ => None,
+    };
+    residue.is_some_and(|r| report::near(ToleranceDecisionKind::IsoCurve, r, tolerance))
+}
+
+/// The smaller of two optional residues.
+fn least(a: Option<Scalar>, b: Option<Scalar>) -> Option<Scalar> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     }
 }
 
@@ -711,7 +742,8 @@ fn affine_pcurve(
     let (pu, pv) = periods(surface);
     let uv = |t: Scalar, near: Point2| -> Result<Point2, BooleanError> {
         let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        let (mut u, mut v) = locate(surface, p, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (mut u, mut v) =
+            locate(surface, p, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
         if pu {
             u += ((near.x - u) / TAU).round() * TAU;
         }
@@ -832,7 +864,7 @@ fn angle_span(
 ) -> Result<Interval, BooleanError> {
     let at = |t: Scalar| -> Result<Scalar, BooleanError> {
         let p = evaluate3(&section.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        Ok(locate(surface, p, tolerance)
+        Ok(locate(surface, p, report::floored(tolerance))
             .map_err(|_| BooleanError::Evaluation)?
             .0)
     };
@@ -859,7 +891,8 @@ fn place(
     hi: Point2,
     tolerance: Tolerance,
 ) -> Result<Point2, BooleanError> {
-    let (mut u, mut v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+    let (mut u, mut v) =
+        locate(surface, point, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)?;
     let (pu, pv) = periods(surface);
     let slack = 1e-9;
     let wrap = |x: &mut Scalar, a: Scalar, b: Scalar| {
@@ -896,16 +929,19 @@ fn split_use(
     // taken, is that point: splitting there would leave a sliver whose
     // ends weld into one vertex (#228). The cut moves by at most the
     // caller's linear tolerance.
-    let eps = tolerance.linear();
     let mut taken = Vec::with_capacity(ends.len() + 2);
     for t in [piece.span.start, piece.span.end] {
         taken.push(evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?);
     }
     for &point in ends {
-        if taken.iter().any(|q: &Point3| (point - *q).length() <= eps) {
+        let nearest = taken
+            .iter()
+            .map(|q: &Point3| (point - *q).length())
+            .fold(Scalar::INFINITY, Scalar::min);
+        if report::near(ToleranceDecisionKind::MergedPoints, nearest, tolerance) {
             continue;
         }
-        let Ok(t) = locate3(&piece.curve, point, tolerance) else {
+        let Ok(t) = locate3(&piece.curve, point, report::floored(tolerance)) else {
             continue;
         };
         let t = if matches!(piece.curve, Curve3::Circle(_) | Curve3::Ellipse(_)) {
@@ -917,11 +953,16 @@ fn split_use(
         };
         let Some(t) = t else { continue };
         let on = evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?;
-        if (on - point).length() > tolerance.linear() {
+        if !report::near(
+            ToleranceDecisionKind::IncidentPoint,
+            (on - point).length(),
+            tolerance,
+        ) {
             continue;
         }
         // The same point on the pcurve, through the surface's parameters.
-        let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(surface, point, report::floored(tolerance))
+            .map_err(|_| BooleanError::Evaluation)?;
         let (pu, pv) = periods(surface);
         let turns: &[Scalar] = &[0.0, TAU, -TAU, 2.0 * TAU, -2.0 * TAU];
         let mut shifts = Vec::new();
@@ -932,7 +973,11 @@ fn split_use(
         }
         let mut found = None;
         for (du, dv) in shifts {
-            if let Ok(p) = locate2(&piece.pcurve, Point2::new(u + du, v + dv), tolerance) {
+            if let Ok(p) = locate2(
+                &piece.pcurve,
+                Point2::new(u + du, v + dv),
+                report::floored(tolerance),
+            ) {
                 let (plo, phi) = (
                     piece.pspan.start.min(piece.pspan.end),
                     piece.pspan.start.max(piece.pspan.end),

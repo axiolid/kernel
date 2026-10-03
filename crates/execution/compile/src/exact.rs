@@ -15,10 +15,17 @@
 //! [`ExactBRep::transformed`] (#223): a rotation, a reflection and a
 //! translation are exact, and a scale or shear is refused, never
 //! approximated.
+//!
+//! [`ReferenceExactCompiler::compile_exact_with_report`] also says, per
+//! body, whether any boolean on the way read a feature within the
+//! tolerance (#236): an exact [`BooleanReport`] means the body is the exact
+//! result of its operands as given; otherwise it was built from operands
+//! moved by at most the report's magnitudes, within the tolerance.
 
 use std::collections::{HashMap, HashSet};
 
 use axiolid_brep::{ExactBRep, TransformError};
+use axiolid_brep_boolean::BooleanReport;
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_construct::revolve_exact::revolve_profile_exact;
 use axiolid_construct::swept_disk_exact::{
@@ -46,6 +53,53 @@ impl ReferenceExactCompiler {
     /// Construct the reference exact compiler.
     pub const fn new() -> Self {
         Self
+    }
+
+    /// [`ExactCompiler::compile_exact`], with the within-tolerance
+    /// decisions the body's booleans took (#236), merged over every boolean
+    /// in its graph (each kind once, with its worst magnitude).
+    ///
+    /// An exact report ([`BooleanReport::is_exact`]) means no boolean read
+    /// anything within the tolerance: the body is the exact boolean of its
+    /// operands as given, and may be cited as exact. Otherwise it is the
+    /// exact result of operands moved by at most [`BooleanReport::linear`]
+    /// and turned by at most [`BooleanReport::angular`], and a consumer
+    /// must widen distances by that much. Bodies without booleans, and the
+    /// integer-exact prism path, always report exact.
+    ///
+    /// # Errors
+    ///
+    /// As [`ExactCompiler::compile_exact`].
+    pub fn compile_exact_with_report(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<(ExactBRep, BooleanReport)> {
+        let mut compilation = ExactCompilation::new(graph, options);
+        let body = compilation.compile(root)?;
+        Ok((body, compilation.report_of(root)))
+    }
+
+    /// [`Self::compile_exact_with_report`] for several roots in one
+    /// compilation, sharing its cache, in root order.
+    ///
+    /// # Errors
+    ///
+    /// As [`ExactCompiler::compile_exact_batch_into`].
+    pub fn compile_exact_batch_with_reports(
+        &self,
+        graph: &GeometryGraph,
+        roots: &[NodeId],
+        options: &ExecutionOptions,
+    ) -> GeomResult<Vec<(ExactBRep, BooleanReport)>> {
+        let mut compilation = ExactCompilation::new(graph, options);
+        let mut out = Vec::with_capacity(roots.len());
+        for &root in roots {
+            let body = compilation.compile(root)?;
+            out.push((body, compilation.report_of(root)));
+        }
+        Ok(out)
     }
 }
 
@@ -88,6 +142,11 @@ struct ExactCompilation<'a> {
     active: HashSet<NodeId>,
     cache_hits: usize,
     evaluated_nodes: usize,
+    /// Per compiled node with a boolean beneath it: what its booleans read
+    /// within tolerance (#236). Absent means exact.
+    reports: HashMap<NodeId, BooleanReport>,
+    /// The report of the general boolean `compile_boolean` just ran.
+    boolean_report: Option<BooleanReport>,
 }
 
 impl<'a> ExactCompilation<'a> {
@@ -99,6 +158,20 @@ impl<'a> ExactCompilation<'a> {
             active: HashSet::new(),
             cache_hits: 0,
             evaluated_nodes: 0,
+            reports: HashMap::new(),
+            boolean_report: None,
+        }
+    }
+
+    /// What the booleans beneath a compiled node read within tolerance.
+    fn report_of(&self, node: NodeId) -> BooleanReport {
+        self.reports.get(&node).cloned().unwrap_or_default()
+    }
+
+    /// Record a node's report, if anything was read.
+    fn set_report(&mut self, node: NodeId, report: BooleanReport) {
+        if !report.is_exact() {
+            self.reports.insert(node, report);
         }
     }
 
@@ -169,6 +242,7 @@ impl<'a> ExactCompilation<'a> {
             GeometryNode::Instance(instance) => {
                 let instance = *instance;
                 let source = self.compile(instance.source)?;
+                self.set_report(root, self.report_of(instance.source));
                 source
                     .transformed(&instance.transform)
                     .map_err(|error| match error {
@@ -211,7 +285,14 @@ impl<'a> ExactCompilation<'a> {
                 operator,
             }) => {
                 let (left, right, operator) = (*left, *right, *operator);
-                self.compile_boolean(left, right, operator)
+                let body = self.compile_boolean(left, right, operator)?;
+                let own = self.boolean_report.take().unwrap_or_default();
+                let report = self
+                    .report_of(left)
+                    .merged(&self.report_of(right))
+                    .merged(&own);
+                self.set_report(root, report);
+                Ok(body)
             }
             _ => Err(unsupported(exact_input_family(node))),
         }

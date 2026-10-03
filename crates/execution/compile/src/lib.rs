@@ -21,5 +21,8 @@ pub use compiler::ReferenceMeshCompiler;
 pub use deviation::{DeviationBound, DeviationContribution, DeviationPath, DeviationReport};
 
 mod exact;
+/// What a boolean read within tolerance, as
+/// [`ReferenceExactCompiler::compile_exact_with_report`] reports it (#236).
+pub use axiolid_brep_boolean::{BooleanReport, ToleranceDecision, ToleranceDecisionKind};
 pub use directrix::ExactDirectrix;
 pub use exact::{exact_directrix, ReferenceExactCompiler, SOLID_FAMILY_NAMES};

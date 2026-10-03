@@ -26,6 +26,24 @@ caret rule for `0.x` versions.
   boundary that is not a polyline, scaled placements and the general
   boolean's refusals are refused by name; a clip that removes everything
   is `Degenerate`.
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` return each body with a
+  `BooleanReport` (re-exported from `axiolid-brep-boolean`, with
+  `ToleranceDecision` and `ToleranceDecisionKind`) merged over every
+  general boolean and clip beneath it (#236). An exact report means the
+  body is the exact result of its operands as given and may be cited as
+  exact; otherwise it bounds how far the operands were moved or turned,
+  within the tolerance.
+
+### Fixed
+
+- Placed differences compile at `Tolerance::ZERO` (#236): openings placed
+  with exact axis matrices (entries `0` and `+-1`), through, blind or
+  flush, give the exact difference and an exact report.
+- A boolean's deviation contribution says when its bound also holds for
+  the exact boolean of the given operands (#236): measured against an
+  exact compiler result whose report is exact, its detail reads "the exact
+  boolean of the given operands" instead of "operands within tolerance".
 
 - `ReferenceMeshCompiler::compile_mesh_with_deviation` reports a boolean
   `Certified` where `ReferenceExactCompiler` builds its exact result

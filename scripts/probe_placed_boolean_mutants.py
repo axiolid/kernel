@@ -1,9 +1,10 @@
-"""Mutation probe for exact differences of placed operands (#228).
+"""Mutation probe for exact differences of placed operands (#228, #236).
 
 Each mutant reintroduces a way the placed-opening path failed or could
 fail -- a rounding residue read exactly, a tangent double root split into
-a sliver, the compiler's dispatch or refusals loosened -- and must turn a
-test red.
+a sliver, the compiler's dispatch or refusals loosened, an exact
+configuration read within tolerance, a reading left out of the report --
+and must turn a test red.
 
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
@@ -20,6 +21,10 @@ import pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/construction/brep-boolean/src/section.rs"
+R = "crates/algorithms/construction/brep-boolean/src/report.rs"
+P = "crates/algorithms/construction/brep-boolean/src/predicate.rs"
+E = "crates/execution/compile/src/exact.rs"
+K = "crates/execution/compile/src/exact/clip.rs"
 F = "crates/algorithms/construction/brep-boolean/src/split.rs"
 C = "crates/execution/compile/src/exact/boolean.rs"
 B = "crates/algorithms/construction/brep-boolean/src/bounds.rs"
@@ -27,7 +32,9 @@ TESTS = [
     ["-p", "axiolid-brep-boolean", "--lib"],
     ["-p", "axiolid-brep-boolean", "--test", "openings"],
     ["-p", "axiolid-brep-boolean", "--test", "contact"],
+    ["-p", "axiolid-brep-boolean", "--test", "report"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"],
+    ["-p", "axiolid-mesh-compile", "--test", "exact_boolean_report"],
 ]
 
 MUTANTS = [
@@ -47,17 +54,17 @@ MUTANTS = [
      "                let mut cuts = merge_close(branch, cuts, tolerance)?;",
      "                let mut cuts = cuts;"),
     ("a near-parallel plane and cylinder read exactly", S,
-     "    if extent.is_none_or(|extent| along.abs() * extent > eps) {",
-     "    if along != 0.0 {"),
+     "    if parallel == Reading::Apart {",
+     "    if parallel != Reading::Exact {"),
     ("a plane read parallel however far it turns over the faces", S,
-     "    if extent.is_none_or(|extent| along.abs() * extent > eps) {",
-     "    if along.abs() > eps {"),
+     "        along.abs() * extent,",
+     "        along.abs(),"),
     ("a near-perpendicular plane and cylinder read exactly", S,
-     "    if cylinder.radius * axis.cross(normal).length() <= eps {",
-     "    if false {"),
+     "        cylinder.radius * axis.cross(normal).length(),",
+     "        Scalar::INFINITY,"),
     ("a near-tangent plane cuts two rulings", S,
-     "    let offsets: Vec<Scalar> = if (distance.abs() - r).abs() <= eps {",
-     "    let offsets: Vec<Scalar> = if distance.abs() == r {"),
+     "        (distance.abs() - r).abs(),",
+     "        Scalar::INFINITY,"),
     ("a chain of near cuts merged past the tolerance", S,
      "                    return Err(BooleanError::NearCoincidence);",
      "                    let _ = 0;"),
@@ -65,13 +72,13 @@ MUTANTS = [
      "            Some((sum, count, first, last)) if (point - *last).length() <= eps => {",
      "            Some((sum, count, first, last)) if (point - *last).length() <= 10.0 * eps => {"),
     ("coincident supports read at twenty tolerances", "crates/algorithms/construction/brep-boolean/src/support.rs",
-     "    let eps = tolerance.linear();",
-     "    let eps = 20.0 * tolerance.linear();"),
+     "        linear,\n        angular,",
+     "        linear / 20.0,\n        angular,"),
     ("an edge read along a curve from sampled points", S,
      "        _ => Ok(false),\n    }\n}",
      "        _ => Ok(true),\n    }\n}"),
     ("a boundary use split next to its own end", F,
-     "        if taken.iter().any(|q: &Point3| (point - *q).length() <= eps) {",
+     "        if report::near(ToleranceDecisionKind::MergedPoints, nearest, tolerance) {",
      "        if false {"),
     ("unions of placed operands let through", C,
      "        if operator != BooleanOperator::Difference {",
@@ -83,14 +90,42 @@ MUTANTS = [
      "                _ => {\n                    return Err(unsupported(",
      "                _ if false => {\n                    return Err(unsupported("),
     ("the operator dropped for the general boolean", C,
-     "        boolean(&subject, &tool, operator, self.options.tolerance())",
-     "        boolean(&subject, &tool, BooleanOperator::Union, self.options.tolerance())"),
+     "boolean_with_report(&subject, &tool, operator, self.options.tolerance())",
+     "boolean_with_report(&subject, &tool, BooleanOperator::Union, self.options.tolerance())"),
     ("operands swapped", C,
-     "        boolean(&subject, &tool, operator, self.options.tolerance())",
-     "        boolean(&tool, &subject, operator, self.options.tolerance())"),
+     "boolean_with_report(&subject, &tool, operator, self.options.tolerance())",
+     "boolean_with_report(&tool, &subject, operator, self.options.tolerance())"),
     ("an emptied wall refused instead of degenerate", C,
      "        BooleanError::EmptyResult => {",
      "        BooleanError::EmptyResult if false => {"),
+    # #236: zero tolerance, exact predicates first, and the report.
+    ("a point named on its own curve only within the caller's tolerance", R,
+     "        tolerance.linear().max(rounding()),\n        tolerance.angular().max(ROUNDING),",
+     "        tolerance.linear(),\n        tolerance.angular().max(ROUNDING),"),
+    ("no rounding floor for constructed points", R,
+     "    let within = residue <= tolerance.linear().max(rounding());",
+     "    let within = residue <= tolerance.linear();"),
+    ("exact predicates never asked", R,
+     "    if exact() {\n        return Reading::Exact;",
+     "    if false && exact() {\n        return Reading::Exact;"),
+    ("a reading within tolerance left out of the report", R,
+     "            s.report.add(kind, linear, angular);",
+     "            let _ = (kind, linear, angular);"),
+    ("parallel planes called exactly coplanar", P,
+     "            Some(np.cross(&nq).is_zero() && zero(&oq.sub(&op).dot(&np)))",
+     "            Some(np.cross(&nq).is_zero())"),
+    ("any plane called exactly perpendicular to an axis", P,
+     "    plane_cylinder(p, c).is_some_and(|(n, axis, _)| n.cross(&axis).is_zero())",
+     "    plane_cylinder(p, c).is_some()"),
+    ("a difference's report dropped by the compiler", E,
+     "                self.set_report(root, report);",
+     "                let _ = report;"),
+    ("an instance loses its source's report", E,
+     "                self.set_report(root, self.report_of(instance.source));",
+     "                let _ = instance.source;"),
+    ("a clip's report dropped by the compiler", K,
+     "        self.boolean_report = Some(report);",
+     "        let _ = report;"),
 ]
 
 def run(target):

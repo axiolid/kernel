@@ -168,3 +168,46 @@ and with openings, in either order.
 
 Tests: `crates/execution/compile/tests/exact_half_space_clip.rs`; probe
 `scripts/probe_half_space_clip_mutants.py`.
+
+## Amendment 2026-10-03: exact first, and a report (#236)
+
+A consumer could not tell an exact difference from one built within
+tolerance, and `Tolerance::ZERO` failed for every placed difference, even
+for openings placed by matrices with entries `0` and `+-1`. So every result
+had to be treated as perturbed.
+
+- **Why zero failed.** Naming a point's parameters on the curve or surface
+  it was evaluated from (`axiolid_evaluate::surface::locate`, `locate3`)
+  checks the `f64` round trip against the linear tolerance; at zero any
+  rounding residue fails it (`BooleanError::Evaluation`). That is
+  bookkeeping, not a decision. It, and welding two evaluations of one
+  vertex, now allow the rounding of the operands' coordinates: `2^-40` of
+  their extent. A residue that small is one exact point evaluated twice;
+  only a larger one is a decision within tolerance.
+- **Exact first.** Readings about the operands' own surfaces (coincident
+  supports, a plane parallel or perpendicular to or touching a cylinder)
+  ask an exact predicate on the operands' numbers first (dyadic arithmetic,
+  `axiolid-exact`, already in the crate's closure through `axiolid-nurbs`;
+  the direct edge is allowlisted). Exactly coplanar, parallel and
+  perpendicular faces are decided without the tolerance at any tolerance.
+- **Report.** `axiolid_brep_boolean::boolean_with_report` returns a
+  `BooleanReport`: per kind of within-tolerance reading that fired, the
+  furthest it moved (`linear`) and turned (`angular`) the operands.
+  `ReferenceExactCompiler::compile_exact_with_report` (and a batch form)
+  merges the reports of every general boolean and clip beneath a body.
+- **Guarantee, amended.** An empty report means the result is the exact
+  boolean of the operands as given; at `Tolerance::ZERO` the report is
+  always empty, and operands that miss coincidence by rounding are refused
+  by name rather than guessed. A non-empty report bounds the perturbation
+  of the existing guarantee. Placed with exact axis matrices, through,
+  blind and flush openings succeed at zero and report nothing, at any
+  tolerance; built from sines and cosines under a general placement, a
+  flush opening's caps are read as coplanar and reported, and at zero it
+  is refused. A through opening under a general rotation meets the wall
+  only transversally and reports nothing: it needs no reading.
+- **Not changed.** The within-tolerance readings themselves, their bounds
+  and their refusals.
+
+Tests: `crates/algorithms/construction/brep-boolean/tests/report.rs`,
+`crates/execution/compile/tests/exact_boolean_report.rs`; probe
+`scripts/probe_placed_boolean_mutants.py` (report mutants).

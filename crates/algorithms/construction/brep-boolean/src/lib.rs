@@ -35,8 +35,7 @@
 //! **Decisions within tolerance.** Operands built or placed separately meet
 //! faces that agree only up to rounding (#228). These decisions use the
 //! caller's [`Tolerance`] and nothing else: `eps = tolerance.linear()` for
-//! distances, `alpha = tolerance.angular()` for directions; there is no
-//! built-in floor.
+//! distances, `alpha = tolerance.angular()` for directions.
 //!
 //! - two supports are one surface when their normals or axes agree within
 //!   `alpha` and their offsets within `eps`;
@@ -48,36 +47,60 @@
 //! - a section that touches the surface next to an edge, whose double root
 //!   rounding split or lost, is cut where it meets the edge itself, within
 //!   `eps`;
-//! - cuts on a section within `eps` of each other are one cut, and a
-//!   boundary split within `eps` of the boundary piece's end is that end;
+//! - cuts on a section within `eps` of each other are one cut, a boundary
+//!   split within `eps` of the boundary piece's end is that end, and two
+//!   evaluations of a vertex within `eps` are one vertex;
+//! - a section is an iso-parameter curve of a face within `eps`;
 //! - a plane is parallel or perpendicular to a cylinder's axis, or touches
 //!   the cylinder, when that moves the plane by at most `eps` over where
 //!   the section can matter.
 //!
-//! When none of these fired, the result is the exact boolean of the
-//! operands. When one fired, it is the exact boolean of operands whose
-//! faces were moved by at most `eps` (and, for a coincidence or contact of
-//! directions, turned by at most `alpha`), with every surface and curve
-//! exact for those. A reading that no single such perturbation explains is
-//! refused instead: cuts chained within `eps` of each other over more than
-//! `eps` are [`BooleanError::NearCoincidence`]. Features further apart than
-//! the tolerance always go through the exact predicates: a gap of ten
-//! tolerances stays a gap.
+//! **Exact first (#236).** A reading about the operands' own surfaces --
+//! two supports are one, a plane is parallel or perpendicular to a
+//! cylinder's axis or touches it -- is first put to an exact predicate on
+//! the operands' `f64` numbers (dyadic arithmetic, `axiolid-exact`). Faces
+//! that are exactly coplanar, parallel or perpendicular, as operands placed
+//! by matrices with entries `0` and `+-1` meet, are decided exactly and use
+//! no tolerance. A reading about constructed points (a cut, a vertex, a
+//! point on an edge) compares `f64` evaluations of exact curves, so a
+//! residue up to `2^-40` of the operands' extent (about four thousand units
+//! in the last place) is the rounding of one exact point, read without the
+//! tolerance; only a larger residue is a decision within tolerance.
 //!
-//! Bookkeeping in a face's parameters (welding the two evaluations of one
-//! vertex, ordering pieces leaving a vertex) uses fixed relative slacks far
-//! below any tolerance. It never decides geometry: an order it cannot
-//! settle is refused ([`BooleanError::TangentSplit`],
-//! [`BooleanError::UnclosedSplit`]).
+//! **Guarantee.** [`boolean_with_report`] returns a [`BooleanReport`] of the
+//! within-tolerance decisions that fired, by kind, with the furthest each
+//! moved or turned the operands. When it is empty
+//! ([`BooleanReport::is_exact`]), the result is the exact boolean of the
+//! operands as given: every decision was exact, and new vertices are exact
+//! points evaluated in `f64`. At [`Tolerance::ZERO`] nothing can be read
+//! within tolerance, so every result is exact; operands that only miss each
+//! other by rounding are then refused, not guessed. When the report is not
+//! empty, the result is the exact boolean of operands whose faces were
+//! moved by at most `eps` (and, for a coincidence or contact of
+//! directions, turned by at most `alpha`), with every surface and curve
+//! exact for those; the report bounds how far. A reading that no single
+//! such perturbation explains is refused instead: cuts chained within `eps`
+//! of each other over more than `eps` are [`BooleanError::NearCoincidence`].
+//! Features further apart than the tolerance always go through the exact
+//! predicates: a gap of ten tolerances stays a gap.
+//!
+//! Bookkeeping in a face's parameters (ordering pieces leaving a vertex,
+//! naming a point's parameters on the surface it was evaluated from) uses
+//! fixed relative slacks far below any tolerance. It never decides
+//! geometry: an order it cannot settle is refused
+//! ([`BooleanError::TangentSplit`], [`BooleanError::UnclosedSplit`]).
 
 mod assemble;
 mod bounds;
 mod classify;
+mod predicate;
+mod report;
 mod seams;
 mod section;
 mod split;
 mod support;
 
+pub use report::{BooleanReport, ToleranceDecision, ToleranceDecisionKind};
 pub use section::{section_edges, SectionEdge};
 pub use split::{split_face, Piece, PieceSource, Region};
 
@@ -99,6 +122,40 @@ use axiolid_topology::Orientation;
 /// Anything a step refuses (see [`BooleanError`]), or a result with nothing
 /// left.
 pub fn boolean(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> Result<ExactBRep, BooleanError> {
+    boolean_with_report(a, b, operator, tolerance).map(|(result, _)| result)
+}
+
+/// [`boolean`], with the within-tolerance decisions it took (#236).
+///
+/// An exact report ([`BooleanReport::is_exact`]) means no decision used the
+/// tolerance: the result is the exact boolean of `a` and `b` as given (see
+/// "What a result guarantees"). Otherwise the report names each kind of
+/// reading that fired and the furthest it moved or turned the operands,
+/// within `tolerance`. At [`Tolerance::ZERO`] nothing can be read within
+/// tolerance, so a result is always exact: operands placed with exact axis
+/// matrices (entries `0` and `+-1`) meet in exactly coincident, parallel and
+/// perpendicular faces, which the exact predicates decide.
+///
+/// # Errors
+///
+/// As [`boolean`].
+pub fn boolean_with_report(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> Result<(ExactBRep, BooleanReport), BooleanError> {
+    let session = report::open(&[a, b]);
+    let result = run(a, b, operator, tolerance)?;
+    Ok((result, session.finish()))
+}
+
+fn run(
     a: &ExactBRep,
     b: &ExactBRep,
     operator: BooleanOperator,
@@ -223,7 +280,8 @@ fn classify_point(
     if let Some(theirs) = other_solid.on_face(point, coincident, tolerance)? {
         // On the other solid's boundary: kept once, from the first
         // operand, where the operator leaves a boundary.
-        let (u, v) = locate(surface, point, tolerance).map_err(|_| BooleanError::Evaluation)?;
+        let (u, v) = locate(surface, point, report::floored(tolerance))
+            .map_err(|_| BooleanError::Evaluation)?;
         let ours = normal(surface, u, v).map_err(|_| BooleanError::Evaluation)? * sign;
         let same = ours.dot(theirs) > 0.0;
         let keep = first

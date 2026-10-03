@@ -223,9 +223,12 @@ fn assert_measured(
     assert_eq!(report.contributions.len(), 1, "{report:?}");
     let contribution = report.contributions[0];
     assert_eq!(contribution.path, DeviationPath::Boolean);
-    assert_eq!(
-        contribution.detail,
-        "measured against the exact compiler's result, operands within tolerance"
+    // Within tolerance, or the exact boolean of the given operands (#236).
+    assert!(
+        contribution
+            .detail
+            .starts_with("measured against the exact compiler's result, "),
+        "{report:?}"
     );
     let DeviationBound::Certified(bound) = contribution.bound else {
         panic!("{name}: expected a certified bound, got {report:?}");
@@ -402,5 +405,66 @@ fn a_union_the_exact_compiler_refuses_stays_unbounded_by_name() {
     assert_eq!(
         contribution.bound,
         DeviationBound::Unbounded("exact union or intersection of placed operands")
+    );
+}
+
+/// A wall `6 x 0.25 x 3` minus a window `1.25 x 1.5` flush with both its
+/// faces, both under `placement`, the window turned across the wall by
+/// `across`.
+fn wall_with_flush_window(g: &mut Graph, placement: Transform3, across: Transform3) -> NodeId {
+    let wall = g.extrusion(rect(6.0, 0.25), 3.0);
+    let wall = g.place(wall, placement);
+    let window = g.extrusion(rect(1.25, 1.5), 0.25);
+    let local = Transform3::from_translation(Vec3::new(0.75, 0.125, 1.25)) * across;
+    let window = g.place(window, placement * local);
+    g.boolean(wall, window, BooleanOperator::Difference)
+}
+
+/// The boolean contribution's detail for a flush window.
+fn flush_window_detail(
+    placement: Transform3,
+    across: Transform3,
+    tolerance: Tolerance,
+) -> &'static str {
+    let options = ExecutionOptions::new(tolerance)
+        .with_chord_error(1e-3)
+        .unwrap();
+    let (_, _, _, report, _) = compile(|g| wall_with_flush_window(g, placement, across), &options);
+    let contribution = report.contributions[0];
+    assert_eq!(contribution.path, DeviationPath::Boolean);
+    assert!(
+        matches!(contribution.bound, DeviationBound::Certified(_)),
+        "{report:?}"
+    );
+    contribution.detail
+}
+
+#[test]
+fn the_detail_says_when_the_bound_holds_for_the_given_operands() {
+    // Placed by exact axis matrices, the window's caps lie exactly in the
+    // wall's faces: no decision within tolerance, at zero tolerance or a
+    // positive one, so the bound is to the exact boolean of the operands
+    // as given (#236).
+    let exact_across =
+        Transform3::from_mat3(axiolid_core::Mat3::from_cols(Vec3::X, Vec3::Z, -Vec3::Y));
+    let grid = Transform3::from_mat3_translation(
+        axiolid_core::Mat3::from_cols(Vec3::Y, -Vec3::X, Vec3::Z),
+        Vec3::new(12.5, -4.0, 3.25),
+    );
+    for tolerance in [Tolerance::ZERO, Tolerance::METRE] {
+        assert_eq!(
+            flush_window_detail(grid, exact_across, tolerance),
+            "measured against the exact compiler's result, the exact boolean of the given operands"
+        );
+    }
+    // Turned from sines and cosines under a building placement, the caps
+    // meet the faces only up to rounding: read within tolerance.
+    assert_eq!(
+        flush_window_detail(
+            building(),
+            Transform3::from_rotation_x(FRAC_PI_2),
+            Tolerance::METRE
+        ),
+        "measured against the exact compiler's result, operands within tolerance"
     );
 }

@@ -149,6 +149,7 @@ graph TD
     axiolid_brep_boolean --> axiolid_core
     axiolid_brep_boolean --> axiolid_curve
     axiolid_brep_boolean --> axiolid_evaluate
+    axiolid_brep_boolean --> axiolid_exact
     axiolid_brep_boolean --> axiolid_measure
     axiolid_brep_boolean --> axiolid_nurbs
     axiolid_brep_boolean --> axiolid_overlay

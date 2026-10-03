@@ -67,7 +67,7 @@
 //! curved base surface cannot reach this path.
 
 use axiolid_brep::{ExactBRep, TransformError};
-use axiolid_brep_boolean::{boolean, BooleanError};
+use axiolid_brep_boolean::{boolean_with_report, BooleanError};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{
@@ -238,10 +238,15 @@ impl ExactCompilation<'_> {
             Err(Decided::Subject) => return Ok(subject),
             Err(Decided::Empty) => return Err(emptied()),
         };
-        boolean(&subject, &solid, operator, tolerance).map_err(|error| match error {
-            BooleanError::EmptyResult => emptied(),
-            error => remap_boolean_error(error),
-        })
+        let (body, report) = boolean_with_report(&subject, &solid, operator, tolerance).map_err(
+            |error| match error {
+                BooleanError::EmptyResult => emptied(),
+                error => remap_boolean_error(error),
+            },
+        )?;
+        // What it read within tolerance, for the compiler's report (#236).
+        self.boolean_report = Some(report);
+        Ok(body)
     }
 
     /// The finite prism standing in for the half-space over `envelope`, or

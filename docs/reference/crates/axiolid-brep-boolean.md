@@ -43,6 +43,7 @@ results against them.
 - [`axiolid-core`](./axiolid-core)
 - [`axiolid-curve`](./axiolid-curve)
 - [`axiolid-evaluate`](./axiolid-evaluate)
+- [`axiolid-exact`](./axiolid-exact)
 - [`axiolid-measure`](./axiolid-measure)
 - [`axiolid-nurbs`](./axiolid-nurbs)
 - [`axiolid-surface`](./axiolid-surface)
