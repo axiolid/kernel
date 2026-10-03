@@ -1235,4 +1235,9 @@ fn an_instance_scales_the_bound_and_a_boolean_is_unbounded() {
     );
     assert_eq!(report.bound, None);
     assert_eq!(report.contributions[0].path, DeviationPath::Boolean);
+    // No exact result to measure against (#235): named by the refusal.
+    assert_eq!(
+        report.contributions[0].bound,
+        DeviationBound::Unbounded("exact boolean operand that is not an extrusion")
+    );
 }

@@ -48,7 +48,8 @@
 //! # Branch and bound against an exact parameterisation
 //!
 //! Where the mesh's vertices sit at no known surface parameters (a tube's
-//! stations stand on frames read off its sampled path), the exact surface
+//! stations stand on frames read off its sampled path, a boolean's cut
+//! curve wherever the mesh boolean put it), the exact surface
 //! `T` is covered by parameter cells. A cell with centre `x_c` and
 //! half-widths `h` maps into `T(x_c) + DT(x_c) [-h, h]` grown by
 //! `e2 = 1/2 (A h_x^2 + 2 B h_x h_y + C h_y^2)`, with `A, B, C` certified
@@ -61,15 +62,23 @@
 //! sampled at a cell centre, or a work cap is reached; the reported value
 //! is always the worst bound over all cells.
 //! - Instances scale the bound by their transform's largest stretch;
-//!   collections take the worst member. A boolean's result is unbounded:
-//!   cutting two meshes moves the intersection curve, and a one-sided
-//!   bound on each operand does not bound it.
+//!   collections take the worst member.
+//! - Booleans (#235): cutting two meshes moves the intersection curve, and
+//!   a one-sided bound on each operand does not bound it, so nothing is
+//!   derived from the operands. Where `ReferenceExactCompiler` builds the
+//!   exact result of the same node (differences of placed extrusions,
+//!   #228), the mesh is certified against that exact B-rep by the branch
+//!   and bound above, over each face's trimmed parameter domain; a boolean
+//!   it refuses is unbounded with the refusal's name. This runs only for a
+//!   report: plain compilation does not build the exact result.
 //!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
 use axiolid_core::{Scalar, Transform3};
 
+mod boolean;
 mod paths;
+pub(crate) use boolean::of_boolean;
 pub(crate) use paths::{of_curve_bounded, of_primitive, of_solid};
 
 /// The construction path a part of the mesh came from.

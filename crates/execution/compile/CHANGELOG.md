@@ -27,6 +27,30 @@ caret rule for `0.x` versions.
   boolean's refusals are refused by name; a clip that removes everything
   is `Degenerate`.
 
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` reports a boolean
+  `Certified` where `ReferenceExactCompiler` builds its exact result
+  (#235): differences of placed extrusions, such as a wall with a round
+  window, an I-beam with round holes through its web, or a slab with a
+  round shaft. The boolean's mesh is measured against that exact B-rep by
+  the certified branch and bound of #232, over each face's trimmed
+  parameter domain (pcurves flattened to a certified chord bound; a cell is
+  dropped only when it is certainly outside the face). Nothing is derived
+  from the operands' bounds, which are one-sided and say nothing about
+  where the mesh boolean puts the cut. A boolean the exact compiler refuses
+  stays `Unbounded`, named by the refusal (for instance "exact union or
+  intersection of placed operands"), detail "no exact result". Only a
+  deviation report pays for this: plain compilation does not build the
+  exact result. Measured at a 1 mm budget: a 6 m wall with a 0.4 m round
+  window reports 0.53 mm against a sampled 0.48 mm, in about 0.7 s.
+
+### Changed
+
+- The certified branch and bound covers a piece with a flat region of the
+  mesh (edge-connected, consistently wound, coplanar triangles) as well as
+  with single triangles, so edges inside a planar face or a cylinder facet
+  no longer have to be resolved to the bound's own size. Bounds are as
+  sound as before and settle with less work.
+
 ## [0.3.9] - 2026-10-03
 
 ### Added

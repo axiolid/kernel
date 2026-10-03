@@ -117,6 +117,15 @@ enum Step {
     Exit(EvalKey),
 }
 
+/// Whether a compilation measures what no construction proves: a
+/// boolean's deviation against its exact result (#235) costs an exact
+/// compilation and a certified search, so only a deviation report pays it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Measure {
+    Skip,
+    Deviation,
+}
+
 /// Cached meshes keyed by node and effective local tolerance.
 ///
 /// A transformed instance changes the local chord budget. Keying only by node
@@ -307,6 +316,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         root: NodeId,
         options: &ExecutionOptions,
         cache: &mut Cache,
+        measure: Measure,
     ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, Budget::of(options));
         let mut stack = vec![Step::Enter(root_key)];
@@ -341,7 +351,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                                 budget.chord
                             ))
                         })?;
-                    let built = self.build(graph, key, &local_options, cache)?;
+                    let built = self.build(graph, key, &local_options, cache, measure)?;
                     cache.insert(key, built);
                 }
             }
@@ -447,6 +457,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         key: EvalKey,
         options: &ExecutionOptions,
         cache: &Cache,
+        measure: Measure,
     ) -> GeomResult<Built> {
         let id = key.id;
         let node = self.node(graph, id)?;
@@ -471,7 +482,19 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 left,
                 right,
                 operator,
-            }) => self.build_boolean(graph, *left, *right, *operator, options, cache),
+            }) => {
+                let built = self.build_boolean(graph, *left, *right, *operator, options, cache)?;
+                Ok(match measure {
+                    // Measured against the exact result only when a report
+                    // asks for it: it compiles the exact boolean (#235).
+                    Measure::Deviation => {
+                        let deviation =
+                            crate::deviation::of_boolean(graph, id, options, &built.mesh);
+                        built.with_deviation(deviation)
+                    }
+                    Measure::Skip => built,
+                })
+            }
             GeometryNode::SolidOperation(operation) => {
                 let mesh = self.build_solid(graph, operation, options)?;
                 let deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
@@ -978,7 +1001,7 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
     ) -> GeomResult<TriMesh> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
-        self.evaluate(graph, root, options, &mut cache)
+        self.evaluate(graph, root, options, &mut cache, Measure::Skip)
             .map(|built| built.mesh)
     }
 
@@ -992,7 +1015,7 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
     ) -> GeomResult<CompileOutcome> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
-        let built = self.evaluate(graph, root, options, &mut cache)?;
+        let built = self.evaluate(graph, root, options, &mut cache, Measure::Skip)?;
         Ok(CompileOutcome::tracked(built.mesh, built.fates.into_vec()).with_closure(built.closure))
     }
 
@@ -1009,7 +1032,10 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
         destination.reserve(roots.len());
         let mut cache = Cache::new();
         for &root in roots {
-            destination.push(self.evaluate(graph, root, options, &mut cache)?.mesh);
+            destination.push(
+                self.evaluate(graph, root, options, &mut cache, Measure::Skip)?
+                    .mesh,
+            );
         }
         Ok(())
     }
@@ -1055,7 +1081,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// budget asked for; see [`crate::DeviationReport`] and the
     /// [`deviation`](crate::deviation) module for what each path's bound
     /// rests on. A path with no certified bound is named, and makes the
-    /// overall bound `None`.
+    /// overall bound `None`. A boolean is measured against its exact result
+    /// where [`crate::ReferenceExactCompiler`] builds one (#235), which costs
+    /// that exact compilation and a certified search per boolean node.
     ///
     /// An inherent method rather than a [`MeshCompiler`] one: the bound is
     /// this compiler's claim about its own meshes, and another compiler
@@ -1072,7 +1100,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<(CompileOutcome, crate::DeviationReport)> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
-        let built = self.evaluate(graph, root, options, &mut cache)?;
+        let built = self.evaluate(graph, root, options, &mut cache, Measure::Deviation)?;
         let report = built.deviation.report(chord_error(options));
         Ok((
             CompileOutcome::tracked(built.mesh, built.fates.into_vec()).with_closure(built.closure),

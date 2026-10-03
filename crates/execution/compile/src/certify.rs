@@ -23,6 +23,17 @@
 //! of the best lower bound (or a tenth of the target, below which the gap
 //! does not matter), or the work budget runs out. The returned value is the
 //! worst upper bound over all cells, so stopping early only loosens it.
+//!
+//! A patch may be trimmed (a face of an exact B-rep, #235): it then says
+//! how each cell lies against its domain ([`Coverage`]). A cell certainly
+//! outside is dropped; one that may meet the domain's boundary is bounded
+//! whole, which covers its part inside, but its centre does not raise the
+//! lower bound, since it may lie off the face.
+//!
+//! Besides single triangles, a piece may be covered by a flat region of
+//! the mesh (edge-connected coplanar triangles, [`flat`]): without that,
+//! every edge inside a planar face or a cylinder facet would have to be
+//! resolved down to the bound's own size.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -30,12 +41,34 @@ use std::collections::BinaryHeap;
 use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_mesh::TriMesh;
 
+mod flat;
+
 /// A parameterised piece of the exact surface.
 pub(crate) trait Patch {
     /// Point and first partials at `(x, y)`; `None` where undefined.
     fn jet(&self, x: Scalar, y: Scalar) -> Option<(Point3, Vec3, Vec3)>;
     /// Certified `sup |T_xx|, |T_xy|, |T_yy|` over the box.
     fn second(&self, x: (Scalar, Scalar), y: (Scalar, Scalar)) -> Option<[Scalar; 3]>;
+    /// Where the box lies against the patch's domain. A patch whose domain
+    /// is the whole box (the default) covers every cell; a trimmed face
+    /// ([`crate::deviation`]'s boolean results) drops a cell only when it is
+    /// certainly outside.
+    fn coverage(&self, _x: (Scalar, Scalar), _y: (Scalar, Scalar)) -> Coverage {
+        Coverage::Inside
+    }
+}
+
+/// Where a cell lies against its patch's domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Coverage {
+    /// Every point of the cell is in the domain.
+    Inside,
+    /// The cell may meet the domain's boundary: it is kept and bounded
+    /// whole, which covers its part in the domain, but its centre is not a
+    /// certain domain point, so it does not raise the lower bound.
+    Boundary,
+    /// No point of the cell is in the domain: the cell is dropped.
+    Outside,
 }
 
 /// One parameter box of one patch.
@@ -91,8 +124,15 @@ pub(crate) fn certify(
     let mut heap = BinaryHeap::with_capacity(cells.len());
     let mut work = 0_usize;
     for cell in cells {
-        let (upper, sample) = evaluate(patches[cell.patch], &cell, &index)?;
-        lower = lower.max(sample);
+        let patch = patches[cell.patch];
+        let coverage = patch.coverage(cell.x, cell.y);
+        if coverage == Coverage::Outside {
+            continue;
+        }
+        let (upper, sample) = evaluate(patch, &cell, &index)?;
+        if coverage == Coverage::Inside {
+            lower = lower.max(sample);
+        }
         heap.push(Scored { upper, cell });
         work += 1;
     }
@@ -133,8 +173,14 @@ pub(crate) fn certify(
             ]
         };
         for half in halves {
+            let coverage = patch.coverage(half.x, half.y);
+            if coverage == Coverage::Outside {
+                continue;
+            }
             let (upper, sample) = evaluate(patch, &half, &index)?;
-            lower = lower.max(sample);
+            if coverage == Coverage::Inside {
+                lower = lower.max(sample);
+            }
             heap.push(Scored { upper, cell: half });
             work += 1;
         }
@@ -164,11 +210,13 @@ fn evaluate(patch: &dyn Patch, cell: &Cell, index: &TriangleIndex) -> Option<(Sc
     // Distances from the lattice of piece corners to each candidate.
     let side = PIECES + 1;
     let mut lattice = Vec::with_capacity(side * side);
+    let mut points = Vec::with_capacity(side * side);
     for i in 0..side {
         for j in 0..side {
             let sx = -1.0 + 2.0 * i as Scalar / PIECES as Scalar;
             let sy = -1.0 + 2.0 * j as Scalar / PIECES as Scalar;
             let p = q + du * (sx * hx) + dv * (sy * hy);
+            points.push(p);
             lattice.push(
                 candidates
                     .iter()
@@ -194,6 +242,9 @@ fn evaluate(patch: &dyn Patch, cell: &Cell, index: &TriangleIndex) -> Option<(Sc
                         .fold(0.0, Scalar::max)
                 })
                 .fold(Scalar::INFINITY, Scalar::min);
+            // A flat region may cover the piece where no one triangle does.
+            let around = [corners[0], corners[1], corners[3], corners[2]].map(|c| points[c]);
+            let best = index.flat.bound(&around, &candidates, best);
             worst = worst.max(best);
         }
     }
@@ -207,6 +258,7 @@ pub(crate) struct TriangleIndex {
     triangles: Vec<[Point3; 3]>,
     nodes: Vec<Node>,
     order: Vec<usize>,
+    flat: flat::Flat,
 }
 
 struct Node {
@@ -222,25 +274,27 @@ const LEAF: usize = 8;
 
 impl TriangleIndex {
     pub(crate) fn new(mesh: &TriMesh) -> Option<Self> {
-        let triangles: Vec<[Point3; 3]> = mesh
+        let (triangles, ids): (Vec<[Point3; 3]>, Vec<[u32; 3]>) = mesh
             .indices
             .chunks_exact(3)
             .filter_map(|t| {
                 let corners = [0, 1, 2].map(|k| mesh.positions.get(t[k] as usize).copied());
                 match corners {
-                    [Some(a), Some(b), Some(c)] => Some([a, b, c]),
+                    [Some(a), Some(b), Some(c)] => Some(([a, b, c], [t[0], t[1], t[2]])),
                     _ => None,
                 }
             })
-            .filter(|t| t.iter().all(|p| p.is_finite()))
-            .collect();
+            .filter(|(t, _)| t.iter().all(|p| p.is_finite()))
+            .unzip();
         if triangles.is_empty() {
             return None;
         }
+        let flat = flat::Flat::new(&triangles, &ids);
         let mut index = Self {
             order: (0..triangles.len()).collect(),
             triangles,
             nodes: Vec::new(),
+            flat,
         };
         let count = index.order.len();
         index.build(0, count);
