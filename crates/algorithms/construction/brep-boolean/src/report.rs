@@ -83,9 +83,14 @@ pub struct ToleranceDecision {
 /// (see the crate docs). Otherwise it is the exact boolean of operands
 /// moved by at most [`Self::linear`] and turned by at most
 /// [`Self::angular`], both within the caller's tolerance.
+///
+/// Either way, constructed points closer than [`Self::rounding_floor`]
+/// were read as one point without a decision, and are not reported (#244).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BooleanReport {
     decisions: Vec<ToleranceDecision>,
+    /// The operands' extent the rounding floor was scaled from (#244).
+    extent: Scalar,
 }
 
 impl BooleanReport {
@@ -127,13 +132,58 @@ impl BooleanReport {
         self.decisions.iter().any(|d| d.kind == kind)
     }
 
+    /// The absolute rounding floor that applied to this result (#244), in
+    /// the operands' length unit: [`ROUNDING_FACTOR`] times
+    /// [`Self::extent`].
+    ///
+    /// A residue between constructed points (cuts, vertices, a point on an
+    /// edge) up to this floor was read as one exact point evaluated twice,
+    /// without the tolerance, and is in no [`ToleranceDecision`]; only a
+    /// larger one is a decision within tolerance. So a consumer widening
+    /// distances on the result widens them by this floor too, even when
+    /// [`Self::is_exact`] holds. Zero when no general boolean produced the
+    /// report (the default report).
+    #[must_use]
+    pub fn rounding_floor(&self) -> Scalar {
+        ROUNDING_FACTOR * self.extent
+    }
+
+    /// The extent [`Self::rounding_floor`] was scaled from (#244): the
+    /// largest coordinate magnitude of the operands as given to the
+    /// boolean, the larger of the two operands' readings, each the largest
+    /// of
+    ///
+    /// - `max(|x|, |y|, |z|)` over every topology vertex, and
+    /// - per plane, cylinder, elliptical cylinder, cone, sphere or torus
+    ///   surface, `max(|x|, |y|, |z|)` of its frame origin plus its size:
+    ///   zero for a plane, `|radius|` for a cylinder, a cone (its radius at
+    ///   the frame origin) or a sphere, the larger semi-axis for an
+    ///   elliptical cylinder, `|major + minor|` for a torus; other surface
+    ///   families add nothing beyond their vertices.
+    ///
+    /// Coordinates are read about the operands' own origin, so the extent
+    /// grows with their distance from it. An operand whose reading is not
+    /// finite counts as zero. After [`Self::merged`], the largest extent of the merged
+    /// reports.
+    #[must_use]
+    pub fn extent(&self) -> Scalar {
+        self.extent
+    }
+
     /// This report and `other` together: what a chain of booleans read
     /// (each kind once, with the worst magnitude of either).
+    ///
+    /// The merged rounding floor is the larger of the two
+    /// ([`Self::extent`] is the larger extent), sound for every boolean of
+    /// the chain: each one's floor is at most it. A rigid placement of a
+    /// result leaves distances between its points unchanged, so a report
+    /// carried through one keeps its floor as is (#244).
     #[must_use]
     pub fn merged(mut self, other: &BooleanReport) -> BooleanReport {
         for d in &other.decisions {
             self.add(d.kind, d.linear, d.angular);
         }
+        self.extent = self.extent.max(other.extent);
         self
     }
 
@@ -156,10 +206,21 @@ impl BooleanReport {
     }
 }
 
-/// The rounding floor, relative to the operands' extent: `2^-40`.
-pub(crate) const ROUNDING: Scalar = 1.0 / 1_099_511_627_776.0;
+/// The rounding floor relative to the operands' extent: `2^-40` (#236,
+/// #244).
+///
+/// The absolute linear floor of a boolean is this factor times the
+/// operands' extent; [`BooleanReport::rounding_floor`] returns it and
+/// [`BooleanReport::extent`] defines the extent. Angular residues have a
+/// floor of this factor itself, in radians, unscaled.
+pub const ROUNDING_FACTOR: Scalar = 1.0 / 1_099_511_627_776.0;
+
+/// The relative rounding floor ([`ROUNDING_FACTOR`]).
+pub(crate) const ROUNDING: Scalar = ROUNDING_FACTOR;
 
 struct Session {
+    /// The operands' extent ([`BooleanReport::extent`]).
+    extent: Scalar,
     /// The linear rounding floor: [`ROUNDING`] times the operands' extent.
     rounding: Scalar,
     report: BooleanReport,
@@ -183,9 +244,10 @@ impl Guard {
         }
         SESSION
             .with(|s| {
-                s.borrow_mut()
-                    .as_mut()
-                    .map(|s| std::mem::take(&mut s.report))
+                s.borrow_mut().as_mut().map(|s| BooleanReport {
+                    extent: s.extent,
+                    ..std::mem::take(&mut s.report)
+                })
             })
             .unwrap_or_default()
     }
@@ -206,6 +268,7 @@ pub(crate) fn open(operands: &[&ExactBRep]) -> Guard {
         let extent = operands.iter().map(|b| extent(b)).fold(0.0, Scalar::max);
         SESSION.with(|s| {
             *s.borrow_mut() = Some(Session {
+                extent,
                 rounding: ROUNDING * extent,
                 report: BooleanReport::default(),
             });
@@ -356,6 +419,33 @@ mod tests {
         assert_eq!(r.angular(), 1e-12);
         let merged = BooleanReport::default().merged(&r);
         assert_eq!(merged, r);
+    }
+
+    #[test]
+    fn merged_reports_keep_the_larger_rounding_floor() {
+        let small = BooleanReport {
+            extent: 3.0,
+            ..BooleanReport::default()
+        };
+        let large = BooleanReport {
+            extent: 10.0,
+            ..BooleanReport::default()
+        };
+        for merged in [small.clone().merged(&large), large.clone().merged(&small)] {
+            assert_eq!(merged.extent(), 10.0);
+            assert_eq!(merged.rounding_floor(), ROUNDING_FACTOR * 10.0);
+            assert!(merged.is_exact());
+        }
+        assert_eq!(BooleanReport::default().rounding_floor(), 0.0);
+    }
+
+    #[test]
+    fn a_session_reports_the_floor_it_applied() {
+        let guard = open(&[]);
+        assert_eq!(rounding(), 0.0);
+        let report = guard.finish();
+        assert_eq!((report.extent(), report.rounding_floor()), (0.0, 0.0));
+        assert_eq!(ROUNDING_FACTOR, (2.0 as Scalar).powi(-40));
     }
 
     #[test]

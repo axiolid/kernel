@@ -14,7 +14,9 @@ use std::f64::consts::FRAC_PI_2;
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
-use axiolid_brep_boolean::{boolean, boolean_with_report, BooleanReport, ToleranceDecisionKind};
+use axiolid_brep_boolean::{
+    boolean, boolean_with_report, BooleanReport, ToleranceDecisionKind, ROUNDING_FACTOR,
+};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{BooleanOperator, Mat3, Tolerance, Transform3, Vec3};
 use axiolid_measure::exact_properties;
@@ -243,4 +245,40 @@ fn boolean_is_the_result_of_boolean_with_report() {
     let (reported, _) =
         boolean_with_report(&a, &b, BooleanOperator::Difference, Tolerance::METRE).expect("cut");
     assert_eq!(plain, reported);
+}
+
+#[test]
+fn the_report_carries_the_rounding_floor_of_its_operands() {
+    // #244. The wall `[-3, 3] x [-1/8, 1/8] x [0, 3]` and an opening inside
+    // it: the extent is the wall's largest coordinate, `L / 2`. Placed by
+    // the quarter turn offset by `(12.5, -4, 3.25)`, the wall's `y = -1/8`
+    // face lands at `x = 12.625`. An exact result at zero tolerance still
+    // exposes its floor.
+    let placements = exact_placements();
+    for (p, extent) in [(placements[0], L / 2.0), (placements[1], 12.5 + T / 2.0)] {
+        for tolerance in [Tolerance::ZERO, Tolerance::METRE] {
+            let (_, depth, start, removed) = cases()[1];
+            let report = cut(
+                &wall(p),
+                &opening(depth, start, exact_across(), p),
+                tolerance,
+                removed,
+                0.0,
+            );
+            assert!(report.is_exact(), "{report:?}");
+            assert_eq!(report.extent(), extent, "{report:?}");
+            assert_eq!(report.rounding_floor(), ROUNDING_FACTOR * extent);
+        }
+    }
+    // The larger operand sets the extent: an opening reaching `y = -10`.
+    let (_, _, _, removed) = cases()[0];
+    let report = cut(
+        &wall(Transform3::IDENTITY),
+        &opening(20.0, 10.0, exact_across(), Transform3::IDENTITY),
+        Tolerance::ZERO,
+        removed,
+        0.0,
+    );
+    assert_eq!(report.extent(), 10.0, "{report:?}");
+    assert_eq!(report.rounding_floor(), 10.0 * ROUNDING_FACTOR);
 }

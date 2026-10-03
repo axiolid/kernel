@@ -207,6 +207,13 @@ had to be treated as perturbed.
   only transversally and reports nothing: it needs no reading.
 - **Not changed.** The within-tolerance readings themselves, their bounds
   and their refusals.
+- **Floor exposed (#244).** Points closer than the rounding floor are one
+  point and unreported, so a consumer had to mirror the private factor and
+  extent. `BooleanReport::rounding_floor` now gives the floor that applied
+  (`ROUNDING_FACTOR` × `BooleanReport::extent`, which states the extent's
+  definition), on exact reports too. Merged reports, and the compiler's
+  per-body reports, keep the largest floor beneath the body; a rigid
+  instance keeps it unchanged.
 
 Tests: `crates/algorithms/construction/brep-boolean/tests/report.rs`,
 `crates/execution/compile/tests/exact_boolean_report.rs`; probe

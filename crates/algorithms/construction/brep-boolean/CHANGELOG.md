@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `BooleanReport::rounding_floor` (#244): the absolute rounding floor that
+  applied to a result, in the operands' length unit. Constructed points
+  closer than it count as one point and are not reported, so a consumer
+  widening distances on a result, exact or not, widens them by it.
+  `BooleanReport::extent` is the extent it was scaled from, with its
+  definition (the largest `max(|x|, |y|, |z|)` over the operands' vertices
+  and their analytic surfaces' origins widened by their radii), and the
+  public `ROUNDING_FACTOR` (`2^-40`) is the relative factor. `merged` keeps
+  the larger floor.
+
 ## [0.1.3] - 2026-10-03
 
 ### Added

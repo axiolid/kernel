@@ -21,7 +21,9 @@ use axiolid_brep_audit::geometric_audit;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Mat3, Plane3, Point3, Tolerance, Transform3, Vec3};
 use axiolid_measure::{boundary_distance, exact_properties};
-use axiolid_mesh_compile::{BooleanReport, ReferenceExactCompiler, ToleranceDecisionKind};
+use axiolid_mesh_compile::{
+    BooleanReport, ReferenceExactCompiler, ToleranceDecisionKind, ROUNDING_FACTOR,
+};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
@@ -398,4 +400,39 @@ fn a_clip_reports_what_it_read() {
         report.contains(ToleranceDecisionKind::CoincidentSupports),
         "{report:?}"
     );
+}
+
+#[test]
+fn a_body_reports_the_largest_rounding_floor_beneath_it() {
+    // #244. A wall with two exact openings: the first through,
+    // overshooting to `y = +-10`, so its difference's extent is `10`; the
+    // second flush, cut from that result, whose extent is the wall's
+    // `L / 2 = 3`. The body's floor is the larger, at zero tolerance too,
+    // and an instance placed far off keeps it: a rigid placement leaves
+    // distances between points unchanged.
+    let mut g = Graph::new();
+    let wall = g.wall(Transform3::IDENTITY);
+    let through = g.opening((-1.5, 20.0, 10.0), exact_across(), Transform3::IDENTITY);
+    let first = g.minus(wall, through);
+    let flush = g.opening((1.5, T, T / 2.0), exact_across(), Transform3::IDENTITY);
+    let body = g.minus(first, flush);
+    let placed = g.instance(
+        body,
+        Transform3::from_translation(Vec3::new(100.0, 0.0, 0.0)),
+    );
+    let alone = g.minus(wall, flush);
+    let graph = g.finish(vec![body, placed, alone]);
+    let reports = compile(&graph, &[body, placed, alone], Tolerance::ZERO).expect("exact");
+    for (solid, report) in &reports {
+        audited(solid);
+        assert!(report.is_exact(), "{report:?}");
+    }
+    let expected = L * T * H - 2.0 * W * OH * T;
+    assert!((volume(&reports[0].0) - expected).abs() <= 1e-12 * expected);
+    assert_eq!(reports[0].1.extent(), 10.0, "{:?}", reports[0].1);
+    assert_eq!(reports[0].1.rounding_floor(), 10.0 * ROUNDING_FACTOR);
+    assert_eq!(reports[1].1, reports[0].1);
+    // The flush cut alone: the wall's own extent.
+    assert_eq!(reports[2].1.extent(), L / 2.0, "{:?}", reports[2].1);
+    assert_eq!(reports[2].1.rounding_floor(), L / 2.0 * ROUNDING_FACTOR);
 }

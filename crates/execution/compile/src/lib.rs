@@ -23,6 +23,8 @@ pub use deviation::{DeviationBound, DeviationContribution, DeviationPath, Deviat
 mod exact;
 /// What a boolean read within tolerance, as
 /// [`ReferenceExactCompiler::compile_exact_with_report`] reports it (#236).
-pub use axiolid_brep_boolean::{BooleanReport, ToleranceDecision, ToleranceDecisionKind};
+pub use axiolid_brep_boolean::{
+    BooleanReport, ToleranceDecision, ToleranceDecisionKind, ROUNDING_FACTOR,
+};
 pub use directrix::ExactDirectrix;
 pub use exact::{exact_directrix, ReferenceExactCompiler, SOLID_FAMILY_NAMES};

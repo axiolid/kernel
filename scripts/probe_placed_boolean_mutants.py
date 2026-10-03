@@ -1,10 +1,10 @@
-"""Mutation probe for exact differences of placed operands (#228, #236).
+"""Mutation probe for exact differences of placed operands (#228, #236, #244).
 
 Each mutant reintroduces a way the placed-opening path failed or could
 fail -- a rounding residue read exactly, a tangent double root split into
 a sliver, the compiler's dispatch or refusals loosened, an exact
-configuration read within tolerance, a reading left out of the report --
-and must turn a test red.
+configuration read within tolerance, a reading or the rounding floor left
+out of the report -- and must turn a test red.
 
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
@@ -126,6 +126,25 @@ MUTANTS = [
     ("a clip's report dropped by the compiler", K,
      "        self.boolean_report = Some(report);",
      "        let _ = report;"),
+    # #244: the rounding floor a report exposes.
+    ("a session's floor left out of its report", R,
+     "                    extent: s.extent,",
+     "                    extent: 0.0,"),
+    ("the floor read off the first operand only", R,
+     "        let extent = operands.iter().map(|b| extent(b)).fold(0.0, Scalar::max);",
+     "        let extent = operands.iter().take(1).map(|b| extent(b)).fold(0.0, Scalar::max);"),
+    ("the floor not scaled by the factor", R,
+     "        ROUNDING_FACTOR * self.extent",
+     "        self.extent"),
+    ("merged reports keep the first floor", R,
+     "        self.extent = self.extent.max(other.extent);",
+     "        let _ = other.extent;"),
+    ("merged reports keep the last floor", R,
+     "        self.extent = self.extent.max(other.extent);",
+     "        self.extent = other.extent;"),
+    ("an exact body's floor dropped by the compiler", E,
+     "        if !report.is_exact() || report.rounding_floor() > 0.0 {",
+     "        if !report.is_exact() {"),
 ]
 
 def run(target):

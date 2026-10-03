@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` carry each body's rounding floor
+  (`BooleanReport::rounding_floor`, #244): the largest floor of any
+  general boolean or clip beneath the body, kept unchanged through rigid
+  instances, and present on exact reports too. `ROUNDING_FACTOR` is
+  re-exported.
+
 ## [0.3.11] - 2026-10-03
 
 ### Added

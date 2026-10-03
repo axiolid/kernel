@@ -67,6 +67,13 @@ impl ReferenceExactCompiler {
     /// must widen distances by that much. Bodies without booleans, and the
     /// integer-exact prism path, always report exact.
     ///
+    /// Either way, constructed points closer than
+    /// [`BooleanReport::rounding_floor`] count as one point and are not
+    /// reported, so a consumer widens distances by that floor too (#244).
+    /// The merged floor is the largest floor of any boolean or clip beneath
+    /// the body; an instance is rigid and keeps its source's floor, in
+    /// model units, unchanged. Zero means no general boolean or clip ran.
+    ///
     /// # Errors
     ///
     /// As [`ExactCompiler::compile_exact`].
@@ -143,7 +150,8 @@ struct ExactCompilation<'a> {
     cache_hits: usize,
     evaluated_nodes: usize,
     /// Per compiled node with a boolean beneath it: what its booleans read
-    /// within tolerance (#236). Absent means exact.
+    /// within tolerance (#236), and their rounding floor (#244). Absent
+    /// means exact, with no floor.
     reports: HashMap<NodeId, BooleanReport>,
     /// The report of the general boolean `compile_boolean` just ran.
     boolean_report: Option<BooleanReport>,
@@ -168,9 +176,10 @@ impl<'a> ExactCompilation<'a> {
         self.reports.get(&node).cloned().unwrap_or_default()
     }
 
-    /// Record a node's report, if anything was read.
+    /// Record a node's report, if anything was read or a rounding floor
+    /// applied (#244).
     fn set_report(&mut self, node: NodeId, report: BooleanReport) {
-        if !report.is_exact() {
+        if !report.is_exact() || report.rounding_floor() > 0.0 {
             self.reports.insert(node, report);
         }
     }

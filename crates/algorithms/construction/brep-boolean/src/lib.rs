@@ -65,16 +65,23 @@
 //! point on an edge) compares `f64` evaluations of exact curves, so a
 //! residue up to `2^-40` of the operands' extent (about four thousand units
 //! in the last place) is the rounding of one exact point, read without the
-//! tolerance; only a larger residue is a decision within tolerance.
+//! tolerance; only a larger residue is a decision within tolerance. That
+//! rounding floor is [`BooleanReport::rounding_floor`] (#244):
+//! [`ROUNDING_FACTOR`] times [`BooleanReport::extent`], which defines the
+//! extent exactly.
 //!
 //! **Guarantee.** [`boolean_with_report`] returns a [`BooleanReport`] of the
 //! within-tolerance decisions that fired, by kind, with the furthest each
 //! moved or turned the operands. When it is empty
 //! ([`BooleanReport::is_exact`]), the result is the exact boolean of the
 //! operands as given: every decision was exact, and new vertices are exact
-//! points evaluated in `f64`. At [`Tolerance::ZERO`] nothing can be read
-//! within tolerance, so every result is exact; operands that only miss each
-//! other by rounding are then refused, not guessed. When the report is not
+//! points evaluated in `f64`. Constructed points closer than
+//! [`BooleanReport::rounding_floor`] count as one point and are not
+//! reported, so a consumer widening distances on any result, exact or not,
+//! widens them by that floor too. At [`Tolerance::ZERO`] nothing can be
+//! read within tolerance, so every result is exact (and still has its
+//! floor); operands that only miss each other by rounding are then refused,
+//! not guessed. When the report is not
 //! empty, the result is the exact boolean of operands whose faces were
 //! moved by at most `eps` (and, for a coincidence or contact of
 //! directions, turned by at most `alpha`), with every surface and curve
@@ -100,7 +107,7 @@ mod section;
 mod split;
 mod support;
 
-pub use report::{BooleanReport, ToleranceDecision, ToleranceDecisionKind};
+pub use report::{BooleanReport, ToleranceDecision, ToleranceDecisionKind, ROUNDING_FACTOR};
 pub use section::{section_edges, SectionEdge};
 pub use split::{split_face, Piece, PieceSource, Region};
 
