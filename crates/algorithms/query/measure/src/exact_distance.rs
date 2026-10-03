@@ -59,7 +59,11 @@
 //! it is horizontal and along the plan offset. [`plan_overlap`] shows two
 //! shadows overlap over a patch of positive area from two planar faces,
 //! not vertical, whose shadows share an open patch, and shows them apart
-//! once the lower bound is positive.
+//! once the lower bound is positive. When the distance search shows
+//! neither, a second search over patches of such faces alone, coarsest
+//! pair first, looks for the overlap (#237): in the first, pairs of walls
+//! and edges whose shadows merely cross take the budget, and a plan
+//! distance of zero met between two boundary points ends it.
 //!
 //! # Scope
 //!
@@ -229,6 +233,25 @@ pub fn plan_overlap(
     b: &ExactBRep,
     tolerance: Tolerance,
 ) -> Result<PlanOverlap, ExactMeasureError> {
+    Ok(overlap_search(a, b, tolerance)?.0)
+}
+
+/// The elements of the two B-reps a result was shown on.
+pub(crate) type Pair = (Shape, Shape);
+
+/// [`plan_overlap`], with the elements an overlap was shown on.
+///
+/// First the distance search, which shows the shadows apart or meets an
+/// overlap on its way; then, when it shows neither, a search over pairs of
+/// patches of planar faces that are not vertical alone, coarsest first, so
+/// that pairs of walls and edges whose shadows merely cross cannot use up
+/// the budget, and a plan distance of zero shown by two boundary points
+/// does not end it.
+pub(crate) fn overlap_search(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+) -> Result<(PlanOverlap, Option<Pair>), ExactMeasureError> {
     // Overlap on curved faces alone is never shown, so the search is
     // bounded more tightly than a distance query's.
     let found = search_within(
@@ -239,13 +262,121 @@ pub fn plan_overlap(
         OVERLAP_STEPS,
         &mut |lower, _| lower > 0.0,
     )?;
-    Ok(match found.overlap {
-        Some(at) => PlanOverlap::Overlapping { at },
-        None if found.bounds.lower > 0.0 => PlanOverlap::Disjoint {
-            gap: found.bounds.lower,
-        },
-        None => PlanOverlap::Undecided,
+    if let Some(at) = found.overlap {
+        return Ok((PlanOverlap::Overlapping { at }, Some(found.on)));
+    }
+    if found.bounds.lower > 0.0 {
+        return Ok((
+            PlanOverlap::Disjoint {
+                gap: found.bounds.lower,
+            },
+            None,
+        ));
+    }
+    Ok(match level_overlap(a, b, tolerance, OVERLAP_STEPS)? {
+        Some((at, on)) => (PlanOverlap::Overlapping { at }, Some(on)),
+        None => (PlanOverlap::Undecided, None),
     })
+}
+
+/// Search pairs of patches of planar faces that are not vertical, one of
+/// each B-rep, whose shadows may meet, refining the coarsest pair first,
+/// for two inside patches whose shadows share an open patch.
+fn level_overlap(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+    max_steps: usize,
+) -> Result<Option<(Point2, Pair)>, ExactMeasureError> {
+    let linear = tolerance.linear().max(1e-12);
+    let side_a = Side::new(a, linear, Metric::Plan)?;
+    let side_b = Side::new(b, linear, Metric::Plan)?;
+    let level = |side: &Side<'_>| -> Result<Vec<Element>, ExactMeasureError> {
+        let mut out = Vec::new();
+        for element in &side.elements {
+            if let Shape::Face { face, .. } = element.shape {
+                if level_frame(side, face)?.is_some() {
+                    out.push(*element);
+                }
+            }
+        }
+        Ok(out)
+    };
+    let mut elements_a = level(&side_a)?;
+    let mut elements_b = level(&side_b)?;
+    // Coarsest first: the pair with the larger plan discs.
+    let mut heap = BinaryHeap::new();
+    let push = |heap: &mut BinaryHeap<(Key, usize, usize)>,
+                ea: &Element,
+                eb: &Element,
+                i: usize,
+                j: usize|
+     -> Result<(), ExactMeasureError> {
+        if lower_bound(&side_a, ea, &side_b, eb)? <= 0.0 {
+            heap.push((Key(ea.plan_radius + eb.plan_radius), i, j));
+        }
+        Ok(())
+    };
+    for (i, ea) in elements_a.iter().enumerate() {
+        for (j, eb) in elements_b.iter().enumerate() {
+            push(&mut heap, ea, eb, i, j)?;
+        }
+    }
+    let mut steps = 0;
+    while let Some((_, i, j)) = heap.pop() {
+        let (ea, eb) = (elements_a[i], elements_b[j]);
+        if let Some((at, _, _)) = plan_patches_overlap(&side_a, &ea, &side_b, &eb)? {
+            return Ok(Some((at, (ea.shape, eb.shape))));
+        }
+        steps += 1;
+        if steps > max_steps {
+            break;
+        }
+        let split_a = side_a.size(&ea) >= side_b.size(&eb);
+        let (side, parent) = if split_a {
+            (&side_a, ea)
+        } else {
+            (&side_b, eb)
+        };
+        let children = side.split(&parent)?;
+        // A pair that can shrink no further shows nothing more.
+        if children
+            .iter()
+            .any(|child| side.size(child) >= side.size(&parent))
+        {
+            continue;
+        }
+        for child in children {
+            if split_a {
+                elements_a.push(child);
+                push(&mut heap, &child, &eb, elements_a.len() - 1, j)?;
+            } else {
+                elements_b.push(child);
+                push(&mut heap, &ea, &child, i, elements_b.len() - 1)?;
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The frame of face `face` when it is planar and not vertical (nor within
+/// rounding of it): a plane whose shadow has area.
+fn level_frame(
+    side: &Side<'_>,
+    face: usize,
+) -> Result<Option<axiolid_core::Frame3>, ExactMeasureError> {
+    let surface = surface_of(side.brep, side.brep.topology().faces()[face].surface)?;
+    let Surface::Plane(plane) = surface else {
+        return Ok(None);
+    };
+    let f = plane.frame;
+    let det = f.x.x * f.y.y - f.x.y * f.y.x;
+    let scale = f.x.length() * f.y.length();
+    // A vertical or near-vertical plane casts no area worth trusting.
+    if det.abs().is_nan() || det.abs() <= 1e-9 * scale {
+        return Ok(None);
+    }
+    Ok(Some(f))
 }
 
 /// Refine the distance only until it clears `limit`.
@@ -1130,7 +1261,7 @@ pub(crate) struct Found {
     pub(crate) bounds: DistanceBounds,
     /// The element of each boundary holding `point_a` and `point_b`.
     pub(crate) on: (Shape, Shape),
-    overlap: Option<Point2>,
+    pub(crate) overlap: Option<Point2>,
 }
 
 pub(crate) fn search(
@@ -1286,11 +1417,9 @@ fn plan_patches_overlap(
         else {
             return Ok(None);
         };
-        let surface = surface_of(side.brep, side.brep.topology().faces()[face].surface)?;
-        let Surface::Plane(plane) = surface else {
+        let Some(f) = level_frame(side, face)? else {
             return Ok(None);
         };
-        let f = plane.frame;
         let map = |u: Scalar, v: Scalar| {
             let p = f.origin + f.x * u + f.y * v;
             Point2::new(p.x, p.y)
@@ -1302,11 +1431,6 @@ fn plan_patches_overlap(
             map(lo.x, hi.y),
         ];
         let det = f.x.x * f.y.y - f.x.y * f.y.x;
-        let scale = f.x.length() * f.y.length();
-        // A vertical or near-vertical plane casts no area worth trusting.
-        if det.abs().is_nan() || det.abs() <= 1e-9 * scale {
-            return Ok(None);
-        }
         if (hi.x - lo.x) * (hi.y - lo.y) * det < 0.0 {
             corners.reverse();
         }

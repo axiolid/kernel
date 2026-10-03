@@ -9,6 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Plan distance, clearance and overlap between bodies of several exact
+  solids (#237): `body_plan_boundary_distance`,
+  `body_plan_boundary_clearance` and `body_plan_overlap` take a
+  `PlacedBody` (or a slice of items) per side, as the `body_*` queries in
+  space. The plan distance is the least over item pairs of the distance
+  between their shadows on the XY plane, by one shared search, so far
+  pairs are never refined; it is zero where an item's shadow overlaps or
+  lies inside one of the other body's, and the witnesses name their items
+  (`BodyDistance`). `body_plan_overlap` answers `BodyPlanOverlap`: an
+  overlap of positive area with the two items that show it, a certified
+  gap, or undecided. Items of one body may overlap or touch freely in
+  plan, so no layout is checked. The placement is applied before
+  projecting along the world's `z`: a body turned about `z` measures as
+  its plan turned, and a tilted body casts its tilted items' shadows.
+
+### Fixed
+
+- `plan_overlap` no longer leaves undecided an overlap that two level
+  planar faces show when their shadows overlap only in part (a block over
+  part of a column's disc): when the distance search shows neither an
+  overlap nor a gap -- its budget taken by walls and edges whose shadows
+  merely cross, or its run ended by a plan distance of zero met between
+  two boundary points -- a second search over patches of planar faces
+  that are not vertical alone, coarsest pair first, looks for one.
+
 ## [0.3.8] - 2026-10-03
 
 ### Added

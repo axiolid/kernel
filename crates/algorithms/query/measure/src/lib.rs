@@ -33,8 +33,9 @@ pub use exact::{exact_properties, ExactMeasureError};
 #[cfg(feature = "exact")]
 pub use exact_bodies::{
     body_boundary_clearance, body_boundary_distance, body_boundary_hausdorff_distance,
+    body_plan_boundary_clearance, body_plan_boundary_distance, body_plan_overlap,
     one_sided_body_boundary_hausdorff, one_sided_body_boundary_hausdorff_with_budget, BodyDistance,
-    BodyHausdorff, BodyHausdorffBounds, BodyMeasureError, BodySide, PlacedBody,
+    BodyHausdorff, BodyHausdorffBounds, BodyMeasureError, BodyPlanOverlap, BodySide, PlacedBody,
 };
 #[cfg(feature = "exact")]
 pub use exact_distance::{

@@ -26,6 +26,13 @@
 //! at a point no farther away. As for one pair, containment is a separate
 //! classification.
 //!
+//! # In plan
+//!
+//! [`body_plan_boundary_distance`], [`body_plan_boundary_clearance`] and
+//! [`body_plan_overlap`] measure between the bodies' shadows on the XY
+//! plane by the same shared search (#237, `plan.rs`). Items of one body may
+//! overlap freely there, so nothing about their layout is checked.
+//!
 //! # Hausdorff
 //!
 //! [`body_boundary_hausdorff_distance`] and
@@ -139,8 +146,12 @@ use crate::exact_hausdorff::{witnessed, Cut, MAX_SPLITS};
 use crate::mesh_hausdorff::HausdorffBounds;
 
 mod contact;
+mod plan;
 
 use contact::{Assembler, AxisPlane, Uncut};
+pub use plan::{
+    body_plan_boundary_clearance, body_plan_boundary_distance, body_plan_overlap, BodyPlanOverlap,
+};
 
 /// Which argument of a body query a refusal is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,9 +408,13 @@ pub fn body_boundary_distance<'a, 'b>(
     tolerance: Tolerance,
 ) -> Result<BodyDistance, BodyMeasureError> {
     let accuracy = accuracy.max(0.0);
-    distance(a.into(), b.into(), tolerance, &mut |lower, upper| {
-        upper - lower <= accuracy
-    })
+    distance(
+        a.into(),
+        b.into(),
+        tolerance,
+        Metric::Space,
+        &mut |lower, upper| upper - lower <= accuracy,
+    )
 }
 
 /// [`body_boundary_distance`] refined only until it clears `limit`.
@@ -413,22 +428,28 @@ pub fn body_boundary_clearance<'a, 'b>(
     limit: Scalar,
     tolerance: Tolerance,
 ) -> Result<(BodyDistance, Clearance), BodyMeasureError> {
-    let found = distance(a.into(), b.into(), tolerance, &mut |lower, upper| {
-        upper < limit || lower > limit
-    })?;
+    let found = distance(
+        a.into(),
+        b.into(),
+        tolerance,
+        Metric::Space,
+        &mut |lower, upper| upper < limit || lower > limit,
+    )?;
     let clearance = found.bounds.against(limit);
     Ok((found, clearance))
 }
 
+/// The least distance by `metric` over item pairs, by one search over the
+/// placed items merged into one B-rep per body.
 fn distance(
     a: PlacedBody<'_>,
     b: PlacedBody<'_>,
     tolerance: Tolerance,
+    metric: Metric,
     done: &mut dyn FnMut(Scalar, Scalar) -> bool,
 ) -> Result<BodyDistance, BodyMeasureError> {
-    let a = Items::new(a.items, BodySide::First)?.placed(a.placement, BodySide::First)?;
-    let b = Items::new(b.items, BodySide::Second)?.placed(b.placement, BodySide::Second)?;
-    let found = search(&a.brep, &b.brep, tolerance, Metric::Space, done)?;
+    let (a, b) = Items::pair(a, b)?;
+    let found = search(&a.brep, &b.brep, tolerance, metric, done)?;
     Ok(BodyDistance {
         item_a: a.item(found.on.0),
         item_b: b.item(found.on.1),
@@ -581,6 +602,13 @@ impl<'a> Items<'a> {
                 })
             }
         }
+    }
+
+    /// Both bodies' items, uncut, merged and placed.
+    fn pair(a: PlacedBody<'a>, b: PlacedBody<'a>) -> Result<(Self, Self), BodyMeasureError> {
+        let a = Self::new(a.items, BodySide::First)?.placed(a.placement, BodySide::First)?;
+        let b = Self::new(b.items, BodySide::Second)?.placed(b.placement, BodySide::Second)?;
+        Ok((a, b))
     }
 
     /// How the measured boundary was cut from the items: nothing cut when
