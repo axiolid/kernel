@@ -119,6 +119,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.4 - 2026-10-03
+
+### Added
+
+- `BooleanReport::rounding_floor` (#244): the absolute rounding floor that
+  applied to a result, in the operands' length unit. Constructed points
+  closer than it count as one point and are not reported, so a consumer
+  widening distances on a result, exact or not, widens them by it.
+  `BooleanReport::extent` is the extent it was scaled from, with its
+  definition (the largest `max(|x|, |y|, |z|)` over the operands' vertices
+  and their analytic surfaces' origins widened by their radii), and the
+  public `ROUNDING_FACTOR` (`2^-40`) is the relative factor. `merged` keeps
+  the larger floor.
+
 ### 0.1.3 - 2026-10-03
 
 ### Added
@@ -310,6 +324,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.13 - 2026-10-03
+
+### Fixed
+
+- **Restored: swept disks mitre their corners again (#245).** Since 0.3.11
+  (#232) `pipe::swept_disk_along_pieces` refused a non-tangent joint as
+  "undefined"; that was a regression (0.3.11 and 0.3.12). A disk swept
+  round a corner between two straight segments is mitred at half angle,
+  as `IfcSweptDiskSolid` defines it: both tubes are cut by the plane that
+  bisects the two tangents, and the two pieces share one ring on it whose
+  every vertex lies on both exact cylinders (the outgoing frame is the
+  least rotation of the incoming one, which agrees with the reflection in
+  the mitre plane). The walls are planar trapezoids, exact faces of the
+  ring prism; the ring is chorded to `(c/2) cos(theta/2)` for the
+  sharpest mitre, because the mitre stretches the section by
+  `1 / cos(theta/2)`, so the exact tube stays within the chord budget
+  (derivation in the module notes). Hollow disks mitre their bore the same
+  way. The near-tangent tolerance `joint_tolerance` is unchanged. Refused
+  by name: a segment whose mitres reach past its length
+  (`L <= r |g_perp|`, `r tan(theta/2)` for one mitre: the tube would cut
+  through itself), a reversal, and a corner beside an arc (no ring lies
+  on both the cylinder's and the torus's cut).
+- A disk radius equal to the fillet or bend radius is refused with its own
+  reason (#245): the format rule permits a fillet radius equal to the disk
+  radius, but the bend is then a horn torus whose inner wall pinches to a
+  point on the bend's axis, which no closed two-manifold mesh bounds
+  without meeting itself there.
 
 ### 0.3.12 - 2026-10-03
 
@@ -1609,6 +1651,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.12 - 2026-10-03
+
+### Fixed
+
+- **Restored: swept disks along polylines and composites with sharp
+  corners compile again, mitred (#245).** From 0.3.9 to 0.3.11 a
+  `SweptDisk` whose directrix turned a corner with no fillet radius was
+  refused ("give a fillet radius"); that was a regression. Each corner
+  between two straight segments is mitred at half angle (both legs cut by
+  the bisector plane, as `IfcSweptDiskSolid` defines it), watertight, one
+  winding, the volume exactly the ring polygon's area times the
+  centreline length, and every point of the exact tube within the chord
+  budget (measured: at most 0.50 of it at 1 mm and 0.1 mm for 30, 90 and
+  150 degree corners, out of plane, hollow).
+  `compile_mesh_with_deviation` reports such pipes `Proven` at the
+  budget. A cut through a polyline corner keeps the corner. Still refused
+  by name: a mitre reaching past its leg, a reversal, a corner beside an
+  arc, a disk radius equal to the fillet or bend radius (a horn torus),
+  and a closed polyline, now `UnsupportedInput` (its closing mitre is not
+  built). The exact compiler still refuses directrices with corners.
+
+### Added
+
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` carry each body's rounding floor
+  (`BooleanReport::rounding_floor`, #244): the largest floor of any
+  general boolean or clip beneath the body, kept unchanged through rigid
+  instances, and present on exact reports too. `ROUNDING_FACTOR` is
+  re-exported.
 
 ### 0.3.11 - 2026-10-03
 

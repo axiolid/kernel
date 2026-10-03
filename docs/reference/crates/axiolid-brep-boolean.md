@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.3 (2026-10-03) |
+| Latest release | 0.1.4 (2026-10-03) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,31 +51,18 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.3 (2026-10-03):
+Latest release, 0.1.4 (2026-10-03):
 
 ### Added
 
-- `boolean_with_report` returns, with the result, a `BooleanReport` of
-  the within-tolerance decisions that fired (#236): one
-  `ToleranceDecision` per `ToleranceDecisionKind` (coincident supports,
-  contact, a point on an edge, a section along an edge, a tangent crossing,
-  merged points, an iso-curve, a plane parallel or perpendicular to or
-  touching a cylinder), with the furthest it moved (`linear`) or turned
-  (`angular`) the operands. An empty report means the result is the exact
-  boolean of the operands as given. `boolean` is unchanged.
-
-### Fixed
-
-- Placed differences succeed at `Tolerance::ZERO` (#236). Naming a point
-  on the curve or surface it was evaluated from compared its `f64`
-  round-trip residue with the linear tolerance, so at zero every boolean
-  failed with `BooleanError::Evaluation`; that bookkeeping, and welding
-  two evaluations of one vertex, now allow the rounding of the
-  operands' extent (`2^-40` of it).
-- Readings about the operands' own surfaces (coincident supports, a plane
-  parallel or perpendicular to or touching a cylinder) ask an exact
-  dyadic predicate first: faces exactly coplanar, parallel or
-  perpendicular, as operands placed by matrices with entries `0` and
-  `+-1` meet, are decided exactly and read nothing within tolerance.
+- `BooleanReport::rounding_floor` (#244): the absolute rounding floor that
+  applied to a result, in the operands' length unit. Constructed points
+  closer than it count as one point and are not reported, so a consumer
+  widening distances on a result, exact or not, widens them by it.
+  `BooleanReport::extent` is the extent it was scaled from, with its
+  definition (the largest `max(|x|, |y|, |z|)` over the operands' vertices
+  and their analytic surfaces' origins widened by their radii), and the
+  public `ROUNDING_FACTOR` (`2^-40`) is the relative factor. `merged` keeps
+  the larger floor.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

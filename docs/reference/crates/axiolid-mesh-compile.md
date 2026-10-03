@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-03) |
+| Latest release | 0.3.12 (2026-10-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -60,14 +60,34 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-03):
+Latest release, 0.3.12 (2026-10-03):
+
+### Fixed
+
+- **Restored: swept disks along polylines and composites with sharp
+  corners compile again, mitred (#245).** From 0.3.9 to 0.3.11 a
+  `SweptDisk` whose directrix turned a corner with no fillet radius was
+  refused ("give a fillet radius"); that was a regression. Each corner
+  between two straight segments is mitred at half angle (both legs cut by
+  the bisector plane, as `IfcSweptDiskSolid` defines it), watertight, one
+  winding, the volume exactly the ring polygon's area times the
+  centreline length, and every point of the exact tube within the chord
+  budget (measured: at most 0.50 of it at 1 mm and 0.1 mm for 30, 90 and
+  150 degree corners, out of plane, hollow).
+  `compile_mesh_with_deviation` reports such pipes `Proven` at the
+  budget. A cut through a polyline corner keeps the corner. Still refused
+  by name: a mitre reaching past its leg, a reversal, a corner beside an
+  arc, a disk radius equal to the fillet or bend radius (a horn torus),
+  and a closed polyline, now `UnsupportedInput` (its closing mitre is not
+  built). The exact compiler still refuses directrices with corners.
 
 ### Added
 
-- Sweep directrices resolve `TrimSelector::ArcLength` (#239) against an
-  analytic basis, in the trim's sense, through
-  `axiolid_reference::arc_parameter`; the mesh, piecewise and exact sweep
-  paths read it like a parameter selector. An arc length on a
-  curve-relation basis, or past the end of its basis, is refused by name.
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` carry each body's rounding floor
+  (`BooleanReport::rounding_floor`, #244): the largest floor of any
+  general boolean or clip beneath the body, kept unchanged through rigid
+  instances, and present on exact reports too. `ROUNDING_FACTOR` is
+  re-exported.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

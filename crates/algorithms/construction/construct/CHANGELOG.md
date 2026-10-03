@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-03
+
 ### Fixed
 
 - **Restored: swept disks mitre their corners again (#245).** Since 0.3.11

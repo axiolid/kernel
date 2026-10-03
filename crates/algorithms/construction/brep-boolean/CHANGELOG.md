@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-03
+
 ### Added
 
 - `BooleanReport::rounding_floor` (#244): the absolute rounding floor that
