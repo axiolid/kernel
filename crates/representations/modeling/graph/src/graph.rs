@@ -28,6 +28,13 @@ pub enum GraphError {
         /// What the contradiction is, in the caller's terms.
         detail: &'static str,
     },
+    /// A station or a list of stations is malformed (#241): a non-finite
+    /// or negative distance, a non-finite offset, too few stations,
+    /// distances that do not increase, or inconsistent tags.
+    InvalidStation {
+        /// What is wrong, in the caller's terms.
+        detail: &'static str,
+    },
 }
 
 impl fmt::Display for GraphError {
@@ -47,6 +54,7 @@ impl fmt::Display for GraphError {
             Self::ContradictoryMaster { detail } => {
                 write!(f, "contradictory surface-curve master: {detail}")
             }
+            Self::InvalidStation { detail } => write!(f, "invalid station: {detail}"),
             Self::UnknownRoot { root, node_count } => {
                 write!(f, "root {root} exceeds graph size {node_count}")
             }

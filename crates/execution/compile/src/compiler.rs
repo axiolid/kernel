@@ -535,6 +535,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         merged,
                     ))
             }),
+            // Open sections at stations along a directrix: a sheet (#241).
+            GeometryNode::SurfaceRelation(axiolid_model::SurfaceRelation::SectionedSurface {
+                directrix,
+                sections,
+                frame,
+            }) => crate::station::sectioned_surface(graph, *directrix, sections, *frame, options)
+                .map(|mesh| {
+                    Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
+                        .with_deviation(crate::deviation::of_sectioned_surface())
+                }),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
@@ -818,6 +828,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 }
                 axiolid_construct::sweep::sectioned_spine(&placed)
             }
+            // Sections at stations along the directrix (#241).
+            SolidOperation::StationedSpine {
+                directrix,
+                sections,
+                frame,
+            } => crate::station::stationed_spine(graph, *directrix, sections, *frame, options),
             SolidOperation::BoundedHalfSpace {
                 half_space,
                 boundary,

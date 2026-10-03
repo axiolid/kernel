@@ -148,6 +148,8 @@ fn resolve(
                 Some((start, end)) => trim_by_length(&out, start, end, slack).map(Some),
             }
         }
+        // No exact pieces: swept as sampled (#241).
+        Some(GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. })) => Ok(None),
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "sweep directrix {id:?} is not a 3D curve"

@@ -84,7 +84,7 @@ use axiolid_core::{Scalar, Transform3};
 mod boolean;
 mod paths;
 pub(crate) use boolean::{emitted_booleans, of_boolean};
-pub(crate) use paths::{of_curve_bounded, of_primitive, of_solid};
+pub(crate) use paths::{of_curve_bounded, of_primitive, of_sectioned_surface, of_solid};
 
 /// The construction path a part of the mesh came from.
 #[non_exhaustive]
@@ -108,6 +108,10 @@ pub enum DeviationPath {
     SurfaceCurveSweep,
     /// Sections placed along a spine.
     SectionedSpine,
+    /// Sections standing at stations along a directrix (#241).
+    StationedSpine,
+    /// Open sections at stations joined by tag (#241).
+    SectionedSurface,
     /// A half-space bounded by a polygon.
     BoundedHalfSpace,
     /// A CSG primitive.

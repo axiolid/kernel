@@ -2,7 +2,7 @@
 
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 
-use crate::NodeId;
+use crate::{NodeId, Station, StationFrame};
 
 /// One trim selector preserved from a source representation.
 #[non_exhaustive]
@@ -98,6 +98,20 @@ pub enum CurveRelation {
     ParameterCurve {
         basis_surface: NodeId,
         reference_curve: NodeId,
+    },
+    /// A curve through offsets given at stations along a basis curve
+    /// (#241).
+    ///
+    /// The curve runs from the first station's distance to the last's; at
+    /// a distance `s` between two stations it is the point the offsets
+    /// linearly interpolated in `s` give in the basis curve's `frame` at
+    /// `s` (see [`crate::station`]). It is a 3D curve whatever the basis:
+    /// a 2D basis lies in `z = 0`. At least two stations, strictly
+    /// increasing in distance, are required.
+    OffsetByStations {
+        basis: NodeId,
+        stations: Vec<Station>,
+        frame: StationFrame,
     },
 }
 
@@ -195,7 +209,9 @@ impl CurveRelation {
     pub(crate) fn references(&self, out: &mut Vec<NodeId>) {
         match self {
             Self::Composite { segments } => out.extend(segments.iter().map(|item| item.curve)),
-            Self::Trimmed { basis, .. } | Self::Offset { basis, .. } => out.push(*basis),
+            Self::Trimmed { basis, .. }
+            | Self::Offset { basis, .. }
+            | Self::OffsetByStations { basis, .. } => out.push(*basis),
             Self::SurfaceCurve {
                 curve_3d, sides, ..
             } => {

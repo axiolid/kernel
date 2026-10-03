@@ -201,6 +201,11 @@ fn resolve(
                 None => Ok((out, None)),
             }
         }
+        // Offsets at stations along a basis curve, sampled (#241).
+        Some(GeometryNode::CurveRelation(relation @ CurveRelation::OffsetByStations { .. })) => {
+            crate::station::offset_curve_points(graph, relation, range, options)
+                .map(|points| (points, None))
+        }
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "sweep directrix {id:?} is not a 3D curve"

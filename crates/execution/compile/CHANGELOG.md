@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
+  node into its point and frame (`x` tangent, `y` up, `z` right). The
+  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
+  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
+  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
+  in distance between stations and refining between them until each
+  section point's midpoint and each wall quad stay within the chord
+  budget; an `OffsetByStations` curve is sampled as a sweep directrix
+  (its parameter is the basis distance). Their deviation is reported
+  `Unbounded` by name (`DeviationPath::StationedSpine`,
+  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
+  refuses a station-placed spine by name. Refused by name: a station on
+  an instance or a curve relation, a distance beyond the curve, sections
+  whose ring structure, vertex count or tags disagree, and an open
+  section that is not a polyline.
+
 ## [0.3.12] - 2026-10-03
 
 ### Fixed

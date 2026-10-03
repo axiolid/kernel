@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station`: `axiolid-evaluate`'s station resolution (#241), re-exported
+  on the same footing as `curve` and `surface`.
+
 ## [0.3.5] - 2026-10-03
 
 ### Added

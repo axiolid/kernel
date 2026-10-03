@@ -2,7 +2,7 @@
 
 use axiolid_core::{BooleanOperator, Point3, Scalar, Transform3, Vec3};
 
-use crate::NodeId;
+use crate::{NodeId, StationFrame, StationedSection};
 
 /// Position of one section along a sectioned sweep.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,6 +84,20 @@ pub enum SolidOperation {
         spine: NodeId,
         sections: Vec<Section>,
     },
+    /// Closed profiles standing at stations along a directrix (#241).
+    ///
+    /// Each profile is placed in the directrix's `frame` at its station
+    /// (profile `x` to the lateral axis, `y` to up, normal along the
+    /// tangent; see [`crate::station`]). Between two stations the profiles
+    /// are matched vertex for vertex, by ring and index, and interpolated
+    /// linearly in distance, as are the offsets, so every section must
+    /// flatten to the same ring structure. At least two sections, strictly
+    /// increasing in distance, are required.
+    StationedSpine {
+        directrix: NodeId,
+        sections: Vec<StationedSection>,
+        frame: StationFrame,
+    },
     /// General CSG binary operation.
     Boolean {
         left: NodeId,
@@ -137,6 +151,14 @@ impl SolidOperation {
             } => out.extend([*profile, *directrix, *reference_surface]),
             Self::SectionedSpine { spine, sections } => {
                 out.push(*spine);
+                out.extend(sections.iter().map(|section| section.profile));
+            }
+            Self::StationedSpine {
+                directrix,
+                sections,
+                ..
+            } => {
+                out.push(*directrix);
                 out.extend(sections.iter().map(|section| section.profile));
             }
             Self::Boolean { left, right, .. } => out.extend([*left, *right]),

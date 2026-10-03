@@ -8,7 +8,7 @@ use axiolid_profile::Profile;
 use axiolid_surface::Surface;
 use axiolid_topology::BRep;
 
-use crate::{CurveRelation, NodeId, SolidOperation, SurfaceRelation};
+use crate::{CurveRelation, CurveStation, NodeId, SolidOperation, SurfaceRelation};
 
 /// Point constrained to a curve parameter.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,6 +123,9 @@ pub enum GeometryNode {
     Instance(Instance),
     /// Ordered geometric set or representation.
     Collection(Vec<NodeId>),
+    /// A point and frame at a distance along a basis curve, offset in its
+    /// section frame (#241). See [`crate::station`].
+    CurveStation(CurveStation),
 }
 
 impl GeometryNode {
@@ -151,6 +154,7 @@ impl GeometryNode {
             }
             Self::Instance(value) => references.push(value.source),
             Self::Collection(values) => references.extend(values.iter().copied()),
+            Self::CurveStation(value) => references.push(value.basis),
             Self::Point2(_)
             | Self::Point3(_)
             | Self::Vector2(_)

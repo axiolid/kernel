@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use axiolid_curve::{BSplineCurve2, Curve2};
 
 use crate::{
-    CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, SolidOperation,
-    SurfaceRelation, TrimSelector, TrimmingPreference,
+    CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, SolidOperation, Station,
+    StationedOpenSection, SurfaceRelation, TrimSelector, TrimmingPreference,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -23,6 +23,7 @@ enum ExpectedReference {
     Curve3,
     Surface,
     Profile,
+    OpenProfile,
     Solid,
     HalfSpace,
 }
@@ -67,6 +68,13 @@ fn curve_has_dimension(root: NodeId, nodes: &[GeometryNode], dimension: CurveDim
             }
             GeometryNode::CurveRelation(CurveRelation::ParameterCurve { .. }) => {
                 if dimension != CurveDimension::Two {
+                    return false;
+                }
+            }
+            // A 3D curve whatever its basis: a 2D basis lies in `z = 0` and
+            // the vertical offsets lift it.
+            GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {
+                if dimension != CurveDimension::Three {
                     return false;
                 }
             }
@@ -352,6 +360,7 @@ impl ExpectedReference {
             Self::Curve3 => "curve3",
             Self::Surface => "surface",
             Self::Profile => "profile",
+            Self::OpenProfile => "open profile",
             Self::Solid => "solid",
             Self::HalfSpace => "half-space",
         }
@@ -391,6 +400,7 @@ impl ExpectedReference {
             Self::Curve | Self::Curve2 | Self::BoundedOpenCurve2 | Self::Curve3 => false,
             Self::Surface => surface,
             Self::Profile => matches!(node, GeometryNode::Profile(_)),
+            Self::OpenProfile => matches!(node, GeometryNode::OpenProfile(_)),
             Self::Solid => matches!(
                 node,
                 GeometryNode::Primitive(_)
@@ -467,7 +477,76 @@ pub(crate) fn validate_reference_types(
         | GeometryNode::BoundingBox(_)
         | GeometryNode::Instance(_)
         | GeometryNode::Collection(_) => Ok(()),
+        GeometryNode::CurveStation(value) => {
+            expect_reference(nodes, value.basis, ExpectedReference::Curve)?;
+            validate_station(&value.station)
+        }
     }
+}
+
+/// A station's distance is finite and not negative and its offsets finite.
+/// Whether the distance is within the basis curve's length needs curve
+/// evaluation, so a resolver refuses that.
+fn validate_station(station: &Station) -> Result<(), GraphError> {
+    if !station.distance.is_finite() {
+        return Err(GraphError::InvalidStation {
+            detail: "the distance along the basis curve is not finite",
+        });
+    }
+    if station.distance < 0.0 {
+        return Err(GraphError::InvalidStation {
+            detail: "the distance along the basis curve is negative",
+        });
+    }
+    if !station.offsets.is_finite() {
+        return Err(GraphError::InvalidStation {
+            detail: "an offset is not finite",
+        });
+    }
+    Ok(())
+}
+
+/// At least two well-formed stations, strictly increasing in distance.
+fn validate_station_run<'a>(
+    stations: impl ExactSizeIterator<Item = &'a Station>,
+) -> Result<(), GraphError> {
+    if stations.len() < 2 {
+        return Err(GraphError::InvalidStation {
+            detail: "at least two stations are required",
+        });
+    }
+    let mut previous: Option<f64> = None;
+    for station in stations {
+        validate_station(station)?;
+        if previous.is_some_and(|before| station.distance <= before) {
+            return Err(GraphError::InvalidStation {
+                detail: "station distances must increase strictly",
+            });
+        }
+        previous = Some(station.distance);
+    }
+    Ok(())
+}
+
+/// Every open section carries the same tag sequence, or every one none,
+/// and no section repeats a tag.
+fn validate_section_tags(sections: &[StationedOpenSection]) -> Result<(), GraphError> {
+    let Some(first) = sections.first() else {
+        return Ok(());
+    };
+    if sections.iter().any(|section| section.tags != first.tags) {
+        return Err(GraphError::InvalidStation {
+            detail: "the sections' tags are inconsistent: every section must carry the same \
+                     tag sequence, or none",
+        });
+    }
+    let mut seen = HashSet::new();
+    if !first.tags.iter().all(|tag| seen.insert(tag.as_str())) {
+        return Err(GraphError::InvalidStation {
+            detail: "a section repeats a tag",
+        });
+    }
+    Ok(())
 }
 
 fn expect_reference(
@@ -515,6 +594,7 @@ fn node_kind(node: &GeometryNode) -> &'static str {
         GeometryNode::BoundingBox(_) => "bounding-box",
         GeometryNode::Instance(_) => "instance",
         GeometryNode::Collection(_) => "collection",
+        GeometryNode::CurveStation(_) => "curve-station",
     }
 }
 
@@ -565,6 +645,12 @@ fn validate_curve_relation(
             expect_reference(nodes, *basis_surface, ExpectedReference::Surface)?;
             expect_reference(nodes, *reference_curve, ExpectedReference::Curve2)
         }
+        CurveRelation::OffsetByStations {
+            basis, stations, ..
+        } => {
+            expect_reference(nodes, *basis, ExpectedReference::Curve)?;
+            validate_station_run(stations.iter())
+        }
     }
 }
 
@@ -589,6 +675,18 @@ fn validate_surface_relation(
         SurfaceRelation::LinearExtrusion { swept_curve, .. }
         | SurfaceRelation::Revolution { swept_curve, .. } => {
             expect_reference(nodes, *swept_curve, ExpectedReference::Curve)
+        }
+        SurfaceRelation::SectionedSurface {
+            directrix,
+            sections,
+            ..
+        } => {
+            expect_reference(nodes, *directrix, ExpectedReference::Curve)?;
+            for section in sections {
+                expect_reference(nodes, section.profile, ExpectedReference::OpenProfile)?;
+            }
+            validate_station_run(sections.iter().map(|section| &section.station))?;
+            validate_section_tags(sections)
         }
     }
 }
@@ -639,6 +737,17 @@ fn validate_solid_operation(
                 expect_reference(nodes, section.profile, ExpectedReference::Profile)?;
             }
             Ok(())
+        }
+        SolidOperation::StationedSpine {
+            directrix,
+            sections,
+            ..
+        } => {
+            expect_reference(nodes, *directrix, ExpectedReference::Curve)?;
+            for section in sections {
+                expect_reference(nodes, section.profile, ExpectedReference::Profile)?;
+            }
+            validate_station_run(sections.iter().map(|section| &section.station))
         }
         SolidOperation::Boolean { left, right, .. } => {
             expect_reference(nodes, *left, ExpectedReference::Solid)?;

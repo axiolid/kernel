@@ -1,0 +1,371 @@
+//! Stations: a position at a distance along a curve, framed by the curve's
+//! section (#241, ADR 0082).
+//!
+//! A station names a place by a measure along a basis curve instead of by
+//! coordinates, the way an alignment is staked out. Reading it back is
+//! curve evaluation, so it lives here, beside the arc-length machinery it
+//! reuses ([`crate::arc_parameter`]).
+//!
+//! # Distance convention
+//!
+//! The distance is measured in the basis curve's own convention, from its
+//! start:
+//!
+//! - an [`Elevated3`](axiolid_curve::Elevated3) or a
+//!   [`Banked3`](axiolid_curve::Banked3) is authored against PLAN distance,
+//!   its own parameter, and a station on it is a plan distance (the
+//!   curve-evaluation contract's `DistanceConvention::PlanDistance`);
+//! - every other curve, 2D or 3D, is measured by its arc length (for a 2D
+//!   curve, the plan length).
+//!
+//! The start is parameter `0` for a line, a circle, an ellipse, an
+//! intrinsic curve and a chain, and the first parameter of the domain for
+//! a polyline or a B-spline. A distance must lie in `[0, L]`, `L` the
+//! curve's length ([`station_length2`], [`station_length3`]): one full turn
+//! for a closed conic, no limit for a line. A negative or non-finite
+//! distance, and one past `L` by more than
+//! [`ARC_LENGTH_TOLERANCE`]` * max(1, L)`, is refused by name; one past it
+//! by less is read at `L`.
+//!
+//! # Section frame
+//!
+//! [`SectionFrame`] carries the point and three unit axes: `tangent` along
+//! the curve, `lateral` to the LEFT of it, and `up = tangent x lateral`.
+//!
+//! - A 2D curve lies in the plane `z = 0`: `lateral` is the left normal,
+//!   `up` is `+Z`.
+//! - A [`Banked3`](axiolid_curve::Banked3) is framed by its rolled section
+//!   ([`crate::banked::banked_section`]): `lateral` towards the left rail
+//!   head.
+//! - Every other 3D curve, an [`Elevated3`](axiolid_curve::Elevated3)
+//!   included, gets the reference-up frame against `+Z`, the one
+//!   `ReferenceCurveEvaluator::frame_at` returns: `lateral` is horizontal,
+//!   `up` leans back with the grade. A vertical tangent has no such frame
+//!   and is refused by name.
+//!
+//! [`SectionFrame::frame`] returns the axes in the curve-evaluation
+//! provider's layout: `x` the tangent, `y` up, `z = -lateral` (to the
+//! right). The contract's documentation of `frame_at` still says `z` is up
+//! (#242); this module follows the provider.
+//!
+//! [`SectionFrame::plan`] is the vertical alternative: the tangent's
+//! horizontal projection, the horizontal left normal and `+Z`, with grade
+//! and bank dropped.
+//!
+//! # Accuracy contract
+//!
+//! The point and frame are the exact curve's at a measure within
+//! [`ARC_LENGTH_TOLERANCE`]` * max(1, s)` of `s` where the arc length is
+//! numerical (a conic, a polyline is exact, a B-spline), at `s` itself on a
+//! line, an intrinsic curve, a chain and an elevated or banked curve (their
+//! parameter is the measure), each evaluated to its own stated accuracy
+//! (Gauss-Legendre quadrature for intrinsic positions, ADR 0060).
+
+use axiolid_contracts::{GeomError, GeomResult};
+use axiolid_core::{Frame3, Point3, Scalar, Vec3};
+use axiolid_curve::{Curve2, Curve3};
+
+use crate::arc_parameter::{
+    arc_length2, arc_length3, parameter_at_arc_length2, parameter_at_arc_length3,
+    ARC_LENGTH_TOLERANCE,
+};
+use crate::curve::{derivative2, derivative3, domain2, domain3, evaluate2, evaluate3};
+
+fn invalid(detail: String) -> GeomError {
+    GeomError::InvalidInput(detail)
+}
+
+/// A point on a curve and the section axes there: tangent, left lateral
+/// and up, unit and right-handed (`up = tangent x lateral`).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionFrame {
+    /// The curve point.
+    pub point: Point3,
+    /// Unit tangent, in the direction of increasing distance.
+    pub tangent: Vec3,
+    /// Unit lateral axis, to the left of the tangent.
+    pub lateral: Vec3,
+    /// Unit section up, `tangent x lateral`.
+    pub up: Vec3,
+}
+
+impl SectionFrame {
+    /// The point offset from this frame's point: `lateral` along the
+    /// lateral axis (positive to the left), `vertical` along up and
+    /// `longitudinal` along the tangent.
+    #[must_use]
+    pub fn place(&self, lateral: Scalar, vertical: Scalar, longitudinal: Scalar) -> Point3 {
+        self.point + lateral * self.lateral + vertical * self.up + longitudinal * self.tangent
+    }
+
+    /// The same point framed vertically: the tangent's horizontal
+    /// projection, the horizontal left normal and `+Z`. Grade and bank are
+    /// dropped.
+    ///
+    /// # Errors
+    ///
+    /// A vertical tangent, which has no horizontal projection.
+    pub fn plan(&self) -> GeomResult<Self> {
+        let horizontal = Vec3::new(self.tangent.x, self.tangent.y, 0.0);
+        let length = horizontal.length();
+        if !length.is_finite() || length <= 1e-12 {
+            return Err(invalid(
+                "station: the tangent is vertical, so it has no plan direction".into(),
+            ));
+        }
+        let tangent = horizontal / length;
+        Ok(Self {
+            point: self.point,
+            tangent,
+            lateral: Vec3::new(-tangent.y, tangent.x, 0.0),
+            up: Vec3::Z,
+        })
+    }
+
+    /// The frame in the curve-evaluation provider's layout: `x` the
+    /// tangent, `y` up, `z = x x y`, which is `-lateral` (to the right).
+    #[must_use]
+    pub fn frame(&self) -> Frame3 {
+        Frame3 {
+            origin: self.point,
+            x: self.tangent,
+            y: self.up,
+            z: -self.lateral,
+        }
+    }
+}
+
+/// A 2D curve's point and unit tangent lifted to `z = 0`, framed with the
+/// left normal and `+Z`.
+fn planar_frame(
+    point: axiolid_core::Point2,
+    tangent: axiolid_core::Vec2,
+) -> GeomResult<SectionFrame> {
+    let length = tangent.length();
+    if !length.is_finite() || length <= 0.0 {
+        return Err(invalid(
+            "station: the curve has no tangent direction there".into(),
+        ));
+    }
+    let t = tangent / length;
+    Ok(SectionFrame {
+        point: Point3::new(point.x, point.y, 0.0),
+        tangent: Vec3::new(t.x, t.y, 0.0),
+        lateral: Vec3::new(-t.y, t.x, 0.0),
+        up: Vec3::Z,
+    })
+}
+
+/// The reference-up frame against `+Z`, as `ReferenceCurveEvaluator`
+/// builds it: `right = t x Z`, `up = right x t`, `lateral = -right`.
+fn reference_up_frame(point: Point3, derivative: Vec3) -> GeomResult<SectionFrame> {
+    let length = derivative.length();
+    if !length.is_finite() || length <= 0.0 {
+        return Err(invalid(
+            "station: the curve has no tangent direction there".into(),
+        ));
+    }
+    let tangent = derivative / length;
+    let right = tangent.cross(Vec3::Z);
+    let magnitude = right.length();
+    if !magnitude.is_finite() || magnitude <= 1e-12 {
+        return Err(invalid(
+            "station: the tangent is vertical, so the section has no lateral axis".into(),
+        ));
+    }
+    let right = right / magnitude;
+    Ok(SectionFrame {
+        point,
+        tangent,
+        lateral: -right,
+        up: right.cross(tangent),
+    })
+}
+
+/// Check `distance` against the curve length `length` (`None`:
+/// unbounded) and return the distance to read, clamped onto `L` within
+/// tolerance.
+fn admitted(distance: Scalar, length: Option<Scalar>) -> GeomResult<Scalar> {
+    if !distance.is_finite() {
+        return Err(invalid(format!(
+            "station: distance {distance} along the curve is not finite"
+        )));
+    }
+    if distance < 0.0 {
+        return Err(invalid(format!(
+            "station: distance {distance} is before the curve's start"
+        )));
+    }
+    match length {
+        None => Ok(distance),
+        Some(length) => {
+            let slack = ARC_LENGTH_TOLERANCE * length.abs().max(1.0);
+            if distance > length + slack {
+                Err(invalid(format!(
+                    "station: distance {distance} is beyond the curve's length {length}"
+                )))
+            } else {
+                Ok(distance.min(length))
+            }
+        }
+    }
+}
+
+fn unmeasured(dimension: &str) -> GeomError {
+    invalid(format!(
+        "station: this {dimension} curve family has no distance a station can be measured by"
+    ))
+}
+
+/// Where a 2D curve's measure starts: parameter `0`, or the domain's
+/// first parameter for a polyline or a B-spline.
+fn start2(curve: &Curve2) -> Scalar {
+    match curve {
+        Curve2::Polyline(_) | Curve2::BSpline(_) => {
+            let domain = domain2(curve);
+            domain.start.min(domain.end)
+        }
+        _ => 0.0,
+    }
+}
+
+fn start3(curve: &Curve3) -> Scalar {
+    match curve {
+        Curve3::Polyline(_) | Curve3::BSpline(_) => {
+            let domain = domain3(curve);
+            domain.start.min(domain.end)
+        }
+        _ => 0.0,
+    }
+}
+
+/// The length a station on a 2D curve is measured against: `None` for a
+/// line (unbounded), one turn for a circle or an ellipse, the arc length
+/// of its domain for a polyline or a B-spline, the stated length of an
+/// intrinsic curve or a chain.
+///
+/// # Errors
+///
+/// Any other family, a chain without a valid length, and the quadrature's
+/// refusals, by name.
+pub fn station_length2(curve: &Curve2) -> GeomResult<Option<Scalar>> {
+    match curve {
+        Curve2::Line(_) => Ok(None),
+        Curve2::Circle(_) | Curve2::Ellipse(_) => {
+            arc_length2(curve, 0.0, core::f64::consts::TAU).map(Some)
+        }
+        Curve2::Polyline(_) | Curve2::BSpline(_) => {
+            let domain = domain2(curve);
+            let (lo, hi) = (domain.start.min(domain.end), domain.start.max(domain.end));
+            if hi <= lo {
+                return Err(invalid("station: the curve has an empty domain".into()));
+            }
+            arc_length2(curve, lo, hi).map(Some)
+        }
+        Curve2::Intrinsic(intrinsic) => {
+            if intrinsic.length.is_finite() && intrinsic.length > 0.0 {
+                Ok(Some(intrinsic.length))
+            } else {
+                Err(invalid(
+                    "station: the intrinsic curve has no positive finite length".into(),
+                ))
+            }
+        }
+        Curve2::Chain(chain) => chain
+            .length()
+            .map(Some)
+            .ok_or_else(|| invalid("station: the chain has no valid length".into())),
+        _ => Err(unmeasured("2D")),
+    }
+}
+
+/// The length a station on a 3D curve is measured against, as
+/// [`station_length2`]; an elevated curve's is its plan's, a banked
+/// curve's the span of its cant law.
+///
+/// # Errors
+///
+/// As [`station_length2`].
+pub fn station_length3(curve: &Curve3) -> GeomResult<Option<Scalar>> {
+    match curve {
+        Curve3::Line(_) => Ok(None),
+        Curve3::Circle(_) | Curve3::Ellipse(_) => {
+            arc_length3(curve, 0.0, core::f64::consts::TAU).map(Some)
+        }
+        Curve3::Polyline(_) | Curve3::BSpline(_) => {
+            let domain = domain3(curve);
+            let (lo, hi) = (domain.start.min(domain.end), domain.start.max(domain.end));
+            if hi <= lo {
+                return Err(invalid("station: the curve has an empty domain".into()));
+            }
+            arc_length3(curve, lo, hi).map(Some)
+        }
+        Curve3::Intrinsic(intrinsic) => {
+            if intrinsic.length.is_finite() && intrinsic.length > 0.0 {
+                Ok(Some(intrinsic.length))
+            } else {
+                Err(invalid(
+                    "station: the intrinsic curve has no positive finite length".into(),
+                ))
+            }
+        }
+        Curve3::Elevated(elevated) => station_length2(&elevated.plan),
+        Curve3::Banked(banked) => {
+            let domain = domain3(curve);
+            if domain.end > domain.start {
+                Ok(Some(domain.end))
+            } else {
+                Err(invalid(format!(
+                    "station: the banked curve's cant law has no valid span ({})",
+                    banked.span()
+                )))
+            }
+        }
+        _ => Err(unmeasured("3D")),
+    }
+}
+
+/// The section of a 2D curve at arc length `distance` from its start; see
+/// the [module documentation](self) for the conventions.
+///
+/// # Errors
+///
+/// A distance that is not finite, negative or beyond the curve's length,
+/// an unmeasurable family, and the evaluators' refusals, by name.
+pub fn station_section2(curve: &Curve2, distance: Scalar) -> GeomResult<SectionFrame> {
+    let distance = admitted(distance, station_length2(curve)?)?;
+    let t = parameter_at_arc_length2(curve, start2(curve), distance)?;
+    planar_frame(evaluate2(curve, t)?, derivative2(curve, t)?)
+}
+
+/// The section of a 3D curve at `distance` from its start: plan distance
+/// on an elevated or banked curve, arc length on any other; see the
+/// [module documentation](self).
+///
+/// # Errors
+///
+/// As [`station_section2`], and a vertical tangent where the reference-up
+/// frame is built.
+pub fn station_section3(curve: &Curve3, distance: Scalar) -> GeomResult<SectionFrame> {
+    let distance = admitted(distance, station_length3(curve)?)?;
+    match curve {
+        Curve3::Banked(banked) => {
+            let section = crate::banked::banked_section(banked, distance)?;
+            Ok(SectionFrame {
+                point: section.point,
+                tangent: section.tangent,
+                lateral: section.lateral,
+                up: section.up,
+            })
+        }
+        Curve3::Elevated(elevated) => reference_up_frame(
+            crate::arc_length::elevated_point(elevated, distance)?,
+            crate::arc_length::elevated_tangent(elevated, distance)?,
+        ),
+        _ => {
+            let t = parameter_at_arc_length3(curve, start3(curve), distance)?;
+            reference_up_frame(evaluate3(curve, t)?, derivative3(curve, t)?)
+        }
+    }
+}

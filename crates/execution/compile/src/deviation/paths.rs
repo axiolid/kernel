@@ -190,6 +190,11 @@ pub(crate) fn of_solid(
                 "sectioned spine: the surface between sections is not defined exactly",
             ),
         ),
+        SolidOperation::StationedSpine { .. } => (
+            DeviationPath::StationedSpine,
+            "",
+            DeviationBound::Unbounded(STATIONED_SAMPLING),
+        ),
         SolidOperation::BoundedHalfSpace { .. } => (
             DeviationPath::BoundedHalfSpace,
             "",
@@ -204,6 +209,21 @@ pub(crate) fn of_solid(
         ),
     };
     Ok(Deviation::one(path, detail, bound))
+}
+
+/// Why station-placed sweeps are unbounded (#241): the sections between
+/// stations are bisected until each placed point's midpoint test passes,
+/// which samples the surface rather than bounding it.
+const STATIONED_SAMPLING: &str =
+    "stationed sections: the surface between stations is sampled, not bounded";
+
+/// The deviation of a sectioned surface (#241); see [`STATIONED_SAMPLING`].
+pub(crate) fn of_sectioned_surface() -> Deviation {
+    Deviation::one(
+        DeviationPath::SectionedSurface,
+        "",
+        DeviationBound::Unbounded(STATIONED_SAMPLING),
+    )
 }
 
 /// The deviation of a CSG primitive meshed for chord budget `chord`.

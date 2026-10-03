@@ -13,8 +13,8 @@ use axiolid_surface::Surface;
 use axiolid_topology::BRep;
 
 use crate::{
-    CurveRelation, GeometryNode, Instance, NodeId, OpenProfile, PointOnCurve, PointOnSurface,
-    SolidOperation, SurfaceRelation,
+    CurveRelation, CurveStation, GeometryNode, Instance, NodeId, OpenProfile, PointOnCurve,
+    PointOnSurface, SolidOperation, SurfaceRelation,
 };
 
 mod private {
@@ -76,6 +76,7 @@ built_in_node!(PolygonMesh, PolygonMesh);
 built_in_node!(TriMesh, TriMesh);
 built_in_node!(Aabb, BoundingBox);
 built_in_node!(Instance, Instance);
+built_in_node!(CurveStation, CurveStation);
 
 #[cfg(test)]
 mod tests {

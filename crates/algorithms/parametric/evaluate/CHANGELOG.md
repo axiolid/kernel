@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station` (#241, ADR 0082): `station_section2` and `station_section3`
+  resolve a distance along a curve -- plan distance on an elevated or
+  banked curve, arc length (through `arc_parameter`) on any other -- to a
+  `SectionFrame`: the point, the unit tangent, the lateral axis to the
+  left and `up = tangent x lateral`. A 2D curve is framed in `z = 0` with
+  `+Z` up, a banked curve by its rolled section, every other 3D curve by
+  the reference-up frame against `+Z` that `ReferenceCurveEvaluator`
+  returns. `SectionFrame::place` applies offsets, `plan` gives the upright
+  frame, `frame` the provider's layout (`x` tangent, `y` up, `z` right).
+  `station_length2`/`station_length3` give the length a station is
+  checked against; a negative, non-finite or too-long distance and a
+  vertical tangent are refused by name.
+
 ## [0.3.4] - 2026-10-03
 
 ### Added

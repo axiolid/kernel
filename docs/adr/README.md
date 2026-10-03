@@ -66,3 +66,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0079](./0079-least-squares-fitting-uses-the-numeric-substrate.md) | Least-squares fitting lives in axiolid-nurbs and depends on axiolid-numeric |
 | [0080](./0080-exact-compiler-cuts-placed-openings-with-the-general-boolean.md) | The exact compiler cuts placed openings with the general boolean |
 | [0081](./0081-banked-curves-name-their-cant-convention.md) | Banked curves name their cant convention |
+| [0082](./0082-stations-measure-in-their-basis-curves-convention.md) | Stations measure in their basis curve's convention |

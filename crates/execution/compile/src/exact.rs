@@ -373,6 +373,7 @@ fn exact_input_family(node: &GeometryNode) -> &'static str {
         GeometryNode::SolidOperation(operation) => solid_operation_family(operation),
         GeometryNode::Instance(_) => "instance",
         GeometryNode::Collection(_) => "collection",
+        GeometryNode::CurveStation(_) => "curve station",
         _ => "unknown geometry node",
     }
 }
@@ -387,6 +388,7 @@ pub(crate) fn solid_operation_family(operation: &SolidOperation) -> &'static str
         SolidOperation::FixedReferenceSweep { .. } => "fixed-reference sweep",
         SolidOperation::SurfaceCurveSweep { .. } => "surface-curve sweep",
         SolidOperation::SectionedSpine { .. } => "sectioned spine",
+        SolidOperation::StationedSpine { .. } => "station-placed spine",
         SolidOperation::Boolean { .. } => "boolean",
         SolidOperation::BoundedHalfSpace { .. } => "bounded half-space",
         _ => "unknown solid operation",
@@ -410,7 +412,7 @@ mod family_name_tests {
     fn the_exported_table_matches_the_naming_function() {
         assert_eq!(
             SOLID_FAMILY_NAMES.len(),
-            10,
+            11,
             "the declared family count changed; update the table"
         );
         for name in SOLID_FAMILY_NAMES {
@@ -501,6 +503,7 @@ pub const SOLID_FAMILY_NAMES: &[&str] = &[
     "fixed-reference sweep",
     "surface-curve sweep",
     "sectioned spine",
+    "station-placed spine",
     "boolean",
     "bounded half-space",
 ];

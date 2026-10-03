@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
+  lateral/vertical/longitudinal) along a basis curve, measured in that
+  curve's convention -- plan distance on an elevated or banked curve, arc
+  length on any other -- with offsets in its section frame
+  (`StationFrame::Section`, or the upright `StationFrame::Plan`).
+  `GeometryNode::CurveStation(CurveStation)` is a point and frame at a
+  station; `CurveRelation::OffsetByStations` a 3D curve through offsets
+  at stations, interpolated linearly in distance;
+  `SolidOperation::StationedSpine` closed profiles standing at stations
+  (`StationedSection`), matched by ring and vertex index;
+  `SurfaceRelation::SectionedSurface` open sections at stations
+  (`StationedOpenSection`) joined by tag.
+- `GraphError::InvalidStation` names a malformed station when the node is
+  pushed: a non-finite or negative distance, a non-finite offset, fewer
+  than two stations in a run, distances that do not increase strictly,
+  sections whose tags differ or repeat. A distance beyond the basis
+  curve's length is refused when the station is resolved.
+
 ## [0.3.4] - 2026-10-03
 
 ### Added

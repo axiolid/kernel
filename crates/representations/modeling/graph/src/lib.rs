@@ -16,6 +16,7 @@ pub mod graph;
 pub mod id;
 pub mod node;
 pub mod solid_operation;
+pub mod station;
 pub mod surface_relation;
 mod validation;
 pub mod value;
@@ -29,5 +30,8 @@ pub use graph::{GeometryGraph, GeometryGraphBuilder, GraphError};
 pub use id::NodeId;
 pub use node::{GeometryNode, Instance, OpenProfile, PointOnCurve, PointOnSurface};
 pub use solid_operation::{Section, SolidOperation};
+pub use station::{
+    CurveStation, Station, StationFrame, StationOffsets, StationedOpenSection, StationedSection,
+};
 pub use surface_relation::SurfaceRelation;
 pub use value::BuiltInNode;

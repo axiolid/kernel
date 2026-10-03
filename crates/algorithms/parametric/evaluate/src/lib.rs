@@ -27,6 +27,7 @@ pub mod intrinsic_relation;
 mod nurbs;
 pub mod polyline_length;
 pub mod provider;
+pub mod station;
 pub mod surface;
 
 pub use arc_length::{elevated_point, elevated_tangent, intrinsic_point, intrinsic_tangent};
@@ -41,4 +42,7 @@ pub use elevation::{elevation_chord_bound, elevation_grade, elevation_height};
 pub use frenet::{frenet_frame, frenet_point, frenet_tangent};
 pub use intrinsic_relation::{join_intrinsic3, offset_intrinsic3, trim_intrinsic3};
 pub use provider::ReferenceCurveEvaluator;
+pub use station::{
+    station_length2, station_length3, station_section2, station_section3, SectionFrame,
+};
 pub use surface::{partials, Patch, ScalarSurface};

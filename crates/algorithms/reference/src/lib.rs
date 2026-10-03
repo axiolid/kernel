@@ -37,6 +37,9 @@ pub mod triangle_triangle;
 /// Certified derivative and chord bounds (#232), re-exported on the same
 /// footing as `curve` and `surface`.
 pub use axiolid_evaluate::bound;
+/// Stations: a section frame at a distance along a curve (#241),
+/// re-exported on the same footing as `curve` and `surface`.
+pub use axiolid_evaluate::station;
 /// Arc length along any evaluable curve and its inverse, and arc-length
 /// chains (#239), re-exported on the same footing as `curve` and `surface`.
 pub use axiolid_evaluate::{arc_parameter, chain};
