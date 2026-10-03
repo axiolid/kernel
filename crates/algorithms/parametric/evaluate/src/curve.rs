@@ -114,6 +114,12 @@ pub fn domain3(curve: &Curve3) -> Interval {
             start: 0.0,
             end: i.length,
         },
+        // Parameterised by PLAN distance over the cant law's span: no
+        // station outside it has a section (ADR 0081).
+        Curve3::Banked(b) if b.cant.is_well_formed() => Interval {
+            start: 0.0,
+            end: b.span(),
+        },
         _ => Interval {
             start: 0.0,
             end: 0.0,
@@ -366,6 +372,8 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         Curve3::TorusSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         Curve3::PairSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
+        // `t` is PLAN distance, the centreline's own parameter (ADR 0081).
+        Curve3::Banked(b) => crate::banked::banked_point(b, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -393,6 +401,8 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::TorusSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         Curve3::PairSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
+        // In plan distance, so not unit: `(p, grade + pivot rate)`.
+        Curve3::Banked(b) => crate::banked::banked_derivative(b, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {

@@ -329,3 +329,29 @@ fn an_elevated_alignment_curve_is_refused_by_name() {
     assert!(matches!(error, TransformError::Unsupported(_)));
     assert!(error.to_string().contains("elevated"));
 }
+
+#[test]
+fn a_banked_alignment_curve_is_refused_by_name() {
+    let base = Elevated3::new(
+        line2(),
+        ElevationLaw::Polynomial {
+            coefficients: vec![1.0],
+        },
+    );
+    let banked = Curve3::Banked(axiolid_curve::Banked3::new(
+        base,
+        axiolid_curve::CantLaw::new(vec![axiolid_curve::CantPiece::constant(10.0, 0.1)]),
+        axiolid_curve::CantLaw::zero(10.0),
+        1.5,
+        axiolid_curve::BankConvention::TangentRotation,
+    ));
+    let source = sheet(
+        Surface::Plane(Plane { frame: frame() }),
+        banked,
+        line2(),
+        Interval::UNIT,
+    );
+    let error = source.transformed(&placement()).unwrap_err();
+    assert!(matches!(error, TransformError::Unsupported(_)));
+    assert!(error.to_string().contains("banked"));
+}

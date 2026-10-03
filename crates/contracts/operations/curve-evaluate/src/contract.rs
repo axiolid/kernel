@@ -84,5 +84,10 @@ pub trait CurveEvaluator: Backend {
     ///
     /// Refuses when the tangent is parallel to `up`, where roll is
     /// genuinely undetermined.
+    ///
+    /// A curve that carries its own roll ([`Curve3::Banked`]) is framed by
+    /// it: the section frame rolled about the tangent by the curve's bank
+    /// convention, which at zero cant is the reference-up frame with
+    /// `up = +Z` (ADR 0081).
     fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3>;
 }

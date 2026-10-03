@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `banked` (#240, ADR 0081): `banked_point`, `banked_derivative`,
+  `banked_tangent` and `banked_section` evaluate a `Curve3::Banked` by plan
+  distance. A `BankedSection` carries the rotation point, the unit tangent
+  of the banked curve (its grade includes the pivot's rate), the lateral
+  and up axes rolled about it, the cant, the nominal bank angle, the roll
+  its convention gives, the pivot and the grade, with `frame()` and
+  `rail_heads()`. Every refusal of the cant laws is passed on by name.
+- `evaluate3`, `derivative3` and `domain3` take a banked curve, parameterised
+  by plan distance over its cant law's span, so `flatten3` flattens it;
+  `certifies_flattening3` reports it uncertified (midpoint sagitta, #232).
+- `ReferenceCurveEvaluator` measures a banked curve in plan distance, and
+  its `frame_at` returns the curve's section frame. An evaluator built
+  against a reference up other than `+Z` refuses a banked curve, whose cant
+  is measured against `+Z`.
+
 ## [0.3.3] - 2026-10-03
 
 ### Added

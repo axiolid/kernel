@@ -19,7 +19,8 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 Exact, format-neutral curve values: lines and polylines (from
 `axiolid-linear`), conics, rational and polynomial B-splines,
-natural-equation (intrinsic) curves, elevated alignment curves, and the
+natural-equation (intrinsic) curves, elevated alignment curves, banked
+centrelines carrying a cant law under a named convention, and the
 curves where surfaces meet. Knots, multiplicities, weights and domains are
 kept as authored. It declares the `CurveEvaluator` seam but evaluates
 nothing; `axiolid-evaluate` does that. Composite, trimmed, offset and

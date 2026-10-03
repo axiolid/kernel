@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `CurveEvaluator::frame_at` documents that a curve carrying its own roll
+  (`Curve3::Banked`, #240) is framed by it: its section frame, rolled about
+  the tangent under the curve's bank convention (ADR 0081).
+
 ## [0.3.1] - 2026-09-28
 
 ### Changed

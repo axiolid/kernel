@@ -230,7 +230,8 @@ impl ExactBRep {
     ///   orthonormal within [`RIGID_TOLERANCE`] in every dot product -- any
     ///   scale (uniform or not) or shear;
     /// - [`TransformError::Unsupported`]: an elevated alignment curve
-    ///   (`Curve3::Elevated`), or an unknown curve or surface family.
+    ///   (`Curve3::Elevated`), a banked one (`Curve3::Banked`), or an
+    ///   unknown curve or surface family.
     ///
     /// Additionally under a reflection, [`TransformError::Unsupported`] for:
     /// - an intrinsic space curve (its torsion would change sign);
@@ -561,6 +562,12 @@ fn curve3(curve: &Curve3, rigid: &Rigid) -> Result<(Curve3, Reparam), TransformE
         Curve3::Elevated(_) => {
             return Err(TransformError::Unsupported(
                 "an elevated alignment curve (plan and height law)",
+            ))
+        }
+        // Its cant is measured against +Z, which a motion would tilt.
+        Curve3::Banked(_) => {
+            return Err(TransformError::Unsupported(
+                "a banked alignment curve (centreline and cant law)",
             ))
         }
         _ => return Err(TransformError::Unsupported("an unknown curve family")),

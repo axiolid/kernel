@@ -592,6 +592,9 @@ pub fn certifies_flattening3(curve: &Curve3) -> bool {
     match curve {
         Curve3::Line(_) | Curve3::Polyline(_) | Curve3::Circle(_) | Curve3::Ellipse(_) => true,
         Curve3::BSpline(b) => spline_weights_positive(b.weights.as_deref()),
+        // A banked curve has no derivative bound here: its flattening is
+        // measured on midpoint sagittas, not certified.
+        Curve3::Banked(_) => false,
         _ => false,
     }
 }

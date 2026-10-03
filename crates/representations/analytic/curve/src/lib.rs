@@ -5,6 +5,7 @@
 //! Composite, trimmed, offset, and surface-bound curves are graph relations in
 //! `axiolid-model`; keeping them there avoids a curve/surface dependency cycle.
 
+pub mod banked;
 pub mod conic;
 pub mod elevation;
 pub mod evaluate;
@@ -19,6 +20,9 @@ pub mod spline;
 pub mod spline_surface;
 pub mod torus_section;
 
+pub use banked::{
+    bank_angle, BankConvention, BankError, Banked3, CantForm, CantLaw, CantPiece, CantValue,
+};
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
 pub use elevation::{Elevated3, ElevationLaw};
 pub use evaluate::CurveEvaluator;
@@ -119,4 +123,8 @@ pub enum Curve3 {
     /// defined between them by the surfaces themselves. See
     /// [`PairSection3`] (ADR 0077).
     PairSection(PairSection3),
+    /// An elevated centreline carrying a cant law: the section rolls about
+    /// the tangent by a bank angle, under a named convention. See
+    /// [`Banked3`] (ADR 0081).
+    Banked(Banked3),
 }

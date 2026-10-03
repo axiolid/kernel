@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `Curve3::Banked(Banked3)` (#240, ADR 0081): an elevated centreline
+  carrying a roll law, evaluated by plan distance. `CantLaw` is a run of
+  `CantPiece`s from plan distance zero, each a `CantForm` over its own
+  `xi = s / length`: a polynomial in `xi` (constant, linear, Bloss, and
+  Helmert as two quadratic pieces through `CantPiece::helmert`), a
+  half-cosine, a sine transition, or a Viennese bend, which gives the bank
+  angle itself (`CantValue::Angle`). A second `CantLaw` of height pieces
+  is the pivot: the rotation point's elevation above the profile. The
+  rail-head distance `b` gives `psi = asin(D / b)` (`bank_angle`), and a
+  cant beyond it is refused by name (`BankError`). `BankConvention` names
+  how a cant is read on a grade, with no default: `TangentRotation` rolls
+  the section about the 3D tangent by `psi` (the rail heads rise
+  `D cos theta`), `VerticalRise` by `asin(D / (b cos theta))` (they rise
+  exactly `D`).
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

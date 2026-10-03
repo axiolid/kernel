@@ -12,6 +12,7 @@ use axiolid_curve::Curve3;
 use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConvention};
 
 use crate::arc_length::{elevated_point, elevated_tangent};
+use crate::banked::{banked_point, banked_section, banked_tangent};
 use crate::frenet::{frenet_point, frenet_tangent};
 use crate::polyline_length::polyline_parameter;
 
@@ -56,6 +57,28 @@ impl ReferenceCurveEvaluator {
     #[must_use]
     pub const fn up(&self) -> Vec3 {
         self.up
+    }
+}
+
+impl ReferenceCurveEvaluator {
+    /// A banked curve carries its own roll, so its frame is its section
+    /// frame rather than the reference-up one (ADR 0081). Its cant is
+    /// measured against `+Z`, so an evaluator built against another up
+    /// refuses rather than mix the two.
+    fn banked_frame(&self, curve: &axiolid_curve::Banked3, at: CurveMeasure) -> GeomResult<Frame3> {
+        if self.up != Vec3::Z {
+            return Err(invalid(
+                "a banked curve's cant is measured against +Z; this evaluator's reference up differs",
+            ));
+        }
+        let distance = match at {
+            CurveMeasure::Distance(distance) | CurveMeasure::Parameter(distance) => distance,
+            _ => return Err(unsupported()),
+        };
+        if !distance.is_finite() {
+            return Err(invalid("curve measure must be finite"));
+        }
+        Ok(banked_section(curve, distance)?.frame())
     }
 }
 
@@ -108,6 +131,8 @@ fn finite_value(at: CurveMeasure) -> GeomResult<Scalar> {
 ///   grade the true 3D length exceeds the plan distance by 0.125 m per
 ///   100 m, and quietly conflating the two would misplace an object by
 ///   that much.
+/// - `Banked` is its centreline's: PLAN distance, for the same reason
+///   (ADR 0081).
 /// - `Polyline` has an exact arc length: a finite sum of segment
 ///   lengths, located by a running sum and one linear interpolation. Its
 ///   only transcendental is the same per-segment `sqrt` that `Line`
@@ -124,7 +149,7 @@ fn convention_for(curve: &Curve3) -> DistanceConvention {
         Curve3::Intrinsic(_) | Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
             DistanceConvention::ArcLength3d
         }
-        Curve3::Elevated(_) => DistanceConvention::PlanDistance,
+        Curve3::Elevated(_) | Curve3::Banked(_) => DistanceConvention::PlanDistance,
         _ => DistanceConvention::Unsupported,
     }
 }
@@ -136,7 +161,7 @@ fn parameter_for(curve: &Curve3, distance: Scalar) -> GeomResult<Scalar> {
     }
     match curve {
         // Already arc length.
-        Curve3::Intrinsic(_) | Curve3::Elevated(_) => Ok(distance),
+        Curve3::Intrinsic(_) | Curve3::Elevated(_) | Curve3::Banked(_) => Ok(distance),
         // The parameter advances |direction| per unit, so a caller-facing
         // distance must be divided by it. Import adapters may preserve a
         // non-unit direction, so this is not a no-op in practice.
@@ -182,6 +207,7 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             // Native arc-length families: straight through, no conversion.
             Curve3::Intrinsic(i) => frenet_point(i, distance),
             Curve3::Elevated(e) => elevated_point(e, distance),
+            Curve3::Banked(b) => banked_point(b, distance),
             Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
                 crate::curve::evaluate3(curve, parameter_for(curve, distance)?)
             }
@@ -195,6 +221,7 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             CurveMeasure::Distance(distance) => match curve {
                 Curve3::Intrinsic(i) => frenet_tangent(i, distance)?,
                 Curve3::Elevated(e) => elevated_tangent(e, distance)?,
+                Curve3::Banked(b) => banked_tangent(b, distance)?,
                 Curve3::Line(_) | Curve3::Circle(_) | Curve3::Polyline(_) => {
                     crate::curve::derivative3(curve, parameter_for(curve, distance)?)?
                 }
@@ -216,6 +243,9 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
     }
 
     fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        if let Curve3::Banked(banked) = curve {
+            return self.banked_frame(banked, at);
+        }
         let origin = self.point_at(curve, at)?;
         let tangent = self.tangent_at(curve, at)?;
         // Reference-up construction. `right` is perpendicular to both the

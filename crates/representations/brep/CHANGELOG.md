@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `ExactBRep::transformed` refuses a banked alignment curve
+  (`Curve3::Banked`, #240) by name, as it does an elevated one: its cant is
+  measured against `+Z`, which a motion would tilt.
+
 ## [0.3.3] - 2026-10-02
 
 ### Added
