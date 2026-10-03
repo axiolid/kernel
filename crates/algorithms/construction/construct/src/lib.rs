@@ -68,6 +68,7 @@ pub mod half_space;
 pub mod hull;
 pub mod loft;
 pub mod offset;
+pub mod pipe;
 pub mod polyhedron;
 mod polyhedron_exact;
 pub mod profile;

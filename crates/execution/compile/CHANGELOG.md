@@ -9,6 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A swept disk along a line, a polyline, or a trim or composite of lines,
+  polylines and circular arcs keeps every point of the exact tube within
+  the chord budget of the mesh (#232). The directrix is read as exact
+  segments and arcs and swept by `axiolid_construct::pipe` (see its notes
+  for the bound); it used to be sampled as a whole, each bend chorded for
+  its centreline instead of the tube's outer side. At 1 mm: line + bend
+  (R 0.1) + line, r 0.05, 1.184 -> 0.784 mm (502 -> 686 triangles);
+  three bends out of plane 1.184 -> 0.803 mm (1652 -> 1882); at 0.1 mm
+  R 0.04 / r 0.01 0.108 -> 0.077 mm, R 0.6 / r 0.3 0.115 -> 0.085 mm.
+  A composite's sweep range is now cut at exact arc lengths rather than
+  along its sampled chords. Lone circles and ellipses keep the #231
+  sweep, and composites holding other curves (ellipse arcs, B-splines)
+  are swept as sampled.
+
+### Changed
+
+- A swept disk's `fillet_radius` is honoured on polylines and composites
+  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
+  becomes a tangent arc of that radius (#232). A directrix with a corner
+  and no fillet radius, which IFC leaves undefined and which used to be
+  swept with sharp mitres, is now refused by name, as are a closed
+  polyline directrix, a fillet that does not fit its segments, a disk
+  radius at or above the fillet or bend radius, and a sweep range
+  combined with a fillet radius (`UnsupportedInput`).
+
 ## [0.3.8] - 2026-10-02
 
 ### Added

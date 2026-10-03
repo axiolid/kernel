@@ -1,12 +1,17 @@
-"""Mutation probe for the surface-to-mesh bound of doubly curved bodies (#231).
+"""Mutation probe for the surface-to-mesh bound of curved bodies (#231, #232).
 
 Each mutant gives a direction of a doubly curved surface the whole chord
 budget again, sizes a step at the wrong radius, drops a term of the bound
 (the walls' twist, the taper, the section's reach, the directrix's own
 sagitta), loosens the quad lemma, tilts a swept end, or clamps a budget it
-must refuse, and must turn a test red. `surface_deviation.rs` samples the
-exact surfaces against the compiled meshes; the `loft` unit tests check the
-quad lemma against a brute-force distance.
+must refuse, and must turn a test red. The pipe mutants (#232) do the same
+to swept disks along chains of segments and arcs: they drop a term of a
+piece's bound or the joint's measured shift, stop carrying the frame across
+a joint, loosen the corner tolerance, cut fillets wrongly or let them
+overrun their segments, and accept folded bends or closed polylines.
+`surface_deviation.rs` samples the exact surfaces against the compiled
+meshes; the `loft` unit tests check the quad lemma against a brute-force
+distance.
 """
 import pathlib, subprocess, sys
 
@@ -17,6 +22,8 @@ R = "crates/algorithms/construction/construct/src/revolve.rs"
 S = "crates/algorithms/construction/construct/src/sweep.rs"
 L = "crates/algorithms/construction/construct/src/loft.rs"
 P = "crates/algorithms/reference/src/primitive.rs"
+PIPE = "crates/algorithms/construction/construct/src/pipe.rs"
+PIECES = "crates/execution/compile/src/directrix/pieces.rs"
 SURFACE = ["-p", "axiolid-mesh-compile", "--test", "surface_deviation"]
 QUAD = ["-p", "axiolid-construct", "--lib", "loft"]
 
@@ -45,6 +52,22 @@ MUTANTS = [
     ('sphere at the whole budget', P, '    let n = segments_within(r, 0.5 * tol)?;', '    let n = segments_within(r, tol)?;', [SURFACE]),
     ('torus equator at the whole budget', P, '    let n = segments_within(big + r, 0.5 * tol)?;', '    let n = segments_within(big + r, tol)?;', [SURFACE]),
     ('primitive segment cap clamps', P, '    if n == 4096 && radius', '    if false && radius', [SURFACE]),
+    ('cylinder segments clamped', P, '"cylinder height")?;\n    let n = segments_within(r, tol)?;', '"cylinder height")?;\n    let n = segments(r, tol);', [SURFACE]),
+    ('cone segments clamped', P, '"cone height")?;\n    let n = segments_within(r, tol)?;', '"cone height")?;\n    let n = segments(r, tol);', [SURFACE]),
+    ('pipe disk chorded to the whole budget', PIPE, 'sweep::disk_rings(radius, inner_radius, 0.5 * chord)?;', 'sweep::disk_rings(radius, inner_radius, chord)?;', [SURFACE]),
+    ('pipe bends sampled to the whole budget', PIPE, '    let share = 0.5 * chord;', '    let share = chord;', [SURFACE]),
+    ('pipe section reach ignored', PIPE, 'sweep::span_bound(&f[0], &f[1], b, reach)', 'sweep::span_bound(&f[0], &f[1], b, 0.0)', [SURFACE]),
+    ('pipe bends never refined', PIPE, '        if worst <= share {', '        if true {', [SURFACE]),
+    ('pipe joint shift ignored', PIPE, '                let moved = if k == 0 { shift } else { 0.0 };', '                let moved = 0.0;', [SURFACE]),
+    ('pipe frame not carried across a joint', PIPE, '            Some(frame) => least_rotation(frame.x, frame.x.cross(frame.y), tangent),', '            Some(_) => seed_reference(tangent),', [SURFACE]),
+    ('pipe corners not refused', PIPE, '        if theta > tolerance {', '        if false {', [SURFACE]),
+    ('pipe corner tolerance quadrupled', PIPE, '    2.0 * (chord / (8.0 * radius)).min(1.0).asin()', '    2.0 * (chord / (2.0 * radius)).min(1.0).asin()', [SURFACE]),
+    ('fillet cut by the sine', PIPE, '        let cut = fillet * (0.5 * theta).tan();', '        let cut = fillet * (0.5 * theta).sin();', [SURFACE]),
+    ('fillet overrunning its segment accepted', PIPE, '        if needed > length + slack {', '        if false {', [SURFACE]),
+    ('disk as wide as the fillet accepted', PIPE, '        if radius >= fillet {', '        if radius > fillet {', [SURFACE]),
+    ('bend as tight as the disk accepted', PIPE, '                if bend <= radius {', '                if bend < radius {', [SURFACE]),
+    ('reversed arc keeps its turn', PIPE, '                start: self.end_point(),\n                angle: -angle,', '                start: self.end_point(),\n                angle,', [SURFACE]),
+    ('closed polyline accepted', PIECES, '            if polyline.closed {', '            if false {', [SURFACE]),
 ]
 
 def run(target):

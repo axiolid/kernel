@@ -8,6 +8,9 @@ use axiolid_model::{
     TrimmingPreference,
 };
 
+mod pieces;
+pub(crate) use pieces::pieces;
+
 const MAX_DEPTH: usize = 256;
 const MAX_POINTS: usize = 1_000_000;
 const MAX_FLATTEN_DEPTH: u32 = 16;

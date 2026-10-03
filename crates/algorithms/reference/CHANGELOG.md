@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `tessellate_primitive` refuses a cylinder or a cone whose chord budget
+  needs more than 4096 segments with `BudgetExceeded`, as it already did
+  for spheres and tori, instead of clamping silently to a coarser mesh
+  (#232). Their bound is now documented: both are curved one way only, so
+  the ring's sagitta is the whole distance from any point of the exact
+  surface, caps included, to the mesh, and it gets the whole budget.
+
 ## [0.3.3] - 2026-10-02
 
 ### Fixed

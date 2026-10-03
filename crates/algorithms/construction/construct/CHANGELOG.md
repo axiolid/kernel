@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `pipe::swept_disk_along_pieces`, with `pipe::PathPiece` and
+  `pipe::joint_tolerance` (#232): a disk, optionally hollow, swept along a
+  chain of straight segments and circular arcs, with every point of the
+  exact tube within the chord budget of the mesh. Half the budget chords
+  the disk; each piece is then bounded on its own by the #231 span bound
+  (exact along an arc, where the stations are rotations about its axis,
+  and zero along a segment), its end frames exact. Consecutive pieces
+  share one station, so the tube is watertight and wound one way; the
+  shared station's measured distance from the outgoing piece's own start
+  station is added to that piece's first span. A joint turning by more
+  than `2 asin(c / (8 r))` is a corner and is refused by name, as is a
+  gap above a quarter of the budget, a bend radius at or below the disk
+  radius, and a bend needing more than 4096 steps (`BudgetExceeded`). A
+  fillet radius rounds each corner between two segments with a tangent
+  arc (`IfcSweptDiskSolidPolygonal`); a fillet that overruns its
+  segments, a disk at or above the fillet radius, a reversal and a corner
+  beside an arc are refused by name. The derivation is in the module
+  notes.
+
 ## [0.3.10] - 2026-10-02
 
 ### Added

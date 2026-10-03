@@ -21,15 +21,15 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{
     Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3,
 };
-use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2};
+use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Line2, Line3, Polyline3};
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
-    CurveRelation, GeometryGraphBuilder, GeometryNode, NodeId, SolidOperation, TrimSelector,
-    TrimmingPreference,
+    CurveRelation, CurveSegment, GeometryGraphBuilder, GeometryNode, NodeId, SolidOperation,
+    Transition, TrimSelector, TrimmingPreference,
 };
 use axiolid_primitive::Primitive;
 use axiolid_profile::{
@@ -854,5 +854,743 @@ fn a_profile_swept_along_an_arc_stays_within_the_budget() {
             &options,
         );
         assert_within("rectangle swept along an arc", &mesh, &samples, budget);
+    }
+}
+
+// --- #232: pipes along chains of straight legs and bends, primitives ---
+
+/// One smooth piece of a pipe's centreline, in closed form: a straight leg
+/// or a circular bend (`from` turned by `angle` about the line through
+/// `centre` along unit `axis`).
+#[derive(Clone, Copy, Debug)]
+enum Leg {
+    Straight {
+        from: Point3,
+        dir: Vec3,
+        length: Scalar,
+    },
+    Bend {
+        centre: Point3,
+        axis: Vec3,
+        from: Point3,
+        angle: Scalar,
+    },
+}
+
+impl Leg {
+    fn point(&self, s: Scalar) -> Point3 {
+        match *self {
+            Leg::Straight { from, dir, length } => from + dir * (length * s),
+            Leg::Bend {
+                centre,
+                axis,
+                from,
+                angle,
+            } => rotate(from, centre, axis, angle * s),
+        }
+    }
+
+    fn tangent(&self, s: Scalar) -> Vec3 {
+        match *self {
+            Leg::Straight { dir, .. } => dir,
+            Leg::Bend { centre, axis, .. } => axis.cross(self.point(s) - centre).normalize(),
+        }
+    }
+
+    fn length(&self) -> Scalar {
+        match *self {
+            Leg::Straight { length, .. } => length,
+            Leg::Bend {
+                centre,
+                from,
+                angle,
+                ..
+            } => (from - centre).length() * angle,
+        }
+    }
+}
+
+/// A centreline drawn as a turtle walks: straight legs and bends.
+struct Turtle {
+    at: Point3,
+    dir: Vec3,
+    legs: Vec<Leg>,
+}
+
+impl Turtle {
+    fn new(at: Point3, dir: Vec3) -> Self {
+        Self {
+            at,
+            dir: dir.normalize(),
+            legs: Vec::new(),
+        }
+    }
+
+    fn straight(mut self, length: Scalar) -> Self {
+        self.legs.push(Leg::Straight {
+            from: self.at,
+            dir: self.dir,
+            length,
+        });
+        self.at += self.dir * length;
+        self
+    }
+
+    /// Bend through `angle` on a centreline radius `radius`, turning
+    /// toward `toward` (made perpendicular to the heading).
+    fn bend(mut self, radius: Scalar, angle: Scalar, toward: Vec3) -> Self {
+        let inward = (toward - self.dir * self.dir.dot(toward)).normalize();
+        let centre = self.at + inward * radius;
+        let axis = self.dir.cross(inward).normalize();
+        let leg = Leg::Bend {
+            centre,
+            axis,
+            from: self.at,
+            angle,
+        };
+        self.at = leg.point(1.0);
+        self.dir = leg.tangent(1.0);
+        self.legs.push(leg);
+        self
+    }
+
+    fn length(&self) -> Scalar {
+        self.legs.iter().map(Leg::length).sum()
+    }
+}
+
+/// Two unit vectors perpendicular to unit `t` and to each other.
+fn normals(t: Vec3) -> (Vec3, Vec3) {
+    let seed = if t.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let n1 = (seed - t * t.dot(seed)).normalize();
+    (n1, t.cross(n1))
+}
+
+/// Samples of the exact tube of radius `r` round `legs`: each leg's own
+/// wall, square to its own tangent, and the two end disks.
+fn pipe_samples(legs: &[Leg], r: Scalar) -> Vec<Point3> {
+    let mut out = Vec::new();
+    for leg in legs {
+        let along = match leg {
+            Leg::Straight { .. } => 24,
+            Leg::Bend { .. } => 720,
+        };
+        for s in span(0.0, 1.0, along) {
+            let (c, (n1, n2)) = (leg.point(s), normals(leg.tangent(s)));
+            out.extend(span(0.0, TAU, 360).map(|v| c + n1 * (r * v.cos()) + n2 * (r * v.sin())));
+        }
+    }
+    let first = legs.first().unwrap();
+    let last = legs.last().unwrap();
+    for (c, t) in [
+        (first.point(0.0), first.tangent(0.0)),
+        (last.point(1.0), last.tangent(1.0)),
+    ] {
+        let (n1, n2) = normals(t);
+        for rho in span(0.0, r, 12) {
+            out.extend(span(0.0, TAU, 90).map(|v| c + n1 * (rho * v.cos()) + n2 * (rho * v.sin())));
+        }
+    }
+    out
+}
+
+/// How the composite writes its legs into the graph.
+#[derive(Clone, Copy, Debug)]
+enum Spelling {
+    /// Trims of a line and of a circle, all with the composite's sense.
+    Trims,
+    /// Two-point polylines for the legs, and each bend trimmed backwards
+    /// against its circle and used against the composite's sense.
+    Reversed,
+}
+
+/// Push `legs` as one composite curve.
+fn composite(b: &mut GeometryGraphBuilder, legs: &[Leg], spelling: Spelling) -> NodeId {
+    let mut segments = Vec::new();
+    for leg in legs {
+        let (curve, same_sense) = match (*leg, spelling) {
+            (Leg::Straight { from, dir, length }, Spelling::Trims) => {
+                let line = b
+                    .push(GeometryNode::Curve3(Curve3::Line(Line3 {
+                        origin: from,
+                        direction: dir,
+                    })))
+                    .unwrap();
+                (trim(b, line, 0.0, length, true), true)
+            }
+            (Leg::Straight { from, dir, length }, Spelling::Reversed) => {
+                let polyline = Curve3::Polyline(Polyline3 {
+                    points: vec![from, from + dir * length],
+                    closed: false,
+                });
+                (b.push(GeometryNode::Curve3(polyline)).unwrap(), true)
+            }
+            (
+                Leg::Bend {
+                    centre,
+                    axis,
+                    from,
+                    angle,
+                },
+                spelling,
+            ) => {
+                let radius = (from - centre).length();
+                let x = (from - centre) / radius;
+                let circle = b
+                    .push(GeometryNode::Curve3(Curve3::Circle(Circle3 {
+                        frame: Frame3 {
+                            origin: centre,
+                            x,
+                            y: axis.cross(x),
+                            z: axis,
+                        },
+                        radius,
+                    })))
+                    .unwrap();
+                match spelling {
+                    Spelling::Trims => (trim(b, circle, 0.0, angle, true), true),
+                    Spelling::Reversed => (trim(b, circle, angle, 0.0, false), false),
+                }
+            }
+        };
+        segments.push(CurveSegment {
+            curve,
+            same_sense,
+            transition: Transition::Continuous,
+        });
+    }
+    b.push(GeometryNode::CurveRelation(CurveRelation::Composite {
+        segments,
+    }))
+    .unwrap()
+}
+
+fn trim(
+    b: &mut GeometryGraphBuilder,
+    basis: NodeId,
+    start: Scalar,
+    end: Scalar,
+    sense: bool,
+) -> NodeId {
+    b.push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+        basis,
+        start: vec![TrimSelector::Parameter(start)],
+        end: vec![TrimSelector::Parameter(end)],
+        sense_agreement: sense,
+        preference: TrimmingPreference::Parameter,
+    }))
+    .unwrap()
+}
+
+fn swept_disk(
+    b: &mut GeometryGraphBuilder,
+    directrix: NodeId,
+    radius: Scalar,
+    fillet_radius: Option<Scalar>,
+) -> NodeId {
+    b.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+        directrix,
+        radius,
+        inner_radius: None,
+        parameter_range: None,
+        fillet_radius,
+    }))
+    .unwrap()
+}
+
+fn try_compile(
+    build: impl FnOnce(&mut GeometryGraphBuilder) -> NodeId,
+    options: &ExecutionOptions,
+) -> Result<TriMesh, GeomError> {
+    let mut builder = GeometryGraphBuilder::new();
+    let root = build(&mut builder);
+    let graph = builder.finish(vec![root]).expect("a valid graph");
+    ReferenceMeshCompiler::new(BoolmeshBoolean::new()).compile_mesh(&graph, root, options)
+}
+
+/// Every edge is used by exactly two triangles, once in each direction:
+/// closed, two-manifold and consistently oriented.
+fn assert_watertight(name: &str, mesh: &TriMesh) {
+    let mut uses: HashMap<(u32, u32), (usize, i64)> = HashMap::new();
+    for t in mesh.indices.chunks_exact(3) {
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            let entry = uses.entry((a.min(b), a.max(b))).or_default();
+            entry.0 += 1;
+            entry.1 += if a < b { 1 } else { -1 };
+        }
+    }
+    assert!(
+        uses.values().all(|(n, d)| *n == 2 && *d == 0),
+        "{name}: the mesh is not closed and consistently oriented"
+    );
+}
+
+/// The volume is positive (outward) and within `area * budget` of the
+/// exact tube's, `pi r^2` times the centreline length (Pappus for each
+/// bend), never above it: the mesh is inscribed.
+fn assert_pipe_volume(name: &str, mesh: &TriMesh, r: Scalar, length: Scalar, budget: Scalar) {
+    let got = axiolid_measure::volume_properties(mesh, Tolerance::new(1e-9, 1e-9).unwrap())
+        .unwrap_or_else(|e| panic!("{name}: not a closed two-manifold: {e:?}"))
+        .signed_volume;
+    let want = PI * r * r * length;
+    let area = TAU * r * length + 2.0 * PI * r * r;
+    assert!(
+        got > 0.0 && got <= want * (1.0 + 1e-12) && want - got <= area * budget,
+        "{name}: volume {got} against Pappus {want} (area {area}, budget {budget:e})"
+    );
+}
+
+fn check_pipe(name: &str, legs: &[Leg], length: Scalar, r: Scalar, spelling: Spelling) {
+    let samples = pipe_samples(legs, r);
+    for (options, budget) in budgets() {
+        let mesh = compile(
+            |b| {
+                let path = composite(b, legs, spelling);
+                swept_disk(b, path, r, None)
+            },
+            &options,
+        );
+        let name = format!("{name} r {r} ({spelling:?})");
+        assert_watertight(&name, &mesh);
+        assert_pipe_volume(&name, &mesh, r, length, budget);
+        assert_within(&name, &mesh, &samples, budget);
+    }
+}
+
+#[test]
+fn pipes_along_line_arc_line_composites_stay_within_the_budget() {
+    // Bend radii of one, two and three pipe diameters, a thin pipe and a
+    // fat one: the outer side of the bend sets the step, not the centreline.
+    for (big, r, spelling) in [
+        (0.1, 0.05, Spelling::Trims),
+        (0.04, 0.01, Spelling::Reversed),
+        (0.06, 0.01, Spelling::Trims),
+        (0.6, 0.3, Spelling::Reversed),
+    ] {
+        let path = Turtle::new(Point3::new(0.1, -0.2, 0.3), Vec3::X)
+            .straight(0.5)
+            .bend(big, FRAC_PI_2, Vec3::Y)
+            .straight(0.4);
+        check_pipe(
+            &format!("line + bend R {big} + line"),
+            &path.legs,
+            path.length(),
+            r,
+            spelling,
+        );
+    }
+}
+
+#[test]
+fn a_pipe_bending_out_of_its_plane_stays_within_the_budget() {
+    // Three bends in three planes, one of them through more than a half
+    // turn, two of them back to back; the frames carry round all of them.
+    let r = 0.05;
+    let path = Turtle::new(Point3::ZERO, Vec3::new(1.0, 0.2, 0.0))
+        .straight(0.3)
+        .bend(0.1, FRAC_PI_2, Vec3::Y)
+        .straight(0.2)
+        .bend(0.15, 1.2, Vec3::Z)
+        .bend(0.1, 0.6 * PI, Vec3::new(1.0, -1.0, 0.5))
+        .straight(0.25);
+    for spelling in [Spelling::Trims, Spelling::Reversed] {
+        check_pipe(
+            "pipe bending out of plane",
+            &path.legs,
+            path.length(),
+            r,
+            spelling,
+        );
+    }
+}
+
+/// The corners of the polyline whose corners, rounded to `fillet`, give
+/// `legs` (straight legs alternating with bends of radius `fillet`): each
+/// corner lies where the legs either side of a bend meet when extended.
+fn corners_of(legs: &[Leg], fillet: Scalar) -> Vec<Point3> {
+    let mut points = vec![legs[0].point(0.0)];
+    for leg in legs {
+        if let Leg::Bend { angle, .. } = *leg {
+            let reach = fillet * (0.5 * angle).tan();
+            points.push(leg.point(0.0) + leg.tangent(0.0) * reach);
+        }
+    }
+    points.push(legs.last().unwrap().point(1.0));
+    points
+}
+
+fn filleted(b: &mut GeometryGraphBuilder, corners: &[Point3], r: Scalar, fillet: Scalar) -> NodeId {
+    let polyline = b
+        .push(GeometryNode::Curve3(Curve3::Polyline(Polyline3 {
+            points: corners.to_vec(),
+            closed: false,
+        })))
+        .unwrap();
+    swept_disk(b, polyline, r, Some(fillet))
+}
+
+#[test]
+fn filleted_polylines_stay_within_the_budget() {
+    // IfcSweptDiskSolidPolygonal: a polyline whose corners are rounded to
+    // the fillet radius, two bends in a plane and three out of it, two of
+    // them back to back where their fillets use up the whole leg between.
+    let cases = [
+        (
+            0.05,
+            0.1,
+            Turtle::new(Point3::new(0.0, 0.0, 0.0), Vec3::X)
+                .straight(0.4)
+                .bend(0.1, FRAC_PI_2, Vec3::Y)
+                .straight(0.3)
+                .bend(0.1, FRAC_PI_2, -Vec3::X)
+                .straight(0.4),
+        ),
+        (
+            0.02,
+            0.06,
+            Turtle::new(Point3::new(0.2, 0.1, -0.1), Vec3::new(1.0, 1.0, 0.0))
+                .straight(0.3)
+                .bend(0.06, 1.1, Vec3::Z)
+                .straight(0.2)
+                .bend(0.06, FRAC_PI_2, Vec3::new(0.3, -1.0, 0.0))
+                .straight(0.0)
+                .bend(0.06, 0.7, Vec3::new(-1.0, 0.0, 1.0))
+                .straight(0.35),
+        ),
+    ];
+    for (r, fillet, path) in cases {
+        let legs: Vec<Leg> = path
+            .legs
+            .iter()
+            .copied()
+            .filter(|leg| leg.length() > 0.0)
+            .collect();
+        let corners = corners_of(&path.legs, fillet);
+        let samples = pipe_samples(&legs, r);
+        for (options, budget) in budgets() {
+            let mesh = compile(|b| filleted(b, &corners, r, fillet), &options);
+            let name = format!(
+                "polyline of {} corners filleted to {fillet}, r {r}",
+                corners.len() - 2
+            );
+            assert_watertight(&name, &mesh);
+            assert_pipe_volume(&name, &mesh, r, path.length(), budget);
+            assert_within(&name, &mesh, &samples, budget);
+        }
+    }
+}
+
+/// The largest turn a joint may make and still count as tangent
+/// continuous (`axiolid_construct::pipe`): its shared section, square to
+/// the incoming leg, then leans off the outgoing leg's own by at most a
+/// quarter of the chord budget.
+fn joint_tolerance(chord: Scalar, r: Scalar) -> Scalar {
+    2.0 * (chord / (8.0 * r)).min(1.0).asin()
+}
+
+/// A straight leg that meets a bend at its start turned by `kink` about
+/// the bend's axis, then the bend, then a leg straight off its end.
+fn kinked(kink: Scalar, r_bend: Scalar) -> Vec<Leg> {
+    let bend = Turtle::new(Point3::new(0.4, 0.0, 0.0), Vec3::X)
+        .bend(r_bend, FRAC_PI_2, Vec3::Y)
+        .straight(0.3);
+    let dir = Vec3::new(kink.cos(), -kink.sin(), 0.0);
+    let mut legs = vec![Leg::Straight {
+        from: Point3::new(0.4, 0.0, 0.0) - dir * 0.4,
+        dir,
+        length: 0.4,
+    }];
+    legs.extend(bend.legs);
+    legs
+}
+
+#[test]
+fn a_joint_within_the_stated_angular_tolerance_is_swept_within_the_budget() {
+    // A joint that turns by less than the tolerance is tangent continuous:
+    // every leg's own tube stays within the budget of the mesh.
+    let r = 0.05;
+    for (options, budget) in budgets() {
+        let legs = kinked(0.9 * joint_tolerance(budget, r), 0.12);
+        let length = legs.iter().map(Leg::length).sum();
+        let samples = pipe_samples(&legs, r);
+        let mesh = compile(
+            |b| {
+                let path = composite(b, &legs, Spelling::Trims);
+                swept_disk(b, path, r, None)
+            },
+            &options,
+        );
+        assert_watertight("kink within tolerance", &mesh);
+        assert_pipe_volume("kink within tolerance", &mesh, r, length, budget);
+        assert_within("kink within tolerance", &mesh, &samples, budget);
+        // Just past the tolerance it is a corner.
+        let legs = kinked(1.1 * joint_tolerance(budget, r), 0.12);
+        let refused = try_compile(
+            |b| {
+                let path = composite(b, &legs, Spelling::Trims);
+                swept_disk(b, path, r, None)
+            },
+            &options,
+        );
+        assert!(is_invalid(&refused, "corner"), "{}", outcome(&refused));
+    }
+}
+
+#[test]
+fn a_gap_at_a_joint_is_paid_for_by_the_next_piece() {
+    // A short bend sized so its two spans, alone, use nearly all of their
+    // half of the 1 mm budget at the outer side ((R + r)(1 - cos) = 0.499
+    // mm), and whose start lies 0.24 mm outward of the incoming leg's end,
+    // within the linear tolerance the composite accepts. The shared joint
+    // section sits on the leg, so the bend's own first span must make room
+    // for the measured shift; otherwise its outer side misses the budget.
+    let (r, big, gap): (Scalar, Scalar, Scalar) = (0.05, 0.15, 2.4e-4);
+    let step = 2.0 * (1.0 - 0.499e-3 / (big + r)).acos();
+    let bend = Turtle::new(Point3::new(0.4, -gap, 0.0), Vec3::X)
+        .bend(big, 2.0 * step, Vec3::Y)
+        .straight(0.2);
+    let mut legs = vec![Leg::Straight {
+        from: Point3::ZERO,
+        dir: Vec3::X,
+        length: 0.4,
+    }];
+    legs.extend(bend.legs);
+    let samples = pipe_samples(&legs, r);
+    let (options, budget) = budgets()[0].clone();
+    let mesh = compile(
+        |b| {
+            let path = composite(b, &legs, Spelling::Trims);
+            swept_disk(b, path, r, None)
+        },
+        &options,
+    );
+    assert_watertight("gap at a joint", &mesh);
+    assert_within("gap at a joint", &mesh, &samples, budget);
+}
+
+/// A compile result for a failure message, without dumping the mesh.
+fn outcome(result: &Result<TriMesh, GeomError>) -> String {
+    match result {
+        Ok(mesh) => format!("compiled to {} triangles", mesh.indices.len() / 3),
+        Err(error) => format!("{error:?}"),
+    }
+}
+
+fn is_invalid(result: &Result<TriMesh, GeomError>, words: &str) -> bool {
+    matches!(result, Err(GeomError::InvalidInput(m)) if m.contains(words))
+}
+
+fn polyline(b: &mut GeometryGraphBuilder, points: &[Point3], closed: bool) -> NodeId {
+    b.push(GeometryNode::Curve3(Curve3::Polyline(Polyline3 {
+        points: points.to_vec(),
+        closed,
+    })))
+    .unwrap()
+}
+
+#[test]
+fn a_directrix_with_a_corner_is_refused_by_name() {
+    // IFC leaves a swept disk along a directrix that is not tangent
+    // continuous undefined; sharp mitres used to be swept silently.
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let corners = [
+        Point3::ZERO,
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+    ];
+    let sharp = try_compile(
+        |b| {
+            let path = polyline(b, &corners, false);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert!(is_invalid(&sharp, "corner"), "{}", outcome(&sharp));
+    // A composite of two lines meeting at 10 degrees.
+    let turn = 10f64.to_radians();
+    let legs = [
+        Leg::Straight {
+            from: Point3::ZERO,
+            dir: Vec3::X,
+            length: 1.0,
+        },
+        Leg::Straight {
+            from: Point3::X,
+            dir: Vec3::new(turn.cos(), turn.sin(), 0.0),
+            length: 1.0,
+        },
+    ];
+    let composite = try_compile(
+        |b| {
+            let path = composite(b, &legs, Spelling::Trims);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert!(is_invalid(&composite, "corner"), "{}", outcome(&composite));
+    // A closed polyline turns a corner where it closes, with no leg on
+    // either side to fillet against: refused with or without a fillet.
+    for fillet in [None, Some(0.2)] {
+        let closed = try_compile(
+            |b| {
+                let path = polyline(b, &corners, true);
+                swept_disk(b, path, 0.05, fillet)
+            },
+            &options,
+        );
+        assert!(closed.is_err(), "{fillet:?}: {}", outcome(&closed));
+    }
+    // Collinear vertices are no corner.
+    let straight = try_compile(
+        |b| {
+            let path = polyline(b, &[Point3::ZERO, Point3::X, 2.0 * Point3::X], false);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert!(straight.is_ok(), "{}", outcome(&straight));
+}
+
+#[test]
+fn a_fillet_that_does_not_fit_or_folds_the_tube_is_refused_by_name() {
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let corners = [
+        Point3::ZERO,
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(1.0, 0.3, 0.0),
+        Point3::new(2.0, 0.3, 0.0),
+    ];
+    let attempt =
+        |r: Scalar, fillet: Scalar| try_compile(|b| filleted(b, &corners, r, fillet), &options);
+    // Two right-angle corners 0.3 apart each need `fillet` of the leg
+    // between them: 0.15 fits exactly, 0.2 does not.
+    let fits = attempt(0.05, 0.15);
+    assert!(fits.is_ok(), "{}", outcome(&fits));
+    let too_large = attempt(0.05, 0.2);
+    assert!(
+        is_invalid(&too_large, "does not fit"),
+        "{}",
+        outcome(&too_large)
+    );
+    // A disk as wide as the fillet folds the inside of the bend.
+    for (r, fillet) in [(0.1, 0.1), (0.12, 0.1)] {
+        let folded = attempt(r, fillet);
+        assert!(is_invalid(&folded, "fillet radius"), "{}", outcome(&folded));
+    }
+    // A bend in a composite as tight as the disk folds it too.
+    let path = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.3)
+        .bend(0.05, FRAC_PI_2, Vec3::Y)
+        .straight(0.3);
+    let tight = try_compile(
+        |b| {
+            let directrix = composite(b, &path.legs, Spelling::Trims);
+            swept_disk(b, directrix, 0.05, None)
+        },
+        &options,
+    );
+    assert!(is_invalid(&tight, "bend radius"), "{}", outcome(&tight));
+}
+
+#[test]
+fn a_pipe_budget_beyond_the_step_cap_is_refused() {
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE)
+        .with_chord_error(1e-9)
+        .unwrap();
+    let path = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.3)
+        .bend(0.6, FRAC_PI_2, Vec3::Y)
+        .straight(0.3);
+    let refused = try_compile(
+        |b| {
+            let directrix = composite(b, &path.legs, Spelling::Trims);
+            swept_disk(b, directrix, 0.3, None)
+        },
+        &options,
+    );
+    assert!(
+        matches!(refused, Err(GeomError::BudgetExceeded { .. })),
+        "{}",
+        outcome(&refused)
+    );
+}
+
+/// Samples of a cylinder (`top` = `r`) or a cone (`top` = 0) along +z
+/// from z = 0 to `h`: the side and both caps.
+fn frustum_samples(r: Scalar, top: Scalar, h: Scalar) -> Vec<Point3> {
+    let mut out = Vec::new();
+    for z in span(0.0, h, 64) {
+        let rho = r + (top - r) * z / h;
+        out.extend(span(0.0, TAU, 1440).map(|a| Point3::new(rho * a.cos(), rho * a.sin(), z)));
+    }
+    for (rho_max, z) in [(r, 0.0), (top, h)] {
+        for rho in span(0.0, rho_max, 16) {
+            out.extend(span(0.0, TAU, 720).map(|a| Point3::new(rho * a.cos(), rho * a.sin(), z)));
+        }
+    }
+    out
+}
+
+#[test]
+fn primitive_cylinders_and_cones_stay_within_the_budget() {
+    let h = 0.5;
+    for r in [0.01, 0.3, 1.0] {
+        for (primitive, top, what) in [
+            (
+                Primitive::Cylinder {
+                    radius: r,
+                    height: h,
+                },
+                r,
+                "cylinder",
+            ),
+            (
+                Primitive::Cone {
+                    radius: r,
+                    height: h,
+                },
+                0.0,
+                "cone",
+            ),
+        ] {
+            let samples = frustum_samples(r, top, h);
+            for (options, budget) in budgets() {
+                let mesh = compile(
+                    |b| b.push(GeometryNode::Primitive(primitive)).unwrap(),
+                    &options,
+                );
+                assert_within(&format!("primitive {what} r {r}"), &mesh, &samples, budget);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_primitive_cylinder_or_cone_beyond_the_segment_cap_is_refused() {
+    // 4096 segments hold a 1 m circle to 0.3 um, not to 1 nm: refuse
+    // rather than clamp to a coarser mesh.
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE)
+        .with_chord_error(1e-9)
+        .unwrap();
+    for primitive in [
+        Primitive::Cylinder {
+            radius: 1.0,
+            height: 1.0,
+        },
+        Primitive::Cone {
+            radius: 1.0,
+            height: 1.0,
+        },
+    ] {
+        let refused = try_compile(
+            |b| b.push(GeometryNode::Primitive(primitive)).unwrap(),
+            &options,
+        );
+        assert!(
+            matches!(refused, Err(GeomError::BudgetExceeded { .. })),
+            "{primitive:?}: {}",
+            outcome(&refused)
+        );
     }
 }

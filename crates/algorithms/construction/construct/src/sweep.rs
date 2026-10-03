@@ -198,7 +198,8 @@ pub struct SampledPath {
     /// its chord bound. `None` marks a path whose chords are the path
     /// itself (a line or a polyline, whose corners have no curvature to
     /// refine) or one this crate cannot vouch is smooth, such as a
-    /// composite; such a path is swept as given.
+    /// composite; such a path is swept as given. A chain of segments and
+    /// arcs is bounded piece by piece by [`crate::pipe`] instead (#232).
     pub end_tangents: Option<[Vec3; 2]>,
 }
 
@@ -273,7 +274,7 @@ fn bounded_stations(
 }
 
 /// The directrix and frame terms of [`bounded_stations`]'s span bound.
-fn span_bound(from: &Frame, to: &Frame, budget: Scalar, reach: Scalar) -> Scalar {
+pub(crate) fn span_bound(from: &Frame, to: &Frame, budget: Scalar, reach: Scalar) -> Scalar {
     let (t0, t1) = (from.x.cross(from.y), to.x.cross(to.y));
     let turn = t0.dot(t1).clamp(-1.0, 1.0).acos();
     let chord = (to.origin - from.origin).length();
@@ -484,6 +485,11 @@ fn check_disk(
             operation: axiolid_contracts::Operation::Sweep,
         });
     }
+    check_radii(radius, inner_radius)
+}
+
+/// Validate a swept disk's outer and inner radii.
+pub(crate) fn check_radii(radius: Scalar, inner_radius: Option<Scalar>) -> GeomResult<()> {
     if !radius.is_finite() || radius <= 0.0 {
         return Err(GeomError::InvalidInput(format!(
             "swept disk radius must be positive and finite, got {radius}"
@@ -516,6 +522,17 @@ fn check_disk(
 fn rotation_minimising_frames(path: &[Point3], ends: Option<[Vec3; 2]>) -> GeomResult<Vec<Frame>> {
     let seed = seed_reference(path)?;
     let tangents = tangents_along(path, ends)?;
+    frames_carried(path, &tangents, seed)
+}
+
+/// Rotation-minimising frames along `path` with the given unit tangent at
+/// each sample, the first frame's x being `seed` made perpendicular to the
+/// first tangent; see [`rotation_minimising_frames`].
+pub(crate) fn frames_carried(
+    path: &[Point3],
+    tangents: &[Vec3],
+    seed: Vec3,
+) -> GeomResult<Vec<Frame>> {
     let mut reference = seed;
     let mut frames = Vec::with_capacity(path.len());
     for i in 0..path.len() {
@@ -574,7 +591,11 @@ fn tangents_along(path: &[Point3], ends: Option<[Vec3; 2]>) -> GeomResult<Vec<Ve
 
 /// A circular profile, hollow when `inner` is given, each ring within
 /// `chord` of its circle.
-fn disk_rings(radius: Scalar, inner: Option<Scalar>, chord: Scalar) -> GeomResult<Rings> {
+pub(crate) fn disk_rings(
+    radius: Scalar,
+    inner: Option<Scalar>,
+    chord: Scalar,
+) -> GeomResult<Rings> {
     let circle = |r: Scalar, reverse: bool| -> GeomResult<Vec<Point2>> {
         let n = crate::revolve::steps(r, core::f64::consts::TAU, chord)?;
         let mut pts: Vec<Point2> = (0..n)

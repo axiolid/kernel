@@ -660,19 +660,39 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             // Sweeps along a directrix are doubly curved too: the
             // construction splits the budget between the section and the
             // directrix and refines the directrix until its walls fit.
+            // Lines, polylines and composites of lines and arcs are swept
+            // piece by piece, corners refused or filleted (#232).
             SolidOperation::SweptDisk {
                 directrix,
                 radius,
                 inner_radius,
                 parameter_range,
                 fillet_radius,
-            } => axiolid_construct::sweep::swept_disk_within(
-                |chord| self.directrix_sampled(graph, *directrix, *parameter_range, options, chord),
-                *radius,
-                *inner_radius,
-                *fillet_radius,
-                chord_error(options),
-            ),
+            } => match crate::directrix::pieces(graph, *directrix, *parameter_range, options)? {
+                Some(_) if fillet_radius.is_some() && parameter_range.is_some() => {
+                    Err(GeomError::UnsupportedInput {
+                        backend: self.descriptor().id,
+                        operation: axiolid_contracts::Operation::Sweep,
+                        input: "a parameter range on a swept disk with a fillet radius",
+                    })
+                }
+                Some(pieces) => axiolid_construct::pipe::swept_disk_along_pieces(
+                    &pieces,
+                    *radius,
+                    *inner_radius,
+                    *fillet_radius,
+                    chord_error(options),
+                ),
+                None => axiolid_construct::sweep::swept_disk_within(
+                    |chord| {
+                        self.directrix_sampled(graph, *directrix, *parameter_range, options, chord)
+                    },
+                    *radius,
+                    *inner_radius,
+                    *fillet_radius,
+                    chord_error(options),
+                ),
+            },
             SolidOperation::FixedReferenceSweep {
                 profile,
                 directrix,

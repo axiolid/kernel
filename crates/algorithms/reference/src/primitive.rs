@@ -23,10 +23,10 @@ fn segments(radius: Scalar, tolerance: Scalar) -> usize {
     (n as usize).clamp(3, 4096)
 }
 
-/// [`segments`] for one direction of a doubly curved surface, refused
-/// rather than clamped when the budget needs more than the clamp allows:
-/// a clamped count would leave the surface outside the bound the caller
-/// asked for (#231).
+/// [`segments`] for one direction of a curved surface, refused rather
+/// than clamped when the budget needs more than the clamp allows: a
+/// clamped count would leave the surface outside the bound the caller
+/// asked for (#231, #232).
 fn segments_within(radius: Scalar, tolerance: Scalar) -> GeomResult<usize> {
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return Err(GeomError::InvalidInput(format!(
@@ -53,7 +53,10 @@ fn segments_within(radius: Scalar, tolerance: Scalar) -> GeomResult<usize> {
 /// an arc of radius at most `rho_max` (the widest vertex) whose chord lies
 /// in a planar trapezoid of the mesh, so within `rho_max (1 - cos(h/2))`
 /// of it for a step `h` round the axis. Each direction gets half the
-/// budget, so the two add to at most the whole.
+/// budget, so the two add to at most the whole. A cylinder and a cone are
+/// curved one way only, so their ring's sagitta is the whole deviation and
+/// gets the whole budget (#232). Any of the four that needs more than 4096
+/// segments is refused with `BudgetExceeded`, never clamped.
 ///
 /// Outward winding is not decoration: `axiolid-mesh-boolean-boolmesh` and the clash
 /// containment test both read signed volume, and an inverted primitive
@@ -297,10 +300,20 @@ fn ring(radius: Scalar, z: Scalar, n: usize) -> Vec<Point3> {
 }
 
 /// Cylinder along +z, base on z = 0.
+///
+/// Every point of the exact surface lies within `tol` of the mesh (#232).
+/// The side is ruled: a point at angle `a` between two ring vertices, at
+/// height `z`, lies on the generator through `a`, whose foot in the
+/// plane of the wall rectangle between the two vertices' generators is at
+/// the same height and at most the sagitta `r (1 - cos(pi/n))` away, and
+/// the rectangle is the mesh's own two triangles. A cap point outside the
+/// inscribed polygon lies in a circular segment, within the sagitta of its
+/// chord. `n` is the least count whose sagitta fits; a budget beyond 4096
+/// segments is refused rather than clamped.
 fn cylinder(radius: Scalar, height: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
     let r = positive(radius, "cylinder radius")?;
     let h = positive(height, "cylinder height")?;
-    let n = segments(r, tol);
+    let n = segments_within(r, tol)?;
     let mut p = ring(r, 0.0, n);
     p.extend(ring(r, h, n));
     p.push(Point3::new(0.0, 0.0, 0.0));
@@ -320,10 +333,16 @@ fn cylinder(radius: Scalar, height: Scalar, tol: Scalar) -> GeomResult<TriMesh> 
 }
 
 /// Cone along +z: base ring on z = 0, apex at height.
+///
+/// Bounded as the cylinder (#232): the horizontal section of the cone at
+/// height `z` is a circle of radius `r (1 - z/h)` and that of each side
+/// triangle the chord of it between the same two angles, so a point of the
+/// cone is within `r (1 - z/h)(1 - cos(pi/n))`, at most the base ring's
+/// sagitta, of a side triangle. The base cap is the cylinder's.
 fn cone(radius: Scalar, height: Scalar, tol: Scalar) -> GeomResult<TriMesh> {
     let r = positive(radius, "cone radius")?;
     let h = positive(height, "cone height")?;
-    let n = segments(r, tol);
+    let n = segments_within(r, tol)?;
     let mut p = ring(r, 0.0, n);
     p.push(Point3::new(0.0, 0.0, 0.0));
     p.push(Point3::new(0.0, 0.0, h));
