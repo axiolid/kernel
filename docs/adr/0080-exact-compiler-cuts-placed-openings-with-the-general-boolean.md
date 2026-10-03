@@ -274,3 +274,30 @@ Tests: `crates/execution/compile/tests/exact_tangent_hole.rs`,
 `crates/algorithms/construction/brep-boolean/tests/tangent_contact.rs`,
 the I-beam case of `crates/execution/compile/tests/boolean_deviation.rs`;
 probe `scripts/probe_placed_boolean_mutants.py` (contact mutants).
+
+## Amendment 2026-10-03: nothing read at zero tolerance, enforced (#251)
+
+The #236 guarantee (an empty report at `Tolerance::ZERO`) was broken by a
+support reading whose `f64` measure was exactly `0` while the exact
+predicate rejected it: the gate `measure <= tolerance` held as `0 <= 0`,
+and the reading was taken and reported with `linear` 0. A round hole
+across a wall under a general rotation hit it: its axis and the wall's
+normals are the same `f64` vector, but the numbers given are not exactly
+perpendicular (the frames are orthonormal only to rounding).
+
+- **Decision.** A reading the exact predicate rejects moves or turns the
+  operands by a positive amount, whatever its `f64` measure. A tolerance
+  with a zero part admits none, so it never takes one: the exact answer
+  stands (at zero, the general closed form cuts the hole). Both parts
+  positive, nothing changes. Point readings were already sound: they
+  record only residues above the rounding floor and within the tolerance.
+- **Enforced structurally.** The report's session carries the caller's
+  tolerance. Recording a decision at `Tolerance::ZERO`, or beyond the
+  tolerance, is a debug assertion, and otherwise the entry point refuses
+  it by name (`BooleanError::ToleranceExceeded`), so no future reading can
+  break the guarantee silently.
+
+Tests: `crates/algorithms/construction/brep-boolean/tests/report.rs` (a
+general-placement round hole, and random general placements by every
+operator, at zero); probe `scripts/probe_placed_boolean_mutants.py` (#251
+mutants).

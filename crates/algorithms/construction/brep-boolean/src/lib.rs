@@ -75,8 +75,13 @@
 //! the operands' `f64` numbers (dyadic arithmetic, `axiolid-exact`). Faces
 //! that are exactly coplanar, parallel or perpendicular, as operands placed
 //! by matrices with entries `0` and `+-1` meet, are decided exactly and use
-//! no tolerance. A reading about constructed points (a cut, a vertex, a
-//! point on an edge) compares `f64` evaluations of exact curves, so a
+//! no tolerance. A reading the exact predicate rejects is not exact even
+//! when its `f64` measure is exactly zero (one general rotation turns a
+//! hole's axis and a wall's normal into the same `f64` vector, though the
+//! numbers given are not perpendicular), so a tolerance with a zero part
+//! never takes it (#251): at [`Tolerance::ZERO`] the exact answer stands
+//! and the general closed form decides. A reading about constructed points
+//! (a cut, a vertex, a point on an edge) compares `f64` evaluations of exact curves, so a
 //! residue up to `2^-40` of the operands' extent (about four thousand units
 //! in the last place) is the rounding of one exact point, read without the
 //! tolerance; only a larger residue is a decision within tolerance. That
@@ -95,7 +100,11 @@
 //! widens them by that floor too. At [`Tolerance::ZERO`] nothing can be
 //! read within tolerance, so every result is exact (and still has its
 //! floor); operands that only miss each other by rounding are then refused,
-//! not guessed. When the report is not
+//! not guessed. The report's session enforces it (#251): a decision
+//! recorded at [`Tolerance::ZERO`], or beyond the caller's tolerance, is a
+//! debug assertion, and otherwise refused
+//! ([`BooleanError::ToleranceExceeded`]) rather than returned with a
+//! report that misdescribes it. When the report is not
 //! empty, the result is the exact boolean of operands whose faces were
 //! moved by at most `eps` (and, for a coincidence or contact of
 //! directions, turned by at most `alpha`), with every surface and curve
@@ -172,9 +181,9 @@ pub fn boolean_with_report(
     operator: BooleanOperator,
     tolerance: Tolerance,
 ) -> Result<(ExactBRep, BooleanReport), BooleanError> {
-    let session = report::open(&[a, b]);
+    let session = report::open(&[a, b], tolerance);
     let result = run(a, b, operator, tolerance)?;
-    Ok((result, session.finish()))
+    Ok((result, session.finish()?))
 }
 
 fn run(
@@ -381,6 +390,12 @@ pub enum BooleanError {
     /// cylinder that is no ruling or conic), so the reading could not be
     /// made the same for every face pair (#243).
     UnsupportedContact,
+    /// A decision this stage reads within tolerance was asked for beyond
+    /// the caller's tolerance: any such reading at [`Tolerance::ZERO`],
+    /// where the result must be exact (#251). The within-tolerance
+    /// readings never ask for one; this refusal stands in for a result
+    /// whose report would misdescribe it.
+    ToleranceExceeded,
 }
 
 impl fmt::Display for BooleanError {
@@ -414,6 +429,9 @@ impl fmt::Display for BooleanError {
             Self::UnsupportedContact => f.write_str(
                 "a curve crosses a plane read as touching a cylinder where the contact cannot be placed",
             ),
+            Self::ToleranceExceeded => {
+                f.write_str("a decision within tolerance was asked for beyond the caller's tolerance")
+            }
         }
     }
 }

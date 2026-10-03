@@ -9,6 +9,30 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `BooleanError::ToleranceExceeded` (#251): a decision within tolerance
+  was asked for beyond the caller's tolerance, any at all at
+  `Tolerance::ZERO`. The report's session refuses it by name (and asserts
+  in debug builds) rather than return a result its report misdescribes;
+  no reading asks for one.
+
+### Fixed
+
+- At `Tolerance::ZERO` the report is empty again (#251, the #236
+  contract). A support reading the exact predicate rejects was taken when
+  its `f64` measure was exactly `0`, and reported as a decision with
+  `linear` 0: a round hole across a wall under a general rotation, whose
+  axis and the wall's normals round to the same `f64` vector though the
+  numbers given (a frame orthonormal only to rounding) are not
+  perpendicular, was read `PlanePerpendicularToAxis` at zero. A tolerance
+  with a zero part now never takes a reading the exact predicate rejects
+  (coincident supports; a plane parallel or perpendicular to a cylinder's
+  axis or touching it): the exact answer stands, and the general closed
+  form cuts the hole, exactly, with an empty report. Point readings
+  already recorded only residues above the rounding floor and within the
+  tolerance, never at zero. Both positive parts: unchanged.
+
 ## [0.1.5] - 2026-10-03
 
 ### Added

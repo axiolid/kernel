@@ -21,15 +21,28 @@
 //!
 //! The report lives in a per-thread session opened by the public entry
 //! points ([`crate::boolean_with_report`], [`crate::boolean`],
-//! [`crate::section_edges`], [`crate::split_face`]); an entry point called
-//! inside another's session joins it. Nothing is shared across threads and
-//! nothing outlives the call.
+//! [`crate::section_edges`], [`crate::split_face`]) with the caller's
+//! tolerance; an entry point called inside another's session joins it.
+//! Nothing is shared across threads and nothing outlives the call.
+//!
+//! **Nothing is read at a zero tolerance (#251).** A support reading the
+//! exact predicate rejects moves or turns the operands by a positive
+//! amount, however small its `f64` measure: one whose measure rounds to
+//! exactly `0` is not exact. So a tolerance with a zero part takes no such
+//! reading ([`support`]): at [`Tolerance::ZERO`] the exact answer stands
+//! and the general closed form decides. The session enforces the contract
+//! too: a decision recorded at [`Tolerance::ZERO`], or beyond the caller's
+//! tolerance, is a bug -- a debug assertion -- and in a release build the
+//! entry point refuses it ([`BooleanError::ToleranceExceeded`]) rather than
+//! return a result its report misdescribes.
 
 use std::cell::RefCell;
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Scalar, Tolerance};
 use axiolid_surface::Surface;
+
+use crate::BooleanError;
 
 /// What a within-tolerance decision read (#236).
 #[non_exhaustive]
@@ -219,6 +232,12 @@ pub const ROUNDING_FACTOR: Scalar = 1.0 / 1_099_511_627_776.0;
 pub(crate) const ROUNDING: Scalar = ROUNDING_FACTOR;
 
 struct Session {
+    /// The caller's tolerance: every recorded decision lies within it, and
+    /// at [`Tolerance::ZERO`] none may be recorded (#251).
+    tolerance: Tolerance,
+    /// Whether a decision the tolerance does not admit was asked for: the
+    /// entry point refuses ([`BooleanError::ToleranceExceeded`]).
+    exceeded: bool,
     /// The operands' extent ([`BooleanReport::extent`]).
     extent: Scalar,
     /// The linear rounding floor: [`ROUNDING`] times the operands' extent.
@@ -238,18 +257,28 @@ pub(crate) struct Guard {
 impl Guard {
     /// The report of the session, closing it. A guard that joined an outer
     /// session returns an empty report: the outer one holds the decisions.
-    pub(crate) fn finish(self) -> BooleanReport {
+    ///
+    /// # Errors
+    ///
+    /// [`BooleanError::ToleranceExceeded`] when a decision the caller's
+    /// tolerance does not admit was asked for (see [`record`]).
+    pub(crate) fn finish(self) -> Result<BooleanReport, BooleanError> {
         if !self.owner {
-            return BooleanReport::default();
+            return Ok(BooleanReport::default());
         }
         SESSION
             .with(|s| {
-                s.borrow_mut().as_mut().map(|s| BooleanReport {
-                    extent: s.extent,
-                    ..std::mem::take(&mut s.report)
+                s.borrow_mut().as_mut().map(|s| {
+                    if s.exceeded {
+                        return Err(BooleanError::ToleranceExceeded);
+                    }
+                    Ok(BooleanReport {
+                        extent: s.extent,
+                        ..std::mem::take(&mut s.report)
+                    })
                 })
             })
-            .unwrap_or_default()
+            .unwrap_or_else(|| Ok(BooleanReport::default()))
     }
 }
 
@@ -261,13 +290,16 @@ impl Drop for Guard {
     }
 }
 
-/// Open a session for the given operands, or join the one already open.
-pub(crate) fn open(operands: &[&ExactBRep]) -> Guard {
+/// Open a session for the given operands at the caller's tolerance, or
+/// join the one already open.
+pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
     let owner = SESSION.with(|s| s.borrow().is_none());
     if owner {
         let extent = operands.iter().map(|b| extent(b)).fold(0.0, Scalar::max);
         SESSION.with(|s| {
             *s.borrow_mut() = Some(Session {
+                tolerance,
+                exceeded: false,
                 extent,
                 rounding: ROUNDING * extent,
                 report: BooleanReport::default(),
@@ -320,10 +352,31 @@ pub(crate) fn floored(tolerance: Tolerance) -> Tolerance {
 }
 
 /// Record a within-tolerance reading in the open session.
+///
+/// A reading must lie within the session's tolerance, and at
+/// [`Tolerance::ZERO`] there is none (#236, #251): the helpers below never
+/// ask otherwise. A call that does is a bug -- a debug assertion -- and in
+/// a release build marks the session, whose entry point then refuses
+/// ([`Guard::finish`]) instead of returning a result the report
+/// misdescribes.
 pub(crate) fn record(kind: ToleranceDecisionKind, linear: Scalar, angular: Scalar) {
     SESSION.with(|s| {
         if let Some(s) = s.borrow_mut().as_mut() {
-            s.report.add(kind, linear, angular);
+            let admitted = s.tolerance != Tolerance::ZERO
+                && linear <= s.tolerance.linear()
+                && angular <= s.tolerance.angular();
+            // The crate's own unit tests take the release build's refusal.
+            #[cfg(not(test))]
+            debug_assert!(
+                admitted,
+                "{kind:?} ({linear}, {angular}) recorded at tolerance {:?} (#251)",
+                s.tolerance
+            );
+            if admitted {
+                s.report.add(kind, linear, angular);
+            } else {
+                s.exceeded = true;
+            }
         }
     });
 }
@@ -380,6 +433,13 @@ impl Reading {
 /// tolerance (or within rounding of zero), the exact predicate is asked:
 /// confirmed, the reading is exact and unrecorded; otherwise it is taken
 /// within tolerance and recorded, or refused beyond it.
+///
+/// A reading the exact predicate rejects moves or turns the operands by a
+/// positive amount even when its `f64` measure is exactly `0` (a rotation's
+/// rounding cancels in `f64`, not in the numbers given). A tolerance part of
+/// zero admits no positive amount, so such a reading is refused there,
+/// whatever its measure: at [`Tolerance::ZERO`] the exact answer stands
+/// (#251).
 pub(crate) fn support(
     kind: ToleranceDecisionKind,
     linear: Scalar,
@@ -394,7 +454,7 @@ pub(crate) fn support(
     if exact() {
         return Reading::Exact;
     }
-    if linear <= eps && angular <= alpha {
+    if eps > 0.0 && alpha > 0.0 && linear <= eps && angular <= alpha {
         record(kind, linear, angular);
         return Reading::Within;
     }
@@ -441,17 +501,17 @@ mod tests {
 
     #[test]
     fn a_session_reports_the_floor_it_applied() {
-        let guard = open(&[]);
+        let guard = open(&[], Tolerance::ZERO);
         assert_eq!(rounding(), 0.0);
-        let report = guard.finish();
+        let report = guard.finish().expect("nothing recorded");
         assert_eq!((report.extent(), report.rounding_floor()), (0.0, 0.0));
         assert_eq!(ROUNDING_FACTOR, (2.0 as Scalar).powi(-40));
     }
 
     #[test]
     fn readings_within_rounding_are_unrecorded_and_beyond_tolerance_refused() {
-        let guard = open(&[]);
         let tol = Tolerance::METRE;
+        let guard = open(&[], tol);
         // No operands: the floor is zero, so any residue is a decision.
         assert!(near(MergedPoints, 0.0, tol));
         assert!(near(MergedPoints, 5e-7, tol));
@@ -464,10 +524,81 @@ mod tests {
         assert_eq!(within, Reading::Within);
         let apart = support(PlaneParallelToAxis, 1e-5, 0.0, tol, || true);
         assert_eq!(apart, Reading::Apart);
-        let report = guard.finish();
+        let report = guard.finish().expect("within tolerance");
         assert_eq!(report.decisions().len(), 2);
         assert!(report.contains(MergedPoints));
         assert!(report.contains(PlaneParallelToAxis));
         assert!(!report.contains(CoincidentSupports));
+    }
+
+    #[test]
+    fn a_reading_the_exact_predicate_rejects_is_never_taken_at_a_zero_part() {
+        // #251: an `f64` measure of exactly zero is not exact. At
+        // `Tolerance::ZERO`, or with a zero part, only the exact predicate
+        // can confirm a reading; nothing is recorded.
+        let partial = [
+            Tolerance::ZERO,
+            Tolerance::new(1e-6, 0.0).expect("valid"),
+            Tolerance::new(0.0, 1e-9).expect("valid"),
+        ];
+        for tol in partial {
+            let guard = open(&[], tol);
+            for kind in [
+                CoincidentSupports,
+                PlaneParallelToAxis,
+                PlanePerpendicularToAxis,
+                PlaneTouchesCylinder,
+            ] {
+                assert_eq!(support(kind, 0.0, 0.0, tol, || false), Reading::Apart);
+                assert_eq!(support(kind, 0.0, 0.0, tol, || true), Reading::Exact);
+            }
+            let report = guard.finish().expect("nothing recorded");
+            assert!(report.is_exact(), "{tol:?}: {report:?}");
+        }
+        // Both parts positive: a zero measure the predicate rejects is
+        // still taken, and reported (unchanged).
+        let guard = open(&[], Tolerance::METRE);
+        let within = support(PlanePerpendicularToAxis, 0.0, 0.0, Tolerance::METRE, || {
+            false
+        });
+        assert_eq!(within, Reading::Within);
+        let report = guard.finish().expect("within tolerance");
+        assert!(report.contains(PlanePerpendicularToAxis));
+    }
+
+    #[test]
+    fn points_within_rounding_are_never_recorded_at_zero_tolerance() {
+        let guard = open(&[], Tolerance::ZERO);
+        assert!(near(MergedPoints, 0.0, Tolerance::ZERO));
+        assert!(!near(MergedPoints, 1e-300, Tolerance::ZERO));
+        assert!(near_angle(Contact, 0.0, Tolerance::ZERO));
+        assert!(!near_angle(Contact, 2.0 * ROUNDING, Tolerance::ZERO));
+        assert!(guard.finish().expect("nothing recorded").is_exact());
+    }
+
+    #[test]
+    fn a_decision_recorded_at_zero_tolerance_is_refused() {
+        // The helpers never record at `Tolerance::ZERO`; a direct record is
+        // a bug: a debug assertion outside these tests, and a named refusal.
+        let guard = open(&[], Tolerance::ZERO);
+        record(PlanePerpendicularToAxis, 0.0, 0.0);
+        assert_eq!(guard.finish(), Err(BooleanError::ToleranceExceeded));
+    }
+
+    #[test]
+    fn a_decision_beyond_the_tolerance_is_refused() {
+        let guard = open(&[], Tolerance::METRE);
+        record(MergedPoints, 2e-6, 0.0);
+        assert_eq!(guard.finish(), Err(BooleanError::ToleranceExceeded));
+    }
+
+    #[test]
+    fn a_joined_session_keeps_the_outer_tolerance() {
+        let outer = open(&[], Tolerance::METRE);
+        let inner = open(&[], Tolerance::ZERO);
+        // The outer session's tolerance applies to a joined entry point.
+        assert!(near(MergedPoints, 5e-7, Tolerance::METRE));
+        assert!(inner.finish().expect("joined").is_exact());
+        assert!(outer.finish().expect("within").contains(MergedPoints));
     }
 }

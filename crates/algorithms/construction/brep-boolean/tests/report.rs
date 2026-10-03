@@ -8,19 +8,21 @@
 //! at `Tolerance::ZERO` with nothing read within tolerance. Built from
 //! sines and cosines under a general placement, the flush caps miss the
 //! wall's faces by rounding: read as coplanar at a positive tolerance, and
-//! reported.
+//! reported. At zero tolerance nothing is read under any placement (#251).
 
 use std::f64::consts::FRAC_PI_2;
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
 use axiolid_brep_boolean::{
-    boolean, boolean_with_report, BooleanReport, ToleranceDecisionKind, ROUNDING_FACTOR,
+    boolean, boolean_with_report, BooleanError, BooleanReport, ToleranceDecisionKind,
+    ROUNDING_FACTOR,
 };
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{BooleanOperator, Mat3, Tolerance, Transform3, Vec3};
 use axiolid_measure::exact_properties;
-use axiolid_profile::{Profile, RectangleProfile};
+use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
+use axiolid_surface::Surface;
 
 /// Wall length, thickness and height.
 const L: f64 = 6.0;
@@ -281,4 +283,130 @@ fn the_report_carries_the_rounding_floor_of_its_operands() {
     );
     assert_eq!(report.extent(), 10.0, "{report:?}");
     assert_eq!(report.rounding_floor(), 10.0 * ROUNDING_FACTOR);
+}
+
+const R_HOLE: f64 = 0.5;
+
+/// A round hole of radius `R_HOLE` across the wall at `(0.5, 1.25)` in
+/// `x, z`, from wall `y = start` along `-y` for `depth`.
+fn round_hole(depth: f64, start: f64, p: Transform3) -> ExactBRep {
+    let profile = Profile::Circle(CircleProfile {
+        radius: R_HOLE,
+        thickness: None,
+    });
+    extrude_profile_exact(&profile, Vec3::Z, depth, Tolerance::ZERO)
+        .expect("a hole")
+        .transformed(
+            &(p * Transform3::from_translation(Vec3::new(0.5, start, 1.25)) * exact_across()),
+        )
+        .expect("rigid")
+}
+
+#[test]
+fn a_round_hole_under_a_general_placement_is_exact_at_zero_tolerance() {
+    // #251. Placed by one general rotation, the hole's axis and the wall's
+    // faces' normals are the same `f64` vector: their `f64` cross product
+    // is exactly zero, while the exact numbers (a frame orthonormal only to
+    // rounding) are not perpendicular. That reading used to be taken at
+    // zero tolerance and reported with `linear` 0. Now the exact answer
+    // stands: the general closed form cuts the hole, the report is empty.
+    let p = general();
+    let (w, h) = (wall(p), round_hole(T + 0.5, T / 2.0 + 0.25, p));
+    let axis = h
+        .surfaces()
+        .iter()
+        .find_map(|s| match s {
+            Surface::Cylinder(c) => Some(c.frame.z.normalize()),
+            _ => None,
+        })
+        .expect("a cylinder");
+    let zero_cross = w.surfaces().iter().any(|s| match s {
+        Surface::Plane(q) => q.frame.z.normalize().cross(axis).length() == 0.0,
+        _ => false,
+    });
+    assert!(zero_cross, "the f64 reading must be perpendicular");
+    let disc = std::f64::consts::PI * R_HOLE * R_HOLE;
+    for (depth, start, removed) in [
+        (T + 0.5, T / 2.0 + 0.25, disc * T),
+        (0.25 + T / 2.0, T / 2.0 + 0.25, disc * T / 2.0),
+    ] {
+        let hole = round_hole(depth, start, p);
+        let report = cut(&w, &hole, Tolerance::ZERO, removed, 1e-9);
+        assert!(report.is_exact(), "depth {depth}: {report:?}");
+        assert_eq!((report.linear(), report.angular()), (0.0, 0.0));
+        // At a positive tolerance the reading is still taken, and reported.
+        let report = cut(&w, &hole, Tolerance::METRE, removed, 1e-9);
+        assert!(
+            report.contains(ToleranceDecisionKind::PlanePerpendicularToAxis),
+            "{report:?}"
+        );
+    }
+}
+
+/// A deterministic stream of numbers in `[0, 1)` (SplitMix64).
+struct Stream(u64);
+
+impl Stream {
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        (z >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// A random rigid placement: a turn about a random axis, offset up to
+    /// twenty units.
+    fn placement(&mut self) -> Transform3 {
+        let mut c = || 2.0 * self.next() - 1.0;
+        let axis = Vec3::new(c(), c(), c()).normalize_or(Vec3::Z);
+        let angle = std::f64::consts::PI * c();
+        let offset = Vec3::new(20.0 * c(), 20.0 * c(), 20.0 * c());
+        Transform3::from_translation(offset) * Transform3::from_axis_angle(axis, angle)
+    }
+}
+
+#[test]
+fn reports_at_zero_tolerance_are_empty_under_random_general_placements() {
+    // #236, #251: at zero tolerance a boolean is exact or refused by name,
+    // whatever the placement. Rectangular openings (exact and rounded axis
+    // matrices) and round holes, through, flush and blind, under random
+    // rigid placements, by every operator.
+    //
+    // Through and blind tools cross the wall's faces transversally (the
+    // round hole's cylinder meets them perpendicularly in `f64`, not in the
+    // numbers given) and always succeed; a flush tool's caps miss the
+    // wall's faces by the placement's rounding and may only be refused.
+    let mut stream = Stream(0x251);
+    let mut exact = 0;
+    for _ in 0..24 {
+        let p = stream.placement();
+        let w = wall(p);
+        for (name, depth, start, _) in cases() {
+            for tool in [
+                opening(depth, start, exact_across(), p),
+                opening(depth, start, rounded_across(), p),
+                round_hole(depth, start, p),
+            ] {
+                for operator in [
+                    BooleanOperator::Difference,
+                    BooleanOperator::Union,
+                    BooleanOperator::Intersection,
+                ] {
+                    match boolean_with_report(&w, &tool, operator, Tolerance::ZERO) {
+                        Ok((_, report)) => {
+                            assert!(report.is_exact(), "{name} {p:?} {operator:?}: {report:?}");
+                            exact += 1;
+                        }
+                        Err(e) => {
+                            assert_ne!(e, BooleanError::ToleranceExceeded);
+                            assert_eq!(name, "flush", "{p:?} {operator:?}: {e}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(exact, 24 * 2 * 3 * 3);
 }

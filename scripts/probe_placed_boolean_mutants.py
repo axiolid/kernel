@@ -1,5 +1,5 @@
 """Mutation probe for exact differences of placed operands (#228, #236, #244,
-#243).
+#243, #251).
 
 Each mutant reintroduces a way the placed-opening path failed or could
 fail -- a rounding residue read exactly, a tangent double root split into
@@ -28,7 +28,13 @@ within rounding over every box). Skipping disputed points when
 classifying a region: a region's interior points are stepped a quarter of
 its size in from its boundary, so none here falls in the strip `2 sqrt(2 r
 d)` wide where the given and moved plane disagree; the guard is kept for
-regions narrower than that.
+regions narrower than that. An entry point (`boolean_with_report`,
+`section_edges`, `split_face`) passing on its session's refusal: no
+reading asks for a decision beyond the tolerance, and in a debug build the
+session's assertion fires first, so only a future bug in a release build
+reaches it (the session's own tests check the refusal).
+
+Arguments, when given, run only the mutants whose names contain one of them.
 """
 import pathlib, subprocess, sys
 
@@ -190,6 +196,28 @@ MUTANTS = [
     ("a curve of the plane that is no line left to the exact roots", T,
      "    let Curve3::Line(line) = curve else {\n        return Err(BooleanError::UnsupportedContact);",
      "    let Curve3::Line(line) = curve else {\n        return Ok(None);"),
+    # #251: nothing read at zero tolerance, enforced by the session.
+    ("a zero f64 measure the exact predicate rejects taken at zero tolerance", R,
+     "    if eps > 0.0 && alpha > 0.0 && linear <= eps && angular <= alpha {",
+     "    if linear <= eps && angular <= alpha {"),
+    ("only a zero angular part refuses an inexact reading", R,
+     "    if eps > 0.0 && alpha > 0.0 && linear <= eps && angular <= alpha {",
+     "    if alpha > 0.0 && linear <= eps && angular <= alpha {"),
+    ("only a zero linear part refuses an inexact reading", R,
+     "    if eps > 0.0 && alpha > 0.0 && linear <= eps && angular <= alpha {",
+     "    if eps > 0.0 && linear <= eps && angular <= alpha {"),
+    ("a session admits a decision at zero tolerance", R,
+     "            let admitted = s.tolerance != Tolerance::ZERO\n",
+     "            let admitted = true\n"),
+    ("a session admits a decision beyond the tolerance", R,
+     "                && linear <= s.tolerance.linear()\n",
+     ""),
+    ("a decision the session refuses recorded without a refusal", R,
+     "                s.exceeded = true;",
+     "                s.report.add(kind, linear, angular);"),
+    ("a refused session returns its report", R,
+     "                    if s.exceeded {",
+     "                    if false {"),
 ]
 
 def run(target):
@@ -197,6 +225,9 @@ def run(target):
         ["cargo", "test", "-q", *target],
         cwd=ROOT, capture_output=True, text=True, timeout=1800,
     ).returncode
+
+if len(sys.argv) > 1:
+    MUTANTS = [m for m in MUTANTS if any(a in m[0] for a in sys.argv[1:])]
 
 survivors = []
 for name, rel, old, new in MUTANTS:

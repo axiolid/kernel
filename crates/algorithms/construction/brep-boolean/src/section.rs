@@ -128,8 +128,10 @@ pub fn section_edges(
     b: &ExactBRep,
     tolerance: Tolerance,
 ) -> Result<Vec<SectionEdge>, BooleanError> {
-    let _session = report::open(&[a, b]);
-    sections_and_contacts(a, b, tolerance).map(|(edges, _)| edges)
+    let session = report::open(&[a, b], tolerance);
+    let (edges, _) = sections_and_contacts(a, b, tolerance)?;
+    session.finish()?;
+    Ok(edges)
 }
 
 /// [`section_edges`], with the plane/cylinder contacts read within
@@ -1758,7 +1760,7 @@ mod tests {
             })
         };
         // Exactly perpendicular: the closed form's circle, nothing read.
-        let session = report::open(&[]);
+        let session = report::open(&[], tol());
         assert!(plane_cylinder_within_rounding(
             &plane(Vec3::Z, Vec3::X),
             &cylinder,
@@ -1766,10 +1768,10 @@ mod tests {
             tol()
         )
         .is_none());
-        assert!(session.finish().is_exact());
+        assert!(session.finish().expect("exact").is_exact());
         // Tilted by a rotation's rounding residue: read perpendicular, and
         // reported.
-        let session = report::open(&[]);
+        let session = report::open(&[], tol());
         let tilted = Vec3::new(0.0, (core::f64::consts::FRAC_PI_2).cos(), 1.0);
         let circle =
             plane_cylinder_within_rounding(&plane(tilted, Vec3::X), &cylinder, Some(10.0), tol());
@@ -1777,7 +1779,7 @@ mod tests {
             circle.map(|c| (c.curves.len(), c.contact)),
             Some((1, false))
         );
-        let report = session.finish();
+        let report = session.finish().expect("within tolerance");
         assert!(report.contains(ToleranceDecisionKind::PlanePerpendicularToAxis));
         assert!(report.linear() > 0.0 && report.linear() <= EPS);
     }

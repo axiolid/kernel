@@ -108,7 +108,21 @@ pub fn split_face(
     cuts: &[Point3],
     tolerance: Tolerance,
 ) -> Result<Vec<Region>, BooleanError> {
-    let _session = report::open(&[brep]);
+    let session = report::open(&[brep], tolerance);
+    let regions = split_face_in_session(brep, face, sections, first, cuts, tolerance)?;
+    session.finish()?;
+    Ok(regions)
+}
+
+/// [`split_face`] inside the open report session.
+fn split_face_in_session(
+    brep: &ExactBRep,
+    face: FaceId,
+    sections: &[SectionEdge],
+    first: bool,
+    cuts: &[Point3],
+    tolerance: Tolerance,
+) -> Result<Vec<Region>, BooleanError> {
     let topology = brep.topology();
     let record = topology
         .faces()
