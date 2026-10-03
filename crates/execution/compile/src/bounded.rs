@@ -20,6 +20,10 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
 const MAX_SUBDIVISION_DEPTH: u32 = 24;
 
 /// Triangulate a curve-bounded plane.
+///
+/// Also returns the largest distance a merged near-duplicate boundary point
+/// lay from the point kept in its place, in the plane's parameters (#232):
+/// merging moves a ring by no more than that.
 pub(crate) fn curve_bounded(
     backend: BackendId,
     graph: &GeometryGraph,
@@ -28,7 +32,7 @@ pub(crate) fn curve_bounded(
     implicit_outer: bool,
     chord: Scalar,
     tolerance: Tolerance,
-) -> GeomResult<TriMesh> {
+) -> GeomResult<(TriMesh, Scalar)> {
     if implicit_outer {
         // The outer loop would be the basis surface's own boundary, which a
         // plane does not have.
@@ -64,8 +68,9 @@ pub(crate) fn curve_bounded(
         ));
     }
     let mut rings: Vec<Vec<Point2>> = Vec::with_capacity(boundaries.len());
+    let mut merged: Scalar = 0.0;
     for (index, &id) in boundaries.iter().enumerate() {
-        let mut ring = boundary_ring(graph, id, chord, tolerance)?;
+        let mut ring = boundary_ring(graph, id, chord, tolerance, &mut merged)?;
         if ring.len() < 3 {
             return Err(GeomError::Degenerate(format!(
                 "curve-bounded boundary {index} has {} distinct points, need at least 3",
@@ -104,7 +109,7 @@ pub(crate) fn curve_bounded(
     mesh.validate_structure().map_err(|error| {
         GeomError::InvalidInput(format!("invalid curve-bounded plane mesh: {error}"))
     })?;
-    Ok(mesh)
+    Ok((mesh, merged))
 }
 
 /// A closed boundary as a ring in the plane's parameters.
@@ -113,6 +118,7 @@ fn boundary_ring(
     id: NodeId,
     chord: Scalar,
     tolerance: Tolerance,
+    merged: &mut Scalar,
 ) -> GeomResult<Vec<Point2>> {
     let linear = tolerance.linear();
     let open = |closed: bool, first: Option<&Point2>, last: Option<&Point2>| {
@@ -185,12 +191,14 @@ fn boundary_ring(
     let near = |a: Point2, b: Point2| (a.x - b.x).abs() <= linear && (a.y - b.y).abs() <= linear;
     let mut ring: Vec<Point2> = Vec::with_capacity(raw.len());
     for p in raw {
-        if ring.last().is_none_or(|&q| !near(q, p)) {
-            ring.push(p);
+        match ring.last() {
+            Some(&q) if near(q, p) => *merged = merged.max((q - p).length()),
+            _ => ring.push(p),
         }
     }
     while ring.len() > 1 && near(ring[0], ring[ring.len() - 1]) {
-        ring.pop();
+        let dropped = ring.pop().expect("non-empty");
+        *merged = merged.max((ring[0] - dropped).length());
     }
     Ok(ring)
 }

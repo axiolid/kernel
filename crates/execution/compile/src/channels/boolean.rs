@@ -43,5 +43,14 @@ pub(crate) fn after_boolean(
         mesh,
         fates,
         closure: axiolid_mesh_compile_contract::MeshClosure::Solid,
+        // Cutting moves the intersection curve, and a one-sided bound on
+        // each operand says nothing about where it lands (#232).
+        deviation: crate::deviation::Deviation::one(
+            crate::deviation::DeviationPath::Boolean,
+            "",
+            crate::deviation::DeviationBound::Unbounded(
+                "boolean result: no operand bound covers the cut",
+            ),
+        ),
     }
 }

@@ -35,8 +35,9 @@ pub(crate) use transform::transform;
 use axiolid_mesh::{AttributeFate, TriMesh};
 use axiolid_mesh_compile_contract::MeshClosure;
 
-/// A node's mesh, what happened to each channel on the way to it, and
-/// whether it bounds a solid (#161).
+/// A node's mesh, what happened to each channel on the way to it, whether
+/// it bounds a solid (#161), and how far the exact surface may lie from it
+/// (#232).
 #[derive(Debug, Clone)]
 pub(crate) struct Built {
     pub mesh: TriMesh,
@@ -44,6 +45,10 @@ pub(crate) struct Built {
     /// Never [`MeshClosure::Unknown`] inside the compiler: every node
     /// states it.
     pub closure: MeshClosure,
+    /// Unreported (unbounded) until the node's path states it with
+    /// [`Built::with_deviation`]; instances, collections and booleans
+    /// derive it from their operands.
+    pub deviation: crate::deviation::Deviation,
 }
 
 impl Built {
@@ -63,7 +68,14 @@ impl Built {
             mesh,
             fates,
             closure,
+            deviation: crate::deviation::Deviation::default(),
         }
+    }
+
+    /// The same node with its deviation stated.
+    pub fn with_deviation(mut self, deviation: crate::deviation::Deviation) -> Self {
+        self.deviation = deviation;
+        self
     }
 }
 

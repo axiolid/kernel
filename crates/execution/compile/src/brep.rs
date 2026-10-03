@@ -5,9 +5,56 @@
 //! projected to its own plane, triangulated with the same earcut path
 //! profiles use, and lifted back. Shared vertices stay shared: the loop
 //! indices already reference interned topology vertices.
+//!
+//! # Deviation (#232)
+//!
+//! Every face also reports a certified bound on how far its exact surface
+//! lies from its triangles, as a [`Deviation`] per surface family:
+//!
+//! - A planar face with straight edges is its own polygon: the bound is
+//!   how far its vertices sit off its declared plane (zero without one). A
+//!   curved edge on a planar face is chorded vertex to vertex here, so it
+//!   is unbounded by name, as is a face skipped for having no area.
+//! - A curved face is bounded per triangle in its parameter domain. With
+//!   `L` the linear interpolant of the surface at the triangle's parameter
+//!   corners, Taylor's theorem gives `|S(x) - L(x)| <= 1/2 sum_i l_i
+//!   q(y_i - x)`, `l_i` the barycentric weights and `q(d) = A d_u^2 + 2 B
+//!   |d_u d_v| + C d_v^2 <= (A + B) d_u^2 + (C + B) d_v^2`, where `A, B, C`
+//!   bound `|S_uu|, |S_uv|, |S_vv|` over the triangle's parameter box
+//!   ([`axiolid_reference::bound::SurfaceBoundOracle`]). In coordinates
+//!   scaled by `sqrt(A + B)` and `sqrt(C + B)` the sum is `R^2 - |z - c|^2`
+//!   for any centre `c` and the corners' largest distance `R` from it, so
+//!   at most the squared radius of the triangle's smallest enclosing
+//!   circle there. Where a knot line of full multiplicity crosses the box
+//!   the first-order bound `max_edges (|S_u| |d_u| + |S_v| |d_v|)` is used
+//!   instead. Each mesh vertex's distance from the surface at its own
+//!   parameters (a seam vertex shared from the neighbouring face) is added.
+//! - The trim: the exact domain differs from the triangulated polygon by
+//!   lenses between each pcurve span and its chord. A lens point is within
+//!   the span's certified chord bound `d` of the chord
+//!   ([`axiolid_reference::bound::chord_bound2`]), which is an edge of a
+//!   triangle, so its surface point is within `G d` of that triangle's
+//!   bound, `G = sqrt(|S_u|^2 + |S_v|^2)` over the lens. A gap between
+//!   consecutive pcurves adds the same way.
+//!
+//! A triangle the mesh drops because two of its corners share a vertex (a
+//! pole) still covers its parameter triangle; its bound counts only if the
+//! segment it collapses to is an edge of the face's emitted triangles.
+//! For a rational B-spline the interpolation coefficients come from its
+//! homogeneous numerator and weight, not from the quotient rule
+//! ([`axiolid_reference::bound::SurfaceBounds::interpolation`]); both sets
+//! are tried and the smaller bound kept.
+//!
+//! The bound also steers the mesh where that is cheap: a triangle whose
+//! certified bound misses the budget has its widest free edge split, and
+//! a trim edge is sampled until its certified chord bound fits, both up to
+//! caps beyond which the bound is reported as it stands.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
+use axiolid_reference::bound::SurfaceBoundOracle;
+
+use crate::deviation::{Deviation, DeviationBound, DeviationPath};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::NodeId;
@@ -149,7 +196,7 @@ pub fn tessellate(
     graph: &axiolid_model::GeometryGraph,
     tolerance: axiolid_core::Tolerance,
     chord_error: Scalar,
-) -> GeomResult<(TriMesh, MeshClosure)> {
+) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
     check_tessellation_input_budget(brep)?;
     // Structure before geometry. A dangling handle or an open loop
     // produces a mesh that looks plausible and is wrong, so the
@@ -230,6 +277,7 @@ pub fn tessellate(
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
         std::collections::HashMap::new();
     let mut total_curved_records = 0_usize;
+    let mut deviation = Deviation::empty();
     for &(shell, void) in &shells {
         let first_index = mesh.indices.len();
         for &(face_id, shell_sense) in &shell.faces {
@@ -247,6 +295,7 @@ pub fn tessellate(
                 &mut welded,
                 &mut edge_cache,
                 &mut total_curved_records,
+                &mut deviation,
             )?;
             check_mesh_budget(&mesh)?;
         }
@@ -254,7 +303,7 @@ pub fn tessellate(
             face_into_cavity(&mut mesh, first_index);
         }
     }
-    Ok((mesh, closure))
+    Ok((mesh, closure, deviation))
 }
 
 /// A void shell must be closed on its own: every edge its faces use is
@@ -321,6 +370,7 @@ struct FaceContext<'a> {
     closure: MeshClosure,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_face(
     mesh: &mut TriMesh,
     ctx: &FaceContext<'_>,
@@ -329,6 +379,7 @@ fn append_face(
     welded: &mut std::collections::HashMap<axiolid_topology::VertexId, u32>,
     cache: &mut EdgeSamples,
     total_curved_records: &mut usize,
+    deviation: &mut Deviation,
 ) -> GeomResult<()> {
     let (brep, graph) = (ctx.brep, ctx.graph);
     // A curved support cannot be tessellated by projecting the boundary onto
@@ -336,18 +387,31 @@ fn append_face(
     // the output. Sample the surface itself when the face states its boundary
     // in surface parameters, and refuse when it does not: a missing wall is
     // cheap, a wrong wall corrupts every downstream quantity.
-    if let Some(surface) = face_surface(graph, face)? {
+    let support = face_surface(graph, face)?;
+    if let Some(surface) = support {
         if !surface_is_planar(surface) {
-            return with_curved_face_transaction(
+            let mut bound = FaceBound::new(surface);
+            with_curved_face_transaction(
                 mesh,
                 welded,
                 cache,
                 total_curved_records,
                 ctx.chord_error,
-                |state| append_curved_face(state, ctx, face, surface, flip),
+                |state| append_curved_face(state, ctx, face, surface, flip, &mut bound),
+            )?;
+            deviation.add(
+                DeviationPath::BRepFace,
+                surface_family(surface),
+                bound.finish(),
             );
+            return Ok(());
         }
     }
+    deviation.add(
+        DeviationPath::BRepFace,
+        "plane",
+        planar_face_bound(ctx, face, support)?,
+    );
     let mut rings: Vec<Vec<(axiolid_topology::VertexId, Vec3)>> = Vec::new();
     let mut outer_index = None;
     for bound in &face.bounds {
@@ -385,6 +449,13 @@ fn append_face(
             // leave real area of its face uncut.
             let finite = ring.iter().all(|&(_, p)| p.is_finite());
             if index == 0 && finite && ctx.closure == MeshClosure::Surface {
+                // Its winding may still enclose lobes of area (a bowtie),
+                // which the mesh then lacks.
+                deviation.add(
+                    DeviationPath::BRepFace,
+                    "plane",
+                    DeviationBound::Unbounded("planar face with no net area, skipped"),
+                );
                 return Ok(());
             }
             return Err(GeomError::Degenerate(
@@ -770,7 +841,7 @@ fn edge_sample_count(
             worst = worst.max((m - 0.5 * (a + b)).length());
         }
         if worst <= tolerance {
-            return Ok(n);
+            return Ok(certified_edge_count(curve, surface, tolerance, n));
         }
         if n >= MAX_CURVED_EDGE_SEGMENTS {
             return Err(GeomError::BudgetExceeded {
@@ -779,6 +850,66 @@ fn edge_sample_count(
         }
         n *= 2;
     }
+}
+
+/// `n`, doubled until every span's certified 3D chord bound is within
+/// `tolerance` too, where that is cheap (#232); `n` itself when the
+/// bound cannot be had or would need more than the segment cap.
+///
+/// A span's image `S(g(t))` is within `G d + q(D) / 8` of its chord: `d`
+/// the pcurve's certified chord bound in parameters and `G` the surface's
+/// Lipschitz bound, plus the surface's interpolation error along the
+/// parameter segment `D` between the span's ends (the one-dimensional case
+/// of the triangle bound in the module notes). A boundary edge is never
+/// split by interior refinement, so a coarse one would leave its
+/// triangles' bounds wide.
+fn certified_edge_count(
+    curve: &axiolid_curve::Curve2,
+    surface: &axiolid_surface::Surface,
+    tolerance: Scalar,
+    n: usize,
+) -> usize {
+    let Some(oracle) = SurfaceBoundOracle::new(surface) else {
+        return n;
+    };
+    let domain = axiolid_reference::curve::domain2(curve);
+    let fits = |count: usize| -> Option<bool> {
+        let at = |i: usize| {
+            domain.start + (domain.end - domain.start) * (i as Scalar) / (count as Scalar)
+        };
+        for i in 0..count {
+            let (t0, t1) = (at(i), at(i + 1));
+            let d = axiolid_reference::bound::chord_bound2(curve, t0, t1)?;
+            let a = axiolid_reference::curve::evaluate2(curve, t0).ok()?;
+            let b = axiolid_reference::curve::evaluate2(curve, t1).ok()?;
+            let grow = Point2::splat(d);
+            let (lo, hi) = (a.min(b) - grow, a.max(b) + grow);
+            let bounds = oracle.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+            let span = b - a;
+            let [x, y, z] = bounds.interpolation;
+            let along = 0.125
+                * (x * span.x * span.x + 2.0 * y * (span.x * span.y).abs() + z * span.y * span.y);
+            let along = if bounds.smooth {
+                along
+            } else {
+                bounds.du * span.x.abs() + bounds.dv * span.y.abs()
+            };
+            let lipschitz = (bounds.du * bounds.du + bounds.dv * bounds.dv).sqrt();
+            if lipschitz * d + along > tolerance {
+                return Some(false);
+            }
+        }
+        Some(true)
+    };
+    let mut count = n;
+    while count <= MAX_CURVED_EDGE_SEGMENTS {
+        match fits(count) {
+            Some(true) => return count,
+            Some(false) => count *= 2,
+            None => return n,
+        }
+    }
+    n
 }
 
 /// Sample a trim as `n` segments, including both endpoints.
@@ -996,6 +1127,7 @@ fn curved_boundary(
     ctx: &FaceContext<'_>,
     face: &axiolid_topology::Face<NodeId>,
     surface: &axiolid_surface::Surface,
+    bound: &mut FaceBound<'_>,
 ) -> GeomResult<CurvedBoundary> {
     let (brep, graph) = (ctx.brep, ctx.graph);
     let mut out = CurvedBoundary {
@@ -1005,12 +1137,16 @@ fn curved_boundary(
         winding_reversed: false,
     };
     let mut rings: Vec<CurvedRing> = Vec::with_capacity(face.bounds.len());
-    for bound in &face.bounds {
+    for face_bound in &face.bounds {
         let ring_start = out.uv.len();
         let wire = brep
             .loops()
-            .get(bound.loop_id.index())
+            .get(face_bound.loop_id.index())
             .ok_or_else(|| GeomError::InvalidInput("loop missing".to_string()))?;
+        // The previous pcurve's end and the ring's first start, for the
+        // gaps between consecutive pcurves (#232).
+        let mut previous_end: Option<Point2> = None;
+        let mut ring_first: Option<Point2> = None;
         for use_ in &wire.edges {
             let Some(pcurve) = use_.pcurve else {
                 return Err(GeomError::Unsupported {
@@ -1031,6 +1167,12 @@ fn curved_boundary(
             };
             state.reserve_face_vertices(n)?;
             let params = trim_samples(trim, n)?;
+            bound.trim(trim, n, &params);
+            if let (Some(end), Some(&start)) = (previous_end, params.first()) {
+                bound.gap(end, start, surface);
+            }
+            ring_first = ring_first.or_else(|| params.first().copied());
+            previous_end = params.last().copied();
             // Evaluate the trim on the surface: these are the seam's
             // 3D points, and they are interned under the edge.
             let points: Vec<Vec3> = params
@@ -1058,15 +1200,18 @@ fn curved_boundary(
             out.uv.extend(params.into_iter().take(n));
             out.shared.extend(shared.into_iter().take(n));
         }
-        if bound.orientation == Orientation::Reversed {
+        if let (Some(end), Some(start)) = (previous_end, ring_first) {
+            bound.gap(end, start, surface);
+        }
+        if face_bound.orientation == Orientation::Reversed {
             out.uv[ring_start..].reverse();
             out.shared[ring_start..].reverse();
         }
         rings.push((
             ring_start,
             out.uv.len(),
-            bound.outer,
-            bound.orientation == Orientation::Reversed,
+            face_bound.outer,
+            face_bound.orientation == Orientation::Reversed,
         ));
     }
     let outer_index = validate_curved_rings(&rings)?;
@@ -1183,8 +1328,9 @@ fn append_curved_face(
     face: &axiolid_topology::Face<NodeId>,
     surface: &axiolid_surface::Surface,
     flip: bool,
+    bound: &mut FaceBound<'_>,
 ) -> GeomResult<()> {
-    let boundary = curved_boundary(state, ctx, face, surface)?;
+    let boundary = curved_boundary(state, ctx, face, surface, bound)?;
     if boundary.uv.len() < 3 {
         return Err(GeomError::Degenerate(
             "curved face boundary is underspecified".to_owned(),
@@ -1212,6 +1358,7 @@ fn append_curved_face(
                 triangles,
                 next_local,
                 flip ^ boundary.winding_reversed,
+                bound,
             );
         }
     }
@@ -1224,6 +1371,16 @@ fn append_curved_face(
             flat.len()
         )));
     }
+    let ring_edges = local_boundary_edges(boundary.uv.len(), &boundary.hole_starts)?;
+    let indices = restore_collinear_samples(&flat, indices);
+    // Flipped in a metric where a unit of u and of v are about as long on
+    // the surface: a cylinder's u is its radius times longer than its v.
+    let metric = parameter_metric(surface, &boundary.uv);
+    let scaled: Vec<[Scalar; 2]> = flat
+        .iter()
+        .map(|p| [p[0] * metric.0, p[1] * metric.1])
+        .collect();
+    let indices = delaunay_flips(&scaled, indices, &ring_edges);
 
     let boundary_edges = local_boundary_edges(boundary.uv.len(), &boundary.hole_starts)?;
     let mut triangles = Vec::with_capacity(indices.len() / 3);
@@ -1252,12 +1409,19 @@ fn append_curved_face(
     let next_local = u32::try_from(boundary.uv.len()).map_err(|_| GeomError::BudgetExceeded {
         resource: "curved-face local vertices",
     })?;
+    // Earcut is trusted to cover the trim polygon; a triangulation whose
+    // parameter area misses the polygon's would leave part of the face
+    // unmeshed, so the bound is withdrawn rather than claimed.
+    if !covers_polygon(&boundary, &triangles) {
+        bound.unbounded("curved face triangulation does not cover its trim");
+    }
     refine_curved_face(
         state,
         surface,
         triangles,
         next_local,
         flip ^ boundary.winding_reversed,
+        bound,
     )
 }
 
@@ -1306,12 +1470,55 @@ fn local_boundary_edges(
     Ok(edges)
 }
 
+/// Refine a curved face, also splitting where its certified bound misses
+/// the budget (#232) while that stays within the refinement limits.
+///
+/// The certified splits are best effort, never a new refusal: if the pass
+/// that makes them runs out of depth or vertices, everything it added is
+/// discarded and the face is refined on the midpoint and centroid checks
+/// alone, as before, its bound then reported as it is.
 fn refine_curved_face(
+    state: &mut CurvedMeshState<'_>,
+    surface: &axiolid_surface::Surface,
+    triangles: Vec<SurfaceTriangle>,
+    next_local: u32,
+    flip: bool,
+    bound: &mut FaceBound<'_>,
+) -> GeomResult<()> {
+    let positions = state.mesh.positions.len();
+    let indices = state.mesh.indices.len();
+    let local = state.face_local_vertices;
+    let records = *state.total_curved_records;
+    match refine_pass(
+        state,
+        surface,
+        triangles.clone(),
+        next_local,
+        flip,
+        bound,
+        true,
+    ) {
+        Err(GeomError::BudgetExceeded { resource }) => {
+            let _ = resource;
+            state.mesh.positions.truncate(positions);
+            state.mesh.indices.truncate(indices);
+            state.face_local_vertices = local;
+            *state.total_curved_records = records;
+            refine_pass(state, surface, triangles, next_local, flip, bound, false)
+        }
+        other => other,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refine_pass(
     state: &mut CurvedMeshState<'_>,
     surface: &axiolid_surface::Surface,
     mut triangles: Vec<SurfaceTriangle>,
     mut next_local: u32,
     flip: bool,
+    bound: &mut FaceBound<'_>,
+    certified: bool,
 ) -> GeomResult<()> {
     let mut midpoint_cache: HashMap<LocalEdgeKey, SurfaceVertex> = HashMap::new();
 
@@ -1329,6 +1536,28 @@ fn refine_curved_face(
                     let (a, b) = triangle_edge(triangle.vertices, edge);
                     requested_edges.insert(local_edge_key(a, b));
                     self_mask |= 1 << edge;
+                }
+            }
+            // The midpoint and centroid checks above are measurements. Where
+            // the certified bound still misses the budget, split the longest
+            // edge that may be split, while it is cheap: shallow, within the
+            // face's vertex budget, and with the bound not dominated by a
+            // corner's own offset, which splitting cannot reduce (#232).
+            if certified
+                && self_mask == 0
+                && triangle.depth < CERTIFIED_DEPTH
+                && state.face_local_vertices < CERTIFIED_FACE_VERTICES
+            {
+                if let Some(certified) =
+                    bound.triangle_bound(state.mesh, surface, triangle.vertices)?
+                {
+                    if certified > state.chord_error {
+                        if let Some(edge) = bound.widest_free_edge(&triangle) {
+                            let (a, b) = triangle_edge(triangle.vertices, edge);
+                            requested_edges.insert(local_edge_key(a, b));
+                            self_mask |= 1 << edge;
+                        }
+                    }
                 }
             }
             self_masks.push(self_mask);
@@ -1353,7 +1582,12 @@ fn refine_curved_face(
                 next.push(triangle);
                 continue;
             }
-            if triangle.depth >= MAX_REFINEMENT_DEPTH {
+            let limit = if certified {
+                MAX_CERTIFIED_REFINEMENT_DEPTH
+            } else {
+                MAX_REFINEMENT_DEPTH
+            };
+            if triangle.depth >= limit {
                 return Err(GeomError::BudgetExceeded {
                     resource: "curved-face refinement depth",
                 });
@@ -1393,6 +1627,7 @@ fn refine_curved_face(
                 MAX_MESH_INDICES,
                 "mesh indices",
             )?;
+            bound.triangles(state.mesh, surface, &next)?;
             for triangle in next {
                 let [a, b, c] = triangle.vertices.map(|vertex| vertex.mesh);
                 if a == b || b == c || c == a {
@@ -1717,6 +1952,529 @@ fn refinement_midpoint(
     Ok(vertex)
 }
 
+/// The surface family's name, for a report.
+fn surface_family(surface: &axiolid_surface::Surface) -> &'static str {
+    match surface {
+        axiolid_surface::Surface::Plane(_) => "plane",
+        axiolid_surface::Surface::Cylinder(_) => "cylinder",
+        axiolid_surface::Surface::EllipticalCylinder(_) => "elliptical cylinder",
+        axiolid_surface::Surface::Cone(_) => "cone",
+        axiolid_surface::Surface::Sphere(_) => "sphere",
+        axiolid_surface::Surface::Torus(_) => "torus",
+        axiolid_surface::Surface::BSpline(_) => "B-spline surface",
+        _ => "surface",
+    }
+}
+
+/// A planar face's bound: its vertices' distance off the declared plane,
+/// when every edge is straight (#232).
+fn planar_face_bound(
+    ctx: &FaceContext<'_>,
+    face: &axiolid_topology::Face<NodeId>,
+    support: Option<&axiolid_surface::Surface>,
+) -> GeomResult<DeviationBound> {
+    let mut off_plane: Scalar = 0.0;
+    let plane = match support {
+        Some(axiolid_surface::Surface::Plane(plane)) => {
+            let normal = plane.frame.x.cross(plane.frame.y).normalize_or_zero();
+            (normal != Vec3::ZERO).then_some((plane.frame.origin, normal))
+        }
+        _ => None,
+    };
+    for bound in &face.bounds {
+        let wire = ctx
+            .brep
+            .loops()
+            .get(bound.loop_id.index())
+            .ok_or_else(|| GeomError::InvalidInput("loop missing".to_owned()))?;
+        for use_ in &wire.edges {
+            let edge = ctx
+                .brep
+                .edges()
+                .get(use_.edge.index())
+                .ok_or_else(|| GeomError::InvalidInput("edge missing".to_owned()))?;
+            let straight = match edge.curve {
+                None => true,
+                Some(id) => {
+                    matches!(
+                        ctx.graph.get(id),
+                        Some(axiolid_model::GeometryNode::Curve3(
+                            axiolid_curve::Curve3::Line(_)
+                        ))
+                    ) || matches!(
+                        ctx.graph.get(id),
+                        Some(axiolid_model::GeometryNode::Curve3(axiolid_curve::Curve3::Polyline(p)))
+                            if p.points.len() == 2 && !p.closed
+                    )
+                }
+            };
+            if !straight {
+                return Ok(DeviationBound::Unbounded(
+                    "planar face with a curved edge, chorded vertex to vertex",
+                ));
+            }
+            if let Some((origin, normal)) = plane {
+                for vertex in [edge.start, edge.end] {
+                    let position = ctx
+                        .brep
+                        .vertices()
+                        .get(vertex.index())
+                        .ok_or_else(|| GeomError::InvalidInput("vertex missing".to_owned()))?
+                        .position;
+                    off_plane = off_plane.max((position - origin).dot(normal).abs());
+                }
+            }
+        }
+    }
+    Ok(if off_plane == 0.0 {
+        DeviationBound::Proven(0.0)
+    } else {
+        DeviationBound::Certified(off_plane * (1.0 + 1e-12))
+    })
+}
+
+/// The bound of one curved face, gathered while it is meshed (#232).
+struct FaceBound<'s> {
+    oracle: Option<SurfaceBoundOracle<'s>>,
+    /// The worst triangle bound: interpolation plus vertex offsets.
+    interior: Scalar,
+    /// The worst trim lens or pcurve gap term.
+    trim: Scalar,
+    unbounded: Option<&'static str>,
+}
+
+impl<'s> FaceBound<'s> {
+    fn new(surface: &'s axiolid_surface::Surface) -> Self {
+        let oracle = SurfaceBoundOracle::new(surface);
+        Self {
+            unbounded: oracle
+                .is_none()
+                .then_some("curved face whose surface has no derivative bound"),
+            oracle,
+            interior: 0.0,
+            trim: 0.0,
+        }
+    }
+
+    fn unbounded(&mut self, reason: &'static str) {
+        self.unbounded.get_or_insert(reason);
+    }
+
+    fn finish(&self) -> DeviationBound {
+        match self.unbounded {
+            Some(reason) => DeviationBound::Unbounded(reason),
+            None => DeviationBound::Certified((self.interior + self.trim) * (1.0 + 1e-12)),
+        }
+    }
+
+    /// `sqrt(|S_u|^2 + |S_v|^2)` over a box, the surface's Lipschitz bound
+    /// in parameter distance.
+    fn lipschitz(&self, lo: Point2, hi: Point2) -> Option<Scalar> {
+        let b = self.oracle.as_ref()?.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+        Some((b.du * b.du + b.dv * b.dv).sqrt())
+    }
+
+    /// The lens terms of one pcurve sampled as `n` uniform spans.
+    fn trim(&mut self, curve: &axiolid_curve::Curve2, n: usize, params: &[Point2]) {
+        if self.unbounded.is_some() {
+            return;
+        }
+        let domain = axiolid_reference::curve::domain2(curve);
+        let at =
+            |i: usize| domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar);
+        for i in 0..n {
+            let Some(d) = axiolid_reference::bound::chord_bound2(curve, at(i), at(i + 1)) else {
+                self.unbounded("trim pcurve family with no chord bound");
+                return;
+            };
+            if d == 0.0 {
+                continue;
+            }
+            let (a, b) = (params[i], params[i + 1]);
+            let grow = Point2::splat(d);
+            let Some(g) = self.lipschitz(a.min(b) - grow, a.max(b) + grow) else {
+                self.unbounded("surface has no derivative bound over a trim");
+                return;
+            };
+            self.trim = self.trim.max(g * d);
+        }
+    }
+
+    /// A gap between one pcurve's end and the next one's start.
+    fn gap(&mut self, end: Point2, start: Point2, surface: &axiolid_surface::Surface) {
+        if self.unbounded.is_some() || end == start {
+            return;
+        }
+        let (u_period, v_period) = surface_periods(surface);
+        let near = Point2::new(
+            localized_parameter(end.x, start.x, u_period),
+            localized_parameter(end.y, start.y, v_period),
+        );
+        let gap = (near - end).length();
+        if gap == 0.0 {
+            return;
+        }
+        match self.lipschitz(end.min(near), end.max(near)) {
+            Some(g) => self.trim = self.trim.max(g * gap),
+            None => self.unbounded("surface has no derivative bound over a trim gap"),
+        }
+    }
+
+    /// The final triangles of one face.
+    fn triangles(
+        &mut self,
+        mesh: &TriMesh,
+        surface: &axiolid_surface::Surface,
+        triangles: &[SurfaceTriangle],
+    ) -> GeomResult<()> {
+        if self.unbounded.is_some() {
+            return Ok(());
+        }
+        // Edges of the emitted triangles, for the dropped ones.
+        let mut emitted: HashSet<(u32, u32)> = HashSet::new();
+        for triangle in triangles {
+            let [a, b, c] = triangle.vertices.map(|vertex| vertex.mesh);
+            if a != b && b != c && c != a {
+                for (x, y) in [(a, b), (b, c), (c, a)] {
+                    emitted.insert(sorted_local_edge(x, y));
+                }
+            }
+        }
+        // Keyed by vertex AND parameters: a seam vertex has two occurrences.
+        let mut offsets: HashMap<(u32, u64, u64), Scalar> = HashMap::new();
+        for triangle in triangles {
+            let [a, b, c] = triangle.vertices.map(|vertex| vertex.mesh);
+            if a == b || b == c || c == a {
+                let pair = if a == b { (b, c) } else { (a, b) };
+                let covered = if pair.0 == pair.1 {
+                    emitted.iter().any(|&(x, y)| x == pair.0 || y == pair.0)
+                } else {
+                    emitted.contains(&sorted_local_edge(pair.0, pair.1))
+                };
+                if !covered {
+                    self.unbounded("a dropped degenerate triangle is not covered by the mesh");
+                    return Ok(());
+                }
+            }
+            let mut offset: Scalar = 0.0;
+            for vertex in triangle.vertices {
+                let key = (vertex.mesh, vertex.uv.x.to_bits(), vertex.uv.y.to_bits());
+                let value = match offsets.get(&key) {
+                    Some(&value) => value,
+                    None => {
+                        let exact = axiolid_reference::surface::evaluate(
+                            surface,
+                            vertex.uv.x,
+                            vertex.uv.y,
+                        )?;
+                        let value = (mesh.positions[vertex.mesh as usize] - exact).length();
+                        offsets.insert(key, value);
+                        value
+                    }
+                };
+                offset = offset.max(value);
+            }
+            let Some(interp) = self.interpolation(triangle.vertices.map(|vertex| vertex.uv)) else {
+                self.unbounded("surface has no derivative bound over a triangle");
+                return Ok(());
+            };
+            self.interior = self.interior.max(interp + offset);
+        }
+        Ok(())
+    }
+
+    /// The bound on `|S - L|` over one parameter triangle.
+    fn interpolation(&self, uv: [Point2; 3]) -> Option<Scalar> {
+        let lo = uv[0].min(uv[1]).min(uv[2]);
+        let hi = uv[0].max(uv[1]).max(uv[2]);
+        let b = self.oracle.as_ref()?.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+        let first = [(0, 1), (1, 2), (2, 0)]
+            .iter()
+            .map(|&(i, j)| {
+                let d = uv[j] - uv[i];
+                b.du * d.x.abs() + b.dv * d.y.abs()
+            })
+            .fold(0.0, Scalar::max);
+        if !b.smooth {
+            return Some(first);
+        }
+        // `2 B |d_u d_v| <= B (alpha d_u^2 + d_v^2 / alpha)` for any
+        // `alpha > 0`: each choice is a bound, so a few are tried, centred
+        // on the triangle's own aspect (a ruled cone's triangles are long
+        // along the rulings, where `C = 0`).
+        let extent = hi - lo;
+        let aspect = if extent.x > 0.0 && extent.y > 0.0 {
+            extent.y / extent.x
+        } else {
+            1.0
+        };
+        let mut best = first;
+        for alpha in [
+            1.0,
+            aspect / 4.0,
+            aspect / 2.0,
+            aspect,
+            2.0 * aspect,
+            4.0 * aspect,
+        ] {
+            if !(alpha > 0.0 && alpha.is_finite()) {
+                continue;
+            }
+            // Either coefficient set bounds the error on its own (they
+            // differ only for a rational spline); the better one is kept.
+            for [a2, b2, c2] in [b.interpolation, [b.duu, b.duv, b.dvv]] {
+                let (su, sv) = ((a2 + b2 * alpha).sqrt(), (c2 + b2 / alpha).sqrt());
+                let z = uv.map(|p| Point2::new((p.x - lo.x) * su, (p.y - lo.y) * sv));
+                let radius = enclosing_radius(z);
+                best = best.min(0.5 * radius * radius);
+            }
+        }
+        Some(best)
+    }
+
+    /// The triangle's widest edge in the metric its bound is measured in,
+    /// when that edge is not a trim edge: splitting a narrower one leaves
+    /// the bound as wide as it was.
+    fn widest_free_edge(&self, triangle: &SurfaceTriangle) -> Option<usize> {
+        let uv = triangle.vertices.map(|vertex| vertex.uv);
+        let lo = uv[0].min(uv[1]).min(uv[2]);
+        let hi = uv[0].max(uv[1]).max(uv[2]);
+        let b = self.oracle.as_ref()?.bounds((lo.x, hi.x), (lo.y, hi.y))?;
+        let [x, y, z] = b.interpolation;
+        let width = |edge: usize| {
+            let (p, q) = triangle_edge(triangle.vertices, edge);
+            let d = q.uv - p.uv;
+            x * d.x * d.x + 2.0 * y * (d.x * d.y).abs() + z * d.y * d.y
+        };
+        let widest = (0..3).max_by(|&i, &j| width(i).total_cmp(&width(j)))?;
+        (!triangle.boundary[widest]).then_some(widest)
+    }
+
+    /// One triangle's bound while the face is refined: interpolation plus
+    /// its corners' distance off the surface; `None` when unbounded.
+    fn triangle_bound(
+        &self,
+        mesh: &TriMesh,
+        surface: &axiolid_surface::Surface,
+        vertices: [SurfaceVertex; 3],
+    ) -> GeomResult<Option<Scalar>> {
+        if self.unbounded.is_some() {
+            return Ok(None);
+        }
+        let mut offset: Scalar = 0.0;
+        for vertex in vertices {
+            let exact = axiolid_reference::surface::evaluate(surface, vertex.uv.x, vertex.uv.y)?;
+            offset = offset.max((mesh.positions[vertex.mesh as usize] - exact).length());
+        }
+        Ok(self
+            .interpolation(vertices.map(|vertex| vertex.uv))
+            .map(|interp| interp + offset))
+    }
+}
+
+/// Refinement depth below which a triangle whose certified bound misses
+/// the budget has its widest free edge split (#232); deeper ones are
+/// accepted and their bound reported as it is.
+const CERTIFIED_DEPTH: u8 = 24;
+/// The depth guard of the pass that makes certified splits. Earcut fans
+/// thin triangles out of a trim corner, and narrowing them by halving takes
+/// more generations than the measurement checks ever asked for; the face's
+/// vertex budget still bounds the work, and a pass that exhausts either is
+/// discarded (see [`refine_curved_face`]).
+const MAX_CERTIFIED_REFINEMENT_DEPTH: u8 = 40;
+/// Vertices a face may reach before certified splits stop. Beyond it the
+/// bound is reported as it stands rather than paid for: a spline's
+/// derivative-net bounds can ask for many times the triangles the
+/// measurement checks need.
+const CERTIFIED_FACE_VERTICES: usize = 1 << 15;
+
+/// Put back the trim samples earcut skipped as collinear.
+///
+/// Earcut drops a ring point that lies on the line through its neighbours,
+/// so a straight trim sampled into many points (as a shared edge is, for
+/// the curved face across it) comes back as one long triangle edge. The
+/// neighbouring face still uses every sample, which leaves T-junctions in
+/// the shell, and the long edge is not a trim edge any more, so refinement
+/// splits it at points the neighbour does not have (#232). Each skipped
+/// sample lying strictly inside a triangle edge splits that triangle in
+/// two, which keeps the triangles' parameter area.
+fn restore_collinear_samples(flat: &[[Scalar; 2]], mut indices: Vec<usize>) -> Vec<usize> {
+    let mut used = vec![false; flat.len()];
+    for &i in &indices {
+        used[i] = true;
+    }
+    for (point, _) in used.iter().enumerate().filter(|(_, &u)| !u) {
+        let p = flat[point];
+        'triangles: for t in 0..indices.len() / 3 {
+            for edge in 0..3 {
+                let (a, b) = (indices[3 * t + edge], indices[3 * t + (edge + 1) % 3]);
+                let (pa, pb) = (flat[a], flat[b]);
+                let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+                let (ex, ey) = (p[0] - pa[0], p[1] - pa[1]);
+                let length2 = dx * dx + dy * dy;
+                let along = ex * dx + ey * dy;
+                let cross = dx * ey - dy * ex;
+                if !(along > 0.0 && along < length2) || cross.abs() > 1e-12 * length2 {
+                    continue;
+                }
+                let c = indices[3 * t + (edge + 2) % 3];
+                indices[3 * t] = a;
+                indices[3 * t + 1] = point;
+                indices[3 * t + 2] = c;
+                indices.extend([point, b, c]);
+                break 'triangles;
+            }
+        }
+    }
+    indices
+}
+
+/// Scales for u and v that make them about equally long on the surface:
+/// the bounds of `|S_u|` and `|S_v|` over the trim's box, or unit scales
+/// when the surface has none.
+fn parameter_metric(surface: &axiolid_surface::Surface, uv: &[Point2]) -> (Scalar, Scalar) {
+    let Some(oracle) = SurfaceBoundOracle::new(surface) else {
+        return (1.0, 1.0);
+    };
+    let lo = uv
+        .iter()
+        .fold(Point2::splat(Scalar::INFINITY), |m, p| m.min(*p));
+    let hi = uv
+        .iter()
+        .fold(Point2::splat(Scalar::NEG_INFINITY), |m, p| m.max(*p));
+    match oracle.bounds((lo.x, hi.x), (lo.y, hi.y)) {
+        Some(b) if b.du > 0.0 && b.dv > 0.0 && b.du.is_finite() && b.dv.is_finite() => (b.du, b.dv),
+        _ => (1.0, 1.0),
+    }
+}
+
+/// Flip interior edges of a polygon triangulation until it is Delaunay in
+/// the parameter plane (Lawson), never flipping a trim edge.
+///
+/// Putting skipped samples back fans thin triangles out of one corner;
+/// slivers that long put their 3D triangles off the surface by more than
+/// the surface itself bends, and leave the refinement nothing it can
+/// split usefully (#232). A flip only replaces the diagonal of a convex
+/// quad, so the triangles still tile the same polygon.
+fn delaunay_flips(
+    flat: &[[Scalar; 2]],
+    mut indices: Vec<usize>,
+    ring_edges: &HashSet<LocalEdgeKey>,
+) -> Vec<usize> {
+    let key = |a: usize, b: usize| sorted_local_edge(a as u32, b as u32);
+    let orient = |a: usize, b: usize, c: usize| {
+        let (pa, pb, pc) = (flat[a], flat[b], flat[c]);
+        (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0])
+    };
+    let incircle = |a: usize, b: usize, c: usize, d: usize| {
+        let row = |p: usize| {
+            let (x, y) = (flat[p][0] - flat[d][0], flat[p][1] - flat[d][1]);
+            [x, y, x * x + y * y]
+        };
+        let (ra, rb, rc) = (row(a), row(b), row(c));
+        ra[0] * (rb[1] * rc[2] - rb[2] * rc[1]) - ra[1] * (rb[0] * rc[2] - rb[2] * rc[0])
+            + ra[2] * (rb[0] * rc[1] - rb[1] * rc[0])
+    };
+    let triangles = indices.len() / 3;
+    // A pass flips every edge that fails; Lawson's flips terminate, the
+    // cap only guards against rounding cycling on cocircular points.
+    for _ in 0..4 * triangles.max(1) {
+        let mut owners: HashMap<LocalEdgeKey, Vec<(usize, usize)>> = HashMap::new();
+        for t in 0..triangles {
+            for e in 0..3 {
+                let (a, b) = (indices[3 * t + e], indices[3 * t + (e + 1) % 3]);
+                owners.entry(key(a, b)).or_default().push((t, e));
+            }
+        }
+        let mut flipped = false;
+        let mut touched = vec![false; triangles];
+        for (edge, uses) in &owners {
+            if uses.len() != 2 || ring_edges.contains(edge) {
+                continue;
+            }
+            let ((t1, e1), (t2, e2)) = (uses[0], uses[1]);
+            if touched[t1] || touched[t2] {
+                continue;
+            }
+            let (a, b, c) = (
+                indices[3 * t1 + e1],
+                indices[3 * t1 + (e1 + 1) % 3],
+                indices[3 * t1 + (e1 + 2) % 3],
+            );
+            let d = indices[3 * t2 + (e2 + 2) % 3];
+            let side = orient(a, b, c);
+            // A convex quad a, d, b, c: d across ab from c, and a, b on
+            // opposite sides of cd.
+            let convex = side * orient(a, b, d) < 0.0 && orient(c, d, a) * orient(c, d, b) < 0.0;
+            if !convex || side * incircle(a, b, c, d) <= 0.0 {
+                continue;
+            }
+            indices[3 * t1..3 * t1 + 3].copy_from_slice(&[a, d, c]);
+            indices[3 * t2..3 * t2 + 3].copy_from_slice(&[d, b, c]);
+            touched[t1] = true;
+            touched[t2] = true;
+            flipped = true;
+        }
+        if !flipped {
+            break;
+        }
+    }
+    indices
+}
+
+/// Radius of the smallest circle enclosing a triangle: half the longest
+/// side when the triangle is right, obtuse or flat, else its circumradius.
+fn enclosing_radius([a, b, c]: [Point2; 3]) -> Scalar {
+    let (ab, bc, ca) = (
+        (b - a).length_squared(),
+        (c - b).length_squared(),
+        (a - c).length_squared(),
+    );
+    let mut sides = [ab, bc, ca];
+    sides.sort_by(Scalar::total_cmp);
+    let [s0, s1, longest] = sides;
+    if s0 + s1 <= longest {
+        return 0.5 * longest.sqrt();
+    }
+    let twice_area = ((b - a).x * (c - a).y - (b - a).y * (c - a).x).abs();
+    if twice_area <= 0.0 || twice_area.is_nan() {
+        return 0.5 * longest.sqrt();
+    }
+    // R = |ab| |bc| |ca| / (4 area), never below half the longest side.
+    ((ab * bc * ca).sqrt() / (2.0 * twice_area)).max(0.5 * longest.sqrt())
+}
+
+/// Whether the triangles' parameter area matches the trim polygon's, to a
+/// relative `1e-9`.
+fn covers_polygon(boundary: &CurvedBoundary, triangles: &[SurfaceTriangle]) -> bool {
+    let signed = |ring: &[Point2]| -> Scalar {
+        let n = ring.len();
+        (0..n)
+            .map(|i| {
+                let (p, q) = (ring[i], ring[(i + 1) % n]);
+                p.x * q.y - q.x * p.y
+            })
+            .sum::<Scalar>()
+            * 0.5
+    };
+    let mut starts = vec![0];
+    starts.extend_from_slice(&boundary.hole_starts);
+    starts.push(boundary.uv.len());
+    let mut polygon = 0.0;
+    for (k, w) in starts.windows(2).enumerate() {
+        let area = signed(&boundary.uv[w[0]..w[1]]).abs();
+        polygon += if k == 0 { area } else { -area };
+    }
+    let covered: Scalar = triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.vertices.map(|vertex| vertex.uv);
+            0.5 * ((b - a).x * (c - a).y - (b - a).y * (c - a).x).abs()
+        })
+        .sum();
+    (covered - polygon).abs() <= 1e-9 * polygon.abs().max(covered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1810,7 +2568,8 @@ mod tests {
             },
         ];
 
-        refine_curved_face(&mut state, &surface, triangles, 4, false).unwrap();
+        let mut bound = FaceBound::new(&surface);
+        refine_curved_face(&mut state, &surface, triangles, 4, false, &mut bound).unwrap();
 
         let shared = (0_u32, 1_u32);
         let uses = state
@@ -1947,6 +2706,69 @@ mod tests {
     }
 
     #[test]
+    fn the_enclosing_circle_of_an_acute_triangle_is_its_circumcircle() {
+        let s = 3.0_f64.sqrt();
+        let equilateral = [
+            Point2::new(0.0, 0.0),
+            Point2::new(2.0, 0.0),
+            Point2::new(1.0, s),
+        ];
+        assert!((enclosing_radius(equilateral) - 2.0 / s).abs() < 1e-12);
+        let obtuse = [
+            Point2::new(0.0, 0.0),
+            Point2::new(2.0, 0.0),
+            Point2::new(1.0, 0.1),
+        ];
+        assert!((enclosing_radius(obtuse) - 1.0).abs() < 1e-12);
+    }
+
+    /// A seam vertex shared from the face across sits off this face's
+    /// surface; that offset is part of the bound, since interpolation
+    /// cannot reach it.
+    #[test]
+    fn a_vertex_off_its_surface_widens_the_triangle_bound() {
+        let surface = Surface::Cylinder(Cylinder {
+            frame: Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            radius: 2.0,
+        });
+        let uv = [
+            Point2::new(0.0, 0.0),
+            Point2::new(0.01, 0.0),
+            Point2::new(0.0, 0.01),
+        ];
+        let mut positions: Vec<Vec3> = uv
+            .iter()
+            .map(|p| axiolid_reference::surface::evaluate(&surface, p.x, p.y).unwrap())
+            .collect();
+        positions[1] += Vec3::new(0.0, 0.0, 0.01);
+        let mesh = TriMesh {
+            positions,
+            indices: vec![0, 1, 2],
+            normals: None,
+            attributes: Vec::new(),
+        };
+        let vertex = |i: u32| SurfaceVertex {
+            uv: uv[i as usize],
+            mesh: i,
+            local: i,
+        };
+        let triangle = SurfaceTriangle {
+            vertices: [vertex(0), vertex(1), vertex(2)],
+            boundary: [false; 3],
+            depth: 0,
+        };
+        let mut bound = FaceBound::new(&surface);
+        bound.triangles(&mesh, &surface, &[triangle]).unwrap();
+        assert!(bound.interior >= 0.01, "{}", bound.interior);
+        assert!(bound.interior < 0.0101, "{}", bound.interior);
+    }
+
+    #[test]
     fn grid_rejects_bow_tie() {
         let uv = vec![
             Point2::new(0.0, 0.0),
@@ -1960,6 +2782,7 @@ mod tests {
             hole_starts: vec![],
             winding_reversed: false,
         };
+
         assert!(recognise_grid(&b).is_none());
     }
 

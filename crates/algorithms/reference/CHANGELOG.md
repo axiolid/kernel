@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `bound`, re-exported from `axiolid-evaluate` like `curve` and `surface`
+  (#232).
+
 ### Fixed
 
 - `tessellate_primitive` refuses a cylinder or a cone whose chord budget

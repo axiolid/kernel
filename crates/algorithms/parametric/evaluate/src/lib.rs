@@ -16,6 +16,7 @@
 //! surface too: renaming or reshaping an item here breaks those callers.
 
 pub mod arc_length;
+pub mod bound;
 pub mod curve;
 pub mod frenet;
 pub mod intrinsic_relation;

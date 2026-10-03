@@ -30,6 +30,13 @@ caret rule for `0.x` versions.
   beside an arc are refused by name. The derivation is in the module
   notes.
 
+- `profile::profile_deviation` and `ProfileDeviation` (#232): how far a
+  profile's exact boundary may lie from the rings `profile_rings` flattens
+  it to. The chord budget for every segment family the flattener certifies,
+  plus the largest merge of near-duplicate points, scaled by a derived
+  profile's stretch; any other family (a clothoid, a non-positive spline
+  weight) is unbounded by name.
+
 ### Changed
 
 - Contour lowering splits a circular segment of half a turn or more into

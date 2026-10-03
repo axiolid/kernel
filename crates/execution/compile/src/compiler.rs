@@ -473,11 +473,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 operator,
             }) => self.build_boolean(graph, *left, *right, *operator, options, cache),
             GeometryNode::SolidOperation(operation) => {
-                self.build_solid(graph, operation, options).map(Built::leaf)
+                let mesh = self.build_solid(graph, operation, options)?;
+                let deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
+                Ok(Built::leaf(mesh).with_deviation(deviation))
             }
             GeometryNode::BRep(brep) => {
-                crate::brep::tessellate(brep, graph, options.tolerance(), chord_error(options))
-                    .map(|(mesh, closure)| Built::with_closure(mesh, closure))
+                crate::brep::tessellate(brep, graph, options.tolerance(), chord_error(options)).map(
+                    |(mesh, closure, deviation)| {
+                        Built::with_closure(mesh, closure).with_deviation(deviation)
+                    },
+                )
             }
             // A plane trimmed by boundary curves: a surface (#192).
             GeometryNode::SurfaceRelation(axiolid_model::SurfaceRelation::CurveBounded {
@@ -493,8 +498,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 chord_error(options),
                 options.tolerance(),
             )
-            .map(|mesh| {
+            .map(|(mesh, merged)| {
                 Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
+                    .with_deviation(crate::deviation::of_curve_bounded(
+                        graph,
+                        *basis,
+                        boundaries,
+                        chord_error(options),
+                        merged,
+                    ))
             }),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
@@ -503,7 +515,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     primitive,
                     chord_tolerance(options)?,
                 )
-                .map(Built::leaf)
+                .map(|mesh| {
+                    let deviation = crate::deviation::of_primitive(primitive, chord_error(options));
+                    Built::leaf(mesh).with_deviation(deviation)
+                })
             }
             other => Err(GeomError::Unsupported {
                 backend: self.descriptor().id,
@@ -1029,6 +1044,41 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     pub const fn boolean_provider(&self) -> &B {
         &self.boolean
     }
+
+    /// Compile one root and report how far its exact surface may lie from
+    /// the mesh (#232).
+    ///
+    /// The outcome is [`MeshCompiler::compile_mesh_reported`]'s. The report
+    /// carries a certified upper bound on the distance from every point of
+    /// the exact surface to the mesh's triangles, in world units, the
+    /// paths that contributed, and whether the bound is within the chord
+    /// budget asked for; see [`crate::DeviationReport`] and the
+    /// [`deviation`](crate::deviation) module for what each path's bound
+    /// rests on. A path with no certified bound is named, and makes the
+    /// overall bound `None`.
+    ///
+    /// An inherent method rather than a [`MeshCompiler`] one: the bound is
+    /// this compiler's claim about its own meshes, and another compiler
+    /// would have to prove its own before it could make it.
+    ///
+    /// # Errors
+    ///
+    /// As [`MeshCompiler::compile_mesh_reported`].
+    pub fn compile_mesh_with_deviation(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<(CompileOutcome, crate::DeviationReport)> {
+        self.admit_budget(options)?;
+        let mut cache = Cache::new();
+        let built = self.evaluate(graph, root, options, &mut cache)?;
+        let report = built.deviation.report(chord_error(options));
+        Ok((
+            CompileOutcome::tracked(built.mesh, built.fates.into_vec()).with_closure(built.closure),
+            report,
+        ))
+    }
 }
 
 /// A face's outer ring followed by its holes.
@@ -1071,7 +1121,12 @@ fn authored_mesh(mesh: TriMesh, _options: &ExecutionOptions) -> Built {
     } else {
         axiolid_mesh_compile_contract::MeshClosure::Surface
     };
-    Built::with_closure(mesh, closure)
+    // An authored mesh is its own exact surface (#232).
+    Built::with_closure(mesh, closure).with_deviation(crate::deviation::Deviation::one(
+        crate::deviation::DeviationPath::AuthoredMesh,
+        "",
+        crate::deviation::DeviationBound::Proven(0.0),
+    ))
 }
 
 /// Every edge of the index connectivity is shared by exactly two

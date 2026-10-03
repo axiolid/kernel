@@ -4,7 +4,9 @@
 
 mod bounded;
 mod brep;
+mod certify;
 mod channels;
+pub mod deviation;
 mod directrix;
 mod pinch;
 mod planar;
@@ -16,6 +18,7 @@ pub const BACKEND_ID: BackendId = BackendId::new("scalar-compile");
 
 mod compiler;
 pub use compiler::ReferenceMeshCompiler;
+pub use deviation::{DeviationBound, DeviationContribution, DeviationPath, DeviationReport};
 
 mod exact;
 pub use directrix::ExactDirectrix;

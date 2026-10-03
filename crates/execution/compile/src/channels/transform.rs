@@ -55,6 +55,7 @@ pub(crate) fn transform(built: &Built, transform: Transform3) -> Built {
         mesh,
         fates: built.fates.clone(),
         closure: built.closure,
+        deviation: built.deviation.transformed(transform),
     }
 }
 

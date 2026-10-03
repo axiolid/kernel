@@ -27,6 +27,22 @@ caret rule for `0.x` versions.
   most it, and a gap of ten tolerances is kept. One-segment semicircular
   arches compile (contour lowering splits them).
 
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` and
+  `DeviationReport` (#232): next to the mesh, a certified upper bound on
+  the distance from every point of the exact surface to the triangles, the
+  paths that contributed (`DeviationContribution`, `DeviationPath`,
+  `DeviationBound::{Proven, Certified, Unbounded}`) and whether the
+  requested chord budget is met. #231's paths report the budget they are
+  proven to; profiles report their flattening's bound (a derived profile
+  its stretch); curved B-rep faces a per-triangle bound from the surface's
+  second-derivative bounds plus each trim pcurve's lens; pipes along
+  segments and arcs and primitive cylinders and cones the budget their
+  constructions prove; disks swept along B-splines and ellipses a bound
+  certified against the exact tube by branch and bound. Booleans, tapered
+  extrusions, sectioned spines, bounded half-spaces, composites holding
+  other curves and other frame laws are unbounded by name. An
+  inherent method: the `MeshCompiler` contract is unchanged.
+
 ### Changed
 
 - A swept disk's `fillet_radius` is honoured on polylines and composites
@@ -37,6 +53,15 @@ caret rule for `0.x` versions.
   polyline directrix, a fillet that does not fit its segments, a disk
   radius at or above the fillet or bend radius, and a sweep range
   combined with a fillet radius (`UnsupportedInput`).
+
+- A B-spline directrix with no corner knot reports its exact end
+  tangents, so sweeps along it refine their stations and stand their end
+  caps square to the curve, as along a conic (#232).
+- Curved B-rep faces are also refined where a triangle's certified bound
+  misses the chord budget, by its widest free edge, up to a vertex cap; a
+  pass that runs out of depth or vertices is discarded for the
+  measurement-only refinement. Trim edges are sampled until their
+  certified chord bound fits too, where that converges (#232).
 
 ### Fixed
 
@@ -54,6 +79,11 @@ caret rule for `0.x` versions.
   sweep, and composites holding other curves (ellipse arcs, B-splines)
   are swept as sampled.
 
+- Trim samples earcut skips as collinear are put back on a curved face
+  (#232): a straight pcurve sampled into many points came back as one long
+  triangle edge, a T-junction against the face across it. The fan of thin
+  triangles that putting them back leaves is then flipped to a Delaunay
+  triangulation of the trim polygon, in parameters scaled to the surface.
 
 ## [0.3.8] - 2026-10-02
 

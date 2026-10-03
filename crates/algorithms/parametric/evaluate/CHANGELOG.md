@@ -9,6 +9,31 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `bound` (#232): certified derivative and chord bounds.
+  `chord_bound2`/`chord_bound3` bound how far a curve strays from the chord
+  of a parameter span (exact sagitta for an arc of at most half a turn,
+  `h^2/8 sup|c''|` otherwise, and for a rational B-spline the projective
+  form `h^2/8 (|A''| + R|w''|) / w_min`, which carries no first-derivative
+  terms); `curve_derivative_bounds2`/`3` bound `|c'|, |c''|, |c'''|` of
+  lines, circles, ellipses, sinusoids and B-splines (rational too) from
+  closed forms and derivative control polygons; `SurfaceBoundOracle`
+  bounds the first and second partials of every elementary surface and of
+  B-spline surfaces over a parameter box, with interpolation coefficients
+  for linear interpolation over a triangle; `continuity_breaks2`/`3` name
+  the knots where a curve may fail to be `C^k`; `certifies_flattening2`/`3`
+  name the families whose flattening is certified.
+
+### Changed
+
+- `flatten2` and `flatten3` accept a span only when its certified chord
+  bound is within the tolerance too, for every family `bound` covers
+  (#232): the midpoint sagitta alone let an ellipse or a spline bulge past
+  its chord either side of the midpoint. A B-spline is cut at its corner
+  knots (multiplicity at least the degree) first, so a corner is kept as
+  an exact vertex. Families without a bound keep the sagitta test.
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

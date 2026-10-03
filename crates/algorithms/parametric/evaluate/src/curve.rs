@@ -939,6 +939,11 @@ pub(crate) fn eval_homogeneous<const N: usize>(
 /// Flatten a 2D curve over `domain` so the chord never deviates from the true
 /// curve by more than `chord_tolerance`.
 ///
+/// For the families [`crate::bound::certifies_flattening2`] names this is a
+/// guarantee: every span is also accepted on a certified chord bound, and a
+/// B-spline is cut at its corner knots first (#232). Other families are
+/// accepted on their midpoint sagitta alone.
+///
 /// # Why bisection rather than a closed-form segment count
 ///
 /// A count derived from radius and tolerance only works for circles. Bisecting
@@ -999,17 +1004,52 @@ pub fn flatten2(
 
     let mut out = vec![evaluate2(curve, domain.start)?];
     let eval = |t| evaluate2(curve, t);
-    subdivide(
-        &eval,
-        domain.start,
-        domain.end,
-        chord_tolerance,
-        max_depth.min(MAX_DEPTH_CEILING),
-        MAX_POINTS,
-        &mut out,
-    )?;
-    out.push(evaluate2(curve, domain.end)?);
+    let bound = |a, b| crate::bound::chord_bound2(curve, a, b);
+    for (a, b) in smooth_pieces(domain, &crate::bound::continuity_breaks2(curve, 1)) {
+        subdivide(
+            &eval,
+            &bound,
+            a,
+            b,
+            chord_tolerance,
+            max_depth.min(MAX_DEPTH_CEILING),
+            MAX_POINTS,
+            &mut out,
+        )?;
+        out.push(evaluate2(curve, b)?);
+    }
     Ok(out)
+}
+
+/// `domain` cut at the breaks strictly inside it, in its own direction.
+///
+/// A chord across a knot where the curve is not `C^1` cannot be certified
+/// (#232): the curve may turn a corner there. Cutting at the knot keeps the
+/// corner as an exact vertex and leaves smooth pieces to bound.
+fn smooth_pieces(domain: Interval, breaks: &[Scalar]) -> Vec<(Scalar, Scalar)> {
+    let (lo, hi) = if domain.start <= domain.end {
+        (domain.start, domain.end)
+    } else {
+        (domain.end, domain.start)
+    };
+    let mut cuts: Vec<Scalar> = breaks
+        .iter()
+        .copied()
+        .filter(|&t| t > lo && t < hi)
+        .collect();
+    cuts.sort_by(Scalar::total_cmp);
+    cuts.dedup();
+    if domain.start > domain.end {
+        cuts.reverse();
+    }
+    let mut out = Vec::with_capacity(cuts.len() + 1);
+    let mut from = domain.start;
+    for cut in cuts {
+        out.push((from, cut));
+        from = cut;
+    }
+    out.push((from, domain.end));
+    out
 }
 
 /// Hard ceiling on recursion depth regardless of what a caller asks for.
@@ -1093,8 +1133,18 @@ fn sagitta<P: ChordPoint>(a: P, b: P, m: P) -> Scalar {
 /// exhaustion is an error rather than a truncation, matching the 2D
 /// contract: silently returning a coarser polyline than asked for would
 /// break the tolerance guarantee the caller is relying on.
-fn subdivide<P, F>(
+///
+/// A span is accepted when its midpoint sagitta is within `tol` AND, for a
+/// family [`crate::bound`] can bound, its certified chord bound is too
+/// (#232). The midpoint alone is a measurement: an ellipse or a spline can
+/// cross its chord at the midpoint and bulge either side of it. A family
+/// with no bound (`bound` returns `None`) keeps the sagitta test alone,
+/// which is why [`crate::bound::certifies_flattening2`] names the families
+/// whose output is certified.
+#[allow(clippy::too_many_arguments)]
+fn subdivide<P, F, B>(
     eval: &F,
+    bound: &B,
     a: Scalar,
     b: Scalar,
     tol: Scalar,
@@ -1105,6 +1155,7 @@ fn subdivide<P, F>(
 where
     P: ChordPoint,
     F: Fn(Scalar) -> GeomResult<P>,
+    B: Fn(Scalar, Scalar) -> Option<Scalar>,
 {
     if out.len() >= budget {
         return Err(GeomError::Degenerate(format!(
@@ -1130,7 +1181,7 @@ where
         )));
     }
     let pm = eval(mid)?;
-    if sagitta(pa, pb, pm) <= tol {
+    if sagitta(pa, pb, pm) <= tol && bound(a, b).is_none_or(|certified| certified <= tol) {
         // Within tolerance: the chord a->b stands, no interior point.
         return Ok(());
     }
@@ -1139,9 +1190,9 @@ where
             resource: "curve flattening depth",
         });
     }
-    subdivide(eval, a, mid, tol, depth - 1, budget, out)?;
+    subdivide(eval, bound, a, mid, tol, depth - 1, budget, out)?;
     out.push(pm);
-    subdivide(eval, mid, b, tol, depth - 1, budget, out)?;
+    subdivide(eval, bound, mid, b, tol, depth - 1, budget, out)?;
     Ok(())
 }
 
@@ -1299,17 +1350,21 @@ pub fn flatten3(
     }
 
     let eval = |t| evaluate3(curve, t);
+    let bound = |a, b| crate::bound::chord_bound3(curve, a, b);
     let mut out = vec![eval(domain.start)?];
-    subdivide(
-        &eval,
-        domain.start,
-        domain.end,
-        chord_tolerance,
-        max_depth.min(MAX_DEPTH_CEILING),
-        MAX_POINTS,
-        &mut out,
-    )?;
-    out.push(eval(domain.end)?);
+    for (a, b) in smooth_pieces(domain, &crate::bound::continuity_breaks3(curve, 1)) {
+        subdivide(
+            &eval,
+            &bound,
+            a,
+            b,
+            chord_tolerance,
+            max_depth.min(MAX_DEPTH_CEILING),
+            MAX_POINTS,
+            &mut out,
+        )?;
+        out.push(eval(b)?);
+    }
     Ok(out)
 }
 

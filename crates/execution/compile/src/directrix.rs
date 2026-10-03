@@ -25,13 +25,14 @@ pub(crate) fn points(
 }
 
 /// The directrix sampled to the options' chord budget, with its exact end
-/// tangents when it is one smooth conic arc (#231).
+/// tangents when it is one smooth curve (#231, #232).
 ///
-/// Only a circle or an ellipse, alone or trimmed, reports its tangents:
-/// those are smooth everywhere, so a sweep may refine them until its walls
-/// fit its budget. A line or polyline is its own chords, and a composite or
-/// a B-spline may carry corners that no refinement removes, so those are
-/// swept as sampled.
+/// A circle or an ellipse, alone or trimmed, reports its tangents: those
+/// are smooth everywhere, so a sweep may refine them until its walls fit
+/// its budget. So does a B-spline with no corner knot (one of full
+/// multiplicity) inside the swept span (#232). A line or polyline is its
+/// own chords, and a composite or a cornered B-spline may carry corners
+/// that no refinement removes, so those are swept as sampled.
 pub(crate) fn sampled(
     graph: &GeometryGraph,
     id: NodeId,
@@ -61,13 +62,21 @@ fn reversed((mut points, ends): Resolved) -> Resolved {
     (points, ends.map(|[start, end]| [-end, -start]))
 }
 
-/// Unit tangents of a smooth conic at the ends of `[start, end]`, in the
-/// direction of increasing parameter; `None` for any other family.
-fn conic_ends(curve: &axiolid_curve::Curve3, start: Scalar, end: Scalar) -> Option<[Vec3; 2]> {
-    if !matches!(
-        curve,
-        axiolid_curve::Curve3::Circle(_) | axiolid_curve::Curve3::Ellipse(_)
-    ) {
+/// Unit tangents of a smooth curve at the ends of `[start, end]`, in the
+/// direction of increasing parameter: a conic, or a B-spline with no
+/// corner knot strictly inside (#232); `None` for any other family.
+fn smooth_ends(curve: &axiolid_curve::Curve3, start: Scalar, end: Scalar) -> Option<[Vec3; 2]> {
+    let smooth = match curve {
+        axiolid_curve::Curve3::Circle(_) | axiolid_curve::Curve3::Ellipse(_) => true,
+        axiolid_curve::Curve3::BSpline(_) => {
+            let (lo, hi) = (start.min(end), start.max(end));
+            !axiolid_reference::bound::continuity_breaks3(curve, 1)
+                .into_iter()
+                .any(|knot| knot > lo && knot < hi)
+        }
+        _ => false,
+    };
+    if !smooth {
         return None;
     }
     let unit = |t| {
@@ -303,7 +312,7 @@ fn sample_periodic_trim(
         crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
     )?;
-    Ok((points, conic_ends(curve, lo, hi)))
+    Ok((points, smooth_ends(curve, lo, hi)))
 }
 
 /// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
@@ -418,7 +427,7 @@ fn sample_curve(
         crate::compiler::chord_error(options),
         MAX_FLATTEN_DEPTH,
     )?;
-    Ok((points, conic_ends(curve, domain.start, domain.end)))
+    Ok((points, smooth_ends(curve, domain.start, domain.end)))
 }
 
 fn stitch(target: &mut Vec<Point3>, mut child: Vec<Point3>, tolerance: Scalar) -> GeomResult<()> {
@@ -677,4 +686,120 @@ fn exact_at(
             "directrix {id:?} is outside the graph"
         ))),
     }
+}
+
+/// What a sweep's directrix is, for its deviation report (#232).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DirectrixKind {
+    /// One straight segment.
+    Segment,
+    /// One circular arc.
+    Arc(axiolid_curve::Circle3),
+    /// One smooth curve over a parameter span, as the mesh path samples it:
+    /// an ellipse or a B-spline.
+    Smooth(axiolid_curve::Curve3, axiolid_core::Interval),
+    /// Anything else, named.
+    Other(&'static str),
+}
+
+/// Classify a directrix the way [`sampled`] reads it.
+///
+/// A segment or an arc is what [`exact`] resolves. An ellipse or a
+/// B-spline, alone, trimmed or read through a curve-3D surface curve, is
+/// [`DirectrixKind::Smooth`] over the span [`sampled`] flattens; a trim of
+/// a periodic ellipse uses the same unwrapped interval. Everything else
+/// (polylines, composites, relations of relations) is named.
+pub(crate) fn kind(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<DirectrixKind> {
+    fn marker(_: &'static str) -> GeomError {
+        GeomError::Degenerate("not one segment or one arc".to_owned())
+    }
+    if let Ok(exact) = exact(graph, id, range, options, marker) {
+        return Ok(match exact {
+            ExactDirectrix::Segment(..) => DirectrixKind::Segment,
+            ExactDirectrix::Arc(circle, _) => DirectrixKind::Arc(circle),
+        });
+    }
+    smooth_kind(graph, id, range, options, 0)
+}
+
+fn smooth_kind(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+    depth: usize,
+) -> GeomResult<DirectrixKind> {
+    use axiolid_curve::Curve3;
+    if depth > MAX_DEPTH {
+        return Err(GeomError::BudgetExceeded {
+            resource: "directrix relation depth",
+        });
+    }
+    let smooth = |curve: &Curve3| matches!(curve, Curve3::Ellipse(_) | Curve3::BSpline(_));
+    Ok(match graph.get(id) {
+        Some(GeometryNode::Curve3(curve)) if smooth(curve) => {
+            DirectrixKind::Smooth(curve.clone(), clamped_span(curve, range)?)
+        }
+        Some(GeometryNode::Curve3(Curve3::Polyline(_))) => {
+            DirectrixKind::Other("polyline directrix")
+        }
+        Some(GeometryNode::Curve3(_)) => DirectrixKind::Other("directrix curve family"),
+        Some(GeometryNode::CurveRelation(CurveRelation::SurfaceCurve {
+            curve_3d,
+            master: MasterRepresentation::Curve3d,
+            ..
+        })) => smooth_kind(graph, *curve_3d, range, options, depth + 1)?,
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+            basis,
+            start,
+            end,
+            sense_agreement,
+            preference,
+        })) => {
+            let Some(GeometryNode::Curve3(curve)) = graph.get(*basis) else {
+                return Ok(DirectrixKind::Other("trim of a curve relation"));
+            };
+            if !smooth(curve) {
+                return Ok(DirectrixKind::Other("trimmed directrix curve family"));
+            }
+            let a = parameter(start, *preference, "start", curve, options.tolerance())?;
+            let b = parameter(end, *preference, "end", curve, options.tolerance())?;
+            if let Some(period) = period_of(curve) {
+                let (lo, hi) =
+                    periodic_trim_interval(period, a, b, *sense_agreement, range, options)?;
+                DirectrixKind::Smooth(curve.clone(), axiolid_core::Interval::new(lo, hi))
+            } else {
+                let (s, e) = range.unwrap_or((a, b));
+                DirectrixKind::Smooth(curve.clone(), clamped_span(curve, Some((s, e)))?)
+            }
+        }
+        Some(GeometryNode::CurveRelation(CurveRelation::Composite { .. })) => {
+            DirectrixKind::Other("composite directrix")
+        }
+        Some(GeometryNode::CurveRelation(_)) => DirectrixKind::Other("directrix relation"),
+        _ => DirectrixKind::Other("not a 3D curve"),
+    })
+}
+
+/// The span [`sample_curve`] flattens: the natural domain, narrowed to a
+/// range when one is given.
+fn clamped_span(
+    curve: &axiolid_curve::Curve3,
+    range: Option<(Scalar, Scalar)>,
+) -> GeomResult<axiolid_core::Interval> {
+    let natural = axiolid_reference::curve::domain3(curve);
+    Ok(match range {
+        None => natural,
+        Some((start, end)) => {
+            let (start, end) = finite_range((start, end))?;
+            let lo = natural.start.min(natural.end);
+            let hi = natural.start.max(natural.end);
+            axiolid_core::Interval::new(start.min(end).max(lo), start.max(end).min(hi))
+        }
+    })
 }

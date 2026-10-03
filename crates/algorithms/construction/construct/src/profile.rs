@@ -12,6 +12,7 @@
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance};
+use axiolid_curve::Curve2;
 use axiolid_profile::{CircleProfile, EllipseProfile, Profile, RectangleProfile};
 
 /// Outer ring plus holes, all CCW/CW normalised by the caller's contract:
@@ -81,6 +82,176 @@ pub fn profile_rings(
         .inspect_err(|_| {
             let _ = other;
         }),
+    }
+}
+
+/// How far a profile's exact boundary may lie from the rings
+/// [`profile_rings`] flattens it to (#232).
+///
+/// `Bounded(d)`: every point of the exact boundary is within `d` of an edge
+/// of the rings, so every point of the exact region is within `d` of the
+/// rings' region too (a point between an arc and its chord is in the
+/// convex hull of the two, hence within the arc's distance of the chord).
+/// `Unbounded` names the part that has no certified bound.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProfileDeviation {
+    /// A certified upper bound, in the profile's own units.
+    Bounded(Scalar),
+    /// No certified bound; the reason names the family.
+    Unbounded(&'static str),
+}
+
+impl ProfileDeviation {
+    /// The worse of two deviations: unbounded wins, else the larger bound.
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unbounded(reason), _) | (_, Self::Unbounded(reason)) => Self::Unbounded(reason),
+            (Self::Bounded(a), Self::Bounded(b)) => Self::Bounded(a.max(b)),
+        }
+    }
+
+    fn scaled(self, factor: Scalar) -> Self {
+        match self {
+            Self::Bounded(d) => Self::Bounded(d * factor),
+            unbounded => unbounded,
+        }
+    }
+
+    fn plus(self, extra: Scalar) -> Self {
+        match self {
+            Self::Bounded(d) => Self::Bounded(d + extra),
+            unbounded => unbounded,
+        }
+    }
+}
+
+/// The deviation of [`profile_rings`]`(profile, chord_error, tolerance)`
+/// from the exact profile (#232).
+///
+/// The rings are rebuilt here, deterministically, and three things are
+/// read off them:
+///
+/// - each curved segment's family: one [`axiolid_reference::curve::flatten2`]
+///   certifies ([`axiolid_reference::bound::certifies_flattening2`]) is
+///   within `chord_error` of its chords; any other is `Unbounded`;
+/// - the points merged as coincident (within the linear tolerance of the
+///   point kept): a merged point moves the ring by at most its distance to
+///   the kept one, which is added;
+/// - a derived profile's transform, whose largest stretch scales the
+///   basis's bound.
+///
+/// # Errors
+///
+/// As [`profile_rings`] for the same arguments.
+pub fn profile_deviation(
+    profile: &Profile,
+    chord_error: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<ProfileDeviation> {
+    Ok(match profile {
+        Profile::Rectangle(r) if r.outer_radius.is_some() || r.inner_radius.is_some() => {
+            contour_deviation(
+                &crate::section_lower::rectangle_contour(r)?,
+                chord_error,
+                tolerance,
+            )?
+        }
+        Profile::Rectangle(r) => {
+            rectangle_rings(r, chord_error, tolerance)?;
+            match r.thickness {
+                // The hole is dropped when one of its extents vanishes
+                // within the tolerance; its slit walls then lie inside the
+                // solid, far from every ring.
+                Some(t) if tolerance.eq(r.x / 2.0 - t, 0.0) || tolerance.eq(r.y / 2.0 - t, 0.0) => {
+                    ProfileDeviation::Unbounded("hollow rectangle whose hole collapses")
+                }
+                _ => ProfileDeviation::Bounded(0.0),
+            }
+        }
+        Profile::Section(section) => contour_deviation(
+            &crate::section_lower::section_contour(section)?,
+            chord_error,
+            tolerance,
+        )?,
+        Profile::Circle(c) => {
+            circle_rings(c, chord_error)?;
+            ProfileDeviation::Bounded(chord_error)
+        }
+        Profile::Ellipse(e) => {
+            ellipse_rings(e, chord_error)?;
+            ProfileDeviation::Bounded(chord_error)
+        }
+        Profile::Contour(c) => contour_deviation(c, chord_error, tolerance)?,
+        Profile::Derived { basis, transform } => {
+            profile_deviation(basis, chord_error, tolerance)?.scaled(stretch2(transform))
+        }
+        Profile::CenterLine(cl) => {
+            profile_rings(profile, chord_error, tolerance)?;
+            let mut merged: Scalar = 0.0;
+            contour_points_measured(&cl.path, chord_error, tolerance, &mut merged)?;
+            let straight = cl
+                .path
+                .segments
+                .iter()
+                .all(|segment| matches!(segment.curve, Curve2::Line(_) | Curve2::Polyline(_)));
+            if straight && merged == 0.0 {
+                ProfileDeviation::Bounded(0.0)
+            } else {
+                ProfileDeviation::Unbounded("centre-line profile along a curved or merged path")
+            }
+        }
+        _ => {
+            profile_rings(profile, chord_error, tolerance)?;
+            ProfileDeviation::Unbounded("profile family")
+        }
+    })
+}
+
+/// The largest stretch of a 2D affine map's linear part: its largest
+/// singular value, `sqrt((F + sqrt(F^2 - 4 D^2)) / 2)` with `F` the squared
+/// Frobenius norm and `D` the determinant, inflated against rounding.
+fn stretch2(transform: &axiolid_core::Transform2) -> Scalar {
+    let m = transform.matrix2;
+    let f = m.x_axis.length_squared() + m.y_axis.length_squared();
+    let d = m.determinant();
+    let disc = (f * f - 4.0 * d * d).max(0.0).sqrt();
+    (0.5 * (f + disc)).sqrt() * (1.0 + 1e-12)
+}
+
+/// [`ProfileDeviation`] of one contour with holes.
+fn contour_deviation(
+    c: &axiolid_profile::ContourProfile,
+    chord_error: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<ProfileDeviation> {
+    let mut deviation = ProfileDeviation::Bounded(0.0);
+    for contour in core::iter::once(&c.outer).chain(&c.holes) {
+        let mut merged: Scalar = 0.0;
+        contour_points_measured(contour, chord_error, tolerance, &mut merged)?;
+        let mut chords = ProfileDeviation::Bounded(0.0);
+        for segment in &contour.segments {
+            chords = chords.max(segment_deviation(&segment.curve, chord_error));
+        }
+        deviation = deviation.max(chords.plus(merged));
+    }
+    Ok(deviation)
+}
+
+/// A segment's chord deviation: none for a straight one, the budget for a
+/// family the flattener certifies, else unbounded by family.
+fn segment_deviation(curve: &Curve2, chord_error: Scalar) -> ProfileDeviation {
+    match curve {
+        Curve2::Line(_) | Curve2::Polyline(_) => ProfileDeviation::Bounded(0.0),
+        other if axiolid_reference::bound::certifies_flattening2(other) => {
+            ProfileDeviation::Bounded(chord_error)
+        }
+        Curve2::Intrinsic(_) => ProfileDeviation::Unbounded("intrinsic (clothoid) profile segment"),
+        Curve2::BSpline(_) => {
+            ProfileDeviation::Unbounded("B-spline profile segment with a non-positive weight")
+        }
+        _ => ProfileDeviation::Unbounded("profile segment family"),
     }
 }
 
@@ -309,6 +480,19 @@ fn contour_points(
     chord_error: Scalar,
     tolerance: Tolerance,
 ) -> GeomResult<Vec<Point2>> {
+    let mut merged = 0.0;
+    contour_points_measured(contour, chord_error, tolerance, &mut merged)
+}
+
+/// [`contour_points`], also raising `merged` to the largest distance
+/// between a dropped near-duplicate point and the point it merged into
+/// (#232): dropping it moves the ring by no more than that.
+fn contour_points_measured(
+    contour: &axiolid_profile::Contour,
+    chord_error: Scalar,
+    tolerance: Tolerance,
+    merged: &mut Scalar,
+) -> GeomResult<Vec<Point2>> {
     let mut out: Vec<Point2> = Vec::new();
     for segment in &contour.segments {
         let mut pts = segment_points(segment, chord_error)?;
@@ -316,17 +500,18 @@ fn contour_points(
             pts.reverse();
         }
         for p in pts {
-            if out
-                .last()
-                .is_none_or(|last| !near2(*last, p, tolerance.linear()))
-            {
-                out.push(p);
+            match out.last() {
+                Some(last) if near2(*last, p, tolerance.linear()) => {
+                    *merged = merged.max((*last - p).length());
+                }
+                _ => out.push(p),
             }
         }
     }
     // A closed ring must not repeat its first point as its last.
     while out.len() > 1 && near2(out[0], *out.last().expect("non-empty"), tolerance.linear()) {
-        out.pop();
+        let dropped = out.pop().expect("non-empty");
+        *merged = merged.max((out[0] - dropped).length());
     }
     if out.len() < 3 {
         return Err(GeomError::Degenerate(format!(
