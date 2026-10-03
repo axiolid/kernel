@@ -703,7 +703,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             // construction splits the budget between the section and the
             // directrix and refines the directrix until its walls fit.
             // Lines, polylines and composites of lines and arcs are swept
-            // piece by piece, corners refused or filleted (#232).
+            // piece by piece, corners mitred (#245) or filleted (#232).
             SolidOperation::SweptDisk {
                 directrix,
                 radius,

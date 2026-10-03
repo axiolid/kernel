@@ -9,6 +9,32 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restored: swept disks mitre their corners again (#245).** Since 0.3.11
+  (#232) `pipe::swept_disk_along_pieces` refused a non-tangent joint as
+  "undefined"; that was a regression (0.3.11 and 0.3.12). A disk swept
+  round a corner between two straight segments is mitred at half angle,
+  as `IfcSweptDiskSolid` defines it: both tubes are cut by the plane that
+  bisects the two tangents, and the two pieces share one ring on it whose
+  every vertex lies on both exact cylinders (the outgoing frame is the
+  least rotation of the incoming one, which agrees with the reflection in
+  the mitre plane). The walls are planar trapezoids, exact faces of the
+  ring prism; the ring is chorded to `(c/2) cos(theta/2)` for the
+  sharpest mitre, because the mitre stretches the section by
+  `1 / cos(theta/2)`, so the exact tube stays within the chord budget
+  (derivation in the module notes). Hollow disks mitre their bore the same
+  way. The near-tangent tolerance `joint_tolerance` is unchanged. Refused
+  by name: a segment whose mitres reach past its length
+  (`L <= r |g_perp|`, `r tan(theta/2)` for one mitre: the tube would cut
+  through itself), a reversal, and a corner beside an arc (no ring lies
+  on both the cylinder's and the torus's cut).
+- A disk radius equal to the fillet or bend radius is refused with its own
+  reason (#245): the format rule permits a fillet radius equal to the disk
+  radius, but the bend is then a horn torus whose inner wall pinches to a
+  point on the bend's axis, which no closed two-manifold mesh bounds
+  without meeting itself there.
+
 ## [0.3.12] - 2026-10-03
 
 ### Changed

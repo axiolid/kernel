@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restored: swept disks along polylines and composites with sharp
+  corners compile again, mitred (#245).** From 0.3.9 to 0.3.11 a
+  `SweptDisk` whose directrix turned a corner with no fillet radius was
+  refused ("give a fillet radius"); that was a regression. Each corner
+  between two straight segments is mitred at half angle (both legs cut by
+  the bisector plane, as `IfcSweptDiskSolid` defines it), watertight, one
+  winding, the volume exactly the ring polygon's area times the
+  centreline length, and every point of the exact tube within the chord
+  budget (measured: at most 0.50 of it at 1 mm and 0.1 mm for 30, 90 and
+  150 degree corners, out of plane, hollow).
+  `compile_mesh_with_deviation` reports such pipes `Proven` at the
+  budget. A cut through a polyline corner keeps the corner. Still refused
+  by name: a mitre reaching past its leg, a reversal, a corner beside an
+  arc, a disk radius equal to the fillet or bend radius (a horn torus),
+  and a closed polyline, now `UnsupportedInput` (its closing mitre is not
+  built). The exact compiler still refuses directrices with corners.
+
 ### Added
 
 - `ReferenceExactCompiler::compile_exact_with_report` and

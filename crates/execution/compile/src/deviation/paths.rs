@@ -87,8 +87,9 @@ pub(crate) fn of_solid(
         } => {
             // Lines, polylines (filleted or not) and chains of segments and
             // arcs are swept piece by piece by `axiolid_construct::pipe`,
-            // which proves the budget (#232); the compiler takes that path
-            // whenever the directrix resolves to pieces.
+            // which proves the budget (#232), mitred corners included (#245);
+            // the compiler takes that path whenever the directrix resolves
+            // to pieces, and refuses what it cannot prove.
             if crate::directrix::pieces(graph, *directrix, *parameter_range, options)?.is_some() {
                 return Ok(Deviation::one(
                     DeviationPath::SweptDisk,

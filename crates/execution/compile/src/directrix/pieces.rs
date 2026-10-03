@@ -3,7 +3,7 @@
 //! Lines, polylines, circles, their trims and composites of them resolve
 //! to [`PathPiece`]s with the same parameter conventions as the sampled
 //! reading in the parent module, so `axiolid_construct::pipe` can bound
-//! the tube against its exact centreline and refuse corners by name. Any
+//! the tube against its exact centreline and mitre its corners. Any
 //! other family (an ellipse, a B-spline) yields `None`, and the caller
 //! sweeps the sampled path as before.
 
@@ -211,12 +211,15 @@ fn curve_pieces(
             }]))
         }
         Curve3::Polyline(polyline) => {
+            // Its last section would have to be mitred back onto its first,
+            // and the frames carried round a loop that leaves its plane do
+            // not return to themselves; not built yet (#245).
             if polyline.closed {
-                return Err(GeomError::InvalidInput(
-                    "a swept disk along a closed polyline turns a corner where it closes, \
-                     and a swept disk along a corner is undefined"
-                        .into(),
-                ));
+                return Err(GeomError::UnsupportedInput {
+                    backend: crate::BACKEND_ID,
+                    operation: axiolid_contracts::Operation::Sweep,
+                    input: "a swept disk along a closed polyline (the mitre where it closes)",
+                });
             }
             let d = domain(curve, range, options)?;
             let points = &polyline.points;

@@ -1,11 +1,12 @@
-//! Swept disks along chains of straight segments and circular arcs (#232).
+//! Swept disks along chains of straight segments and circular arcs (#232,
+//! #245).
 //!
 //! A pipe run, a rebar or a cable tray edge is a disk swept along legs
-//! joined by bends: authoring formats write it as a disk swept along a
-//! composite of lines and arcs, or along a polyline whose corners are
-//! rounded to a fillet radius.
-//! [`swept_disk_along_pieces`] meshes both so that every point of the
-//! exact tube lies within the chord budget of the triangles.
+//! joined by bends or corners: authoring formats write it as a disk swept
+//! along a composite of lines and arcs, or along a polyline whose corners
+//! are mitred or rounded to a fillet radius.
+//! [`swept_disk_along_pieces`] meshes all of them so that every point of
+//! the exact tube lies within the chord budget of the triangles.
 //!
 //! # The bound
 //!
@@ -48,17 +49,59 @@
 //! so the first span of the outgoing piece adds the measured `delta` to its
 //! bound and is refined until the sum fits.
 //!
-//! A swept disk along a directrix that is not tangent continuous is
-//! undefined (the section has no single plane at a corner), so a joint
-//! turning by more than
+//! A joint turning by at most
 //!
 //! `theta_max = 2 asin(c / (8 r))` (pi once `c >= 8 r`)
 //!
-//! is a corner and is refused by name: at that turn the shared section
-//! leans off the outgoing piece's own by a quarter of the budget, and any
-//! larger turn would be a kink no chord budget can hide. A turn at or below
-//! it is tangent continuous at the requested accuracy and costs at most
-//! `c/4` of the directrix's half. A gap above `c/4` is refused too.
+//! is tangent continuous at the requested accuracy: its shared section
+//! leans off the outgoing piece's own by at most a quarter of the budget,
+//! which that piece's first span pays as above. A gap above `c/4` is
+//! refused.
+//!
+//! # Mitres
+//!
+//! A sharper joint between two straight segments is a corner, and a disk
+//! swept round a corner is mitred at half angle (#245): both tubes are cut
+//! by the plane through the corner whose normal `n = (u + v) / |u + v|`
+//! bisects the incoming and outgoing tangents `u` and `v`. Reflection in
+//! that plane maps `u` to `-v`, so it swaps the two axis lines and with
+//! them the two cylinders of radius `r` (and the two bores); it fixes the
+//! plane, so both cylinders cut it in the same ellipse. The outgoing frame
+//! is the incoming one turned by the least rotation about `u x v`, which
+//! agrees with that reflection on the plane square to `u`. So profile point
+//! `k` of the incoming end section and of the outgoing start section, each
+//! projected along its own axis onto the mitre plane, land on one point:
+//! the two pieces share that mitre ring, and every vertex of it lies on
+//! both exact cylinders. Each wall quad of a segment joins two generator
+//! lines of the prism over the ring polygon, so it is a planar trapezoid,
+//! exactly a face of that prism cut by the end planes: the walls add
+//! nothing, and the span bound measures them as zero.
+//!
+//! The section pays instead. A point `w + s u` of the exact cylinder (`w`
+//! square to `u`, `|w| = r`; the mitre plane cuts its generator at
+//! `s_cut(w) = -w.n / u.n`, at most `r tan(theta/2)`) lies within
+//! `(1 - l) r <= e = r (1 - cos(pi/m))` of the prism point `w' + s u` at
+//! its azimuth, `w' = l w` on the ring polygon of `m` points. When that
+//! point lies past the plane, the plane crosses the prism's generator at
+//! `l s_cut(w)`, which moves the point by at most
+//! `(1 - l) s_cut(w) <= (1 - l) r tan(theta/2)` along `u`, square to the
+//! first move: the distance is at most `e / cos(theta/2)`, attained where
+//! the ellipse's major axis ends. The rings are therefore chorded to
+//! `(c/2) cos(theta_m/2)` for the sharpest mitre `theta_m` (only finer
+//! elsewhere), and a mitred pipe keeps every point of the exact tube
+//! within `c` of its triangles, as a smooth one does. A hollow disk's bore
+//! is mitred by the same plane and bounded the same way.
+//!
+//! Along a segment of length `L` the tube runs, on the generator at `w`,
+//! from its start plane to its end plane; both cuts are linear in `w`, so
+//! the shortest generator is `L - r |g_perp|` with
+//! `g = n1 / u.n1 - n0 / u.n0` (`n0 = u` at a square end), and it must be
+//! positive (one mitre: `L > r tan(theta/2)`). Refused by name: a segment
+//! whose mitres meet inside the tube, which would cut through itself; a
+//! reversal (`theta = pi`, where the mitre plane holds both legs); and a
+//! corner beside an arc, because the mitre plane cuts the torus round an
+//! arc in a different curve than the tube on its other side, so no ring
+//! lies on both exact surfaces and the bound above does not carry over.
 //!
 //! # Fillets
 //!
@@ -68,10 +111,15 @@
 //! which cuts `f tan(theta/2)` off each. Segments shortened to nothing are
 //! dropped (two fillets then meet tangentially). Refused by name: a fillet
 //! that needs more of a segment than it has, a corner beside an arc (only
-//! corners between straight segments are rounded), a disk radius at or
-//! above the fillet radius, or any bend radius, whose tube folds through
-//! the bend's axis on its inside (equality is a horn torus, which some
-//! formats permit but which bounds no two-manifold solid), and a reversal.
+//! corners between straight segments are rounded), a disk radius above the
+//! fillet radius, or any bend radius, whose tube folds through the bend's
+//! axis on its inside, and a reversal. A disk radius equal to the fillet
+//! (or bend) radius is refused by name too, although the format rule
+//! permits it (fillet radius at least the disk radius): the bend is then a
+//! horn torus whose inner wall pinches to one point on the bend's axis,
+//! where every section touches. That boundary is not a two-manifold; a
+//! closed mesh within the budget would have to either meet itself there
+//! (degenerate triangles) or stand off the pinch and misstate it.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
@@ -266,11 +314,14 @@ impl PathPiece {
                          a full turn, got {angle}"
                     )));
                 }
-                if bend <= radius {
+                if bend < radius {
                     return Err(GeomError::InvalidInput(format!(
                         "swept disk radius {radius} is not below the bend radius {bend}: \
                          the tube would fold through the bend's axis"
                     )));
+                }
+                if bend == radius {
+                    return Err(horn_torus("bend", radius));
                 }
             }
         }
@@ -318,8 +369,9 @@ fn turn(a: Vec3, b: Vec3) -> Scalar {
 /// Sweep a disk, optionally hollow, along a chain of segments and arcs so
 /// that every point of the exact tube lies within `chord` of the mesh.
 ///
-/// `fillet_radius` rounds each corner between two segments; see the
-/// module notes for the bound, the joint rule, and what is refused. The
+/// `fillet_radius` rounds each corner between two segments; without it,
+/// each such corner is mitred at half angle (#245). See the module notes
+/// for the bound, the joint rule, the mitre, and what is refused. The
 /// pieces run in the direction of travel, each starting where the last
 /// ended.
 pub fn swept_disk_along_pieces(
@@ -355,21 +407,11 @@ pub fn swept_disk_along_pieces(
     for piece in &path {
         piece.check(radius)?;
     }
+    // The mitre plane's unit normal at each joint, `None` where the joint
+    // is tangent continuous at this budget.
+    let mut mitres: Vec<Option<Vec3>> = Vec::with_capacity(path.len());
+    let mut sharpest: Scalar = 0.0;
     for (k, pair) in path.windows(2).enumerate() {
-        let theta = turn(pair[0].end_tangent(), pair[1].start_tangent());
-        if theta > tolerance {
-            let advice = if fillet_radius.is_some() {
-                "only corners between two straight segments are filleted"
-            } else {
-                "a swept disk along it is undefined; give a fillet radius or a \
-                 tangent-continuous directrix"
-            };
-            return Err(GeomError::InvalidInput(format!(
-                "swept disk directrix turns a corner of {theta} rad at joint {k}, above \
-                 the {tolerance} rad a tangent-continuous joint may turn at this chord \
-                 budget: {advice}"
-            )));
-        }
         let gap = (pair[1].start_point() - pair[0].end_point()).length();
         if gap > 0.25 * chord {
             return Err(GeomError::InvalidInput(format!(
@@ -377,12 +419,66 @@ pub fn swept_disk_along_pieces(
                  quarter of the {chord} chord budget"
             )));
         }
+        let (u, v) = (pair[0].end_tangent(), pair[1].start_tangent());
+        let theta = turn(u, v);
+        if theta <= tolerance {
+            mitres.push(None);
+            continue;
+        }
+        if !matches!(
+            (pair[0], pair[1]),
+            (PathPiece::Segment { .. }, PathPiece::Segment { .. })
+        ) {
+            let advice = if fillet_radius.is_some() {
+                "only corners between two straight segments are filleted"
+            } else {
+                "only corners between two straight segments are mitred; the mitre plane \
+                 cuts the tube round an arc in a different curve than the tube on its \
+                 other side"
+            };
+            return Err(GeomError::InvalidInput(format!(
+                "swept disk directrix turns a corner of {theta} rad beside an arc at joint \
+                 {k}, above the {tolerance} rad a tangent-continuous joint may turn at this \
+                 chord budget: {advice}"
+            )));
+        }
+        let bisector = u + v;
+        if theta >= core::f64::consts::PI - 1e-9 || bisector.length() <= 1e-9 {
+            return Err(GeomError::InvalidInput(format!(
+                "swept disk directrix reverses at joint {k}: a mitre at half angle would \
+                 hold both legs"
+            )));
+        }
+        sharpest = sharpest.max(theta);
+        mitres.push(Some(bisector.normalize()));
     }
-    let rings = sweep::disk_rings(radius, inner_radius, 0.5 * chord)?;
+    // A segment's two end planes must not meet inside the tube.
+    for (i, piece) in path.iter().enumerate() {
+        let PathPiece::Segment { start, end } = *piece else {
+            continue;
+        };
+        let ends = mitre_ends(&mitres, i);
+        if ends == [None, None] {
+            continue;
+        }
+        let u = (end - start).normalize();
+        let lean = |n: Option<Vec3>| n.map_or(u, |n| n / u.dot(n));
+        let g = lean(ends[1]) - lean(ends[0]);
+        let reach = radius * (g - u * u.dot(g)).length();
+        let length = (end - start).length();
+        if reach >= length {
+            return Err(GeomError::InvalidInput(format!(
+                "swept disk directrix segment {i} is {length} long, but the mitres at its \
+                 ends reach {reach} along it at the disk radius {radius}: the tube would cut \
+                 through itself"
+            )));
+        }
+    }
+    let rings = sweep::disk_rings(radius, inner_radius, 0.5 * chord * (0.5 * sharpest).cos())?;
     let share = 0.5 * chord;
     let mut stations: Vec<Station> = Vec::new();
     let mut last: Option<Frame> = None;
-    for piece in &path {
+    for (i, piece) in path.iter().enumerate() {
         let tangent = piece.start_tangent();
         // The outgoing piece's own start frame: the incoming end frame
         // turned by the least rotation onto this tangent.
@@ -391,7 +487,8 @@ pub fn swept_disk_along_pieces(
             Some(frame) => least_rotation(frame.x, frame.x.cross(frame.y), tangent),
         };
         let joint = stations.last();
-        let (frames, placed) = bounded_piece(piece, &rings, seed, radius, share, joint)?;
+        let ends = mitre_ends(&mitres, i);
+        let (frames, placed) = bounded_piece(piece, &rings, seed, radius, share, joint, ends)?;
         let skip = usize::from(joint.is_some());
         stations.extend(placed.into_iter().skip(skip));
         last = frames.into_iter().last();
@@ -410,9 +507,19 @@ pub fn swept_disk_along_pieces(
 /// Rounds of halving a piece's directrix budget before it is refused.
 const MAX_REFINEMENTS: usize = 16;
 
+/// The mitre normals at the start and the end of piece `i`.
+fn mitre_ends(mitres: &[Option<Vec3>], i: usize) -> [Option<Vec3>; 2] {
+    [
+        i.checked_sub(1).and_then(|k| mitres[k]),
+        mitres.get(i).copied().flatten(),
+    ]
+}
+
 /// A piece's frames and stations, its directrix sampled until each span's
 /// bound fits `share`; the first span also carries the measured distance
-/// from the shared `joint` station to the piece's own first station.
+/// from the shared `joint` station to the piece's own first station. An
+/// end with a mitre normal in `ends` (start, end) has its station
+/// projected along the piece's tangent onto that mitre plane.
 fn bounded_piece(
     piece: &PathPiece,
     rings: &crate::profile::Rings,
@@ -420,15 +527,22 @@ fn bounded_piece(
     reach: Scalar,
     share: Scalar,
     joint: Option<&Station>,
+    ends: [Option<Vec3>; 2],
 ) -> GeomResult<(Vec<Frame>, Vec<Station>)> {
     let mut b = share;
     for _ in 0..MAX_REFINEMENTS {
         let (points, tangents) = piece.sample(b)?;
         let frames = sweep::frames_carried(&points, &tangents, seed)?;
-        let placed: Vec<Station> = frames
+        let mut placed: Vec<Station> = frames
             .iter()
             .map(|f| loft::place(rings, |p| loft::at(f, p)))
             .collect();
+        let last = placed.len() - 1;
+        for (k, normal) in [(0, ends[0]), (last, ends[1])] {
+            if let Some(n) = normal {
+                placed[k] = mitred(&placed[k], &frames[k], n);
+            }
+        }
         let shift = joint.map_or(0.0, |j| displacement(j, &placed[0]));
         let worst = frames
             .windows(2)
@@ -449,6 +563,36 @@ fn bounded_piece(
     Err(GeomError::BudgetExceeded {
         resource: "swept disk directrix refinement",
     })
+}
+
+/// `station`, square to `frame`'s tangent at its origin, projected along
+/// that tangent onto the mitre plane through the origin with unit normal
+/// `normal` (see the module notes).
+fn mitred(station: &Station, frame: &Frame, normal: Vec3) -> Station {
+    let tangent = frame.x.cross(frame.y);
+    let along = tangent.dot(normal);
+    Station {
+        loops: station
+            .loops
+            .iter()
+            .map(|ring| {
+                ring.iter()
+                    .map(|q| *q - tangent * ((*q - frame.origin).dot(normal) / along))
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
+/// The refusal of a disk radius equal to a bend's or fillet's radius
+/// (see the module notes).
+fn horn_torus(what: &str, radius: Scalar) -> GeomError {
+    GeomError::InvalidInput(format!(
+        "swept disk radius {radius} equals the {what} radius: the format rule permits a \
+         fillet radius equal to the disk radius, but the bend is then a horn torus whose \
+         inner wall degenerates to one point on the bend's axis, a boundary that is not a \
+         two-manifold and that no closed mesh bounds without meeting itself there"
+    ))
 }
 
 /// The largest distance between corresponding vertices of two stations.
@@ -516,11 +660,14 @@ fn fillet(
             arcs.push(None);
             continue;
         }
-        if radius >= fillet {
+        if radius > fillet {
             return Err(GeomError::InvalidInput(format!(
-                "swept disk radius {radius} is not below the fillet radius {fillet}: the \
+                "swept disk radius {radius} is above the fillet radius {fillet}: the \
                  tube would fold through the bend's axis"
             )));
+        }
+        if radius == fillet {
+            return Err(horn_torus("fillet", radius));
         }
         let normal = u.cross(v);
         if normal.length() <= 1e-12 {
@@ -594,6 +741,40 @@ mod tests {
         for pair in path.windows(2) {
             assert!((pair[0].end_point() - pair[1].start_point()).length() < 1e-12);
             assert!(turn(pair[0].end_tangent(), pair[1].start_tangent()) < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_mitre_ring_lies_on_both_cylinders_and_on_the_bisector_plane() {
+        let corner = Point3::new(1.0, 0.2, -0.3);
+        let (u, v) = (
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.2, 0.7, -0.4).normalize(),
+        );
+        let pieces = [
+            PathPiece::Segment {
+                start: corner - u,
+                end: corner,
+            },
+            PathPiece::Segment {
+                start: corner,
+                end: corner + v,
+            },
+        ];
+        let (r, inner) = (0.05, 0.03);
+        let mesh = swept_disk_along_pieces(&pieces, r, Some(inner), None, 1e-3).unwrap();
+        // One station per vertex: start, mitre, end.
+        let per = mesh.positions.len() / 3;
+        let n = (u + v).normalize();
+        let off = |p: Point3, axis: Vec3| {
+            let d = p - corner;
+            (d - axis * d.dot(axis)).length()
+        };
+        for p in &mesh.positions[per..2 * per] {
+            assert!((*p - corner).dot(n).abs() < 1e-12);
+            let (a, b) = (off(*p, u), off(*p, v));
+            assert!((a - b).abs() < 1e-12, "{a} {b}");
+            assert!((a - r).abs() < 1e-12 || (a - inner).abs() < 1e-12, "{a}");
         }
     }
 
