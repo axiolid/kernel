@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station::SectionFrame::oriented` (#246, ADR 0082 amendment): turns a
+  section frame by an explicit axis and reference direction given as
+  components in that frame, `(tangent, lateral, up)` -- the axis becomes
+  the exact up, the reference direction is orthonormalised against it
+  (Gram-Schmidt, axis primary), the point stays -- and refuses a zero,
+  non-finite or parallel pair by name (`station::ORIENTATION_TOLERANCE`).
+
 ## [0.3.5] - 2026-10-03
 
 ### Added

@@ -21,7 +21,23 @@
 //! budget of the midpoint of its chord. That test is a sample, not a
 //! proof, so these paths report [`DeviationBound::Unbounded`] by name.
 //!
+//! # Orientation and tags (#246)
+//!
+//! An [`OrientedCurveStation`] and the sections of a
+//! [`SectionsAtStations`] spine or an [`OpenSectionsAtStations`] surface may
+//! carry an explicit orientation, which turns the frame a profile is placed
+//! in (and a resolved station presents) while the offsets stay in the base
+//! frame; between two sections the unit axis and reference direction are
+//! interpolated linearly in the base frame and orthonormalised again.
+//! Tagged sections are matched by tag: an open section's polyline is
+//! reversed when its tags run backwards, and a closed section's rings are
+//! re-ordered and re-started so that every ring lines up with the first
+//! section's, which needs a polygonal contour. The rules are
+//! `axiolid_model::station`'s; a mismatch is refused by name.
+//!
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
+//! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
+//! [`OpenSectionsAtStations`]: axiolid_model::SurfaceRelation::OpenSectionsAtStations
 //! [`StationedSpine`]: axiolid_model::SolidOperation::StationedSpine
 //! [`SectionedSurface`]: axiolid_model::SurfaceRelation::SectionedSurface
 //! [`DeviationBound::Unbounded`]: crate::DeviationBound::Unbounded
@@ -33,9 +49,10 @@ use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance};
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
-    CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, Station, StationFrame,
-    StationOffsets, StationedOpenSection, StationedSection,
+    CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, OrientedCurveStation,
+    SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
 };
+use axiolid_profile::{Contour, Profile};
 use axiolid_reference::station::{station_section2, station_section3, SectionFrame};
 
 /// Most sections one interval between two stations is bisected into.
@@ -59,31 +76,45 @@ pub struct ResolvedStation {
     pub section: SectionFrame,
 }
 
-/// Resolve a [`CurveStation`] node to its point and frame.
+/// Resolve a [`CurveStation`] or an [`OrientedCurveStation`] node to its
+/// point and frame.
 ///
 /// See the [module documentation](self) and
-/// `axiolid_reference::station` for the conventions and the accuracy.
+/// `axiolid_reference::station` for the conventions and the accuracy. An
+/// oriented station's frame is turned by its orientation; its point, and
+/// [`ResolvedStation::section`], are not.
 ///
 /// # Errors
 ///
-/// A node that is not a [`GeometryNode::CurveStation`], a basis that is not
-/// an atomic curve, a distance beyond the basis curve's length, and every
-/// refusal of the curve evaluators, by name.
+/// A node that is not a [`GeometryNode::CurveStation`] or a
+/// [`GeometryNode::OrientedCurveStation`], a basis that is not an atomic
+/// curve, a distance beyond the basis curve's length, a degenerate
+/// orientation, and every refusal of the curve evaluators, by name.
 pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation> {
-    let Some(GeometryNode::CurveStation(CurveStation {
-        basis,
-        station,
-        frame,
-    })) = graph.get(id)
-    else {
-        return Err(GeomError::InvalidInput(format!(
-            "node {id:?} is not a curve station"
-        )));
+    let (
+        CurveStation {
+            basis,
+            station,
+            frame,
+        },
+        orientation,
+    ) = match graph.get(id) {
+        Some(GeometryNode::CurveStation(station)) => (station, StationOrientation::default()),
+        Some(GeometryNode::OrientedCurveStation(OrientedCurveStation {
+            station,
+            orientation,
+            ..
+        })) => (station, *orientation),
+        _ => {
+            return Err(GeomError::InvalidInput(format!(
+                "node {id:?} is not a curve station"
+            )))
+        }
     };
     let basis = Basis::of(graph, *basis)?;
     let section = basis.section(station.distance, *frame)?;
     let point = place(&section, &station.offsets, Point2::ZERO);
-    let mut placed = section.frame();
+    let mut placed = oriented(&section, &orientation, &orientation, 0.0)?.frame();
     placed.origin = point;
     Ok(ResolvedStation {
         point,
@@ -146,6 +177,41 @@ fn place(section: &SectionFrame, offsets: &StationOffsets, local: Point2) -> Poi
         local.y + offsets.vertical,
         offsets.longitudinal,
     )
+}
+
+/// The frame a section is placed in at the fraction `u` between two
+/// sections oriented `a` and `b`: `base` itself when neither is oriented,
+/// else `base` turned by the unit axes interpolated linearly in it.
+fn oriented(
+    base: &SectionFrame,
+    a: &StationOrientation,
+    b: &StationOrientation,
+    u: Scalar,
+) -> GeomResult<SectionFrame> {
+    if a.is_base() && b.is_base() {
+        return Ok(*base);
+    }
+    let unit = |orientation: &StationOrientation| {
+        orientation
+            .unit_axes()
+            .map_err(|detail| GeomError::InvalidInput(format!("station: {detail}")))
+    };
+    let ((axis_a, ref_a), (axis_b, ref_b)) = (unit(a)?, unit(b)?);
+    base.oriented(Some(axis_a.lerp(axis_b, u)), Some(ref_a.lerp(ref_b, u)))
+}
+
+/// A section point `local` placed in the `turned` frame (profile `x` along
+/// its lateral axis, `y` along its up) at the origin the `offsets` locate
+/// in the `base` frame.
+fn place_turned(
+    base: &SectionFrame,
+    turned: &SectionFrame,
+    offsets: &StationOffsets,
+    local: Point2,
+) -> Point3 {
+    base.place(offsets.lateral, offsets.vertical, offsets.longitudinal)
+        + local.x * turned.lateral
+        + local.y * turned.up
 }
 
 fn lerp(a: Scalar, b: Scalar, u: Scalar) -> Scalar {
@@ -368,7 +434,7 @@ fn same_structure(a: &Rings, b: &Rings) -> bool {
 pub(crate) fn stationed_spine(
     graph: &GeometryGraph,
     directrix: NodeId,
-    sections: &[StationedSection],
+    sections: &[SectionAtStation],
     frame: StationFrame,
     options: &ExecutionOptions,
 ) -> GeomResult<TriMesh> {
@@ -379,16 +445,40 @@ pub(crate) fn stationed_spine(
     }
     let basis = Basis::of(graph, directrix)?;
     let half = 0.5 * crate::compiler::chord_error(options);
-    let rings = sections
+    let tagged = !sections[0].tags.is_empty();
+    if sections
         .iter()
-        .map(|section| match graph.get(section.profile) {
-            Some(GeometryNode::Profile(shape)) => profile_rings(shape, half, options.tolerance()),
-            _ => Err(GeomError::InvalidInput(format!(
-                "spine section profile {:?} is not a Profile node",
-                section.profile
-            ))),
-        })
-        .collect::<GeomResult<Vec<_>>>()?;
+        .any(|section| section.tags.is_empty() == tagged)
+    {
+        return Err(GeomError::InvalidInput(
+            "station-placed spine sections mix tagged and untagged sections: tag every \
+             section or none"
+                .into(),
+        ));
+    }
+    let shape = |section: &SectionAtStation| match graph.get(section.profile) {
+        Some(GeometryNode::Profile(shape)) => Ok(shape),
+        _ => Err(GeomError::InvalidInput(format!(
+            "spine section profile {:?} is not a Profile node",
+            section.profile
+        ))),
+    };
+    let rings = if tagged {
+        let tagged = sections
+            .iter()
+            .map(|section| tagged_rings(shape(section)?, &section.tags, options.tolerance()))
+            .collect::<GeomResult<Vec<_>>>()?;
+        let first = &tagged[0].1;
+        tagged
+            .iter()
+            .map(|(rings, tags)| match_rings(first, rings, tags))
+            .collect::<GeomResult<Vec<_>>>()?
+    } else {
+        sections
+            .iter()
+            .map(|section| profile_rings(shape(section)?, half, options.tolerance()))
+            .collect::<GeomResult<Vec<_>>>()?
+    };
     if rings.iter().any(|ring| !same_structure(ring, &rings[0])) {
         return Err(GeomError::InvalidInput(
             "station-placed spine sections must share their ring structure: vertices are \
@@ -411,11 +501,17 @@ pub(crate) fn stationed_spine(
             u,
         );
         let section = basis.section(s, frame)?;
+        let turned = oriented(
+            &section,
+            &sections[i].orientation,
+            &sections[i + 1].orientation,
+            u,
+        )?;
         let points = local
             .outer
             .iter()
             .chain(local.holes.iter().flatten())
-            .map(|p| place(&section, &offsets, *p))
+            .map(|p| place_turned(&section, &turned, &offsets, *p))
             .collect();
         Ok((local, points))
     };
@@ -443,9 +539,170 @@ pub(crate) fn stationed_spine(
     loft_tapered(&rings[0], &rings[rings.len() - 1], &stations)
 }
 
+/// Why a tagged closed section cannot be matched (#246).
+fn tag_mismatch(detail: &str) -> GeomError {
+    GeomError::InvalidInput(format!("station-placed spine tags: {detail}"))
+}
+
+/// A tagged closed section's rings, wound outer counter-clockwise and holes
+/// clockwise, each with its tags in ring order. The tags name the contour
+/// vertices, the outer ring's then each hole's, in authored order.
+fn tagged_rings(
+    profile: &Profile,
+    tags: &[String],
+    tolerance: Tolerance,
+) -> GeomResult<(Rings, Vec<Vec<String>>)> {
+    let mut rings = polygon_rings(profile, tolerance)?;
+    let count: usize = rings.iter().map(Vec::len).sum();
+    if count != tags.len() {
+        return Err(tag_mismatch(&format!(
+            "a section has {} tags for {count} contour vertices",
+            tags.len()
+        )));
+    }
+    let mut names = tags.iter();
+    let mut ring_tags = Vec::with_capacity(rings.len());
+    for (k, ring) in rings.iter_mut().enumerate() {
+        let mut ring_names: Vec<String> = names.by_ref().take(ring.len()).cloned().collect();
+        let area = axiolid_reference::signed_area2(ring);
+        if area == 0.0 || !area.is_finite() {
+            return Err(GeomError::Degenerate(
+                "a tagged spine section has a ring without area".into(),
+            ));
+        }
+        // The outer ring counter-clockwise, holes clockwise, as
+        // `profile_rings` winds them; the tags turn with their vertices.
+        if (area > 0.0) != (k == 0) {
+            ring.reverse();
+            ring_names.reverse();
+        }
+        ring_tags.push(ring_names);
+    }
+    let outer = rings.remove(0);
+    Ok((
+        Rings {
+            outer,
+            holes: rings,
+        },
+        ring_tags,
+    ))
+}
+
+/// The vertex rings of a polygonal profile, outer first, in authored order.
+fn polygon_rings(profile: &Profile, tolerance: Tolerance) -> GeomResult<Vec<Vec<Point2>>> {
+    match profile {
+        Profile::Contour(contour) => std::iter::once(&contour.outer)
+            .chain(&contour.holes)
+            .map(|ring| polygon_vertices(ring, tolerance))
+            .collect(),
+        Profile::Derived { basis, transform } => {
+            let mut rings = polygon_rings(basis, tolerance)?;
+            for point in rings.iter_mut().flatten() {
+                *point = transform.transform_point2(*point);
+            }
+            Ok(rings)
+        }
+        _ => Err(GeomError::UnsupportedInput {
+            backend: crate::BACKEND_ID,
+            operation: Operation::ProfileTriangulation,
+            input: "a tagged spine section whose profile is not a contour: tags name contour \
+                    vertices",
+        }),
+    }
+}
+
+/// A closed contour's vertices: each straight segment's points in the
+/// contour's sense, coincident neighbours merged, the closing repeat
+/// dropped.
+fn polygon_vertices(contour: &Contour, tolerance: Tolerance) -> GeomResult<Vec<Point2>> {
+    let linear = tolerance.linear();
+    let near = |a: Point2, b: Point2| (a.x - b.x).abs() <= linear && (a.y - b.y).abs() <= linear;
+    let mut out: Vec<Point2> = Vec::new();
+    for segment in &contour.segments {
+        if !matches!(segment.curve, Curve2::Line(_) | Curve2::Polyline(_)) {
+            return Err(GeomError::UnsupportedInput {
+                backend: crate::BACKEND_ID,
+                operation: Operation::ProfileTriangulation,
+                input: "a tagged spine section with a curved contour segment: tags name the \
+                        vertices of straight segments",
+            });
+        }
+        // A line or a polyline flattens to its own vertices whatever the
+        // chord budget.
+        let mut points =
+            axiolid_reference::curve::flatten2(&segment.curve, segment.domain, 1.0, 16)?;
+        if !segment.same_sense {
+            points.reverse();
+        }
+        for point in points {
+            if !out.last().is_some_and(|last| near(*last, point)) {
+                out.push(point);
+            }
+        }
+    }
+    while out.len() > 1 && near(out[0], out[out.len() - 1]) {
+        out.pop();
+    }
+    if out.len() < 3 {
+        return Err(GeomError::Degenerate(format!(
+            "a tagged spine section's contour has {} vertices, need at least 3",
+            out.len()
+        )));
+    }
+    Ok(out)
+}
+
+/// `rings` re-ordered so that ring `r`, vertex `m` carries the tag
+/// `first[r][m]`: the first section's ring structure, matched by tag.
+fn match_rings(first: &[Vec<String>], rings: &Rings, tags: &[Vec<String>]) -> GeomResult<Rings> {
+    let index: std::collections::HashMap<&str, (usize, usize)> = tags
+        .iter()
+        .enumerate()
+        .flat_map(|(r, ring)| {
+            ring.iter()
+                .enumerate()
+                .map(move |(m, tag)| (tag.as_str(), (r, m)))
+        })
+        .collect();
+    let points = |r: usize| {
+        if r == 0 {
+            &rings.outer
+        } else {
+            &rings.holes[r - 1]
+        }
+    };
+    if tags.len() != first.len() {
+        return Err(tag_mismatch("the sections have different numbers of rings"));
+    }
+    let mut matched: Vec<Vec<Point2>> = Vec::with_capacity(first.len());
+    for (r, want) in first.iter().enumerate() {
+        let Some(&(found, start)) = want.first().and_then(|tag| index.get(tag.as_str())) else {
+            return Err(tag_mismatch(
+                "a section lacks a tag the first section carries",
+            ));
+        };
+        let have = &tags[found];
+        let len = want.len();
+        let cyclic = have.len() == len && (0..len).all(|m| have[(start + m) % len] == want[m]);
+        if (r == 0) != (found == 0) || !cyclic {
+            return Err(tag_mismatch(
+                "the tags must map each ring of the first section onto one ring of every \
+                 other, the outer onto the outer, in the same cyclic order",
+            ));
+        }
+        let ring = points(found);
+        matched.push((0..len).map(|m| ring[(start + m) % len]).collect());
+    }
+    let outer = matched.remove(0);
+    Ok(Rings {
+        outer,
+        holes: matched,
+    })
+}
+
 /// The open polyline of a sectioned surface's section, checked against
 /// its tags.
-fn open_section(graph: &GeometryGraph, section: &StationedOpenSection) -> GeomResult<Vec<Point2>> {
+fn open_section(graph: &GeometryGraph, section: &SectionAtStation) -> GeomResult<Vec<Point2>> {
     let path = match graph.get(section.profile) {
         Some(GeometryNode::OpenProfile(profile)) => profile.path,
         _ => {
@@ -483,7 +740,7 @@ fn open_section(graph: &GeometryGraph, section: &StationedOpenSection) -> GeomRe
 pub(crate) fn sectioned_surface(
     graph: &GeometryGraph,
     directrix: NodeId,
-    sections: &[StationedOpenSection],
+    sections: &[SectionAtStation],
     frame: StationFrame,
     options: &ExecutionOptions,
 ) -> GeomResult<TriMesh> {
@@ -493,7 +750,7 @@ pub(crate) fn sectioned_surface(
         ));
     }
     let basis = Basis::of(graph, directrix)?;
-    let polylines = sections
+    let mut polylines = sections
         .iter()
         .map(|section| open_section(graph, section))
         .collect::<GeomResult<Vec<_>>>()?;
@@ -505,13 +762,21 @@ pub(crate) fn sectioned_surface(
                 .into(),
         ));
     }
-    if sections
-        .iter()
-        .any(|section| section.tags != sections[0].tags)
-    {
-        return Err(GeomError::InvalidInput(
-            "sectioned surface sections carry inconsistent tags".into(),
-        ));
+    // Joined by tag: a section whose tags run backwards is joined reversed.
+    let first = &sections[0].tags;
+    for (section, points) in sections.iter().zip(&mut polylines) {
+        if section.tags == *first {
+            continue;
+        }
+        if section.tags.iter().eq(first.iter().rev()) {
+            points.reverse();
+        } else {
+            return Err(GeomError::InvalidInput(
+                "sectioned surface sections carry inconsistent tags: every section must carry \
+                 the first section's tags in its order or in reverse, or none"
+                    .into(),
+            ));
+        }
     }
     let distances: Vec<Scalar> = sections.iter().map(|s| s.station.distance).collect();
     if distances.windows(2).any(|pair| pair[1] <= pair[0]) {
@@ -527,12 +792,19 @@ pub(crate) fn sectioned_surface(
             u,
         );
         let section = basis.section(s, frame)?;
+        let turned = oriented(
+            &section,
+            &sections[i].orientation,
+            &sections[i + 1].orientation,
+            u,
+        )?;
         Ok(polylines[i]
             .iter()
             .zip(&polylines[i + 1])
             .map(|(p, q)| {
-                place(
+                place_turned(
                     &section,
+                    &turned,
                     &offsets,
                     Point2::new(lerp(p.x, q.x, u), lerp(p.y, q.y, u)),
                 )

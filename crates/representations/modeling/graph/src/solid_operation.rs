@@ -2,7 +2,7 @@
 
 use axiolid_core::{BooleanOperator, Point3, Scalar, Transform3, Vec3};
 
-use crate::{NodeId, StationFrame, StationedSection};
+use crate::{NodeId, SectionAtStation, StationFrame, StationedSection};
 
 /// Position of one section along a sectioned sweep.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -121,6 +121,21 @@ pub enum SolidOperation {
         sections: Vec<StationedSection>,
         frame: StationFrame,
     },
+    /// Closed profiles standing at stations along a directrix, each
+    /// optionally tagged and explicitly oriented (#246): the general form
+    /// of [`SolidOperation::StationedSpine`].
+    ///
+    /// Each profile is placed as in a `StationedSpine`, its plane turned by
+    /// the section's orientation, and interpolated linearly in distance
+    /// with the next. Untagged sections are matched by ring and index;
+    /// tagged ones by tag, every section carrying the same tags (see
+    /// [`crate::station`]). At least two sections, strictly increasing in
+    /// distance, all tagged or none, are required.
+    SectionsAtStations {
+        directrix: NodeId,
+        sections: Vec<SectionAtStation>,
+        frame: StationFrame,
+    },
 }
 
 impl SolidOperation {
@@ -154,6 +169,14 @@ impl SolidOperation {
                 out.extend(sections.iter().map(|section| section.profile));
             }
             Self::StationedSpine {
+                directrix,
+                sections,
+                ..
+            } => {
+                out.push(*directrix);
+                out.extend(sections.iter().map(|section| section.profile));
+            }
+            Self::SectionsAtStations {
                 directrix,
                 sections,
                 ..

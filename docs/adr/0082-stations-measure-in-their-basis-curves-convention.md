@@ -115,3 +115,78 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
 - `crates/algorithms/parametric/evaluate/src/station.rs`
 - `crates/execution/compile/src/station.rs`
 - ADR 0081 (banked section frame), #239 (`arc_parameter`).
+
+## Amendment 2026-10-03: explicit orientation and tag matching (#246)
+
+The consumer (openbimrs/ifc#307) needs two things the decision above left
+out: a station placement may state its own `Axis` and `RefDirection`,
+which must not be parallel, and sections must be matched by tag wherever
+tags are given, closed profiles included.
+
+- **What the vectors mean.** buildingSMART IFC 4.3, `IfcAxis2PlacementLinear`:
+  "Relative placement axes (Axis and RefDirection) are relative to the
+  curve used for linear referencing provided in IfcPlacement Location
+  (IfcPointByDistanceExpression BasisCurve), maintaining the relationship
+  to the tangent of the curve"; `Axis` is "the exact direction of the
+  local Z Axis", `RefDirection` "the direction used to determine the
+  direction of the local X Axis ... if RefDirection is omitted, the
+  direction is taken from the curve tangent", and rule WR2 forbids them
+  parallel or anti-parallel. We therefore store them as COMPONENTS IN THE
+  STATION'S BASE FRAME, never in world coordinates: `(a, b, c)` is
+  `a * tangent + b * lateral + c * up` of the `StationFrame` the station
+  names (section or plan), whose `(tangent, lateral, up)` is the
+  placement's local `(X, Y, Z)` (tangent, left, up). Which base frame the
+  consumer's curve frame is (grade and bank kept or dropped) is the
+  consumer's `StationFrame` choice, stated per relation as before.
+- **Orthonormalisation.** Gram-Schmidt with the axis primary: `up' =
+  axis / |axis|` exactly, `tangent' = normalise(r - (r . up') up')` for
+  the unit reference direction, `lateral' = up' x tangent'`. Defaults:
+  axis `(0, 0, 1)`, reference `(1, 0, 0)`. A zero or non-finite vector,
+  or a pair (given or defaulted) whose sine is at most
+  `ORIENTATION_TOLERANCE = 1e-9`, is refused by name when the node is
+  pushed (`axiolid-model`) and again when a frame is turned
+  (`axiolid-evaluate`, `SectionFrame::oriented`).
+- **What it turns.** The frame a resolved station presents and the plane
+  a section's profile is placed in (profile `x` along `lateral'`, `y`
+  along `up'`). The offsets stay in the base frame: they locate the
+  origin, as `IfcPointByDistanceExpression` does independently of the
+  placement's axes. Between two sections the unit axis and unit reference
+  direction are interpolated linearly, component-wise in the base frame,
+  and orthonormalised again; an interpolated pair that degenerates is
+  refused by name.
+- **Tags.** A run of sections is tagged throughout or not at all (mixed is
+  refused by name); every section carries the same SET of tags, none
+  repeated. Open sections: the tags run along the polyline in the first
+  section's order or in reverse (joined reversed); anything else would
+  cross the sheet and is refused. Closed sections: the tags name the
+  contour vertices, outer ring then holes, each ring from its first
+  segment's start in its authored sense; the profile must be a polygonal
+  contour, optionally under a `Derived` transform (a mirrored guardrail).
+  After winding every ring (outer counter-clockwise, holes clockwise,
+  tags turning with their vertices), each ring of the first section must
+  map onto one ring of every other, outer onto outer, in the same cyclic
+  order; so a section may start a ring elsewhere, list its holes in
+  another order or be authored with the other winding, nothing else.
+  Index matching remains for untagged sections.
+- **Representation, additively.** `CurveStation`, `StationedSection` and
+  `StationedOpenSection` have public fields and the #241 variants public
+  struct fields, so adding a field to any of them breaks construction. We
+  add instead `StationOrientation`, `OrientedCurveStation` (a new
+  `GeometryNode` variant) and `SectionAtStation` (`#[non_exhaustive]`,
+  built by `new`/`with_tags`/`with_orientation`, so later fields stay
+  additive) with two appended variants, `SolidOperation::SectionsAtStations`
+  and `SurfaceRelation::OpenSectionsAtStations`, the general forms of
+  `StationedSpine` and `SectionedSurface`, which compile through the same
+  code. `StationFrame` could not carry the vectors: it derives `Eq` and
+  `Hash`, which floats do not have.
+
+| Option | Why not |
+| --- | --- |
+| Axis and reference direction in world coordinates | Contradicts the schema's reading, and a section's orientation would not follow the curve between stations. |
+| Tags as a sequence, matched by index | What the #241 surface did; it cannot express a section authored from another start or in the other direction, which is exactly what tags are for. |
+| Tags on flattened vertices of any profile | A chord-dependent vertex has no authored name; tags on curved or parametric profiles are refused by name instead. |
+| Any permutation of tags | Lofting a ring onto a permuted ring crosses the walls; only rotations (and, for open sections, reversal) keep the section's edges. |
+
+Still open: a station along an instance or a curve relation, and offset
+curves extended past the first and last station (non-blocking for the
+consumer).

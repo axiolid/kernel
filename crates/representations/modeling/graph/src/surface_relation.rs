@@ -2,7 +2,7 @@
 
 use axiolid_core::{Scalar, Vec3};
 
-use crate::{NodeId, StationFrame, StationedOpenSection};
+use crate::{NodeId, SectionAtStation, StationFrame, StationedOpenSection};
 
 /// Relationship between surface nodes.
 #[non_exhaustive]
@@ -53,6 +53,20 @@ pub enum SurfaceRelation {
         sections: Vec<StationedOpenSection>,
         frame: StationFrame,
     },
+    /// Open sections standing at stations along a directrix, each
+    /// optionally explicitly oriented (#246): the general form of
+    /// [`SurfaceRelation::SectionedSurface`].
+    ///
+    /// Each section's open polyline is placed as in a `SectionedSurface`,
+    /// its plane turned by the section's orientation. Sections are joined
+    /// by tag, or by index when none is tagged (see [`crate::station`]).
+    /// At least two sections, strictly increasing in distance, all tagged
+    /// or none, are required.
+    OpenSectionsAtStations {
+        directrix: NodeId,
+        sections: Vec<SectionAtStation>,
+        frame: StationFrame,
+    },
 }
 
 impl SurfaceRelation {
@@ -69,6 +83,14 @@ impl SurfaceRelation {
                 out.push(*swept_curve)
             }
             Self::SectionedSurface {
+                directrix,
+                sections,
+                ..
+            } => {
+                out.push(*directrix);
+                out.extend(sections.iter().map(|section| section.profile));
+            }
+            Self::OpenSectionsAtStations {
                 directrix,
                 sections,
                 ..

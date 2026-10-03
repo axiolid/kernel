@@ -281,3 +281,97 @@ fn a_sectioned_surface_validates_its_tags() {
         vec![basis, profile, profile]
     );
 }
+
+#[test]
+fn an_oriented_station_and_general_sections_validate_and_reference() {
+    use axiolid_core::Vec3;
+    use axiolid_model::{OrientedCurveStation, SectionAtStation, StationOrientation};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let turn = StationOrientation::new(Some(Vec3::new(0.0, 1.0, 1.0)), None);
+    let id = b
+        .push_value(OrientedCurveStation::new(
+            CurveStation::new(basis, Station::at(2.0)),
+            turn,
+        ))
+        .unwrap();
+    invalid(
+        b.push_value(OrientedCurveStation::new(
+            CurveStation::new(basis, Station::at(-1.0)),
+            turn,
+        )),
+        "negative",
+    );
+    invalid(
+        b.push_value(OrientedCurveStation::new(
+            CurveStation::new(basis, Station::at(1.0)),
+            StationOrientation::new(Some(Vec3::Z), Some(Vec3::new(0.0, 0.0, -2.0))),
+        )),
+        "parallel",
+    );
+    assert!(StationOrientation::default().is_base());
+    assert_eq!(
+        StationOrientation::default().unit_axes(),
+        Ok((Vec3::Z, Vec3::X))
+    );
+    let profile = rectangle(&mut b);
+    let spine = b
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: basis,
+                sections: vec![
+                    SectionAtStation::new(profile, Station::at(0.0)).with_orientation(turn),
+                    SectionAtStation::from(StationedSection {
+                        profile,
+                        station: Station::at(4.0),
+                    }),
+                ],
+                frame: StationFrame::Plan,
+            },
+        ))
+        .unwrap();
+    // An open section may run its tags backwards, in either form.
+    let path = open(&mut b);
+    let reversed = |names: [&[&str]; 2]| {
+        vec![
+            StationedOpenSection {
+                profile: path,
+                tags: tags(names[0]),
+                station: Station::at(0.0),
+            },
+            StationedOpenSection {
+                profile: path,
+                tags: tags(names[1]),
+                station: Station::at(3.0),
+            },
+        ]
+    };
+    let forwards_back = reversed([&["l", "c", "r"], &["r", "c", "l"]]);
+    b.push(GeometryNode::SurfaceRelation(
+        SurfaceRelation::SectionedSurface {
+            directrix: basis,
+            sections: forwards_back.clone(),
+            frame: StationFrame::Plan,
+        },
+    ))
+    .unwrap();
+    let general = b
+        .push(GeometryNode::SurfaceRelation(
+            SurfaceRelation::OpenSectionsAtStations {
+                directrix: basis,
+                sections: forwards_back.into_iter().map(Into::into).collect(),
+                frame: StationFrame::Plan,
+            },
+        ))
+        .unwrap();
+    let graph = b.finish(vec![id, spine, general]).unwrap();
+    assert_eq!(graph.get(id).unwrap().references(), vec![basis]);
+    assert_eq!(
+        graph.get(spine).unwrap().references(),
+        vec![basis, profile, profile]
+    );
+    assert_eq!(
+        graph.get(general).unwrap().references(),
+        vec![basis, path, path]
+    );
+}

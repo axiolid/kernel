@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Oriented and tagged stations (#246, ADR 0082 amendment):
+  `station::resolve` also resolves an `OrientedCurveStation`, its frame
+  turned by the orientation, its point and `section` not. The new
+  `SectionsAtStations` spine and `OpenSectionsAtStations` sheet mesh like
+  the #241 relations (same deviation paths, the exact compiler refuses the
+  spine as a station-placed spine), each section's plane turned by its
+  orientation, interpolated between sections in the base frame. Tagged
+  closed sections are matched by tag: their profile must be a polygonal
+  contour (optionally under a derived transform), each ring rewound
+  outer counter-clockwise and holes clockwise, then re-started and
+  re-ordered to line up with the first section's rings; a tag count that
+  is not the vertex count, a curved or parametric profile, an outer ring
+  tagged as a hole and an order that is no rotation are refused by name.
+
+### Changed
+
+- A sectioned surface whose section runs its tags in reverse is joined
+  reversed instead of refused (#246).
+
 ## [0.3.13] - 2026-10-03
 
 ### Added

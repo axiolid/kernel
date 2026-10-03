@@ -12,7 +12,7 @@ use axiolid_curve::{BSplineCurve2, Curve2};
 
 use crate::{
     CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, SolidOperation, Station,
-    StationedOpenSection, SurfaceRelation, TrimSelector, TrimmingPreference,
+    StationOrientation, SurfaceRelation, TrimSelector, TrimmingPreference,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -481,6 +481,11 @@ pub(crate) fn validate_reference_types(
             expect_reference(nodes, value.basis, ExpectedReference::Curve)?;
             validate_station(&value.station)
         }
+        GeometryNode::OrientedCurveStation(value) => {
+            expect_reference(nodes, value.station.basis, ExpectedReference::Curve)?;
+            validate_station(&value.station.station)?;
+            validate_orientation(&value.orientation)
+        }
     }
 }
 
@@ -528,23 +533,60 @@ fn validate_station_run<'a>(
     Ok(())
 }
 
-/// Every open section carries the same tag sequence, or every one none,
-/// and no section repeats a tag.
-fn validate_section_tags(sections: &[StationedOpenSection]) -> Result<(), GraphError> {
-    let Some(first) = sections.first() else {
+/// An explicit orientation's vectors are finite, not zero and not
+/// parallel.
+fn validate_orientation(orientation: &StationOrientation) -> Result<(), GraphError> {
+    orientation
+        .unit_axes()
+        .map(|_| ())
+        .map_err(|detail| GraphError::InvalidStation { detail })
+}
+
+/// Tags of one run of sections (see [`crate::station`]): every section
+/// tagged or none; each tagging the same set, none repeated; an `open`
+/// section's in the first's order or in reverse.
+fn validate_section_tags<'a>(
+    tags: impl Iterator<Item = &'a [String]>,
+    open: bool,
+) -> Result<(), GraphError> {
+    let tags: Vec<&[String]> = tags.collect();
+    let Some(first) = tags.first() else {
         return Ok(());
     };
-    if sections.iter().any(|section| section.tags != first.tags) {
+    if tags
+        .iter()
+        .any(|section| section.is_empty() != first.is_empty())
+    {
         return Err(GraphError::InvalidStation {
-            detail: "the sections' tags are inconsistent: every section must carry the same \
-                     tag sequence, or none",
+            detail: "the sections' tags are inconsistent: some sections are tagged and others \
+                     not; tag every section or none",
         });
     }
-    let mut seen = HashSet::new();
-    if !first.tags.iter().all(|tag| seen.insert(tag.as_str())) {
-        return Err(GraphError::InvalidStation {
-            detail: "a section repeats a tag",
-        });
+    let set = |section: &[String]| -> Result<Vec<String>, GraphError> {
+        let mut sorted = section.to_vec();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(GraphError::InvalidStation {
+                detail: "a section repeats a tag",
+            });
+        }
+        Ok(sorted)
+    };
+    let expected = set(first)?;
+    for section in &tags[1..] {
+        if set(section)? != expected {
+            return Err(GraphError::InvalidStation {
+                detail: "the sections' tags are inconsistent: every section must carry the same \
+                         set of tags",
+            });
+        }
+        if open && *section != *first && !section.iter().eq(first.iter().rev()) {
+            return Err(GraphError::InvalidStation {
+                detail: "the sections' tags are inconsistent: an open section must order its \
+                         tags as the first section does or in reverse, or joining by tag \
+                         would cross the sheet",
+            });
+        }
     }
     Ok(())
 }
@@ -595,6 +637,7 @@ fn node_kind(node: &GeometryNode) -> &'static str {
         GeometryNode::Instance(_) => "instance",
         GeometryNode::Collection(_) => "collection",
         GeometryNode::CurveStation(_) => "curve-station",
+        GeometryNode::OrientedCurveStation(_) => "oriented-curve-station",
     }
 }
 
@@ -686,7 +729,20 @@ fn validate_surface_relation(
                 expect_reference(nodes, section.profile, ExpectedReference::OpenProfile)?;
             }
             validate_station_run(sections.iter().map(|section| &section.station))?;
-            validate_section_tags(sections)
+            validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)
+        }
+        SurfaceRelation::OpenSectionsAtStations {
+            directrix,
+            sections,
+            ..
+        } => {
+            expect_reference(nodes, *directrix, ExpectedReference::Curve)?;
+            for section in sections {
+                expect_reference(nodes, section.profile, ExpectedReference::OpenProfile)?;
+                validate_orientation(&section.orientation)?;
+            }
+            validate_station_run(sections.iter().map(|section| &section.station))?;
+            validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)
         }
     }
 }
@@ -748,6 +804,22 @@ fn validate_solid_operation(
                 expect_reference(nodes, section.profile, ExpectedReference::Profile)?;
             }
             validate_station_run(sections.iter().map(|section| &section.station))
+        }
+        SolidOperation::SectionsAtStations {
+            directrix,
+            sections,
+            ..
+        } => {
+            expect_reference(nodes, *directrix, ExpectedReference::Curve)?;
+            for section in sections {
+                expect_reference(nodes, section.profile, ExpectedReference::Profile)?;
+                validate_orientation(&section.orientation)?;
+            }
+            validate_station_run(sections.iter().map(|section| &section.station))?;
+            validate_section_tags(
+                sections.iter().map(|section| section.tags.as_slice()),
+                false,
+            )
         }
         SolidOperation::Boolean { left, right, .. } => {
             expect_reference(nodes, *left, ExpectedReference::Solid)?;

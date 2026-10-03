@@ -52,6 +52,18 @@
 //! horizontal projection, the horizontal left normal and `+Z`, with grade
 //! and bank dropped.
 //!
+//! # Explicit orientation (#246)
+//!
+//! [`SectionFrame::oriented`] turns a section frame by an explicit axis and
+//! reference direction given as components in that frame, `(tangent,
+//! lateral, up)`, not in world coordinates: a linear placement's axes "are
+//! relative to the curve used for linear referencing ..., maintaining the
+//! relationship to the tangent of the curve" (buildingSMART IFC 4.3,
+//! `IfcAxis2PlacementLinear`), whose local `X`, `Y`, `Z` are the tangent,
+//! the left lateral and up. The axis is the oriented up, exact; the
+//! reference direction is made perpendicular to it (Gram-Schmidt, axis
+//! primary) and becomes the oriented tangent. The point does not move.
+//!
 //! # Accuracy contract
 //!
 //! The point and frame are the exact curve's at a measure within
@@ -70,6 +82,11 @@ use crate::arc_parameter::{
     ARC_LENGTH_TOLERANCE,
 };
 use crate::curve::{derivative2, derivative3, domain2, domain3, evaluate2, evaluate3};
+
+/// Largest sine of the angle between an orientation's axis and reference
+/// direction that still counts as parallel ([`SectionFrame::oriented`]);
+/// the graph refuses the same pairs when a station is pushed.
+pub const ORIENTATION_TOLERANCE: Scalar = 1e-9;
 
 fn invalid(detail: String) -> GeomError {
     GeomError::InvalidInput(detail)
@@ -120,6 +137,50 @@ impl SectionFrame {
             tangent,
             lateral: Vec3::new(-tangent.y, tangent.x, 0.0),
             up: Vec3::Z,
+        })
+    }
+
+    /// The same point with its axes turned by an explicit orientation
+    /// (#246): `axis` and `ref_direction` are components in THIS frame,
+    /// `(tangent, lateral, up)`, defaulting to `(0, 0, 1)` and `(1, 0, 0)`.
+    ///
+    /// Gram-Schmidt with the axis primary: `up' = axis / |axis|`,
+    /// `tangent' = normalise(r - (r . up') up')` for the unit reference
+    /// direction `r`, `lateral' = up' x tangent'`. This is the reading of a
+    /// linear placement's `Axis` and `RefDirection` relative to the curve
+    /// (see the [module documentation](self#explicit-orientation-246)).
+    ///
+    /// # Errors
+    ///
+    /// A zero or non-finite vector, or an axis and reference direction
+    /// parallel or anti-parallel within [`ORIENTATION_TOLERANCE`], by name.
+    pub fn oriented(&self, axis: Option<Vec3>, ref_direction: Option<Vec3>) -> GeomResult<Self> {
+        let unit = |vector: Vec3, what: &str| {
+            let length = vector.length();
+            if vector.is_finite() && length.is_finite() && length > 1e-12 {
+                Ok(vector / length)
+            } else {
+                Err(invalid(format!(
+                    "station: the orientation's {what} {vector:?} is zero or not finite"
+                )))
+            }
+        };
+        let axis = unit(axis.unwrap_or(Vec3::Z), "axis")?;
+        let reference = unit(ref_direction.unwrap_or(Vec3::X), "reference direction")?;
+        if axis.cross(reference).length() <= ORIENTATION_TOLERANCE {
+            return Err(invalid(format!(
+                "station: the orientation's axis {axis:?} and reference direction \
+                 {reference:?} are parallel"
+            )));
+        }
+        let x = (reference - reference.dot(axis) * axis).normalize();
+        let y = axis.cross(x);
+        let world = |v: Vec3| v.x * self.tangent + v.y * self.lateral + v.z * self.up;
+        Ok(Self {
+            point: self.point,
+            tangent: world(x),
+            lateral: world(y),
+            up: world(axis),
         })
     }
 

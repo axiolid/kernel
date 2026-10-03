@@ -9,6 +9,37 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Explicit station orientation (#246, ADR 0082 amendment):
+  `StationOrientation { axis, ref_direction }`, both optional and given as
+  components in the station's base frame `(tangent, lateral, up)` -- the
+  reading of a linear placement's axes relative to its curve -- with the
+  axis the oriented up and the reference direction orthonormalised
+  against it (Gram-Schmidt, axis primary); `unit_axes` fills the defaults
+  `(0, 0, 1)` and `(1, 0, 0)`. `ORIENTATION_TOLERANCE` bounds the sine
+  below which the two count as parallel. Offsets stay in the base frame.
+- `GeometryNode::OrientedCurveStation(OrientedCurveStation)`: a curve
+  station with an orientation.
+- `SectionAtStation` (built by `new`, `with_tags`, `with_orientation`; it
+  is `#[non_exhaustive]`, so fields can follow additively) and its two
+  relations, `SolidOperation::SectionsAtStations` (closed profiles, the
+  general form of `StationedSpine`, matched by tag when tagged) and
+  `SurfaceRelation::OpenSectionsAtStations` (open sections, the general
+  form of `SectionedSurface`). Both variants are appended to their enums.
+  `From<StationedSection>` and `From<StationedOpenSection>` convert the
+  #241 sections.
+- `GraphError::InvalidStation` also names a zero, non-finite or parallel
+  orientation and a run of sections that mixes tagged and untagged ones.
+
+### Changed
+
+- Tags are matched as sets (#246): every section of a run carries the
+  same tags, none repeated; an open section's tags may run in the first
+  section's order or in reverse, so a `SectionedSurface` whose sections
+  are authored in opposite directions is now accepted and joined
+  reversed. Any other order is still refused by name.
+
 ## [0.3.5] - 2026-10-03
 
 ### Added

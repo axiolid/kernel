@@ -451,3 +451,58 @@ fn a_cubic_parabola_station_inverts_its_arc_length() {
         "cubic parabola",
     );
 }
+
+#[test]
+fn an_explicit_orientation_turns_the_section_in_its_own_axes() {
+    // Line heading (0.6, 0.8): t = (0.6, 0.8, 0), l = (-0.8, 0.6, 0), u = Z.
+    let line = Curve2::Line(Line2 {
+        origin: Point2::new(1.0, 2.0),
+        direction: Vec2::new(3.0, 4.0),
+    });
+    let section = station_section2(&line, 10.0).unwrap();
+    let (t, l, u) = (section.tangent, section.lateral, section.up);
+    // Defaults: the section itself.
+    let same = section.oriented(None, None).unwrap();
+    assert_frame(&same, section.point, t, l, EPS, "unturned");
+    // Axis (0, 1, 1) and reference (1, 0, 5): up' = (l + u) / sqrt 2, the
+    // reference loses its component 5 / sqrt 2 along up' ... in components
+    // (1, 0, 5) - 2.5 (0, 1, 1) = (1, -2.5, 2.5), normalised.
+    let r = core::f64::consts::FRAC_1_SQRT_2;
+    let turned = section
+        .oriented(
+            Some(Vec3::new(0.0, 1.0, 1.0)),
+            Some(Vec3::new(1.0, 0.0, 5.0)),
+        )
+        .unwrap();
+    let n = (1.0_f64 + 12.5).sqrt();
+    let tangent = (t - 2.5 * l + 2.5 * u) / n;
+    let up = r * (l + u);
+    assert_frame(
+        &turned,
+        section.point,
+        tangent,
+        up.cross(tangent),
+        EPS,
+        "turned",
+    );
+    close3(turned.up, up, EPS, "the axis is exact");
+    // Parallel, anti-parallel and degenerate pairs are refused by name.
+    refused(
+        section.oriented(Some(Vec3::Y), Some(-Vec3::Y)).unwrap_err(),
+        "parallel",
+    );
+    refused(
+        section.oriented(None, Some(Vec3::Z)).unwrap_err(),
+        "parallel",
+    );
+    refused(
+        section.oriented(Some(Vec3::ZERO), None).unwrap_err(),
+        "axis",
+    );
+    refused(
+        section
+            .oriented(None, Some(Vec3::splat(Scalar::INFINITY)))
+            .unwrap_err(),
+        "reference direction",
+    );
+}

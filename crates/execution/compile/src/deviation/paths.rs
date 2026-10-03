@@ -190,7 +190,7 @@ pub(crate) fn of_solid(
                 "sectioned spine: the surface between sections is not defined exactly",
             ),
         ),
-        SolidOperation::StationedSpine { .. } => (
+        SolidOperation::StationedSpine { .. } | SolidOperation::SectionsAtStations { .. } => (
             DeviationPath::StationedSpine,
             "",
             DeviationBound::Unbounded(STATIONED_SAMPLING),

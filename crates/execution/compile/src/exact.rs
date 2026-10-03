@@ -374,6 +374,7 @@ fn exact_input_family(node: &GeometryNode) -> &'static str {
         GeometryNode::Instance(_) => "instance",
         GeometryNode::Collection(_) => "collection",
         GeometryNode::CurveStation(_) => "curve station",
+        GeometryNode::OrientedCurveStation(_) => "oriented curve station",
         _ => "unknown geometry node",
     }
 }
@@ -388,7 +389,9 @@ pub(crate) fn solid_operation_family(operation: &SolidOperation) -> &'static str
         SolidOperation::FixedReferenceSweep { .. } => "fixed-reference sweep",
         SolidOperation::SurfaceCurveSweep { .. } => "surface-curve sweep",
         SolidOperation::SectionedSpine { .. } => "sectioned spine",
-        SolidOperation::StationedSpine { .. } => "station-placed spine",
+        SolidOperation::StationedSpine { .. } | SolidOperation::SectionsAtStations { .. } => {
+            "station-placed spine"
+        }
         SolidOperation::Boolean { .. } => "boolean",
         SolidOperation::BoundedHalfSpace { .. } => "bounded half-space",
         _ => "unknown solid operation",

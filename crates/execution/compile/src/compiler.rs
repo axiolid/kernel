@@ -540,7 +540,25 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 directrix,
                 sections,
                 frame,
-            }) => crate::station::sectioned_surface(graph, *directrix, sections, *frame, options)
+            }) => {
+                let sections: Vec<_> = sections.iter().cloned().map(Into::into).collect();
+                crate::station::sectioned_surface(graph, *directrix, &sections, *frame, options)
+                    .map(|mesh| {
+                        Built::with_closure(
+                            mesh,
+                            axiolid_mesh_compile_contract::MeshClosure::Surface,
+                        )
+                        .with_deviation(crate::deviation::of_sectioned_surface())
+                    })
+            }
+            // The general form: oriented sections, joined by tag (#246).
+            GeometryNode::SurfaceRelation(
+                axiolid_model::SurfaceRelation::OpenSectionsAtStations {
+                    directrix,
+                    sections,
+                    frame,
+                },
+            ) => crate::station::sectioned_surface(graph, *directrix, sections, *frame, options)
                 .map(|mesh| {
                     Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
                         .with_deviation(crate::deviation::of_sectioned_surface())
@@ -830,6 +848,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             }
             // Sections at stations along the directrix (#241).
             SolidOperation::StationedSpine {
+                directrix,
+                sections,
+                frame,
+            } => {
+                let sections: Vec<_> = sections.iter().copied().map(Into::into).collect();
+                crate::station::stationed_spine(graph, *directrix, &sections, *frame, options)
+            }
+            // The general form: oriented sections, matched by tag (#246).
+            SolidOperation::SectionsAtStations {
                 directrix,
                 sections,
                 frame,

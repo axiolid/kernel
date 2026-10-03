@@ -30,15 +30,72 @@
 //! frame as `x` the tangent, `y` up, `z` to the right (`-lateral`), the
 //! curve-evaluation provider's layout.
 //!
+//! # Explicit orientation (#246)
+//!
+//! A station may carry a [`StationOrientation`]: an optional `axis` and an
+//! optional `ref_direction`, both given as COMPONENTS IN THE STATION'S BASE
+//! FRAME at its distance (the [`StationFrame`] it names), never in world
+//! coordinates: a vector `(a, b, c)` means `a * tangent + b * lateral + c *
+//! up`. This is how a linear placement reads its own axes: they "are
+//! relative to the curve used for linear referencing ..., maintaining the
+//! relationship to the tangent of the curve" (buildingSMART IFC 4.3,
+//! `IfcAxis2PlacementLinear`), whose local `X` is the tangent, `Y` the left
+//! lateral and `Z` up, this module's `(tangent, lateral, up)`.
+//!
+//! - `axis` is the exact direction of the oriented frame's up (local `Z`);
+//!   absent, it is `(0, 0, 1)`, the base frame's up.
+//! - `ref_direction` fixes the oriented frame's tangent role (local `X`);
+//!   absent, it is `(1, 0, 0)`, the curve tangent.
+//! - The frame is orthonormalised by Gram-Schmidt with the axis primary:
+//!   `up' = axis / |axis|`, `tangent' = normalise(r - (r . up') up')` for
+//!   the unit `r = ref_direction / |ref_direction|`, and `lateral' = up' x
+//!   tangent'`, so `(tangent', lateral', up')` stays right-handed.
+//! - A zero or non-finite vector, and an axis and reference direction
+//!   (given or defaulted) parallel or anti-parallel within
+//!   [`ORIENTATION_TOLERANCE`] (the sine of the angle between them), are
+//!   refused by name when the node is pushed.
+//!
+//! The oriented triad replaces the base one wherever a frame ORIENTS
+//! something: the frame a resolved station presents, and the plane a
+//! section's profile is placed in (profile `x` along `lateral'`, `y`
+//! along `up'`). The OFFSETS stay in the base frame: they locate the
+//! station's origin, which the orientation does not move.
+//!
 //! # Sections between stations
 //!
 //! A profile placed at a station maps its `x` onto the lateral axis and its
 //! `y` onto up, so its normal `x x y` is the tangent. Between two stations
-//! everything is interpolated LINEARLY in distance: the offsets, and each
-//! section point with its counterpart in the next section (a closed
-//! profile's by ring and vertex index, an open section's by tag).
+//! everything is interpolated LINEARLY in distance: the offsets, each
+//! section point with its counterpart in the next section, and an explicit
+//! orientation (the unit axis and the unit reference direction,
+//! component-wise in the base frame, an absent one counting as `(0, 0, 1)`
+//! and `(1, 0, 0)`, then orthonormalised as above; a resolver refuses by
+//! name an interpolated pair that degenerates).
+//!
+//! # Matching points between sections
+//!
+//! Untagged sections are matched by position: a closed profile's points by
+//! ring and vertex index, an open section's by vertex index. Tagged
+//! sections ([`SectionAtStation::tags`], [`StationedOpenSection::tags`])
+//! are matched by tag. One run of sections is tagged throughout or not at
+//! all, and every section carries the same SET of tags, none repeated, so
+//! the tags are a bijection between any two sections:
+//!
+//! - an open section's tags run along its polyline in the first section's
+//!   order or in reverse (a reversed section is joined reversed); any other
+//!   order would cross the sheet and is refused;
+//! - a closed section's tags name its contour vertices, the outer ring's
+//!   then each hole's, each ring from its first segment's start in its
+//!   authored sense. Its profile must be polygonal (straight segments only,
+//!   optionally under a `Profile::Derived` transform). The tags must map
+//!   each ring of the first section onto one ring of every other, the
+//!   outer onto the outer, in the same cyclic order once both are wound
+//!   alike (outer counter-clockwise, holes clockwise): a section may start
+//!   a ring at another vertex, list its holes in another order or wind a
+//!   ring the other way, nothing else. A resolver checks this, since it
+//!   needs the profile's vertices.
 
-use axiolid_core::Scalar;
+use axiolid_core::{Scalar, Vec3};
 
 use crate::NodeId;
 
@@ -160,8 +217,9 @@ pub struct StationedSection {
 ///
 /// `tags` names the vertices of the section's polyline in order; two
 /// consecutive sections are joined point to point by equal tags. Every
-/// section of one surface carries the same tag sequence, or none (then the
-/// vertices are joined by index).
+/// section of one surface carries the same tags, in the first section's
+/// order or in reverse, or none (then the vertices are joined by index);
+/// see the [module documentation](self).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StationedOpenSection {
     /// Open profile node.
@@ -170,4 +228,164 @@ pub struct StationedOpenSection {
     pub tags: Vec<String>,
     /// Distance along the directrix and offsets of the profile's origin.
     pub station: Station,
+}
+
+/// Largest sine of the angle between a [`StationOrientation`]'s axis and
+/// reference direction that still counts as parallel.
+pub const ORIENTATION_TOLERANCE: Scalar = 1e-9;
+
+/// An explicit in-section orientation at a station (#246).
+///
+/// Both vectors are components in the station's base frame, `(tangent,
+/// lateral, up)`; see the [module documentation](self) for their meaning,
+/// defaults and orthonormalisation. Both absent is the base frame itself,
+/// the [`Default`].
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StationOrientation {
+    /// The oriented frame's up (local `Z`), exact; `None` for `(0, 0, 1)`.
+    pub axis: Option<Vec3>,
+    /// The direction the oriented frame's tangent role (local `X`) is
+    /// taken from, made perpendicular to the axis; `None` for `(1, 0, 0)`.
+    pub ref_direction: Option<Vec3>,
+}
+
+impl StationOrientation {
+    /// An orientation from an optional axis and reference direction, both
+    /// in the base frame.
+    #[must_use]
+    pub const fn new(axis: Option<Vec3>, ref_direction: Option<Vec3>) -> Self {
+        Self {
+            axis,
+            ref_direction,
+        }
+    }
+
+    /// Whether neither vector is given, so the base frame is used as is.
+    #[must_use]
+    pub const fn is_base(&self) -> bool {
+        self.axis.is_none() && self.ref_direction.is_none()
+    }
+
+    /// The unit axis and unit reference direction, defaults filled in.
+    ///
+    /// # Errors
+    ///
+    /// Why there are none, worded for
+    /// [`GraphError::InvalidStation`](crate::GraphError::InvalidStation):
+    /// a zero or non-finite vector, or the two parallel or anti-parallel
+    /// within [`ORIENTATION_TOLERANCE`].
+    pub fn unit_axes(&self) -> Result<(Vec3, Vec3), &'static str> {
+        let unit = |vector: Vec3, what: &'static str| {
+            let length = vector.length();
+            if vector.is_finite() && length.is_finite() && length > 1e-12 {
+                Ok(vector / length)
+            } else {
+                Err(what)
+            }
+        };
+        let axis = unit(
+            self.axis.unwrap_or(Vec3::Z),
+            "the orientation's axis is zero or not finite",
+        )?;
+        let reference = unit(
+            self.ref_direction.unwrap_or(Vec3::X),
+            "the orientation's reference direction is zero or not finite",
+        )?;
+        if axis.cross(reference).length() <= ORIENTATION_TOLERANCE {
+            return Err("the orientation's axis and reference direction are parallel");
+        }
+        Ok((axis, reference))
+    }
+}
+
+/// A [`CurveStation`] with an explicit orientation (#246).
+///
+/// Its point is the station's, offsets read in the base frame; its frame
+/// is the base frame turned by `orientation` (see the
+/// [module documentation](self)).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OrientedCurveStation {
+    /// The basis curve, distance, offsets and base frame.
+    pub station: CurveStation,
+    /// The axis and reference direction, in the base frame.
+    pub orientation: StationOrientation,
+}
+
+impl OrientedCurveStation {
+    /// `station` turned by `orientation`.
+    #[must_use]
+    pub const fn new(station: CurveStation, orientation: StationOrientation) -> Self {
+        Self {
+            station,
+            orientation,
+        }
+    }
+}
+
+/// A section standing at a station, with optional tags and an optional
+/// explicit orientation (#246): the general form of [`StationedSection`]
+/// (closed) and [`StationedOpenSection`] (open).
+///
+/// Built with [`SectionAtStation::new`] and the `with_` methods, so that
+/// fields can be added without breaking callers.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionAtStation {
+    /// The profile node: an area profile in a sectioned spine, an open
+    /// profile in a sectioned surface.
+    pub profile: NodeId,
+    /// Distance along the directrix and offsets of the profile's origin,
+    /// in the base frame.
+    pub station: Station,
+    /// One tag per vertex, or empty to match by index; see the
+    /// [module documentation](self).
+    pub tags: Vec<String>,
+    /// The section's orientation in the base frame; the default is the
+    /// base frame.
+    pub orientation: StationOrientation,
+}
+
+impl SectionAtStation {
+    /// `profile` at `station`, untagged, in the base frame.
+    #[must_use]
+    pub const fn new(profile: NodeId, station: Station) -> Self {
+        Self {
+            profile,
+            station,
+            tags: Vec::new(),
+            orientation: StationOrientation::new(None, None),
+        }
+    }
+
+    /// The same section with `tags`, one per vertex.
+    #[must_use]
+    pub fn with_tags<I, T>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The same section turned by `orientation`.
+    #[must_use]
+    pub const fn with_orientation(mut self, orientation: StationOrientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+}
+
+impl From<StationedSection> for SectionAtStation {
+    fn from(section: StationedSection) -> Self {
+        Self::new(section.profile, section.station)
+    }
+}
+
+impl From<StationedOpenSection> for SectionAtStation {
+    fn from(section: StationedOpenSection) -> Self {
+        Self::new(section.profile, section.station).with_tags(section.tags)
+    }
 }
