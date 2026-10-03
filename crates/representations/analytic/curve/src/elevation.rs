@@ -18,14 +18,26 @@
 //!
 //! Naming the convention here means a consumer never has to guess which
 //! distance a law is written in.
+//!
+//! # Closed forms here, quadrature in an evaluator
+//!
+//! A polynomial and a circular arc in the `(d, z)` plane have closed-form
+//! heights and grades, so [`ElevationLaw::height_at`] and
+//! [`ElevationLaw::grade_at`] answer them here. A profile given by its
+//! curvature against its own arc length ([`ElevationLaw::Intrinsic`], the
+//! clothoid between two grades) does not: its height is the Fresnel-type
+//! integral the [`CurvatureLaw`] module refuses to compute, followed by an
+//! inversion of plan distance against arc length. This crate stores that
+//! law exactly and reports `None` for it; an evaluator that can state its
+//! quadrature tolerance reads it (`axiolid-evaluate`'s `elevation` module).
 
 use axiolid_core::Scalar;
 
-use crate::Curve2;
+use crate::{CurvatureLaw, Curve2};
 
 /// Height as a function of distance along the plan.
 ///
-/// Mirrors [`CurvatureLaw`](crate::CurvatureLaw) in shape so the two halves of
+/// Mirrors [`CurvatureLaw`] in shape so the two halves of
 /// an alignment read the same way, but stays a separate type: a curvature law
 /// is a property of a planar curve and an elevation law is not, and sharing one
 /// enum would make a meaningless pairing representable.
@@ -54,7 +66,7 @@ pub enum ElevationLaw {
     ///
     /// Each piece's law is written in its OWN distance, restarting at zero at
     /// its seam, so moving a piece never rewrites its coefficients. This
-    /// matches [`CurvatureLaw::Piecewise`](crate::CurvatureLaw::Piecewise)
+    /// matches [`CurvatureLaw::Piecewise`]
     /// deliberately: a vertical profile is authored as a run of segments and
     /// the seams are observable data.
     Piecewise {
@@ -62,6 +74,56 @@ pub enum ElevationLaw {
         breaks: Vec<Scalar>,
         /// One law per piece; `laws.len() == breaks.len() + 1`.
         laws: Vec<ElevationLaw>,
+    },
+    /// A circular arc in the `(d, z)` plane: the grade angle changes at a
+    /// constant rate along the profile's own arc length.
+    ///
+    /// With `t0 = atan(grade)` and the signed `radius` `R` (positive is a
+    /// sag, turning counter-clockwise in `(d, z)`; negative is a crest):
+    ///
+    /// - `sin t(d) = sin t0 + d / R`
+    /// - `z(d) = height + R (cos t0 - cos t(d))`
+    /// - `grade(d) = tan t(d)`
+    ///
+    /// This is the circle itself, not the parabola `d^2 / (2R)` that
+    /// approximates it near the vertex; the two differ by `O(d^4 / R^3)`.
+    /// The arc has heights only while `|sin t0 + d / R| < 1`: past that the
+    /// circle turns vertical, and `height_at` and `grade_at` report `None`.
+    ///
+    /// Evaluated without cancellation: `R (cos t0 - cos t(d))` is computed
+    /// as `d (sin t(d) + sin t0) / (cos t0 + cos t(d))`, which removes the
+    /// difference of nearly equal cosines that `d / R -> 0` would otherwise
+    /// multiply by a large `R`.
+    CircularArc {
+        /// Height at the piece start.
+        height: Scalar,
+        /// Grade `dz/dd` at the piece start.
+        grade: Scalar,
+        /// Signed radius: positive sag, negative crest. Finite and non-zero.
+        radius: Scalar,
+    },
+    /// A profile given by its curvature against its OWN arc length.
+    ///
+    /// The vertical counterpart of [`Curve2::Intrinsic`]: a planar curve in
+    /// `(d, z)` starting at `(0, height)` in the direction `atan(grade)`,
+    /// whose curvature is `curvature(s)` with `s` the arc length of the
+    /// profile (not plan distance), positive counter-clockwise in `(d, z)`
+    /// -- a sag. A linear law is the clothoid joining two grades; a constant
+    /// law is the circular arc that [`Self::CircularArc`] holds in closed
+    /// form.
+    ///
+    /// Height at a plan distance has no closed form (see the module
+    /// documentation), so `height_at` and `grade_at` report `None`, and an
+    /// evaluator integrates the curve and inverts `d(s)` to a stated
+    /// tolerance. Only `d >= 0` is defined, since the law is integrated
+    /// forward from its start, and only while `d(s)` keeps increasing.
+    Intrinsic {
+        /// Height at the piece start.
+        height: Scalar,
+        /// Grade `dz/dd` at the piece start.
+        grade: Scalar,
+        /// Curvature against the profile's own arc length from its start.
+        curvature: CurvatureLaw,
     },
 }
 
@@ -104,11 +166,44 @@ impl ElevationLaw {
         }
     }
 
-    /// Whether the piece lists agree and the seams ascend.
+    /// A circular vertical arc from `height` at `grade`, of signed `radius`
+    /// (positive sag, negative crest). See [`Self::CircularArc`].
+    #[must_use]
+    pub const fn circular_arc(height: Scalar, grade: Scalar, radius: Scalar) -> Self {
+        Self::CircularArc {
+            height,
+            grade,
+            radius,
+        }
+    }
+
+    /// A profile from `height` at `grade` whose curvature runs along its own
+    /// arc length. See [`Self::Intrinsic`].
+    #[must_use]
+    pub const fn intrinsic(height: Scalar, grade: Scalar, curvature: CurvatureLaw) -> Self {
+        Self::Intrinsic {
+            height,
+            grade,
+            curvature,
+        }
+    }
+
+    /// Whether the piece lists agree and the seams ascend, and every stored
+    /// number is finite (an arc's radius also non-zero).
     #[must_use]
     pub fn is_well_formed(&self) -> bool {
         match self {
             Self::Polynomial { coefficients } => coefficients.iter().all(|c| c.is_finite()),
+            Self::CircularArc {
+                height,
+                grade,
+                radius,
+            } => height.is_finite() && grade.is_finite() && radius.is_finite() && *radius != 0.0,
+            Self::Intrinsic {
+                height,
+                grade,
+                curvature,
+            } => height.is_finite() && grade.is_finite() && curvature.is_well_formed(),
             Self::Piecewise { breaks, laws } => {
                 laws.len() == breaks.len() + 1
                     && breaks.iter().all(|b| b.is_finite())
@@ -135,6 +230,19 @@ impl ElevationLaw {
                 let (law, local) = piece_at(breaks, laws, distance)?;
                 law.height_at(local)
             }
+            Self::CircularArc {
+                height,
+                grade,
+                radius,
+            } => {
+                let arc = ArcState::at(*grade, *radius, distance)?;
+                // R (cos t0 - cos t) = R (sin^2 t - sin^2 t0) / (cos t0 + cos t)
+                // and R (sin t - sin t0) = d, so the large R cancels exactly.
+                Some(height + distance * (arc.sin + arc.sin0) / (arc.cos0 + arc.cos))
+                    .filter(|z| z.is_finite())
+            }
+            // No closed form: an evaluator integrates it (module docs).
+            Self::Intrinsic { .. } => None,
         }
     }
 
@@ -161,7 +269,81 @@ impl ElevationLaw {
                 let (law, local) = piece_at(breaks, laws, distance)?;
                 law.grade_at(local)
             }
+            Self::CircularArc { grade, radius, .. } => {
+                let arc = ArcState::at(*grade, *radius, distance)?;
+                Some(arc.sin / arc.cos).filter(|g| g.is_finite())
+            }
+            // No closed form: an evaluator integrates it (module docs).
+            Self::Intrinsic { .. } => None,
         }
+    }
+
+    /// The innermost piece covering `distance`, and that distance rebased
+    /// to the piece's own start.
+    ///
+    /// Descends through nested [`Self::Piecewise`] laws, so the returned law
+    /// is never piecewise; any other law is its own piece at the unchanged
+    /// distance. Seams belong to the piece that starts there, as in
+    /// `height_at`. `None` when the distance is not finite or a piece list
+    /// is malformed.
+    ///
+    /// This is what an evaluator needs to read a law it evaluates itself
+    /// (an [`Self::Intrinsic`] piece) inside a composed profile.
+    #[must_use]
+    pub fn piece_at(&self, distance: Scalar) -> Option<(&Self, Scalar)> {
+        if !distance.is_finite() {
+            return None;
+        }
+        match self {
+            Self::Piecewise { breaks, laws } => {
+                let (law, local) = piece_at(breaks, laws, distance)?;
+                law.piece_at(local)
+            }
+            _ => Some((self, distance)),
+        }
+    }
+}
+
+/// The trigonometry of a circular vertical arc at one plan distance.
+struct ArcState {
+    /// `sin t0` of the start direction.
+    sin0: Scalar,
+    /// `cos t0` of the start direction.
+    cos0: Scalar,
+    /// `sin t(d)` at the distance.
+    sin: Scalar,
+    /// `cos t(d)` at the distance, positive inside the domain.
+    cos: Scalar,
+}
+
+impl ArcState {
+    /// `None` outside the arc's domain `|sin t0 + d / R| < 1`, or for a
+    /// non-finite grade or a zero or non-finite radius.
+    fn at(grade: Scalar, radius: Scalar, distance: Scalar) -> Option<Self> {
+        if !(grade.is_finite() && radius.is_finite() && radius != 0.0) {
+            return None;
+        }
+        // sin and cos of atan(grade) without forming the angle: no rounding
+        // through atan and back, and exact at grade zero.
+        let norm = grade.hypot(1.0);
+        let sin0 = grade / norm;
+        let cos0 = 1.0 / norm;
+        let sin = sin0 + distance / radius;
+        if sin.is_nan() || sin.abs() >= 1.0 {
+            return None;
+        }
+        // (1 - s)(1 + s) keeps its relative accuracy as |s| -> 1, where
+        // 1 - s^2 would not.
+        let cos = ((1.0 - sin) * (1.0 + sin)).sqrt();
+        if cos <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            sin0,
+            cos0,
+            sin,
+            cos,
+        })
     }
 }
 

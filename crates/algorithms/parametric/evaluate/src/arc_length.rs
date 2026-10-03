@@ -239,10 +239,8 @@ pub fn elevated_point(curve: &Elevated3, d: Scalar) -> GeomResult<Point3> {
         return Err(invalid("plan distance must be finite"));
     }
     let planar = plan_point(&curve.plan, d)?;
-    let height = curve
-        .elevation
-        .height_at(d)
-        .ok_or_else(|| invalid("elevation law has no height at that distance"))?;
+    // Every law, including the intrinsic profile with no closed form (#238).
+    let height = crate::elevation::elevation_height(&curve.elevation, d)?;
     Ok(Point3::new(planar.x, planar.y, height))
 }
 
@@ -256,10 +254,7 @@ pub fn elevated_tangent(curve: &Elevated3, d: Scalar) -> GeomResult<Vec3> {
         return Err(invalid("plan distance must be finite"));
     }
     let planar = plan_tangent(&curve.plan, d)?;
-    let grade = curve
-        .elevation
-        .grade_at(d)
-        .ok_or_else(|| invalid("elevation law has no grade at that distance"))?;
+    let grade = crate::elevation::elevation_grade(&curve.elevation, d)?;
     let scale = (1.0 + grade * grade).sqrt();
     if !scale.is_finite() || scale == 0.0 {
         return Err(invalid("grade does not give a finite tangent"));

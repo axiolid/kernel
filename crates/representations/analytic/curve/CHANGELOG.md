@@ -25,6 +25,21 @@ caret rule for `0.x` versions.
   the section about the 3D tangent by `psi` (the rail heads rise
   `D cos theta`), `VerticalRise` by `asin(D / (b cos theta))` (they rise
   exactly `D`).
+- `ElevationLaw::CircularArc { height, grade, radius }` (#238): a vertical
+  circular arc in plan distance, the circle itself rather than a parabola.
+  With `t0 = atan(grade)` and signed `R` (positive sag), `sin t = sin t0 +
+  d/R`, `z = height + R (cos t0 - cos t)` and `grade = tan t`, evaluated
+  in a form that does not cancel for small `d/R`. `height_at` and
+  `grade_at` answer it in closed form and report `None` where
+  `|sin t0 + d/R| >= 1`.
+- `ElevationLaw::Intrinsic { height, grade, curvature }` (#238): a profile
+  given by curvature against its own arc length (a linear law is the
+  clothoid between grades). Stored exactly; `height_at` and `grade_at`
+  report `None` for it, since its height is a quadrature, read by
+  `axiolid-evaluate`.
+- `ElevationLaw::circular_arc`, `ElevationLaw::intrinsic` and
+  `ElevationLaw::piece_at`, the innermost piece of a composed law at a
+  distance, rebased to its own start.
 
 ## [0.3.2] - 2026-09-28
 

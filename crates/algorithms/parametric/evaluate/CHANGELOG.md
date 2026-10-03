@@ -25,6 +25,26 @@ caret rule for `0.x` versions.
   its `frame_at` returns the curve's section frame. An evaluator built
   against a reference up other than `+Z` refuses a banked curve, whose cant
   is measured against `+Z`.
+- `elevation` (#238): `elevation_height` and `elevation_grade` read every
+  elevation law, alone or inside a piecewise one. Closed forms go through
+  `ElevationLaw::height_at`/`grade_at`; an intrinsic (clothoid) profile is
+  integrated with `intrinsic_point` and its plan distance inverted by a
+  bracketed Newton solve to `INVERSION_TOLERANCE * max(1, d)`, after
+  certifying that the profile stays below vertical over the bracket, so a
+  profile that turns vertical is refused rather than read on a branch
+  where plan distance runs backwards. Against a 50-digit reference a
+  150 m clothoid agrees to 4e-15 m in height.
+- `elevation_chord_bound`: a certified bound on how far an elevation law
+  strays from the chord of its heights over a span, `h^2/8 sup|z''|` with
+  `z'' = k / cos^3 t`, for polynomials, circular arcs and intrinsic
+  profiles; `None` across a piecewise seam, outside a law's domain, or for
+  a family it does not bound.
+
+### Changed
+
+- `elevated_point`, `elevated_tangent` and `banked_derivative` read the
+  elevation through `elevation_height`/`elevation_grade`, so elevated and
+  banked curves carry circular-arc and intrinsic profiles.
 
 ## [0.3.3] - 2026-10-03
 

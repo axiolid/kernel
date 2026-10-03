@@ -134,11 +134,8 @@ pub fn banked_derivative(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> {
     covered(curve, d)?;
     let (_, pivot_rate) = curve.pivot_at(d).map_err(refused)?;
     let plan = plan_direction(curve, d)?;
-    let grade = curve
-        .base
-        .elevation
-        .grade_at(d)
-        .ok_or_else(|| invalid("elevation law has no grade at that distance"))?;
+    // Every elevation law, including an intrinsic profile (#238).
+    let grade = crate::elevation::elevation_grade(&curve.base.elevation, d)?;
     let derivative = Vec3::new(plan.x, plan.y, grade + pivot_rate);
     if !derivative.is_finite() {
         return Err(invalid("banked curve: grade is not finite"));
