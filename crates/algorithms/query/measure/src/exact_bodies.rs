@@ -30,19 +30,21 @@
 //!
 //! [`body_boundary_hausdorff_distance`] and
 //! [`one_sided_body_boundary_hausdorff`] measure the boundary of the UNION
-//! of each body's items. They are computed on the union of the items'
-//! boundaries, so every body is first checked, item pair by item pair, for
-//! a layout under which the two are the same point set:
+//! of each body's items. Every body is first checked, item pair by item
+//! pair, for a layout under which that boundary can be formed exactly:
 //!
-//! - **Apart**: shown by a plane strictly between them -- a direction along
-//!   which the exact projection ranges of every face patch and edge span of
-//!   the two are disjoint, tried along the axes and every planar face's
-//!   normal -- or, failing that, by a positive certified lower bound on the
-//!   distance between their boundaries together with a boundary point of
-//!   each outside an enclosing box of the other. The second test needs each
-//!   item to be one solid (one outer shell, voids allowed): two such solids
-//!   whose boundaries do not meet are disjoint unless the outer shell of
-//!   one lies inside the other, and then its box lies in the other's box.
+//! - **Apart**: shown by a plane with a certified positive gap between
+//!   them -- a direction along which the exact projection ranges of every
+//!   face patch and edge span of the two are disjoint, tried along the axes
+//!   and every planar face's normal -- or, failing that, by a positive
+//!   certified lower bound on the distance between their boundaries
+//!   together with a boundary point of each outside an enclosing box of the
+//!   other. The second test needs each item to be one solid (one outer
+//!   shell, voids allowed): two such solids whose boundaries do not meet
+//!   are disjoint unless the outer shell of one lies inside the other, and
+//!   then its box lies in the other's box. However small the gap -- an
+//!   exporter's 0.3 mm between parts -- both facing faces are on the
+//!   union's boundary and are measured as such: a gap is never glued.
 //! - **Touching without a shared patch**: a plane separates them to within
 //!   rounding (`1e-9` relative to their size), and one of the two has no
 //!   face that can hold a patch of that plane -- no planar face lying in it
@@ -55,26 +57,54 @@
 //!   boundaries. Planes are tried along the axes, every planar face's
 //!   normal, and the sum of any two touching ones (two blocks meeting at an
 //!   edge are separated by the diagonal plane, where neither has a face).
+//! - **Exact face contact**: they touch on a plane where both have faces,
+//!   every such face planar and lying, in the B-rep's own numbers, on one
+//!   plane normal to a coordinate axis (its plane, vertices, lines and
+//!   circles all at the very same coordinate along it; a placement turning
+//!   about that axis keeps this), and bounded by lines and circles. Each
+//!   face in contact is then cut down to its free region, what is left of
+//!   it once the faces of other items lying against it are cut away, by an
+//!   exact arrangement of their boundaries on the plane (`contact`).
 //!
-//! Anything else is refused by name: [`BodyMeasureError::ItemsShareFace`]
-//! when the items touch where both have a face in the separating plane --
-//! a shared patch of face is interior to the union and NOT on its boundary,
-//! and the union boundary is not formed here -- and
-//! [`BodyMeasureError::ItemsOverlap`] when they were not shown apart or
+//! Why cutting is right: interiors are disjoint, so a point `p` of an
+//! item's face `F` is off the union's boundary only if a ball round it is
+//! covered by items. By the argument above, the half of the ball across
+//! `F`'s plane is covered by other items whose faces then hold a disc of
+//! that plane round `p` -- faces lying against `F`. So the union's boundary
+//! is the closure of the free regions of all faces: those in no contact as
+//! they are, and those in contact cut. Its edges are the edges of those
+//! regions; an edge between two faces both cut away (the foot of a wall
+//! shared by two blocks on a footing) is not on it and is dropped.
+//!
+//! Anything else is refused by name, never glued or snapped:
+//! [`BodyMeasureError::ItemsNearlyShareFace`] with the gap when two items
+//! touch on a plane where both have faces that are not exactly on one axis
+//! plane (a tilted assembly, walls turned in plan), or interpenetrate by no
+//! more than the caller's tolerance; [`BodyMeasureError::ItemsShareFace`]
+//! when such faces cannot be cut (a B-spline face, an elliptical edge);
+//! and [`BodyMeasureError::ItemsOverlap`] when they were not shown apart or
 //! touching: boundaries that cross or come closer than the search resolves
 //! with no plane between them, one item possibly inside another, or curved
-//! items touching (no planar face to separate them by). Nothing is assumed
-//! disjoint.
+//! items touching (no planar face to separate them by).
 //!
-//! Once the layout is shown, the one-sided distance is
-//! `max over p in dA of min over items B_j of d(p, dB_j)`, measured by the
-//! search of [`crate::one_sided_boundary_hausdorff`] over all items at
-//! once. Faces are matched across every pair of items, so a body moved by
+//! Gluing near contact and widening the result by the gap is not sound:
+//! lifted 0.3 mm off its footing, a column's base disc and the disc of the
+//! footing's top under it are both on the union's boundary, and their
+//! centres are a whole radius from the boundary of the body glued shut. So
+//! a gap is measured as a gap, and an interpenetration is refused.
+//!
+//! The one-sided distance is then measured by the search of
+//! [`crate::one_sided_boundary_hausdorff`] on the union's boundary of each
+//! body. Faces are matched across every pair of items, so a body moved by
 //! a translation closes as fast as one solid does: every face patch is
-//! held at `|t|` by its own translate, and the support point of the union
-//! against `t` is `|t|` from the moved body.
+//! held at `|t|` by its own translate, and the support point of each item
+//! against `t` seeds the lower bound. A free region is bounded through the
+//! face it was cut from, so an exact cut that falls out differently in the
+//! last bit for a translated copy (a sliver along a wall turned in plan)
+//! still closes at once (`exact_hausdorff/cut.rs`).
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use core::fmt;
 
@@ -88,8 +118,12 @@ use crate::exact_distance::{
     search, search_within, surface_of, Clearance, DistanceBounds, Metric, Shape, Side,
     OVERLAP_STEPS,
 };
-use crate::exact_hausdorff::{witnessed, MAX_SPLITS};
+use crate::exact_hausdorff::{witnessed, Cut, MAX_SPLITS};
 use crate::mesh_hausdorff::HausdorffBounds;
+
+mod contact;
+
+use contact::{Assembler, AxisPlane, Uncut};
 
 /// Which argument of a body query a refusal is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +136,7 @@ pub enum BodySide {
 
 /// Why two bodies of exact solids could not be measured.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BodyMeasureError {
     /// The body has no items.
     EmptyBody {
@@ -124,8 +158,9 @@ pub enum BodyMeasureError {
         second: usize,
     },
     /// Two items of one body touch where both have a face in the plane
-    /// that separates them, so they may share a patch of face: interior to
-    /// their union and not on its boundary, which is not formed here.
+    /// that separates them, and the shared patch cannot be cut exactly: a
+    /// B-spline face reaches the plane, or a face in contact is bounded by
+    /// an edge that is neither a line nor a circle.
     ItemsShareFace {
         /// Which body.
         body: BodySide,
@@ -133,6 +168,24 @@ pub enum BodyMeasureError {
         first: usize,
         /// The second item, by index in the slice.
         second: usize,
+    },
+    /// Two items of one body are within the caller's tolerance of face
+    /// contact without being in exact contact: they interpenetrate by up to
+    /// `-gap`, or touch where their faces are not exactly on one plane (a
+    /// turned assembly's walls). Gluing them would measure a boundary the
+    /// items do not have, so the pair is refused rather than snapped (a
+    /// positive gap is measured exactly instead: the two faces are on the
+    /// union's boundary).
+    ItemsNearlyShareFace {
+        /// Which body.
+        body: BodySide,
+        /// The first item, by index in the slice.
+        first: usize,
+        /// The second item, by index in the slice.
+        second: usize,
+        /// The certified least separation along the plane between them:
+        /// negative where they may interpenetrate, by at most its size.
+        gap: Scalar,
     },
 }
 
@@ -157,7 +210,17 @@ impl fmt::Display for BodyMeasureError {
             } => write!(
                 f,
                 "items {first} and {second} of the {body:?} body may share a patch of \
-                 face, which is not on the boundary of their union"
+                 face that cannot be cut exactly"
+            ),
+            Self::ItemsNearlyShareFace {
+                body,
+                first,
+                second,
+                gap,
+            } => write!(
+                f,
+                "items {first} and {second} of the {body:?} body are within the \
+                 tolerance of face contact (gap {gap}) but not in exact contact"
             ),
         }
     }
@@ -305,10 +368,8 @@ pub fn one_sided_body_boundary_hausdorff_with_budget(
     tolerance: Tolerance,
     max_splits: usize,
 ) -> Result<BodyHausdorffBounds, BodyMeasureError> {
-    let source = Items::new(from, BodySide::First)?;
-    let target = Items::new(to, BodySide::Second)?;
-    check_layout(from, BodySide::First, tolerance)?;
-    check_layout(to, BodySide::Second, tolerance)?;
+    let source = Items::boundary(from, BodySide::First, tolerance)?;
+    let target = Items::boundary(to, BodySide::Second, tolerance)?;
     one_sided(&source, &target, accuracy, tolerance, max_splits)
 }
 
@@ -324,10 +385,8 @@ pub fn body_boundary_hausdorff_distance(
     accuracy: Scalar,
     tolerance: Tolerance,
 ) -> Result<BodyHausdorff, BodyMeasureError> {
-    let first = Items::new(a, BodySide::First)?;
-    let second = Items::new(b, BodySide::Second)?;
-    check_layout(a, BodySide::First, tolerance)?;
-    check_layout(b, BodySide::Second, tolerance)?;
+    let first = Items::boundary(a, BodySide::First, tolerance)?;
+    let second = Items::boundary(b, BodySide::Second, tolerance)?;
     let forward = one_sided(&first, &second, accuracy, tolerance, MAX_SPLITS)?;
     let backward = one_sided(&second, &first, accuracy, tolerance, MAX_SPLITS)?;
     let mut distance = if backward.bounds.lower > forward.bounds.lower {
@@ -350,6 +409,10 @@ fn one_sided(
     tolerance: Tolerance,
     max_splits: usize,
 ) -> Result<BodyHausdorffBounds, BodyMeasureError> {
+    let cuts = match (&from.cut, &to.cut) {
+        (None, None) => None,
+        _ => Some((from.cut(), to.cut())),
+    };
     let found = witnessed(
         &from.brep,
         &to.brep,
@@ -357,6 +420,7 @@ fn one_sided(
         tolerance,
         max_splits,
         &from.edge_ranges(),
+        cuts.as_ref().map(|(a, b)| (a, b)),
     )?;
     Ok(BodyHausdorffBounds {
         bounds: found.bounds,
@@ -371,6 +435,18 @@ struct Items<'a> {
     brep: Cow<'a, ExactBRep>,
     faces: Vec<usize>,
     edges: Vec<usize>,
+    /// Where `brep` is the items' boundary cut down to free regions: the
+    /// items uncut, and how each cut face and each face in contact relate.
+    cut: Option<CutFrom<'a>>,
+}
+
+/// The items uncut, the face of them each cut face of the boundary came
+/// from, and the faces lying against each face in contact, all by index
+/// into the uncut items.
+struct CutFrom<'a> {
+    items: Cow<'a, ExactBRep>,
+    origin: HashMap<usize, usize>,
+    partners: HashMap<usize, Vec<usize>>,
 }
 
 impl<'a> Items<'a> {
@@ -381,6 +457,7 @@ impl<'a> Items<'a> {
                 brep: Cow::Borrowed(one),
                 faces: vec![0],
                 edges: vec![0],
+                cut: None,
             }),
             _ => {
                 let mut builder = ExactBRepBuilder::default();
@@ -399,9 +476,106 @@ impl<'a> Items<'a> {
                     brep: Cow::Owned(brep),
                     faces,
                     edges,
+                    cut: None,
                 })
             }
         }
+    }
+
+    /// How the measured boundary was cut from the items: nothing cut when
+    /// no faces were in contact.
+    fn cut(&self) -> Cut<'_> {
+        match &self.cut {
+            Some(cut) => Cut {
+                items: &cut.items,
+                origin: cut.origin.clone(),
+                partners: cut.partners.clone(),
+            },
+            None => Cut {
+                items: &self.brep,
+                origin: HashMap::new(),
+                partners: HashMap::new(),
+            },
+        }
+    }
+
+    /// The boundary of the union of a body's items: their faces, with those
+    /// in exact contact cut down to their free regions, once every pair of
+    /// items is shown apart, touching or in exact contact.
+    fn boundary(
+        items: &'a [ExactBRep],
+        body: BodySide,
+        tolerance: Tolerance,
+    ) -> Result<Self, BodyMeasureError> {
+        if items.is_empty() {
+            return Err(BodyMeasureError::EmptyBody { body });
+        }
+        let partners = check_layout(items, body, tolerance)?;
+        if partners.is_empty() {
+            return Self::new(items, body);
+        }
+        let uncut = Self::new(items, body)?;
+        let mut origin = HashMap::new();
+        let mut assembler = Assembler::default();
+        let (mut faces, mut edges) = (Vec::new(), Vec::new());
+        for (index, item) in items.iter().enumerate() {
+            let (first_face, first_edge) = assembler.counts();
+            faces.push(first_face);
+            edges.push(first_edge);
+            assembler.next_item();
+            for face in 0..item.topology().faces().len() {
+                let cut = match partners.get(&(index, face)) {
+                    Some((plane, against)) => {
+                        let against: Vec<(&ExactBRep, usize)> =
+                            against.iter().map(|&(j, g)| (&items[j], g)).collect();
+                        contact::free_regions(item, face, &against, *plane)
+                            .map_err(|()| BodyMeasureError::ItemsShareFace {
+                                body,
+                                first: index.min(partners[&(index, face)].1[0].0),
+                                second: index.max(partners[&(index, face)].1[0].0),
+                            })?
+                            .map(|regions| (regions, *plane))
+                    }
+                    None => None,
+                };
+                match cut {
+                    Some((regions, plane)) => {
+                        for region in &regions {
+                            origin.insert(assembler.counts().0, uncut.faces[index] + face);
+                            assembler.add_region(region, plane);
+                        }
+                    }
+                    None => assembler
+                        .copy_face(item, face)
+                        .ok_or(ExactMeasureError::DanglingReference)?,
+                }
+            }
+        }
+        let brep = assembler
+            .finish()
+            .ok_or(ExactMeasureError::DanglingReference)?;
+        let partners = partners
+            .iter()
+            .map(|(&(item, face), (_, against))| {
+                (
+                    uncut.faces[item] + face,
+                    against
+                        .iter()
+                        .map(|&(other, g)| uncut.faces[other] + g)
+                        .collect(),
+                )
+            })
+            .collect();
+        Ok(Self {
+            brep: Cow::Owned(brep),
+            faces,
+            edges,
+            cut: Some(CutFrom {
+                items: uncut.brep,
+                origin,
+                partners,
+            }),
+        })
     }
 
     /// Each item's edges, by index in the merged B-rep.
@@ -425,27 +599,42 @@ impl<'a> Items<'a> {
 }
 
 /// How two items of one body lie (see the module docs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Layout {
     /// Shown disjoint.
     Apart,
     /// Shown touching, with no patch of face shared.
     Touching,
-    /// Touching where both may hold a patch of the separating plane.
+    /// In exact face contact on `plane`: these faces of each lie on it.
+    Contact {
+        plane: AxisPlane,
+        faces_a: Vec<usize>,
+        faces_b: Vec<usize>,
+    },
+    /// Touching where both may hold a patch of the separating plane, on a
+    /// face that is not planar.
     MayShareFace,
+    /// Within `gap` of face contact (negative: interpenetrating), or
+    /// touching where the faces are not exactly on one plane.
+    NearlyShareFace { gap: Scalar },
     /// Neither shown.
     Undecided,
 }
 
-/// Refuse a body two of whose items are not shown apart or touching without
-/// a shared patch.
+/// The faces of other items lying against each face in exact contact, by
+/// item and face, with the plane they share.
+type Partners = HashMap<(usize, usize), (AxisPlane, Vec<(usize, usize)>)>;
+
+/// Refuse a body two of whose items are not shown apart, touching without
+/// a shared patch, or in exact face contact; and list the faces in contact.
 fn check_layout(
     items: &[ExactBRep],
     body: BodySide,
     tolerance: Tolerance,
-) -> Result<(), BodyMeasureError> {
+) -> Result<Partners, BodyMeasureError> {
+    let mut partners = Partners::new();
     if items.len() < 2 {
-        return Ok(());
+        return Ok(partners);
     }
     let linear = tolerance.linear().max(1e-12);
     let sides = items
@@ -456,6 +645,33 @@ fn check_layout(
         for second in first + 1..sides.len() {
             match layout(&sides[first], &sides[second], tolerance)? {
                 Layout::Apart | Layout::Touching => {}
+                Layout::Contact {
+                    plane,
+                    faces_a,
+                    faces_b,
+                } => {
+                    for &fa in &faces_a {
+                        for &fb in &faces_b {
+                            for (from, to) in
+                                [((first, fa), (second, fb)), ((second, fb), (first, fa))]
+                            {
+                                partners
+                                    .entry(from)
+                                    .or_insert_with(|| (plane, Vec::new()))
+                                    .1
+                                    .push(to);
+                            }
+                        }
+                    }
+                }
+                Layout::NearlyShareFace { gap } => {
+                    return Err(BodyMeasureError::ItemsNearlyShareFace {
+                        body,
+                        first,
+                        second,
+                        gap,
+                    })
+                }
                 Layout::MayShareFace => {
                     return Err(BodyMeasureError::ItemsShareFace {
                         body,
@@ -473,7 +689,7 @@ fn check_layout(
             }
         }
     }
-    Ok(())
+    Ok(partners)
 }
 
 /// The range of `d . x` over every element of a side: a sound enclosure of
@@ -507,17 +723,25 @@ fn plane_normals(side: &Side<'_>) -> Result<Vec<Vec3>, ExactMeasureError> {
 }
 
 /// A plane `d . x = level` with `a` on its low side and `b` on its high
-/// side, to within `slack`.
+/// side, to within `slack`; `gap` is the certified least separation of
+/// the two along `d`, negative where their ranges overlap.
 #[derive(Debug, Clone, Copy)]
 struct Plane {
     d: Vec3,
     level: Scalar,
     slack: Scalar,
+    gap: Scalar,
 }
 
-/// How the items' ranges along the unit `d` lie: strictly apart either way
-/// round, within rounding of a plane between them, or overlapping.
-fn separate(a: &Side<'_>, b: &Side<'_>, d: Vec3) -> Result<Separation, ExactMeasureError> {
+/// How the items' ranges along the unit `d` lie: certainly apart (a
+/// positive gap), within rounding of a plane between them, overlapping by
+/// no more than `tolerance`, or overlapping more.
+fn separate(
+    a: &Side<'_>,
+    b: &Side<'_>,
+    d: Vec3,
+    tolerance: Scalar,
+) -> Result<Separation, ExactMeasureError> {
     let (a_lo, a_hi) = extent(a, d)?;
     let (b_lo, b_hi) = extent(b, d)?;
     let scale = a_lo.abs().max(a_hi.abs()).max(b_lo.abs()).max(b_hi.abs());
@@ -527,11 +751,22 @@ fn separate(a: &Side<'_>, b: &Side<'_>, d: Vec3) -> Result<Separation, ExactMeas
         (b_lo - a_hi, d, 0.5 * (a_hi + b_lo)),
         (a_lo - b_hi, -d, -0.5 * (b_hi + a_lo)),
     ] {
-        if gap > slack {
+        if gap > 0.0 {
             return Ok(Separation::Apart);
         }
+        let plane = Plane {
+            d,
+            level,
+            slack,
+            gap,
+        };
         if gap >= -slack {
-            found = Separation::Touching(Plane { d, level, slack });
+            found = Separation::Touching(plane);
+        } else if gap >= -tolerance && !matches!(found, Separation::Touching(_)) {
+            found = Separation::Near(Plane {
+                slack: slack - gap,
+                ..plane
+            });
         }
     }
     Ok(found)
@@ -541,32 +776,78 @@ fn separate(a: &Side<'_>, b: &Side<'_>, d: Vec3) -> Result<Separation, ExactMeas
 enum Separation {
     Apart,
     Touching(Plane),
+    Near(Plane),
     Overlapping,
 }
 
-/// Whether some face of the side may hold an open patch of the plane: a
-/// planar face lying in it, or a B-spline face reaching it.
-fn may_hold_patch(side: &Side<'_>, plane: &Plane) -> Result<bool, ExactMeasureError> {
+/// The faces of the side that may hold an open patch of the plane: the
+/// planar faces lying in it, and whether a B-spline face reaches it (no
+/// other family holds an open patch of a plane).
+fn patch_faces(side: &Side<'_>, plane: &Plane) -> Result<(Vec<usize>, bool), ExactMeasureError> {
     let band = (
         plane.level - 2.0 * plane.slack,
         plane.level + 2.0 * plane.slack,
     );
+    let mut planar = Vec::new();
+    let mut spline = false;
     for element in &side.elements {
         let Shape::Face { face, .. } = element.shape else {
             continue;
         };
         let surface = surface_of(side.brep, side.brep.topology().faces()[face].surface)?;
         let (lo, hi) = side.project(element, plane.d)?;
-        let holds = match surface {
-            Surface::Plane(_) => lo >= band.0 && hi <= band.1,
-            Surface::BSpline(_) => hi >= band.0 && lo <= band.1,
-            _ => false,
-        };
-        if holds {
-            return Ok(true);
+        match surface {
+            Surface::Plane(_) if lo >= band.0 && hi <= band.1 => {
+                if !planar.contains(&face) {
+                    planar.push(face);
+                }
+            }
+            Surface::BSpline(_) if hi >= band.0 && lo <= band.1 => spline = true,
+            _ => {}
         }
     }
-    Ok(false)
+    Ok((planar, spline))
+}
+
+/// Whether some face of the side may hold an open patch of the plane.
+fn may_hold_patch(side: &Side<'_>, plane: &Plane) -> Result<bool, ExactMeasureError> {
+    let (planar, spline) = patch_faces(side, plane)?;
+    Ok(spline || !planar.is_empty())
+}
+
+/// The layout of two items touching on `plane` where both may hold a patch
+/// of it: exact face contact when every such face is planar and lies, in
+/// its own numbers, on one axis plane; else near contact, or a face that
+/// cannot be cut.
+fn contact(a: &Side<'_>, b: &Side<'_>, plane: &Plane) -> Result<Layout, ExactMeasureError> {
+    let (faces_a, spline_a) = patch_faces(a, plane)?;
+    let (faces_b, spline_b) = patch_faces(b, plane)?;
+    if spline_a || spline_b {
+        return Ok(Layout::MayShareFace);
+    }
+    let mut common: Option<AxisPlane> = None;
+    let mut off_plane = false;
+    for (side, faces) in [(a, &faces_a), (b, &faces_b)] {
+        for &face in faces {
+            match (contact::axis_plane(side.brep, face), common) {
+                (Err(Uncut::Edge), _) => return Ok(Layout::MayShareFace),
+                (Ok(found), None) => common = Some(found),
+                (Ok(found), Some(seen)) if found == seen => {}
+                _ => off_plane = true,
+            }
+        }
+    }
+    if off_plane {
+        return Ok(Layout::NearlyShareFace { gap: plane.gap });
+    }
+    Ok(match common {
+        Some(on) => Layout::Contact {
+            plane: on,
+            faces_a,
+            faces_b,
+        },
+        None => Layout::NearlyShareFace { gap: plane.gap },
+    })
 }
 
 fn layout(a: &Side<'_>, b: &Side<'_>, tolerance: Tolerance) -> Result<Layout, ExactMeasureError> {
@@ -580,11 +861,14 @@ fn layout(a: &Side<'_>, b: &Side<'_>, tolerance: Tolerance) -> Result<Layout, Ex
             candidates.push(n);
         }
     }
+    let linear = tolerance.linear();
     let mut touching: Vec<Plane> = Vec::new();
+    let mut near: Vec<Plane> = Vec::new();
     for d in candidates {
-        match separate(a, b, d)? {
+        match separate(a, b, d, linear)? {
             Separation::Apart => return Ok(Layout::Apart),
             Separation::Touching(plane) => touching.push(plane),
+            Separation::Near(plane) => near.push(plane),
             Separation::Overlapping => {}
         }
     }
@@ -595,10 +879,10 @@ fn layout(a: &Side<'_>, b: &Side<'_>, tolerance: Tolerance) -> Result<Layout, Ex
             let sum = touching[i].d + touching[j].d;
             let length = sum.length();
             if length > 1e-6 {
-                match separate(a, b, sum / length)? {
+                match separate(a, b, sum / length, linear)? {
                     Separation::Apart => return Ok(Layout::Apart),
                     Separation::Touching(plane) => touching.push(plane),
-                    Separation::Overlapping => {}
+                    Separation::Near(_) | Separation::Overlapping => {}
                 }
             }
         }
@@ -608,14 +892,22 @@ fn layout(a: &Side<'_>, b: &Side<'_>, tolerance: Tolerance) -> Result<Layout, Ex
             return Ok(Layout::Touching);
         }
     }
+    // Touching where both hold a patch of the plane: face contact, cut
+    // exactly or refused by name.
+    if let Some(plane) = touching.first() {
+        return contact(a, b, plane);
+    }
     if boundaries_apart(a, b, tolerance)? && !nested(a, b)? {
         return Ok(Layout::Apart);
     }
-    Ok(if touching.is_empty() {
-        Layout::Undecided
-    } else {
-        Layout::MayShareFace
-    })
+    // Interpenetrating by no more than the tolerance across a plane where
+    // both have a face: near contact, refused by name.
+    for plane in &near {
+        if may_hold_patch(a, plane)? && may_hold_patch(b, plane)? {
+            return Ok(Layout::NearlyShareFace { gap: plane.gap });
+        }
+    }
+    Ok(Layout::Undecided)
 }
 
 /// Whether the boundaries are certainly apart: a positive lower bound on

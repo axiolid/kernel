@@ -20,14 +20,32 @@ caret rule for `0.x` versions.
   Hausdorff distance between the boundaries of the unions). Witnesses name
   their items (`BodyDistance`, `BodyHausdorffBounds`, `BodyHausdorff`).
   The Hausdorff queries first show every pair of items of a body apart (a
-  plane strictly between them, or boundaries certainly apart with neither
-  inside the other) or touching without a shared patch of face (a plane
-  between them within rounding where one of them has no face), and refuse
-  anything else by name in the new `BodyMeasureError`: `ItemsShareFace`
-  (a column standing on its footing) and `ItemsOverlap`. Distance needs
-  no such check. A translated multi-item body closes as fast as one
-  solid: faces match across items, and each item's own support point
-  seeds the lower bound.
+  plane with a certified positive gap between them, or boundaries
+  certainly apart with neither inside the other), touching without a
+  shared patch of face (a plane between them within rounding where one of
+  them has no face), or in exact face contact. Items in face contact (a
+  column on its footing, blocks sharing a wall, stacked steps) share a
+  patch that is interior to their union: each face in contact is cut down
+  to its free region by an exact arrangement of the faces' boundaries on
+  their common plane (`axiolid-overlay`'s `ArcArrangement`, now an
+  optional dependency under `exact`), and the union's boundary is
+  measured. Contact is exact when both faces lie, in the B-rep's own
+  numbers, on one plane normal to a coordinate axis, which a placement
+  turning about that axis keeps. A gap is never glued: two items a
+  sub-millimetre apart are measured as apart, both facing faces on the
+  boundary, whatever the tolerance (gluing and widening the interval by
+  the gap would not be sound: a lifted column's base disc is a whole
+  radius from the glued boundary). Anything else is refused by name in
+  the new `BodyMeasureError`: `ItemsNearlyShareFace` with the gap (faces
+  in contact off an axis plane, or items interpenetrating by no more
+  than the caller's tolerance), `ItemsShareFace` (a face in contact that
+  cannot be cut: a B-spline face, an elliptical edge) and `ItemsOverlap`.
+  Distance needs no such check. A translated multi-item body closes as
+  fast as one solid: faces match across items, a free region is bounded
+  through the face it was cut from (so a cut that falls out differently
+  in the last bit for the moved copy still closes at once), and each
+  item's own support point seeds the lower bound. Ten stacked steps
+  turned in plan and moved close both ways at 1e-9 in about 0.14 s.
 
 ## [0.3.7] - 2026-10-02
 

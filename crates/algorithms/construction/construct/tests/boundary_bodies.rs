@@ -20,7 +20,8 @@ use axiolid_measure::{
     BodyHausdorffBounds, BodyMeasureError, BodySide, Clearance, DistanceBounds, HausdorffBounds,
 };
 use axiolid_profile::{
-    CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
+    CircleProfile, Contour, ContourProfile, EllipseProfile, Profile, ProfileSegment,
+    RectangleProfile,
 };
 use axiolid_topology::Solid;
 
@@ -335,14 +336,20 @@ fn blocks_meeting_at_an_edge_are_one_union_boundary() {
     // every plane along a face normal holds a face of each, but the
     // diagonal one holds neither, so the contact has no area and the union
     // boundary is the two boundaries.
+    // Turned and tilted, their walls are on no axis plane, and no axis
+    // lies in the wedge of directions the shared edge is extreme in: only
+    // the diagonal plane shows the contact has no area.
     let body = vec![
         block(0.5, 0.0, 0.0, 0.0, 1.0),
         block(0.5, 1.0, 1.0, 0.0, 1.0),
     ];
     let t = Vec3::new(0.02, -0.01, 0.03);
-    let copy = shifted(&body, t);
-    let result = body_boundary_hausdorff_distance(&body, &copy, 1e-9, tol()).expect("touching");
-    contains(&result.distance.bounds, t.length(), 1e-9);
+    let turned = Transform3::from_rotation_x(0.3) * Transform3::from_rotation_z(0.6);
+    for body in [body.clone(), placed(&body, &turned)] {
+        let copy = shifted(&body, t);
+        let result = body_boundary_hausdorff_distance(&body, &copy, 1e-9, tol()).expect("touching");
+        contains(&result.distance.bounds, t.length(), 1e-9);
+    }
 }
 
 #[test]
@@ -358,11 +365,18 @@ fn a_block_resting_on_an_edge_shares_no_patch() {
                 * Transform3::from_rotation_y(std::f64::consts::FRAC_PI_4)),
         )
         .expect("rigid");
+    // Tilted as a whole, the footing's top is on no axis plane: the block
+    // still has no face there, so the contact still has no area.
     let body = vec![footing(), resting];
     let t = Vec3::new(-0.02, 0.01, 0.03);
-    let copy = shifted(&body, t);
-    let result = body_boundary_hausdorff_distance(&body, &copy, 1e-9, tol()).expect("touching");
-    contains(&result.distance.bounds, t.length(), 1e-9);
+    for body in [
+        body.clone(),
+        placed(&body, &Transform3::from_rotation_x(0.3)),
+    ] {
+        let copy = shifted(&body, t);
+        let result = body_boundary_hausdorff_distance(&body, &copy, 1e-9, tol()).expect("touching");
+        contains(&result.distance.bounds, t.length(), 1e-9);
+    }
 }
 
 #[test]
@@ -382,49 +396,427 @@ fn refused(result: Result<BodyHausdorffBounds, BodyMeasureError>) -> BodyMeasure
     result.expect_err("refused")
 }
 
-#[test]
-fn items_sharing_a_patch_of_face_are_refused_by_name() {
-    // The column's base disc is interior to the union, and so is the disc
-    // of the footing's top under it: neither is on the union boundary.
-    let body = column_on_footing();
-    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
-    let error = refused(one_sided_body_boundary_hausdorff(
-        &body,
-        &other,
-        1e-3,
+// Face contact (#229): a patch of face two items share is interior to
+// their union, cut away from both, and the union boundary measured.
+
+/// A rectangular slab `2 hx` by `2 hy` centred on `(x, y)`, from `bottom` to
+/// `top`.
+fn slab(hx: f64, hy: f64, x: f64, y: f64, bottom: f64, top: f64) -> ExactBRep {
+    let local = extrude_profile_exact(
+        &Profile::Rectangle(RectangleProfile {
+            x: 2.0 * hx,
+            y: 2.0 * hy,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        }),
+        Vec3::Z,
+        top - bottom,
         tol(),
+    )
+    .expect("a slab");
+    moved(local, Vec3::new(x, y, bottom))
+}
+
+/// `n` steps, each `going` deep and `rise` high and 1 wide: step `k` spans
+/// `x` from `k going` to `n going` and stands on step `k - 1`, which it
+/// covers but for that step's tread.
+fn stair(n: usize, going: f64, rise: f64) -> Vec<ExactBRep> {
+    (0..n)
+        .map(|k| {
+            let k = k as f64;
+            let from = k * going;
+            let to = n as f64 * going;
+            slab(
+                0.5 * (to - from),
+                0.5,
+                0.5 * (from + to),
+                0.0,
+                k * rise,
+                (k + 1.0) * rise,
+            )
+        })
+        .collect()
+}
+
+/// The same stair as one solid: its side profile extruded across it.
+fn stair_solid(n: usize, going: f64, rise: f64) -> ExactBRep {
+    // Along the bottom, up the back, then down the treads from the top.
+    let mut corners = vec![Point2::new(0.0, 0.0)];
+    corners.push(Point2::new(n as f64 * going, 0.0));
+    corners.push(Point2::new(n as f64 * going, n as f64 * rise));
+    for k in (0..n).rev() {
+        let (x, z) = (k as f64 * going, (k + 1) as f64 * rise);
+        corners.push(Point2::new(x, z));
+        if k > 0 {
+            corners.push(Point2::new(x, k as f64 * rise));
+        }
+    }
+    let contour = Contour::new(
+        (0..corners.len())
+            .map(|k| ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: corners[k],
+                    direction: corners[(k + 1) % corners.len()] - corners[k],
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            })
+            .collect(),
+    );
+    let local = extrude_profile_exact(
+        &Profile::Contour(ContourProfile {
+            outer: contour,
+            holes: Vec::new(),
+        }),
+        Vec3::Z,
+        1.0,
+        tol(),
+    )
+    .expect("a stair");
+    // The profile stood up in the plane `y = 0.5`, extruded towards `-y`.
+    local
+        .transformed(
+            &(Transform3::from_translation(Vec3::new(0.0, 0.5, 0.0))
+                * Transform3::from_rotation_x(std::f64::consts::FRAC_PI_2)),
+        )
+        .expect("rigid")
+}
+
+fn placed(body: &[ExactBRep], placement: &Transform3) -> Vec<ExactBRep> {
+    body.iter()
+        .map(|item| item.transformed(placement).expect("rigid"))
+        .collect()
+}
+
+/// A translate closes within the translate budget at 1e-9, both ways.
+fn closes_as_a_translate(body: &[ExactBRep], t: Vec3) {
+    let copy = shifted(body, t);
+    for (from, to) in [(body, copy.as_slice()), (copy.as_slice(), body)] {
+        let found =
+            one_sided_body_boundary_hausdorff_with_budget(from, to, 1e-9, tol(), TRANSLATE_BUDGET)
+                .expect("measured");
+        contains(&found.bounds, t.length(), 1e-9);
+    }
+}
+
+#[test]
+fn a_column_on_its_footing_is_one_union_boundary() {
+    let body = column_on_footing();
+    let accuracy = 0.01;
+    // Against the footing alone: the column's top is 2.5 above it, and the
+    // footing's disc under the column is not on the union's boundary: its
+    // centre is 0.3 from the column's foot, the nearest point that is.
+    let footing = [footing()];
+    let result = body_boundary_hausdorff_distance(&body, &footing, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 2.5, accuracy);
+    contains(&result.backward.bounds, 0.3, accuracy);
+    assert!((result.backward.bounds.point_from.z - 0.5).abs() < 1e-9);
+    assert!(
+        result
+            .backward
+            .bounds
+            .point_from
+            .x
+            .hypot(result.backward.bounds.point_from.y)
+            < 0.3
+    );
+    // Against the column alone: a bottom corner of the footing is farthest,
+    // from the column's foot; the column's base is 0.3 from the union's
+    // boundary at its centre.
+    let column = [column(0.3, 0.5, 3.0)];
+    let result = body_boundary_hausdorff_distance(&body, &column, accuracy, tol()).expect("cut");
+    let corner = (2f64.sqrt() - 0.3).hypot(0.5);
+    contains(&result.forward.bounds, corner, accuracy);
+    contains(&result.backward.bounds, 0.3, accuracy);
+    for t in translations() {
+        closes_as_a_translate(&body, t);
+    }
+}
+
+#[test]
+fn blocks_sharing_a_wall_are_one_box() {
+    // Two unit cubes side by side are the box `[-0.5, 1.5] x [-0.5, 0.5] x
+    // [0, 1]`: the shared wall is cut away from both, and every other point
+    // of each is on the box. Measured with the wall, its centre would be
+    // 0.5 from the box.
+    let pair = vec![
+        block(0.5, 0.0, 0.0, 0.0, 1.0),
+        block(0.5, 1.0, 0.0, 0.0, 1.0),
+    ];
+    let boxed = [slab(1.0, 0.5, 0.5, 0.0, 0.0, 1.0)];
+    let accuracy = 0.05;
+    let result = body_boundary_hausdorff_distance(&pair, &boxed, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 0.0, accuracy);
+    contains(&result.backward.bounds, 0.0, accuracy);
+    // A shorter neighbour shares only the lower half of the wall; the
+    // upper half stays on the boundary.
+    let stepped = vec![
+        block(0.5, 0.0, 0.0, 0.0, 1.0),
+        block(0.5, 1.0, 0.0, 0.0, 0.5),
+    ];
+    for t in translations() {
+        closes_as_a_translate(&pair, t);
+        closes_as_a_translate(&stepped, t);
+    }
+}
+
+#[test]
+fn a_stair_of_stacked_steps_is_its_profile_extruded() {
+    // Each step covers the one below but for its tread: the covered part
+    // and the step's base are cut away, and what is left is the stair's
+    // boundary, the same point set as the stair built as one solid.
+    let (n, going, rise) = (4, 0.3, 0.2);
+    let steps = stair(n, going, rise);
+    let solid = [stair_solid(n, going, rise)];
+    let accuracy = 0.05;
+    let result = body_boundary_hausdorff_distance(&steps, &solid, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 0.0, accuracy);
+    contains(&result.backward.bounds, 0.0, accuracy);
+    for t in translations() {
+        closes_as_a_translate(&steps, t);
+    }
+}
+
+#[test]
+fn a_placed_assembly_keeps_its_contacts_exact() {
+    // Turned about the vertical and moved, as an IFC placement does: the
+    // contact planes stay horizontal, every height unchanged to the bit,
+    // so the contacts are still exact and cut as before.
+    let placement = Transform3::from_translation(Vec3::new(3.25, -1.5, 0.75))
+        * Transform3::from_rotation_z(0.6);
+    let body = placed(&column_on_footing(), &placement);
+    let footing = placed(&[footing()], &placement);
+    let accuracy = 0.01;
+    let result = body_boundary_hausdorff_distance(&body, &footing, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 2.5, accuracy);
+    contains(&result.backward.bounds, 0.3, accuracy);
+    let steps = placed(&stair(4, 0.3, 0.2), &placement);
+    for t in translations() {
+        closes_as_a_translate(&body, t);
+        closes_as_a_translate(&steps, t);
+    }
+}
+
+#[test]
+fn a_frame_on_a_slab_leaves_the_slab_open_inside_it() {
+    // A square frame, outer half-side 1 and passage half-side 0.5, 0.5
+    // tall, standing on a slab 3 square and 1 thick. Only the ring under
+    // the frame's material is cut from the slab's top; inside the passage
+    // the top stays on the boundary. The slab point farthest from the
+    // union's boundary is on the ring's diagonal, as far from the frame's
+    // outer wall as from its inner corner: `(x, x)` with `1 - x =
+    // sqrt(2) (x - 0.5)`, at `1 - 1 / sqrt(2)`. Were the passage cut too,
+    // its centre would be 0.5 from the inner wall. The frame's top is 0.5
+    // above the slab.
+    let body = vec![
+        slab(1.5, 1.5, 0.0, 0.0, 0.0, 1.0),
+        frame(1.0, 0.5, 1.0, 1.5),
+    ];
+    let alone = [slab(1.5, 1.5, 0.0, 0.0, 0.0, 1.0)];
+    let accuracy = 0.01;
+    let result = body_boundary_hausdorff_distance(&body, &alone, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 0.5, accuracy);
+    contains(
+        &result.backward.bounds,
+        1.0 - std::f64::consts::FRAC_1_SQRT_2,
+        accuracy,
+    );
+    closes_as_a_translate(&body, Vec3::new(0.03, -0.04, 0.02));
+}
+
+#[test]
+fn a_square_column_and_a_round_one_on_one_footing() {
+    // A column of half-side 0.2 and one of radius 0.3, each on the footing.
+    // The square's sides are 0.1 inside the round column's wall, at their
+    // middles, and so is the footing's top between the square and the
+    // circle; the circle is nowhere farther from the square.
+    let square = vec![footing(), block(0.2, 0.0, 0.0, 0.5, 3.0)];
+    let round = column_on_footing();
+    let accuracy = 0.01;
+    let result = body_boundary_hausdorff_distance(&square, &round, accuracy, tol()).expect("cut");
+    contains(&result.forward.bounds, 0.1, accuracy);
+    contains(&result.backward.bounds, 0.1, accuracy);
+}
+
+#[test]
+fn a_central_block_covers_what_a_corner_block_leaves_open() {
+    // On one base 1 thick, a block of half-side 0.8 and height 2 in the
+    // middle, or a small one at a corner. The base's top at the centre is
+    // open beside the corner block and 0.8 from the open top beside the
+    // central one; nothing of the corner body is farther. The central
+    // block's top is 2 above the base.
+    let base = || block(1.0, 0.0, 0.0, 0.0, 1.0);
+    let corner = vec![base(), block(0.05, 0.9, 0.9, 1.0, 1.1)];
+    let central = vec![base(), block(0.8, 0.0, 0.0, 1.0, 3.0)];
+    let forward = one_sided_body_boundary_hausdorff(&corner, &central, 0.01, tol()).expect("cut");
+    contains(&forward.bounds, 0.8, 0.01);
+    assert_eq!(forward.item_from, 0);
+    let backward = one_sided_body_boundary_hausdorff(&central, &corner, 0.05, tol()).expect("cut");
+    contains(&backward.bounds, 2.0, 0.05);
+}
+
+#[test]
+fn a_lift_below_rounding_is_refused_not_glued() {
+    // A column 1e-13 above its footing: neither a certified gap nor exact
+    // contact.
+    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
+    let lifted = vec![footing(), column(0.3, 0.5 + 1e-13, 3.0)];
+    assert!(matches!(
+        refused(one_sided_body_boundary_hausdorff(
+            &lifted,
+            &other,
+            1e-3,
+            tol()
+        )),
+        BodyMeasureError::ItemsNearlyShareFace { .. }
     ));
+}
+
+#[test]
+fn contact_off_the_axes_or_on_an_ellipse_is_refused_by_name() {
+    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
+    // Tilted, the contact plane is no longer at one coordinate: whether
+    // the column's base meets the footing's top, clears it or sinks into
+    // it is below rounding, and gluing them would be a guess.
+    let tilted = placed(&column_on_footing(), &Transform3::from_rotation_x(0.3));
+    assert!(matches!(
+        refused(one_sided_body_boundary_hausdorff(
+            &tilted,
+            &other,
+            1e-3,
+            tol()
+        )),
+        BodyMeasureError::ItemsNearlyShareFace {
+            body: BodySide::First,
+            first: 0,
+            second: 1,
+            ..
+        }
+    ));
+    // Turned about the vertical, two blocks sharing a wall have their walls
+    // on a plane no coordinate is constant on: refused the same way.
+    let walls = placed(
+        &[
+            block(0.5, 0.0, 0.0, 0.0, 1.0),
+            block(0.5, 1.0, 0.0, 0.0, 1.0),
+        ],
+        &Transform3::from_rotation_z(0.6),
+    );
+    assert!(matches!(
+        refused(one_sided_body_boundary_hausdorff(
+            &walls,
+            &other,
+            1e-3,
+            tol()
+        )),
+        BodyMeasureError::ItemsNearlyShareFace { .. }
+    ));
+    // An elliptical column's base is bounded by an ellipse, which the
+    // plane cannot be cut by exactly.
+    let elliptical = moved(
+        extrude_profile_exact(
+            &Profile::Ellipse(EllipseProfile {
+                semi_axis_x: 0.4,
+                semi_axis_y: 0.2,
+            }),
+            Vec3::Z,
+            2.5,
+            tol(),
+        )
+        .expect("an elliptical column"),
+        Vec3::new(0.0, 0.0, 0.5),
+    );
     assert_eq!(
-        error,
+        refused(one_sided_body_boundary_hausdorff(
+            &[footing(), elliptical],
+            &other,
+            1e-3,
+            tol()
+        )),
         BodyMeasureError::ItemsShareFace {
             body: BodySide::First,
             first: 0,
             second: 1
         }
     );
-    let error = body_boundary_hausdorff_distance(&other, &body, 1e-3, tol()).expect_err("refused");
-    assert_eq!(
-        error,
-        BodyMeasureError::ItemsShareFace {
-            body: BodySide::Second,
+}
+
+/// One millimetre.
+fn millimetre() -> Tolerance {
+    Tolerance::new(1e-3, 1e-9).expect("a tolerance")
+}
+
+#[test]
+fn a_gap_within_the_tolerance_is_measured_as_a_gap() {
+    // Lifted 0.3 mm off its footing, the column leaves both discs on the
+    // union's boundary, at a 1 mm tolerance as at any other: the footing's
+    // disc centre is 0.3 from the boundary of the body whose column stands
+    // on the footing, and the other way every point is within 0.3 mm.
+    let lift = 3e-4;
+    let gapped = vec![footing(), column(0.3, 0.5 + lift, 3.0 + lift)];
+    let standing = column_on_footing();
+    let accuracy = 0.01;
+    let result = body_boundary_hausdorff_distance(&gapped, &standing, accuracy, millimetre())
+        .expect("apart");
+    contains(&result.forward.bounds, 0.3, accuracy);
+    contains(&result.backward.bounds, lift, accuracy);
+    closes_as_a_translate(&gapped, Vec3::new(0.03, -0.04, 0.0));
+}
+
+#[test]
+fn a_penetration_within_the_tolerance_is_refused_with_its_depth() {
+    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
+    let depth = 3e-4;
+    let sunk = vec![footing(), column(0.3, 0.5 - depth, 3.0)];
+    match refused(one_sided_body_boundary_hausdorff(
+        &sunk,
+        &other,
+        1e-3,
+        millimetre(),
+    )) {
+        BodyMeasureError::ItemsNearlyShareFace {
+            body: BodySide::First,
             first: 0,
-            second: 1
-        }
-    );
-    // Side by side, sharing a wall.
-    let pair = vec![
-        block(0.5, 0.0, 0.0, 0.0, 1.0),
-        block(0.5, 1.0, 0.0, 0.0, 1.0),
-    ];
-    assert!(matches!(
+            second: 1,
+            gap,
+        } => assert!((gap + depth).abs() < 1e-9, "gap {gap}"),
+        error => panic!("{error:?}"),
+    }
+    // Beyond the tolerance it is an overlap.
+    assert_eq!(
         refused(one_sided_body_boundary_hausdorff(
-            &pair,
+            &sunk,
             &other,
             1e-3,
             tol()
         )),
-        BodyMeasureError::ItemsShareFace { .. }
-    ));
+        BodyMeasureError::ItemsOverlap {
+            body: BodySide::First,
+            first: 0,
+            second: 1
+        }
+    );
+}
+
+#[test]
+fn a_ten_step_stair_closes_as_fast_as_one_solid() {
+    // Ten items, nine contacts; also turned and moved as a placement does,
+    // where the exact cut leaves slivers along the walls that fall out
+    // differently for the moved copy.
+    let steps = stair(10, 0.28, 0.175);
+    let placement = Transform3::from_translation(Vec3::new(3.25, -1.5, 0.75))
+        * Transform3::from_rotation_z(0.6);
+    let t = Vec3::new(0.012, -0.007, 0.0);
+    for (name, body) in [
+        ("axis-aligned", steps.clone()),
+        ("placed", placed(&steps, &placement)),
+    ] {
+        let started = std::time::Instant::now();
+        closes_as_a_translate(&body, t);
+        let elapsed = started.elapsed();
+        println!("ten steps, {name}, both ways at 1e-9: {elapsed:?}");
+    }
 }
 
 #[test]

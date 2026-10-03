@@ -248,6 +248,7 @@ graph TD
     axiolid_measure --> axiolid_curve
     axiolid_measure --> axiolid_evaluate
     axiolid_measure --> axiolid_mesh
+    axiolid_measure --> axiolid_overlay
     axiolid_measure --> axiolid_surface
     axiolid_measure --> axiolid_topology
     axiolid_mesh --> axiolid_core

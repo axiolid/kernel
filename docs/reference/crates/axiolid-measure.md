@@ -25,7 +25,7 @@ Default: none.
 
 | Feature | Enables |
 | --- | --- |
-| `exact` | [`axiolid-brep`](./axiolid-brep), [`axiolid-curve`](./axiolid-curve), [`axiolid-evaluate`](./axiolid-evaluate), [`axiolid-surface`](./axiolid-surface), [`axiolid-topology`](./axiolid-topology) |
+| `exact` | [`axiolid-brep`](./axiolid-brep), [`axiolid-curve`](./axiolid-curve), [`axiolid-evaluate`](./axiolid-evaluate), [`axiolid-overlay`](./axiolid-overlay), [`axiolid-surface`](./axiolid-surface), [`axiolid-topology`](./axiolid-topology) |
 
 ## Depends on
 
@@ -34,6 +34,7 @@ Default: none.
 - [`axiolid-curve`](./axiolid-curve)
 - [`axiolid-evaluate`](./axiolid-evaluate)
 - [`axiolid-mesh`](./axiolid-mesh)
+- [`axiolid-overlay`](./axiolid-overlay)
 - [`axiolid-surface`](./axiolid-surface)
 - [`axiolid-topology`](./axiolid-topology)
 

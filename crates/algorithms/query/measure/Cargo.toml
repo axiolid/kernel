@@ -16,17 +16,20 @@ axiolid-mesh.workspace = true
 axiolid-brep = { workspace = true, optional = true }
 axiolid-curve = { workspace = true, optional = true }
 axiolid-evaluate = { workspace = true, optional = true }
+axiolid-overlay = { workspace = true, optional = true }
 axiolid-surface = { workspace = true, optional = true }
 axiolid-topology = { workspace = true, optional = true }
 
 [features]
 # Exact B-rep measurement. OFF by default: a mesh-only consumer must not
 # acquire analytic surfaces and exact topology just to measure a mesh, which
-# the `mesh-rule-checker` closure profile enforces.
+# the `mesh-rule-checker` closure profile enforces. `axiolid-overlay` cuts
+# the plane of a face shared by two items of a body (#229) exactly.
 exact = [
     "dep:axiolid-brep",
     "dep:axiolid-curve",
     "dep:axiolid-evaluate",
+    "dep:axiolid-overlay",
     "dep:axiolid-surface",
     "dep:axiolid-topology",
 ]
@@ -38,4 +41,4 @@ role = "algorithm.query"
 domain = "query.measure"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-mesh", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-evaluate", "axiolid-mesh", "axiolid-overlay", "axiolid-surface", "axiolid-topology"]

@@ -102,7 +102,11 @@ use crate::exact_distance::{
 };
 use crate::mesh_hausdorff::HausdorffBounds;
 
+mod cut;
 mod translate;
+
+pub(crate) use cut::Cut;
+use cut::CutBounds;
 
 use axiolid_evaluate::surface::evaluate;
 use translate::{support_point, translate, Shifted};
@@ -177,7 +181,7 @@ pub fn one_sided_boundary_hausdorff_with_budget(
     // One item: every edge.
     let every = 0..from.topology().edges().len();
     let edges = core::slice::from_ref(&every);
-    Ok(witnessed(from, to, accuracy, tolerance, max_splits, edges)?.bounds)
+    Ok(witnessed(from, to, accuracy, tolerance, max_splits, edges, None)?.bounds)
 }
 
 /// A one-sided interval and the elements its witnesses lie on.
@@ -193,6 +197,9 @@ pub(crate) struct Witnessed {
 /// witnesses lie on. `items` partitions `from`'s edges by item: each item's
 /// support point against a matched translation seeds the lower bound, so
 /// an item moved alone is seeded even where another holds the union's.
+/// `cuts` says how each boundary was cut from its items where they share
+/// patches of face (see `cut`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn witnessed(
     from: &ExactBRep,
     to: &ExactBRep,
@@ -200,12 +207,21 @@ pub(crate) fn witnessed(
     tolerance: Tolerance,
     max_splits: usize,
     items: &[core::ops::Range<usize>],
+    cuts: Option<(&Cut<'_>, &Cut<'_>)>,
 ) -> Result<Witnessed, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
     let linear = tolerance.linear().max(1e-12);
     let source = Side::new(from, linear, Metric::Space)?;
     let mut target = Nearest::new(Side::new(to, linear, Metric::Space)?);
-    search(&source, &mut target, accuracy, max_splits, items)
+    let mut cuts = cuts.map(|(from, to)| CutBounds::new(from, to));
+    search(
+        &source,
+        &mut target,
+        accuracy,
+        max_splits,
+        items,
+        cuts.as_mut(),
+    )
 }
 
 /// Two-sided Hausdorff distance between the boundaries of `a` and `b`, to
@@ -679,6 +695,7 @@ fn search(
     accuracy: Scalar,
     max_splits: usize,
     items: &[core::ops::Range<usize>],
+    mut cuts: Option<&mut CutBounds<'_>>,
 ) -> Result<Witnessed, ExactMeasureError> {
     let matched = matches(source.brep, target.side.brep);
     let point_accuracy = 0.25 * accuracy;
@@ -737,6 +754,13 @@ fn search(
                         .and_then(|bound| shifted.bound(bound, lo, hi)),
                 };
                 if let Some(bound) = bound {
+                    upper = upper.min(bound);
+                }
+            }
+            // A face cut to its free region, through the face it was cut
+            // from (see `cut`).
+            if let Some(cuts) = cuts.as_deref_mut() {
+                if let Some(bound) = cuts.bound(source.brep, face, lo, hi)? {
                     upper = upper.min(bound);
                 }
             }
