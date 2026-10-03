@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Boundary distance and Hausdorff distance between bodies of several
+  exact solids (#229), one `ExactBRep` per item in a slice:
+  `body_boundary_distance` and `body_boundary_clearance` (the least
+  distance over item pairs, by one shared branch and bound, so far pairs
+  are never refined), `body_boundary_hausdorff_distance`,
+  `one_sided_body_boundary_hausdorff` and its `_with_budget` form (the
+  Hausdorff distance between the boundaries of the unions). Witnesses name
+  their items (`BodyDistance`, `BodyHausdorffBounds`, `BodyHausdorff`).
+  The Hausdorff queries first show every pair of items of a body apart (a
+  plane strictly between them, or boundaries certainly apart with neither
+  inside the other) or touching without a shared patch of face (a plane
+  between them within rounding where one of them has no face), and refuse
+  anything else by name in the new `BodyMeasureError`: `ItemsShareFace`
+  (a column standing on its footing) and `ItemsOverlap`. Distance needs
+  no such check. A translated multi-item body closes as fast as one
+  solid: faces match across items, and each item's own support point
+  seeds the lower bound.
+
 ## [0.3.7] - 2026-10-02
 
 ### Added

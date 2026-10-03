@@ -258,10 +258,20 @@ fn deviation(a: &Curve2, b: &Curve2, s: Vec2, t0: Scalar, t1: Scalar) -> Option<
 /// lines and conics whose surface is ruled along its trims (planes,
 /// cylinders, cones), a linear function is extreme on the trims, so the
 /// support point of such a solid is on an edge.
-pub(super) fn support_point(brep: &ExactBRep, direction: Vec3) -> Option<Point3> {
+///
+/// Only the edges indexed by `edges` are searched: one item's, when the
+/// B-rep holds several (#229).
+pub(super) fn support_point(
+    brep: &ExactBRep,
+    direction: Vec3,
+    edges: core::ops::Range<usize>,
+) -> Option<(Point3, usize)> {
     let topology = brep.topology();
-    let mut best: Option<(Scalar, Point3)> = None;
+    let mut best: Option<(Scalar, Point3, usize)> = None;
     for (index, edge) in topology.edges().iter().enumerate() {
+        if !edges.contains(&index) {
+            continue;
+        }
         let Some(curve) = edge.curve.and_then(|id| brep.curves3().get(id.index())) else {
             continue;
         };
@@ -294,12 +304,12 @@ pub(super) fn support_point(brep: &ExactBRep, direction: Vec3) -> Option<Point3>
                 continue;
             };
             let height = direction.dot(point);
-            if point.is_finite() && best.is_none_or(|(top, _)| height > top) {
-                best = Some((height, point));
+            if point.is_finite() && best.is_none_or(|(top, ..)| height > top) {
+                best = Some((height, point, index));
             }
         }
     }
-    best.map(|(_, point)| point)
+    best.map(|(_, point, edge)| (point, edge))
 }
 
 /// `B`'s face `fb` as a translate of `A`'s face `fa`, re-charted onto

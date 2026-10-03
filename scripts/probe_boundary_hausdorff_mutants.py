@@ -112,8 +112,8 @@ MUTANTS = [
      "            if inside <= hi {",
      "            if false {"),
     ("support point toward t, not against it", H,
-     "        let Some(p) = support_point(source.brep, -t) else {",
-     "        let Some(p) = support_point(source.brep, t) else {"),
+     "        let Some((p, edge)) = support_point(source.brep, -t, edges) else {",
+     "        let Some((p, edge)) = support_point(source.brep, t, edges) else {"),
 ]
 
 def run(target):

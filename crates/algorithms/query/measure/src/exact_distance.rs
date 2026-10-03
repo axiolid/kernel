@@ -85,7 +85,7 @@ use crate::exact_domain::Domain;
 const MAX_STEPS: usize = 400_000;
 
 /// Pairs refined before [`plan_overlap`] reports it could not decide.
-const OVERLAP_STEPS: usize = 20_000;
+pub(crate) const OVERLAP_STEPS: usize = 20_000;
 
 /// An interval certain to contain the distance between two boundaries.
 #[derive(Debug, Clone, PartialEq)]
@@ -1123,14 +1123,17 @@ impl Ord for Key {
     }
 }
 
-/// What a search found: the bounds, and a plan point shown inside both
-/// shadows when planar faces show them overlapping.
-struct Found {
-    bounds: DistanceBounds,
+/// What a search found: the bounds, the elements the witnesses lie on, and
+/// a plan point shown inside both shadows when planar faces show them
+/// overlapping.
+pub(crate) struct Found {
+    pub(crate) bounds: DistanceBounds,
+    /// The element of each boundary holding `point_a` and `point_b`.
+    pub(crate) on: (Shape, Shape),
     overlap: Option<Point2>,
 }
 
-fn search(
+pub(crate) fn search(
     a: &ExactBRep,
     b: &ExactBRep,
     tolerance: Tolerance,
@@ -1140,7 +1143,7 @@ fn search(
     search_within(a, b, tolerance, metric, MAX_STEPS, done)
 }
 
-fn search_within(
+pub(crate) fn search_within(
     a: &ExactBRep,
     b: &ExactBRep,
     tolerance: Tolerance,
@@ -1158,7 +1161,7 @@ fn search_within(
     let mut elements_a = side_a.elements.clone();
     let mut elements_b = side_b.elements.clone();
 
-    let mut best: Option<(Scalar, Point3, Point3)> = None;
+    let mut best: Option<(Scalar, Point3, Point3, (Shape, Shape))> = None;
     let mut heap = BinaryHeap::new();
     let viable = |a: &Element, b: &Element| {
         critical_possible(a, b, metric) && critical_possible(b, a, metric)
@@ -1180,17 +1183,17 @@ fn search_within(
         if metric == Metric::Plan && bound == 0.0 {
             if let Some((at, wa, wb)) = plan_patches_overlap(&side_a, &ea, &side_b, &eb)? {
                 overlap = Some(at);
-                best = Some((0.0, wa, wb));
+                best = Some((0.0, wa, wb, (ea.shape, eb.shape)));
                 break;
             }
         }
         if let (Some(wa), Some(wb)) = (ea.witness, eb.witness) {
             let d = apart(wa, wb);
-            if best.is_none_or(|(current, _, _)| d < current) {
-                best = Some((d, wa, wb));
+            if best.is_none_or(|(current, ..)| d < current) {
+                best = Some((d, wa, wb, (ea.shape, eb.shape)));
             }
         }
-        let upper = best.map_or(Scalar::INFINITY, |(d, _, _)| d);
+        let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
         if upper.is_finite() && (bound >= upper || done(bound, upper)) {
             break;
         }
@@ -1198,8 +1201,6 @@ fn search_within(
         if steps > max_steps {
             break;
         }
-        // Refine the larger of the two; a pair that can shrink no further
-        // holds the lower bound where it is.
         // Refine the larger of the two; a pair that can shrink no further
         // holds the lower bound where it is.
         let split_a = side_a.size(&ea) >= side_b.size(&eb);
@@ -1245,7 +1246,7 @@ fn search_within(
     if let Some(Reverse((Key(bound), _, _))) = heap.peek() {
         lower = lower.min(*bound);
     }
-    let (upper, point_a, point_b) = best.ok_or(crate::exact::NOT_CONVERGED)?;
+    let (upper, point_a, point_b, on) = best.ok_or(crate::exact::NOT_CONVERGED)?;
     if overlap.is_some() {
         lower = 0.0;
     }
@@ -1256,6 +1257,7 @@ fn search_within(
             point_a,
             point_b,
         },
+        on,
         overlap,
     })
 }

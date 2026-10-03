@@ -63,7 +63,9 @@
 //! lower bound with `A`'s support point against `t` on its edges: for a
 //! translate that point is exactly `|t|` from `B`'s boundary, whatever the
 //! shape, so a farthest point isolated at a corner is not left to edge
-//! bisection.
+//! bisection. For a body of several items ([`crate::exact_bodies`]) each
+//! item's own support point is seeded: an item moved alone has its
+//! farthest point there, wherever the union's support point lies.
 //!
 //! # Convergence and refusal
 //!
@@ -107,7 +109,7 @@ use translate::{support_point, translate, Shifted};
 
 /// Splits of the measured boundary's patches and edge spans before a
 /// one-sided query reports what it has.
-const MAX_SPLITS: usize = 200_000;
+pub(crate) const MAX_SPLITS: usize = 200_000;
 
 /// Refinement steps one point query may take.
 const POINT_STEPS: usize = 20_000;
@@ -172,11 +174,38 @@ pub fn one_sided_boundary_hausdorff_with_budget(
     tolerance: Tolerance,
     max_splits: usize,
 ) -> Result<HausdorffBounds, ExactMeasureError> {
+    // One item: every edge.
+    let every = 0..from.topology().edges().len();
+    let edges = core::slice::from_ref(&every);
+    Ok(witnessed(from, to, accuracy, tolerance, max_splits, edges)?.bounds)
+}
+
+/// A one-sided interval and the elements its witnesses lie on.
+pub(crate) struct Witnessed {
+    pub(crate) bounds: HausdorffBounds,
+    /// The element of `from` holding `point_from`.
+    pub(crate) from: Shape,
+    /// The element of `to` holding `point_to`.
+    pub(crate) to: Shape,
+}
+
+/// [`one_sided_boundary_hausdorff_with_budget`], naming the elements the
+/// witnesses lie on. `items` partitions `from`'s edges by item: each item's
+/// support point against a matched translation seeds the lower bound, so
+/// an item moved alone is seeded even where another holds the union's.
+pub(crate) fn witnessed(
+    from: &ExactBRep,
+    to: &ExactBRep,
+    accuracy: Scalar,
+    tolerance: Tolerance,
+    max_splits: usize,
+    items: &[core::ops::Range<usize>],
+) -> Result<Witnessed, ExactMeasureError> {
     let accuracy = accuracy.max(0.0);
     let linear = tolerance.linear().max(1e-12);
     let source = Side::new(from, linear, Metric::Space)?;
     let mut target = Nearest::new(Side::new(to, linear, Metric::Space)?);
-    search(&source, &mut target, accuracy, max_splits)
+    search(&source, &mut target, accuracy, max_splits, items)
 }
 
 /// Two-sided Hausdorff distance between the boundaries of `a` and `b`, to
@@ -243,6 +272,8 @@ struct PointDistance {
     lower: Scalar,
     upper: Scalar,
     nearest: Point3,
+    /// The element `nearest` lies on.
+    on: Shape,
 }
 
 impl<'a> Nearest<'a> {
@@ -300,18 +331,18 @@ impl<'a> Nearest<'a> {
                 order += 1;
             }
         }
-        let mut best: Option<(Scalar, Point3)> = None;
+        let mut best: Option<(Scalar, Point3, Shape)> = None;
         let mut lower = 0.0;
         let mut steps = 0;
         while let Some(Reverse((Key(bound, _), node))) = heap.pop() {
             lower = bound;
             if let Some(w) = self.nodes[node].witness {
                 let d = (w - p).length();
-                if best.is_none_or(|(current, _)| d < current) {
-                    best = Some((d, w));
+                if best.is_none_or(|(current, ..)| d < current) {
+                    best = Some((d, w, self.nodes[node].shape));
                 }
             }
-            let upper = best.map_or(Scalar::INFINITY, |(d, _)| d);
+            let upper = best.map_or(Scalar::INFINITY, |(d, ..)| d);
             if upper.is_finite() && (bound >= upper || upper - bound <= accuracy) {
                 break;
             }
@@ -333,10 +364,11 @@ impl<'a> Nearest<'a> {
         if let Some(Reverse((Key(bound, _), _))) = heap.peek() {
             lower = Scalar::min(lower, *bound);
         }
-        Ok(best.map(|(upper, nearest)| PointDistance {
+        Ok(best.map(|(upper, nearest, on)| PointDistance {
             lower: lower.min(upper),
             upper,
             nearest,
+            on,
         }))
     }
 }
@@ -637,7 +669,8 @@ fn displacements(
 /// What the search has certified so far.
 struct State {
     lower: Scalar,
-    witness: Option<(Point3, Point3)>,
+    /// The witnesses, and the elements of each boundary they lie on.
+    witness: Option<(Point3, Point3, Shape, Shape)>,
 }
 
 fn search(
@@ -645,7 +678,8 @@ fn search(
     target: &mut Nearest<'_>,
     accuracy: Scalar,
     max_splits: usize,
-) -> Result<HausdorffBounds, ExactMeasureError> {
+    items: &[core::ops::Range<usize>],
+) -> Result<Witnessed, ExactMeasureError> {
     let matched = matches(source.brep, target.side.brep);
     let point_accuracy = 0.25 * accuracy;
     let mut state = State {
@@ -659,14 +693,22 @@ fn search(
 
     // A matched face moved by `t` puts the farthest point of a translate at
     // `A`'s support point against `t` (see `translate::support_point`).
-    for t in displacements(source, target.side.brep, &matched)? {
-        let Some(p) = support_point(source.brep, -t) else {
+    let seeds = displacements(source, target.side.brep, &matched)?
+        .into_iter()
+        .flat_map(|t| items.iter().map(move |edges| (t, edges.clone())));
+    for (t, edges) in seeds {
+        let Some((p, edge)) = support_point(source.brep, -t, edges) else {
             continue;
         };
         if let Some(found) = target.query(p, point_accuracy)? {
             if found.lower > state.lower || state.witness.is_none() {
                 state.lower = state.lower.max(found.lower);
-                state.witness = Some((p, found.nearest));
+                let on = Shape::Edge {
+                    edge,
+                    t0: 0.0,
+                    t1: 0.0,
+                };
+                state.witness = Some((p, found.nearest, on, found.on));
             }
         }
     }
@@ -705,7 +747,7 @@ fn search(
                 if let Some(found) = target.query(w, point_accuracy)? {
                     if found.lower > state.lower || state.witness.is_none() {
                         state.lower = state.lower.max(found.lower);
-                        state.witness = Some((w, found.nearest));
+                        state.witness = Some((w, found.nearest, element.shape, found.on));
                     }
                     // `d(., dB)` is 1-Lipschitz about the witness.
                     upper = upper.min(found.upper + element.radius);
@@ -773,12 +815,16 @@ fn search(
     }
 
     let face_top = faces.peek().map_or(Scalar::NEG_INFINITY, |(key, _)| key.0);
-    let (point_from, point_to) = state.witness.ok_or(crate::exact::NOT_CONVERGED)?;
-    Ok(HausdorffBounds {
-        lower: state.lower,
-        upper: face_top.max(state.lower),
-        point_from,
-        point_to,
+    let (point_from, point_to, from, to) = state.witness.ok_or(crate::exact::NOT_CONVERGED)?;
+    Ok(Witnessed {
+        bounds: HausdorffBounds {
+            lower: state.lower,
+            upper: face_top.max(state.lower),
+            point_from,
+            point_to,
+        },
+        from,
+        to,
     })
 }
 

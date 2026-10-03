@@ -8,6 +8,8 @@
 #[cfg(feature = "exact")]
 pub mod exact;
 #[cfg(feature = "exact")]
+pub mod exact_bodies;
+#[cfg(feature = "exact")]
 pub mod exact_distance;
 #[cfg(feature = "exact")]
 mod exact_domain;
@@ -28,6 +30,12 @@ pub mod winding;
 
 #[cfg(feature = "exact")]
 pub use exact::{exact_properties, ExactMeasureError};
+#[cfg(feature = "exact")]
+pub use exact_bodies::{
+    body_boundary_clearance, body_boundary_distance, body_boundary_hausdorff_distance,
+    one_sided_body_boundary_hausdorff, one_sided_body_boundary_hausdorff_with_budget, BodyDistance,
+    BodyHausdorff, BodyHausdorffBounds, BodyMeasureError, BodySide,
+};
 #[cfg(feature = "exact")]
 pub use exact_distance::{
     boundary_clearance, boundary_distance, plan_boundary_clearance, plan_boundary_distance,

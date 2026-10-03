@@ -17,7 +17,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 ## Overview
 
-Metric properties of geometry: surface area, signed volume, centroids and second moments of triangle meshes, closest points and distances between segments, triangles and meshes, certified Hausdorff distance between meshes, Frechet distance between polylines, and winding numbers. Undefined quantities are refused: an open or non-manifold mesh gets an error, not a plausible volume. The optional `exact` feature adds mass properties, certified boundary distance and certified boundary Hausdorff distance for exact B-reps without imposing them on mesh-only consumers.
+Metric properties of geometry: surface area, signed volume, centroids and second moments of triangle meshes, closest points and distances between segments, triangles and meshes, certified Hausdorff distance between meshes, Frechet distance between polylines, and winding numbers. Undefined quantities are refused: an open or non-manifold mesh gets an error, not a plausible volume. The optional `exact` feature adds mass properties, certified boundary distance and certified boundary Hausdorff distance for exact B-reps, single solids or bodies of several, without imposing them on mesh-only consumers.
 
 ## Features
 
