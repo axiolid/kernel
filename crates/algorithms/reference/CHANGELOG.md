@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-03
+
 ### Added
 
 - `bound`, re-exported from `axiolid-evaluate` like `curve` and `surface`

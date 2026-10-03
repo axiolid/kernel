@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-02) |
+| Latest release | 0.3.4 (2026-10-03) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,17 +46,20 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-02):
+Latest release, 0.3.4 (2026-10-03):
+
+### Added
+
+- `bound`, re-exported from `axiolid-evaluate` like `curve` and `surface`
+  (#232).
 
 ### Fixed
 
-- `tessellate_primitive` keeps every point of a sphere and a torus within
-  the chord budget of the mesh, not only its vertices (#231). Both
-  directions of each used to get the whole budget, so their sagittas added
-  inside a triangle (a 0.3 m sphere at 1 mm lay 1.99 mm from its mesh, a
-  torus 1.90 mm); each now gets half, and the sphere's stack count is
-  rounded up rather than down, which had let an odd segment count leave
-  the polar step alone above its share. A budget that needs more than
-  4096 segments is refused with `BudgetExceeded` instead of clamped.
+- `tessellate_primitive` refuses a cylinder or a cone whose chord budget
+  needs more than 4096 segments with `BudgetExceeded`, as it already did
+  for spheres and tori, instead of clamping silently to a coarser mesh
+  (#232). Their bound is now documented: both are curved one way only, so
+  the ring's sagitta is the whole distance from any point of the exact
+  surface, caps included, to the mesh, and it gets the whole budget.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

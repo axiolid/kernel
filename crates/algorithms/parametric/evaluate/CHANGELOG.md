@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-03
+
 ### Added
 
 - `bound` (#232): certified derivative and chord bounds.

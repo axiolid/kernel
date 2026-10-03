@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-02) |
+| Latest release | 0.3.9 (2026-10-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -59,37 +59,82 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-02):
+Latest release, 0.3.9 (2026-10-03):
 
 ### Added
 
-- `exact_directrix` and `ExactDirectrix` are public (#230): they read a
-  swept disk's directrix as one segment or one arc, exactly as
-  `ReferenceExactCompiler` does, so a consumer building exact boundaries
-  that must match the compiled solids no longer duplicates the reading.
-  Corners, other curve families and unbounded lines are refused by name.
+- `ReferenceExactCompiler` compiles differences of placed extrusions
+  exactly (#228): a wall or slab under any rigid placement minus openings
+  under theirs, perpendicular to its extrusion (doors, windows) or
+  parallel (shafts), with rectangle, circle and line-and-arc profiles,
+  through, blind, flush or touching its edges, and several openings per
+  body as nested differences. It runs the general exact boolean
+  (`axiolid-brep-boolean`, ADR 0080); two unplaced sharp rectangles along
+  `+z` keep the prism path. Unions and intersections of placed operands,
+  operands that are not extrusions, a tool that is itself a boolean, scaled
+  placements and configurations the general boolean refuses are refused by
+  name; a difference that removes the whole subject is `Degenerate`.
+  Faces that agree only up to rounding are read within the caller's
+  tolerance; the result is then the exact boolean of operands moved by at
+  most it, and a gap of ten tolerances is kept. One-segment semicircular
+  arches compile (contour lowering splits them).
+
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` and
+  `DeviationReport` (#232): next to the mesh, a certified upper bound on
+  the distance from every point of the exact surface to the triangles, the
+  paths that contributed (`DeviationContribution`, `DeviationPath`,
+  `DeviationBound::{Proven, Certified, Unbounded}`) and whether the
+  requested chord budget is met. #231's paths report the budget they are
+  proven to; profiles report their flattening's bound (a derived profile
+  its stretch); curved B-rep faces a per-triangle bound from the surface's
+  second-derivative bounds plus each trim pcurve's lens; pipes along
+  segments and arcs and primitive cylinders and cones the budget their
+  constructions prove; disks swept along B-splines and ellipses a bound
+  certified against the exact tube by branch and bound. Booleans, tapered
+  extrusions, sectioned spines, bounded half-spaces, composites holding
+  other curves and other frame laws are unbounded by name. An
+  inherent method: the `MeshCompiler` contract is unchanged.
+
+### Changed
+
+- A swept disk's `fillet_radius` is honoured on polylines and composites
+  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
+  becomes a tangent arc of that radius (#232). A directrix with a corner
+  and no fillet radius, which IFC leaves undefined and which used to be
+  swept with sharp mitres, is now refused by name, as are a closed
+  polyline directrix, a fillet that does not fit its segments, a disk
+  radius at or above the fillet or bend radius, and a sweep range
+  combined with a fillet radius (`UnsupportedInput`).
+
+- A B-spline directrix with no corner knot reports its exact end
+  tangents, so sweeps along it refine their stations and stand their end
+  caps square to the curve, as along a conic (#232).
+- Curved B-rep faces are also refined where a triangle's certified bound
+  misses the chord budget, by its widest free edge, up to a vertex cap; a
+  pass that runs out of depth or vertices is discarded for the
+  measurement-only refinement. Trim edges are sampled until their
+  certified chord bound fits too, where that converges (#232).
 
 ### Fixed
 
-- Doubly curved meshes stay within the chord budget (#231). A revolution
-  chorded its profile and its turn each to the whole budget, so the two
-  deviations added inside a triangle: a torus (R 0.5, r 0.1) at 1 mm lay
-  1.46 mm from its mesh. A revolution, a tapered one included, now chords
-  its profile to half the chord budget and its turn to the other half
-  (see `axiolid_construct::revolve` for the proof), and its turn follows
-  `ExecutionOptions::with_chord_error` instead of the linear tolerance.
-  Swept disks, fixed-reference and surface-curve sweeps along a circle or
-  ellipse, plain or trimmed, give the section half the budget and refine
-  the directrix until the section's far side fits the other half, and
-  stand their end sections square to the curve rather than to its end
-  chords (a disk r 0.1 along an arc R 0.2 lay 7 mm from its end caps at
-  1 mm). Every point of the exact surface now lies within the budget of
-  the triangles, checked by dense sampling of tori (R/r down to 1.2),
-  spheres, partial and skew-axis revolutions, a revolved rounded
-  rectangle, a tapered revolution and sweeps along arcs with r/R up to
-  0.83, at 1 mm and 0.1 mm. A torus at 1 mm has 4928 triangles instead of
-  3520. A budget beyond 4096 steps round an axis is refused with
-  `BudgetExceeded` rather than met by a coarser mesh. Polyline, composite
-  and B-spline directrices are swept as sampled, as before.
+- A swept disk along a line, a polyline, or a trim or composite of lines,
+  polylines and circular arcs keeps every point of the exact tube within
+  the chord budget of the mesh (#232). The directrix is read as exact
+  segments and arcs and swept by `axiolid_construct::pipe` (see its notes
+  for the bound); it used to be sampled as a whole, each bend chorded for
+  its centreline instead of the tube's outer side. At 1 mm: line + bend
+  (R 0.1) + line, r 0.05, 1.184 -> 0.784 mm (502 -> 686 triangles);
+  three bends out of plane 1.184 -> 0.803 mm (1652 -> 1882); at 0.1 mm
+  R 0.04 / r 0.01 0.108 -> 0.077 mm, R 0.6 / r 0.3 0.115 -> 0.085 mm.
+  A composite's sweep range is now cut at exact arc lengths rather than
+  along its sampled chords. Lone circles and ellipses keep the #231
+  sweep, and composites holding other curves (ellipse arcs, B-splines)
+  are swept as sampled.
+
+- Trim samples earcut skips as collinear are put back on a curved face
+  (#232): a straight pcurve sampled into many points came back as one long
+  triangle edge, a T-junction against the face across it. The fan of thin
+  triangles that putting them back leaves is then flipped to a Delaunay
+  triangulation of the trim polygon, in parameters scaled to the surface.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

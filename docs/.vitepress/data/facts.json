@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.1",
-      "released_date": "2026-09-28",
+      "released": "0.1.2",
+      "released_date": "2026-10-03",
       "role": "algorithm.construction",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.10",
-      "released_date": "2026-10-02",
+      "released": "0.3.11",
+      "released_date": "2026-10-03",
       "role": "algorithm.construction",
-      "version": "0.3.10"
+      "version": "0.3.11"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -166,10 +166,10 @@
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-03",
       "role": "algorithm.parametric",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -274,10 +274,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.7",
-      "released_date": "2026-10-02",
+      "released": "0.3.8",
+      "released_date": "2026-10-03",
       "role": "algorithm.query",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.8",
-      "released_date": "2026-10-02",
+      "released": "0.3.9",
+      "released_date": "2026-10-03",
       "role": "execution.orchestration",
-      "version": "0.3.8"
+      "version": "0.3.9"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -463,10 +463,10 @@
       "description": "Portable scalar reference implementation and certified predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
-      "released": "0.3.3",
-      "released_date": "2026-10-02",
+      "released": "0.3.4",
+      "released_date": "2026-10-03",
       "role": "algorithm.reference",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-refine": {
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",

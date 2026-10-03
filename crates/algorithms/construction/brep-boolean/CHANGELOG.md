@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-03
+
 ### Added
 
 - `BooleanError::NearCoincidence`: features chained within tolerance of

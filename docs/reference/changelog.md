@@ -111,6 +111,46 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.2 - 2026-10-03
+
+### Added
+
+- `BooleanError::NearCoincidence`: features chained within tolerance of
+  each other over more than the tolerance, which no single perturbation
+  within tolerance reconciles, are refused by name (#228).
+- The crate docs state what a result guarantees: which decisions are
+  exact, which are taken within the caller's tolerance, and that the
+  result is then the exact boolean of operands moved by at most it.
+
+### Fixed
+
+- Operands placed by independent rigid motions cut each other (#228). Their
+  coincident, parallel or tangent faces agree only up to rounding, which
+  the exact predicates saw: an opening flush with a wall's faces was
+  undecided, an arched opening's tangent jambs left slivers or no cut, and
+  a plane `1e-17` off parallel or perpendicular to a cylinder's axis gave
+  an ellipse nothing could evaluate. Within tolerance, a section now runs
+  along an edge it lies on, a tangent crossing is cut once where it meets
+  the edge, cuts and boundary splits closer than tolerance are one point,
+  and such a plane cuts the cylinder in rulings or a circle.
+
+### Changed
+
+- Every within-tolerance decision uses the caller's `Tolerance` only:
+  distances its linear part, with no built-in `1e-9` floor, and the
+  coincidence and contact tests on normals and axes its angular part
+  instead of a fixed `1e-9`. With `Tolerance::METRE` results are
+  unchanged.
+- Work between faces that cannot meet is skipped (#228). Each face and
+  edge gets a sound box from its surface or curve in closed form, enlarged
+  by the linear tolerance; face pairs whose boxes are apart are not
+  sectioned, a section line or conic is cut only against edges whose
+  boxes meet both faces' common box (and at that box's boundary),
+  classification rays skip faces whose boxes they miss, and split faces
+  ignore cut points outside their boxes. A wall losing ten placed windows
+  one at a time went from 1.67 s to 0.28 s in release
+  (`cargo bench -p axiolid-benchmark --bench exact_openings`).
+
 ### 0.1.1 - 2026-09-28
 
 ### Changed
@@ -235,6 +275,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.11 - 2026-10-03
+
+### Added
+
+- `pipe::swept_disk_along_pieces`, with `pipe::PathPiece` and
+  `pipe::joint_tolerance` (#232): a disk, optionally hollow, swept along a
+  chain of straight segments and circular arcs, with every point of the
+  exact tube within the chord budget of the mesh. Half the budget chords
+  the disk; each piece is then bounded on its own by the #231 span bound
+  (exact along an arc, where the stations are rotations about its axis,
+  and zero along a segment), its end frames exact. Consecutive pieces
+  share one station, so the tube is watertight and wound one way; the
+  shared station's measured distance from the outgoing piece's own start
+  station is added to that piece's first span. A joint turning by more
+  than `2 asin(c / (8 r))` is a corner and is refused by name, as is a
+  gap above a quarter of the budget, a bend radius at or below the disk
+  radius, and a bend needing more than 4096 steps (`BudgetExceeded`). A
+  fillet radius rounds each corner between two segments with a tangent
+  arc (`IfcSweptDiskSolidPolygonal`); a fillet that overruns its
+  segments, a disk at or above the fillet radius, a reversal and a corner
+  beside an arc are refused by name. The derivation is in the module
+  notes.
+
+- `profile::profile_deviation` and `ProfileDeviation` (#232): how far a
+  profile's exact boundary may lie from the rings `profile_rings` flattens
+  it to. The chord budget for every segment family the flattener certifies,
+  plus the largest merge of near-duplicate points, scaled by a derived
+  profile's stretch; any other family (a clothoid, a non-positive spline
+  weight) is unbounded by name.
+
+### Changed
+
+- Contour lowering splits a circular segment of half a turn or more into
+  equal sub-arcs below half a turn instead of refusing it (#228, ADR 0053
+  amended): an IFC arch is commonly one semicircle. The split vertices are
+  the circle evaluated at their parameters, as a segment's ends are. Only a
+  segment sweeping more than a whole turn is refused.
 
 ### 0.3.10 - 2026-10-02
 
@@ -694,6 +772,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.3 - 2026-10-03
+
+### Added
+
+- `bound` (#232): certified derivative and chord bounds.
+  `chord_bound2`/`chord_bound3` bound how far a curve strays from the chord
+  of a parameter span (exact sagitta for an arc of at most half a turn,
+  `h^2/8 sup|c''|` otherwise, and for a rational B-spline the projective
+  form `h^2/8 (|A''| + R|w''|) / w_min`, which carries no first-derivative
+  terms); `curve_derivative_bounds2`/`3` bound `|c'|, |c''|, |c'''|` of
+  lines, circles, ellipses, sinusoids and B-splines (rational too) from
+  closed forms and derivative control polygons; `SurfaceBoundOracle`
+  bounds the first and second partials of every elementary surface and of
+  B-spline surfaces over a parameter box, with interpolation coefficients
+  for linear interpolation over a triangle; `continuity_breaks2`/`3` name
+  the knots where a curve may fail to be `C^k`; `certifies_flattening2`/`3`
+  name the families whose flattening is certified.
+
+### Changed
+
+- `flatten2` and `flatten3` accept a span only when its certified chord
+  bound is within the tolerance too, for every family `bound` covers
+  (#232): the midpoint sagitta alone let an ellipse or a spline bulge past
+  its chord either side of the midpoint. A B-spline is cut at its corner
+  knots (multiplicity at least the degree) first, so a corner is kept as
+  an exact vertex. Families without a bound keep the sagitta test.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -946,6 +1051,58 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.8 - 2026-10-03
+
+### Added
+
+- Boundary distance and Hausdorff distance between bodies of several
+  exact solids (#229), one `ExactBRep` per item in a slice:
+  `body_boundary_distance` and `body_boundary_clearance` (the least
+  distance over item pairs, by one shared branch and bound, so far pairs
+  are never refined), `body_boundary_hausdorff_distance`,
+  `one_sided_body_boundary_hausdorff` and its `_with_budget` form (the
+  Hausdorff distance between the boundaries of the unions). Witnesses name
+  their items (`BodyDistance`, `BodyHausdorffBounds`, `BodyHausdorff`).
+  The Hausdorff queries first show every pair of items of a body apart (a
+  plane with a certified positive gap between them, or boundaries
+  certainly apart with neither inside the other), touching without a
+  shared patch of face (a plane between them within rounding where one of
+  them has no face), or in exact face contact. Items in face contact (a
+  column on its footing, blocks sharing a wall, stacked steps) share a
+  patch that is interior to their union: each face in contact is cut down
+  to its free region by an exact arrangement of the faces' boundaries on
+  their common plane (`axiolid-overlay`'s `ArcArrangement`, now an
+  optional dependency under `exact`), and the union's boundary is
+  measured. Contact is exact when both faces lie, in the B-rep's own
+  numbers, on one plane normal to a coordinate axis, which a placement
+  turning about that axis keeps. A gap is never glued: two items a
+  sub-millimetre apart are measured as apart, both facing faces on the
+  boundary, whatever the tolerance (gluing and widening the interval by
+  the gap would not be sound: a lifted column's base disc is a whole
+  radius from the glued boundary). Anything else is refused by name in
+  the new `BodyMeasureError`: `ContactPlaneNotAxisNormal` (items touching
+  on a plane no coordinate axis is normal to, such as walls turned in
+  plan), `ItemsNearlyShareFace` with the gap (items interpenetrating by
+  no more than the caller's tolerance, or faces on axis planes at
+  coordinates differing below rounding), `ItemsShareFace` (a face in
+  contact that cannot be cut: a B-spline face, an elliptical edge) and
+  `ItemsOverlap`.
+  Every `body_*` query takes each side as a `PlacedBody`: the items in the
+  body's own frame and one rigid placement (a slice, vector or array of
+  items converts with the identity). Contact is found and cut in the
+  body's frame, where an IFC body's extruded items stand on axis-normal
+  planes, and the placement then moves the cut boundary, so a body turned
+  in any direction keeps its contact cut; witnesses are in the world.
+  Items turned against each other within the body's frame are still
+  refused as `ContactPlaneNotAxisNormal`, and a placement that is not
+  rigid as `Placement`.
+  Distance needs no such check. A translated multi-item body closes as
+  fast as one solid: faces match across items, a free region is bounded
+  through the face it was cut from (so a cut that falls out differently
+  in the last bit for the moved copy still closes at once), and each
+  item's own support point seeds the lower bound. Ten stacked steps
+  turned in plan and moved close both ways at 1e-9 in about 0.14 s.
 
 ### 0.3.7 - 2026-10-02
 
@@ -1259,6 +1416,84 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.9 - 2026-10-03
+
+### Added
+
+- `ReferenceExactCompiler` compiles differences of placed extrusions
+  exactly (#228): a wall or slab under any rigid placement minus openings
+  under theirs, perpendicular to its extrusion (doors, windows) or
+  parallel (shafts), with rectangle, circle and line-and-arc profiles,
+  through, blind, flush or touching its edges, and several openings per
+  body as nested differences. It runs the general exact boolean
+  (`axiolid-brep-boolean`, ADR 0080); two unplaced sharp rectangles along
+  `+z` keep the prism path. Unions and intersections of placed operands,
+  operands that are not extrusions, a tool that is itself a boolean, scaled
+  placements and configurations the general boolean refuses are refused by
+  name; a difference that removes the whole subject is `Degenerate`.
+  Faces that agree only up to rounding are read within the caller's
+  tolerance; the result is then the exact boolean of operands moved by at
+  most it, and a gap of ten tolerances is kept. One-segment semicircular
+  arches compile (contour lowering splits them).
+
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` and
+  `DeviationReport` (#232): next to the mesh, a certified upper bound on
+  the distance from every point of the exact surface to the triangles, the
+  paths that contributed (`DeviationContribution`, `DeviationPath`,
+  `DeviationBound::{Proven, Certified, Unbounded}`) and whether the
+  requested chord budget is met. #231's paths report the budget they are
+  proven to; profiles report their flattening's bound (a derived profile
+  its stretch); curved B-rep faces a per-triangle bound from the surface's
+  second-derivative bounds plus each trim pcurve's lens; pipes along
+  segments and arcs and primitive cylinders and cones the budget their
+  constructions prove; disks swept along B-splines and ellipses a bound
+  certified against the exact tube by branch and bound. Booleans, tapered
+  extrusions, sectioned spines, bounded half-spaces, composites holding
+  other curves and other frame laws are unbounded by name. An
+  inherent method: the `MeshCompiler` contract is unchanged.
+
+### Changed
+
+- A swept disk's `fillet_radius` is honoured on polylines and composites
+  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
+  becomes a tangent arc of that radius (#232). A directrix with a corner
+  and no fillet radius, which IFC leaves undefined and which used to be
+  swept with sharp mitres, is now refused by name, as are a closed
+  polyline directrix, a fillet that does not fit its segments, a disk
+  radius at or above the fillet or bend radius, and a sweep range
+  combined with a fillet radius (`UnsupportedInput`).
+
+- A B-spline directrix with no corner knot reports its exact end
+  tangents, so sweeps along it refine their stations and stand their end
+  caps square to the curve, as along a conic (#232).
+- Curved B-rep faces are also refined where a triangle's certified bound
+  misses the chord budget, by its widest free edge, up to a vertex cap; a
+  pass that runs out of depth or vertices is discarded for the
+  measurement-only refinement. Trim edges are sampled until their
+  certified chord bound fits too, where that converges (#232).
+
+### Fixed
+
+- A swept disk along a line, a polyline, or a trim or composite of lines,
+  polylines and circular arcs keeps every point of the exact tube within
+  the chord budget of the mesh (#232). The directrix is read as exact
+  segments and arcs and swept by `axiolid_construct::pipe` (see its notes
+  for the bound); it used to be sampled as a whole, each bend chorded for
+  its centreline instead of the tube's outer side. At 1 mm: line + bend
+  (R 0.1) + line, r 0.05, 1.184 -> 0.784 mm (502 -> 686 triangles);
+  three bends out of plane 1.184 -> 0.803 mm (1652 -> 1882); at 0.1 mm
+  R 0.04 / r 0.01 0.108 -> 0.077 mm, R 0.6 / r 0.3 0.115 -> 0.085 mm.
+  A composite's sweep range is now cut at exact arc lengths rather than
+  along its sampled chords. Lone circles and ellipses keep the #231
+  sweep, and composites holding other curves (ellipse arcs, B-splines)
+  are swept as sampled.
+
+- Trim samples earcut skips as collinear are put back on a curved face
+  (#232): a straight pcurve sampled into many points came back as one long
+  triangle edge, a T-junction against the face across it. The fan of thin
+  triangles that putting them back leaves is then flipped to a Delaunay
+  triangulation of the trim polygon, in parameters scaled to the surface.
 
 ### 0.3.8 - 2026-10-02
 
@@ -2226,6 +2461,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.4 - 2026-10-03
+
+### Added
+
+- `bound`, re-exported from `axiolid-evaluate` like `curve` and `surface`
+  (#232).
+
+### Fixed
+
+- `tessellate_primitive` refuses a cylinder or a cone whose chord budget
+  needs more than 4096 segments with `BudgetExceeded`, as it already did
+  for spheres and tori, instead of clamping silently to a coarser mesh
+  (#232). Their bound is now documented: both are curved one way only, so
+  the ring's sagitta is the whole distance from any point of the exact
+  surface, caps included, to the mesh, and it gets the whole budget.
 
 ### 0.3.3 - 2026-10-02
 

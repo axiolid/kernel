@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-02) |
+| Latest release | 0.3.8 (2026-10-03) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -40,33 +40,56 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-02):
+Latest release, 0.3.8 (2026-10-03):
 
 ### Added
 
-- `one_sided_boundary_hausdorff_with_budget` (#227): the one-sided
-  boundary Hausdorff distance with the caller's cap on the splits, so a
-  consumer bounds the work per pair. The interval is sound at any budget,
-  only wider when it runs out.
-
-### Fixed
-
-- `boundary_hausdorff_distance` took its matched fast path only for faces
-  with identical pcurves (#227). Prisms from `boolean_arc_prisms_exact`
-  are trimmed in world coordinates, so two of them a translation apart
-  were treated as unmatched and closed at first order: [1.0, 1.59] mm at
-  accuracy 1e-4 after the whole 200k-split budget. Faces are now also
-  matched as translates, independently of how the B-rep was built: same
-  family, axes and shape (radius, semi-axes, angle, a cone's apex), and
-  trims equal after the parameter shift the translation induces (for a
-  plane the shift across its axes, for a cylinder, elliptical cylinder or
-  cone along its axis only), to within a gate of 1e-9 relative. The other
-  face is re-charted by the shift and bounded as before, the measured trim
-  residue folded in, so the bound is `|t|`; a turned or resized face, by
-  however little, is never matched this way. The lower bound is seeded
-  with the support point against each matched displacement, exactly `|t|`
-  from a translate's boundary. Those prisms, square, round or with an arc
-  in the section, moved by 1 mm or 0.2 m in any direction, now close to
-  1e-6 without a split.
+- Boundary distance and Hausdorff distance between bodies of several
+  exact solids (#229), one `ExactBRep` per item in a slice:
+  `body_boundary_distance` and `body_boundary_clearance` (the least
+  distance over item pairs, by one shared branch and bound, so far pairs
+  are never refined), `body_boundary_hausdorff_distance`,
+  `one_sided_body_boundary_hausdorff` and its `_with_budget` form (the
+  Hausdorff distance between the boundaries of the unions). Witnesses name
+  their items (`BodyDistance`, `BodyHausdorffBounds`, `BodyHausdorff`).
+  The Hausdorff queries first show every pair of items of a body apart (a
+  plane with a certified positive gap between them, or boundaries
+  certainly apart with neither inside the other), touching without a
+  shared patch of face (a plane between them within rounding where one of
+  them has no face), or in exact face contact. Items in face contact (a
+  column on its footing, blocks sharing a wall, stacked steps) share a
+  patch that is interior to their union: each face in contact is cut down
+  to its free region by an exact arrangement of the faces' boundaries on
+  their common plane (`axiolid-overlay`'s `ArcArrangement`, now an
+  optional dependency under `exact`), and the union's boundary is
+  measured. Contact is exact when both faces lie, in the B-rep's own
+  numbers, on one plane normal to a coordinate axis, which a placement
+  turning about that axis keeps. A gap is never glued: two items a
+  sub-millimetre apart are measured as apart, both facing faces on the
+  boundary, whatever the tolerance (gluing and widening the interval by
+  the gap would not be sound: a lifted column's base disc is a whole
+  radius from the glued boundary). Anything else is refused by name in
+  the new `BodyMeasureError`: `ContactPlaneNotAxisNormal` (items touching
+  on a plane no coordinate axis is normal to, such as walls turned in
+  plan), `ItemsNearlyShareFace` with the gap (items interpenetrating by
+  no more than the caller's tolerance, or faces on axis planes at
+  coordinates differing below rounding), `ItemsShareFace` (a face in
+  contact that cannot be cut: a B-spline face, an elliptical edge) and
+  `ItemsOverlap`.
+  Every `body_*` query takes each side as a `PlacedBody`: the items in the
+  body's own frame and one rigid placement (a slice, vector or array of
+  items converts with the identity). Contact is found and cut in the
+  body's frame, where an IFC body's extruded items stand on axis-normal
+  planes, and the placement then moves the cut boundary, so a body turned
+  in any direction keeps its contact cut; witnesses are in the world.
+  Items turned against each other within the body's frame are still
+  refused as `ContactPlaneNotAxisNormal`, and a placement that is not
+  rigid as `Placement`.
+  Distance needs no such check. A translated multi-item body closes as
+  fast as one solid: faces match across items, a free region is bounded
+  through the face it was cut from (so a cut that falls out differently
+  in the last bit for the moved copy still closes at once), and each
+  item's own support point seeds the lower bound. Ten stacked steps
+  turned in plan and moved close both ways at 1e-9 in about 0.14 s.
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

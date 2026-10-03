@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-02) |
+| Latest release | 0.3.11 (2026-10-03) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -63,35 +63,42 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-02):
+Latest release, 0.3.11 (2026-10-03):
 
 ### Added
 
-- `sweep::swept_disk_within`, `sweep::fixed_reference_sweep_within` and
-  `sweep::surface_curve_sweep_within`, with `sweep::SampledPath` (#231):
-  sweeps that take a directrix sampler instead of fixed samples, and keep
-  every point of the surface their section traces along a smooth
-  directrix within a chord budget. Each span is bounded by the
-  directrix's sagitta, plus the section's extra sagitta at its furthest
-  point from the directrix, plus the wall quads' twist; the directrix is
-  resampled at half the budget until every span fits. Along a circular
-  arc this is exact (the stations are rotations about the arc's axis);
-  for other smooth curves it is the second-order estimate. A path with
-  end tangents places its end sections square to the curve. A path
-  without them (a line, a polyline, a composite) is swept as given.
+- `pipe::swept_disk_along_pieces`, with `pipe::PathPiece` and
+  `pipe::joint_tolerance` (#232): a disk, optionally hollow, swept along a
+  chain of straight segments and circular arcs, with every point of the
+  exact tube within the chord budget of the mesh. Half the budget chords
+  the disk; each piece is then bounded on its own by the #231 span bound
+  (exact along an arc, where the stations are rotations about its axis,
+  and zero along a segment), its end frames exact. Consecutive pieces
+  share one station, so the tube is watertight and wound one way; the
+  shared station's measured distance from the outgoing piece's own start
+  station is added to that piece's first span. A joint turning by more
+  than `2 asin(c / (8 r))` is a corner and is refused by name, as is a
+  gap above a quarter of the budget, a bend radius at or below the disk
+  radius, and a bend needing more than 4096 steps (`BudgetExceeded`). A
+  fillet radius rounds each corner between two segments with a tangent
+  arc (`IfcSweptDiskSolidPolygonal`); a fillet that overruns its
+  segments, a disk at or above the fillet radius, a reversal and a corner
+  beside an arc are refused by name. The derivation is in the module
+  notes.
 
-### Fixed
+- `profile::profile_deviation` and `ProfileDeviation` (#232): how far a
+  profile's exact boundary may lie from the rings `profile_rings` flattens
+  it to. The chord budget for every segment family the flattener certifies,
+  plus the largest merge of near-duplicate points, scaled by a derived
+  profile's stretch; any other family (a clothoid, a non-positive spline
+  weight) is unbounded by name.
 
-- `revolve::revolve` and `sweep::tapered_revolve` bound the distance from
-  every point of the surface their rings sweep to the mesh by
-  `tolerance.linear()` (#231). The step round the axis used to bound the
-  sagitta alone, which misses the twist of the walls when the axis leaves
-  the profile's plane or the section tapers: the step now also covers
-  each wall quad's distance from its two triangles (a proved bound, zero
-  for the planar trapezoids of an ordinary revolution), and a tapered
-  turn's spiral is bounded by its own curvature. The module notes carry
-  the derivation, including why a chorded profile and a chorded turn
-  each need their own share of a surface budget. A budget beyond 4096
-  steps is refused with `BudgetExceeded` instead of met by fewer steps.
+### Changed
+
+- Contour lowering splits a circular segment of half a turn or more into
+  equal sub-arcs below half a turn instead of refusing it (#228, ADR 0053
+  amended): an IFC arch is commonly one semicircle. The split vertices are
+  the circle evaluated at their parameters, as a segment's ends are. Only a
+  segment sweeping more than a whole turn is refused.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-09-28) |
+| Latest release | 0.1.2 (2026-10-03) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -50,11 +50,44 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.1 (2026-09-28):
+Latest release, 0.1.2 (2026-10-03):
+
+### Added
+
+- `BooleanError::NearCoincidence`: features chained within tolerance of
+  each other over more than the tolerance, which no single perturbation
+  within tolerance reconciles, are refused by name (#228).
+- The crate docs state what a result guarantees: which decisions are
+  exact, which are taken within the caller's tolerance, and that the
+  result is then the exact boolean of operands moved by at most it.
+
+### Fixed
+
+- Operands placed by independent rigid motions cut each other (#228). Their
+  coincident, parallel or tangent faces agree only up to rounding, which
+  the exact predicates saw: an opening flush with a wall's faces was
+  undecided, an arched opening's tangent jambs left slivers or no cut, and
+  a plane `1e-17` off parallel or perpendicular to a cylinder's axis gave
+  an ellipse nothing could evaluate. Within tolerance, a section now runs
+  along an edge it lies on, a tangent crossing is cut once where it meets
+  the edge, cuts and boundary splits closer than tolerance are one point,
+  and such a plane cuts the cylinder in rulings or a circle.
 
 ### Changed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- Every within-tolerance decision uses the caller's `Tolerance` only:
+  distances its linear part, with no built-in `1e-9` floor, and the
+  coincidence and contact tests on normals and axes its angular part
+  instead of a fixed `1e-9`. With `Tolerance::METRE` results are
+  unchanged.
+- Work between faces that cannot meet is skipped (#228). Each face and
+  edge gets a sound box from its surface or curve in closed form, enlarged
+  by the linear tolerance; face pairs whose boxes are apart are not
+  sectioned, a section line or conic is cut only against edges whose
+  boxes meet both faces' common box (and at that box's boundary),
+  classification rays skip faces whose boxes they miss, and split faces
+  ignore cut points outside their boxes. A wall losing ten placed windows
+  one at a time went from 1.67 s to 0.28 s in release
+  (`cargo bench -p axiolid-benchmark --bench exact_openings`).
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)
