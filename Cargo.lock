@@ -513,6 +513,8 @@ name = "axiolid-mesh-compile"
 version = "0.3.8"
 dependencies = [
  "axiolid-brep",
+ "axiolid-brep-audit",
+ "axiolid-brep-boolean",
  "axiolid-construct",
  "axiolid-contracts",
  "axiolid-core",

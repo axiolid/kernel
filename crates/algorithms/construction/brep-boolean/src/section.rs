@@ -32,9 +32,20 @@
 //!   edges are imprinted on the other where they run inside it, so the
 //!   shared patch becomes a region of both faces; classification then sees
 //!   it on the other solid's boundary (see `crate::boolean`).
+//!
+//! Operands placed by independent rigid motions agree only up to rounding,
+//! and the exact predicates above see that residue (#228). Within
+//! tolerance, then:
+//!
+//! - a plane parallel or perpendicular to a cylinder's axis cuts rulings
+//!   or a circle, not a degenerate ellipse;
+//! - a curve running along a boundary edge is read as running along it;
+//! - a curve that touches the edge's adjacent surface (a double root,
+//!   which rounding splits in two or loses) is cut where it meets the edge
+//!   itself, and cuts closer together than tolerance are one cut.
 
 use axiolid_brep::ExactBRep;
-use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance};
+use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance, Vec3};
 use axiolid_curve::Curve3;
 use axiolid_evaluate::surface::{locate, normal};
 use axiolid_evaluate::{curve::locate3, evaluate3};
@@ -118,8 +129,14 @@ pub fn section_edges(
             // one face's parameter box (ADR 0077), which holds every part
             // of it that can matter.
             let splines = matches!((sa, sb), (Surface::BSpline(_), Surface::BSpline(_)));
+            // A plane parallel or perpendicular to a cylinder's axis to
+            // within rounding.
+            let rulings = plane_cylinder_within_rounding(sa, sb, tolerance);
+            if rulings.as_ref().is_some_and(Vec::is_empty) {
+                continue;
+            }
             // Two B-splines are traced below, in the faces' own boxes.
-            let closed_form = if splines {
+            let closed_form = if splines || rulings.is_some() {
                 None
             } else {
                 let known = closed_forms
@@ -150,9 +167,10 @@ pub fn section_edges(
                     Err(_) => None,
                 }
             };
-            let branches: Vec<(Curve3, Option<Interval>)> = match closed_form {
-                Some(curve) => curve.branches.into_iter().zip(curve.spans).collect(),
-                None => {
+            let branches: Vec<(Curve3, Option<Interval>)> = match (rulings, closed_form) {
+                (Some(lines), _) => lines.into_iter().map(|line| (line, None)).collect(),
+                (None, Some(curve)) => curve.branches.into_iter().zip(curve.spans).collect(),
+                (None, None) => {
                     // Only a B-spline can carry a section with a B-spline
                     // (it has no equation to read elsewhere); otherwise the
                     // compact and low-degree surfaces carry best.
@@ -244,6 +262,7 @@ pub fn section_edges(
                     cuts.retain(|&c| c >= lo && c <= hi);
                     cuts.extend([lo, hi].into_iter().filter(|x| x.is_finite()));
                 }
+                let cuts = merge_close(branch, cuts, tolerance)?;
                 for (piece_curve, span) in pieces(branch, cuts)? {
                     // Off-centre, so a symmetric section's pole or seam
                     // crossing never becomes the sample.
@@ -288,6 +307,93 @@ pub fn section_edges(
         }
     }
     Ok(out)
+}
+
+/// The section of a plane and a cylinder whose axis the plane is parallel
+/// or perpendicular to within the angular tolerance, or `None` for any
+/// other pair.
+///
+/// The exact closed form decides parallel and perpendicular exactly, on the
+/// numbers given. Two operands placed by independent rigid motions -- an
+/// arched opening's jamb plane against its own soffit cylinder, or a wall's
+/// face against it, after a general rotation -- leave the normal and axis
+/// `1e-17` off, and the exact section is then an ellipse `1e16` long, or
+/// tilted by the residue, that nothing can evaluate. Read within rounding,
+/// the section is what the operands describe:
+///
+/// - parallel: two rulings, one where the plane touches the cylinder
+///   (within linear tolerance), or none (an empty list);
+/// - perpendicular: the circle where the axis pierces the plane.
+///
+/// Each curve lies on the cylinder exactly and on the plane to within the
+/// angular tolerance times its extent (#228).
+fn plane_cylinder_within_rounding(
+    a: &Surface,
+    b: &Surface,
+    tolerance: Tolerance,
+) -> Option<Vec<Curve3>> {
+    let (cylinder, plane) = match (a, b) {
+        (Surface::Cylinder(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cylinder(c)) => {
+            (c, p)
+        }
+        _ => return None,
+    };
+    let axis = cylinder.frame.z.normalize_or_zero();
+    let normal = plane.frame.z.normalize_or_zero();
+    if axis == Vec3::ZERO || normal == Vec3::ZERO {
+        return None;
+    }
+    let along = axis.dot(normal);
+    if axis.cross(normal).length() <= tolerance.angular() {
+        // Perpendicular to the axis within rounding: the circle where the
+        // axis pierces the plane, not an ellipse tilted by the residue.
+        let centre = cylinder.frame.origin
+            + axis * (normal.dot(plane.frame.origin - cylinder.frame.origin) / along);
+        let x = (cylinder.frame.x - axis * axis.dot(cylinder.frame.x)).normalize_or_zero();
+        if x == Vec3::ZERO || !centre.is_finite() {
+            return None;
+        }
+        return Some(vec![Curve3::Circle(axiolid_curve::Circle3 {
+            frame: axiolid_core::Frame3 {
+                origin: centre,
+                x,
+                y: axis.cross(x),
+                z: axis,
+            },
+            radius: cylinder.radius,
+        })]);
+    }
+    if along.abs() > tolerance.angular() {
+        return None;
+    }
+    // The normal with its rounding along the axis removed.
+    let normal = (normal - axis * along).normalize_or_zero();
+    if normal == Vec3::ZERO {
+        return None;
+    }
+    let distance = normal.dot(cylinder.frame.origin - plane.frame.origin);
+    let foot = cylinder.frame.origin - normal * distance;
+    let across = axis.cross(normal);
+    let (r, eps) = (cylinder.radius, tolerance.linear().max(1e-9));
+    let offsets: Vec<Scalar> = if (distance.abs() - r).abs() <= eps {
+        vec![0.0]
+    } else if distance.abs() > r {
+        Vec::new()
+    } else {
+        let half = (r * r - distance * distance).sqrt();
+        vec![half, -half]
+    };
+    Some(
+        offsets
+            .into_iter()
+            .map(|offset| {
+                Curve3::Line(axiolid_curve::Line3 {
+                    origin: foot + across * offset,
+                    direction: axis,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// The points where a surface's angle parameter has no value: a sphere's
@@ -392,6 +498,130 @@ enum Place {
     Inside,
     Boundary,
     Outside,
+}
+
+/// Where `curve` crosses `edge` within tolerance, as a parameter on
+/// `curve`: two lines at their closest approach, or a line and a circle or
+/// ellipse where the line pierces the conic's plane. `None` when they stay
+/// further apart than tolerance, run parallel (a line in the conic's
+/// plane, parallel lines), or are another pair of families.
+///
+/// Both pairs are well conditioned where they cross transversally in
+/// space, which is the case a tangent contact with the edge's adjacent
+/// surface leaves (#228).
+fn near_crossing(
+    curve: &Curve3,
+    edge: &Curve3,
+    tolerance: Tolerance,
+) -> Result<Option<Scalar>, BooleanError> {
+    let eps = tolerance.linear().max(1e-9);
+    let conic_plane = |c: &Curve3| match c {
+        Curve3::Circle(c) => Some(c.frame),
+        Curve3::Ellipse(e) => Some(e.frame),
+        _ => None,
+    };
+    let point = match (curve, edge) {
+        (Curve3::Line(a), Curve3::Line(b)) => {
+            let (d1, d2) = (a.direction, b.direction);
+            let r = a.origin - b.origin;
+            let (aa, bb, ab) = (d1.dot(d1), d2.dot(d2), d1.dot(d2));
+            let denominator = aa * bb - ab * ab;
+            if denominator <= 1e-12 * aa * bb {
+                return Ok(None);
+            }
+            let (c, f) = (d1.dot(r), d2.dot(r));
+            let s = (ab * f - c * bb) / denominator;
+            let t = (aa * f - ab * c) / denominator;
+            let (p, q) = (a.origin + d1 * s, b.origin + d2 * t);
+            if (p - q).length() > eps {
+                return Ok(None);
+            }
+            return Ok(Some(s));
+        }
+        (Curve3::Line(line), conic) | (conic, Curve3::Line(line)) => {
+            let Some(frame) = conic_plane(conic) else {
+                return Ok(None);
+            };
+            let n = frame.z.normalize();
+            let along = line.direction.dot(n);
+            if along.abs() <= 1e-9 * line.direction.length() {
+                return Ok(None);
+            }
+            let s = (frame.origin - line.origin).dot(n) / along;
+            line.origin + line.direction * s
+        }
+        _ => return Ok(None),
+    };
+    // The pierce point must lie on the conic, within tolerance.
+    let conic = if matches!(curve, Curve3::Line(_)) {
+        edge
+    } else {
+        curve
+    };
+    let Ok(t) = locate3(conic, point, tolerance) else {
+        return Ok(None);
+    };
+    let on = evaluate3(conic, t).map_err(|_| BooleanError::Evaluation)?;
+    if (on - point).length() > eps {
+        return Ok(None);
+    }
+    match locate3(curve, point, tolerance) {
+        Ok(t) => Ok(Some(t)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Cuts on a line or conic that lie within tolerance of each other in
+/// space, merged into one at their mean parameter.
+///
+/// A curve crossing a face's edge where it touches the edge's other
+/// surface -- a wall's face meeting an arched opening's jamb where the jamb
+/// runs tangent into the arch -- has a double root there, and the exact
+/// intersection returns it as two roots about `sqrt(eps)` apart. Kept
+/// apart, they leave a sliver piece `1e-8` long whose ends no other piece
+/// meets, and the face does not split (#228). Other curves are returned
+/// unchanged.
+fn merge_close(
+    curve: &Curve3,
+    cuts: Vec<Scalar>,
+    tolerance: Tolerance,
+) -> Result<Vec<Scalar>, BooleanError> {
+    let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
+    if !(periodic || matches!(curve, Curve3::Line(_))) {
+        return Ok(cuts);
+    }
+    let eps = tolerance.linear().max(1e-9);
+    let at = |t: Scalar| evaluate3(curve, t).map_err(|_| BooleanError::Evaluation);
+    let mut placed: Vec<(Scalar, Point3)> = Vec::with_capacity(cuts.len());
+    for cut in cuts {
+        if !cut.is_finite() {
+            continue;
+        }
+        placed.push((cut, at(cut)?));
+    }
+    placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // (parameter sum, count, last point) per cluster.
+    let mut clusters: Vec<(Scalar, Scalar, Point3)> = Vec::new();
+    for (cut, point) in placed {
+        match clusters.last_mut() {
+            Some((sum, count, last)) if (point - *last).length() <= eps => {
+                *sum += cut;
+                *count += 1.0;
+                *last = point;
+            }
+            _ => clusters.push((cut, 1.0, point)),
+        }
+    }
+    let mut out: Vec<Scalar> = clusters.iter().map(|(sum, count, _)| sum / count).collect();
+    // A closed conic's cuts either side of its parameter origin are one
+    // point.
+    if periodic && clusters.len() >= 2 {
+        let (first, last) = (at(out[0])?, at(out[out.len() - 1])?);
+        if (first - last).length() <= eps {
+            out.pop();
+        }
+    }
+    Ok(out)
 }
 
 /// The pieces of a bounded edge span between the cuts inside it.
@@ -716,11 +946,36 @@ impl<'a> Side<'a> {
                         result = exact_curve_surface_intersection(curve, &cutter);
                     }
                 }
+                // Two operands placed independently put one plane at two
+                // roundings: the curve then misses the adjacent face's
+                // support by 1e-17 and the exact test calls it apart or
+                // crossing, though it runs along the edge. Within tolerance
+                // along the whole edge, it is contained (#228).
+                if !matches!(result, Ok(ExactCurveIntersection::Contained))
+                    && runs_along(curve, edge_curve, span, tolerance)?
+                {
+                    result = Ok(ExactCurveIntersection::Contained);
+                }
                 match result {
                     Ok(ExactCurveIntersection::Points(hits)) => {
+                        let before = out.len();
                         for hit in hits {
                             if on_edge(edge_curve, span, hit.point, tolerance)? {
                                 out.push(hit.parameter.approx());
+                            }
+                        }
+                        // Where the curve touches the adjacent surface at
+                        // the edge (a tangent crossing), rounding can leave
+                        // the double root with no real root at all: the
+                        // curve still meets the edge itself, transversally,
+                        // and that crossing is read from the two curves.
+                        if out.len() == before {
+                            if let Some(t) = near_crossing(curve, edge_curve, tolerance)? {
+                                let point =
+                                    evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
+                                if on_edge(edge_curve, span, point, tolerance)? {
+                                    out.push(t);
+                                }
                             }
                         }
                     }
@@ -878,6 +1133,30 @@ fn normal_sweep(
         radius: circle.radius,
         semi_angle: (radial / along).atan(),
     }))
+}
+
+/// Whether the edge (`edge` over `span`) lies on `curve` within tolerance:
+/// both ends and three interior points. Five points of a line or conic
+/// within tolerance of another line or conic put the whole edge there.
+fn runs_along(
+    curve: &Curve3,
+    edge: &Curve3,
+    span: Interval,
+    tolerance: Tolerance,
+) -> Result<bool, BooleanError> {
+    let eps = tolerance.linear().max(1e-9);
+    for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let point = evaluate3(edge, span.start + f * (span.end - span.start))
+            .map_err(|_| BooleanError::Evaluation)?;
+        let Ok(t) = locate3(curve, point, tolerance) else {
+            return Ok(false);
+        };
+        let on = evaluate3(curve, t).map_err(|_| BooleanError::Evaluation)?;
+        if (on - point).length() > eps {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Whether `point` lies on the edge within tolerance and inside its span.

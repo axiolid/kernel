@@ -9,6 +9,31 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceExactCompiler` compiles differences of placed extrusions
+  exactly (#228): a wall or slab under any rigid placement minus openings
+  under theirs, perpendicular to its extrusion (doors, windows) or
+  parallel (shafts), with rectangle, circle and line-and-arc profiles,
+  through, blind, flush or touching its edges, and several openings per
+  body as nested differences. It runs the general exact boolean
+  (`axiolid-brep-boolean`, ADR 0080); two unplaced sharp rectangles along
+  `+z` keep the prism path. Unions and intersections of placed operands,
+  operands that are not extrusions, a tool that is itself a boolean, scaled
+  placements and configurations the general boolean refuses are refused by
+  name; a difference that removes the whole subject is `Degenerate`.
+
+### Changed
+
+- A swept disk's `fillet_radius` is honoured on polylines and composites
+  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
+  becomes a tangent arc of that radius (#232). A directrix with a corner
+  and no fillet radius, which IFC leaves undefined and which used to be
+  swept with sharp mitres, is now refused by name, as are a closed
+  polyline directrix, a fillet that does not fit its segments, a disk
+  radius at or above the fillet or bend radius, and a sweep range
+  combined with a fillet radius (`UnsupportedInput`).
+
 ### Fixed
 
 - A swept disk along a line, a polyline, or a trim or composite of lines,
@@ -25,16 +50,6 @@ caret rule for `0.x` versions.
   sweep, and composites holding other curves (ellipse arcs, B-splines)
   are swept as sampled.
 
-### Changed
-
-- A swept disk's `fillet_radius` is honoured on polylines and composites
-  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
-  becomes a tangent arc of that radius (#232). A directrix with a corner
-  and no fillet radius, which IFC leaves undefined and which used to be
-  swept with sharp mitres, is now refused by name, as are a closed
-  polyline directrix, a fillet that does not fit its segments, a disk
-  radius at or above the fillet or bend radius, and a sweep range
-  combined with a fillet radius (`UnsupportedInput`).
 
 ## [0.3.8] - 2026-10-02
 

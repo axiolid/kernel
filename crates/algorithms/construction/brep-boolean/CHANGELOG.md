@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Operands placed by independent rigid motions cut each other (#228). Their
+  coincident, parallel or tangent faces agree only up to rounding, which
+  the exact predicates saw: an opening flush with a wall's faces was
+  undecided, an arched opening's tangent jambs left slivers or no cut, and
+  a plane `1e-17` off parallel or perpendicular to a cylinder's axis gave
+  an ellipse nothing could evaluate. Within tolerance, a section now runs
+  along an edge it lies on, a tangent crossing is cut once where it meets
+  the edge, cuts and boundary splits closer than tolerance are one point,
+  and such a plane cuts the cylinder in rulings or a circle.
+
 ## [0.1.1] - 2026-09-28
 
 ### Changed

@@ -4,10 +4,11 @@
 //! a `NodeId -> ExactBRep` memo table; a discrete value cannot enter that cache.
 //!
 //! It never falls back to mesh compilation. Extrusions, revolutions,
-//! booleans of sharp rectangle prisms along +z, disks swept along one
-//! segment or one arc, and instances of any of these under a rigid
-//! transform are compiled exactly; every other family is refused with
-//! `GeomError::UnsupportedInput` naming it.
+//! booleans of sharp rectangle prisms along +z, differences of placed
+//! extrusions ([`boolean`], #228), disks swept along one segment or one
+//! arc, and instances of any of these under a rigid transform are compiled
+//! exactly; every other family is refused with `GeomError::UnsupportedInput`
+//! naming it.
 //!
 //! An instance places its source's exact B-rep with
 //! [`ExactBRep::transformed`] (#223): a rotation, a reflection and a
@@ -17,7 +18,6 @@
 use std::collections::{HashMap, HashSet};
 
 use axiolid_brep::{ExactBRep, TransformError};
-use axiolid_construct::boolean_exact::{boolean_prisms_exact, Prism};
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_construct::revolve_exact::revolve_profile_exact;
 use axiolid_construct::swept_disk_exact::{
@@ -30,6 +30,8 @@ use axiolid_contracts::{
 use axiolid_core::Scalar;
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
+
+mod boolean;
 
 /// Scalar reference implementation of the exact-compilation capability.
 #[derive(Debug, Clone, Copy, Default)]
@@ -206,73 +208,11 @@ impl<'a> ExactCompilation<'a> {
                 right,
                 operator,
             }) => {
-                let subject = self.prism_operand(*left, "boolean subject")?;
-                let tool = self.prism_operand(*right, "boolean tool")?;
-                boolean_prisms_exact(&subject, &tool, *operator, self.options.tolerance())
-                    .map_err(remap_construction_error)
+                let (left, right, operator) = (*left, *right, *operator);
+                self.compile_boolean(left, right, operator)
             }
             _ => Err(unsupported(exact_input_family(node))),
         }
-    }
-}
-
-impl ExactCompilation<'_> {
-    /// Recover a prism from a boolean operand.
-    ///
-    /// Only a sharp filled rectangle extruded along +z is a prism this path
-    /// can name. Recovering one from an arbitrary exact B-rep is its own
-    /// inference problem, and guessing wrong would mis-identify the operand,
-    /// so anything else is refused by name.
-    fn prism_operand(&self, id: NodeId, role: &'static str) -> GeomResult<Prism> {
-        let _ = role;
-        let node = self.graph.get(id).ok_or_else(|| {
-            GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
-        })?;
-        let GeometryNode::SolidOperation(SolidOperation::Extrusion {
-            profile,
-            direction,
-            depth,
-        }) = *node
-        else {
-            return Err(unsupported(
-                "exact boolean operand that is not an extrusion",
-            ));
-        };
-        if direction.normalize_or_zero().dot(axiolid_core::Vec3::Z)
-            < 1.0 - self.options.tolerance().linear()
-        {
-            return Err(unsupported(
-                "exact boolean operand with an oblique extrusion",
-            ));
-        }
-        let profile_node = self.graph.get(profile).ok_or_else(|| {
-            GeomError::InvalidInput(format!("profile {profile:?} does not belong to this graph"))
-        })?;
-        let GeometryNode::Profile(axiolid_profile::Profile::Rectangle(rectangle)) = profile_node
-        else {
-            return Err(unsupported(
-                "exact boolean operand with a non-rectangle profile",
-            ));
-        };
-        if rectangle.thickness.is_some()
-            || rectangle.outer_radius.is_some()
-            || rectangle.inner_radius.is_some()
-        {
-            return Err(unsupported(
-                "exact boolean operand with a non-sharp profile",
-            ));
-        }
-        let (hx, hy) = (rectangle.x / 2.0, rectangle.y / 2.0);
-        Ok(Prism {
-            rings: vec![vec![
-                axiolid_core::Point2::new(-hx, -hy),
-                axiolid_core::Point2::new(hx, -hy),
-                axiolid_core::Point2::new(hx, hy),
-                axiolid_core::Point2::new(-hx, hy),
-            ]],
-            bottom: 0.0,
-            top: depth,
-        })
     }
 }
 

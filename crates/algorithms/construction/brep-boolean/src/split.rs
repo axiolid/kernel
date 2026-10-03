@@ -13,7 +13,9 @@
 //!    equation read in the face's parameters, traced once per surface over
 //!    the face's parameter box, and the stretch between the section's ends
 //!    cut out of it.
-//! 2. Boundary uses are split wherever a section edge ends on them.
+//! 2. Boundary uses are split wherever a section edge ends on them; an
+//!    end within tolerance of the use's own end, or of another cut, is that
+//!    point, not a sliver (#228).
 //! 3. The pieces form a graph in `(u, v)`: boundary pieces are walked the
 //!    way their loop runs, section pieces both ways. Starting from each
 //!    unused half-edge, the walk turns at every vertex to the first
@@ -884,7 +886,18 @@ fn split_use(
         piece.span.start.max(piece.span.end),
     );
     let slack = 1e-9 * (1.0 + lo.abs().max(hi.abs()));
+    // A cut within tolerance of the piece's own ends, or of a cut already
+    // taken, is that point: splitting there would leave a sliver whose
+    // ends weld into one vertex (#228).
+    let eps = tolerance.linear().max(1e-9);
+    let mut taken = Vec::with_capacity(ends.len() + 2);
+    for t in [piece.span.start, piece.span.end] {
+        taken.push(evaluate3(&piece.curve, t).map_err(|_| BooleanError::Evaluation)?);
+    }
     for &point in ends {
+        if taken.iter().any(|q: &Point3| (point - *q).length() <= eps) {
+            continue;
+        }
         let Ok(t) = locate3(&piece.curve, point, tolerance) else {
             continue;
         };
@@ -930,6 +943,7 @@ fn split_use(
         let p = found.ok_or(BooleanError::Evaluation)?;
         if !cuts.iter().any(|(c, _)| (c - t).abs() <= slack) {
             cuts.push((t, p));
+            taken.push(on);
         }
     }
     if cuts.is_empty() {

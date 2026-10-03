@@ -268,6 +268,8 @@ graph TD
     axiolid_mesh_boolean_contract --> axiolid_mesh
     axiolid_mesh_boolean_contract --> axiolid_mesh_contracts
     axiolid_mesh_compile --> axiolid_brep
+    axiolid_mesh_compile --> axiolid_brep_audit
+    axiolid_mesh_compile --> axiolid_brep_boolean
     axiolid_mesh_compile --> axiolid_construct
     axiolid_mesh_compile --> axiolid_contracts
     axiolid_mesh_compile --> axiolid_core
