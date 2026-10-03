@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-03) |
+| Latest release | 0.3.10 (2026-10-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -60,82 +60,73 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-03):
+Latest release, 0.3.10 (2026-10-03):
 
 ### Added
 
-- `ReferenceExactCompiler` compiles differences of placed extrusions
-  exactly (#228): a wall or slab under any rigid placement minus openings
-  under theirs, perpendicular to its extrusion (doors, windows) or
-  parallel (shafts), with rectangle, circle and line-and-arc profiles,
-  through, blind, flush or touching its edges, and several openings per
-  body as nested differences. It runs the general exact boolean
-  (`axiolid-brep-boolean`, ADR 0080); two unplaced sharp rectangles along
-  `+z` keep the prism path. Unions and intersections of placed operands,
-  operands that are not extrusions, a tool that is itself a boolean, scaled
-  placements and configurations the general boolean refuses are refused by
-  name; a difference that removes the whole subject is `Degenerate`.
-  Faces that agree only up to rounding are read within the caller's
-  tolerance; the result is then the exact boolean of operands moved by at
-  most it, and a gap of ten tolerances is kept. One-segment semicircular
-  arches compile (contour lowering splits them).
-
-- `ReferenceMeshCompiler::compile_mesh_with_deviation` and
-  `DeviationReport` (#232): next to the mesh, a certified upper bound on
-  the distance from every point of the exact surface to the triangles, the
-  paths that contributed (`DeviationContribution`, `DeviationPath`,
-  `DeviationBound::{Proven, Certified, Unbounded}`) and whether the
-  requested chord budget is met. #231's paths report the budget they are
-  proven to; profiles report their flattening's bound (a derived profile
-  its stretch); curved B-rep faces a per-triangle bound from the surface's
-  second-derivative bounds plus each trim pcurve's lens; pipes along
-  segments and arcs and primitive cylinders and cones the budget their
-  constructions prove; disks swept along B-splines and ellipses a bound
-  certified against the exact tube by branch and bound. Booleans, tapered
-  extrusions, sectioned spines, bounded half-spaces, composites holding
-  other curves and other frame laws are unbounded by name. An
-  inherent method: the `MeshCompiler` contract is unchanged.
-
-### Changed
-
-- A swept disk's `fillet_radius` is honoured on polylines and composites
-  of lines (`IfcSweptDiskSolidPolygonal`) instead of refused: each corner
-  becomes a tangent arc of that radius (#232). A directrix with a corner
-  and no fillet radius, which IFC leaves undefined and which used to be
-  swept with sharp mitres, is now refused by name, as are a closed
-  polyline directrix, a fillet that does not fit its segments, a disk
-  radius at or above the fillet or bend radius, and a sweep range
-  combined with a fillet radius (`UnsupportedInput`).
-
-- A B-spline directrix with no corner knot reports its exact end
-  tangents, so sweeps along it refine their stations and stand their end
-  caps square to the curve, as along a conic (#232).
-- Curved B-rep faces are also refined where a triangle's certified bound
-  misses the chord budget, by its widest free edge, up to a vertex cap; a
-  pass that runs out of depth or vertices is discarded for the
-  measurement-only refinement. Trim edges are sampled until their
-  certified chord bound fits too, where that converges (#232).
+- `ReferenceExactCompiler` clips by half-spaces exactly (#234): a
+  difference or intersection whose tool is a `HalfSpace`, or a
+  `BoundedHalfSpace` (a polyline boundary in the plane), read through
+  rigid placements, with the mesh compiler's semantics (`agreement` selects
+  the normal side; the boundary is framed by its placement projected into
+  the plane and swept along the normal). The half-space becomes a finite
+  prism over a sound envelope of the subject plus a margin and goes through
+  the general exact boolean under the #228 tolerance contract; the result
+  does not depend on the margin (ADR 0080, amended). Clips compose with
+  each other and with placed openings in either order: a wall minus its
+  windows, clipped by two roof planes. Unions with a half-space, a
+  half-space as the subject, a subject not built from placed extrusions, a
+  boundary that is not a polyline, scaled placements and the general
+  boolean's refusals are refused by name; a clip that removes everything
+  is `Degenerate`.
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` return each body with a
+  `BooleanReport` (re-exported from `axiolid-brep-boolean`, with
+  `ToleranceDecision` and `ToleranceDecisionKind`) merged over every
+  general boolean and clip beneath it (#236). An exact report means the
+  body is the exact result of its operands as given and may be cited as
+  exact; otherwise it bounds how far the operands were moved or turned,
+  within the tolerance.
 
 ### Fixed
 
-- A swept disk along a line, a polyline, or a trim or composite of lines,
-  polylines and circular arcs keeps every point of the exact tube within
-  the chord budget of the mesh (#232). The directrix is read as exact
-  segments and arcs and swept by `axiolid_construct::pipe` (see its notes
-  for the bound); it used to be sampled as a whole, each bend chorded for
-  its centreline instead of the tube's outer side. At 1 mm: line + bend
-  (R 0.1) + line, r 0.05, 1.184 -> 0.784 mm (502 -> 686 triangles);
-  three bends out of plane 1.184 -> 0.803 mm (1652 -> 1882); at 0.1 mm
-  R 0.04 / r 0.01 0.108 -> 0.077 mm, R 0.6 / r 0.3 0.115 -> 0.085 mm.
-  A composite's sweep range is now cut at exact arc lengths rather than
-  along its sampled chords. Lone circles and ellipses keep the #231
-  sweep, and composites holding other curves (ellipse arcs, B-splines)
-  are swept as sampled.
+- Placed differences compile at `Tolerance::ZERO` (#236): openings placed
+  with exact axis matrices (entries `0` and `+-1`), through, blind or
+  flush, give the exact difference and an exact report.
+- A boolean's deviation contribution says when its bound also holds for
+  the exact boolean of the given operands (#236): measured against an
+  exact compiler result whose report is exact, its detail reads "the exact
+  boolean of the given operands" instead of "operands within tolerance".
 
-- Trim samples earcut skips as collinear are put back on a curved face
-  (#232): a straight pcurve sampled into many points came back as one long
-  triangle edge, a T-junction against the face across it. The fan of thin
-  triangles that putting them back leaves is then flipped to a Delaunay
-  triangulation of the trim polygon, in parameters scaled to the surface.
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` reports a boolean
+  `Certified` where `ReferenceExactCompiler` builds its exact result
+  (#235): differences of placed extrusions, such as a wall with a round
+  window, an I-beam with round holes through its web, or a slab with a
+  round shaft, and walls clipped by roof half-spaces (#234). The boolean's
+  mesh is measured against that exact B-rep by the certified branch and
+  bound of #232, over each face's trimmed parameter domain (pcurves
+  flattened to a certified chord bound; a cell is dropped only when it is
+  certainly outside the face). The bound is relative to the exact
+  compiler's result, which is the exact boolean of operands moved by at
+  most the tolerance (#228), and is not claimed for the boolean of the
+  unperturbed operands; the contribution's detail says so ("measured
+  against the exact compiler's result, operands within tolerance").
+  Nothing is derived from the operands' bounds, which are one-sided and
+  say nothing about where the mesh boolean puts the cut. A boolean the
+  exact compiler refuses stays `Unbounded`, named by the refusal (for
+  instance "exact union or intersection of placed operands"), detail "no
+  exact result". Only a deviation report pays for this, only for the
+  booleans whose result is emitted (not the inner differences of a chain),
+  and the search stops once the bound is within the requested budget.
+  Release build, 1 mm budget: a 6 m wall with a 0.4 m round window in
+  about 0.5 s, a 4 m I-beam with three round web holes in about 0.9 s.
+
+### Changed
+
+- The certified branch and bound covers a piece with a flat region of the
+  mesh (edge-connected, consistently wound, coplanar triangles) as well as
+  with single triangles, so edges inside a planar face or a cylinder facet
+  no longer have to be resolved to the bound's own size. Bounds are as
+  sound as before and settle with less work.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

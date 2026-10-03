@@ -111,6 +111,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.3 - 2026-10-03
+
+### Added
+
+- `boolean_with_report` returns, with the result, a `BooleanReport` of
+  the within-tolerance decisions that fired (#236): one
+  `ToleranceDecision` per `ToleranceDecisionKind` (coincident supports,
+  contact, a point on an edge, a section along an edge, a tangent crossing,
+  merged points, an iso-curve, a plane parallel or perpendicular to or
+  touching a cylinder), with the furthest it moved (`linear`) or turned
+  (`angular`) the operands. An empty report means the result is the exact
+  boolean of the operands as given. `boolean` is unchanged.
+
+### Fixed
+
+- Placed differences succeed at `Tolerance::ZERO` (#236). Naming a point
+  on the curve or surface it was evaluated from compared its `f64`
+  round-trip residue with the linear tolerance, so at zero every boolean
+  failed with `BooleanError::Evaluation`; that bookkeeping, and welding
+  two evaluations of one vertex, now allow the rounding of the
+  operands' extent (`2^-40` of it).
+- Readings about the operands' own surfaces (coincident supports, a plane
+  parallel or perpendicular to or touching a cylinder) ask an exact
+  dyadic predicate first: faces exactly coplanar, parallel or
+  perpendicular, as operands placed by matrices with entries `0` and
+  `+-1` meet, are decided exactly and read nothing within tolerance.
+
 ### 0.1.2 - 2026-10-03
 
 ### Added
@@ -1052,6 +1079,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-measure
 
+### 0.3.9 - 2026-10-03
+
+### Added
+
+- Plan distance, clearance and overlap between bodies of several exact
+  solids (#237): `body_plan_boundary_distance`,
+  `body_plan_boundary_clearance` and `body_plan_overlap` take a
+  `PlacedBody` (or a slice of items) per side, as the `body_*` queries in
+  space. The plan distance is the least over item pairs of the distance
+  between their shadows on the XY plane, by one shared search, so far
+  pairs are never refined; it is zero where an item's shadow overlaps or
+  lies inside one of the other body's, and the witnesses name their items
+  (`BodyDistance`). `body_plan_overlap` answers `BodyPlanOverlap`: an
+  overlap of positive area with the two items that show it, a certified
+  gap, or undecided. Items of one body may overlap or touch freely in
+  plan, so no layout is checked. The placement is applied before
+  projecting along the world's `z`: a body turned about `z` measures as
+  its plan turned, and a tilted body casts its tilted items' shadows.
+
+### Fixed
+
+- `plan_overlap` no longer leaves undecided an overlap that two level
+  planar faces show when their shadows overlap only in part (a block over
+  part of a column's disc): when the distance search shows neither an
+  overlap nor a gap -- its budget taken by walls and edges whose shadows
+  merely cross, or its run ended by a plan distance of zero met between
+  two boundary points -- a second search over patches of planar faces
+  that are not vertical alone, coarsest pair first, looks for one.
+
 ### 0.3.8 - 2026-10-03
 
 ### Added
@@ -1416,6 +1472,75 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.10 - 2026-10-03
+
+### Added
+
+- `ReferenceExactCompiler` clips by half-spaces exactly (#234): a
+  difference or intersection whose tool is a `HalfSpace`, or a
+  `BoundedHalfSpace` (a polyline boundary in the plane), read through
+  rigid placements, with the mesh compiler's semantics (`agreement` selects
+  the normal side; the boundary is framed by its placement projected into
+  the plane and swept along the normal). The half-space becomes a finite
+  prism over a sound envelope of the subject plus a margin and goes through
+  the general exact boolean under the #228 tolerance contract; the result
+  does not depend on the margin (ADR 0080, amended). Clips compose with
+  each other and with placed openings in either order: a wall minus its
+  windows, clipped by two roof planes. Unions with a half-space, a
+  half-space as the subject, a subject not built from placed extrusions, a
+  boundary that is not a polyline, scaled placements and the general
+  boolean's refusals are refused by name; a clip that removes everything
+  is `Degenerate`.
+- `ReferenceExactCompiler::compile_exact_with_report` and
+  `compile_exact_batch_with_reports` return each body with a
+  `BooleanReport` (re-exported from `axiolid-brep-boolean`, with
+  `ToleranceDecision` and `ToleranceDecisionKind`) merged over every
+  general boolean and clip beneath it (#236). An exact report means the
+  body is the exact result of its operands as given and may be cited as
+  exact; otherwise it bounds how far the operands were moved or turned,
+  within the tolerance.
+
+### Fixed
+
+- Placed differences compile at `Tolerance::ZERO` (#236): openings placed
+  with exact axis matrices (entries `0` and `+-1`), through, blind or
+  flush, give the exact difference and an exact report.
+- A boolean's deviation contribution says when its bound also holds for
+  the exact boolean of the given operands (#236): measured against an
+  exact compiler result whose report is exact, its detail reads "the exact
+  boolean of the given operands" instead of "operands within tolerance".
+
+- `ReferenceMeshCompiler::compile_mesh_with_deviation` reports a boolean
+  `Certified` where `ReferenceExactCompiler` builds its exact result
+  (#235): differences of placed extrusions, such as a wall with a round
+  window, an I-beam with round holes through its web, or a slab with a
+  round shaft, and walls clipped by roof half-spaces (#234). The boolean's
+  mesh is measured against that exact B-rep by the certified branch and
+  bound of #232, over each face's trimmed parameter domain (pcurves
+  flattened to a certified chord bound; a cell is dropped only when it is
+  certainly outside the face). The bound is relative to the exact
+  compiler's result, which is the exact boolean of operands moved by at
+  most the tolerance (#228), and is not claimed for the boolean of the
+  unperturbed operands; the contribution's detail says so ("measured
+  against the exact compiler's result, operands within tolerance").
+  Nothing is derived from the operands' bounds, which are one-sided and
+  say nothing about where the mesh boolean puts the cut. A boolean the
+  exact compiler refuses stays `Unbounded`, named by the refusal (for
+  instance "exact union or intersection of placed operands"), detail "no
+  exact result". Only a deviation report pays for this, only for the
+  booleans whose result is emitted (not the inner differences of a chain),
+  and the search stops once the bound is within the requested budget.
+  Release build, 1 mm budget: a 6 m wall with a 0.4 m round window in
+  about 0.5 s, a 4 m I-beam with three round web holes in about 0.9 s.
+
+### Changed
+
+- The certified branch and bound covers a piece with a flat region of the
+  mesh (edge-connected, consistently wound, coplanar triangles) as well as
+  with single triangles, so edges inside a planar face or a cylinder facet
+  no longer have to be resolved to the bound's own size. Bounds are as
+  sound as before and settle with less work.
 
 ### 0.3.9 - 2026-10-03
 

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-10-03
+
 ### Added
 
 - `ReferenceExactCompiler` clips by half-spaces exactly (#234): a

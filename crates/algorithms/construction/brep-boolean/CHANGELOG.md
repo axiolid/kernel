@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-03
+
 ### Added
 
 - `boolean_with_report` returns, with the result, a `BooleanReport` of
