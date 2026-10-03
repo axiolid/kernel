@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-03) |
+| Latest release | 0.3.11 (2026-10-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -60,73 +60,14 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-03):
+Latest release, 0.3.11 (2026-10-03):
 
 ### Added
 
-- `ReferenceExactCompiler` clips by half-spaces exactly (#234): a
-  difference or intersection whose tool is a `HalfSpace`, or a
-  `BoundedHalfSpace` (a polyline boundary in the plane), read through
-  rigid placements, with the mesh compiler's semantics (`agreement` selects
-  the normal side; the boundary is framed by its placement projected into
-  the plane and swept along the normal). The half-space becomes a finite
-  prism over a sound envelope of the subject plus a margin and goes through
-  the general exact boolean under the #228 tolerance contract; the result
-  does not depend on the margin (ADR 0080, amended). Clips compose with
-  each other and with placed openings in either order: a wall minus its
-  windows, clipped by two roof planes. Unions with a half-space, a
-  half-space as the subject, a subject not built from placed extrusions, a
-  boundary that is not a polyline, scaled placements and the general
-  boolean's refusals are refused by name; a clip that removes everything
-  is `Degenerate`.
-- `ReferenceExactCompiler::compile_exact_with_report` and
-  `compile_exact_batch_with_reports` return each body with a
-  `BooleanReport` (re-exported from `axiolid-brep-boolean`, with
-  `ToleranceDecision` and `ToleranceDecisionKind`) merged over every
-  general boolean and clip beneath it (#236). An exact report means the
-  body is the exact result of its operands as given and may be cited as
-  exact; otherwise it bounds how far the operands were moved or turned,
-  within the tolerance.
-
-### Fixed
-
-- Placed differences compile at `Tolerance::ZERO` (#236): openings placed
-  with exact axis matrices (entries `0` and `+-1`), through, blind or
-  flush, give the exact difference and an exact report.
-- A boolean's deviation contribution says when its bound also holds for
-  the exact boolean of the given operands (#236): measured against an
-  exact compiler result whose report is exact, its detail reads "the exact
-  boolean of the given operands" instead of "operands within tolerance".
-
-- `ReferenceMeshCompiler::compile_mesh_with_deviation` reports a boolean
-  `Certified` where `ReferenceExactCompiler` builds its exact result
-  (#235): differences of placed extrusions, such as a wall with a round
-  window, an I-beam with round holes through its web, or a slab with a
-  round shaft, and walls clipped by roof half-spaces (#234). The boolean's
-  mesh is measured against that exact B-rep by the certified branch and
-  bound of #232, over each face's trimmed parameter domain (pcurves
-  flattened to a certified chord bound; a cell is dropped only when it is
-  certainly outside the face). The bound is relative to the exact
-  compiler's result, which is the exact boolean of operands moved by at
-  most the tolerance (#228), and is not claimed for the boolean of the
-  unperturbed operands; the contribution's detail says so ("measured
-  against the exact compiler's result, operands within tolerance").
-  Nothing is derived from the operands' bounds, which are one-sided and
-  say nothing about where the mesh boolean puts the cut. A boolean the
-  exact compiler refuses stays `Unbounded`, named by the refusal (for
-  instance "exact union or intersection of placed operands"), detail "no
-  exact result". Only a deviation report pays for this, only for the
-  booleans whose result is emitted (not the inner differences of a chain),
-  and the search stops once the bound is within the requested budget.
-  Release build, 1 mm budget: a 6 m wall with a 0.4 m round window in
-  about 0.5 s, a 4 m I-beam with three round web holes in about 0.9 s.
-
-### Changed
-
-- The certified branch and bound covers a piece with a flat region of the
-  mesh (edge-connected, consistently wound, coplanar triangles) as well as
-  with single triangles, so edges inside a planar face or a cylinder facet
-  no longer have to be resolved to the bound's own size. Bounds are as
-  sound as before and settle with less work.
+- Sweep directrices resolve `TrimSelector::ArcLength` (#239) against an
+  analytic basis, in the trim's sense, through
+  `axiolid_reference::arc_parameter`; the mesh, piecewise and exact sweep
+  paths read it like a parameter selector. An arc length on a
+  curve-relation basis, or past the end of its basis, is refused by name.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

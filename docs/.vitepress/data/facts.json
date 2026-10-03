@@ -40,10 +40,10 @@
       "description": "Exact analytic B-rep result contracts over neutral topology",
       "layer": "representations",
       "path": "crates/representations/brep",
-      "released": "0.3.3",
-      "released_date": "2026-10-02",
+      "released": "0.3.4",
+      "released_date": "2026-10-03",
       "role": "representation.composed",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-brep-audit": {
       "description": "Geometric consistency auditing for exact boundary representations",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.11",
+      "released": "0.3.12",
       "released_date": "2026-10-03",
       "role": "algorithm.construction",
-      "version": "0.3.11"
+      "version": "0.3.12"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -121,19 +121,19 @@
       "description": "Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves.",
       "layer": "representations",
       "path": "crates/representations/analytic/curve",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-03",
       "role": "representation.atomic",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-curve-evaluate-contract": {
       "description": "Portable curve evaluation capability contract: point, tangent and oriented frame at a distance",
       "layer": "contracts",
       "path": "crates/contracts/operations/curve-evaluate",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-03",
       "role": "contract.operation",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-decimate": {
       "description": "Edge-collapse mesh decimation with a bounded, reported deviation",
@@ -166,10 +166,10 @@
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.3",
+      "released": "0.3.4",
       "released_date": "2026-10-03",
       "role": "algorithm.parametric",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.10",
+      "released": "0.3.11",
       "released_date": "2026-10-03",
       "role": "execution.orchestration",
-      "version": "0.3.10"
+      "version": "0.3.11"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.3",
-      "released_date": "2026-09-28",
+      "released": "0.3.4",
+      "released_date": "2026-10-03",
       "role": "representation.graph",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -463,10 +463,10 @@
       "description": "Portable scalar reference implementation and certified predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
-      "released": "0.3.4",
+      "released": "0.3.5",
       "released_date": "2026-10-03",
       "role": "algorithm.reference",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-refine": {
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",

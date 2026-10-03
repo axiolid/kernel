@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-03
+
 ### Changed
 
 - `ExactBRep::transformed` refuses a banked alignment curve

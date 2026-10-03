@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-09-28) |
+| Latest release | 0.3.4 (2026-10-03) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -38,11 +38,16 @@ identifiers outside the graph.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-09-28):
+Latest release, 0.3.4 (2026-10-03):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `TrimSelector::ArcLength(Scalar)` (#239): selects the basis parameter
+  where the arc length along the basis, measured from its parameter `0` in
+  the trim's sense, equals the value. Stored exactly; an evaluator resolves
+  it by quadrature and a root find to a stated tolerance. It is a
+  parameter-kind selector: it satisfies `TrimmingPreference::Parameter`,
+  a non-finite value is refused by validation, and equal arc lengths are an
+  empty trim.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-28) |
+| Latest release | 0.3.3 (2026-10-03) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -35,11 +35,50 @@ and surfaces free of a dependency cycle.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-28):
+Latest release, 0.3.3 (2026-10-03):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `Curve3::Banked(Banked3)` (#240, ADR 0081): an elevated centreline
+  carrying a roll law, evaluated by plan distance. `CantLaw` is a run of
+  `CantPiece`s from plan distance zero, each a `CantForm` over its own
+  `xi = s / length`: a polynomial in `xi` (constant, linear, Bloss, and
+  Helmert as two quadratic pieces through `CantPiece::helmert`), a
+  half-cosine, a sine transition, or a Viennese bend, which gives the bank
+  angle itself (`CantValue::Angle`). A second `CantLaw` of height pieces
+  is the pivot: the rotation point's elevation above the profile. The
+  rail-head distance `b` gives `psi = asin(D / b)` (`bank_angle`), and a
+  cant beyond it is refused by name (`BankError`). `BankConvention` names
+  how a cant is read on a grade, with no default: `TangentRotation` rolls
+  the section about the 3D tangent by `psi` (the rail heads rise
+  `D cos theta`), `VerticalRise` by `asin(D / (b cos theta))` (they rise
+  exactly `D`).
+- `ElevationLaw::CircularArc { height, grade, radius }` (#238): a vertical
+  circular arc in plan distance, the circle itself rather than a parabola.
+  With `t0 = atan(grade)` and signed `R` (positive sag), `sin t = sin t0 +
+  d/R`, `z = height + R (cos t0 - cos t)` and `grade = tan t`, evaluated
+  in a form that does not cancel for small `d/R`. `height_at` and
+  `grade_at` answer it in closed form and report `None` where
+  `|sin t0 + d/R| >= 1`.
+- `ElevationLaw::Intrinsic { height, grade, curvature }` (#238): a profile
+  given by curvature against its own arc length (a linear law is the
+  clothoid between grades). Stored exactly; `height_at` and `grade_at`
+  report `None` for it, since its height is a quadrature, read by
+  `axiolid-evaluate`.
+- `ElevationLaw::circular_arc`, `ElevationLaw::intrinsic` and
+  `ElevationLaw::piece_at`, the innermost piece of a composed law at a
+  distance, rebased to its own start.
+- `Curve2::Chain(Chain2)` (#239): a plane curve parameterised by
+  cumulative arc length, its pieces placed rigidly end to end from a start
+  frame. `ChainPiece2::Intrinsic { curvature, length }` is a curvature-law
+  piece; `ChainPiece2::Parametric { curve, start, length }` reads any
+  `Curve2`, written in the piece's local frame (through the origin with
+  tangent `+x` at `start`), by arc length over `length`. Each piece starts
+  at the previous end point along the previous end tangent, so a chain is
+  tangent-continuous at its joins: a layout such as line, cubic parabola,
+  arc is one exact value. `Chain2::is_well_formed`, `length`, `joins` and
+  `piece_at` read the data; evaluation lives in `axiolid-evaluate`.
+  `Elevated3` takes a chain as its plan, since its parameter is plan
+  distance (ADR 0060).
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)

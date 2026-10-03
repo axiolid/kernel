@@ -8,7 +8,7 @@ Exact analytic B-rep result contracts over neutral topology.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-02) |
+| Latest release | 0.3.4 (2026-10-03) |
 | crates.io | [`axiolid-brep`](https://crates.io/crates/axiolid-brep) |
 | Facade | [`axiolid`](./axiolid) feature `brep` |
 | Layer | representations (`representation.composed`) |
@@ -34,23 +34,12 @@ evaluate, intersect, tessellate or traverse geometry.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-02):
+Latest release, 0.3.4 (2026-10-03):
 
-### Added
+### Changed
 
-- `ExactBRep::transformed`: place an exact B-rep under a rigid motion
-  (#223). Every vertex, curve and surface maps onto the same family --
-  planes, cylinders, elliptical cylinders, cones, spheres, tori, circles,
-  ellipses, B-splines and the section curves that carry their surface --
-  with the topology, structural names and intervals kept; nothing is
-  tessellated or refitted. A reflection keeps every frame right-handed
-  (curved surfaces then read their angle backwards, `u -> 2 pi - u`, and
-  their pcurves are reflected to match) and flips every face, so a solid
-  stays outward oriented. Refused with the new `TransformError`: a
-  non-finite transform, a linear part not orthonormal within
-  `RIGID_TOLERANCE` (a scale or shear), an elevated alignment curve, and
-  under a reflection the pcurve and carrier families with no closed-form
-  reflection here (quadric and torus section graphs, traced, lifted and
-  intrinsic curves on curved faces).
+- `ExactBRep::transformed` refuses a banked alignment curve
+  (`Curve3::Banked`, #240) by name, as it does an elevated one: its cant is
+  measured against `+Z`, which a motion would tilt.
 
 Full history: [`crates/representations/brep/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/brep/CHANGELOG.md)

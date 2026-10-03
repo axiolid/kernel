@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-03
+
 ### Added
 
 - Sweep directrices resolve `TrimSelector::ArcLength` (#239) against an

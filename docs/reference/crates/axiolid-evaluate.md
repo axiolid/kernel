@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-03) |
+| Latest release | 0.3.4 (2026-10-03) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -39,31 +39,70 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-03):
+Latest release, 0.3.4 (2026-10-03):
 
 ### Added
 
-- `bound` (#232): certified derivative and chord bounds.
-  `chord_bound2`/`chord_bound3` bound how far a curve strays from the chord
-  of a parameter span (exact sagitta for an arc of at most half a turn,
-  `h^2/8 sup|c''|` otherwise, and for a rational B-spline the projective
-  form `h^2/8 (|A''| + R|w''|) / w_min`, which carries no first-derivative
-  terms); `curve_derivative_bounds2`/`3` bound `|c'|, |c''|, |c'''|` of
-  lines, circles, ellipses, sinusoids and B-splines (rational too) from
-  closed forms and derivative control polygons; `SurfaceBoundOracle`
-  bounds the first and second partials of every elementary surface and of
-  B-spline surfaces over a parameter box, with interpolation coefficients
-  for linear interpolation over a triangle; `continuity_breaks2`/`3` name
-  the knots where a curve may fail to be `C^k`; `certifies_flattening2`/`3`
-  name the families whose flattening is certified.
+- `banked` (#240, ADR 0081): `banked_point`, `banked_derivative`,
+  `banked_tangent` and `banked_section` evaluate a `Curve3::Banked` by plan
+  distance. A `BankedSection` carries the rotation point, the unit tangent
+  of the banked curve (its grade includes the pivot's rate), the lateral
+  and up axes rolled about it, the cant, the nominal bank angle, the roll
+  its convention gives, the pivot and the grade, with `frame()` and
+  `rail_heads()`. Every refusal of the cant laws is passed on by name.
+- `evaluate3`, `derivative3` and `domain3` take a banked curve, parameterised
+  by plan distance over its cant law's span, so `flatten3` flattens it;
+  `certifies_flattening3` reports it uncertified (midpoint sagitta, #232).
+- `ReferenceCurveEvaluator` measures a banked curve in plan distance, and
+  its `frame_at` returns the curve's section frame. An evaluator built
+  against a reference up other than `+Z` refuses a banked curve, whose cant
+  is measured against `+Z`.
+- `elevation` (#238): `elevation_height` and `elevation_grade` read every
+  elevation law, alone or inside a piecewise one. Closed forms go through
+  `ElevationLaw::height_at`/`grade_at`; an intrinsic (clothoid) profile is
+  integrated with `intrinsic_point` and its plan distance inverted by a
+  bracketed Newton solve to `INVERSION_TOLERANCE * max(1, d)`, after
+  certifying that the profile stays below vertical over the bracket, so a
+  profile that turns vertical is refused rather than read on a branch
+  where plan distance runs backwards. Against a 50-digit reference a
+  150 m clothoid agrees to 4e-15 m in height.
+- `elevation_chord_bound`: a certified bound on how far an elevation law
+  strays from the chord of its heights over a span, `h^2/8 sup|z''|` with
+  `z'' = k / cos^3 t`, for polynomials, circular arcs and intrinsic
+  profiles; `None` across a piecewise seam, outside a law's domain, or for
+  a family it does not bound.
+
+- `arc_parameter` (#239): `arc_length2`/`arc_length3` (signed arc length
+  between two parameters of any evaluable curve) and
+  `parameter_at_arc_length2`/`parameter_at_arc_length3` (the parameter at
+  a signed arc length from a start parameter). Adaptive 8-point
+  Gauss-Legendre of the speed, split at knots and vertices, and a
+  bracketed Newton root find, both to `ARC_LENGTH_TOLERANCE` (`1e-12`)
+  relative to `max(1, length)`; lines, intrinsic curves and chains are
+  exact. A length past the end of a bounded curve (named with the length
+  available), a start outside the domain, non-finite input and a
+  quadrature past `MAX_PANELS` are refused by name. Against the binomial
+  series of a cubic parabola the inverse lands within `1e-13` relative.
+- `chain` (#239): `chain_point` and `chain_tangent` evaluate a
+  `Curve2::Chain` by arc length; `evaluate2`, `derivative2` and `domain2`
+  take a chain, and an `Elevated3` over a chain evaluates by plan
+  distance (`elevated_point`, `elevated_tangent`, `ReferenceCurveEvaluator`,
+  and so `Curve3::Banked` over it). A piece longer than its curve, a
+  parametric piece off its local frame by more than
+  `PIECE_FRAME_TOLERANCE`, a malformed chain and a distance outside the
+  chain are refused by name.
+- Chains in the certified flattening (#232): `chord_bound2` bounds a span
+  inside one piece (an intrinsic piece by `h^2/8` times a bound on its
+  curvature law, a parametric piece by its curve's own chord bound between
+  the parameters the span reads), `continuity_breaks2` names the joins,
+  and `certifies_flattening2` accepts a chain whose intrinsic pieces have
+  bounded laws and whose parametric pieces are certified families with no
+  corner.
 
 ### Changed
 
-- `flatten2` and `flatten3` accept a span only when its certified chord
-  bound is within the tolerance too, for every family `bound` covers
-  (#232): the midpoint sagitta alone let an ellipse or a spline bulge past
-  its chord either side of the midpoint. A B-spline is cut at its corner
-  knots (multiplicity at least the degree) first, so a corner is kept as
-  an exact vertex. Families without a bound keep the sagitta test.
+- `elevated_point`, `elevated_tangent` and `banked_derivative` read the
+  elevation through `elevation_height`/`elevation_grade`, so elevated and
+  banked curves carry circular-arc and intrinsic profiles.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

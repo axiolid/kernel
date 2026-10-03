@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-10-03
+
 ### Changed
 
 - A `Curve2::Chain` profile segment is named in deviation reports

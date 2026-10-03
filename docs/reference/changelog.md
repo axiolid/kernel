@@ -53,6 +53,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep
 
+### 0.3.4 - 2026-10-03
+
+### Changed
+
+- `ExactBRep::transformed` refuses a banked alignment curve
+  (`Curve3::Banked`, #240) by name, as it does an elevated one: its cant is
+  measured against `+Z`, which a motion would tilt.
+
 ### 0.3.3 - 2026-10-02
 
 ### Added
@@ -302,6 +310,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.12 - 2026-10-03
+
+### Changed
+
+- A `Curve2::Chain` profile segment is named in deviation reports
+  (`arc-length chain profile segment with an unbounded piece`) and in
+  contour-lowering refusals (#239); a chain the flattener certifies is
+  bounded by the chord budget like any other certified family.
 
 ### 0.3.11 - 2026-10-03
 
@@ -683,6 +700,52 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.3 - 2026-10-03
+
+### Added
+
+- `Curve3::Banked(Banked3)` (#240, ADR 0081): an elevated centreline
+  carrying a roll law, evaluated by plan distance. `CantLaw` is a run of
+  `CantPiece`s from plan distance zero, each a `CantForm` over its own
+  `xi = s / length`: a polynomial in `xi` (constant, linear, Bloss, and
+  Helmert as two quadratic pieces through `CantPiece::helmert`), a
+  half-cosine, a sine transition, or a Viennese bend, which gives the bank
+  angle itself (`CantValue::Angle`). A second `CantLaw` of height pieces
+  is the pivot: the rotation point's elevation above the profile. The
+  rail-head distance `b` gives `psi = asin(D / b)` (`bank_angle`), and a
+  cant beyond it is refused by name (`BankError`). `BankConvention` names
+  how a cant is read on a grade, with no default: `TangentRotation` rolls
+  the section about the 3D tangent by `psi` (the rail heads rise
+  `D cos theta`), `VerticalRise` by `asin(D / (b cos theta))` (they rise
+  exactly `D`).
+- `ElevationLaw::CircularArc { height, grade, radius }` (#238): a vertical
+  circular arc in plan distance, the circle itself rather than a parabola.
+  With `t0 = atan(grade)` and signed `R` (positive sag), `sin t = sin t0 +
+  d/R`, `z = height + R (cos t0 - cos t)` and `grade = tan t`, evaluated
+  in a form that does not cancel for small `d/R`. `height_at` and
+  `grade_at` answer it in closed form and report `None` where
+  `|sin t0 + d/R| >= 1`.
+- `ElevationLaw::Intrinsic { height, grade, curvature }` (#238): a profile
+  given by curvature against its own arc length (a linear law is the
+  clothoid between grades). Stored exactly; `height_at` and `grade_at`
+  report `None` for it, since its height is a quadrature, read by
+  `axiolid-evaluate`.
+- `ElevationLaw::circular_arc`, `ElevationLaw::intrinsic` and
+  `ElevationLaw::piece_at`, the innermost piece of a composed law at a
+  distance, rebased to its own start.
+- `Curve2::Chain(Chain2)` (#239): a plane curve parameterised by
+  cumulative arc length, its pieces placed rigidly end to end from a start
+  frame. `ChainPiece2::Intrinsic { curvature, length }` is a curvature-law
+  piece; `ChainPiece2::Parametric { curve, start, length }` reads any
+  `Curve2`, written in the piece's local frame (through the origin with
+  tangent `+x` at `start`), by arc length over `length`. Each piece starts
+  at the previous end point along the previous end tangent, so a chain is
+  tangent-continuous at its joins: a layout such as line, cubic parabola,
+  arc is one exact value. `Chain2::is_well_formed`, `length`, `joins` and
+  `piece_at` read the data; evaluation lives in `axiolid-evaluate`.
+  `Elevated3` takes a chain as its plan, since its parameter is plan
+  distance (ADR 0060).
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -751,6 +814,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.2 - 2026-10-03
+
+### Changed
+
+- `CurveEvaluator::frame_at` documents that a curve carrying its own roll
+  (`Curve3::Banked`, #240) is framed by it: its section frame, rolled about
+  the tangent under the curve's bank convention (ADR 0081).
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -798,6 +869,72 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.4 - 2026-10-03
+
+### Added
+
+- `banked` (#240, ADR 0081): `banked_point`, `banked_derivative`,
+  `banked_tangent` and `banked_section` evaluate a `Curve3::Banked` by plan
+  distance. A `BankedSection` carries the rotation point, the unit tangent
+  of the banked curve (its grade includes the pivot's rate), the lateral
+  and up axes rolled about it, the cant, the nominal bank angle, the roll
+  its convention gives, the pivot and the grade, with `frame()` and
+  `rail_heads()`. Every refusal of the cant laws is passed on by name.
+- `evaluate3`, `derivative3` and `domain3` take a banked curve, parameterised
+  by plan distance over its cant law's span, so `flatten3` flattens it;
+  `certifies_flattening3` reports it uncertified (midpoint sagitta, #232).
+- `ReferenceCurveEvaluator` measures a banked curve in plan distance, and
+  its `frame_at` returns the curve's section frame. An evaluator built
+  against a reference up other than `+Z` refuses a banked curve, whose cant
+  is measured against `+Z`.
+- `elevation` (#238): `elevation_height` and `elevation_grade` read every
+  elevation law, alone or inside a piecewise one. Closed forms go through
+  `ElevationLaw::height_at`/`grade_at`; an intrinsic (clothoid) profile is
+  integrated with `intrinsic_point` and its plan distance inverted by a
+  bracketed Newton solve to `INVERSION_TOLERANCE * max(1, d)`, after
+  certifying that the profile stays below vertical over the bracket, so a
+  profile that turns vertical is refused rather than read on a branch
+  where plan distance runs backwards. Against a 50-digit reference a
+  150 m clothoid agrees to 4e-15 m in height.
+- `elevation_chord_bound`: a certified bound on how far an elevation law
+  strays from the chord of its heights over a span, `h^2/8 sup|z''|` with
+  `z'' = k / cos^3 t`, for polynomials, circular arcs and intrinsic
+  profiles; `None` across a piecewise seam, outside a law's domain, or for
+  a family it does not bound.
+
+- `arc_parameter` (#239): `arc_length2`/`arc_length3` (signed arc length
+  between two parameters of any evaluable curve) and
+  `parameter_at_arc_length2`/`parameter_at_arc_length3` (the parameter at
+  a signed arc length from a start parameter). Adaptive 8-point
+  Gauss-Legendre of the speed, split at knots and vertices, and a
+  bracketed Newton root find, both to `ARC_LENGTH_TOLERANCE` (`1e-12`)
+  relative to `max(1, length)`; lines, intrinsic curves and chains are
+  exact. A length past the end of a bounded curve (named with the length
+  available), a start outside the domain, non-finite input and a
+  quadrature past `MAX_PANELS` are refused by name. Against the binomial
+  series of a cubic parabola the inverse lands within `1e-13` relative.
+- `chain` (#239): `chain_point` and `chain_tangent` evaluate a
+  `Curve2::Chain` by arc length; `evaluate2`, `derivative2` and `domain2`
+  take a chain, and an `Elevated3` over a chain evaluates by plan
+  distance (`elevated_point`, `elevated_tangent`, `ReferenceCurveEvaluator`,
+  and so `Curve3::Banked` over it). A piece longer than its curve, a
+  parametric piece off its local frame by more than
+  `PIECE_FRAME_TOLERANCE`, a malformed chain and a distance outside the
+  chain are refused by name.
+- Chains in the certified flattening (#232): `chord_bound2` bounds a span
+  inside one piece (an intrinsic piece by `h^2/8` times a bound on its
+  curvature law, a parametric piece by its curve's own chord bound between
+  the parameters the span reads), `continuity_breaks2` names the joins,
+  and `certifies_flattening2` accepts a chain whose intrinsic pieces have
+  bounded laws and whose parametric pieces are certified families with no
+  corner.
+
+### Changed
+
+- `elevated_point`, `elevated_tangent` and `banked_derivative` read the
+  elevation through `elevation_height`/`elevation_grade`, so elevated and
+  banked curves carry circular-arc and intrinsic profiles.
 
 ### 0.3.3 - 2026-10-03
 
@@ -1473,6 +1610,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.11 - 2026-10-03
+
+### Added
+
+- Sweep directrices resolve `TrimSelector::ArcLength` (#239) against an
+  analytic basis, in the trim's sense, through
+  `axiolid_reference::arc_parameter`; the mesh, piecewise and exact sweep
+  paths read it like a parameter selector. An arc length on a
+  curve-relation basis, or past the end of its basis, is refused by name.
+
 ### 0.3.10 - 2026-10-03
 
 ### Added
@@ -1875,6 +2022,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.4 - 2026-10-03
+
+### Added
+
+- `TrimSelector::ArcLength(Scalar)` (#239): selects the basis parameter
+  where the arc length along the basis, measured from its parameter `0` in
+  the trim's sense, equals the value. Stored exactly; an evaluator resolves
+  it by quadrature and a root find to a stated tolerance. It is a
+  parameter-kind selector: it satisfies `TrimmingPreference::Parameter`,
+  a non-finite value is refused by validation, and equal arc lengths are an
+  empty trim.
 
 ### 0.3.3 - 2026-09-28
 
@@ -2586,6 +2745,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.5 - 2026-10-03
+
+### Added
+
+- Re-exports `axiolid_evaluate::arc_parameter` and
+  `axiolid_evaluate::chain` (#239).
 
 ### 0.3.4 - 2026-10-03
 

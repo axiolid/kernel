@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-03
+
 ### Added
 
 - `TrimSelector::ArcLength(Scalar)` (#239): selects the basis parameter

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-03
+
 ### Added
 
 - `banked` (#240, ADR 0081): `banked_point`, `banked_derivative`,

@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-03) |
+| Latest release | 0.3.5 (2026-10-03) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,20 +46,11 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-03):
+Latest release, 0.3.5 (2026-10-03):
 
 ### Added
 
-- `bound`, re-exported from `axiolid-evaluate` like `curve` and `surface`
-  (#232).
-
-### Fixed
-
-- `tessellate_primitive` refuses a cylinder or a cone whose chord budget
-  needs more than 4096 segments with `BudgetExceeded`, as it already did
-  for spheres and tori, instead of clamping silently to a coarser mesh
-  (#232). Their bound is now documented: both are curved one way only, so
-  the ring's sagitta is the whole distance from any point of the exact
-  surface, caps included, to the mesh, and it gets the whole budget.
+- Re-exports `axiolid_evaluate::arc_parameter` and
+  `axiolid_evaluate::chain` (#239).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-03) |
+| Latest release | 0.3.12 (2026-10-03) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -63,42 +63,13 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-03):
-
-### Added
-
-- `pipe::swept_disk_along_pieces`, with `pipe::PathPiece` and
-  `pipe::joint_tolerance` (#232): a disk, optionally hollow, swept along a
-  chain of straight segments and circular arcs, with every point of the
-  exact tube within the chord budget of the mesh. Half the budget chords
-  the disk; each piece is then bounded on its own by the #231 span bound
-  (exact along an arc, where the stations are rotations about its axis,
-  and zero along a segment), its end frames exact. Consecutive pieces
-  share one station, so the tube is watertight and wound one way; the
-  shared station's measured distance from the outgoing piece's own start
-  station is added to that piece's first span. A joint turning by more
-  than `2 asin(c / (8 r))` is a corner and is refused by name, as is a
-  gap above a quarter of the budget, a bend radius at or below the disk
-  radius, and a bend needing more than 4096 steps (`BudgetExceeded`). A
-  fillet radius rounds each corner between two segments with a tangent
-  arc (`IfcSweptDiskSolidPolygonal`); a fillet that overruns its
-  segments, a disk at or above the fillet radius, a reversal and a corner
-  beside an arc are refused by name. The derivation is in the module
-  notes.
-
-- `profile::profile_deviation` and `ProfileDeviation` (#232): how far a
-  profile's exact boundary may lie from the rings `profile_rings` flattens
-  it to. The chord budget for every segment family the flattener certifies,
-  plus the largest merge of near-duplicate points, scaled by a derived
-  profile's stretch; any other family (a clothoid, a non-positive spline
-  weight) is unbounded by name.
+Latest release, 0.3.12 (2026-10-03):
 
 ### Changed
 
-- Contour lowering splits a circular segment of half a turn or more into
-  equal sub-arcs below half a turn instead of refusing it (#228, ADR 0053
-  amended): an IFC arch is commonly one semicircle. The split vertices are
-  the circle evaluated at their parameters, as a segment's ends are. Only a
-  segment sweeping more than a whole turn is refused.
+- A `Curve2::Chain` profile segment is named in deviation reports
+  (`arc-length chain profile segment with an unbounded piece`) and in
+  contour-lowering refusals (#239); a chain the flattener certifies is
+  bounded by the chord budget like any other certified family.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)
