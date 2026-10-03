@@ -36,10 +36,22 @@ caret rule for `0.x` versions.
   boundary, whatever the tolerance (gluing and widening the interval by
   the gap would not be sound: a lifted column's base disc is a whole
   radius from the glued boundary). Anything else is refused by name in
-  the new `BodyMeasureError`: `ItemsNearlyShareFace` with the gap (faces
-  in contact off an axis plane, or items interpenetrating by no more
-  than the caller's tolerance), `ItemsShareFace` (a face in contact that
-  cannot be cut: a B-spline face, an elliptical edge) and `ItemsOverlap`.
+  the new `BodyMeasureError`: `ContactPlaneNotAxisNormal` (items touching
+  on a plane no coordinate axis is normal to, such as walls turned in
+  plan), `ItemsNearlyShareFace` with the gap (items interpenetrating by
+  no more than the caller's tolerance, or faces on axis planes at
+  coordinates differing below rounding), `ItemsShareFace` (a face in
+  contact that cannot be cut: a B-spline face, an elliptical edge) and
+  `ItemsOverlap`.
+  Every `body_*` query takes each side as a `PlacedBody`: the items in the
+  body's own frame and one rigid placement (a slice, vector or array of
+  items converts with the identity). Contact is found and cut in the
+  body's frame, where an IFC body's extruded items stand on axis-normal
+  planes, and the placement then moves the cut boundary, so a body turned
+  in any direction keeps its contact cut; witnesses are in the world.
+  Items turned against each other within the body's frame are still
+  refused as `ContactPlaneNotAxisNormal`, and a placement that is not
+  rigid as `Placement`.
   Distance needs no such check. A translated multi-item body closes as
   fast as one solid: faces match across items, a free region is bounded
   through the face it was cut from (so a cut that falls out differently

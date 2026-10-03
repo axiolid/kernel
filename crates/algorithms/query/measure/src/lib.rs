@@ -34,7 +34,7 @@ pub use exact::{exact_properties, ExactMeasureError};
 pub use exact_bodies::{
     body_boundary_clearance, body_boundary_distance, body_boundary_hausdorff_distance,
     one_sided_body_boundary_hausdorff, one_sided_body_boundary_hausdorff_with_budget, BodyDistance,
-    BodyHausdorff, BodyHausdorffBounds, BodyMeasureError, BodySide,
+    BodyHausdorff, BodyHausdorffBounds, BodyMeasureError, BodySide, PlacedBody,
 };
 #[cfg(feature = "exact")]
 pub use exact_distance::{

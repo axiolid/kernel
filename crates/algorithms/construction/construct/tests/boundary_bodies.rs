@@ -18,6 +18,7 @@ use axiolid_measure::{
     boundary_clearance, boundary_distance, boundary_hausdorff_distance,
     one_sided_body_boundary_hausdorff, one_sided_body_boundary_hausdorff_with_budget,
     BodyHausdorffBounds, BodyMeasureError, BodySide, Clearance, DistanceBounds, HausdorffBounds,
+    PlacedBody,
 };
 use axiolid_profile::{
     CircleProfile, Contour, ContourProfile, EllipseProfile, Profile, ProfileSegment,
@@ -669,24 +670,6 @@ fn a_lift_below_rounding_is_refused_not_glued() {
             1e-3,
             tol()
         )),
-        BodyMeasureError::ItemsNearlyShareFace { .. }
-    ));
-}
-
-#[test]
-fn contact_off_the_axes_or_on_an_ellipse_is_refused_by_name() {
-    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
-    // Tilted, the contact plane is no longer at one coordinate: whether
-    // the column's base meets the footing's top, clears it or sinks into
-    // it is below rounding, and gluing them would be a guess.
-    let tilted = placed(&column_on_footing(), &Transform3::from_rotation_x(0.3));
-    assert!(matches!(
-        refused(one_sided_body_boundary_hausdorff(
-            &tilted,
-            &other,
-            1e-3,
-            tol()
-        )),
         BodyMeasureError::ItemsNearlyShareFace {
             body: BodySide::First,
             first: 0,
@@ -694,6 +677,28 @@ fn contact_off_the_axes_or_on_an_ellipse_is_refused_by_name() {
             ..
         }
     ));
+}
+
+#[test]
+fn contact_off_the_axes_or_on_an_ellipse_is_refused_by_name() {
+    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
+    // Tilted item by item, the contact plane is normal to no axis: whether
+    // the column's base meets the footing's top, clears it or sinks into
+    // it is below rounding, and is not guessed.
+    let tilted = placed(&column_on_footing(), &Transform3::from_rotation_x(0.3));
+    assert_eq!(
+        refused(one_sided_body_boundary_hausdorff(
+            &tilted,
+            &other,
+            1e-3,
+            tol()
+        )),
+        BodyMeasureError::ContactPlaneNotAxisNormal {
+            body: BodySide::First,
+            first: 0,
+            second: 1
+        }
+    );
     // Turned about the vertical, two blocks sharing a wall have their walls
     // on a plane no coordinate is constant on: refused the same way.
     let walls = placed(
@@ -710,7 +715,7 @@ fn contact_off_the_axes_or_on_an_ellipse_is_refused_by_name() {
             1e-3,
             tol()
         )),
-        BodyMeasureError::ItemsNearlyShareFace { .. }
+        BodyMeasureError::ContactPlaneNotAxisNormal { .. }
     ));
     // An elliptical column's base is bounded by an ellipse, which the
     // plane cannot be cut by exactly.
@@ -920,4 +925,196 @@ fn an_empty_body_is_refused() {
         )),
         second
     );
+}
+
+// Placed bodies (#229): items in the body's own frame and one placement.
+
+/// A general placement: turned about all three axes, and moved.
+fn general_placement() -> Transform3 {
+    Transform3::from_translation(Vec3::new(12.5, -4.25, 3.0))
+        * Transform3::from_rotation_z(0.6)
+        * Transform3::from_rotation_y(-0.45)
+        * Transform3::from_rotation_x(0.3)
+}
+
+#[test]
+fn a_placed_body_is_cut_in_its_own_frame_then_turned() {
+    let placement = general_placement();
+    let column_body = column_on_footing();
+    let steps = stair(4, 0.3, 0.2);
+    // Placed item by item, the contacts lie on planes no axis is normal
+    // to, and are refused; placed as a body, they are cut first.
+    let other = [block(0.5, 2.5, 0.0, 2.0, 3.0)];
+    for items in [&column_body, &steps] {
+        let preplaced = placed(items, &placement);
+        assert!(matches!(
+            refused(one_sided_body_boundary_hausdorff(
+                &preplaced,
+                &other,
+                1e-3,
+                tol()
+            )),
+            BodyMeasureError::ContactPlaneNotAxisNormal { .. }
+        ));
+        one_sided_body_boundary_hausdorff(PlacedBody::new(items, placement), &other, 0.05, tol())
+            .expect("cut in the body's frame");
+    }
+    // Against the footing alone, placed alike: the same closed forms as
+    // unplaced, and the witnesses in the world -- the footing's point
+    // farthest from the union is on its top, under the column.
+    let footing_alone = [footing()];
+    let accuracy = 0.01;
+    let result = body_boundary_hausdorff_distance(
+        PlacedBody::new(&column_body, placement),
+        PlacedBody::new(&footing_alone, placement),
+        accuracy,
+        tol(),
+    )
+    .expect("cut");
+    contains(&result.forward.bounds, 2.5, accuracy);
+    contains(&result.backward.bounds, 0.3, accuracy);
+    let local = placement
+        .inverse()
+        .transform_point3(result.backward.bounds.point_from);
+    assert!(
+        (local.z - 0.5).abs() < 1e-9,
+        "{local:?} is not on the footing's top"
+    );
+    assert!(
+        local.x.hypot(local.y) < 0.3,
+        "{local:?} is not under the column"
+    );
+    // The stair against the stair built as one solid, placed alike.
+    let solid = [stair_solid(4, 0.3, 0.2)];
+    let result = body_boundary_hausdorff_distance(
+        PlacedBody::new(&steps, placement),
+        PlacedBody::new(&solid, placement),
+        0.05,
+        tol(),
+    )
+    .expect("cut");
+    contains(&result.forward.bounds, 0.0, 0.05);
+    contains(&result.backward.bounds, 0.0, 0.05);
+    // Against an identically built copy placed a translation away: `|t|`,
+    // closed at 1e-9 within the translate budget, both ways.
+    for items in [&column_body, &steps] {
+        for t in translations() {
+            let moved = Transform3::from_translation(t) * placement;
+            for (from, to) in [
+                (
+                    PlacedBody::new(items, placement),
+                    PlacedBody::new(items, moved),
+                ),
+                (
+                    PlacedBody::new(items, moved),
+                    PlacedBody::new(items, placement),
+                ),
+            ] {
+                let found = one_sided_body_boundary_hausdorff_with_budget(
+                    from,
+                    to,
+                    1e-9,
+                    tol(),
+                    TRANSLATE_BUDGET,
+                )
+                .expect("measured");
+                contains(&found.bounds, t.length(), 1e-9);
+            }
+        }
+    }
+    // Distance takes a placed body as well, and needs no cut: it agrees
+    // with the same items placed one by one.
+    let far = Transform3::from_translation(Vec3::new(10.0, 0.0, 0.0)) * placement;
+    let placed_body = body_boundary_distance(
+        PlacedBody::new(&column_body, placement),
+        PlacedBody::new(&column_body, far),
+        1e-6,
+        tol(),
+    )
+    .expect("bounded");
+    let preplaced = body_boundary_distance(
+        &placed(&column_body, &placement),
+        &placed(&column_body, &far),
+        1e-6,
+        tol(),
+    )
+    .expect("bounded");
+    assert!((placed_body.bounds.upper - preplaced.bounds.upper).abs() <= 2e-6);
+    assert_eq!(
+        (placed_body.item_a, placed_body.item_b),
+        (preplaced.item_a, preplaced.item_b)
+    );
+}
+
+#[test]
+fn a_placement_that_is_not_rigid_is_refused() {
+    let body = column_on_footing();
+    let stretched = Transform3::from_scale(Vec3::new(1.0, 2.0, 1.0));
+    assert!(matches!(
+        body_boundary_hausdorff_distance(PlacedBody::new(&body, stretched), &body, 1e-3, tol())
+            .expect_err("not rigid"),
+        BodyMeasureError::Placement {
+            body: BodySide::First,
+            ..
+        }
+    ));
+}
+
+/// A prism over a triangle with corners `(-0.5, -0.3)`, `(0.5, -0.3)` and
+/// `(0, 0.5)`, from `bottom` to `top`: two of its walls slanted against
+/// the axes.
+fn wedge(bottom: f64, top: f64) -> ExactBRep {
+    let corners = [
+        Point2::new(-0.5, -0.3),
+        Point2::new(0.5, -0.3),
+        Point2::new(0.0, 0.5),
+    ];
+    let contour = Contour::new(
+        (0..3)
+            .map(|k| ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: corners[k],
+                    direction: corners[(k + 1) % 3] - corners[k],
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            })
+            .collect(),
+    );
+    let local = extrude_profile_exact(
+        &Profile::Contour(ContourProfile {
+            outer: contour,
+            holes: Vec::new(),
+        }),
+        Vec3::Z,
+        top - bottom,
+        tol(),
+    )
+    .expect("a wedge");
+    moved(local, Vec3::new(0.0, 0.0, bottom))
+}
+
+#[test]
+fn an_item_with_slanted_walls_on_an_axis_normal_contact() {
+    // A triangular prism with slanted walls stands on the footing: the
+    // contact plane is the footing's top, normal to `z`, whatever its
+    // walls. Its top is 1 above the footing; the footing's top point
+    // farthest from the union's boundary is the triangle's incentre, the
+    // inradius `area / semiperimeter` from the walls' feet.
+    let body = vec![footing(), wedge(0.5, 1.5)];
+    let leg = 0.5f64.hypot(0.8);
+    let inradius = 0.4 / (0.5 * (1.0 + 2.0 * leg));
+    let accuracy = 0.01;
+    for placement in [Transform3::IDENTITY, general_placement()] {
+        let result = body_boundary_hausdorff_distance(
+            PlacedBody::new(&body, placement),
+            PlacedBody::new(&[footing()], placement),
+            accuracy,
+            tol(),
+        )
+        .expect("cut");
+        contains(&result.forward.bounds, 1.0, accuracy);
+        contains(&result.backward.bounds, inradius, accuracy);
+    }
+    closes_as_a_translate(&body, Vec3::new(0.03, -0.04, 0.02));
 }

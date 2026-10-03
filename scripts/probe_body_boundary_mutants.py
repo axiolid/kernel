@@ -25,6 +25,11 @@ unsound, but only where a partner's outline moves by more than rounding
 between the two bodies or lies under a third item, and every fixture
 that reaches the bound is a translate (where `zeta` is rounding) with
 partners whose rims are free.
+
+The uncut items of a placed body left unplaced is killed by a unit test
+in `exact_bodies.rs`: a rigid motion makes some uncut face tie every cut
+face's farthest point, so the closed forms cannot see the cut faces'
+bound go wrong.
 """
 import pathlib, subprocess, sys
 
@@ -35,6 +40,7 @@ K = "crates/algorithms/query/measure/src/exact_hausdorff/cut.rs"
 D = "crates/algorithms/query/measure/src/exact_distance.rs"
 H = "crates/algorithms/query/measure/src/exact_hausdorff.rs"
 TESTS = [
+    ["-p", "axiolid-measure", "--all-features", "--lib", "exact_bodies"],
     ["-p", "axiolid-construct", "--test", "boundary_bodies"],
 ]
 
@@ -54,8 +60,8 @@ MUTANTS = [
     ("no plane along the sum of two touching ones", B,
      "        for j in i + 1..base {",
      "        for j in base..base {"),
-    ("faces off one axis plane read as in exact contact", B,
-     "                _ => off_plane = true,",
+    ("faces at different levels read as in exact contact", B,
+     "                _ => off_level = true,",
      "                _ => {}"),
     ("near contact read as an overlap", B,
      "            return Ok(Layout::NearlyShareFace { gap: plane.gap });\n        }\n    }\n    Ok(Layout::Undecided)",
@@ -81,6 +87,19 @@ MUTANTS = [
     ("two-sided upper from the backward side", B,
      "    distance.bounds.upper = forward.bounds.upper.max(backward.bounds.upper);",
      "    distance.bounds.upper = backward.bounds.upper;"),
+    ("faces at different levels refused as off the axes", B,
+     "    if off_level {\n        return Ok(Layout::NearlyShareFace { gap: plane.gap });",
+     "    if off_level {\n        return Ok(Layout::NotAxisNormal);"),
+    ("a plane no axis is normal to read as near contact", B,
+     "        return Ok(Layout::NotAxisNormal);\n    }\n    // On axis planes",
+     "        return Ok(Layout::NearlyShareFace { gap: plane.gap });\n    }\n    // On axis planes"),
+    # Placed bodies.
+    ("a placement never applied", B,
+     "        if placement == Transform3::IDENTITY {",
+     "        if true {"),
+    ("the uncut items left unplaced", B,
+     "                items: Cow::Owned(place(&cut.items)?),",
+     "                items: cut.items,"),
     # Face contact.
     ("a shared patch never cut", C,
      "    if !overlap {",

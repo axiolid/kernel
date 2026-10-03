@@ -77,10 +77,13 @@
 //! shared by two blocks on a footing) is not on it and is dropped.
 //!
 //! Anything else is refused by name, never glued or snapped:
-//! [`BodyMeasureError::ItemsNearlyShareFace`] with the gap when two items
-//! touch on a plane where both have faces that are not exactly on one axis
-//! plane (a tilted assembly, walls turned in plan), or interpenetrate by no
-//! more than the caller's tolerance; [`BodyMeasureError::ItemsShareFace`]
+//! [`BodyMeasureError::ContactPlaneNotAxisNormal`] when two items touch, to
+//! within rounding, on a plane no coordinate axis is normal to (a tilted
+//! assembly, walls turned in plan: whether they meet, clear or overlap is
+//! below rounding there); [`BodyMeasureError::ItemsNearlyShareFace`] with
+//! the gap when they interpenetrate by no more than the caller's tolerance,
+//! or their faces are on axis planes at coordinates that differ below
+//! rounding; [`BodyMeasureError::ItemsShareFace`]
 //! when such faces cannot be cut (a B-spline face, an elliptical edge);
 //! and [`BodyMeasureError::ItemsOverlap`] when they were not shown apart or
 //! touching: boundaries that cross or come closer than the search resolves
@@ -102,14 +105,28 @@
 //! face it was cut from, so an exact cut that falls out differently in the
 //! last bit for a translated copy (a sliver along a wall turned in plan)
 //! still closes at once (`exact_hausdorff/cut.rs`).
+//!
+//! # Placed bodies
+//!
+//! Every query takes each side as a [`PlacedBody`]: the items in the
+//! body's own frame and one rigid placement. An IFC body's extruded items
+//! stand on axis-normal planes in the body's frame however the body is
+//! placed in the world, so contact is found and cut there, and the
+//! placement then moves the cut boundary (and the items it was cut from)
+//! before anything is measured: witnesses are in the world. A placement
+//! cannot change what is measured, a rigid motion carrying the union's
+//! boundary onto the placed union's. Items turned against each other in
+//! the body's own frame still touch on planes no axis is normal to and are
+//! refused as [`BodyMeasureError::ContactPlaneNotAxisNormal`]; a slice of
+//! items converts to a placed body with the identity placement.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use core::fmt;
 
-use axiolid_brep::{ExactBRep, ExactBRepBuilder};
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
+use axiolid_brep::{ExactBRep, ExactBRepBuilder, TransformError};
+use axiolid_core::{Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_evaluate::evaluate3;
 use axiolid_surface::Surface;
 
@@ -132,6 +149,53 @@ pub enum BodySide {
     First,
     /// The second slice: `b`, or `to` of a one-sided query.
     Second,
+}
+
+/// A body: its items in the body's own frame, and one rigid placement
+/// that puts them in the world (#229).
+///
+/// Every `body_*` query takes one per side, and a slice of items (or a
+/// vector or array of them) converts into one with the identity placement.
+/// Face contact is found and cut in the body's own frame, where an IFC
+/// body's extruded items usually stand on axis-normal planes, and the
+/// placement then moves the cut boundary, so a body turned in any
+/// direction still has its contact cut. Witnesses are in the world.
+///
+/// Items turned against each other within the body's own frame still touch
+/// on planes no axis is normal to, and are refused by
+/// [`BodyMeasureError::ContactPlaneNotAxisNormal`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacedBody<'a> {
+    /// The items, in the body's own frame.
+    pub items: &'a [ExactBRep],
+    /// The rigid placement of the body's frame in the world.
+    pub placement: Transform3,
+}
+
+impl<'a> PlacedBody<'a> {
+    /// `items` placed by `placement`.
+    #[must_use]
+    pub fn new(items: &'a [ExactBRep], placement: Transform3) -> Self {
+        Self { items, placement }
+    }
+}
+
+impl<'a> From<&'a [ExactBRep]> for PlacedBody<'a> {
+    fn from(items: &'a [ExactBRep]) -> Self {
+        Self::new(items, Transform3::IDENTITY)
+    }
+}
+
+impl<'a> From<&'a Vec<ExactBRep>> for PlacedBody<'a> {
+    fn from(items: &'a Vec<ExactBRep>) -> Self {
+        Self::new(items, Transform3::IDENTITY)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [ExactBRep; N]> for PlacedBody<'a> {
+    fn from(items: &'a [ExactBRep; N]) -> Self {
+        Self::new(items, Transform3::IDENTITY)
+    }
 }
 
 /// Why two bodies of exact solids could not be measured.
@@ -171,9 +235,10 @@ pub enum BodyMeasureError {
     },
     /// Two items of one body are within the caller's tolerance of face
     /// contact without being in exact contact: they interpenetrate by up to
-    /// `-gap`, or touch where their faces are not exactly on one plane (a
-    /// turned assembly's walls). Gluing them would measure a boundary the
-    /// items do not have, so the pair is refused rather than snapped (a
+    /// `-gap`, or their faces are on planes normal to one axis but not at
+    /// the same coordinate in their own numbers (a gap or an overlap below
+    /// rounding). Gluing them would measure a boundary the items do not
+    /// have, so the pair is refused rather than snapped (a certified
     /// positive gap is measured exactly instead: the two faces are on the
     /// union's boundary).
     ItemsNearlyShareFace {
@@ -186,6 +251,29 @@ pub enum BodyMeasureError {
         /// The certified least separation along the plane between them:
         /// negative where they may interpenetrate, by at most its size.
         gap: Scalar,
+    },
+    /// Two items of one body touch, to within rounding, where both have
+    /// faces on a plane that no coordinate axis is normal to: walls of
+    /// items turned against each other, or an assembly placed before it was
+    /// measured. Contact is cut only on axis-normal planes, where it can be
+    /// shown exact; pass the items in the body's own frame with the
+    /// placement in a [`PlacedBody`] instead, so the contact is cut before
+    /// the placement turns it.
+    ContactPlaneNotAxisNormal {
+        /// Which body.
+        body: BodySide,
+        /// The first item, by index in the slice.
+        first: usize,
+        /// The second item, by index in the slice.
+        second: usize,
+    },
+    /// The placement of a [`PlacedBody`] is not rigid, or its items cannot
+    /// be moved by it.
+    Placement {
+        /// Which body.
+        body: BodySide,
+        /// Why the items could not be placed.
+        error: TransformError,
     },
 }
 
@@ -222,6 +310,18 @@ impl fmt::Display for BodyMeasureError {
                 "items {first} and {second} of the {body:?} body are within the \
                  tolerance of face contact (gap {gap}) but not in exact contact"
             ),
+            Self::ContactPlaneNotAxisNormal {
+                body,
+                first,
+                second,
+            } => write!(
+                f,
+                "items {first} and {second} of the {body:?} body touch on a plane no \
+                 coordinate axis is normal to; pass them unplaced in a PlacedBody"
+            ),
+            Self::Placement { body, error } => {
+                write!(f, "the {body:?} body could not be placed: {error}")
+            }
         }
     }
 }
@@ -230,6 +330,7 @@ impl std::error::Error for BodyMeasureError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Measure(error) => Some(error),
+            Self::Placement { error, .. } => Some(error),
             _ => None,
         }
     }
@@ -289,14 +390,14 @@ pub struct BodyHausdorff {
 /// [`BodyMeasureError::EmptyBody`] for an empty slice, and
 /// [`BodyMeasureError::Measure`] with what [`crate::boundary_distance`]
 /// refuses.
-pub fn body_boundary_distance(
-    a: &[ExactBRep],
-    b: &[ExactBRep],
+pub fn body_boundary_distance<'a, 'b>(
+    a: impl Into<PlacedBody<'a>>,
+    b: impl Into<PlacedBody<'b>>,
     accuracy: Scalar,
     tolerance: Tolerance,
 ) -> Result<BodyDistance, BodyMeasureError> {
     let accuracy = accuracy.max(0.0);
-    distance(a, b, tolerance, &mut |lower, upper| {
+    distance(a.into(), b.into(), tolerance, &mut |lower, upper| {
         upper - lower <= accuracy
     })
 }
@@ -306,13 +407,13 @@ pub fn body_boundary_distance(
 /// # Errors
 ///
 /// As [`body_boundary_distance`].
-pub fn body_boundary_clearance(
-    a: &[ExactBRep],
-    b: &[ExactBRep],
+pub fn body_boundary_clearance<'a, 'b>(
+    a: impl Into<PlacedBody<'a>>,
+    b: impl Into<PlacedBody<'b>>,
     limit: Scalar,
     tolerance: Tolerance,
 ) -> Result<(BodyDistance, Clearance), BodyMeasureError> {
-    let found = distance(a, b, tolerance, &mut |lower, upper| {
+    let found = distance(a.into(), b.into(), tolerance, &mut |lower, upper| {
         upper < limit || lower > limit
     })?;
     let clearance = found.bounds.against(limit);
@@ -320,13 +421,13 @@ pub fn body_boundary_clearance(
 }
 
 fn distance(
-    a: &[ExactBRep],
-    b: &[ExactBRep],
+    a: PlacedBody<'_>,
+    b: PlacedBody<'_>,
     tolerance: Tolerance,
     done: &mut dyn FnMut(Scalar, Scalar) -> bool,
 ) -> Result<BodyDistance, BodyMeasureError> {
-    let a = Items::new(a, BodySide::First)?;
-    let b = Items::new(b, BodySide::Second)?;
+    let a = Items::new(a.items, BodySide::First)?.placed(a.placement, BodySide::First)?;
+    let b = Items::new(b.items, BodySide::Second)?.placed(b.placement, BodySide::Second)?;
     let found = search(&a.brep, &b.brep, tolerance, Metric::Space, done)?;
     Ok(BodyDistance {
         item_a: a.item(found.on.0),
@@ -346,9 +447,9 @@ fn distance(
 /// apart or touching without a shared patch (see the module docs); and
 /// [`BodyMeasureError::Measure`] with what
 /// [`crate::one_sided_boundary_hausdorff`] refuses.
-pub fn one_sided_body_boundary_hausdorff(
-    from: &[ExactBRep],
-    to: &[ExactBRep],
+pub fn one_sided_body_boundary_hausdorff<'a, 'b>(
+    from: impl Into<PlacedBody<'a>>,
+    to: impl Into<PlacedBody<'b>>,
     accuracy: Scalar,
     tolerance: Tolerance,
 ) -> Result<BodyHausdorffBounds, BodyMeasureError> {
@@ -361,15 +462,15 @@ pub fn one_sided_body_boundary_hausdorff(
 /// # Errors
 ///
 /// As [`one_sided_body_boundary_hausdorff`].
-pub fn one_sided_body_boundary_hausdorff_with_budget(
-    from: &[ExactBRep],
-    to: &[ExactBRep],
+pub fn one_sided_body_boundary_hausdorff_with_budget<'a, 'b>(
+    from: impl Into<PlacedBody<'a>>,
+    to: impl Into<PlacedBody<'b>>,
     accuracy: Scalar,
     tolerance: Tolerance,
     max_splits: usize,
 ) -> Result<BodyHausdorffBounds, BodyMeasureError> {
-    let source = Items::boundary(from, BodySide::First, tolerance)?;
-    let target = Items::boundary(to, BodySide::Second, tolerance)?;
+    let source = Items::boundary(from.into(), BodySide::First, tolerance)?;
+    let target = Items::boundary(to.into(), BodySide::Second, tolerance)?;
     one_sided(&source, &target, accuracy, tolerance, max_splits)
 }
 
@@ -379,14 +480,14 @@ pub fn one_sided_body_boundary_hausdorff_with_budget(
 /// # Errors
 ///
 /// As [`one_sided_body_boundary_hausdorff`].
-pub fn body_boundary_hausdorff_distance(
-    a: &[ExactBRep],
-    b: &[ExactBRep],
+pub fn body_boundary_hausdorff_distance<'a, 'b>(
+    a: impl Into<PlacedBody<'a>>,
+    b: impl Into<PlacedBody<'b>>,
     accuracy: Scalar,
     tolerance: Tolerance,
 ) -> Result<BodyHausdorff, BodyMeasureError> {
-    let first = Items::boundary(a, BodySide::First, tolerance)?;
-    let second = Items::boundary(b, BodySide::Second, tolerance)?;
+    let first = Items::boundary(a.into(), BodySide::First, tolerance)?;
+    let second = Items::boundary(b.into(), BodySide::Second, tolerance)?;
     let forward = one_sided(&first, &second, accuracy, tolerance, MAX_SPLITS)?;
     let backward = one_sided(&second, &first, accuracy, tolerance, MAX_SPLITS)?;
     let mut distance = if backward.bounds.lower > forward.bounds.lower {
@@ -503,6 +604,41 @@ impl<'a> Items<'a> {
     /// in exact contact cut down to their free regions, once every pair of
     /// items is shown apart, touching or in exact contact.
     fn boundary(
+        placed: PlacedBody<'a>,
+        body: BodySide,
+        tolerance: Tolerance,
+    ) -> Result<Self, BodyMeasureError> {
+        Self::cut_boundary(placed.items, body, tolerance)?.placed(placed.placement, body)
+    }
+
+    /// Move the measured boundary (and the items it was cut from) by a
+    /// rigid placement; face and edge indices are kept.
+    fn placed(self, placement: Transform3, body: BodySide) -> Result<Self, BodyMeasureError> {
+        if placement == Transform3::IDENTITY {
+            return Ok(self);
+        }
+        let place = |brep: &ExactBRep| {
+            brep.transformed(&placement)
+                .map_err(|error| BodyMeasureError::Placement { body, error })
+        };
+        let cut = match self.cut {
+            Some(cut) => Some(CutFrom {
+                items: Cow::Owned(place(&cut.items)?),
+                origin: cut.origin,
+                partners: cut.partners,
+            }),
+            None => None,
+        };
+        Ok(Self {
+            brep: Cow::Owned(place(&self.brep)?),
+            faces: self.faces,
+            edges: self.edges,
+            cut,
+        })
+    }
+
+    /// The boundary of the union of the items, in their own frame.
+    fn cut_boundary(
         items: &'a [ExactBRep],
         body: BodySide,
         tolerance: Tolerance,
@@ -614,9 +750,12 @@ enum Layout {
     /// Touching where both may hold a patch of the separating plane, on a
     /// face that is not planar.
     MayShareFace,
-    /// Within `gap` of face contact (negative: interpenetrating), or
-    /// touching where the faces are not exactly on one plane.
+    /// Within `gap` of face contact (negative: interpenetrating), on axis
+    /// planes that differ, or across a plane more than rounding deep.
     NearlyShareFace { gap: Scalar },
+    /// Touching to within rounding where both have faces on a plane that
+    /// no coordinate axis is normal to.
+    NotAxisNormal,
     /// Neither shown.
     Undecided,
 }
@@ -670,6 +809,13 @@ fn check_layout(
                         first,
                         second,
                         gap,
+                    })
+                }
+                Layout::NotAxisNormal => {
+                    return Err(BodyMeasureError::ContactPlaneNotAxisNormal {
+                        body,
+                        first,
+                        second,
                     })
                 }
                 Layout::MayShareFace => {
@@ -826,18 +972,27 @@ fn contact(a: &Side<'_>, b: &Side<'_>, plane: &Plane) -> Result<Layout, ExactMea
         return Ok(Layout::MayShareFace);
     }
     let mut common: Option<AxisPlane> = None;
-    let mut off_plane = false;
+    let mut off_level = false;
+    let mut not_axis_normal = false;
     for (side, faces) in [(a, &faces_a), (b, &faces_b)] {
         for &face in faces {
             match (contact::axis_plane(side.brep, face), common) {
                 (Err(Uncut::Edge), _) => return Ok(Layout::MayShareFace),
+                (Err(Uncut::NotAxisNormal), _) => not_axis_normal = true,
                 (Ok(found), None) => common = Some(found),
                 (Ok(found), Some(seen)) if found == seen => {}
-                _ => off_plane = true,
+                _ => off_level = true,
             }
         }
     }
-    if off_plane {
+    // Touching to within rounding on a plane no axis is normal to: the
+    // contact cannot be shown exact there, whatever the gap.
+    if not_axis_normal {
+        return Ok(Layout::NotAxisNormal);
+    }
+    // On axis planes, but not at one coordinate: a gap or an overlap below
+    // rounding, or within the tolerance.
+    if off_level {
         return Ok(Layout::NearlyShareFace { gap: plane.gap });
     }
     Ok(match common {
@@ -983,4 +1138,54 @@ fn sticks_out(a: &Side<'_>, b: &Side<'_>) -> Result<bool, ExactMeasureError> {
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Placing a cut boundary moves the items it was cut from with it: the
+    //! cut faces' bound (`exact_hausdorff/cut.rs`) matches those items
+    //! between bodies, and left unplaced they would match bodies placed
+    //! apart as though they coincided. A rigid motion makes some uncut face
+    //! tie every cut face's farthest point, so no closed form sees it.
+
+    use super::{contact, BodySide, Cow, CutFrom, HashMap, Items};
+    use axiolid_core::{Point2, Transform3, Vec3};
+    use axiolid_overlay::ArcRing;
+
+    #[test]
+    fn placing_a_cut_boundary_places_its_uncut_items() {
+        let plane = contact::AxisPlane {
+            axis: 2,
+            level: 0.5,
+        };
+        let mut assembler = contact::Assembler::default();
+        assembler.add_region(
+            &[ArcRing::from_points(&[
+                Point2::new(0.0, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0, 1.0),
+                Point2::new(0.0, 1.0),
+            ])],
+            plane,
+        );
+        let sheet = assembler.finish().expect("a sheet");
+        let items = Items {
+            brep: Cow::Owned(sheet.clone()),
+            faces: vec![0],
+            edges: vec![0],
+            cut: Some(CutFrom {
+                items: Cow::Owned(sheet),
+                origin: HashMap::new(),
+                partners: HashMap::new(),
+            }),
+        };
+        let shift = Vec3::new(2.0, -1.0, 3.0);
+        let placed = items
+            .placed(Transform3::from_translation(shift), BodySide::First)
+            .expect("rigid");
+        let first = |brep: &axiolid_brep::ExactBRep| brep.topology().vertices()[0].position;
+        let cut = placed.cut.as_ref().expect("still cut");
+        assert_eq!(first(&placed.brep), first(&cut.items));
+        assert!((first(&cut.items).z - 3.5).abs() < 1e-12);
+    }
 }

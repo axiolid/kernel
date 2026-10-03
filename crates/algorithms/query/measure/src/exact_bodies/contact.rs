@@ -102,8 +102,11 @@ impl AxisPlane {
 /// Why a face in contact cannot be cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Uncut {
-    /// The face is not on one axis plane in its own numbers.
-    OffPlane,
+    /// The face's plane is not normal to a coordinate axis.
+    NotAxisNormal,
+    /// The face's plane is normal to an axis, but its boundary is not at
+    /// the plane's coordinate along it in its own numbers.
+    OffLevel,
     /// An edge of the face is neither a line nor a circle.
     Edge,
 }
@@ -112,7 +115,23 @@ pub(super) enum Uncut {
 /// every vertex and edge of its boundary at the same coordinate along one
 /// axis, each edge a line or a circle.
 pub(super) fn axis_plane(brep: &ExactBRep, face: usize) -> Result<AxisPlane, Uncut> {
-    let found = on_axis_plane(brep, face).ok_or(Uncut::OffPlane)?;
+    let normal = brep
+        .topology()
+        .faces()
+        .get(face)
+        .and_then(|f| f.surface)
+        .and_then(|id| brep.surfaces().get(id.index()))
+        .and_then(|surface| match surface {
+            Surface::Plane(plane) => {
+                let frame = plane.frame;
+                (0..3).find(|&k| frame.x[k] == 0.0 && frame.y[k] == 0.0)
+            }
+            _ => None,
+        });
+    if normal.is_none() {
+        return Err(Uncut::NotAxisNormal);
+    }
+    let found = on_axis_plane(brep, face).ok_or(Uncut::OffLevel)?;
     let topology = brep.topology();
     for bound in &topology.faces()[face].bounds {
         for use_ in &topology.loops()[bound.loop_id.index()].edges {
