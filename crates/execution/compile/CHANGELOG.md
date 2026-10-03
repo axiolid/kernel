@@ -31,17 +31,24 @@ caret rule for `0.x` versions.
   `Certified` where `ReferenceExactCompiler` builds its exact result
   (#235): differences of placed extrusions, such as a wall with a round
   window, an I-beam with round holes through its web, or a slab with a
-  round shaft. The boolean's mesh is measured against that exact B-rep by
-  the certified branch and bound of #232, over each face's trimmed
-  parameter domain (pcurves flattened to a certified chord bound; a cell is
-  dropped only when it is certainly outside the face). Nothing is derived
-  from the operands' bounds, which are one-sided and say nothing about
-  where the mesh boolean puts the cut. A boolean the exact compiler refuses
-  stays `Unbounded`, named by the refusal (for instance "exact union or
-  intersection of placed operands"), detail "no exact result". Only a
-  deviation report pays for this: plain compilation does not build the
-  exact result. Measured at a 1 mm budget: a 6 m wall with a 0.4 m round
-  window reports 0.53 mm against a sampled 0.48 mm, in about 0.7 s.
+  round shaft, and walls clipped by roof half-spaces (#234). The boolean's
+  mesh is measured against that exact B-rep by the certified branch and
+  bound of #232, over each face's trimmed parameter domain (pcurves
+  flattened to a certified chord bound; a cell is dropped only when it is
+  certainly outside the face). The bound is relative to the exact
+  compiler's result, which is the exact boolean of operands moved by at
+  most the tolerance (#228), and is not claimed for the boolean of the
+  unperturbed operands; the contribution's detail says so ("measured
+  against the exact compiler's result, operands within tolerance").
+  Nothing is derived from the operands' bounds, which are one-sided and
+  say nothing about where the mesh boolean puts the cut. A boolean the
+  exact compiler refuses stays `Unbounded`, named by the refusal (for
+  instance "exact union or intersection of placed operands"), detail "no
+  exact result". Only a deviation report pays for this, only for the
+  booleans whose result is emitted (not the inner differences of a chain),
+  and the search stops once the bound is within the requested budget.
+  Release build, 1 mm budget: a 6 m wall with a 0.4 m round window in
+  about 0.5 s, a 4 m I-beam with three round web holes in about 0.9 s.
 
 ### Changed
 

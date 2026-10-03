@@ -67,10 +67,15 @@
 //!   a one-sided bound on each operand does not bound it, so nothing is
 //!   derived from the operands. Where `ReferenceExactCompiler` builds the
 //!   exact result of the same node (differences of placed extrusions,
-//!   #228), the mesh is certified against that exact B-rep by the branch
-//!   and bound above, over each face's trimmed parameter domain; a boolean
-//!   it refuses is unbounded with the refusal's name. This runs only for a
-//!   report: plain compilation does not build the exact result.
+//!   #228, and half-space clips, #234), the mesh is certified against that
+//!   exact B-rep by the branch and bound above, over each face's trimmed
+//!   parameter domain; a boolean it refuses is unbounded with the
+//!   refusal's name. The bound is relative to the exact compiler's result,
+//!   the exact boolean of operands moved by at most the tolerance (#228),
+//!   not to the boolean of the unperturbed operands. It runs only for a
+//!   report, and only for the booleans whose result is emitted, not for
+//!   the inner booleans of a chain; the search stops once within the
+//!   requested budget.
 //!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
@@ -78,7 +83,7 @@ use axiolid_core::{Scalar, Transform3};
 
 mod boolean;
 mod paths;
-pub(crate) use boolean::of_boolean;
+pub(crate) use boolean::{emitted_booleans, of_boolean};
 pub(crate) use paths::{of_curve_bounded, of_primitive, of_solid};
 
 /// The construction path a part of the mesh came from.

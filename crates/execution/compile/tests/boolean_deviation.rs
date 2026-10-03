@@ -6,11 +6,14 @@
 //! of each face's parameter box kept where `axiolid_measure::FaceDomain`
 //! certifies the point inside, plus every trim curve, where the cut lies),
 //! and asserts that no sample is further from the mesh than the report's
-//! bound: the report's one-sided quantity, exact surface to mesh. It also
-//! asserts the bound is not absurdly above the measured maximum.
+//! bound: the report's one-sided quantity, exact surface to mesh, relative
+//! to the exact compiler's result. It also asserts the bound is useful:
+//! within the requested budget, or not absurdly above the measured maximum
+//! (the search stops once it is within the budget).
 //!
 //! Cases: a placed wall with a round window, an I-beam with root fillets
-//! and round holes through its web, and a slab with a round shaft. A union
+//! and round holes through its web, a slab with a round shaft, and a gable
+//! wall clipped by two roof half-spaces (#234) with a round window. A union
 //! of placed operands, which the exact compiler refuses, stays unbounded
 //! with the refusal's name.
 
@@ -20,7 +23,7 @@ use std::time::Instant;
 
 use axiolid_brep::ExactBRep;
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{BooleanOperator, Point2, Point3, Scalar, Tolerance, Transform3, Vec3};
+use axiolid_core::{BooleanOperator, Plane3, Point2, Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::FaceDomain;
@@ -32,6 +35,7 @@ use axiolid_mesh_compile::{
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
+use axiolid_primitive::HalfSpace;
 use axiolid_profile::{CircleProfile, Profile, RectangleProfile, SectionProfile};
 
 fn options(budget: Scalar) -> ExecutionOptions {
@@ -219,6 +223,10 @@ fn assert_measured(
     assert_eq!(report.contributions.len(), 1, "{report:?}");
     let contribution = report.contributions[0];
     assert_eq!(contribution.path, DeviationPath::Boolean);
+    assert_eq!(
+        contribution.detail,
+        "measured against the exact compiler's result, operands within tolerance"
+    );
     let DeviationBound::Certified(bound) = contribution.bound else {
         panic!("{name}: expected a certified bound, got {report:?}");
     };
@@ -245,8 +253,8 @@ fn assert_measured(
         "{name}: an exact point lies {worst:e} from the mesh, above the reported {bound:e}"
     );
     assert!(
-        ratio <= ceiling,
-        "{name}: bound {bound:e} is {ratio:.1}x the measured {worst:e}"
+        ratio <= ceiling || bound <= report.requested,
+        "{name}: bound {bound:e} is {ratio:.1}x the measured {worst:e}, above the budget"
     );
     (bound, worst)
 }
@@ -321,6 +329,39 @@ fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
         &options,
     );
     assert_measured("slab, round shaft", case, &options, 2.0);
+}
+
+/// A gable wall under two roof planes `z = 2.4 -+ 0.3 x` (world
+/// half-spaces, as the mesh compiler reads them) with a round window.
+#[test]
+fn a_roof_clipped_wall_is_certified_against_its_exact_result() {
+    let budget = 1e-3;
+    let options = options(budget);
+    let case = compile(
+        |g| {
+            let wall = g.extrusion(rect(6.0, 0.3), 3.0);
+            let wall = g.place(wall, building());
+            let mut body = wall;
+            for s in [0.3, -0.3] {
+                let roof = g.push(GeometryNode::HalfSpace(HalfSpace {
+                    boundary: Plane3 {
+                        origin: building().transform_point3(Point3::new(0.0, 0.0, 2.4)),
+                        normal: building().transform_vector3(Vec3::new(-s, 0.0, 1.0)),
+                    },
+                    agreement: true,
+                }));
+                body = g.boolean(body, roof, BooleanOperator::Difference);
+            }
+            let window = g.extrusion(circle(0.3), 1.0);
+            let across = Transform3::from_translation(Vec3::new(-1.2, 0.5, 1.2))
+                * Transform3::from_rotation_x(FRAC_PI_2);
+            let window = g.place(window, building() * across);
+            g.boolean(body, window, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("gable wall, round window", case, &options, 2.0);
+    assert!(bound <= budget, "{bound}");
 }
 
 #[test]

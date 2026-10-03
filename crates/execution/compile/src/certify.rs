@@ -21,8 +21,9 @@
 //!
 //! Cells are split, worst upper bound first, until the worst is within 10%
 //! of the best lower bound (or a tenth of the target, below which the gap
-//! does not matter), or the work budget runs out. The returned value is the
-//! worst upper bound over all cells, so stopping early only loosens it.
+//! does not matter), or below a level the caller says is enough
+//! (`certify_within`), or the work budget runs out. The returned value is
+//! the worst upper bound over all cells, so stopping early only loosens it.
 //!
 //! A patch may be trimmed (a face of an exact B-rep, #235): it then says
 //! how each cell lies against its domain ([`Coverage`]). A cell certainly
@@ -119,6 +120,19 @@ pub(crate) fn certify(
     mesh: &TriMesh,
     target: Scalar,
 ) -> Option<Scalar> {
+    certify_within(patches, cells, mesh, target, 0.0)
+}
+
+/// [`certify`], also settling as soon as the worst upper bound is at most
+/// `enough`: a caller that only needs to know the bound is within a budget
+/// stops there instead of tightening it to the sampled maximum.
+pub(crate) fn certify_within(
+    patches: &[&dyn Patch],
+    cells: Vec<Cell>,
+    mesh: &TriMesh,
+    target: Scalar,
+    enough: Scalar,
+) -> Option<Scalar> {
     let index = TriangleIndex::new(mesh)?;
     let mut lower: Scalar = 0.0;
     let mut heap = BinaryHeap::with_capacity(cells.len());
@@ -137,7 +151,7 @@ pub(crate) fn certify(
         work += 1;
     }
     while let Some(top) = heap.pop() {
-        let settled = top.upper <= (TIGHT * lower).max(0.1 * target);
+        let settled = top.upper <= (TIGHT * lower).max(0.1 * target).max(enough);
         let cell = top.cell;
         let patch = patches[cell.patch];
         let (_, du, dv) = patch.jet(mid(cell.x), mid(cell.y))?;

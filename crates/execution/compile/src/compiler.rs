@@ -119,11 +119,15 @@ enum Step {
 
 /// Whether a compilation measures what no construction proves: a
 /// boolean's deviation against its exact result (#235) costs an exact
-/// compilation and a certified search, so only a deviation report pays it.
+/// compilation and a certified search, so only a deviation report pays it,
+/// and only for the booleans whose result is emitted: an operand of
+/// another boolean is replaced by that boolean's own measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Measure {
+enum Measure<'m> {
     Skip,
-    Deviation,
+    /// Measure the booleans in this set
+    /// ([`crate::deviation::emitted_booleans`]).
+    Deviation(&'m std::collections::HashSet<NodeId>),
 }
 
 /// Cached meshes keyed by node and effective local tolerance.
@@ -316,7 +320,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         root: NodeId,
         options: &ExecutionOptions,
         cache: &mut Cache,
-        measure: Measure,
+        measure: Measure<'_>,
     ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, Budget::of(options));
         let mut stack = vec![Step::Enter(root_key)];
@@ -457,7 +461,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         key: EvalKey,
         options: &ExecutionOptions,
         cache: &Cache,
-        measure: Measure,
+        measure: Measure<'_>,
     ) -> GeomResult<Built> {
         let id = key.id;
         let node = self.node(graph, id)?;
@@ -487,12 +491,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 Ok(match measure {
                     // Measured against the exact result only when a report
                     // asks for it: it compiles the exact boolean (#235).
-                    Measure::Deviation => {
+                    Measure::Deviation(emitted) if emitted.contains(&id) => {
                         let deviation =
                             crate::deviation::of_boolean(graph, id, options, &built.mesh);
                         built.with_deviation(deviation)
                     }
-                    Measure::Skip => built,
+                    Measure::Deviation(_) | Measure::Skip => built,
                 })
             }
             GeometryNode::SolidOperation(operation) => {
@@ -1081,9 +1085,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// budget asked for; see [`crate::DeviationReport`] and the
     /// [`deviation`](crate::deviation) module for what each path's bound
     /// rests on. A path with no certified bound is named, and makes the
-    /// overall bound `None`. A boolean is measured against its exact result
-    /// where [`crate::ReferenceExactCompiler`] builds one (#235), which costs
-    /// that exact compilation and a certified search per boolean node.
+    /// overall bound `None`. A boolean is measured against the result
+    /// [`crate::ReferenceExactCompiler`] builds for it, where it builds one
+    /// (#235): that costs an exact compilation and a certified search for
+    /// each boolean whose result the root emits (not for the inner
+    /// booleans of a chain).
     ///
     /// An inherent method rather than a [`MeshCompiler`] one: the bound is
     /// this compiler's claim about its own meshes, and another compiler
@@ -1100,7 +1106,14 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<(CompileOutcome, crate::DeviationReport)> {
         self.admit_budget(options)?;
         let mut cache = Cache::new();
-        let built = self.evaluate(graph, root, options, &mut cache, Measure::Deviation)?;
+        let emitted = crate::deviation::emitted_booleans(graph, root);
+        let built = self.evaluate(
+            graph,
+            root,
+            options,
+            &mut cache,
+            Measure::Deviation(&emitted),
+        )?;
         let report = built.deviation.report(chord_error(options));
         Ok((
             CompileOutcome::tracked(built.mesh, built.fates.into_vec()).with_closure(built.closure),

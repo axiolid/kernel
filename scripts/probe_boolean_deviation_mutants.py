@@ -5,7 +5,9 @@ Each mutant loosens a step the measured bound rests on: a flat region's
 off-plane term or its covering test, and a trimmed face's domain
 classification. Each must turn a test red: `boolean_deviation.rs` samples
 the exact results of booleans against the compiled meshes and checks the
-reported bound covers them, and the `certify` unit tests probe flat regions
+reported bound covers them (stopping once within the budget), the
+`deviation::boolean` unit test checks a bound tightened to the sampled
+maximum against the cut, and the `certify` unit tests probe flat regions
 directly. The branch and bound's own steps are probed by
 `probe_deviation_report_mutants.py`.
 """
@@ -29,10 +31,10 @@ MUTANTS = [
      '                    if level {', [UNIT, MEASURED]),
     ('trimmed face drops its boundary cells', BOOL,
      '        if near {\n            return Coverage::Boundary;',
-     '        if near {\n            return Coverage::Outside;', [MEASURED]),
+     '        if near {\n            return Coverage::Outside;', [UNIT, MEASURED]),
     ('trimmed face parity inverted', BOOL,
      '        if self.inside(centre) {',
-     '        if !self.inside(centre) {', [MEASURED]),
+     '        if !self.inside(centre) {', [UNIT, MEASURED]),
 ]
 
 def run(target):

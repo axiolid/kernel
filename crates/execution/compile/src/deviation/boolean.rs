@@ -42,6 +42,34 @@
 //! one-sided quantity, with nothing derived from the operands. The bound is
 //! [`DeviationBound::Certified`].
 //!
+//! # Relative to the exact compiler's result
+//!
+//! The bound is to the B-rep [`ReferenceExactCompiler`] returns, and to
+//! nothing else. Since #228 that result is the exact boolean of operands
+//! moved by at most the caller's tolerance (ADR 0080; the guarantees in
+//! `axiolid_brep_boolean`'s crate docs): where faces agree only up to
+//! rounding, the general boolean decides them within the tolerance. Near
+//! tangency the result of such a decision can differ from the boolean of
+//! the unperturbed operands by more than the tolerance, so the bound is
+//! not claimed for that boolean, and the contribution's detail says what
+//! it is measured against. No perturbation term is added: none is proved.
+//!
+//! # Which booleans are measured
+//!
+//! Only those whose result is emitted ([`emitted_booleans`]): a boolean
+//! that is an operand of another (a wall's first opening, under its
+//! second) is replaced in the report by the outer boolean's measurement,
+//! so measuring it too would only cost an exact compilation and a search.
+//!
+//! # When to stop
+//!
+//! The search stops as soon as its worst cell is within the requested
+//! budget, rather than tightening to within 10% of the sampled maximum: a
+//! boolean's report answers whether the mesh is within the budget, and
+//! the bound is sound wherever the search stops. Above the budget it
+//! tightens as before, so a miss is reported as close to the truth as the
+//! search gets.
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (a union or intersection of placed
@@ -61,16 +89,19 @@ use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_curve::Curve2;
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_mesh::TriMesh;
-use axiolid_model::{GeometryGraph, NodeId};
+use std::collections::HashSet;
+
+use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOracle};
 use axiolid_surface::Surface;
 
 use super::{Deviation, DeviationBound, DeviationPath};
-use crate::certify::{certify, Cell, Coverage, Patch};
+use crate::certify::{certify_within, Cell, Coverage, Patch};
 use crate::ReferenceExactCompiler;
 
-/// The detail of a boolean measured against its exact result.
-const MEASURED: &str = "measured against the exact result";
+/// The detail of a boolean measured against the exact compiler's result:
+/// the exact boolean of the operands moved by at most the tolerance (#228).
+const MEASURED: &str = "measured against the exact compiler's result, operands within tolerance";
 /// The detail of a boolean with no exact result to measure against.
 const NO_EXACT: &str = "no exact result";
 
@@ -98,12 +129,39 @@ pub(crate) fn of_boolean(
             )
         }
     };
+    // TODO(#236): once the exact boolean reports whether any decision
+    // within tolerance fired, consult it here: if none did, the exact
+    // compiler's result is the boolean of the unperturbed operands, and the
+    // bound holds for that boolean too (a detail without the caveat).
     let target = crate::compiler::chord_error(options);
-    let bound = match measure(&exact, mesh, target) {
+    let bound = match measure(&exact, mesh, target, target) {
         Ok(value) => DeviationBound::Certified(value),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
     Deviation::one(DeviationPath::Boolean, MEASURED, bound)
+}
+
+/// The boolean nodes whose meshes `root` emits: reached from `root`
+/// through instances and collections, not through another boolean's
+/// operands.
+pub(crate) fn emitted_booleans(graph: &GeometryGraph, root: NodeId) -> HashSet<NodeId> {
+    let mut emitted = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        match graph.get(id) {
+            Some(GeometryNode::Instance(instance)) => stack.push(instance.source),
+            Some(GeometryNode::Collection(members)) => stack.extend(members.iter().copied()),
+            Some(GeometryNode::SolidOperation(SolidOperation::Boolean { .. })) => {
+                emitted.insert(id);
+            }
+            _ => {}
+        }
+    }
+    emitted
 }
 
 /// The exact compiler's refusal, named.
@@ -117,11 +175,13 @@ fn refusal(error: &GeomError) -> &'static str {
 }
 
 /// A certified bound on the distance from every point of `exact`'s faces
-/// to `mesh`, or why there is none.
-pub(crate) fn measure(
+/// to `mesh`, or why there is none; the search settles once it is within
+/// `enough` (see the module's "When to stop").
+fn measure(
     exact: &ExactBRep,
     mesh: &TriMesh,
     target: Scalar,
+    enough: Scalar,
 ) -> Result<Scalar, &'static str> {
     let topology = exact.topology();
     let mut faces = Vec::with_capacity(topology.faces().len());
@@ -144,7 +204,7 @@ pub(crate) fn measure(
         face.seed(k, &mut cells)?;
     }
     let patches: Vec<&dyn Patch> = faces.iter().map(|f| f as &dyn Patch).collect();
-    certify(&patches, cells, mesh, target)
+    certify_within(&patches, cells, mesh, target, enough)
         .ok_or("boolean: an exact face could not be bounded against the mesh")
 }
 
@@ -486,4 +546,152 @@ fn segments_cross(p: Point2, q: Point2, r: Point2, s: Point2) -> bool {
             && c.y <= a.y.max(b.y)
     };
     on(r, s, p, d1) || on(r, s, q, d2) || on(p, q, r, d3) || on(p, q, s, d4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiolid_core::{BooleanOperator, Tolerance, Transform3, Vec3};
+    use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+    use axiolid_mesh_compile_contract::MeshCompiler;
+    use axiolid_model::{GeometryGraphBuilder, Instance};
+    use axiolid_profile::{CircleProfile, Profile, RectangleProfile, SectionProfile};
+
+    /// Tightened to the sampled maximum (no budget stop), the bound still
+    /// covers the exact result's trim curves, where the cut lies and an
+    /// I-beam's hole edge is furthest from the mesh.
+    #[test]
+    fn a_tight_bound_covers_the_cut() {
+        let mut g = GeometryGraphBuilder::new();
+        let section = g
+            .push(GeometryNode::Profile(Profile::Section(SectionProfile::I {
+                depth: 0.3,
+                width: 0.15,
+                web_thickness: 0.0071,
+                flange_thickness: 0.0107,
+                fillet_radius: Some(0.015),
+                flange_edge_radius: None,
+                flange_slope: None,
+            })))
+            .unwrap();
+        let beam = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile: section,
+                direction: Vec3::Z,
+                depth: 1.0,
+            }))
+            .unwrap();
+        let disk = g
+            .push(GeometryNode::Profile(Profile::Circle(CircleProfile {
+                radius: 0.05,
+                thickness: None,
+            })))
+            .unwrap();
+        let hole = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile: disk,
+                direction: Vec3::Z,
+                depth: 0.2,
+            }))
+            .unwrap();
+        let placed = g
+            .push(GeometryNode::Instance(Instance {
+                source: hole,
+                transform: Transform3::from_translation(Vec3::new(-0.1, 0.02, 0.5))
+                    * Transform3::from_rotation_y(core::f64::consts::FRAC_PI_2),
+            }))
+            .unwrap();
+        let cut = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: beam,
+                right: placed,
+                operator: BooleanOperator::Difference,
+            }))
+            .unwrap();
+        let graph = g.finish(vec![cut]).unwrap();
+        let budget = 1e-3;
+        let options = ExecutionOptions::new(Tolerance::new(budget, 1e-9).unwrap())
+            .with_chord_error(budget)
+            .unwrap();
+        let mesh = crate::ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_reported(&graph, cut, &options)
+            .unwrap()
+            .mesh;
+        let exact = ReferenceExactCompiler::new()
+            .compile_exact(&graph, cut, &options)
+            .unwrap();
+        let bound = measure(&exact, &mesh, budget, 0.0).unwrap();
+        let index = crate::certify::TriangleIndex::new(&mesh).unwrap();
+        let topology = exact.topology();
+        let mut worst: Scalar = 0.0;
+        for face in topology.faces() {
+            let surface = &exact.surfaces()[face.surface.unwrap().index()];
+            for bound in &face.bounds {
+                let wire = &topology.loops()[bound.loop_id.index()];
+                for (k, edge_use) in wire.edges.iter().enumerate() {
+                    let curve = &exact.curves2()[edge_use.pcurve.unwrap().index()];
+                    let span = exact.pcurve_interval(bound.loop_id, k).unwrap();
+                    for s in 0..=2000 {
+                        let t = span.start + (span.end - span.start) * Scalar::from(s) / 2000.0;
+                        let uv = axiolid_reference::evaluate2(curve, t).unwrap();
+                        let p = axiolid_reference::surface::evaluate(surface, uv.x, uv.y).unwrap();
+                        worst = worst.max(index.nearest(p));
+                    }
+                }
+            }
+        }
+        assert!(worst <= bound, "{worst} above the bound {bound}");
+        assert!(bound <= 1.2 * worst, "{bound} for a sampled {worst}");
+    }
+
+    /// A chain's inner booleans are not emitted unless something else
+    /// emits them too: here the first cut is also a collection member.
+    #[test]
+    fn only_emitted_booleans_are_measured() {
+        let mut g = GeometryGraphBuilder::new();
+        let profile = g
+            .push(GeometryNode::Profile(Profile::Rectangle(
+                RectangleProfile {
+                    x: 1.0,
+                    y: 1.0,
+                    thickness: None,
+                    outer_radius: None,
+                    inner_radius: None,
+                },
+            )))
+            .unwrap();
+        let block = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth: 1.0,
+            }))
+            .unwrap();
+        let cut = |g: &mut GeometryGraphBuilder, left| {
+            g.push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left,
+                right: block,
+                operator: BooleanOperator::Difference,
+            }))
+            .unwrap()
+        };
+        let first = cut(&mut g, block);
+        let second = cut(&mut g, first);
+        let third = cut(&mut g, second);
+        let placed = g
+            .push(GeometryNode::Instance(Instance {
+                source: third,
+                transform: Transform3::IDENTITY,
+            }))
+            .unwrap();
+        let both = g
+            .push(GeometryNode::Collection(vec![placed, first]))
+            .unwrap();
+        let graph = g.finish(vec![placed, both]).unwrap();
+        assert_eq!(emitted_booleans(&graph, placed), HashSet::from([third]));
+        assert_eq!(
+            emitted_booleans(&graph, both),
+            HashSet::from([third, first])
+        );
+    }
 }
