@@ -3,8 +3,8 @@
 //! ADR 0012 says the scalar reference exists to validate other implementations.
 //! `axiolid_reference::triangulate_simple` is certified (its orientation decisions go
 //! through exact predicates) but has no hole support. That is exactly enough to
-//! audit earcut on the hole-free case, which is where a silent regression in an
-//! upstream dependency would otherwise go unnoticed.
+//! audit the profile triangulator on the hole-free case, where a silent regression
+//! would otherwise go unnoticed.
 
 use axiolid_construct::profile::{triangulate, Rings};
 use axiolid_core::Point2;
@@ -45,10 +45,10 @@ fn wobbly_ring(seed: u64, vertices: usize) -> Vec<Point2> {
 
 /// Both triangulators must cover the same area on hole-free polygons.
 ///
-/// This is the check that would catch an upstream earcut regression, a wrong
+/// This is the check that would catch a triangulator regression, a wrong
 /// hole-index convention, or an orientation flip.
 #[test]
-fn earcut_and_the_certified_oracle_agree_on_covered_area() {
+fn the_triangulator_and_the_certified_oracle_agree_on_covered_area() {
     let mut compared = 0;
     for seed in 0..200u64 {
         for vertices in [3usize, 5, 8, 17] {
@@ -63,13 +63,13 @@ fn earcut_and_the_certified_oracle_agree_on_covered_area() {
                 outer: ring.clone(),
                 holes: Vec::new(),
             };
-            let (pts, adopted) = triangulate(&rings).expect("earcut");
+            let (pts, adopted) = triangulate(&rings).expect("triangulates");
 
             let a = area_of(&ring, &oracle);
             let b = area_of(&pts, &adopted);
             assert!(
                 (a - b).abs() < 1e-9 * a.max(1.0),
-                "seed {seed}/{vertices}: oracle {a} vs earcut {b}"
+                "seed {seed}/{vertices}: oracle {a} vs triangulator {b}"
             );
             assert_eq!(oracle.len(), vertices - 2, "a simple polygon has n-2 ears");
             assert_eq!(adopted.len(), vertices - 2);

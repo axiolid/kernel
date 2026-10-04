@@ -117,7 +117,7 @@ fn a_downward_hollow_section_loses_exactly_the_hole_volume() {
 }
 
 /// A hollow section must lose exactly the hole's volume. This is the case the
-/// hand-rolled ear clipper could not do, and the reason earcut was adopted.
+/// first hand-rolled ear clipper could not do (ADR 0015, ADR 0083).
 #[test]
 fn a_hollow_section_loses_exactly_the_hole_volume() {
     let rings = profile_rings(&rect(10.0, 6.0, Some(1.0)), 1e-3, Tolerance::METRE).expect("rings");
@@ -254,7 +254,7 @@ mod contour_and_mirror {
     /// A ring whose first point is repeated as its last must still close.
     ///
     /// Authoring tools write both conventions; a duplicated closing point is a
-    /// zero-length edge that earcut cannot triangulate.
+    /// zero-length edge that the triangulation refuses.
     #[test]
     fn a_ring_that_repeats_its_first_point_is_closed_once() {
         let mut pts = square(0.0, 0.0, 1.0);

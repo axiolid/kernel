@@ -271,7 +271,6 @@ dependencies = [
  "axiolid-surface",
  "axiolid-tessellation-contract",
  "axiolid-topology",
- "earcut",
 ]
 
 [[package]]

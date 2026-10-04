@@ -9,6 +9,49 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Profiles with several holes extrude to closed solids (#253).**
+  `profile::triangulate` delegated to `earcut`, which drops nodes where
+  the bridged ring runs straight on and lets only reflex nodes block an
+  ear. For two holes side by side in one horizontal band (a 4 x 4 outer
+  ring, 1 x 1 holes at x in [-1.5, -0.5] and [0.5, 1.5]) it returned 12
+  triangles of the right area instead of 14: one edge ran along the
+  band's bottom line past both holes' inner corners, a T-junction, so the
+  plain extrusion had 8 boundary edges and failed its volume and closure
+  checks. Triangulation is now the crate's own ear clipper, every
+  decision an exact `orient2d` sign (ADR 0083, superseding ADR 0015 for
+  this crate): holes are bridged in order of decreasing largest x from
+  their rightmost vertex, each bridge accepted only when it enters the
+  polygon at both ends and touches no ring edge or earlier bridge, a
+  vertex on it included; an ear is refused if any other vertex lies in
+  its closed triangle. The output is certified before it is returned --
+  every triangle strictly counter-clockwise, every ring edge used once
+  from inside, every other edge once in each direction -- and refused
+  with `Degenerate` otherwise. Rings may come either way round; every
+  vertex is now a triangle corner, `outer ++ holes` unchanged. Ring sets
+  that bound no polygon with holes are refused with `InvalidInput`
+  naming the ring: a non-finite or repeated vertex, a ring folding back
+  on or crossing itself, holes overlapping or touching each other or the
+  outer ring (including at one vertex, which earcut accepted and which
+  extrudes to a non-manifold edge), a hole outside the outer ring or
+  inside another hole. The crate no longer depends on `earcut`. Tests
+  (`tests/profile_holes.rs`): holes side by side, stacked, three on one
+  ray, a hole vertex exactly on another's ray, five holes 1/1024 from the
+  outer ring, and three flattened round holes in a row each triangulate
+  with n + 2h - 2 counter-clockwise triangles, every ring edge once and
+  every other edge twinned, cover exactly outer minus holes, and extrude
+  to a closed, outward solid of volume area x depth; so do a triangle
+  and an L with a straight or reflex vertex, from every starting vertex,
+  as outer ring and as hole, a vertex in line with another hole's side
+  just past its end, and 400 seeded
+  random layouts of rectangles, triangles, L shapes, diamonds and
+  rectangles with collinear midpoints on a quarter grid (compared with
+  `==`) and 200 off-grid layouts of regular 3- to 40-gons; each invalid
+  ring set above is refused by name; the certificate refuses earcut's
+  output for the issue's profile. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (31/31 killed).
+
 ## [0.3.14] - 2026-10-04
 
 ### Fixed

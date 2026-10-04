@@ -4,11 +4,11 @@
 //! `TessellationOptions`-style budget; nothing here invents a default
 //! tolerance.
 //!
-//! Triangulation of rings-with-holes is delegated to `earcut` (MIT/Apache-2.0,
-//! pure Rust). ADR 0015 records why: hole bridging is a solved problem and a
-//! hand-rolled version failed its own area gate on the two-hole case.
-//! `axiolid_reference::triangulate_simple` is retained as the differential oracle for
-//! the hole-free case, so the adopted implementation is audited, not trusted.
+//! Triangulation of rings-with-holes is the crate's own certified ear clipper
+//! (`ring_triangulation`, ADR 0083, replacing the `earcut` adoption of ADR
+//! 0015 after it left T-junctions between holes in one band, #253).
+//! `axiolid_reference::triangulate_simple` stays the differential oracle for
+//! the hole-free case.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance};
@@ -61,8 +61,8 @@ pub fn profile_rings(
             for hole in &mut rings.holes {
                 apply2(hole, transform);
             }
-            // A mirroring placement reverses ring orientation; earcut and the
-            // extruder both rely on outer CCW / holes CW, so restore it here
+            // A mirroring placement reverses ring orientation; the extruder's
+            // walls rely on outer CCW / holes CW, so restore it here
             // rather than letting a silently inside-out solid reach them.
             if transform.matrix2.determinant() < 0.0 {
                 rings.outer.reverse();
@@ -425,8 +425,20 @@ fn flatten_circle(radius: Scalar, chord_error: Scalar) -> GeomResult<Vec<Point2>
 
 /// Triangulate rings into a flat index buffer over a single vertex list.
 ///
-/// Delegates to `earcut`. The returned vertices are the concatenation
-/// `outer ++ holes`, matching earcut's hole-index convention.
+/// The returned vertices are the concatenation `outer ++ holes`, unchanged,
+/// and every one of them is a corner of some triangle. Rings may be given
+/// either way round; the triangles are counter-clockwise. The result is
+/// certified before it is returned (#253): every ring edge is a triangle
+/// edge, every other edge is shared by exactly two triangles, so no
+/// triangle edge runs past a vertex and an extrusion of the caps closes.
+///
+/// # Errors
+///
+/// `InvalidInput`, naming the ring, for rings that do not bound a polygon
+/// with holes: fewer than three or non-finite vertices, a repeated vertex,
+/// a ring that folds back on or crosses itself, holes that overlap or touch
+/// each other or the outer ring, a hole outside the outer ring or inside
+/// another hole. `Degenerate` if the triangulation cannot be certified.
 pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
     if rings.outer.len() < 3 {
         return Err(GeomError::InvalidInput(format!(
@@ -434,8 +446,6 @@ pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
             rings.outer.len()
         )));
     }
-    let mut verts: Vec<[Scalar; 2]> = rings.outer.iter().map(|p| [p.x, p.y]).collect();
-    let mut hole_starts = Vec::with_capacity(rings.holes.len());
     for hole in &rings.holes {
         if hole.len() < 3 {
             return Err(GeomError::InvalidInput(format!(
@@ -443,27 +453,8 @@ pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
                 hole.len()
             )));
         }
-        hole_starts.push(verts.len());
-        verts.extend(hole.iter().map(|p| [p.x, p.y]));
     }
-
-    let mut earcutter = earcut::Earcut::new();
-    let mut flat: Vec<usize> = Vec::new();
-    earcutter.earcut(verts.iter().copied(), &hole_starts, &mut flat);
-
-    if flat.is_empty() || flat.len() % 3 != 0 {
-        return Err(GeomError::Degenerate(format!(
-            "triangulation produced {} indices for a {}-vertex profile",
-            flat.len(),
-            verts.len()
-        )));
-    }
-    let tris = flat
-        .chunks_exact(3)
-        .map(|c| [c[0] as u32, c[1] as u32, c[2] as u32])
-        .collect();
-    let points = verts.into_iter().map(|v| Point2::new(v[0], v[1])).collect();
-    Ok((points, tris))
+    crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes)
 }
 
 /// Apply a 2D affine transform to a ring in place.
@@ -476,8 +467,8 @@ fn apply2(ring: &mut [Point2], t: &axiolid_core::Transform2) {
 /// Flatten one closed contour into a point ring.
 ///
 /// Consecutive duplicate points are dropped: adjoining segments share an
-/// endpoint by construction, and earcut treats a repeated vertex as a
-/// zero-length edge.
+/// endpoint by construction, and the triangulation refuses a repeated
+/// vertex as a zero-length edge.
 fn contour_points(
     contour: &axiolid_profile::Contour,
     chord_error: Scalar,
@@ -555,7 +546,7 @@ fn segment_points(
     )
 }
 
-/// Force the ring-orientation convention earcut and the extruder expect:
+/// Force the ring-orientation convention the extruder expects:
 /// outer counter-clockwise, holes clockwise.
 ///
 /// Source contours carry whatever orientation the authoring tool wrote, so

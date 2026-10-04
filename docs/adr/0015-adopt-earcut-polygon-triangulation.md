@@ -1,6 +1,6 @@
 # 0015 — Adopt `earcut` for polygon triangulation
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded for `axiolid-construct` by [0083](./0083-profile-caps-use-a-certified-ear-clipper.md)
 - **Date:** 2026-08-19
 - **Deciders:** Friedrich, axiolid
 - **Supersedes:** —

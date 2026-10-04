@@ -78,6 +78,7 @@ pub mod revolve;
 pub mod revolve_contour;
 pub mod revolve_exact;
 pub mod revolve_partial;
+mod ring_triangulation;
 pub mod section_lower;
 pub mod sweep;
 pub mod swept_disk_exact;

@@ -29,7 +29,6 @@ axiolid-topology.workspace = true
 axiolid-tessellation-contract.workspace = true
 axiolid-brep-audit.workspace = true
 axiolid-exact.workspace = true
-earcut = "0.4"
 [dev-dependencies]
 axiolid-heal.workspace = true
 # The measurement oracle. `volume_properties` audits closed-two-manifoldness
