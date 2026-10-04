@@ -21,7 +21,16 @@
 //!
 //! # How each path is bounded
 //!
-//! - Authored meshes are their own exact surface: `0`.
+//! - Authored meshes are their own exact surface: `0`. An authored polygon
+//!   face within the linear tolerance of its plane counts as planar and
+//!   adds nothing. A face warped beyond it has no unique surface (#254):
+//!   it is triangulated in its fit plane and reported
+//!   [`DeviationBound::Certified`] under the detail
+//!   `"non-planar authored face"`, never `Proven`. The value is the largest
+//!   distance of a corner from that fit plane, which bounds the distance
+//!   between the mesh and the face flattened onto the plane both ways
+//!   (`crate::planar` gives the argument); the worst face of the mesh is
+//!   reported.
 //! - Profiles ([`axiolid_construct::profile::profile_deviation`]): the
 //!   chord budget for every family the flattener certifies (lines, arcs,
 //!   circles, ellipses, B-splines), plus any merged near-duplicate point,
@@ -85,6 +94,10 @@ mod boolean;
 mod paths;
 pub(crate) use boolean::{emitted_booleans, of_boolean};
 pub(crate) use paths::{of_curve_bounded, of_primitive, of_sectioned_surface, of_solid};
+
+/// The [`DeviationContribution::detail`] of authored polygon faces warped
+/// beyond the linear tolerance (#254).
+pub(crate) const WARPED_AUTHORED_FACE: &str = "non-planar authored face";
 
 /// The construction path a part of the mesh came from.
 #[non_exhaustive]

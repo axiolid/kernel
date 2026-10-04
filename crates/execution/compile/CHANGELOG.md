@@ -29,6 +29,20 @@ caret rule for `0.x` versions.
 
 - A sectioned surface whose section runs its tags in reverse is joined
   reversed instead of refused (#246).
+- An authored polygon face off its plane by more than the linear
+  tolerance is triangulated instead of refused as not planar (#254). It is
+  projected onto its fit plane (the outer ring's centroid and Newell
+  normal), ear clipped there and lifted back to its authored corners,
+  which are never moved. `compile_mesh_with_deviation` reports it as
+  `AuthoredMesh` with the detail `"non-planar authored face"`, always
+  `Certified`, never `Proven`: the largest distance of any corner (holes
+  included) from that fit plane, over the worst such face. That bounds the
+  distance between the mesh and the face flattened onto the plane both
+  ways, and is at least the largest corner distance from the plane the
+  face was triangulated in. Faces within the tolerance triangulate and
+  report exactly as before; rings that cross or enclose no area in the fit
+  plane are still refused by face index, and the exact compiler still
+  refuses polygon meshes by name.
 
 ### Fixed
 

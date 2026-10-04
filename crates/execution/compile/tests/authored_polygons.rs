@@ -5,12 +5,15 @@
 //! Every oracle here is computed from the authored corners by hand -- a
 //! shoelace area, a cross-product normal, a closed-form volume -- never read
 //! back from the compiler.
+//!
+//! Faces warped beyond the tolerance are triangulated in their fit plane
+//! and reported with a certified bound (#254).
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Point3, Tolerance, Vec3};
 use axiolid_mesh::{PolygonFace, PolygonMesh, TriMesh};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::ReferenceMeshCompiler;
+use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{GeometryGraphBuilder, GeometryNode};
 
@@ -484,27 +487,402 @@ fn collinear_notch_and_window_heads_close_the_real_lining() {
     );
 }
 
+/// The unit cube of quads, outward, with its top face `[4, 5, 6, 7]`.
+fn cube_quads() -> Vec<PolygonFace> {
+    [
+        [0, 3, 2, 1],
+        [4, 5, 6, 7],
+        [0, 1, 5, 4],
+        [1, 2, 6, 5],
+        [2, 3, 7, 6],
+        [3, 0, 4, 7],
+    ]
+    .iter()
+    .map(|q| face(q))
+    .collect()
+}
+
+/// A unit cube whose top corners stand at `top[i]` over (0,0), (1,0),
+/// (1,1), (0,1). Every side face stays planar (each lies in `x` or `y`
+/// constant); only the top may warp.
+fn cube_with_top(top: [f64; 4]) -> PolygonMesh {
+    PolygonMesh {
+        positions: vec![
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(1.0, 1.0, 0.0),
+            p(0.0, 1.0, 0.0),
+            p(0.0, 0.0, top[0]),
+            p(1.0, 0.0, top[1]),
+            p(1.0, 1.0, top[2]),
+            p(0.0, 1.0, top[3]),
+        ],
+        faces: cube_quads(),
+    }
+}
+
+fn compile_reported(
+    mesh: PolygonMesh,
+) -> Result<
+    (
+        axiolid_mesh_compile_contract::CompileOutcome,
+        axiolid_mesh_compile::DeviationReport,
+    ),
+    GeomError,
+> {
+    let mut b = GeometryGraphBuilder::new();
+    let node = b.push(GeometryNode::PolygonMesh(mesh)).unwrap();
+    let graph = b.finish(vec![node]).unwrap();
+    ReferenceMeshCompiler::new(BoolmeshBoolean::new()).compile_mesh_with_deviation(
+        &graph,
+        node,
+        &ExecutionOptions::new(Tolerance::MILLIMETRE),
+    )
+}
+
+/// The warp contribution of a report, if any.
+fn warp_of(report: &axiolid_mesh_compile::DeviationReport) -> Option<DeviationBound> {
+    report
+        .contributions
+        .iter()
+        .find(|c| c.path == DeviationPath::AuthoredMesh && c.detail == "non-planar authored face")
+        .map(|c| c.bound)
+}
+
+/// The largest distance of any corner from the plane through the corners'
+/// centroid along their Newell normal, computed here from the corners.
+fn largest_corner_distance_from_fit_plane(corners: &[Point3]) -> f64 {
+    let mut normal = Vec3::ZERO;
+    for (i, &a) in corners.iter().enumerate() {
+        let b = corners[(i + 1) % corners.len()];
+        normal += a.cross(b);
+    }
+    let n = normal.normalize();
+    let centroid = corners.iter().fold(Vec3::ZERO, |s, &c| s + c) / corners.len() as f64;
+    corners
+        .iter()
+        .map(|&c| (c - centroid).dot(n).abs())
+        .fold(0.0, f64::max)
+}
+
+/// Distance to the nearest triangle of the cube's top face (corners 4..8).
+fn distance_to_top(point: Point3, mesh: &TriMesh) -> f64 {
+    mesh.indices
+        .chunks_exact(3)
+        .filter(|t| t.iter().all(|&i| (4..8).contains(&i)))
+        .map(|t| {
+            let tri = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
+            let closest = axiolid_measure::proximity::closest_point_on_triangle(point, tri)
+                .expect("a proper triangle");
+            (closest - point).length()
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// #254's done-when: a faceted box with its top face 5 cm out of plane (a
+/// saddle, corners alternately 5 cm above and below the fit plane z = 1)
+/// compiles as a closed, consistently oriented mesh with a certified, not
+/// exact, bound of at least 5 cm.
 #[test]
-fn a_non_planar_quad_is_refused_by_face_index() {
-    // Corner 2 lifted 0.1 off the plane of the other three: a non-planar
-    // quad has two different triangulations, so neither may be picked.
-    let error = compile(PolygonMesh {
+fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp() {
+    let (outcome, report) =
+        compile_reported(cube_with_top([1.05, 0.95, 1.05, 0.95])).expect("a warped box compiles");
+    let mesh = &outcome.mesh;
+    assert_eq!(mesh.indices.len(), 36, "every quad gives two triangles");
+    assert!(
+        is_closed_two_manifold(mesh),
+        "closed and consistently oriented"
+    );
+    assert_eq!(
+        outcome.closure,
+        axiolid_mesh_compile_contract::MeshClosure::Solid
+    );
+    // Outward: the divergence volume of a consistently but inward oriented
+    // shell would be negative. Each triangulation of the saddle lies
+    // within 5 cm of z = 1 over the unit square, so the volume is 1 to that.
+    let volume: f64 = mesh
+        .indices
+        .chunks_exact(3)
+        .map(|t| {
+            let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
+            a.dot(b.cross(c))
+        })
+        .sum::<f64>()
+        / 6.0;
+    assert!((volume - 1.0).abs() <= 0.05, "volume {volume}");
+
+    let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
+        panic!("a warped face is certified, never proven or absent: {report:?}");
+    };
+    assert!(warp >= 0.05, "warp {warp}");
+    // Sound, and not absurd: the corners are 5 cm off the fit plane z = 1.
+    assert!(warp <= 0.05 + 1e-12, "warp {warp}");
+    assert!(report.bound.is_some_and(|b| b >= 0.05), "{report:?}");
+    assert!(!report.meets_requested(), "not exact: {report:?}");
+    assert!(
+        !report
+            .contributions
+            .iter()
+            .any(|c| matches!(c.bound, DeviationBound::Proven(v) if v >= 0.05)),
+        "no proven claim covers the warp: {report:?}"
+    );
+
+    // What it bounds: the top face flattened onto z = 1 lies within it of
+    // the top face's triangles, sampled on a grid including its corners
+    // and edges, and so does every point of those triangles of it.
+    let mut worst: f64 = 0.0;
+    for i in 0..=20 {
+        for j in 0..=20 {
+            let foot = p(f64::from(i) / 20.0, f64::from(j) / 20.0, 1.0);
+            worst = worst.max(distance_to_top(foot, mesh));
+        }
+    }
+    assert!(
+        worst <= warp,
+        "a flattened point lies {worst} from the mesh"
+    );
+    // Not loose either: at a flattened corner the nearest triangle, tilted
+    // by the saddle, is still nearly 5 cm away.
+    assert!(worst >= 0.045, "{worst}");
+    for t in mesh
+        .indices
+        .chunks_exact(3)
+        .filter(|t| t.iter().all(|&i| (4..8).contains(&i)))
+    {
+        for corner in t {
+            let off = (mesh.positions[*corner as usize].z - 1.0).abs();
+            assert!(off <= warp, "mesh corner {off} off the flattened face");
+        }
+    }
+}
+
+/// One corner lifted 5 cm: the fit plane takes the twist, so every corner
+/// is a quarter of the lift from it. The bound covers the largest corner
+/// distance from that plane, computed here independently.
+#[test]
+fn a_lifted_corner_reports_at_least_its_distance_from_the_fit_plane() {
+    let top = [1.0, 1.0, 1.05, 1.0];
+    let (outcome, report) = compile_reported(cube_with_top(top)).expect("compiles");
+    assert!(is_closed_two_manifold(&outcome.mesh));
+    let corners = [
+        p(0.0, 0.0, top[0]),
+        p(1.0, 0.0, top[1]),
+        p(1.0, 1.0, top[2]),
+        p(0.0, 1.0, top[3]),
+    ];
+    let want = largest_corner_distance_from_fit_plane(&corners);
+    assert!((want - 0.0125).abs() < 1e-3, "fixture: {want}");
+    let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
+        panic!("{report:?}");
+    };
+    assert!(
+        warp >= want && warp <= want + 1e-12,
+        "warp {warp}, want {want}"
+    );
+}
+
+/// A warp inside the linear tolerance is exporter noise: the face is
+/// planar, the report is exactly the authored mesh's own, nothing more.
+#[test]
+fn a_warp_within_tolerance_reports_the_authored_mesh_exactly() {
+    for top in [[1.0; 4], [1.0, 1.0, 1.0 + 9e-4, 1.0]] {
+        let (_, report) = compile_reported(cube_with_top(top)).expect("compiles");
+        assert_eq!(report.bound, Some(0.0), "{report:?}");
+        assert_eq!(report.contributions.len(), 1, "{report:?}");
+        assert_eq!(report.contributions[0].path, DeviationPath::AuthoredMesh);
+        assert_eq!(report.contributions[0].detail, "");
+        assert_eq!(
+            report.contributions[0].bound,
+            DeviationBound::Proven(0.0),
+            "{report:?}"
+        );
+    }
+}
+
+/// The warp is a world length: an instance scales it like every bound,
+/// and a collection keeps the worst face.
+#[test]
+fn a_scaled_instance_of_a_warped_box_scales_its_warp() {
+    let mut b = GeometryGraphBuilder::new();
+    let source = b
+        .push(GeometryNode::PolygonMesh(cube_with_top([
+            1.05, 0.95, 1.05, 0.95,
+        ])))
+        .unwrap();
+    let placed = b
+        .push(GeometryNode::Instance(axiolid_model::Instance {
+            source,
+            transform: axiolid_core::Transform3::from_scale(Vec3::splat(2.0)),
+        }))
+        .unwrap();
+    let graph = b.finish(vec![placed]).unwrap();
+    let (_, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+        .compile_mesh_with_deviation(
+            &graph,
+            placed,
+            &ExecutionOptions::new(Tolerance::MILLIMETRE),
+        )
+        .unwrap();
+    let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
+        panic!("{report:?}");
+    };
+    assert!(warp >= 0.1, "warp {warp}");
+}
+
+/// A hole off its face's plane warps the face too: the bound covers every
+/// corner, not only the outer ring's.
+#[test]
+fn a_hole_off_the_plane_of_its_face_is_measured() {
+    let (outcome, report) = compile_reported(PolygonMesh {
+        positions: vec![
+            p(0.0, 0.0, 0.0),
+            p(4.0, 0.0, 0.0),
+            p(4.0, 4.0, 0.0),
+            p(0.0, 4.0, 0.0),
+            p(1.0, 1.0, 0.0),
+            p(1.0, 2.0, 0.0),
+            p(2.0, 2.0, 0.05),
+            p(2.0, 1.0, 0.0),
+        ],
+        faces: vec![PolygonFace {
+            outer: vec![0, 1, 2, 3],
+            holes: vec![vec![4, 5, 6, 7]],
+        }],
+    })
+    .expect("a warped holed face is triangulated");
+    close(normals(&outcome.mesh).iter().map(|n| n.z / 2.0).sum(), 15.0);
+    let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
+        panic!("{report:?}");
+    };
+    assert!((0.05..0.05 + 1e-12).contains(&warp), "warp {warp}");
+}
+
+/// Of several warped faces the worst is reported, whichever comes first.
+#[test]
+fn the_worst_warped_face_sets_the_bound() {
+    let saddle = |x: f64, h: f64| {
+        [
+            p(x, 0.0, h),
+            p(x + 1.0, 0.0, -h),
+            p(x + 1.0, 1.0, h),
+            p(x, 1.0, -h),
+        ]
+    };
+    for (first, second) in [(0.05, 0.02), (0.02, 0.05)] {
+        let mut positions = saddle(0.0, first).to_vec();
+        positions.extend(saddle(3.0, second));
+        let (_, report) = compile_reported(PolygonMesh {
+            positions,
+            faces: vec![face(&[0, 1, 2, 3]), face(&[4, 5, 6, 7])],
+        })
+        .unwrap();
+        let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
+            panic!("{report:?}");
+        };
+        assert!((0.05..0.05 + 1e-12).contains(&warp), "warp {warp}");
+    }
+}
+
+/// The exact compiler keeps refusing a polygon mesh by name, warped or not.
+#[test]
+fn the_exact_compiler_refuses_a_warped_box_by_name() {
+    use axiolid_exact_compile_contract::ExactCompiler;
+    let mut b = GeometryGraphBuilder::new();
+    let node = b
+        .push(GeometryNode::PolygonMesh(cube_with_top([
+            1.05, 0.95, 1.05, 0.95,
+        ])))
+        .unwrap();
+    let graph = b.finish(vec![node]).unwrap();
+    let error = axiolid_mesh_compile::ReferenceExactCompiler::new()
+        .compile_exact(&graph, node, &ExecutionOptions::new(Tolerance::MILLIMETRE))
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            GeomError::UnsupportedInput {
+                input: "polygon mesh",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+/// A warped ring that crosses itself in its fit plane is still refused by
+/// face index: warping it does not make it a surface.
+#[test]
+fn a_warped_self_crossing_ring_is_refused_by_face_index() {
+    // (0,0) (2,2) (2,0) (0,1) in plan: edges 0-1 and 2-3 cross, and the
+    // lobes differ, so the ring has area and a plane; z warps it 0.2.
+    let error = compile_at(
+        PolygonMesh {
+            positions: vec![
+                p(5.0, 0.0, 0.0),
+                p(6.0, 0.0, 0.0),
+                p(6.0, 1.0, 0.0),
+                p(0.0, 0.0, 0.0),
+                p(2.0, 2.0, 0.2),
+                p(2.0, 0.0, 0.0),
+                p(0.0, 1.0, 0.2),
+            ],
+            faces: vec![face(&[0, 1, 2]), face(&[3, 4, 5, 6])],
+        },
+        Tolerance::MILLIMETRE,
+    )
+    .expect_err("crossing rings have no triangulation");
+    assert!(
+        is_invalid_naming(&error, "face 1") && is_invalid_naming(&error, "cross"),
+        "{error:?}"
+    );
+}
+
+/// A warped face with a hole outside it is refused like a planar one.
+#[test]
+fn a_warped_face_with_a_hole_outside_it_is_refused() {
+    let error = compile_at(
+        PolygonMesh {
+            positions: vec![
+                p(0.0, 0.0, 0.0),
+                p(1.0, 0.0, 0.0),
+                p(1.0, 1.0, 0.1),
+                p(0.0, 1.0, 0.0),
+                p(5.0, 5.0, 0.0),
+                p(6.0, 5.0, 0.0),
+                p(6.0, 6.0, 0.0),
+            ],
+            faces: vec![PolygonFace {
+                outer: vec![0, 1, 2, 3],
+                holes: vec![vec![4, 6, 5]],
+            }],
+        },
+        Tolerance::MILLIMETRE,
+    )
+    .expect_err("a hole must lie inside its face");
+    assert!(is_invalid_naming(&error, "face 0"), "{error:?}");
+}
+
+/// A warped quad keeps its authored corners and facing (#254): corner 2
+/// lifted 0.1, its two triangles both face up and cover the plan square.
+#[test]
+fn a_non_planar_quad_is_triangulated_at_its_authored_corners() {
+    let mesh = compile(PolygonMesh {
         positions: vec![
             p(0.0, 0.0, 0.0),
             p(1.0, 0.0, 0.0),
             p(1.0, 1.0, 0.1),
             p(0.0, 1.0, 0.0),
-            p(5.0, 0.0, 0.0),
-            p(6.0, 0.0, 0.0),
-            p(6.0, 1.0, 0.0),
         ],
-        faces: vec![face(&[4, 5, 6]), face(&[0, 1, 2, 3])],
+        faces: vec![face(&[0, 1, 2, 3])],
     })
-    .expect_err("non-planar");
-    assert!(
-        is_invalid_naming(&error, "face 1") && is_invalid_naming(&error, "not planar"),
-        "{error:?}"
-    );
+    .expect("a warped quad is triangulated");
+    assert_eq!(mesh.indices.len(), 6);
+    assert_eq!(mesh.positions.len(), 4, "no corner added or moved");
+    let plan: f64 = normals(&mesh).iter().map(|n| n.z / 2.0).sum();
+    close(plan, 1.0);
+    for n in normals(&mesh) {
+        assert!(n.z > 0.0, "{n:?} faces down");
+    }
 }
 
 #[test]

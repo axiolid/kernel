@@ -375,15 +375,18 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// as authored and shared, so the output welds exactly where the input
     /// did; no corner is moved or added.
     ///
-    /// A face that is not planar within the linear tolerance, has no area,
-    /// or whose rings cross is refused with an error naming its index: a
-    /// non-planar n-gon has no unique triangulation, so picking one would
-    /// invent geometry.
+    /// A face with no area, or whose rings cross in its plane, is refused
+    /// with an error naming its index. A face off its plane by more than
+    /// the linear tolerance has no unique surface; it is triangulated in
+    /// its fit plane all the same (#254), and the largest warp of any such
+    /// face is returned with the mesh, `None` when every face is planar.
+    /// [`crate::planar`] states what that warp bounds; the caller reports
+    /// it as a certified deviation, never as exact.
     fn compile_authored_polygons(
         &self,
         mesh: &axiolid_mesh::PolygonMesh,
         options: &ExecutionOptions,
-    ) -> GeomResult<TriMesh> {
+    ) -> GeomResult<(TriMesh, Option<Scalar>)> {
         let position_count = mesh.positions.len();
         if let Some(index) = mesh
             .faces
@@ -427,6 +430,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             })?;
 
         let linear = options.tolerance().linear();
+        let mut warp: Option<Scalar> = None;
         for (face_index, face) in mesh.faces.iter().enumerate() {
             if face.outer.len() == 3 && face.holes.is_empty() {
                 indices.extend_from_slice(&face.outer);
@@ -441,17 +445,20 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
                 .collect();
             let views: Vec<&[axiolid_core::Point3]> = points.iter().map(Vec::as_slice).collect();
-            let local = crate::planar::triangulate_polygon(&views, linear)
+            let local = crate::planar::triangulate_authored_polygon(&views, linear)
                 .map_err(|refusal| crate::planar::face_error(face_index, refusal))?;
+            if let Some(face_warp) = local.warp {
+                warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));
+            }
             let corners: Vec<u32> = rings.into_iter().flatten().copied().collect();
-            indices.extend(local.into_iter().map(|corner| corners[corner]));
+            indices.extend(local.indices.into_iter().map(|corner| corners[corner]));
         }
 
         let triangles = TriMesh::new(positions, indices);
         triangles.validate_structure().map_err(|error| {
             GeomError::InvalidInput(format!("invalid authored polygon mesh: {error}"))
         })?;
-        Ok(triangles)
+        Ok((triangles, warp))
     }
 
     /// Build one node, assuming its mesh dependencies are already cached.
@@ -467,9 +474,24 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let node = self.node(graph, id)?;
         match node {
             GeometryNode::TriMesh(mesh) => Ok(authored_mesh(mesh.clone(), options)),
-            GeometryNode::PolygonMesh(mesh) => self
-                .compile_authored_polygons(mesh, options)
-                .map(|mesh| authored_mesh(mesh, options)),
+            GeometryNode::PolygonMesh(mesh) => {
+                self.compile_authored_polygons(mesh, options)
+                    .map(|(mesh, warp)| {
+                        let built = authored_mesh(mesh, options);
+                        match warp {
+                            None => built,
+                            Some(warp) => {
+                                let mut deviation = built.deviation.clone();
+                                deviation.add(
+                                    crate::deviation::DeviationPath::AuthoredMesh,
+                                    crate::deviation::WARPED_AUTHORED_FACE,
+                                    crate::deviation::DeviationBound::Certified(warp),
+                                );
+                                built.with_deviation(deviation)
+                            }
+                        }
+                    })
+            }
             GeometryNode::Instance(instance) => {
                 let source_budget = instance_local_budget(instance.transform, Budget::of(options))?;
                 let source = self.cached(cache, instance.source, source_budget)?;

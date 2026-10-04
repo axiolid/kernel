@@ -11,6 +11,35 @@
 //!    so a ring that winds counter-clockwise about `n` stays
 //!    counter-clockwise in 2D;
 //! 3. ear clipping (`earcut`) of the projected outer ring with its holes.
+//!
+//! # Warped authored faces (#254)
+//!
+//! An authored polygon face whose corners lie off its plane by more than
+//! the linear tolerance has no unique surface: a warped quad has two
+//! triangulations and neither is the face. [`triangulate_polygon`] refuses
+//! it ([`PolygonRefusal::NotPlanar`]); the mesh compiler's authored polygon
+//! path uses [`triangulate_authored_polygon`] instead, which triangulates
+//! it through the same three steps and reports how far it is warped. The
+//! exact compiler refuses polygon meshes altogether.
+//!
+//! The steps are unchanged, so a face within the tolerance of its plane
+//! triangulates exactly as before. A warped face is projected onto its fit
+//! plane `P` (the outer ring's centroid with its Newell normal `n`), ear
+//! clipped there with the same area check, and the triangles are lifted
+//! back to the authored corners, which are never moved. Rings that cross
+//! in that projection, or enclose no area in it, are still refused.
+//!
+//! The reported bound `w` is the largest distance of any corner (outer
+//! ring and holes) from `P`, plus the rounding of computing it. It is a
+//! bound against the authored polygon flattened onto `P` (each corner
+//! replaced by its foot on `P`): the mesh point over a point `x'` of a
+//! projected triangle with feet `c_i'` is `x = sum l_i c_i` for the same
+//! barycentric weights `l_i`, so `x - x' = sum l_i (c_i - c_i')` is a
+//! convex combination of offsets along `n`, each at most `w` long. Every
+//! point of the flattened polygon is therefore within `w` of the mesh,
+//! every mesh point within `w` of it, and every authored corner is a mesh
+//! vertex. `w` is at least the largest distance of a corner from the plane
+//! the face was triangulated in.
 
 use axiolid_contracts::GeomError;
 use axiolid_core::{Scalar, Vec3};
@@ -355,8 +384,9 @@ pub(crate) enum PolygonRefusal {
     /// The outer ring has zero or non-finite area, so it has no plane.
     NoPlane,
     /// A corner lies further from the face plane than the tolerance; the
-    /// value is that distance. A non-planar polygon has no unique
-    /// triangulation, so choosing one would invent geometry.
+    /// value is that distance. Only [`triangulate_polygon`] refuses it,
+    /// whose callers mean the polygon to be planar (a curve-bounded plane);
+    /// an authored face reports its warp instead (#254).
     NotPlanar(Scalar),
     /// The triangles do not cover the polygon's area: the rings cross
     /// themselves or each other, or a hole is not inside the outer ring.
@@ -402,6 +432,47 @@ pub(crate) fn triangulate_polygon(
     rings: &[&[Vec3]],
     linear: Scalar,
 ) -> Result<Vec<usize>, PolygonRefusal> {
+    triangulate_in_fit_plane(rings, linear, true).map(|(indices, _)| indices)
+}
+
+/// An authored polygon face's triangles and how far it is warped (#254).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AuthoredTriangulation {
+    /// Three indices per triangle, as [`triangulate_polygon`] returns them.
+    pub indices: Vec<usize>,
+    /// `None` when every corner lies within the linear tolerance of the fit
+    /// plane: the face is planar and its triangles are exactly what
+    /// [`triangulate_polygon`] returns. Otherwise `Some(w)`, the bound of
+    /// the module notes, above the tolerance.
+    pub warp: Option<Scalar>,
+}
+
+/// [`triangulate_polygon`] for an authored polygon face: a face warped
+/// beyond the linear tolerance is triangulated too and its warp reported,
+/// so [`PolygonRefusal::NotPlanar`] never comes back. The module notes say
+/// what the warp bounds.
+///
+/// # Refusals
+///
+/// No plane, or rings that cross (or a hole outside the outer ring) in the
+/// projection onto the fit plane, as [`triangulate_polygon`].
+pub(crate) fn triangulate_authored_polygon(
+    rings: &[&[Vec3]],
+    linear: Scalar,
+) -> Result<AuthoredTriangulation, PolygonRefusal> {
+    triangulate_in_fit_plane(rings, linear, false)
+        .map(|(indices, warp)| AuthoredTriangulation { indices, warp })
+}
+
+/// The shared triangulation. With `refuse_warp`, a corner off the fit
+/// plane by more than `linear` is refused before anything is triangulated,
+/// as it always was; without, the face is triangulated and its warp
+/// returned.
+fn triangulate_in_fit_plane(
+    rings: &[&[Vec3]],
+    linear: Scalar,
+    refuse_warp: bool,
+) -> Result<(Vec<usize>, Option<Scalar>), PolygonRefusal> {
     let Some(outer) = rings.first() else {
         return Err(PolygonRefusal::NoPlane);
     };
@@ -413,18 +484,30 @@ pub(crate) fn triangulate_polygon(
     // Newell's is the least-squares plane direction for a near-planar ring.
     let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
     let mut worst: Scalar = 0.0;
+    let mut reach: Scalar = 0.0;
     for ring in rings {
         for &p in *ring {
-            let distance = (p - centroid).dot(n).abs();
+            let offset = p - centroid;
+            let distance = offset.dot(n).abs();
             if !distance.is_finite() {
                 return Err(PolygonRefusal::NoPlane);
             }
             worst = worst.max(distance);
+            reach = reach.max(offset.length());
         }
     }
-    if worst > linear {
-        return Err(PolygonRefusal::NotPlanar(worst));
-    }
+    let warp = if worst > linear {
+        if refuse_warp {
+            return Err(PolygonRefusal::NotPlanar(worst));
+        }
+        // The computed distance differs from the true distance to the plane
+        // through `centroid` along `n` (both as stored) by the rounding of a
+        // subtraction, a three-term dot product and the normalisation of
+        // `n`: well within 16 ulps of the corner's distance from `centroid`.
+        Some(worst + 16.0 * f64::EPSILON * reach)
+    } else {
+        None
+    };
 
     let mut flat: Vec<[Scalar; 2]> = Vec::new();
     let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
@@ -474,7 +557,7 @@ pub(crate) fn triangulate_polygon(
     // After the area check, so it judges earcut's own cover; each split
     // keeps winding and moves area only by float noise.
     split_invented_edges(&flat, &hole_starts, collinear_band(linear), &mut indices);
-    Ok(indices)
+    Ok((indices, warp))
 }
 
 /// A typed error naming the authored face that could not be triangulated.
@@ -639,6 +722,55 @@ mod tests {
         assert_eq!(indices.len(), 3, "earcut keeps the one triangle");
         split_invented_edges(&flat, &[], collinear_band(1.0e-3), &mut indices);
         assert_eq!(indices.len(), 3, "the face is not a sliver: {indices:?}");
+    }
+
+    /// A planar face (within the tolerance) triangulates bit for bit as
+    /// [`triangulate_polygon`] does and reports no warp (#254); a warped one
+    /// is still refused by [`triangulate_polygon`], whose callers mean a
+    /// plane, and triangulated with its warp by the authored path.
+    #[test]
+    fn the_authored_path_is_the_planar_path_on_planar_faces() {
+        let holed: [&[Vec3]; 2] = [
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 1.0),
+                Vec3::new(4.0, 3.0, 1.0),
+                Vec3::new(2.0, 1.5, 0.5),
+                Vec3::new(0.0, 3.0, 0.0),
+            ],
+            &[
+                Vec3::new(0.5, 0.5, 0.125),
+                Vec3::new(0.5, 1.0, 0.125),
+                Vec3::new(1.0, 1.0, 0.25),
+                Vec3::new(1.0, 0.5, 0.25),
+            ],
+        ];
+        let noisy: [&[Vec3]; 1] = [&[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 9e-4),
+            Vec3::new(0.0, 1.0, 0.0),
+        ]];
+        for rings in [&holed[..], &noisy[..]] {
+            let planar = triangulate_polygon(rings, 1e-3).unwrap();
+            let authored = triangulate_authored_polygon(rings, 1e-3).unwrap();
+            assert_eq!(authored.indices, planar);
+            assert_eq!(authored.warp, None);
+        }
+        let warped: [&[Vec3]; 1] = [&[
+            Vec3::new(0.0, 0.0, 0.05),
+            Vec3::new(1.0, 0.0, -0.05),
+            Vec3::new(1.0, 1.0, 0.05),
+            Vec3::new(0.0, 1.0, -0.05),
+        ]];
+        assert!(matches!(
+            triangulate_polygon(&warped, 1e-3),
+            Err(PolygonRefusal::NotPlanar(d)) if (d - 0.05).abs() < 1e-12
+        ));
+        let authored = triangulate_authored_polygon(&warped, 1e-3).unwrap();
+        assert_eq!(authored.indices.len(), 6);
+        let warp = authored.warp.unwrap();
+        assert!((0.05..0.05 + 1e-12).contains(&warp), "{warp}");
     }
 
     /// An authored ring edge is shared with the neighbour exactly as
