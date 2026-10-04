@@ -416,6 +416,94 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.15 - 2026-10-04
+
+### Added
+
+- **Rings that touch at single points triangulate on 2D and surface
+  paths (#262).** The certified clipper of #253 refuses rings touching at
+  one vertex, which is right for a solid (the extrusion shares one wall
+  edge between four faces) but refused valid regions a consumer re-feeds
+  from overlay output: two rooms meeting at a corner, an L-shaped room
+  wrapped round a column corner, a corridor eroded to a point, the same
+  pinch reported through even-odd fill, a room minus door zones touching
+  its walls. `profile::triangulate_with(rings, PinchPolicy)` makes the
+  choice explicit: `PinchPolicy::Refuse` is `triangulate` (extrusion and
+  loft caps, unchanged), `PinchPolicy::Accept` triangulates the region
+  (ADR 0083 amendment). Two edges may then meet at one point that is a
+  vertex of at least one of them; the vertex is inserted into the other
+  edge, coincident vertices become one (triangles use a point's first
+  index in `outer ++ holes`), each ring is split at its repeated vertices
+  into simple loops turned by their nesting depth (inside an odd number of
+  loops is inside), the loops' edges must alternate leaving and arriving
+  round each shared vertex (else the rings cross there, refused by name),
+  and each wedge there becomes one node, so the region falls into its
+  connected parts -- two lobes of a pinch separate, a hole touching the
+  outer ring merges with it, holes touching in a ring close off a part of
+  their own -- each bridged and clipped as before. The certificate is the
+  same over the split loops, with each visit of a pinch point counted as
+  its own vertex and `n + 2h - 2c` triangles for `c` parts. Rings touching
+  nowhere triangulate identically under both policies; crossing and
+  overlapping rings stay refused under both. Tests
+  (`tests/profile_pinches.rs`): the consumer's cases (rooms at a corner,
+  an L round a column, an eroded corridor, even-odd figure eights, a room
+  minus door zones), footprints touching at a corner, holes touching the
+  outer ring at a corner, inside an edge, at every corner and across the
+  region, holes touching each other at a corner, inside a side, at their
+  extreme corner and in a ring that closes off a part with its own hole,
+  and an outer ring pinched round a hole, each from every start vertex and
+  either way round, tile exactly (strictly counter-clockwise, exact area,
+  no vertex on a triangle, untwinned edges covering every ring edge once)
+  and are refused by `triangulate` and `extrude_profile` by name; 300
+  random grid layouts of checkerboard squares and touching diamonds tile
+  exactly, 200 off the grid tile, and layouts shrunk apart triangulate
+  identically under both policies; crossing at shared vertices and
+  overlapping rings are refused by name. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (52/52 killed).
+
+### Fixed
+
+- **Profiles with several holes extrude to closed solids (#253).**
+  `profile::triangulate` delegated to `earcut`, which drops nodes where
+  the bridged ring runs straight on and lets only reflex nodes block an
+  ear. For two holes side by side in one horizontal band (a 4 x 4 outer
+  ring, 1 x 1 holes at x in [-1.5, -0.5] and [0.5, 1.5]) it returned 12
+  triangles of the right area instead of 14: one edge ran along the
+  band's bottom line past both holes' inner corners, a T-junction, so the
+  plain extrusion had 8 boundary edges and failed its volume and closure
+  checks. Triangulation is now the crate's own ear clipper, every
+  decision an exact `orient2d` sign (ADR 0083, superseding ADR 0015 for
+  this crate): holes are bridged in order of decreasing largest x from
+  their rightmost vertex, each bridge accepted only when it enters the
+  polygon at both ends and touches no ring edge or earlier bridge, a
+  vertex on it included; an ear is refused if any other vertex lies in
+  its closed triangle. The output is certified before it is returned --
+  every triangle strictly counter-clockwise, every ring edge used once
+  from inside, every other edge once in each direction -- and refused
+  with `Degenerate` otherwise. Rings may come either way round; every
+  vertex is now a triangle corner, `outer ++ holes` unchanged. Ring sets
+  that bound no polygon with holes are refused with `InvalidInput`
+  naming the ring: a non-finite or repeated vertex, a ring folding back
+  on or crossing itself, holes overlapping or touching each other or the
+  outer ring (including at one vertex, which earcut accepted and which
+  extrudes to a non-manifold edge), a hole outside the outer ring or
+  inside another hole. The crate no longer depends on `earcut`. Tests
+  (`tests/profile_holes.rs`): holes side by side, stacked, three on one
+  ray, a hole vertex exactly on another's ray, five holes 1/1024 from the
+  outer ring, and three flattened round holes in a row each triangulate
+  with n + 2h - 2 counter-clockwise triangles, every ring edge once and
+  every other edge twinned, cover exactly outer minus holes, and extrude
+  to a closed, outward solid of volume area x depth; so do a triangle
+  and an L with a straight or reflex vertex, from every starting vertex,
+  as outer ring and as hole, a vertex in line with another hole's side
+  just past its end, and 400 seeded
+  random layouts of rectangles, triangles, L shapes, diamonds and
+  rectangles with collinear midpoints on a quarter grid (compared with
+  `==`) and 200 off-grid layouts of regular 3- to 40-gons; each invalid
+  ring set above is refused by name; the certificate refuses earcut's
+  output for the issue's profile. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (31/31 killed).
+
 ### 0.3.14 - 2026-10-04
 
 ### Fixed
@@ -1071,6 +1159,40 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.6 - 2026-10-04
+
+### Added
+
+- Elevated curves through the generic 3D curve functions (#252):
+  `curve::evaluate3`, `derivative3`, `second_derivative3` and `domain3`
+  read a `Curve3::Elevated` by PLAN distance (ADR 0082, like `Banked3`):
+  the derivative is `(p', grade)`, not unit, the second `(k n, z'')`,
+  the domain `[0, L]` over the plan's length (unbounded for a line plan,
+  a full turn for a circle); `second_derivative3` also reads a
+  `Curve3::Banked` (`banked::banked_second_derivative`, the pivot's `e''`
+  added).
+- `elevated` module (#252): `elevated_derivative`,
+  `elevated_second_derivative`, `elevated_span`, and the certified
+  `elevated_chord_bound` -- `sqrt(P^2 + Z^2)`, the plan's Taylor chord
+  bound `h^2/8 sup |k|` and the profile's `elevation_chord_bound` at
+  equal plan distance, orthogonal parts composed in quadrature (the
+  module documents the derivation and why the plan's own `chord_bound2`
+  does not compose) -- with `banked_chord_bound`,
+  `elevated_derivative_bounds` and `banked_derivative_bounds`
+  (`sup |c'|, |c''|, |c'''|`, plan and profile combined per law, a
+  chain's parametric piece through its own derivative suprema),
+  `elevated_breaks`/`banked_breaks`, and `grade_corners3`, the seams
+  across which the grade jumps, read from the laws on either side.
+  `bound::chord_bound3`, `curve_derivative_bounds3`, `continuity_breaks3`
+  and `certifies_flattening3` dispatch to them, so `flatten3` certifies an
+  elevated curve over a certified plan with a closed-form profile.
+
+### Changed
+
+- `elevation`: an intrinsic reading carries its profile arc length, and
+  `frenet`'s pointwise curvature-law value is shared crate-wide (#252);
+  no public signature changed.
 
 ### 0.3.5 - 2026-10-03
 
@@ -1887,6 +2009,117 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.14 - 2026-10-04
+
+### Added
+
+- Sweeps along elevated and banked directrices (#252): a `Curve3::Elevated`
+  (what a gradient curve lowers to) or `Curve3::Banked` directrix, alone,
+  trimmed or read through a curve-3D surface curve, is sampled by plan
+  distance (its parameter, ADR 0082; a sweep range is a span of plan
+  distance, and a line plan, which has no end, needs one) against its
+  certified 3D chord bound, and swept as one smooth curve -- end tangents
+  reported, refined until the walls fit -- unless its grade jumps at a
+  profile or pivot seam inside the span (by more than 1e-9 rad). Swept
+  disks, fixed-reference and surface-curve sweeps all take it. A disk's
+  tube is certified against the exact tube (`DeviationBound::Certified`,
+  detail "elevated curve" / "banked curve"); a grade break is unbounded
+  by name ("elevated directrix with a grade break"); a straight plan
+  under a constant grade is a segment, proven, and an exact swept disk
+  (`exact_directrix`) along it. A banked curve's disk follows its rotation
+  point; its rolled section frames remain those of station-placed
+  sections. Previously every such directrix was refused as
+  `Unsupported { operation: CurveEvaluation }`.
+
+### Changed
+
+- A warped authored polygon face (#254) now reports the width of the slab
+  its corners span about its fit plane, largest minus smallest signed
+  distance over every corner, holes included, plus rounding (#261),
+  instead of the largest corner distance from that plane. A warped face
+  has no single true surface; either diagonal triangulation, the face
+  flattened onto its fit plane and a bilinear patch all lie in that slab,
+  so each is within its width of the mesh wherever it lies over the face.
+  The largest corner distance understated how far two such readings can
+  be apart. The bound grows by up to twice: a saddle with corners at
+  `+-h` reports `2h` (was `h`); a square with one corner lifted by `h`
+  reports `h/2`, the gap between its two triangulations at the centre
+  (was `h/4`). Still `DeviationBound::Certified` under "non-planar
+  authored face", never `Proven`; faces within the linear tolerance of
+  their plane are unchanged.
+- A disk swept along a smooth curve (ellipse, B-spline, and now elevated
+  and banked curves) is certified with a search suited to a long tube's
+  long, thin quads (#252): quads twisted by up to a twentieth of the
+  budget are covered as flat regions (the thickness is added to the
+  bound), each cell is cut the way that lowers its halves more (within an
+  aspect ratio of 256), and the search settles once within the budget.
+  A 60 m tube that exhausted the work cap at 4.5 times its measured
+  deviation now certifies at 1.1-1.6 times it.
+- A disk swept along a smooth curve whose certified bound lands over the
+  chord budget is rebuilt finer and certified again (#252): the
+  construction's chord shrinks by the overshoot (with a 0.9 margin), at
+  most three times, keeping a rebuild only when it lowers the bound. The
+  stations are placed on a second-order estimate, so bounds landed 4-8%
+  over and `DeviationReport::meets_requested()` read false; every elevated,
+  banked and gradient-curve tube at 1 mm and 0.1 mm now meets it, at
+  6-54% more triangles where a rebuild was needed (none where the first
+  mesh was within). A bound the rebuilds cannot bring within the budget
+  is still reported as it is.
+
+### Fixed
+
+- A B-rep face that declares no surface and whose corners are not
+  coplanar reported `Proven(0)` without being measured (#257), so a
+  faceted box with one corner lifted 5 cm read as exact. Such a face is
+  now measured as a warped authored polygon face is (#261): beyond the
+  linear tolerance of its fit plane it reports the width of the slab its
+  corners (holes included) span about that plane,
+  `DeviationBound::Certified` under the detail "non-planar face without a
+  surface", and `DeviationReport::meets_requested()` follows from it. It
+  is reported rather than refused: these faces come from faceted exports,
+  and the exact compiler refuses B-rep nodes altogether. Faces within the
+  tolerance, and faces with a declared plane (bounded against that plane
+  as before), are unchanged.
+- **Planar faces are triangulated by the certified ear clipper (#260).**
+  Authored polygon faces, curve-bounded planes, planar B-rep faces and
+  curved faces' parameter domains used earcut, the triangulator that left
+  #253's T-junction in profile caps (a triangle edge along a band of holes
+  past their inner corners), and the planar B-rep path checked its output
+  not at all. All of them now go through `axiolid-construct`'s clipper
+  (`profile::triangulate_with`, ADR 0083 amendment), whose certificate
+  proves the triangles tile the projected face exactly once with every
+  ring edge a triangle edge; it replaces the authored path's area
+  cross-check and backs the `Proven(0)` and slab bounds of planar B-rep
+  faces, which assume that cover. Faces are surface patches, so rings
+  touching at a single point (#262: a hole touching the outer ring or
+  another hole, an outer ring pinched at a vertex) triangulate under
+  `PinchPolicy::Accept`; a pinch inside one face of a closed solid leaves
+  every shell edge shared by two faces. A corner repeating its predecessor
+  exactly is still dropped; every other corner is a triangle corner, so
+  curved faces no longer put skipped trim samples back. Rings that bound no
+  region are refused by name where earcut returned a partial cover:
+  `PolygonRefusal::AreaMismatch` is now `PolygonRefusal::Rings`, carrying
+  the clipper's reason (crossing, overlapping, a hole outside). The
+  noise-band split of planar faces stays, for slivers across corners a
+  few nanometres off a straight run. Triangle sets differ from earcut's
+  (a different ear order); areas, closure, authored corners and every
+  deviation report are unchanged. A test fixture whose four cylinder
+  edges each carried the whole closed trim as its pcurve traced its
+  rectangle four times over, an overlapping ring earcut triangulated
+  silently; it now gives each edge its own side. `earcut` is no longer a
+  dependency of this crate or the workspace. Tests
+  (`tests/planar_certified.rs`): #253's side-by-side and three-on-a-ray
+  holes and 60 seeded random layouts become the top and bottom faces of
+  prisms, authored and as faceted B-reps, which compile closed with
+  volume area x depth and planar faces reported `Proven(0)`; footprints
+  touching at a corner and holes touching the outer ring or each other
+  triangulate as single faces, authored and as surface models, with
+  their exact area, facing up; a doubled corner inside a ring is dropped;
+  the extrusion of a profile with a hole touching the outer ring is
+  refused by name. Mutation probes: `scripts/probe_polygon_faces_mutants.py` (26/26
+  killed) and `scripts/probe_closed_mesh_mutants.py` (11/11, the split on
+  the clipper's output).
 
 ### 0.3.13 - 2026-10-03
 
@@ -3202,6 +3435,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.7 - 2026-10-04
+
+### Added
+
+- `elevated`: `axiolid-evaluate`'s derivatives, certified chord and
+  derivative bounds and grade corners of elevated and banked curves
+  (#252), re-exported on the same footing as `curve` and `surface`.
 
 ### 0.3.6 - 2026-10-03
 

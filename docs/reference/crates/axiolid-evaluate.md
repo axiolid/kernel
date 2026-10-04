@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-03) |
+| Latest release | 0.3.6 (2026-10-04) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -41,36 +41,38 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-03):
+Latest release, 0.3.6 (2026-10-04):
 
 ### Added
 
-- `station::SectionFrame::oriented` (#246, ADR 0082 amendment): turns a
-  section frame by an explicit axis and reference direction given as
-  components in that frame, `(tangent, lateral, up)` -- the axis becomes
-  the exact up, the reference direction is orthonormalised against it
-  (Gram-Schmidt, axis primary), the point stays -- and refuses a zero,
-  non-finite or parallel pair by name (`station::ORIENTATION_TOLERANCE`).
-- `bound::chord_bound2` bounds implicit curves (`Curve2::Implicit`, ADR
-  0077) one cell at a time (#249), and `continuity_breaks2` names their
-  cell joins. A regular cell's solved parameter is bounded through the
-  implicit function theorem with interval bounds of the field's partials
-  over the stretch's box (first and second order, the smaller kept); a
-  bridge cell into a crossing by its cubic's Bezier control points. The
-  deviation of a boolean whose exact result has traced pcurves (a hole
-  through an I-beam's root fillets) can now be certified.
+- Elevated curves through the generic 3D curve functions (#252):
+  `curve::evaluate3`, `derivative3`, `second_derivative3` and `domain3`
+  read a `Curve3::Elevated` by PLAN distance (ADR 0082, like `Banked3`):
+  the derivative is `(p', grade)`, not unit, the second `(k n, z'')`,
+  the domain `[0, L]` over the plan's length (unbounded for a line plan,
+  a full turn for a circle); `second_derivative3` also reads a
+  `Curve3::Banked` (`banked::banked_second_derivative`, the pivot's `e''`
+  added).
+- `elevated` module (#252): `elevated_derivative`,
+  `elevated_second_derivative`, `elevated_span`, and the certified
+  `elevated_chord_bound` -- `sqrt(P^2 + Z^2)`, the plan's Taylor chord
+  bound `h^2/8 sup |k|` and the profile's `elevation_chord_bound` at
+  equal plan distance, orthogonal parts composed in quadrature (the
+  module documents the derivation and why the plan's own `chord_bound2`
+  does not compose) -- with `banked_chord_bound`,
+  `elevated_derivative_bounds` and `banked_derivative_bounds`
+  (`sup |c'|, |c''|, |c'''|`, plan and profile combined per law, a
+  chain's parametric piece through its own derivative suprema),
+  `elevated_breaks`/`banked_breaks`, and `grade_corners3`, the seams
+  across which the grade jumps, read from the laws on either side.
+  `bound::chord_bound3`, `curve_derivative_bounds3`, `continuity_breaks3`
+  and `certifies_flattening3` dispatch to them, so `flatten3` certifies an
+  elevated curve over a certified plan with a closed-form profile.
 
-- `station` (#241, ADR 0082): `station_section2` and `station_section3`
-  resolve a distance along a curve -- plan distance on an elevated or
-  banked curve, arc length (through `arc_parameter`) on any other -- to a
-  `SectionFrame`: the point, the unit tangent, the lateral axis to the
-  left and `up = tangent x lateral`. A 2D curve is framed in `z = 0` with
-  `+Z` up, a banked curve by its rolled section, every other 3D curve by
-  the reference-up frame against `+Z` that `ReferenceCurveEvaluator`
-  returns. `SectionFrame::place` applies offsets, `plan` gives the upright
-  frame, `frame` the provider's layout (`x` tangent, `y` up, `z` right).
-  `station_length2`/`station_length3` give the length a station is
-  checked against; a negative, non-finite or too-long distance and a
-  vertical tangent are refused by name.
+### Changed
+
+- `elevation`: an intrinsic reading carries its profile arc length, and
+  `frenet`'s pointwise curvature-law value is shared crate-wide (#252);
+  no public signature changed.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

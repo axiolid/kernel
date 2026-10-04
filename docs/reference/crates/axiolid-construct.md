@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.14 (2026-10-04) |
+| Latest release | 0.3.15 (2026-10-04) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -63,37 +63,92 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.14 (2026-10-04):
+Latest release, 0.3.15 (2026-10-04):
+
+### Added
+
+- **Rings that touch at single points triangulate on 2D and surface
+  paths (#262).** The certified clipper of #253 refuses rings touching at
+  one vertex, which is right for a solid (the extrusion shares one wall
+  edge between four faces) but refused valid regions a consumer re-feeds
+  from overlay output: two rooms meeting at a corner, an L-shaped room
+  wrapped round a column corner, a corridor eroded to a point, the same
+  pinch reported through even-odd fill, a room minus door zones touching
+  its walls. `profile::triangulate_with(rings, PinchPolicy)` makes the
+  choice explicit: `PinchPolicy::Refuse` is `triangulate` (extrusion and
+  loft caps, unchanged), `PinchPolicy::Accept` triangulates the region
+  (ADR 0083 amendment). Two edges may then meet at one point that is a
+  vertex of at least one of them; the vertex is inserted into the other
+  edge, coincident vertices become one (triangles use a point's first
+  index in `outer ++ holes`), each ring is split at its repeated vertices
+  into simple loops turned by their nesting depth (inside an odd number of
+  loops is inside), the loops' edges must alternate leaving and arriving
+  round each shared vertex (else the rings cross there, refused by name),
+  and each wedge there becomes one node, so the region falls into its
+  connected parts -- two lobes of a pinch separate, a hole touching the
+  outer ring merges with it, holes touching in a ring close off a part of
+  their own -- each bridged and clipped as before. The certificate is the
+  same over the split loops, with each visit of a pinch point counted as
+  its own vertex and `n + 2h - 2c` triangles for `c` parts. Rings touching
+  nowhere triangulate identically under both policies; crossing and
+  overlapping rings stay refused under both. Tests
+  (`tests/profile_pinches.rs`): the consumer's cases (rooms at a corner,
+  an L round a column, an eroded corridor, even-odd figure eights, a room
+  minus door zones), footprints touching at a corner, holes touching the
+  outer ring at a corner, inside an edge, at every corner and across the
+  region, holes touching each other at a corner, inside a side, at their
+  extreme corner and in a ring that closes off a part with its own hole,
+  and an outer ring pinched round a hole, each from every start vertex and
+  either way round, tile exactly (strictly counter-clockwise, exact area,
+  no vertex on a triangle, untwinned edges covering every ring edge once)
+  and are refused by `triangulate` and `extrude_profile` by name; 300
+  random grid layouts of checkerboard squares and touching diamonds tile
+  exactly, 200 off the grid tile, and layouts shrunk apart triangulate
+  identically under both policies; crossing at shared vertices and
+  overlapping rings are refused by name. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (52/52 killed).
 
 ### Fixed
 
-- **Parametric profiles with decimal sizes lower at `Tolerance::ZERO`
-  (#250).** `contour_lower::contour_to_arc_ring` demanded bit-equal
-  segment joints at `Tolerance::ZERO`, which a `Line2`/`Circle2` contour
-  cannot give for non-dyadic sizes: a line ends at a rounded
-  `origin + direction`, an arc at the `cos`/`sin` of its sweep. So every
-  I section with IPE or HEA sizes (sharp or with root fillets), and the
-  other families with decimal sizes, was refused before any boolean ran
-  ("contour segments leave a gap of 2.6e-18"). The section router already
-  computes each corner and tangent point once and hands it to both
-  segments; the ring takes one vertex per joint (the leaving segment's
-  start, a line's stored origin bit for bit), so it is closed by
-  construction. The joint check now allows the larger of the tolerance
-  and the rounding of the two evaluations meeting there (eight machine
-  epsilons of the magnitudes they are computed from); a contour open by
-  more is still refused at `Tolerance::ZERO`. Rings are bit-identical to
-  before wherever lowering succeeded, so results at a positive tolerance
-  are unchanged. Tests: I (IPE 300/200, HEA 200, HEB 340; sharp, root
-  fillets, toe radii), asymmetric I, T, U, L, Z, C, trapezium, rounded
-  and hollow rectangles and an annulus lower at ZERO with each line's
-  shared corner as its ring vertex, and extrude at ZERO to their
-  closed-form areas, fillet terms `(1 - pi/4) r^2` included; tapered
-  I/U/L/T lower and extrude at ZERO; joints far from the origin close to
-  their own rounding; contours open by 1e-13 or 1e-9 are refused at ZERO.
-  In `axiolid-mesh-compile`, an IPE 300 beam (with and without fillets)
-  minus a round web hole clear of the fillets compiles at ZERO under
-  exact placements with an empty report and the closed-form volume.
-  Mutation probe: `scripts/probe_section_zero_tolerance_mutants.py`
-  (9/9 killed).
+- **Profiles with several holes extrude to closed solids (#253).**
+  `profile::triangulate` delegated to `earcut`, which drops nodes where
+  the bridged ring runs straight on and lets only reflex nodes block an
+  ear. For two holes side by side in one horizontal band (a 4 x 4 outer
+  ring, 1 x 1 holes at x in [-1.5, -0.5] and [0.5, 1.5]) it returned 12
+  triangles of the right area instead of 14: one edge ran along the
+  band's bottom line past both holes' inner corners, a T-junction, so the
+  plain extrusion had 8 boundary edges and failed its volume and closure
+  checks. Triangulation is now the crate's own ear clipper, every
+  decision an exact `orient2d` sign (ADR 0083, superseding ADR 0015 for
+  this crate): holes are bridged in order of decreasing largest x from
+  their rightmost vertex, each bridge accepted only when it enters the
+  polygon at both ends and touches no ring edge or earlier bridge, a
+  vertex on it included; an ear is refused if any other vertex lies in
+  its closed triangle. The output is certified before it is returned --
+  every triangle strictly counter-clockwise, every ring edge used once
+  from inside, every other edge once in each direction -- and refused
+  with `Degenerate` otherwise. Rings may come either way round; every
+  vertex is now a triangle corner, `outer ++ holes` unchanged. Ring sets
+  that bound no polygon with holes are refused with `InvalidInput`
+  naming the ring: a non-finite or repeated vertex, a ring folding back
+  on or crossing itself, holes overlapping or touching each other or the
+  outer ring (including at one vertex, which earcut accepted and which
+  extrudes to a non-manifold edge), a hole outside the outer ring or
+  inside another hole. The crate no longer depends on `earcut`. Tests
+  (`tests/profile_holes.rs`): holes side by side, stacked, three on one
+  ray, a hole vertex exactly on another's ray, five holes 1/1024 from the
+  outer ring, and three flattened round holes in a row each triangulate
+  with n + 2h - 2 counter-clockwise triangles, every ring edge once and
+  every other edge twinned, cover exactly outer minus holes, and extrude
+  to a closed, outward solid of volume area x depth; so do a triangle
+  and an L with a straight or reflex vertex, from every starting vertex,
+  as outer ring and as hole, a vertex in line with another hole's side
+  just past its end, and 400 seeded
+  random layouts of rectangles, triangles, L shapes, diamonds and
+  rectangles with collinear midpoints on a quarter grid (compared with
+  `==`) and 200 off-grid layouts of regular 3- to 40-gons; each invalid
+  ring set above is refused by name; the certificate refuses earcut's
+  output for the issue's profile. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (31/31 killed).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

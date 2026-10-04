@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.13 (2026-10-03) |
+| Latest release | 0.3.14 (2026-10-04) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -60,102 +60,115 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.13 (2026-10-03):
+Latest release, 0.3.14 (2026-10-04):
 
 ### Added
 
-- Oriented and tagged stations (#246, ADR 0082 amendment):
-  `station::resolve` also resolves an `OrientedCurveStation`, its frame
-  turned by the orientation, its point and `section` not. The new
-  `SectionsAtStations` spine and `OpenSectionsAtStations` sheet mesh like
-  the #241 relations (same deviation paths, the exact compiler refuses the
-  spine as a station-placed spine), each section's plane turned by its
-  orientation, interpolated between sections in the base frame. Tagged
-  closed sections are matched by tag: their profile must be a polygonal
-  contour (optionally under a derived transform), each ring rewound
-  outer counter-clockwise and holes clockwise, then re-started and
-  re-ordered to line up with the first section's rings; a tag count that
-  is not the vertex count, a curved or parametric profile, an outer ring
-  tagged as a hole and an order that is no rotation are refused by name.
-
-- A curve-bounded plane takes `CurveRelation` boundaries (#255): a
-  `Composite` of lines, polylines, arcs and other segments, each read in
-  its `same_sense`, and a `Trimmed` basis curve under every
-  `TrimSelector` kind (parameter, point, arc length), resolved to points by
-  the sweep directrix reader, 2D curves and point selectors lifted to
-  `z = 0`. The boundary must close within the linear tolerance; an open
-  one, a joint gap past it, an offset, surface-curve, parameter-curve or
-  station-offset relation, and a 2D family other than a line, circle,
-  ellipse, polyline or B-spline are refused by name. The deviation report
-  bounds such a boundary by its leaves (straight exact, certified families
-  within the chord budget, others `Unbounded` by name) plus its widest
-  joint gap. A joint or closing gap no wider than its ends' own rounding
-  (`8` machine epsilons of the magnitudes they are computed from, as
-  #250 welds profile joints: `sin(2 pi)` at a full turn, `cos(pi / 2)` at
-  an arc's end) is welded and adds nothing, for atomic boundaries too.
-  Boundaries are flattened to the budget shrunk by the plane frame's
-  stretch bound, so a curve-bounded plane's reported bound stays within
-  the budget and `meets_requested` holds.
-
-- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
-  node into its point and frame (`x` tangent, `y` up, `z` right). The
-  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
-  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
-  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
-  in distance between stations and refining between them until each
-  section point's midpoint and each wall quad stay within the chord
-  budget; an `OffsetByStations` curve is sampled as a sweep directrix
-  (its parameter is the basis distance). Their deviation is reported
-  `Unbounded` by name (`DeviationPath::StationedSpine`,
-  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
-  refuses a station-placed spine by name. Refused by name: a station on
-  an instance or a curve relation, a distance beyond the curve, sections
-  whose ring structure, vertex count or tags disagree, and an open
-  section that is not a polyline.
+- Sweeps along elevated and banked directrices (#252): a `Curve3::Elevated`
+  (what a gradient curve lowers to) or `Curve3::Banked` directrix, alone,
+  trimmed or read through a curve-3D surface curve, is sampled by plan
+  distance (its parameter, ADR 0082; a sweep range is a span of plan
+  distance, and a line plan, which has no end, needs one) against its
+  certified 3D chord bound, and swept as one smooth curve -- end tangents
+  reported, refined until the walls fit -- unless its grade jumps at a
+  profile or pivot seam inside the span (by more than 1e-9 rad). Swept
+  disks, fixed-reference and surface-curve sweeps all take it. A disk's
+  tube is certified against the exact tube (`DeviationBound::Certified`,
+  detail "elevated curve" / "banked curve"); a grade break is unbounded
+  by name ("elevated directrix with a grade break"); a straight plan
+  under a constant grade is a segment, proven, and an exact swept disk
+  (`exact_directrix`) along it. A banked curve's disk follows its rotation
+  point; its rolled section frames remain those of station-placed
+  sections. Previously every such directrix was refused as
+  `Unsupported { operation: CurveEvaluation }`.
 
 ### Changed
 
-- A sectioned surface whose section runs its tags in reverse is joined
-  reversed instead of refused (#246).
-- An authored polygon face off its plane by more than the linear
-  tolerance is triangulated instead of refused as not planar (#254). It is
-  projected onto its fit plane (the outer ring's centroid and Newell
-  normal), ear clipped there and lifted back to its authored corners,
-  which are never moved. `compile_mesh_with_deviation` reports it as
-  `AuthoredMesh` with the detail `"non-planar authored face"`, always
-  `Certified`, never `Proven`: the largest distance of any corner (holes
-  included) from that fit plane, over the worst such face. That bounds the
-  distance between the mesh and the face flattened onto the plane both
-  ways, and is at least the largest corner distance from the plane the
-  face was triangulated in. Faces within the tolerance triangulate and
-  report exactly as before; rings that cross or enclose no area in the fit
-  plane are still refused by face index, and the exact compiler still
-  refuses polygon meshes by name.
-- A clockwise outer loop of a curve-bounded plane is reversed about its
-  first point, so a loop read backwards triangulates exactly as the loop
-  read forwards (#255).
+- A warped authored polygon face (#254) now reports the width of the slab
+  its corners span about its fit plane, largest minus smallest signed
+  distance over every corner, holes included, plus rounding (#261),
+  instead of the largest corner distance from that plane. A warped face
+  has no single true surface; either diagonal triangulation, the face
+  flattened onto its fit plane and a bilinear patch all lie in that slab,
+  so each is within its width of the mesh wherever it lies over the face.
+  The largest corner distance understated how far two such readings can
+  be apart. The bound grows by up to twice: a saddle with corners at
+  `+-h` reports `2h` (was `h`); a square with one corner lifted by `h`
+  reports `h/2`, the gap between its two triangulations at the centre
+  (was `h/4`). Still `DeviationBound::Certified` under "non-planar
+  authored face", never `Proven`; faces within the linear tolerance of
+  their plane are unchanged.
+- A disk swept along a smooth curve (ellipse, B-spline, and now elevated
+  and banked curves) is certified with a search suited to a long tube's
+  long, thin quads (#252): quads twisted by up to a twentieth of the
+  budget are covered as flat regions (the thickness is added to the
+  bound), each cell is cut the way that lowers its halves more (within an
+  aspect ratio of 256), and the search settles once within the budget.
+  A 60 m tube that exhausted the work cap at 4.5 times its measured
+  deviation now certifies at 1.1-1.6 times it.
+- A disk swept along a smooth curve whose certified bound lands over the
+  chord budget is rebuilt finer and certified again (#252): the
+  construction's chord shrinks by the overshoot (with a 0.9 margin), at
+  most three times, keeping a rebuild only when it lowers the bound. The
+  stations are placed on a second-order estimate, so bounds landed 4-8%
+  over and `DeviationReport::meets_requested()` read false; every elevated,
+  banked and gradient-curve tube at 1 mm and 0.1 mm now meets it, at
+  6-54% more triangles where a rebuild was needed (none where the first
+  mesh was within). A bound the rebuilds cannot bring within the budget
+  is still reported as it is.
 
 ### Fixed
 
-- `ReferenceExactCompiler` compiles a round web hole touching the flange
-  of an I-beam with root fillets (#249): exactly, with an empty report, at
-  `Tolerance::ZERO` with exact axes, and reading the contact under a
-  general placement. Its mesh is measured against the exact result
-  through `compile_mesh_with_deviation` and reported `Certified` (traced
-  pcurves now have certified chord bounds). A hole a fraction of the
-  tolerance off touching is refused by name ("... where the contact cannot
-  be placed").
-
-- `ReferenceExactCompiler` compiles placed differences whose round hole
-  touches a planar face (#243): an I-beam whose web hole touches the
-  flange, a wall whose round hole touches its top face, under any rigid
-  placement and up to a fraction of the tolerance into or short of the
-  face, and a column clipped by a plane a fraction of the tolerance into
-  it (the #234 open item). Exactly tangent with exact placements the
-  report is empty, at `Tolerance::ZERO` too; otherwise it carries
-  `PlaneTouchesCylinder`. Through `compile_mesh_with_deviation` such a
-  body's mesh is certified against its exact result instead of left
-  unbounded. A curve crossing the contact where it cannot be placed is
-  refused by name (`BooleanError::UnsupportedContact`).
+- A B-rep face that declares no surface and whose corners are not
+  coplanar reported `Proven(0)` without being measured (#257), so a
+  faceted box with one corner lifted 5 cm read as exact. Such a face is
+  now measured as a warped authored polygon face is (#261): beyond the
+  linear tolerance of its fit plane it reports the width of the slab its
+  corners (holes included) span about that plane,
+  `DeviationBound::Certified` under the detail "non-planar face without a
+  surface", and `DeviationReport::meets_requested()` follows from it. It
+  is reported rather than refused: these faces come from faceted exports,
+  and the exact compiler refuses B-rep nodes altogether. Faces within the
+  tolerance, and faces with a declared plane (bounded against that plane
+  as before), are unchanged.
+- **Planar faces are triangulated by the certified ear clipper (#260).**
+  Authored polygon faces, curve-bounded planes, planar B-rep faces and
+  curved faces' parameter domains used earcut, the triangulator that left
+  #253's T-junction in profile caps (a triangle edge along a band of holes
+  past their inner corners), and the planar B-rep path checked its output
+  not at all. All of them now go through `axiolid-construct`'s clipper
+  (`profile::triangulate_with`, ADR 0083 amendment), whose certificate
+  proves the triangles tile the projected face exactly once with every
+  ring edge a triangle edge; it replaces the authored path's area
+  cross-check and backs the `Proven(0)` and slab bounds of planar B-rep
+  faces, which assume that cover. Faces are surface patches, so rings
+  touching at a single point (#262: a hole touching the outer ring or
+  another hole, an outer ring pinched at a vertex) triangulate under
+  `PinchPolicy::Accept`; a pinch inside one face of a closed solid leaves
+  every shell edge shared by two faces. A corner repeating its predecessor
+  exactly is still dropped; every other corner is a triangle corner, so
+  curved faces no longer put skipped trim samples back. Rings that bound no
+  region are refused by name where earcut returned a partial cover:
+  `PolygonRefusal::AreaMismatch` is now `PolygonRefusal::Rings`, carrying
+  the clipper's reason (crossing, overlapping, a hole outside). The
+  noise-band split of planar faces stays, for slivers across corners a
+  few nanometres off a straight run. Triangle sets differ from earcut's
+  (a different ear order); areas, closure, authored corners and every
+  deviation report are unchanged. A test fixture whose four cylinder
+  edges each carried the whole closed trim as its pcurve traced its
+  rectangle four times over, an overlapping ring earcut triangulated
+  silently; it now gives each edge its own side. `earcut` is no longer a
+  dependency of this crate or the workspace. Tests
+  (`tests/planar_certified.rs`): #253's side-by-side and three-on-a-ray
+  holes and 60 seeded random layouts become the top and bottom faces of
+  prisms, authored and as faceted B-reps, which compile closed with
+  volume area x depth and planar faces reported `Proven(0)`; footprints
+  touching at a corner and holes touching the outer ring or each other
+  triangulate as single faces, authored and as surface models, with
+  their exact area, facing up; a doubled corner inside a ring is dropped;
+  the extrusion of a profile with a hole touching the outer ring is
+  refused by name. Mutation probes: `scripts/probe_polygon_faces_mutants.py` (26/26
+  killed) and `scripts/probe_closed_mesh_mutants.py` (11/11, the split on
+  the clipper's output).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

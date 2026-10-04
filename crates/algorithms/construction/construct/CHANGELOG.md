@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-10-04
+
 ### Added
 
 - **Rings that touch at single points triangulate on 2D and surface

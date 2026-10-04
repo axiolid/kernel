@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

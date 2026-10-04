@@ -92,9 +92,9 @@ axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.2" }
 axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", version = "0.1.0" }
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
-axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.5" }
+axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.6" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.5" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.14" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.15" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.1" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.3" }
@@ -124,8 +124,8 @@ axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.2" }
 axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.1" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
-axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.6" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.13" }
+axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.7" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.14" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that

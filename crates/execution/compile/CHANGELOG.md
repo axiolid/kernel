@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-10-04
+
 ### Added
 
 - Sweeps along elevated and banked directrices (#252): a `Curve3::Elevated`
