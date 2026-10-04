@@ -69,7 +69,22 @@ const INSIDE_SLACK: Scalar = 1e-12;
 
 impl Flat {
     /// Grow regions over `triangles`, whose corner indices are `ids`.
+    #[cfg(test)]
     pub(super) fn new(triangles: &[[Point3; 3]], ids: &[[u32; 3]]) -> Self {
+        Self::with_flatness(triangles, ids, 0.0)
+    }
+
+    /// [`Self::new`], also joining corners up to `flatness` from a seed's
+    /// plane (#252). The bound `d(x, R) <= d(x, H) + thickness` holds for
+    /// any thickness, which is measured, so a looser join only adds what
+    /// it lets in: the two triangles of a slightly twisted tube quad then
+    /// cover a piece together instead of forcing the search down to the
+    /// width of their diagonal.
+    pub(super) fn with_flatness(
+        triangles: &[[Point3; 3]],
+        ids: &[[u32; 3]],
+        flatness: Scalar,
+    ) -> Self {
         let count = triangles.len();
         let (lo, hi) = triangles.iter().flatten().fold(
             (
@@ -90,7 +105,7 @@ impl Flat {
         if !(scale.is_finite() && scale > 0.0) {
             return flat;
         }
-        let near = COPLANAR * scale;
+        let near = (COPLANAR * scale).max(if flatness.is_finite() { flatness } else { 0.0 });
         // Directed edge -> triangles using it; an undirected edge is
         // manifold when used once each way and by no one else.
         let mut directed: HashMap<(u32, u32), Vec<usize>> = HashMap::new();

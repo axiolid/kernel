@@ -176,11 +176,11 @@ fn omega_at(curve: &Intrinsic3, s: Scalar) -> GeomResult<Vec3> {
 
 /// Value of a scalar law at `s`, by differentiating its exact integral.
 fn law_at(law: &axiolid_curve::CurvatureLaw, s: Scalar) -> GeomResult<Scalar> {
-    value_of(law, s).ok_or_else(|| invalid("law is not defined at that arc length"))
+    law_value(law, s).ok_or_else(|| invalid("law is not defined at that arc length"))
 }
 
 /// Pointwise value of a `CurvatureLaw`.
-fn value_of(law: &axiolid_curve::CurvatureLaw, s: Scalar) -> Option<Scalar> {
+pub(crate) fn law_value(law: &axiolid_curve::CurvatureLaw, s: Scalar) -> Option<Scalar> {
     use axiolid_curve::CurvatureLaw as L;
     match law {
         L::Constant { curvature } => Some(*curvature),
@@ -211,7 +211,7 @@ fn value_of(law: &axiolid_curve::CurvatureLaw, s: Scalar) -> Option<Scalar> {
             for (index, piece) in laws.iter().enumerate() {
                 let end = breaks.get(index).copied().unwrap_or(Scalar::INFINITY);
                 if s <= end || index + 1 == laws.len() {
-                    return value_of(piece, s - start);
+                    return law_value(piece, s - start);
                 }
                 start = end;
             }

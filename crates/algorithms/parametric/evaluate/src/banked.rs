@@ -22,7 +22,7 @@
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
-use axiolid_curve::{BankError, Banked3, CantValue};
+use axiolid_curve::{BankError, Banked3, CantForm, CantLaw, CantPiece, CantValue};
 
 use crate::arc_length::{elevated_point, elevated_tangent};
 
@@ -150,6 +150,147 @@ pub fn banked_derivative(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> {
 /// As [`banked_point`].
 pub fn banked_tangent(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> {
     Ok(banked_derivative(curve, d)?.normalize())
+}
+
+/// Second derivative of [`banked_point`] in plan distance (#252):
+/// the centreline's `(p'', z'')` plus the pivot's `e''` vertically.
+///
+/// # Errors
+///
+/// As [`banked_point`].
+pub fn banked_second_derivative(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> {
+    if !d.is_finite() {
+        return Err(invalid("plan distance must be finite"));
+    }
+    covered(curve, d)?;
+    if curve.pivot.has_angle_pieces() {
+        return Err(refused(BankError::AngleInPivot));
+    }
+    let [_, _, bend] = pivot_jet(&curve.pivot, d, false).ok_or_else(|| {
+        refused(BankError::OutsideLaw {
+            law: "pivot",
+            distance: d,
+        })
+    })?;
+    let base = crate::elevated::elevated_second_derivative(&curve.base, d)?;
+    Ok(base + bend * Vec3::Z)
+}
+
+/// The height piece of a law at `d` and the distance into it: the piece
+/// starting there, or with `before` the one ending there.
+fn piece_at(law: &CantLaw, d: Scalar, before: bool) -> Option<(&CantPiece, Scalar)> {
+    if !d.is_finite() || d < 0.0 || !law.is_well_formed() {
+        return None;
+    }
+    let mut start = 0.0;
+    let last = law.pieces.len() - 1;
+    for (index, piece) in law.pieces.iter().enumerate() {
+        let end = start + piece.length;
+        let inside = if before { d <= end } else { d < end };
+        if inside || (index == last && d <= end) {
+            return Some((piece, d - start));
+        }
+        start = end;
+    }
+    None
+}
+
+/// `(e, e', e'')` of a height law at `d`, in plan distance; `None` off
+/// the law or for an angle piece.
+pub(crate) fn pivot_jet(law: &CantLaw, d: Scalar, before: bool) -> Option<[Scalar; 3]> {
+    let (piece, s) = piece_at(law, d, before)?;
+    let length = piece.length;
+    let xi = s / length;
+    let (value, slope, bend) = match &piece.form {
+        CantForm::Polynomial { coefficients } => {
+            let horner =
+                |k: usize| -> Scalar {
+                    coefficients.iter().enumerate().skip(k).rev().fold(
+                        0.0,
+                        |accumulated, (i, c)| {
+                            let falling: Scalar = (0..k).map(|j| (i - j) as Scalar).product();
+                            accumulated * xi + c * falling
+                        },
+                    )
+                };
+            (horner(0), horner(1), horner(2))
+        }
+        CantForm::Cosine { start, change } => {
+            let pi = core::f64::consts::PI;
+            let (sin, cos) = (pi * xi).sin_cos();
+            (
+                start + change * 0.5 * (1.0 - cos),
+                change * 0.5 * pi * sin,
+                change * 0.5 * pi * pi * cos,
+            )
+        }
+        CantForm::Sine { start, change } => {
+            let tau = core::f64::consts::TAU;
+            let (sin, cos) = (tau * xi).sin_cos();
+            (
+                start + change * (xi - sin / tau),
+                change * (1.0 - cos),
+                change * tau * sin,
+            )
+        }
+        _ => return None,
+    };
+    let out = [value, slope / length, bend / (length * length)];
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// Certified `(sup |e'|, sup |e''|, sup |e'''|)` of a height law over
+/// `[lo, hi]` inside ONE piece (#252); `None` across a seam, off the law,
+/// or for an angle piece.
+///
+/// In the piece's `xi = s / L`, the `k`-th derivative in plan distance is
+/// the form's `k`-th in `xi` over `L^k`: a polynomial's by
+/// `sum i!/(i-k)! |c_i| m^(i-k)` with `m` the larger `|xi|`, the
+/// half-cosine's `|dD| / 2 pi^k`, the sine transition's `2 |dD|`,
+/// `2 pi |dD|`, `4 pi^2 |dD|`.
+pub(crate) fn pivot_bounds(law: &CantLaw, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
+    let (lo, hi) = (lo.min(hi), lo.max(hi));
+    let (piece, s_lo) = piece_at(law, lo, false)?;
+    let s_hi = s_lo + (hi - lo);
+    if s_hi > piece.length * (1.0 + 1e-12) {
+        return None;
+    }
+    let length = piece.length;
+    let in_xi = match &piece.form {
+        CantForm::Polynomial { coefficients } => {
+            let m = (s_lo / length).abs().max((s_hi / length).abs());
+            let term = |k: usize| -> Scalar {
+                coefficients
+                    .iter()
+                    .enumerate()
+                    .skip(k)
+                    .map(|(i, c)| {
+                        let falling: Scalar = (0..k).map(|j| (i - j) as Scalar).product();
+                        falling * c.abs() * m.powi((i - k) as i32)
+                    })
+                    .sum()
+            };
+            [term(1), term(2), term(3)]
+        }
+        CantForm::Cosine { change, .. } => {
+            let pi = core::f64::consts::PI;
+            let half = 0.5 * change.abs();
+            [half * pi, half * pi * pi, half * pi * pi * pi]
+        }
+        CantForm::Sine { change, .. } => {
+            let tau = core::f64::consts::TAU;
+            let c = change.abs();
+            [2.0 * c, tau * c, tau * tau * c]
+        }
+        _ => return None,
+    };
+    let out = [
+        in_xi[0] / length,
+        in_xi[1] / (length * length),
+        in_xi[2] / (length * length * length),
+    ]
+    .map(|v| v * (1.0 + crate::bound::ROUNDING));
+    out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
 /// The section at plan distance `d`: rotation point, rolled frame, cant,

@@ -9,6 +9,37 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Sweeps along elevated and banked directrices (#252): a `Curve3::Elevated`
+  (what a gradient curve lowers to) or `Curve3::Banked` directrix, alone,
+  trimmed or read through a curve-3D surface curve, is sampled by plan
+  distance (its parameter, ADR 0082; a sweep range is a span of plan
+  distance, and a line plan, which has no end, needs one) against its
+  certified 3D chord bound, and swept as one smooth curve -- end tangents
+  reported, refined until the walls fit -- unless its grade jumps at a
+  profile or pivot seam inside the span (by more than 1e-9 rad). Swept
+  disks, fixed-reference and surface-curve sweeps all take it. A disk's
+  tube is certified against the exact tube (`DeviationBound::Certified`,
+  detail "elevated curve" / "banked curve"); a grade break is unbounded
+  by name ("elevated directrix with a grade break"); a straight plan
+  under a constant grade is a segment, proven, and an exact swept disk
+  (`exact_directrix`) along it. A banked curve's disk follows its rotation
+  point; its rolled section frames remain those of station-placed
+  sections. Previously every such directrix was refused as
+  `Unsupported { operation: CurveEvaluation }`.
+
+### Changed
+
+- A disk swept along a smooth curve (ellipse, B-spline, and now elevated
+  and banked curves) is certified with a search suited to a long tube's
+  long, thin quads (#252): quads twisted by up to a twentieth of the
+  budget are covered as flat regions (the thickness is added to the
+  bound), each cell is cut the way that lowers its halves more (within an
+  aspect ratio of 256), and the search settles once within the budget.
+  A 60 m tube that exhausted the work cap at 4.5 times its measured
+  deviation now certifies at 1.1-1.6 times it.
+
 ## [0.3.13] - 2026-10-03
 
 ### Added

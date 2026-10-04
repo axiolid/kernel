@@ -8,6 +8,7 @@ use axiolid_model::{
     TrimmingPreference,
 };
 
+mod elevated;
 mod pieces;
 pub(crate) use pieces::pieces;
 
@@ -74,6 +75,8 @@ fn smooth_ends(curve: &axiolid_curve::Curve3, start: Scalar, end: Scalar) -> Opt
                 .into_iter()
                 .any(|knot| knot > lo && knot < hi)
         }
+        // Smooth unless the grade breaks inside the span (#252).
+        curve if elevated::is_elevated(curve) => return elevated::smooth_ends(curve, start, end),
         _ => false,
     };
     if !smooth {
@@ -501,6 +504,9 @@ fn sample_curve(
             }
         }
     };
+    if elevated::is_elevated(curve) {
+        elevated::check_bounded(domain)?;
+    }
     let points = axiolid_reference::curve::flatten3(
         curve,
         domain,
@@ -686,7 +692,11 @@ fn exact_at(
             };
             Ok(ExactDirectrix::Arc(*circle, span))
         }
-        Some(GeometryNode::Curve3(_)) => Err(unsupported(other)),
+        // A straight plan under a constant grade is a segment (#252).
+        Some(GeometryNode::Curve3(curve)) => {
+            elevated::exact_segment(curve, range, options, unsupported)
+                .unwrap_or_else(|| Err(unsupported(other)))
+        }
         Some(GeometryNode::CurveRelation(CurveRelation::SurfaceCurve {
             curve_3d,
             master: MasterRepresentation::Curve3d,
@@ -834,10 +844,21 @@ fn smooth_kind(
             resource: "directrix relation depth",
         });
     }
-    let smooth = |curve: &Curve3| matches!(curve, Curve3::Ellipse(_) | Curve3::BSpline(_));
+    let smooth = |curve: &Curve3| {
+        matches!(curve, Curve3::Ellipse(_) | Curve3::BSpline(_)) || elevated::is_elevated(curve)
+    };
+    // An elevated curve is one smooth curve only where its grade does not
+    // break (#252).
+    let classified = |curve: &Curve3, span: axiolid_core::Interval| {
+        if elevated::is_elevated(curve) && elevated::has_corner(curve, span.start, span.end) {
+            DirectrixKind::Other("elevated directrix with a grade break")
+        } else {
+            DirectrixKind::Smooth(curve.clone(), span)
+        }
+    };
     Ok(match graph.get(id) {
         Some(GeometryNode::Curve3(curve)) if smooth(curve) => {
-            DirectrixKind::Smooth(curve.clone(), clamped_span(curve, range)?)
+            classified(curve, clamped_span(curve, range)?)
         }
         Some(GeometryNode::Curve3(Curve3::Polyline(_))) => {
             DirectrixKind::Other("polyline directrix")
@@ -883,7 +904,7 @@ fn smooth_kind(
                 DirectrixKind::Smooth(curve.clone(), axiolid_core::Interval::new(lo, hi))
             } else {
                 let (s, e) = range.unwrap_or((a, b));
-                DirectrixKind::Smooth(curve.clone(), clamped_span(curve, Some((s, e)))?)
+                classified(curve, clamped_span(curve, Some((s, e)))?)
             }
         }
         Some(GeometryNode::CurveRelation(CurveRelation::Composite { .. })) => {

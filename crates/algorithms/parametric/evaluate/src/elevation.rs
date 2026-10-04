@@ -142,6 +142,8 @@ fn leaf(law: &ElevationLaw, distance: Scalar) -> GeomResult<(&ElevationLaw, Scal
 struct Reading {
     height: Scalar,
     grade: Scalar,
+    /// The profile's own arc length the reading was taken at.
+    arc: Scalar,
 }
 
 /// The profile as a plane curve: origin `(0, height)`, `x` along the start
@@ -192,7 +194,11 @@ fn intrinsic_reading(
         ));
     }
     if d == 0.0 {
-        return Ok(Reading { height, grade });
+        return Ok(Reading {
+            height,
+            grade,
+            arc: 0.0,
+        });
     }
     let theta0 = grade.atan();
     let curve = profile_curve(height, grade, curvature, d);
@@ -212,6 +218,7 @@ fn intrinsic_reading(
             return Ok(Reading {
                 height: point.y - slope * residual,
                 grade: slope,
+                arc: s,
             });
         }
         if residual < 0.0 {
@@ -492,4 +499,216 @@ fn curvature_sup(law: &CurvatureLaw, span: Scalar) -> Option<Scalar> {
         _ => return None,
     };
     Some(sup).filter(|s| s.is_finite())
+}
+
+// --- second derivatives, derivative bounds and seams (#252) ------------------
+
+/// `z''(d)`, the second derivative of height in plan distance, for every
+/// law in the family: `sum i (i - 1) c_i d^(i - 2)` for a polynomial,
+/// `1 / (R cos^3 t)` for a circular arc, `k(s) / cos^3 t` for an intrinsic
+/// profile read at the arc length `s` its height is read at.
+///
+/// # Errors
+///
+/// As [`elevation_height`].
+pub(crate) fn elevation_second(law: &ElevationLaw, distance: Scalar) -> GeomResult<Scalar> {
+    let value = match leaf(law, distance)? {
+        (ElevationLaw::Polynomial { coefficients }, d) => coefficients
+            .iter()
+            .enumerate()
+            .skip(2)
+            .rev()
+            .fold(0.0, |accumulated, (i, c)| {
+                accumulated * d + c * (i * (i - 1)) as Scalar
+            }),
+        (ElevationLaw::CircularArc { grade, radius, .. }, d) => {
+            let sin = arc_sin(*grade, *radius, d)
+                .ok_or_else(|| invalid("elevation law has no height at that distance"))?;
+            let cos = ((1.0 - sin) * (1.0 + sin)).sqrt();
+            1.0 / (radius * cos * cos * cos)
+        }
+        (
+            ElevationLaw::Intrinsic {
+                height,
+                grade,
+                curvature,
+            },
+            d,
+        ) => {
+            let reading = intrinsic_reading(*height, *grade, curvature, d)?;
+            let kappa = crate::frenet::law_value(curvature, reading.arc)
+                .ok_or_else(|| invalid("intrinsic profile curvature is not defined there"))?;
+            let secant = reading.grade.hypot(1.0);
+            kappa * secant * secant * secant
+        }
+        _ => {
+            return Err(invalid(
+                "elevation law family has no second derivative here",
+            ))
+        }
+    };
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(invalid("elevation second derivative is not finite"))
+    }
+}
+
+/// `sin t(d) = sin t0 + d / R` of a circular arc, inside its domain.
+fn arc_sin(grade: Scalar, radius: Scalar, d: Scalar) -> Option<Scalar> {
+    if !(grade.is_finite() && radius.is_finite() && radius != 0.0 && d.is_finite()) {
+        return None;
+    }
+    let sin = grade / grade.hypot(1.0) + d / radius;
+    (sin.abs() < 1.0).then_some(sin)
+}
+
+/// Certified `(sup |z'|, sup |z''|, sup |z'''|)` over the plan-distance
+/// span `[lo, hi]`, or `None` -- unbounded, never a guess -- where
+/// [`elevation_chord_bound`] would refuse, and also where an intrinsic
+/// profile's curvature law has a seam in the span (its `z'''` jumps
+/// there) or a family whose derivative is not bounded here.
+///
+/// Per law, with `m = max(|lo|, |hi|)` in the piece's own distance:
+///
+/// - polynomial: `sum i!/(i-k)! |c_i| m^(i-k)` for `k = 1, 2, 3`;
+/// - circular arc, `sin t` linear in `d` so `|sin t|` peaks at an end:
+///   `z' = tan t`, `z'' = 1 / (R cos^3 t)`, `z''' = 3 sin t / (R^2 cos^5 t)`
+///   (from `cos t t' = 1 / R`);
+/// - intrinsic, `d/dd = (1 / cos t) d/ds` and `t' = k` in its own arc
+///   length: `z'' = k / cos^3 t`, `z''' = k' / cos^4 t + 3 k^2 sin t /
+///   cos^5 t`, over the certified `cos t` floor and curvature suprema of
+///   [`elevation_chord_bound`]'s span.
+pub(crate) fn profile_bounds(law: &ElevationLaw, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
+    if !(lo.is_finite() && hi.is_finite()) || lo > hi {
+        return None;
+    }
+    let out = match law {
+        ElevationLaw::Polynomial { coefficients } => {
+            let m = lo.abs().max(hi.abs());
+            let term = |k: usize| -> Scalar {
+                coefficients
+                    .iter()
+                    .enumerate()
+                    .skip(k)
+                    .map(|(i, c)| {
+                        let falling: Scalar = (0..k).map(|j| (i - j) as Scalar).product();
+                        falling * c.abs() * m.powi((i - k) as i32)
+                    })
+                    .sum()
+            };
+            [term(1), term(2), term(3)]
+        }
+        ElevationLaw::Piecewise { breaks, laws } => {
+            if laws.len() != breaks.len() + 1 {
+                return None;
+            }
+            let mid = 0.5 * (lo + hi);
+            let index = breaks.partition_point(|b| *b <= mid);
+            let start = if index == 0 { 0.0 } else { breaks[index - 1] };
+            let lower = if index == 0 {
+                Scalar::NEG_INFINITY
+            } else {
+                start
+            };
+            let upper = breaks.get(index).copied().unwrap_or(Scalar::INFINITY);
+            if lo < lower || hi > upper {
+                return None;
+            }
+            return profile_bounds(laws.get(index)?, lo - start, hi - start);
+        }
+        ElevationLaw::CircularArc { grade, radius, .. } => {
+            if !(grade.is_finite() && radius.is_finite() && *radius != 0.0) {
+                return None;
+            }
+            let sin0 = grade / grade.hypot(1.0);
+            let reach = (sin0 + lo / radius).abs().max((sin0 + hi / radius).abs());
+            if reach.is_nan() || reach >= 1.0 {
+                return None;
+            }
+            let cos = ((1.0 - reach) * (1.0 + reach)).sqrt();
+            let r = radius.abs();
+            [
+                reach / cos,
+                1.0 / (r * cos.powi(3)),
+                3.0 * reach / (r * r * cos.powi(5)),
+            ]
+        }
+        ElevationLaw::Intrinsic {
+            height,
+            grade,
+            curvature,
+        } => {
+            checked(*height, *grade, curvature).ok()?;
+            if lo < 0.0 {
+                return None;
+            }
+            let theta0 = grade.atan();
+            let profile = profile_curve(*height, *grade, curvature, hi);
+            let past = hi + 2.0 * INVERSION_TOLERANCE * hi.max(1.0);
+            let upper = bracket(&profile, theta0, past).ok()?;
+            // `z'''` carries `k'`, which a seam of the curvature law turns
+            // into a jump: refuse a span that may contain one.
+            if curvature
+                .seams_within(upper)
+                .iter()
+                .any(|&seam| seam > lo && seam < upper)
+            {
+                return None;
+            }
+            let floor = cos_floor(&profile, theta0, lo, upper).ok()?;
+            let kappa = curvature_sup(&curvature.shifted(lo)?, upper - lo)?;
+            let rate = curvature_sup(&curvature.derivative().shifted(lo)?, upper - lo)?;
+            let sin = ((1.0 - floor) * (1.0 + floor)).max(0.0).sqrt();
+            [
+                sin / floor,
+                kappa / floor.powi(3),
+                rate / floor.powi(4) + 3.0 * kappa * kappa * sin / floor.powi(5),
+            ]
+        }
+        _ => return None,
+    };
+    let out = out.map(|v| v * (1.0 + 1e-12));
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// Every seam of a law in plan distance, nested piecewise laws included,
+/// ascending: where its grade may jump.
+pub(crate) fn elevation_seams(law: &ElevationLaw) -> Vec<Scalar> {
+    fn collect(law: &ElevationLaw, offset: Scalar, out: &mut Vec<Scalar>) {
+        if let ElevationLaw::Piecewise { breaks, laws } = law {
+            for (index, piece) in laws.iter().enumerate() {
+                let start = if index == 0 { 0.0 } else { breaks[index - 1] };
+                collect(piece, offset + start, out);
+            }
+            out.extend(breaks.iter().map(|b| offset + b));
+        }
+    }
+    let mut out = Vec::new();
+    if law.is_well_formed() {
+        collect(law, 0.0, &mut out);
+    }
+    out.sort_by(Scalar::total_cmp);
+    out.dedup();
+    out
+}
+
+/// The grade arriving at `distance` from below: the piece that ENDS
+/// there, where [`elevation_grade`] reads the one that starts there.
+///
+/// # Errors
+///
+/// As [`elevation_grade`].
+pub(crate) fn elevation_grade_before(law: &ElevationLaw, distance: Scalar) -> GeomResult<Scalar> {
+    match law {
+        ElevationLaw::Piecewise { breaks, laws } => {
+            if laws.len() != breaks.len() + 1 {
+                return Err(invalid("elevation law piece list is malformed"));
+            }
+            let index = breaks.partition_point(|b| *b < distance);
+            let start = if index == 0 { 0.0 } else { breaks[index - 1] };
+            elevation_grade_before(&laws[index], distance - start)
+        }
+        other => elevation_grade(other, distance),
+    }
 }

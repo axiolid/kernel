@@ -21,6 +21,7 @@ pub mod banked;
 pub mod bound;
 pub mod chain;
 pub mod curve;
+pub mod elevated;
 pub mod elevation;
 pub mod frenet;
 pub mod intrinsic_relation;
@@ -35,9 +36,16 @@ pub use arc_parameter::{
     arc_length2, arc_length3, parameter_at_arc_length2, parameter_at_arc_length3,
     ARC_LENGTH_TOLERANCE,
 };
-pub use banked::{banked_derivative, banked_point, banked_section, banked_tangent, BankedSection};
+pub use banked::{
+    banked_derivative, banked_point, banked_second_derivative, banked_section, banked_tangent,
+    BankedSection,
+};
 pub use chain::{chain_point, chain_tangent};
 pub use curve::{derivative2, derivative3, evaluate2, evaluate3, flatten2, ScalarCurve};
+pub use elevated::{
+    elevated_chord_bound, elevated_derivative, elevated_derivative_bounds,
+    elevated_second_derivative, grade_corners3,
+};
 pub use elevation::{elevation_chord_bound, elevation_grade, elevation_height};
 pub use frenet::{frenet_frame, frenet_point, frenet_tangent};
 pub use intrinsic_relation::{join_intrinsic3, offset_intrinsic3, trim_intrinsic3};

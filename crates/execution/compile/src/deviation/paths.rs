@@ -11,7 +11,7 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_primitive::Primitive;
 
 use super::{Deviation, DeviationBound, DeviationPath};
-use crate::certify::{certify, Cell, Patch};
+use crate::certify::{certify_thin_quads, Cell, Patch};
 use crate::directrix::DirectrixKind;
 
 /// The deviation of a non-boolean solid the compiler built as `mesh`.
@@ -112,6 +112,8 @@ pub(crate) fn of_solid(
                 DirectrixKind::Smooth(curve, span) => {
                     let detail = match curve {
                         Curve3::Ellipse(_) => "ellipse",
+                        Curve3::Elevated(_) => "elevated curve",
+                        Curve3::Banked(_) => "banked curve",
                         _ => "B-spline",
                     };
                     let bound = tube_bound(
@@ -388,8 +390,24 @@ fn tube_bound(
             });
         }
     }
-    certify(&patches, cells, mesh, target)
+    // A long tube's quads are long and thin and slightly twisted: joined
+    // as flat regions up to a twentieth of the target thick, and cut
+    // across their long edges, the search need not resolve every quad's
+    // diagonal down to the bound's size (#252). It settles once within the
+    // target: a long tube has too many cells to tighten further.
+    certify_thin_quads(
+        &patches,
+        cells,
+        mesh,
+        target,
+        target,
+        TUBE_FLATNESS * target,
+    )
 }
+
+/// Fraction of the target a tube quad may be twisted and still be covered
+/// as one flat region; its thickness is added to the bound.
+const TUBE_FLATNESS: Scalar = 0.05;
 
 /// `[lo, hi]` cut where the curve is not `C^2`, then halved until the
 /// tangent turns by at most one radian over each piece, so a reference

@@ -37,6 +37,10 @@ pub mod triangle_triangle;
 /// Certified derivative and chord bounds (#232), re-exported on the same
 /// footing as `curve` and `surface`.
 pub use axiolid_evaluate::bound;
+/// Derivatives, certified bounds and corners of elevated and banked
+/// curves in plan distance (#252), re-exported on the same footing as
+/// `curve` and `surface`.
+pub use axiolid_evaluate::elevated;
 /// Stations: a section frame at a distance along a curve (#241),
 /// re-exported on the same footing as `curve` and `surface`.
 pub use axiolid_evaluate::station;

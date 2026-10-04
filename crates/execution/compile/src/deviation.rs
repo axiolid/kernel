@@ -42,8 +42,12 @@
 //!   (their twisted walls are not measured).
 //! - Swept disks: along lines, polylines (filleted) and chains of
 //!   segments and arcs by `axiolid_construct::pipe`'s proof (#232), along
-//!   one circular arc by #231's; along an ellipse or a B-spline, certified against the exact tube
-//!   (walls, bore and square end caps) by branch and bound, below.
+//!   one circular arc by #231's; along an ellipse, a B-spline, or an
+//!   elevated or banked curve without a grade break (#252, its derivative
+//!   bounds in plan distance from `axiolid_reference::elevated`), certified
+//!   against the exact tube (walls, bore and square end caps) by branch and
+//!   bound, below; an elevated curve whose grade breaks is unbounded by
+//!   name. A straight plan under a constant grade is a segment.
 //!   Fixed-reference sweeps along a segment, or along a circle whose plane
 //!   the reference is normal to, by #231; other frame laws, polyline and
 //!   composite directrices are unbounded here.
@@ -69,7 +73,12 @@
 //! and the worst piece, plus `e2`, bound the cell. Cells are split worst
 //! first until the worst bound is within 10% of the largest exact distance
 //! sampled at a cell centre, or a work cap is reached; the reported value
-//! is always the worst bound over all cells.
+//! is always the worst bound over all cells. A tube (#252) settles once
+//! within the budget, joins its slightly twisted quads as flat regions up
+//! to a twentieth of the budget thick (that thickness is part of the
+//! bound), and cuts each cell the way that lowers its halves more, so a
+//! long tube's long, thin quads do not force every cell down to the width
+//! of their diagonals.
 //! - Instances scale the bound by their transform's largest stretch;
 //!   collections take the worst member.
 //! - Booleans (#235): cutting two meshes moves the intersection curve, and

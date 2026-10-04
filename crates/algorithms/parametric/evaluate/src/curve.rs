@@ -128,6 +128,9 @@ pub fn domain3(curve: &Curve3) -> Interval {
             start: 0.0,
             end: b.span(),
         },
+        // Parameterised by PLAN distance over the plan's length (#252,
+        // ADR 0082): unbounded for a line plan, one turn for a circle.
+        Curve3::Elevated(e) => crate::elevated::elevated_domain(e),
         _ => Interval {
             start: 0.0,
             end: 0.0,
@@ -385,6 +388,9 @@ pub fn evaluate3(curve: &Curve3, t: Scalar) -> GeomResult<Point3> {
         Curve3::PairSection(r) => r.point(t).ok_or_else(|| outside_graph(t)),
         // `t` is PLAN distance, the centreline's own parameter (ADR 0081).
         Curve3::Banked(b) => crate::banked::banked_point(b, t),
+        // `t` is PLAN distance, the parameter both halves are written
+        // against (#252, ADR 0082).
+        Curve3::Elevated(e) => crate::arc_length::elevated_point(e, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -414,6 +420,8 @@ pub fn derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::PairSection(r) => r.tangent(t).ok_or_else(|| outside_graph(t)),
         // In plan distance, so not unit: `(p, grade + pivot rate)`.
         Curve3::Banked(b) => crate::banked::banked_derivative(b, t),
+        // In plan distance, so not unit: `(p', grade)` (#252).
+        Curve3::Elevated(e) => crate::elevated::elevated_derivative(e, t),
         // `Curve*` is #[non_exhaustive]. An unknown family is refused by name
         // rather than approximated by whichever arm happens to be nearest.
         _ => Err(GeomError::Unsupported {
@@ -438,6 +446,9 @@ pub fn second_derivative3(curve: &Curve3, t: Scalar) -> GeomResult<Vec3> {
         Curve3::TorusSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         Curve3::ImplicitSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
         Curve3::PairSection(r) => r.bend(t).ok_or_else(|| outside_graph(t)),
+        // In plan distance: `(k n, z'')`, plus the pivot's `e''` (#252).
+        Curve3::Elevated(e) => crate::elevated::elevated_second_derivative(e, t),
+        Curve3::Banked(b) => crate::banked::banked_second_derivative(b, t),
         _ => Err(GeomError::Unsupported {
             backend: axiolid_contracts::BackendId::new("axiolid-reference"),
             operation: axiolid_contracts::Operation::CurveEvaluation,

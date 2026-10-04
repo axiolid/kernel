@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `elevated`: `axiolid-evaluate`'s derivatives, certified chord and
+  derivative bounds and grade corners of elevated and banked curves
+  (#252), re-exported on the same footing as `curve` and `surface`.
+
 ## [0.3.6] - 2026-10-03
 
 ### Added

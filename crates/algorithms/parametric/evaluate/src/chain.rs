@@ -325,6 +325,167 @@ pub fn chain_chord_bound(chain: &Chain2, a: Scalar, b: Scalar) -> Option<Scalar>
     bound.is_finite().then_some(bound)
 }
 
+/// Second derivative of a chain in its arc length at `s`: the curvature
+/// vector `k n` of the piece read there, mapped through the placement and
+/// the start frame (#252).
+///
+/// An intrinsic piece gives `k(s)` from its law and `n` from its exact
+/// heading; a parametric piece `(c'' - t (t . c'')) / |c'|^2` at the
+/// parameter the distance reads.
+pub(crate) fn chain_second_derivative(chain: &Chain2, s: Scalar) -> GeomResult<Vec2> {
+    let (index, local, placement) = locate(chain, s)?;
+    let piece = &chain.pieces[index];
+    let bend = match piece {
+        ChainPiece2::Intrinsic { curvature, length } => {
+            let curve = Intrinsic2::new(local_frame(), curvature.clone(), *length);
+            let heading = curve.heading_at(local).ok_or_else(|| {
+                invalid("chain piece curvature does not integrate to that distance".into())
+            })?;
+            let kappa = crate::frenet::law_value(curvature, local)
+                .ok_or_else(|| invalid("chain piece curvature is not defined there".into()))?;
+            Vec2::new(-heading.sin(), heading.cos()) * kappa
+        }
+        ChainPiece2::Parametric { curve, .. } => {
+            piece_local(index, piece, local)?;
+            let u = piece_parameter(piece, local)
+                .ok_or_else(|| invalid("chain piece has no parameter there".into()))??;
+            let c1 = derivative2(curve, u)?;
+            let c2 = crate::curve::second_derivative2(curve, u)?;
+            let speed2 = c1.length_squared();
+            if !(speed2 > 0.0 && speed2.is_finite()) {
+                return Err(invalid("chain piece curve has no tangent there".into()));
+            }
+            let t = c1 / speed2.sqrt();
+            (c2 - t * t.dot(c2)) / speed2
+        }
+        _ => {
+            return Err(GeomError::Unsupported {
+                backend: axiolid_contracts::BackendId::new("axiolid-evaluate"),
+                operation: axiolid_contracts::Operation::CurveEvaluation,
+            })
+        }
+    };
+    Ok(to_world(&chain.start, placement.turn(bend)))
+}
+
+/// Certified `(sup |p''|, sup |p'''|)` of a chain `p` in its arc length
+/// over `[a, b]` inside one piece (#252); `None` across a join, for a span
+/// outside the chain, and where a piece is not bounded here.
+///
+/// In arc length `p'' = k n` and `p''' = k' n - k^2 t`, so an intrinsic
+/// piece gives `k` and `|k'| + k^2` from its law (refused across a seam of
+/// it, where `k` may jump). A parametric piece `c(u)` with speed at least
+/// `sigma` and derivative suprema `D_2, D_3` over the parameters the span
+/// reads gives `|p''| <= D_2 / sigma^2` and, with the tube wall's
+/// `|t_u| <= k1 = D_2 / sigma`, `|t_uu| <= k2 = 2 D_3 / sigma + 6 D_2^2 /
+/// sigma^2`, `|p'''| = |d/du (t_u / |c'|)| / |c'| <= k2 / sigma^2 + D_2^2 /
+/// sigma^4`; a line is straight, and a circle on an orthonormal frame is
+/// exact (`1 / r`, `1 / r^2`). Both are scaled by the start frame's
+/// stretch.
+pub(crate) fn chain_plan_bounds(chain: &Chain2, a: Scalar, b: Scalar) -> Option<(Scalar, Scalar)> {
+    let (lo, hi) = (a.min(b), a.max(b));
+    let (index, local_lo, _) = locate(chain, lo).ok()?;
+    let piece = &chain.pieces[index];
+    let begin = chain.pieces[..index]
+        .iter()
+        .fold(0.0, |begin, piece| begin + piece.length());
+    let length = piece.length();
+    let local_hi = hi - begin;
+    if local_hi > length + ARC_LENGTH_TOLERANCE * length.max(1.0) {
+        return None;
+    }
+    let local_hi = if length - local_hi <= 4.0 * Scalar::EPSILON * length.max(1.0) {
+        length
+    } else {
+        local_hi.min(length)
+    };
+    piece_local(index, piece, local_hi).ok()?;
+    let stretch = crate::bound::frame_stretch2(&chain.start);
+    let (p2, p3) = match piece {
+        ChainPiece2::Intrinsic { curvature, .. } => {
+            let k = curvature_bound(curvature, local_lo, local_hi)?;
+            let seamed = curvature
+                .seams_within(length)
+                .iter()
+                .any(|&seam| seam > local_lo && seam < local_hi);
+            // Across a seam `k` may jump: `p''` stays bounded, `p'''` not.
+            let rate = if seamed {
+                Scalar::INFINITY
+            } else {
+                curvature_bound(&curvature.derivative(), local_lo, local_hi)?
+            };
+            (k, rate + k * k)
+        }
+        ChainPiece2::Parametric { curve, .. } => {
+            let u0 = piece_parameter(piece, local_lo)?.ok()?;
+            let u1 = piece_parameter(piece, local_hi)?.ok()?;
+            parametric_plan_bounds(curve, u0, u1)?
+        }
+        _ => return None,
+    };
+    let scale = stretch * (1.0 + crate::bound::ROUNDING);
+    let out = (p2 * scale, p3 * scale);
+    out.0.is_finite().then_some(out)
+}
+
+/// `(sup |p''|, sup |p'''|)` of a 2D curve read by its arc length between
+/// parameters `u0` and `u1`; see [`chain_plan_bounds`].
+pub(crate) fn parametric_plan_bounds(
+    curve: &Curve2,
+    u0: Scalar,
+    u1: Scalar,
+) -> Option<(Scalar, Scalar)> {
+    let (lo, hi) = (u0.min(u1), u0.max(u1));
+    match curve {
+        Curve2::Line(_) => return Some((0.0, 0.0)),
+        Curve2::Circle(c) => {
+            let (x, y) = (c.frame.x, c.frame.y);
+            let unit = |v: Vec2| (v.length() - 1.0).abs() <= 1e-12;
+            if unit(x) && unit(y) && x.dot(y).abs() <= 1e-12 && c.radius > 0.0 {
+                let k = 1.0 / c.radius;
+                return Some((k, k * k));
+            }
+        }
+        _ => {}
+    }
+    if crate::bound::continuity_breaks2(curve, 2)
+        .iter()
+        .any(|&t| t > lo && t < hi)
+    {
+        return None;
+    }
+    let bounds = crate::bound::curve_derivative_bounds2(curve, lo, hi)?;
+    let (d2, d3) = (bounds.second, bounds.third);
+    let mid = derivative2(curve, 0.5 * (lo + hi)).ok()?.length();
+    let sigma = mid - 0.5 * (hi - lo) * d2;
+    if !(sigma > 0.0 && sigma.is_finite()) {
+        return None;
+    }
+    let k2 = 2.0 * d3 / sigma + 6.0 * d2 * d2 / (sigma * sigma);
+    let s2 = sigma * sigma;
+    Some((d2 / s2, k2 / s2 + d2 * d2 / (s2 * s2)))
+}
+
+/// Seams of the intrinsic pieces' curvature laws, in chain arc length:
+/// where the chain's curvature may jump inside a piece (#252).
+pub(crate) fn chain_curvature_seams(chain: &Chain2) -> Vec<Scalar> {
+    let mut out = Vec::new();
+    let mut begin = 0.0;
+    for piece in &chain.pieces {
+        if let ChainPiece2::Intrinsic { curvature, length } = piece {
+            out.extend(
+                curvature
+                    .seams_within(*length)
+                    .into_iter()
+                    .filter(|&s| s > 0.0 && s < *length)
+                    .map(|s| begin + s),
+            );
+        }
+        begin += piece.length();
+    }
+    out
+}
+
 /// Whether [`crate::curve::flatten2`] certifies a chain's chords: every
 /// intrinsic piece's curvature is bounded and every parametric piece's curve
 /// is a certified family with no corner anywhere in its domain (#232).
@@ -348,7 +509,7 @@ pub fn chain_certifies(chain: &Chain2) -> bool {
 
 /// Upper bound on `|k(s)|` over `[lo, hi]` (`0 <= lo <= hi`), from the
 /// triangle inequality term by term; `None` for a law it cannot bound.
-fn curvature_bound(law: &CurvatureLaw, lo: Scalar, hi: Scalar) -> Option<Scalar> {
+pub(crate) fn curvature_bound(law: &CurvatureLaw, lo: Scalar, hi: Scalar) -> Option<Scalar> {
     let reach = lo.abs().max(hi.abs());
     let polynomial = |coefficients: &[Scalar]| -> Scalar {
         coefficients

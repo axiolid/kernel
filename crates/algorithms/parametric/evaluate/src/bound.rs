@@ -392,6 +392,10 @@ pub fn continuity_breaks3(curve: &Curve3, k: usize) -> Vec<Scalar> {
     match curve {
         Curve3::BSpline(b) => bspline_breaks(b, k),
         Curve3::Polyline(p) if k >= 1 => polyline_breaks(p.points.len(), p.closed),
+        // A chain plan's joins and the profile's seams; curvature seams of
+        // the plan for `k >= 2` (#252).
+        Curve3::Elevated(e) => crate::elevated::elevated_breaks(e, k),
+        Curve3::Banked(b) => crate::elevated::banked_breaks(b, k),
         _ => Vec::new(),
     }
 }
@@ -439,6 +443,9 @@ pub fn curve_derivative_bounds3(
             b,
         )),
         Curve3::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b).map(|b| b.0),
+        // In plan distance, plan and profile combined (#252).
+        Curve3::Elevated(e) => crate::elevated::elevated_derivative_bounds(e, a, b),
+        Curve3::Banked(banked) => crate::elevated::banked_derivative_bounds(banked, a, b),
         _ => None,
     }
 }
@@ -577,6 +584,10 @@ pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
         )),
         Curve3::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b)
             .map(|(_, chord)| inflate(taylor(b - a, chord))),
+        // Plan and profile chord bounds at equal plan distance, composed
+        // in quadrature (#252; `crate::elevated`).
+        Curve3::Elevated(e) => crate::elevated::elevated_chord_bound(e, a, b),
+        Curve3::Banked(banked) => crate::elevated::banked_chord_bound(banked, a, b),
         _ => curve_derivative_bounds3(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
 }
@@ -613,8 +624,12 @@ pub fn certifies_flattening3(curve: &Curve3) -> bool {
     match curve {
         Curve3::Line(_) | Curve3::Polyline(_) | Curve3::Circle(_) | Curve3::Ellipse(_) => true,
         Curve3::BSpline(b) => spline_weights_positive(b.weights.as_deref()),
-        // A banked curve has no derivative bound here: its flattening is
-        // measured on midpoint sagittas, not certified.
+        // Certified where both halves always bound: a certified plan and
+        // a profile of closed-form pieces (#252). An intrinsic profile's
+        // bound rests on a below-vertical certificate that may run out of
+        // budget, and a banked curve's on its pivot forms: neither is
+        // claimed for every span.
+        Curve3::Elevated(e) => crate::elevated::certifies_elevated(e),
         Curve3::Banked(_) => false,
         _ => false,
     }

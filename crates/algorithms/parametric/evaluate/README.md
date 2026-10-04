@@ -5,8 +5,9 @@ native-domain evaluation of analytic and B-spline curves and surfaces,
 derivatives, jets, adaptive flattening, elementary surface inversion,
 arc-length evaluation of intrinsic (natural-equation) and elevated curves
 and of arc-length chains, arc length and its inverse on any curve,
-the section frames of banked curves, stations (a section frame at a
-distance along a curve),
+the section frames of banked curves, the derivatives and certified chord
+and derivative bounds of elevated and banked curves in plan distance,
+stations (a section frame at a distance along a curve),
 and `ReferenceCurveEvaluator`, the reference implementation of the
 curve-evaluation contract (ADR 0063). It has no mesh, spatial, measure or
 provider dependency, so a parametric consumer gets evaluation without the

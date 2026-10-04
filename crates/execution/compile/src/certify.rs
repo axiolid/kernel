@@ -25,6 +25,17 @@
 //! (`certify_within`), or the work budget runs out. The returned value is
 //! the worst upper bound over all cells, so stopping early only loosens it.
 //!
+//! A long tube's mesh (#252) is long, thin quads, each split along a
+//! diagonal and slightly twisted, and a cell is only covered once it lies
+//! in one triangle or one flat region: cut across its longer side every
+//! time, every cell along every quad edge shrinks to the bound's size in
+//! both directions and the work cap runs out first. `certify_thin_quads`
+//! joins quads twisted by up to a given thickness as flat regions (the
+//! thickness is added to the bound, as for any region) and cuts each cell
+//! both ways, keeping the cut whose halves are clearly lower together
+//! (within an aspect ratio of [`MAX_ASPECT`]), so a cell across a long
+//! edge is cut across it only.
+//!
 //! A patch may be trimmed (a face of an exact B-rep, #235): it then says
 //! how each cell lies against its domain ([`Coverage`]). A cell certainly
 //! outside is dropped; one that may meet the domain's boundary is bounded
@@ -114,6 +125,7 @@ impl Ord for Scored {
 /// patches' cells to the mesh; `None` when a patch cannot be bounded
 /// somewhere (an undefined point, an unbounded derivative) or the mesh has
 /// no triangle.
+#[cfg(test)]
 pub(crate) fn certify(
     patches: &[&dyn Patch],
     cells: Vec<Cell>,
@@ -133,7 +145,39 @@ pub(crate) fn certify_within(
     target: Scalar,
     enough: Scalar,
 ) -> Option<Scalar> {
-    let index = TriangleIndex::new(mesh)?;
+    certify_with(patches, cells, mesh, target, enough, Search::default())
+}
+
+/// [`certify_within`] for a curved mesh of long, thin, slightly twisted
+/// quads, such as a long tube's (#252): flat regions may be up to
+/// `flatness` thick ([`flat::Flat::with_flatness`]), and each cell is
+/// split the way that lowers its halves more (within [`MAX_ASPECT`]), so a
+/// cell across a quad's long edge is cut across it rather than shrunk
+/// along it as well.
+pub(crate) fn certify_thin_quads(
+    patches: &[&dyn Patch],
+    cells: Vec<Cell>,
+    mesh: &TriMesh,
+    target: Scalar,
+    enough: Scalar,
+    flatness: Scalar,
+) -> Option<Scalar> {
+    let search = Search {
+        flatness,
+        best_split: true,
+    };
+    certify_with(patches, cells, mesh, target, enough, search)
+}
+
+fn certify_with(
+    patches: &[&dyn Patch],
+    cells: Vec<Cell>,
+    mesh: &TriMesh,
+    target: Scalar,
+    enough: Scalar,
+    search: Search,
+) -> Option<Scalar> {
+    let index = TriangleIndex::with_flatness(mesh, search.flatness)?;
     let mut lower: Scalar = 0.0;
     let mut heap = BinaryHeap::with_capacity(cells.len());
     let mut work = 0_usize;
@@ -161,37 +205,40 @@ pub(crate) fn certify_within(
         if settled || tiny || work >= MAX_CELLS {
             return Some(top.upper * (1.0 + 1e-9));
         }
-        let halves = if extent_x >= extent_y {
-            let m = mid(cell.x);
-            [
-                Cell {
-                    x: (cell.x.0, m),
-                    ..cell
-                },
-                Cell {
-                    x: (m, cell.x.1),
-                    ..cell
-                },
-            ]
+        let along_x = split(&cell, true);
+        let along_y = split(&cell, false);
+        let floor = SMALLEST * target;
+        let halves = if !search.best_split || extent_x <= floor || extent_y <= floor {
+            // One side is already at the resolution floor: cut the other.
+            let across_x = if search.best_split {
+                extent_y <= floor
+            } else {
+                extent_x >= extent_y
+            };
+            scored(patch, if across_x { along_x } else { along_y }, &index)?
         } else {
-            let m = mid(cell.y);
-            [
-                Cell {
-                    y: (cell.y.0, m),
-                    ..cell
-                },
-                Cell {
-                    y: (m, cell.y.1),
-                    ..cell
-                },
-            ]
-        };
-        for half in halves {
-            let coverage = patch.coverage(half.x, half.y);
-            if coverage == Coverage::Outside {
-                continue;
+            // Both ways, keeping the pair whose halves are lower together:
+            // a cell across a long edge of thin triangles is cut across
+            // it into one clean half and one still across, where a cut
+            // along it leaves both halves across and no lower (#252).
+            work += 2;
+            let a = scored(patch, along_x, &index)?;
+            let b = scored(patch, along_y, &index)?;
+            let total = |pair: &Halves| pair.iter().flatten().map(|s| s.0).sum::<Scalar>();
+            // The usual cut (across the longer side) unless the other is
+            // clearly better: a marginal gain is no reason to keep
+            // shrinking one side of a cell that also needs the other cut.
+            let (usual, other) = if extent_x >= extent_y { (a, b) } else { (b, a) };
+            // Never thinner than `MAX_ASPECT` to one: a sliver along an
+            // edge that also crosses a vertex needs its long side cut.
+            let (long, short) = (extent_x.max(extent_y), extent_x.min(extent_y));
+            if long < MAX_ASPECT * 0.5 * short && total(&other) < CLEARLY_BETTER * total(&usual) {
+                other
+            } else {
+                usual
             }
-            let (upper, sample) = evaluate(patch, &half, &index)?;
+        };
+        for (upper, sample, half, coverage) in halves.into_iter().flatten() {
             if coverage == Coverage::Inside {
                 lower = lower.max(sample);
             }
@@ -200,6 +247,70 @@ pub(crate) fn certify_within(
         }
     }
     Some(0.0)
+}
+
+/// The cut across a cell's shorter side is taken only when its worse half
+/// is below this fraction of the usual cut's.
+const CLEARLY_BETTER: Scalar = 0.9;
+
+/// Largest metric aspect ratio the best-split search cuts a cell to.
+const MAX_ASPECT: Scalar = 256.0;
+
+/// How the search refines.
+#[derive(Debug, Clone, Copy, Default)]
+struct Search {
+    /// Thickest flat region joined ([`flat::Flat::with_flatness`]).
+    flatness: Scalar,
+    /// Split each cell both ways and keep the better pair, instead of
+    /// across its longer side.
+    best_split: bool,
+}
+
+/// The two halves of `cell`, cut across `x` or across `y`.
+fn split(cell: &Cell, across_x: bool) -> [Cell; 2] {
+    if across_x {
+        let m = mid(cell.x);
+        [
+            Cell {
+                x: (cell.x.0, m),
+                ..*cell
+            },
+            Cell {
+                x: (m, cell.x.1),
+                ..*cell
+            },
+        ]
+    } else {
+        let m = mid(cell.y);
+        [
+            Cell {
+                y: (cell.y.0, m),
+                ..*cell
+            },
+            Cell {
+                y: (m, cell.y.1),
+                ..*cell
+            },
+        ]
+    }
+}
+
+/// Each half's `(upper, centre sample, cell, coverage)`, `None` for a
+/// half certainly outside its patch's domain.
+type Halves = [Option<(Scalar, Scalar, Cell, Coverage)>; 2];
+
+/// Score both halves of a cut; see [`Halves`].
+fn scored(patch: &dyn Patch, halves: [Cell; 2], index: &TriangleIndex) -> Option<Halves> {
+    let mut out = [None, None];
+    for (slot, half) in out.iter_mut().zip(halves) {
+        let coverage = patch.coverage(half.x, half.y);
+        if coverage == Coverage::Outside {
+            continue;
+        }
+        let (upper, sample) = evaluate(patch, &half, index)?;
+        *slot = Some((upper, sample, half, coverage));
+    }
+    Some(out)
 }
 
 fn mid(range: (Scalar, Scalar)) -> Scalar {
@@ -287,7 +398,13 @@ struct Node {
 const LEAF: usize = 8;
 
 impl TriangleIndex {
+    #[cfg(test)]
     pub(crate) fn new(mesh: &TriMesh) -> Option<Self> {
+        Self::with_flatness(mesh, 0.0)
+    }
+
+    /// [`Self::new`] with flat regions up to `flatness` thick.
+    fn with_flatness(mesh: &TriMesh, flatness: Scalar) -> Option<Self> {
         let (triangles, ids): (Vec<[Point3; 3]>, Vec<[u32; 3]>) = mesh
             .indices
             .chunks_exact(3)
@@ -303,7 +420,7 @@ impl TriangleIndex {
         if triangles.is_empty() {
             return None;
         }
-        let flat = flat::Flat::new(&triangles, &ids);
+        let flat = flat::Flat::with_flatness(&triangles, &ids, flatness);
         let mut index = Self {
             order: (0..triangles.len()).collect(),
             triangles,

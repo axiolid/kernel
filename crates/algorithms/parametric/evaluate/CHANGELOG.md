@@ -9,6 +9,38 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Elevated curves through the generic 3D curve functions (#252):
+  `curve::evaluate3`, `derivative3`, `second_derivative3` and `domain3`
+  read a `Curve3::Elevated` by PLAN distance (ADR 0082, like `Banked3`):
+  the derivative is `(p', grade)`, not unit, the second `(k n, z'')`,
+  the domain `[0, L]` over the plan's length (unbounded for a line plan,
+  a full turn for a circle); `second_derivative3` also reads a
+  `Curve3::Banked` (`banked::banked_second_derivative`, the pivot's `e''`
+  added).
+- `elevated` module (#252): `elevated_derivative`,
+  `elevated_second_derivative`, `elevated_span`, and the certified
+  `elevated_chord_bound` -- `sqrt(P^2 + Z^2)`, the plan's Taylor chord
+  bound `h^2/8 sup |k|` and the profile's `elevation_chord_bound` at
+  equal plan distance, orthogonal parts composed in quadrature (the
+  module documents the derivation and why the plan's own `chord_bound2`
+  does not compose) -- with `banked_chord_bound`,
+  `elevated_derivative_bounds` and `banked_derivative_bounds`
+  (`sup |c'|, |c''|, |c'''|`, plan and profile combined per law, a
+  chain's parametric piece through its own derivative suprema),
+  `elevated_breaks`/`banked_breaks`, and `grade_corners3`, the seams
+  across which the grade jumps, read from the laws on either side.
+  `bound::chord_bound3`, `curve_derivative_bounds3`, `continuity_breaks3`
+  and `certifies_flattening3` dispatch to them, so `flatten3` certifies an
+  elevated curve over a certified plan with a closed-form profile.
+
+### Changed
+
+- `elevation`: an intrinsic reading carries its profile arc length, and
+  `frenet`'s pointwise curvature-law value is shared crate-wide (#252);
+  no public signature changed.
+
 ## [0.3.5] - 2026-10-03
 
 ### Added

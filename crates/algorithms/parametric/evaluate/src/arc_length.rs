@@ -223,6 +223,52 @@ fn plan_tangent(plan: &Curve2, d: Scalar) -> GeomResult<Vec2> {
     }
 }
 
+/// Derivative of [`plan_point`] in plan distance: the plan tangent as
+/// placed, unit on an orthonormal frame (#252).
+pub(crate) fn plan_derivative(plan: &Curve2, d: Scalar) -> GeomResult<Vec2> {
+    match plan {
+        Curve2::Chain(chain) => crate::chain::chain_tangent(chain, d),
+        other => plan_tangent(other, d),
+    }
+}
+
+/// Second derivative of [`plan_point`] in plan distance: the plan's
+/// curvature vector `k n` as placed (#252).
+pub(crate) fn plan_second_derivative(plan: &Curve2, d: Scalar) -> GeomResult<Vec2> {
+    if !d.is_finite() {
+        return Err(invalid("plan distance must be finite"));
+    }
+    match plan {
+        Curve2::Line(line) => {
+            unit2(line.direction)?;
+            Ok(Vec2::ZERO)
+        }
+        Curve2::Circle(circle) => {
+            if circle.radius <= 0.0 || !circle.radius.is_finite() {
+                return Err(invalid("circle radius must be positive and finite"));
+            }
+            let angle = d / circle.radius;
+            Ok(rotate2(
+                &circle.frame,
+                Vec2::new(-angle.cos(), -angle.sin()) / circle.radius,
+            ))
+        }
+        Curve2::Intrinsic(intrinsic) => {
+            let heading = intrinsic
+                .heading_at(d)
+                .ok_or_else(|| invalid("curvature law does not integrate to that distance"))?;
+            let kappa = crate::frenet::law_value(&intrinsic.curvature, d)
+                .ok_or_else(|| invalid("curvature law is not defined at that distance"))?;
+            Ok(rotate2(
+                &intrinsic.start,
+                Vec2::new(-heading.sin(), heading.cos()) * kappa,
+            ))
+        }
+        Curve2::Chain(chain) => crate::chain::chain_second_derivative(chain, d),
+        _ => Err(unsupported()),
+    }
+}
+
 fn unit2(v: Vec2) -> GeomResult<Vec2> {
     let length = (v.x * v.x + v.y * v.y).sqrt();
     if !length.is_finite() || length == 0.0 {
