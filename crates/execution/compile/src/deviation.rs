@@ -56,7 +56,11 @@
 //!   composite directrices are unbounded here.
 //! - Primitives: spheres and tori by #231, cylinders and cones by #232
 //!   (`axiolid_reference::primitive`), flat-faced ones exactly.
-//! - B-rep faces: planar faces with straight edges exactly; curved faces
+//! - B-rep faces: planar faces with straight edges exactly; a face that
+//!   declares no surface and whose corners lie off their fit plane beyond
+//!   the linear tolerance (#257) as a warped authored face is, by its
+//!   slab width, [`DeviationBound::Certified`] under the detail
+//!   `"non-planar face without a surface"`; curved faces
 //!   per triangle from the surface's second derivatives over the
 //!   triangle, plus the trim lens of each pcurve chord (the B-rep
 //!   tessellator's module notes give the argument).
@@ -110,6 +114,10 @@ pub(crate) use paths::{of_curve_bounded, of_primitive, of_sectioned_surface, of_
 /// The [`DeviationContribution::detail`] of authored polygon faces warped
 /// beyond the linear tolerance (#254).
 pub(crate) const WARPED_AUTHORED_FACE: &str = "non-planar authored face";
+
+/// The [`DeviationContribution::detail`] of B-rep faces that declare no
+/// surface and are warped beyond the linear tolerance (#257).
+pub(crate) const WARPED_BREP_FACE: &str = "non-planar face without a surface";
 
 /// The construction path a part of the mesh came from.
 #[non_exhaustive]

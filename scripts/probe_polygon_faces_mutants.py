@@ -26,15 +26,22 @@ the fit plane, not the largest corner distance): the #254 anchors moved
 into `CornerSpread`; added "largest signed distance only", "largest
 corner distance (the #254 bound)" and "lowest corner not tracked".
 21 / 21 killed on the first run.
+
+#257 (warped B-rep faces without a surface measured the same way): the
+`brep_warped_faces` target and four B-rep mutants added (unmeasured,
+reported proven, folded into the exact "plane" contribution, hole
+corners dropped). 25 / 25 killed on the first run.
 """
 import pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 P = "crates/execution/compile/src/planar.rs"
 C = "crates/execution/compile/src/compiler.rs"
+B = "crates/execution/compile/src/brep.rs"
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "authored_polygons"],
     ["-p", "axiolid-mesh-compile", "--lib", "planar"],
+    ["-p", "axiolid-mesh-compile", "--test", "brep_warped_faces"],
 ]
 
 MUTANTS = [
@@ -68,6 +75,18 @@ MUTANTS = [
     ("slab: lowest corner not tracked (#261)", P,
      "                spread.below = spread.below.min(distance);\n",
      ""),
+    ("B-rep warp unmeasured (#257)", B,
+     "    if support.is_none() {\n        report_warp(ctx, &rings, deviation)?;",
+     "    if support.is_none() && false {\n        report_warp(ctx, &rings, deviation)?;"),
+    ("B-rep warp reported as proven (#257)", B,
+     "            DeviationBound::Certified(warp),\n        );\n    }\n    Ok(())",
+     "            DeviationBound::Proven(warp),\n        );\n    }\n    Ok(())"),
+    ("B-rep warp folded into the exact plane contribution (#257)", B,
+     "            crate::deviation::WARPED_BREP_FACE,",
+     "            \"plane\","),
+    ("B-rep warp measured on the outer ring only (#257)", B,
+     "    let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();",
+     "    let views: Vec<&[Vec3]> = points.iter().take(1).map(Vec::as_slice).collect();"),
     ("warp reported as proven", C,
      "                                crate::deviation::DeviationBound::Certified(warp),",
      "                                crate::deviation::DeviationBound::Proven(warp),"),

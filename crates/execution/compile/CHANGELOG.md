@@ -64,6 +64,21 @@ caret rule for `0.x` versions.
   mesh was within). A bound the rebuilds cannot bring within the budget
   is still reported as it is.
 
+### Fixed
+
+- A B-rep face that declares no surface and whose corners are not
+  coplanar reported `Proven(0)` without being measured (#257), so a
+  faceted box with one corner lifted 5 cm read as exact. Such a face is
+  now measured as a warped authored polygon face is (#261): beyond the
+  linear tolerance of its fit plane it reports the width of the slab its
+  corners (holes included) span about that plane,
+  `DeviationBound::Certified` under the detail "non-planar face without a
+  surface", and `DeviationReport::meets_requested()` follows from it. It
+  is reported rather than refused: these faces come from faceted exports,
+  and the exact compiler refuses B-rep nodes altogether. Faces within the
+  tolerance, and faces with a declared plane (bounded against that plane
+  as before), are unchanged.
+
 ## [0.3.13] - 2026-10-03
 
 ### Added

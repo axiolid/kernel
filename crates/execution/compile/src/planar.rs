@@ -651,6 +651,32 @@ impl CornerSpread {
     }
 }
 
+/// How far a polygon given as an outer ring plus holes is warped, as
+/// [`triangulate_authored_polygon`] reports it: `None` when every corner
+/// lies within `linear` of the fit plane, else `Some` slab width of the
+/// module notes (#261). For a caller that triangulates the polygon itself
+/// projected along the same Newell normal, such as a B-rep face that
+/// declares no surface (#257).
+///
+/// # Refusals
+///
+/// [`PolygonRefusal::NoPlane`] when the outer ring encloses no area or a
+/// corner is not finite.
+pub(crate) fn polygon_warp(
+    rings: &[&[Vec3]],
+    linear: Scalar,
+) -> Result<Option<Scalar>, PolygonRefusal> {
+    let Some(outer) = rings.first().filter(|outer| !outer.is_empty()) else {
+        return Err(PolygonRefusal::NoPlane);
+    };
+    let normal = newell_normal(outer.iter().copied());
+    plane_axes(normal).ok_or(PolygonRefusal::NoPlane)?;
+    let n = normal.normalize();
+    let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
+    let spread = CornerSpread::of(rings, centroid, n)?;
+    Ok(spread.beyond(linear))
+}
+
 /// A typed error naming the authored face that could not be triangulated.
 pub(crate) fn face_error(face: usize, refusal: PolygonRefusal) -> GeomError {
     match refusal {
@@ -912,7 +938,13 @@ mod tests {
                 .warp
                 .unwrap();
             assert!((want..want + 1e-12).contains(&warp), "{warp}, want {want}");
+            // The B-rep path measures the same way (#257).
+            assert_eq!(polygon_warp(rings, 1e-3), Ok(Some(warp)));
         }
+        let mut planar = lifted[0].to_vec();
+        planar[2].z = 0.0;
+        assert_eq!(polygon_warp(&[&planar], 1e-3), Ok(None));
+        assert_eq!(polygon_warp(&[], 1e-3), Err(PolygonRefusal::NoPlane));
     }
 
     /// An authored ring edge is shared with the neighbour exactly as

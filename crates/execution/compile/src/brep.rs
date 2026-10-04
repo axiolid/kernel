@@ -12,9 +12,24 @@
 //! lies from its triangles, as a [`Deviation`] per surface family:
 //!
 //! - A planar face with straight edges is its own polygon: the bound is
-//!   how far its vertices sit off its declared plane (zero without one). A
-//!   curved edge on a planar face is chorded vertex to vertex here, so it
-//!   is unbounded by name, as is a face skipped for having no area.
+//!   how far its vertices sit off its declared plane, which is its exact
+//!   surface. A curved edge on a planar face is chorded vertex to vertex
+//!   here, so it is unbounded by name, as is a face skipped for having no
+//!   area.
+//! - A face that declares no surface (#257) is its boundary polygon and
+//!   nothing else. Within the linear tolerance of its fit plane it is
+//!   planar and exact, `0`, as before. Warped beyond it, it has no single
+//!   flat surface, so it is measured as a warped authored polygon face is
+//!   (`crate::planar`, #261): projected along the outer ring's Newell
+//!   normal, exactly as it is triangulated here, it reports the width of
+//!   the slab its corners (holes included) span about the fit plane,
+//!   `Certified` under `"non-planar face without a surface"`, never
+//!   `Proven`. It is reported, not refused: such faces come from faceted
+//!   exports (poly-loop faces of a faceted B-rep) whose quads the exporter
+//!   left warped, and the mesh is all anyone builds from them, since the
+//!   exact compiler refuses a B-rep node altogether. Like the exact `0` of
+//!   a planar face, the bound presumes the triangulation covers the face's
+//!   projection, which this path does not check by area.
 //! - A curved face is bounded per triangle in its parameter domain. With
 //!   `L` the linear interpolant of the surface at the triangle's parameter
 //!   corners, Taylor's theorem gives `|S(x) - L(x)| <= 1/2 sum_i l_i
@@ -463,6 +478,9 @@ fn append_face(
             ));
         }
     }
+    if support.is_none() {
+        report_warp(ctx, &rings, deviation)?;
+    }
     let normal = newell_normal(rings[0].iter().map(|&(_, p)| p));
     let (u, v) = plane_axes(normal).ok_or_else(|| {
         GeomError::Degenerate("planar face outer bound has no stable plane".into())
@@ -529,6 +547,35 @@ fn append_face(
         } else {
             mesh.indices.extend([a, b, c]);
         }
+    }
+    Ok(())
+}
+
+/// Measure the warp of a face that declares no surface (#257) and report it
+/// by name when its corners lie off their fit plane beyond the linear
+/// tolerance. `rings` holds the outer ring first, as the face is
+/// triangulated: projected along the outer ring's Newell normal, the plane
+/// [`crate::planar::polygon_warp`] measures against. The module notes say
+/// why it is certified rather than refused.
+fn report_warp(
+    ctx: &FaceContext<'_>,
+    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
+    deviation: &mut Deviation,
+) -> GeomResult<()> {
+    let points: Vec<Vec<Vec3>> = rings
+        .iter()
+        .map(|ring| ring.iter().map(|&(_, p)| p).collect())
+        .collect();
+    let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();
+    let warp = crate::planar::polygon_warp(&views, ctx.tolerance.linear()).map_err(|refusal| {
+        GeomError::Degenerate(format!("planar face cannot be measured: {refusal}"))
+    })?;
+    if let Some(warp) = warp {
+        deviation.add(
+            DeviationPath::BRepFace,
+            crate::deviation::WARPED_BREP_FACE,
+            DeviationBound::Certified(warp),
+        );
     }
     Ok(())
 }
