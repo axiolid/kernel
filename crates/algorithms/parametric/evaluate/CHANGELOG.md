@@ -17,6 +17,14 @@ caret rule for `0.x` versions.
   the exact up, the reference direction is orthonormalised against it
   (Gram-Schmidt, axis primary), the point stays -- and refuses a zero,
   non-finite or parallel pair by name (`station::ORIENTATION_TOLERANCE`).
+- `bound::chord_bound2` bounds implicit curves (`Curve2::Implicit`, ADR
+  0077) one cell at a time (#249), and `continuity_breaks2` names their
+  cell joins. A regular cell's solved parameter is bounded through the
+  implicit function theorem with interval bounds of the field's partials
+  over the stretch's box (first and second order, the smaller kept); a
+  bridge cell into a crossing by its cubic's Bezier control points. The
+  deviation of a boolean whose exact result has traced pcurves (a hole
+  through an I-beam's root fillets) can now be certified.
 
 ## [0.3.5] - 2026-10-03
 

@@ -121,6 +121,18 @@ impl Contacts {
         }
         // A curve on the cylinder, cut by the plane.
         if let Some(contact) = on.iter().find_map(|s| self.find(cutter, s)) {
+            // A traced section on the cylinder (a hole's cut through a
+            // fillet, #249) meets the ruling where it crosses the plane
+            // through the ruling and the axis.
+            if matches!(curve, Curve3::ImplicitSection(_)) {
+                return crate::tangency::traced_on_ruling(
+                    &contact.cylinder,
+                    &contact.ruling,
+                    curve,
+                    tolerance,
+                )
+                .map(Some);
+            }
             return on_cylinder(&contact.ruling, curve, tolerance);
         }
         // A curve in the plane, cut by the cylinder.

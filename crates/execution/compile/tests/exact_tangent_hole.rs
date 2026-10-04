@@ -17,7 +17,10 @@
 //! - a wall whose round hole touches its top face from inside, or whose
 //!   round tool touches it from outside;
 //! - a round column clipped by a plane a fraction of the tolerance into it
-//!   (the #234 roof case).
+//!   (the #234 roof case);
+//! - the I-beam with root fillets (#249): the hole touches each top fillet
+//!   where it meets the flange, a cylinder/cylinder section with a double
+//!   point; its volume is checked against a slice-by-slice reference.
 //!
 //! Each case checks the exact volume against its closed form, the
 //! certified distance to a probe in the hole, a clean audit, a closed
@@ -377,39 +380,187 @@ fn a_rounded_web_hole_touching_the_flange_is_refused_at_zero_tolerance() {
     );
 }
 
-#[test]
-fn a_web_hole_touching_the_flange_of_a_filleted_beam_is_refused_by_name() {
-    // With root fillets the hole's top ruling, tangent to the flange, is
-    // also tangent to each fillet where the fillet meets the flange: the
-    // hole and the fillet cylinder (axes crossing at right angles) meet in
-    // a quartic with a double point there, which the general boolean does
-    // not build. It refuses by name; it never returns an unsewn body.
-    let beam = DYADIC;
+/// The beam's root fillets (#249): radius `1/32` for the dyadic beam,
+/// IPE 300's `15 mm`.
+fn fillet(beam: Beam) -> f64 {
+    if beam.h == DYADIC.h {
+        0.03125
+    } else {
+        0.015
+    }
+}
+
+/// The area of the hole's cross-section above the line `d` above its axis.
+fn segment(r: f64, d: f64) -> f64 {
+    if d >= r {
+        0.0
+    } else if d <= -r {
+        PI * r * r
+    } else {
+        r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+    }
+}
+
+/// The volume of the filleted beam less a hole `gap` above touching the
+/// flange whose run covers both top fillets and no more than the flanges.
+///
+/// Sliced across the hole's axis: through the web the whole disc; through
+/// a fillet of radius `rf`, at `x = x_c - rf sin t`, the material lies
+/// above `y_c + rf cos t`, so the slice is a circular segment, summed by
+/// Simpson's rule in `t` (smooth there); under the flange the material
+/// lies above the flange's inner face.
+fn filleted_volume(beam: Beam, run: Run, gap: f64) -> f64 {
+    let rf = fillet(beam);
+    let (top, x_c) = (beam.h / 2.0 - beam.tf, beam.tw / 2.0 + rf);
+    let y = beam.axis() + gap;
+    let (start, depth) = run.span(beam);
+    assert!(start <= -x_c && start + depth >= x_c);
+    let n = 200_000;
+    let step = 0.5 * PI / n as f64;
+    let mut slices = 0.0;
+    for i in 0..=n {
+        let t = i as f64 * step;
+        let w = if i == 0 || i == n {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        };
+        slices += w * segment(beam.r, top - rf + rf * t.cos() - y) * rf * t.cos();
+    }
+    let flange = (2.0 * (start + depth).min(beam.b / 2.0) - 2.0 * x_c).max(0.0);
+    let removed = PI * beam.r * beam.r * beam.tw
+        + 2.0 * slices * step / 3.0
+        + flange * segment(beam.r, top - y);
+    let area = 2.0 * beam.b * beam.tf
+        + (beam.h - 2.0 * beam.tf) * beam.tw
+        + 4.0 * rf * rf * (1.0 - PI / 4.0);
+    area * beam.len - removed
+}
+
+/// [`beam_case`] for the beam with root fillets.
+fn filleted_case(
+    beam: Beam,
+    run: Run,
+    gap: f64,
+    turn: Transform3,
+    placement: Transform3,
+) -> (GeometryGraph, (NodeId, NodeId), f64) {
     let mut g = Graph::new();
     let section = Profile::Section(SectionProfile::I {
         depth: beam.h,
         width: beam.b,
         web_thickness: beam.tw,
         flange_thickness: beam.tf,
-        fillet_radius: Some(0.03125),
+        fillet_radius: Some(fillet(beam)),
         flange_edge_radius: None,
         flange_slope: None,
     });
     let body = g.extrusion(section, beam.len);
-    let (start, depth) = Run::PastFlanges.span(beam);
+    let body = g.place(body, placement);
+    let (start, depth) = run.span(beam);
     let hole = g.extrusion(circle(beam.r), depth);
-    let local = Transform3::from_translation(Vec3::new(start, beam.axis(), beam.len / 2.0))
-        * exact_onto_x();
-    let hole = g.place(hole, local);
+    let local =
+        Transform3::from_translation(Vec3::new(start, beam.axis() + gap, beam.len / 2.0)) * turn;
+    let hole = g.place(hole, placement * local);
     let body = g.minus(body, hole);
-    let graph = g.finish(vec![body]);
-    let error = ReferenceExactCompiler::new()
-        .compile_exact_with_report(&graph, body, &ExecutionOptions::new(Tolerance::METRE))
-        .expect_err("refused");
-    assert!(
-        matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("section curve")),
-        "{error:?}"
+    // A probe along the hole's axis inside the web, square of half side
+    // `r / 2` across it: the nearest material is the hole's wall in the
+    // web, `r - r / sqrt 2` from its long edges. It stays inside the web
+    // (half the web's thickness long), so the distance has a short
+    // plateau to certify, not one running past the fillets.
+    let a = beam.r / 2.0;
+    let (y, z) = (beam.axis() + gap, beam.len / 2.0);
+    let probe = g.probe(
+        Vec3::new(-beam.tw / 4.0, y - a, z - a),
+        Vec3::new(beam.tw / 4.0, y + a, z + a),
+        placement,
     );
+    let graph = g.finish(vec![body, probe]);
+    (graph, (body, probe), beam.r - a * 2.0_f64.sqrt())
+}
+
+#[test]
+fn a_web_hole_touching_the_flange_of_a_filleted_beam_is_exact_at_zero_tolerance() {
+    // With root fillets the hole's top ruling, tangent to the flange, is
+    // also tangent to each fillet where the fillet meets the flange: the
+    // hole and the fillet cylinder (axes crossing at right angles) meet in
+    // a quartic with a double point there. The trace ends both of its
+    // loops at that point, which is the exact double root of the
+    // fillet/flange edge against the hole: nothing is read within
+    // tolerance, and the volume is the reference's.
+    for placement in exact_placements() {
+        for run in [Run::PastFlanges, Run::PastWeb] {
+            let (graph, roots, distance) =
+                filleted_case(DYADIC, run, 0.0, exact_onto_x(), placement);
+            let expected = filleted_volume(DYADIC, run, 0.0);
+            for tolerance in [Tolerance::ZERO, Tolerance::METRE] {
+                let report = checked(&graph, roots, tolerance, (expected, 0.0), distance)
+                    .unwrap_or_else(|e| panic!("{run:?}: {e}"));
+                assert!(
+                    report.linear() <= report.rounding_floor(),
+                    "{run:?}: {report:?}"
+                );
+                if tolerance == Tolerance::ZERO {
+                    assert!(report.is_exact(), "{run:?}: {report:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_web_hole_touching_the_flange_of_a_filleted_beam_under_a_general_placement() {
+    // The flange is read as touching the hole (#243), and the fillets'
+    // double points are placed on that contact: the dyadic beam and an
+    // IPE 300 with its 15 mm root fillets.
+    let rounded = Transform3::from_rotation_y(FRAC_PI_2);
+    for beam in [DYADIC, IPE] {
+        for placement in [building(), general()] {
+            for turn in [exact_onto_x(), rounded] {
+                let run = Run::PastFlanges;
+                let (graph, roots, distance) = filleted_case(beam, run, 0.0, turn, placement);
+                let report = checked(
+                    &graph,
+                    roots,
+                    Tolerance::METRE,
+                    (filleted_volume(beam, run, 0.0), 1e-12),
+                    distance,
+                )
+                .unwrap_or_else(|e| panic!("{run:?} {placement:?} {turn:?}: {e}"));
+                assert!(report.linear() <= EPS, "{report:?}");
+                assert!(
+                    report.contains(ToleranceDecisionKind::PlaneTouchesCylinder),
+                    "{report:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_filleted_beam_whose_hole_is_a_fraction_of_the_tolerance_off_the_flange_is_refused() {
+    // Read as touching the flange, the hole would touch each fillet too,
+    // where it meets it in two arcs about `sqrt(2 r gap)` from the
+    // contact: no single move within the tolerance explains both, so it
+    // is refused by name, never sewn inconsistently.
+    for fraction in [0.5, -0.5] {
+        let (graph, (body, _), _) = filleted_case(
+            DYADIC,
+            Run::PastFlanges,
+            fraction * EPS,
+            exact_onto_x(),
+            Transform3::IDENTITY,
+        );
+        let error = ReferenceExactCompiler::new()
+            .compile_exact_with_report(&graph, body, &ExecutionOptions::new(Tolerance::METRE))
+            .expect_err("refused");
+        assert!(
+            matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("contact")),
+            "{fraction}: {error:?}"
+        );
+    }
 }
 
 #[test]

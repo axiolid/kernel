@@ -69,6 +69,16 @@
 //! placed is refused ([`BooleanError::UnsupportedContact`]). An exactly
 //! tangent pair is decided by the exact predicates instead.
 //!
+//! **A hole touching a fillet (#249).** A round hole touching a flange
+//! with root fillets touches each fillet too, and the perpendicular
+//! cylinders meet in two loops crossing at the fillet/flange edge. The
+//! trace is taken over the fillet's whole turn when its face's box cuts
+//! through the crossing, a section is cut at a smooth edge where the edge
+//! crosses the other surface, and under a contact reading the crossing is
+//! placed on the contact; where the section misses the contact point by
+//! more than the tolerance it is refused
+//! ([`BooleanError::UnsupportedContact`]). See `tangency`.
+//!
 //! **Exact first (#236).** A reading about the operands' own surfaces --
 //! two supports are one, a plane is parallel or perpendicular to a
 //! cylinder's axis or touches it -- is first put to an exact predicate on
@@ -130,6 +140,7 @@ mod seams;
 mod section;
 mod split;
 mod support;
+mod tangency;
 
 pub use report::{BooleanReport, ToleranceDecision, ToleranceDecisionKind, ROUNDING_FACTOR};
 pub use section::{section_edges, SectionEdge};

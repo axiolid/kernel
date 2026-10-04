@@ -351,6 +351,45 @@ fn an_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_exact_resu
     assert!(bound <= 2.0 * budget, "{bound}");
 }
 
+/// The IPE 300-like beam with its 15 mm root fillets, the hole run through
+/// the web and both fillets past the flange tips: touching the flange, it
+/// touches each top fillet too, where the hole/fillet section has a
+/// double point (#249).
+fn filleted_beam_with_a_hole_touching_its_flange(g: &mut Graph) -> NodeId {
+    let (depth, width, flange, radius) = (0.3, 0.15, 0.0107, 0.05);
+    let section = Profile::Section(SectionProfile::I {
+        depth,
+        width,
+        web_thickness: 0.0071,
+        flange_thickness: flange,
+        fillet_radius: Some(0.015),
+        flange_edge_radius: None,
+        flange_slope: None,
+    });
+    let beam = g.extrusion(section, 4.0);
+    let beam = g.place(beam, building());
+    let hole = g.extrusion(circle(radius), 2.0 * width);
+    let across =
+        Transform3::from_translation(Vec3::new(-width, depth / 2.0 - flange - radius, 2.0))
+            * Transform3::from_rotation_y(FRAC_PI_2);
+    let hole = g.place(hole, building() * across);
+    g.boolean(beam, hole, BooleanOperator::Difference)
+}
+
+#[test]
+fn a_filleted_i_beam_with_a_hole_touching_its_flange_is_certified_against_its_exact_result() {
+    let budget = 1e-3;
+    let options = options(budget);
+    let case = compile(filleted_beam_with_a_hole_touching_its_flange, &options);
+    let (bound, _) = assert_measured(
+        "filleted I-beam, hole touching the flange",
+        case,
+        &options,
+        2.0,
+    );
+    assert!(bound <= 2.0 * budget, "{bound}");
+}
+
 #[test]
 fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
     let budget = 1e-3;

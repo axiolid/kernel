@@ -447,6 +447,9 @@ fn section_piece(
             )
         );
     if !closed_form {
+        if let Some(piece) = own_piece(surface, section, index, lo, hi) {
+            return Ok(piece);
+        }
         return implicit_piece(surface, other, section, index, lo, hi, traces, tolerance);
     }
     // A start at a pole has no angle: read the piece a little way in.
@@ -481,18 +484,10 @@ fn section_piece(
     fallback.ok_or(BooleanError::Evaluation)
 }
 
-/// A section edge's pcurve on an analytic face as its space curve read in
-/// the face's parameters (`Curve2::Lifted`), sharing the edge's parameter;
-/// the guide unwraps its angles into the face's range.
-fn lifted_piece(
-    surface: &Surface,
-    section: &SectionEdge,
-    index: usize,
-    lo: Point2,
-    hi: Point2,
-    tolerance: Tolerance,
-) -> Result<Piece, BooleanError> {
-    let carrier = match surface {
+/// The carrier a traced curve on `surface` is read on (ADR 0077), in the
+/// surface's own parameterisation.
+fn carrier_of(surface: &Surface) -> Option<axiolid_curve::Carrier> {
+    Some(match surface {
         Surface::Plane(p) => axiolid_curve::Carrier::Plane(p.frame),
         Surface::Cylinder(c) => axiolid_curve::Carrier::Ruled(axiolid_curve::RuledCarrier {
             frame: c.frame,
@@ -526,8 +521,65 @@ fn lifted_piece(
         // A B-spline carries a section of two B-splines in its own
         // parameters (ADR 0077).
         Surface::BSpline(b) => axiolid_curve::Carrier::Spline(Box::new(b.clone())),
-        _ => return Err(BooleanError::UnsupportedSplit),
+        _ => return None,
+    })
+}
+
+/// A traced section carried on this face's own surface: its pcurve is the
+/// section's own implicit curve, which defines its points (the carrier at
+/// the pcurve's point), moved by whole turns into the face's range. No
+/// second trace is needed, and none could do better: a hole touching a
+/// fillet where the fillet face ends has its double point on the face's
+/// box, where a trace over that box is undecided (#249).
+fn own_piece(
+    surface: &Surface,
+    section: &SectionEdge,
+    index: usize,
+    lo: Point2,
+    hi: Point2,
+) -> Option<Piece> {
+    let Curve3::ImplicitSection(traced) = &section.curve else {
+        return None;
     };
+    if carrier_of(surface).as_ref() != Some(&traced.carrier) {
+        return None;
+    }
+    let (pu, pv) = periods(surface);
+    let middle = traced
+        .curve
+        .point(0.5 * (section.span.start + section.span.end))?;
+    let into = |x: Scalar, a: Scalar, b: Scalar, periodic: bool| {
+        if !periodic || (x >= a - 1e-9 && x <= b + 1e-9) {
+            0.0
+        } else {
+            ((0.5 * (a + b) - x) / TAU).round() * TAU
+        }
+    };
+    let pcurve = traced.curve.shifted(
+        into(middle.x, lo.x, hi.x, pu),
+        into(middle.y, lo.y, hi.y, pv),
+    );
+    Some(Piece {
+        curve: section.curve.clone(),
+        span: section.span,
+        pcurve: Curve2::Implicit(pcurve),
+        pspan: section.span,
+        source: PieceSource::Section(index),
+    })
+}
+
+/// A section edge's pcurve on an analytic face as its space curve read in
+/// the face's parameters (`Curve2::Lifted`), sharing the edge's parameter;
+/// the guide unwraps its angles into the face's range.
+fn lifted_piece(
+    surface: &Surface,
+    section: &SectionEdge,
+    index: usize,
+    lo: Point2,
+    hi: Point2,
+    tolerance: Tolerance,
+) -> Result<Piece, BooleanError> {
+    let carrier = carrier_of(surface).ok_or(BooleanError::UnsupportedSplit)?;
     if let Curve3::PairSection(pair) = &section.curve {
         let first = pair.side(&carrier).ok_or(BooleanError::UnsupportedSplit)?;
         let (t0, t1) = (section.span.start, section.span.end);

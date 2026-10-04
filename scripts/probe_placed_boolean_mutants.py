@@ -1,12 +1,15 @@
 """Mutation probe for exact differences of placed operands (#228, #236, #244,
-#243, #251).
+#243, #249, #251).
 
 Each mutant reintroduces a way the placed-opening path failed or could
 fail -- a rounding residue read exactly, a tangent double root split into
 a sliver, the compiler's dispatch or refusals loosened, an exact
 configuration read within tolerance, a reading or the rounding floor left
 out of the report, a plane/cylinder contact read by one face pair and not
-the others -- and must turn a test red.
+the others, a hole touching a root fillet's double point not traced, cut
+or placed on the contact, its traced pcurves not bounded -- and must turn
+a test red. Arguments, if any, run only the mutants whose names contain
+one of them.
 
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
@@ -48,6 +51,9 @@ F = "crates/algorithms/construction/brep-boolean/src/split.rs"
 C = "crates/execution/compile/src/exact/boolean.rs"
 B = "crates/algorithms/construction/brep-boolean/src/bounds.rs"
 T = "crates/algorithms/construction/brep-boolean/src/contact.rs"
+G = "crates/algorithms/construction/brep-boolean/src/tangency.rs"
+V = "crates/algorithms/parametric/evaluate/src/bound/implicit.rs"
+W = "crates/algorithms/parametric/evaluate/src/bound.rs"
 TESTS = [
     ["-p", "axiolid-brep-boolean", "--lib"],
     ["-p", "axiolid-brep-boolean", "--test", "openings"],
@@ -58,6 +64,9 @@ TESTS = [
     ["-p", "axiolid-brep-boolean", "--test", "tangent_contact"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_tangent_hole"],
     ["-p", "axiolid-mesh-compile", "--test", "exact_half_space_clip"],
+    ["-p", "axiolid-brep-boolean", "--test", "fillet_tangent"],
+    ["-p", "axiolid-mesh-compile", "--test", "boolean_deviation", "filleted"],
+    ["-p", "axiolid-evaluate", "--lib", "implicit"],
 ]
 
 MUTANTS = [
@@ -218,6 +227,37 @@ MUTANTS = [
     ("a refused session returns its report", R,
      "                    if s.exceeded {",
      "                    if false {"),
+    # #249: a hole touching an I-beam's root fillets.
+    ("a trace undecided in the face's box not retried over a turn", G,
+     "            Some(turn) => implicit_surface_intersection(carrier, other, Some(turn)),",
+     "            Some(_) => Err(ExactIntersectionRefusal::Undecided),"),
+    ("a loop closing through a crossing not cut at its start", S,
+     "            let at_start = cuts.iter().any(|&c| c <= slack || c >= n - slack);",
+     "            let at_start = false;"),
+    ("a smooth edge cut against its tangent neighbour", G,
+     "    Ok(a != Vec3::ZERO && b != Vec3::ZERO && a.cross(b).length() <= SMOOTH)",
+     "    Ok(false)"),
+    ("a section missing the contact point not refused", G,
+     "        if placed && distance(curve, point).is_none_or(|d| d <= reach(meets, tolerance)) {",
+     "        if false {"),
+    ("a contact's reach only the tolerance", G,
+     "    4.0 * (2.0 * r * eps).sqrt() + eps",
+     "    eps"),
+    ("a traced section on a contact cylinder left unplaced", T,
+     "            if matches!(curve, Curve3::ImplicitSection(_)) {",
+     "            if false {"),
+    ("a traced section's own pcurve not kept on its carrier", F,
+     "        if let Some(piece) = own_piece(surface, section, index, lo, hi) {",
+     "        if let Some(piece) = None::<Piece> {"),
+    ("an implicit pcurve bounded to first order only", V,
+     "    let bound = first.min(second);",
+     "    let bound = first;"),
+    ("an implicit pcurve's bend bound ten times too small", V,
+     "    let second = span * span / 8.0 * bend;",
+     "    let second = span * span / 80.0 * bend;"),
+    ("an implicit curve's cell joins not named", W,
+     "        Curve2::Implicit(c) if k >= 1 => implicit::joins(c),\n",
+     ""),
 ]
 
 def run(target):
@@ -226,11 +266,10 @@ def run(target):
         cwd=ROOT, capture_output=True, text=True, timeout=1800,
     ).returncode
 
-if len(sys.argv) > 1:
-    MUTANTS = [m for m in MUTANTS if any(a in m[0] for a in sys.argv[1:])]
+SELECTED = [m for m in MUTANTS if not sys.argv[1:] or any(a in m[0] for a in sys.argv[1:])]
 
 survivors = []
-for name, rel, old, new in MUTANTS:
+for name, rel, old, new in SELECTED:
     path = ROOT / rel
     original = path.read_text()
     assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
@@ -246,5 +285,5 @@ for name, rel, old, new in MUTANTS:
     print(f"{status:8} {name}", flush=True)
     if code == 0:
         survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
+print(f"{len(SELECTED) - len(survivors)}/{len(SELECTED)} killed")
 sys.exit(1 if survivors else 0)

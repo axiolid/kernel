@@ -33,6 +33,10 @@
 //!   first, which leaves every derivative unchanged.
 //! - Elementary surfaces: closed forms over the parameter box. B-spline
 //!   surfaces: the derivative control nets of the tensor product.
+//! - Implicit curves (ADR 0077): cell by cell, the solved parameter's
+//!   slope and bend through the implicit function theorem, with interval
+//!   bounds of the field's partials over the stretch's box; a bridge cell
+//!   by its cubic's control points (`implicit`, #249).
 //!
 //! A B-spline is only as smooth as its knots allow. A knot of multiplicity
 //! `m` leaves a degree `d` spline `C^(d - m)` there, so a bound that needs a
@@ -51,6 +55,8 @@ use axiolid_surface::{BSplineSurface, Surface};
 
 use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
+
+mod implicit;
 
 /// Relative inflation applied to every returned bound, so the rounding of
 /// the bound's own arithmetic cannot make it undershoot.
@@ -374,6 +380,8 @@ pub fn continuity_breaks2(curve: &Curve2, k: usize) -> Vec<Scalar> {
         // each piece is bounded on its own, so the joins are named for
         // every `k`.
         Curve2::Chain(c) if k >= 1 => c.joins().unwrap_or_default(),
+        // An implicit curve's cells are bounded one at a time (#249).
+        Curve2::Implicit(c) if k >= 1 => implicit::joins(c),
         _ => Vec::new(),
     }
 }
@@ -537,6 +545,10 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
         Curve2::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y], a, b)
             .map(|(_, chord)| inflate(taylor(b - a, chord))),
         Curve2::Chain(chain) => crate::chain::chain_chord_bound(chain, a, b),
+        Curve2::Implicit(c) => {
+            let (lo, hi) = ordered(a, b);
+            implicit::chord_bound(c, lo, hi).map(inflate)
+        }
         _ => curve_derivative_bounds2(curve, a, b).map(|d| inflate(taylor(b - a, d.second))),
     }
 }

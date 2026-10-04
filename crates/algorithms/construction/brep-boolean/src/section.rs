@@ -53,6 +53,11 @@
 //! - a plane touching a cylinder is read once for the two supports, and a
 //!   curve on either one is cut by the other where it meets their contact
 //!   ruling, in every face pair alike (`crate::contact`, #243).
+//!
+//! Along a smooth edge (a fillet running tangent into its neighbour) a
+//! section is cut where the edge crosses the section's other surface, and
+//! a trace that cannot be decided in a face's box of a periodic carrier is
+//! taken over its whole turn (`crate::tangency`, #249).
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Interval, Point2, Point3, Scalar, Tolerance, Vec3};
@@ -62,8 +67,7 @@ use axiolid_evaluate::{curve::locate3, evaluate3};
 use axiolid_measure::FaceDomain;
 use axiolid_nurbs::{
     exact_curve_curve_intersection3, exact_curve_surface_intersection, exact_surface_intersection,
-    implicit_surface_intersection, spline_pair_intersection, ExactCurveIntersection,
-    ExactIntersectionRefusal,
+    spline_pair_intersection, ExactCurveIntersection, ExactIntersectionRefusal,
 };
 use axiolid_surface::{Plane, Surface};
 use axiolid_topology::FaceId;
@@ -270,11 +274,7 @@ pub(crate) fn sections_and_contacts(
                             (sb, sa, &side_b, fb)
                         };
                         let (lo, hi) = side.domains[face].bounds();
-                        match implicit_surface_intersection(
-                            carrier,
-                            other,
-                            Some(window(carrier, lo, hi)),
-                        ) {
+                        match crate::tangency::trace(carrier, other, lo, hi) {
                             Ok(sections) => sections
                                 .into_iter()
                                 .map(|s| {
@@ -949,11 +949,16 @@ fn pieces(curve: &Curve3, mut cuts: Vec<Scalar>) -> Result<Vec<(Curve3, Interval
             let (pu, pv) = section.carrier.periodic();
             let closure = section.curve.closure(pu, pv);
             let slack = 1e-9 * (1.0 + n);
+            // A cut at a loop's own start (a chain closing through a vertex
+            // where branches cross, #249) is a cut like any other: the
+            // loop's stretches then run between its start and the cuts.
+            let at_start = cuts.iter().any(|&c| c <= slack || c >= n - slack);
             let mut inner: Vec<Scalar> = cuts
                 .into_iter()
                 .filter(|&c| c > slack && c < n - slack)
                 .collect();
             inner.dedup_by(|x, y| (*x - *y).abs() <= slack);
+            let closure = closure.filter(|_| !at_start);
             let own = |a: Scalar, b: Scalar| -> Result<(Curve3, Interval), BooleanError> {
                 // One cut on a loop: the whole loop, starting there.
                 let sub = if (a - b).abs() <= slack {
@@ -1284,6 +1289,15 @@ impl<'a> Side<'a> {
                 }
                 if !matches!(result, Ok(ExactCurveIntersection::Contained)) {
                     let own = self.surface(face)?;
+                    // Along a smooth edge (a fillet running tangent into
+                    // the adjacent face) the curve touches the cutter: it
+                    // is cut where the edge crosses `meets` (#249).
+                    if let Some(hits) = crate::tangency::smooth_edge_cuts(
+                        own, &cutter, meets, edge_curve, span, curve, contacts, tolerance,
+                    )? {
+                        out.extend(hits);
+                        continue;
+                    }
                     if let Some(hits) =
                         contacts.crossing([own, meets], &cutter, curve, tolerance)?
                     {
@@ -1557,7 +1571,7 @@ fn on_edge(
 
 /// Whether `point`, on `curve`, lies within the edge's span (a closed
 /// conic's span may start anywhere and run past a full turn).
-fn on_span(
+pub(crate) fn on_span(
     curve: &Curve3,
     span: Interval,
     point: Point3,

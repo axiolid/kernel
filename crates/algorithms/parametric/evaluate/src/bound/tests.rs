@@ -497,3 +497,64 @@ fn a_heavily_weighted_rational_surface_lies_within_its_interpolation_bound() {
         }
     }
 }
+
+/// The unit circle `u^2 + v^2 - 1` as an implicit curve: a regular cell
+/// along `u` (upper arc, `v` solved in `[0.5, 1.5]`), then a bridge cell
+/// (a cubic) leaving it, as a trace into a crossing ends (ADR 0077).
+fn implicit_circle() -> Curve2 {
+    use axiolid_curve::{Axis, Basis, Field2, ImplicitCell, ImplicitCurve2, SeriesField2};
+    let field = Field2::Series(SeriesField2 {
+        u: Basis::Power,
+        v: Basis::Power,
+        coefficients: vec![vec![-1.0, 0.0, 1.0], vec![0.0], vec![1.0]],
+    });
+    let regular = ImplicitCell {
+        axis: Axis::U,
+        from: -0.6,
+        to: 0.6,
+        low: 0.5,
+        high: 1.5,
+        bridge: None,
+    };
+    let bridge = ImplicitCell::bridge(
+        Point2::new(0.6, 0.8),
+        Point2::new(0.9, 0.3),
+        Vec2::new(0.8, -0.6),
+        Vec2::new(1.0, -1.5),
+    );
+    Curve2::Implicit(ImplicitCurve2 {
+        field,
+        cells: vec![regular, bridge],
+    })
+}
+
+#[test]
+fn implicit_chord_bounds_cover_the_sampled_deviation_cell_by_cell() {
+    // #249: the boolean's pcurves on a filleted beam are implicit; the
+    // deviation path flattens them with these bounds.
+    let curve = implicit_circle();
+    assert_eq!(continuity_breaks2(&curve, 1), vec![1.0]);
+    // Across the cell join: refused, the caller splits there.
+    assert_eq!(chord_bound2(&curve, 0.5, 1.5), None);
+    for (lo, hi) in [(0.0, 1.0), (1.0, 2.0)] {
+        let mut previous = Scalar::INFINITY;
+        for n in [1_usize, 4, 16, 64] {
+            let mut worst: Scalar = 0.0;
+            for i in 0..n {
+                let a = lo + (hi - lo) * i as Scalar / n as Scalar;
+                let b = lo + (hi - lo) * (i + 1) as Scalar / n as Scalar;
+                let bound = chord_bound2(&curve, a, b).expect("bounded");
+                let measured = measured_chord2(&curve, a, b);
+                assert!(
+                    measured <= bound,
+                    "[{a}, {b}]: measured {measured} above bound {bound}"
+                );
+                worst = worst.max(bound);
+            }
+            // Halving shrinks the bound (second order: by about four).
+            assert!(worst < previous, "{lo}: {worst} after {previous}");
+            previous = worst;
+        }
+        assert!(previous < 1e-3, "{lo}: {previous}");
+    }
+}

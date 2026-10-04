@@ -30,6 +30,17 @@ caret rule for `0.x` versions.
 - A sectioned surface whose section runs its tags in reverse is joined
   reversed instead of refused (#246).
 
+### Fixed
+
+- `ReferenceExactCompiler` compiles a round web hole touching the flange
+  of an I-beam with root fillets (#249): exactly, with an empty report, at
+  `Tolerance::ZERO` with exact axes, and reading the contact under a
+  general placement. Its mesh is measured against the exact result
+  through `compile_mesh_with_deviation` and reported `Certified` (traced
+  pcurves now have certified chord bounds). A hole a fraction of the
+  tolerance off touching is refused by name ("... where the contact cannot
+  be placed").
+
 ## [0.3.13] - 2026-10-03
 
 ### Added

@@ -301,3 +301,63 @@ Tests: `crates/algorithms/construction/brep-boolean/tests/report.rs` (a
 general-placement round hole, and random general placements by every
 operator, at zero); probe `scripts/probe_placed_boolean_mutants.py` (#251
 mutants).
+
+## Amendment 2026-10-04: a hole touching an I-beam's root fillets (#249)
+
+The #243 amendment left one case refused: a round web hole touching the
+flange of an I-beam with root fillets, which most rolled sections have.
+The hole is tangent to each top fillet where the fillet runs into the
+flange, and the two cylinders (axes perpendicular, skew by the difference
+of their radii) meet in a quartic with a double point there: two loops
+round the fillet cylinder, crossing at the fillet/flange edge.
+
+- **Why it failed.** The section is traced (ADR 0077) on the fillet over
+  its face's parameter box, and that face ends at the double point: the
+  crossing sat on the box's edge, where the trace cannot certify the
+  pieces around it, and refused. Behind that, the section touches the
+  flange and web planes along the fillet's smooth edges, so cutting it
+  against the adjacent surfaces meets double roots, and the face's
+  pcurve would have been traced over the same box again.
+- **Decision: trace the whole turn, cut smooth edges by the edge.**
+  - A trace that cannot be decided in a face's box of a periodic carrier
+    is taken over the carrier's whole turn. The crossing is then inside,
+    the trace ends both loops at it, and the loops are cut there. On the
+    carrier's own face a section piece keeps the traced curve itself as
+    its pcurve.
+  - A section is cut at a smooth edge of its face (the adjacent surface
+    tangent to the face along it) where the edge crosses the section's
+    other surface: a line against a cylinder in closed form, transversal
+    at the web and an exact double root at the double point. Smoothness
+    only chooses between two exact formulations of the same crossing.
+  - Under a general placement the flange is read as touching the hole
+    (#243), and the fillet/flange edge, a line in the flange plane, is
+    cut on the contact ruling; the traced section must pass there within
+    the tolerance, which it does when the residue is rounding. A traced
+    section on a cylinder in a contact is cut where it crosses the plane
+    through the contact ruling and the axis.
+- **Refused by name.** A hole a fraction of the tolerance into or short of
+  the flange meets each fillet in two arcs up to `4 sqrt(2 r eps)` from
+  the contact point. Read as touching, the flange would have to join them
+  there; no single move of one operand does (moving the hole onto the
+  flange makes it touch the fillets as well, moving the flange alone
+  leaves the fillets crossing it), so it is
+  `BooleanError::UnsupportedContact`. Beyond the tolerance the exact
+  predicates decide (a groove ten tolerances deep is cut exactly).
+- **Exact at zero tolerance.** With exact axes and dyadic sizes the double
+  point is the exact double root of the edge against the hole, and the
+  report is empty at `Tolerance::ZERO`. The fillet's radius comes from
+  the profile arc's bulge and is an ulp off, a residue the trace's
+  crossing absorbs below its field's rounding.
+- **Certified mesh.** `axiolid_evaluate::bound::chord_bound2` now bounds
+  implicit pcurves cell by cell (implicit function theorem with interval
+  bounds of the field's partials; a bridge cell by its cubic's control
+  points), so the boolean's deviation is `Certified` where its exact
+  result has traced pcurves.
+
+Not covered by these tests: a hole flush with the web faces of a
+filleted beam (its cap lies inside the fillet material and leaves a
+pocket), and fillets running into a tapered flange.
+Tests: `crates/algorithms/construction/brep-boolean/tests/fillet_tangent.rs`,
+the filleted cases of `crates/execution/compile/tests/exact_tangent_hole.rs`
+and `crates/execution/compile/tests/boolean_deviation.rs`; probe
+`scripts/probe_placed_boolean_mutants.py` (fillet mutants).
