@@ -9,12 +9,19 @@
 //! authored polygon faces use, which refuses crossing rings, holes outside
 //! the outer loop and loops with no area rather than filling them. The
 //! result is a surface, never a solid.
+//!
+//! A boundary may also be a curve relation, a composite or a trim (#255):
+//! it is resolved to points by the sweep directrix reader (see
+//! [`relation`]) and must close, its ends no farther apart than the linear
+//! tolerance, as composite joints may be. An open one is refused by name.
 
-use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
+use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance};
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
+
+pub(crate) mod relation;
 
 /// A runaway guard on chord subdivision, as for profiles.
 const MAX_SUBDIVISION_DEPTH: u32 = 24;
@@ -30,9 +37,10 @@ pub(crate) fn curve_bounded(
     basis: NodeId,
     boundaries: &[NodeId],
     implicit_outer: bool,
-    chord: Scalar,
-    tolerance: Tolerance,
+    options: &ExecutionOptions,
 ) -> GeomResult<(TriMesh, Scalar)> {
+    let chord = crate::compiler::chord_error(options);
+    let tolerance = options.tolerance();
     if implicit_outer {
         // The outer loop would be the basis surface's own boundary, which a
         // plane does not have.
@@ -70,7 +78,7 @@ pub(crate) fn curve_bounded(
     let mut rings: Vec<Vec<Point2>> = Vec::with_capacity(boundaries.len());
     let mut merged: Scalar = 0.0;
     for (index, &id) in boundaries.iter().enumerate() {
-        let mut ring = boundary_ring(graph, id, chord, tolerance, &mut merged)?;
+        let mut ring = boundary_ring(graph, id, options, chord, tolerance, &mut merged)?;
         if ring.len() < 3 {
             return Err(GeomError::Degenerate(format!(
                 "curve-bounded boundary {index} has {} distinct points, need at least 3",
@@ -78,9 +86,11 @@ pub(crate) fn curve_bounded(
             )));
         }
         // The outer loop counter-clockwise in the plane's parameters, so the
-        // triangles face along the plane's normal.
+        // triangles face along the plane's normal. Reversed about its first
+        // point, so a loop read backwards (a composite segment against its
+        // curve's sense, #255) triangulates as the loop read forwards.
         if index == 0 && signed_area(&ring) < 0.0 {
-            ring.reverse();
+            ring[1..].reverse();
         }
         rings.push(ring);
     }
@@ -116,6 +126,7 @@ pub(crate) fn curve_bounded(
 fn boundary_ring(
     graph: &GeometryGraph,
     id: NodeId,
+    options: &ExecutionOptions,
     chord: Scalar,
     tolerance: Tolerance,
     merged: &mut Scalar,
@@ -141,6 +152,17 @@ fn boundary_ring(
             let domain = axiolid_reference::curve::domain2(curve);
             axiolid_reference::curve::flatten2(curve, domain, chord, MAX_SUBDIVISION_DEPTH)?
         }
+        Some(GeometryNode::CurveRelation(_)) => {
+            let points = relation::points(graph, id, options)?;
+            let gap = points[0].distance(points[points.len() - 1]);
+            if gap.is_nan() || gap > linear {
+                return Err(GeomError::InvalidInput(format!(
+                    "curve-bounded boundary {id:?} is an open curve relation: its ends are \
+                     {gap} apart, more than the linear tolerance {linear}"
+                )));
+            }
+            in_parameter_plane(id, &points, linear)?
+        }
         Some(GeometryNode::Curve3(curve)) => {
             let points = match curve {
                 Curve3::Polyline(p) => {
@@ -161,15 +183,7 @@ fn boundary_ring(
                     axiolid_reference::curve::flatten3(other, domain, chord, MAX_SUBDIVISION_DEPTH)?
                 }
             };
-            // A 3D boundary is still in the plane's parameters: its points
-            // must lie in the parameter plane, z = 0.
-            if let Some(off) = points.iter().find(|p| p.z.abs() > linear) {
-                return Err(GeomError::InvalidInput(format!(
-                    "curve-bounded boundary {id:?} leaves the parameter plane (z = {})",
-                    off.z
-                )));
-            }
-            points.iter().map(|p| Point2::new(p.x, p.y)).collect()
+            in_parameter_plane(id, &points, linear)?
         }
         Some(_) => {
             return Err(GeomError::InvalidInput(format!(
@@ -201,6 +215,18 @@ fn boundary_ring(
         *merged = merged.max((ring[0] - dropped).length());
     }
     Ok(ring)
+}
+
+/// A 3D boundary is still in the plane's parameters: its points must lie
+/// in the parameter plane, z = 0.
+fn in_parameter_plane(id: NodeId, points: &[Point3], linear: Scalar) -> GeomResult<Vec<Point2>> {
+    if let Some(off) = points.iter().find(|p| p.z.abs() > linear) {
+        return Err(GeomError::InvalidInput(format!(
+            "curve-bounded boundary {id:?} leaves the parameter plane (z = {})",
+            off.z
+        )));
+    }
+    Ok(points.iter().map(|p| Point2::new(p.x, p.y)).collect())
 }
 
 fn signed_area(ring: &[Point2]) -> Scalar {

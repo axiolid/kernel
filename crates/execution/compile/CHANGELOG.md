@@ -25,6 +25,19 @@ caret rule for `0.x` versions.
   is not the vertex count, a curved or parametric profile, an outer ring
   tagged as a hole and an order that is no rotation are refused by name.
 
+- A curve-bounded plane takes `CurveRelation` boundaries (#255): a
+  `Composite` of lines, polylines, arcs and other segments, each read in
+  its `same_sense`, and a `Trimmed` basis curve under every
+  `TrimSelector` kind (parameter, point, arc length), resolved to points by
+  the sweep directrix reader, 2D curves and point selectors lifted to
+  `z = 0`. The boundary must close within the linear tolerance; an open
+  one, a joint gap past it, an offset, surface-curve, parameter-curve or
+  station-offset relation, and a 2D family other than a line, circle,
+  ellipse, polyline or B-spline are refused by name. The deviation report
+  bounds such a boundary by its leaves (straight exact, certified families
+  within the chord budget, others `Unbounded` by name) plus its widest
+  joint gap.
+
 ### Changed
 
 - A sectioned surface whose section runs its tags in reverse is joined
@@ -43,6 +56,9 @@ caret rule for `0.x` versions.
   report exactly as before; rings that cross or enclose no area in the fit
   plane are still refused by face index, and the exact compiler still
   refuses polygon meshes by name.
+- A clockwise outer loop of a curve-bounded plane is reversed about its
+  first point, so a loop read backwards triangulates exactly as the loop
+  read forwards (#255).
 
 ### Fixed
 

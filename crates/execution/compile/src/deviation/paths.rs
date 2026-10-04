@@ -250,12 +250,14 @@ pub(crate) fn of_primitive(primitive: &Primitive, chord: Scalar) -> Deviation {
 /// the curve flattener, so the chord budget where every boundary family is
 /// certified, plus the largest merge of near-duplicate points (`merged`),
 /// scaled by the plane frame's stretch (the boundaries live in its
-/// parameters).
+/// parameters). A curve-relation boundary is bounded by its leaves (#255,
+/// `crate::bounded::relation::bound`), its widest joint gap included.
 pub(crate) fn of_curve_bounded(
     graph: &GeometryGraph,
     basis: NodeId,
     boundaries: &[NodeId],
     chord: Scalar,
+    options: &ExecutionOptions,
     merged: Scalar,
 ) -> Deviation {
     let stretch = match graph.get(basis) {
@@ -288,6 +290,9 @@ pub(crate) fn of_curve_bounded(
                 } else {
                     DeviationBound::Unbounded("curve-bounded plane boundary family")
                 }
+            }
+            Some(GeometryNode::CurveRelation(_)) => {
+                crate::bounded::relation::bound(graph, id, options)
             }
             _ => DeviationBound::Unbounded("curve-bounded plane boundary"),
         };

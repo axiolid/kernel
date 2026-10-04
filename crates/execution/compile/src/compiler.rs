@@ -544,8 +544,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 *basis,
                 boundaries,
                 *implicit_outer,
-                chord_error(options),
-                options.tolerance(),
+                options,
             )
             .map(|(mesh, merged)| {
                 Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
@@ -554,6 +553,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         *basis,
                         boundaries,
                         chord_error(options),
+                        options,
                         merged,
                     ))
             }),

@@ -15,7 +15,7 @@ MUTANTS = [
     ('clockwise outer loop kept', B, '        if index == 0 && signed_area(&ring) < 0.0 {', '        if false && index == 0 && signed_area(&ring) < 0.0 {', TESTS),
     ('parameters mapped with the axes swapped', B, '    let map = |p: Point2| frame.origin + frame.x * p.x + frame.y * p.y;', '    let map = |p: Point2| frame.origin + frame.y * p.x + frame.x * p.y;', TESTS),
     ('open polylines closed silently', B, '        !closed && !meets', '        false && !closed && !meets', TESTS),
-    ('3D boundaries off the parameter plane flattened', B, '            if let Some(off) = points.iter().find(|p| p.z.abs() > linear) {', '            if let Some(off) = points.iter().find(|p| p.z.abs() > linear && false) {', TESTS),
+    ('3D boundaries off the parameter plane flattened', B, '    if let Some(off) = points.iter().find(|p| p.z.abs() > linear) {', '    if let Some(off) = points.iter().find(|p| p.z.abs() > linear && false) {', TESTS),
 ]
 
 def run(target):
