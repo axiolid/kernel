@@ -1,7 +1,13 @@
-"""Mutation probe for the certified profile triangulation (#253).
+"""Mutation probe for the certified profile triangulation (#253, #262).
 
 Each mutant weakens one exact decision of validation, bridging, ear
-clipping or the certificate, and must turn a test red.
+clipping, the pinch path (rings touching at single points under
+`PinchPolicy::Accept`) or the certificate, and must turn a test red.
+
+#253: 31/31. #262 added 21 pinch mutants; first run 51/52: "spokes not
+checked to alternate" survived because the fixture for holes crossing at
+shared corners was refused earlier, as a hole inside another. The square
+now starts outside the other hole, so only the spokes catch it: 52/52.
 
 Equivalent mutants, deliberately not listed:
 
@@ -18,6 +24,11 @@ Equivalent mutants, deliberately not listed:
 - dropping the certificate's per-edge use count: an interior edge used
   twice leaves an odd number of directed edges to pair, so the twin test
   fails on the same input.
+- skipping the bounding-box test before a pinched loop's containment
+  probe: only the work changes.
+- reading a cycle's outer or hole side at its lexicographically largest
+  vertex: the part's wedges are convex there too, and the outside of a
+  hole cycle wraps round it as well.
 """
 import pathlib, subprocess, sys
 
@@ -27,7 +38,9 @@ M = D + ".rs"
 V = D + "/validate.rs"
 B = D + "/bridge.rs"
 C = D + "/clip.rs"
+P = D + "/pinch.rs"
 TESTS = ["-p", "axiolid-construct", "--test", "profile_holes"]
+PINCHES = ["-p", "axiolid-construct", "--test", "profile_pinches"]
 LIB = ["-p", "axiolid-construct", "--lib", "ring_triangulation"]
 
 MUTANTS = [
@@ -108,6 +121,62 @@ MUTANTS = [
     ('point-in-ring ignores downward edges', V,
      '        if (b.y > a.y && side > 0) || (b.y < a.y && side < 0) {',
      '        if b.y > a.y && side > 0 {', TESTS),
+    # Touching rings under PinchPolicy::Accept (#262).
+    ('a vertex inside another edge refused', V,
+     '        (Some(&(_, edge, vertex)), None) => {',
+     '        (Some(&(_, edge, vertex)), None) if false => {', PINCHES),
+    ('edges from a shared end along one line accepted', V,
+     '                if far_e == far_f || folds_back(far_e, p, far_f) {',
+     '                if far_e == far_f {', PINCHES),
+    ('edges lying inside each other read as a touch', V,
+     '        (Some(_), Some(_)) => overlap(e, f),', '        (Some(_), Some(_)) => Ok(()),', PINCHES),
+    ('pinch path never taken', P,
+     '    (shared || !touches.is_empty()).then_some(canon)',
+     '    (false && (shared || !touches.is_empty())).then_some(canon)', PINCHES),
+    ('signed zero read as another point', P,
+     '            let key = ((p.x + 0.0).to_bits(), (p.y + 0.0).to_bits());',
+     '            let key = (p.x.to_bits(), p.y.to_bits());', PINCHES),
+    ('touching vertex not inserted into its edge', P,
+     '                walk.extend_from_slice(list);', '                let _ = &list;', PINCHES),
+    ('touching vertices kept in one order whichever way the edge runs', P,
+     '                    if (pa.x != pb.x && pb.x < pa.x) || (pa.x == pb.x && pb.y < pa.y) {',
+     '                    if false {', PINCHES),
+    ('ring not split at a repeated vertex', P,
+     '            if let Some(&i) = position.get(&v) {',
+     '            if let Some(&i) = position.get(&v).filter(|_| false) {', PINCHES),
+    ('loops all turned counter-clockwise', P,
+     '        if ring_turns_left(&ring) != (d % 2 == 0) {',
+     '        if !ring_turns_left(&ring) {', PINCHES),
+    ('loops kept as given', P,
+     '        if ring_turns_left(&ring) != (d % 2 == 0) {', '        if false {', PINCHES),
+    ('loop sharing every vertex read on the wrong side', P,
+     '        locally_inside(at(before), at(v), at(after), at(w))',
+     '        !locally_inside(at(before), at(v), at(after), at(w))', PINCHES),
+    ('containing loop\'s winding ignored at a shared vertex', P,
+     '        if !counter_clockwise[i] {', '        if false {', PINCHES),
+    ('pinched hole outside the outer ring accepted', P,
+     '        if !inside[j].iter().any(|&i| pieces[i].ring == 0) {', '        if false {', PINCHES),
+    ('pinched hole inside another hole accepted', P,
+     '            .find(|&&i| pieces[i].ring != 0 && pieces[i].ring != piece.ring)',
+     '            .find(|&&i| false && pieces[i].ring != 0 && pieces[i].ring != piece.ring)', PINCHES),
+    ('spokes not checked to alternate', P,
+     '    if tie || !alternates {', '    if tie {', PINCHES),
+    ('spoke order ignores the half-plane', P,
+     '            .cmp(&half(b.0))\n',
+     '            .cmp(&half(a.0))\n', PINCHES),
+    ('wedge closed by the previous arriving edge', P,
+     '        let (leaving, arriving) = (spokes[i], spokes[(i + 1) % count]);',
+     '        let (leaving, arriving) = (spokes[i], spokes[(i + count - 1) % count]);', PINCHES),
+    ('cycle read as outer at any left turn', P,
+     '                .all(|&n| {', '                .any(|&n| {', PINCHES),
+    ('hole cycle given to the first outer cycle around it', P,
+     '            .find(|&o| candidates.iter().all(|&d| d == o || !around(o, d)));',
+     '            .find(|_| true);', PINCHES),
+    ('pinched hole bridged from its first visit', B,
+     '            if visits.len() == 1 {', '            if true {', PINCHES),
+    ('certificate counts every part as one', M,
+     '    let expected = (vertex_count + 2 * holes).saturating_sub(2 * outers);',
+     '    let expected = (vertex_count + 2 * holes).saturating_sub(2);', PINCHES),
     # Certificate (unit tests: the algorithm above never trips it).
     ('certificate skips the triangle count', M,
      '    if triangles.len() != expected {', '    if false {', LIB),

@@ -151,6 +151,10 @@ pub(super) fn bridge_holes(points: &[Point2], loops: &[Loop]) -> GeomResult<Poly
             (p.x - m.x).powi(2) + (p.y - m.y).powi(2)
         };
         candidates.sort_by(|&i, &j| distance(i).total_cmp(&distance(j)).then(i.cmp(&j)));
+        // A hole cycle pinched at `m` (#262) visits it more than once; the
+        // bridge leaves from the visit whose sector it enters.
+        let visits: Vec<usize> = (0..n).filter(|&j| hole[j] == hole[k]).collect();
+        let mut start = k;
         let found = candidates.into_iter().find(|&i| {
             let node = polygon.nodes[i];
             let p = at(node.vertex);
@@ -158,7 +162,19 @@ pub(super) fn bridge_holes(points: &[Point2], loops: &[Loop]) -> GeomResult<Poly
                 at(polygon.nodes[node.prev].vertex),
                 at(polygon.nodes[node.next].vertex),
             );
-            locally_inside(p_prev, p, p_next, m) && clear(m, p, &edges)
+            if !(locally_inside(p_prev, p, p_next, m) && clear(m, p, &edges)) {
+                return false;
+            }
+            if visits.len() == 1 {
+                return true;
+            }
+            let leaves =
+                |&j: &usize| locally_inside(at(hole[(j + n - 1) % n]), m, at(hole[(j + 1) % n]), p);
+            visits
+                .iter()
+                .find(|j| leaves(j))
+                .map(|&j| start = j)
+                .is_some()
         });
         let Some(p) = found else {
             return Err(GeomError::Degenerate(format!(
@@ -167,7 +183,7 @@ pub(super) fn bridge_holes(points: &[Point2], loops: &[Loop]) -> GeomResult<Poly
             )));
         };
         let first = polygon.push_ring(hole);
-        polygon.splice(p, first + k, n);
+        polygon.splice(p, first + start, n);
     }
     Ok(polygon)
 }

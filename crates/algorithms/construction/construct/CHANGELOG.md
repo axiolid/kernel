@@ -9,6 +9,49 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- **Rings that touch at single points triangulate on 2D and surface
+  paths (#262).** The certified clipper of #253 refuses rings touching at
+  one vertex, which is right for a solid (the extrusion shares one wall
+  edge between four faces) but refused valid regions a consumer re-feeds
+  from overlay output: two rooms meeting at a corner, an L-shaped room
+  wrapped round a column corner, a corridor eroded to a point, the same
+  pinch reported through even-odd fill, a room minus door zones touching
+  its walls. `profile::triangulate_with(rings, PinchPolicy)` makes the
+  choice explicit: `PinchPolicy::Refuse` is `triangulate` (extrusion and
+  loft caps, unchanged), `PinchPolicy::Accept` triangulates the region
+  (ADR 0083 amendment). Two edges may then meet at one point that is a
+  vertex of at least one of them; the vertex is inserted into the other
+  edge, coincident vertices become one (triangles use a point's first
+  index in `outer ++ holes`), each ring is split at its repeated vertices
+  into simple loops turned by their nesting depth (inside an odd number of
+  loops is inside), the loops' edges must alternate leaving and arriving
+  round each shared vertex (else the rings cross there, refused by name),
+  and each wedge there becomes one node, so the region falls into its
+  connected parts -- two lobes of a pinch separate, a hole touching the
+  outer ring merges with it, holes touching in a ring close off a part of
+  their own -- each bridged and clipped as before. The certificate is the
+  same over the split loops, with each visit of a pinch point counted as
+  its own vertex and `n + 2h - 2c` triangles for `c` parts. Rings touching
+  nowhere triangulate identically under both policies; crossing and
+  overlapping rings stay refused under both. Tests
+  (`tests/profile_pinches.rs`): the consumer's cases (rooms at a corner,
+  an L round a column, an eroded corridor, even-odd figure eights, a room
+  minus door zones), footprints touching at a corner, holes touching the
+  outer ring at a corner, inside an edge, at every corner and across the
+  region, holes touching each other at a corner, inside a side, at their
+  extreme corner and in a ring that closes off a part with its own hole,
+  and an outer ring pinched round a hole, each from every start vertex and
+  either way round, tile exactly (strictly counter-clockwise, exact area,
+  no vertex on a triangle, untwinned edges covering every ring edge once)
+  and are refused by `triangulate` and `extrude_profile` by name; 300
+  random grid layouts of checkerboard squares and touching diamonds tile
+  exactly, 200 off the grid tile, and layouts shrunk apart triangulate
+  identically under both policies; crossing at shared vertices and
+  overlapping rings are refused by name. Mutation probe:
+  `scripts/probe_ring_triangulation_mutants.py` (52/52 killed).
+
 ### Fixed
 
 - **Profiles with several holes extrude to closed solids (#253).**

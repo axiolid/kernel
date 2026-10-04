@@ -21,6 +21,11 @@
 //! tile the polygon once, so the certificate is the whole contract; a
 //! triangulation that fails it is refused, never returned.
 //!
+//! Rings that touch at single points are refused under
+//! [`PinchPolicy::Refuse`], which solids use: a pinch extrudes to a
+//! non-manifold edge. Under [`PinchPolicy::Accept`], for 2D regions and
+//! planar surface patches, [`pinch`] triangulates around them (#262).
+//!
 //! This replaced `earcut` (ADR 0083). earcut drops nodes where the bridged
 //! ring runs straight on and lets only reflex nodes block an ear, so for two
 //! holes in one horizontal band a cap triangle's edge ran along the band's
@@ -34,17 +39,22 @@ use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
 use axiolid_predicates::orient2d;
 
+use crate::profile::PinchPolicy;
+
 mod bridge;
 mod clip;
+mod pinch;
 mod validate;
 
 /// Triangulate `outer` with `holes`, over the vertex list `outer ++ holes`.
 ///
 /// Rings may be given either way round; the triangles are always
-/// counter-clockwise.
+/// counter-clockwise. Under [`PinchPolicy::Accept`] a point where rings
+/// touch is referenced by its first index in `outer ++ holes`.
 pub(crate) fn triangulate_rings(
     outer: &[Point2],
     holes: &[Vec<Point2>],
+    policy: PinchPolicy,
 ) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
     let mut points = Vec::with_capacity(outer.len() + holes.iter().map(Vec::len).sum::<usize>());
     let mut rings = Vec::with_capacity(1 + holes.len());
@@ -59,10 +69,17 @@ pub(crate) fn triangulate_rings(
             points.len()
         )));
     }
-    let loops = validate::validate(&points, &rings)?;
+    validate::check_rings(&points, &rings)?;
+    let touches = validate::check_edges(&points, &rings, policy)?;
+    if let Some(canon) = pinch::canonical(&points, &touches) {
+        // Only `Accept` lets rings touch, so only it gets here.
+        let triangles = pinch::triangulate(&points, &rings, &canon, &touches)?;
+        return Ok((points, triangles));
+    }
+    let loops = validate::orient_and_place(&points, &rings)?;
     let mut polygon = bridge::bridge_holes(&points, &loops)?;
     let triangles = clip::clip_ears(&points, &mut polygon)?;
-    certify(&points, &loops, &triangles)?;
+    certify(&points, &loops, &triangles, 1, loops.len() - 1)?;
     Ok((points, triangles))
 }
 
@@ -123,19 +140,33 @@ fn locally_inside(a: Point2, v: Point2, b: Point2, p: Point2) -> bool {
 }
 
 /// Refuse a triangulation that does not tile the polygon exactly once.
-fn certify(points: &[Point2], loops: &[Loop], triangles: &[[u32; 3]]) -> GeomResult<()> {
+///
+/// `loops` are the boundary loops, the polygon on their left, bounding
+/// `outers` connected parts with `holes` holes among them; a polygon with
+/// `n` loop vertices then has `n + 2 holes - 2 outers` triangles.
+fn certify(
+    points: &[Point2],
+    loops: &[Loop],
+    triangles: &[[u32; 3]],
+    outers: usize,
+    holes: usize,
+) -> GeomResult<()> {
     let fail = |why: String| {
         Err(GeomError::Degenerate(format!(
             "profile triangulation failed its certificate: {why}"
         )))
     };
-    let vertex_count = points.len();
-    let expected = vertex_count + 2 * (loops.len() - 1) - 2;
+    let vertex_count: usize = loops.iter().map(|ring| ring.vertices.len()).sum();
+    let expected = (vertex_count + 2 * holes).saturating_sub(2 * outers);
     if triangles.len() != expected {
+        let parts = if outers == 1 {
+            String::new()
+        } else {
+            format!(" in {outers} parts")
+        };
         return fail(format!(
-            "{} triangles, a polygon with {vertex_count} vertices and {} holes has {expected}",
+            "{} triangles, a polygon with {vertex_count} vertices and {holes} holes{parts} has {expected}",
             triangles.len(),
-            loops.len() - 1
         ));
     }
     let mut directed: HashMap<(u32, u32), u32> = HashMap::with_capacity(3 * triangles.len());
@@ -232,7 +263,7 @@ mod tests {
 
     /// The certificate's refusal message, or a panic if it passed.
     fn reason(points: &[Point2], loops: &[Loop], triangles: &[[u32; 3]]) -> String {
-        match certify(points, loops, triangles) {
+        match certify(points, loops, triangles, 1, loops.len() - 1) {
             Err(GeomError::Degenerate(message)) => message,
             other => panic!("expected a certificate refusal, got {other:?}"),
         }
@@ -245,7 +276,7 @@ mod tests {
         let loops = vec![Loop {
             vertices: vec![0, 1, 2, 3],
         }];
-        assert!(certify(square, &loops, &[[0, 1, 2], [0, 2, 3]]).is_ok());
+        assert!(certify(square, &loops, &[[0, 1, 2], [0, 2, 3]], 1, 0).is_ok());
         assert!(reason(square, &loops, &[[0, 2, 1], [0, 3, 2]])
             .contains("not strictly counter-clockwise"));
         // Right count, wrong cover: the second triangle overlaps the first.
@@ -266,7 +297,9 @@ mod tests {
         assert!(certify(
             &hexagon,
             &loops,
-            &[[0, 1, 2], [2, 3, 4], [4, 5, 0], [0, 2, 4]]
+            &[[0, 1, 2], [2, 3, 4], [4, 5, 0], [0, 2, 4]],
+            1,
+            0
         )
         .is_ok());
         assert!(reason(
@@ -284,7 +317,8 @@ mod tests {
             points[..4].to_vec(),
             vec![points[4..8].to_vec(), points[8..].to_vec()],
         );
-        let (_, triangles) = triangulate_rings(&outer, &holes).expect("triangulates");
+        let (_, triangles) =
+            triangulate_rings(&outer, &holes, PinchPolicy::Refuse).expect("triangulates");
         assert_eq!(triangles.len(), 14);
     }
 }

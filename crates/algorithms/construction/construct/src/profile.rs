@@ -439,7 +439,59 @@ fn flatten_circle(radius: Scalar, chord_error: Scalar) -> GeomResult<Vec<Point2>
 /// a ring that folds back on or crosses itself, holes that overlap or touch
 /// each other or the outer ring, a hole outside the outer ring or inside
 /// another hole. `Degenerate` if the triangulation cannot be certified.
+///
+/// Touching rings are refused because this is the cap of a solid
+/// ([`PinchPolicy::Refuse`]); a 2D region or a planar surface patch uses
+/// [`triangulate_with`] and [`PinchPolicy::Accept`].
 pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
+    triangulate_with(rings, PinchPolicy::Refuse)
+}
+
+/// How a triangulation treats rings that touch at a single point (#262):
+/// a hole touching the outer ring or another hole at a vertex, an outer
+/// ring pinched at a vertex, or a vertex lying on another ring's edge.
+///
+/// The region such rings bound is valid, but the surface an extrusion
+/// builds over it is not a two-manifold: the walls of the two rings meet
+/// along one edge, which four faces then share. So solids refuse it and
+/// regions and surface patches accept it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PinchPolicy {
+    /// Refuse touching rings with `InvalidInput` naming them. For anything
+    /// that must close into a two-manifold: extrusion and loft caps.
+    Refuse,
+    /// Triangulate the region the touching rings bound. For 2D regions and
+    /// planar surface patches: a plan footprint that is a union of shadows
+    /// touching at a corner, a space-boundary surface, a planar face of a
+    /// B-rep (whose edges are the ring edges either way).
+    Accept,
+}
+
+/// [`triangulate`] under an explicit [`PinchPolicy`].
+///
+/// Under [`PinchPolicy::Refuse`] this is [`triangulate`]. Under
+/// [`PinchPolicy::Accept`] rings may also touch at single points: where two
+/// edges meet at a point that is a vertex of at least one of them. The
+/// region is then the points inside the outer ring and outside every hole
+/// (for a ring pinched into loops, inside an odd number of its loops),
+/// split into its connected parts at the pinches; each part is triangulated
+/// and the whole is certified as [`triangulate`] is, with each visit of a
+/// pinch point counted as its own vertex. A point several vertices share is
+/// referenced by its first index in `outer ++ holes`, and a vertex on
+/// another ring's edge splits that edge, so the ring edges of the result
+/// are the rings' edges cut at every touching vertex. Rings touching
+/// nowhere triangulate exactly as under [`PinchPolicy::Refuse`].
+///
+/// # Errors
+///
+/// As [`triangulate`], except that touching at single points is accepted
+/// under [`PinchPolicy::Accept`]. Rings that cross, at a shared vertex
+/// included, or overlap along an edge are refused by name under both.
+pub fn triangulate_with(
+    rings: &Rings,
+    pinches: PinchPolicy,
+) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
     if rings.outer.len() < 3 {
         return Err(GeomError::InvalidInput(format!(
             "profile outer ring needs at least 3 vertices, got {}",
@@ -454,7 +506,7 @@ pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
             )));
         }
     }
-    crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes)
+    crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes, pinches)
 }
 
 /// Apply a 2D affine transform to a ring in place.

@@ -74,7 +74,8 @@ edge lines coincide constantly.
 - More code owned here. The search grid keeps a 24,576-vertex profile at
   about 0.13 s in a release build; earcut was faster on such inputs.
 - Rings that touch at a single vertex, which earcut accepted, are now
-  refused: their extrusion is not a two-manifold.
+  refused: their extrusion is not a two-manifold. 2D and surface callers
+  accept them through `PinchPolicy::Accept` (amendment below, #262).
 
 **Follow-ups / risks to watch**
 
@@ -91,3 +92,54 @@ edge lines coincide constantly.
   #253 cases and the random-layout properties.
 - `crates/algorithms/construction/construct/tests/oracle.rs` — the
   hole-free differential gate against `axiolid_reference::triangulate_simple`.
+
+## Amendment 2026-10-04: pinch policy per caller (#262)
+
+Refusing rings that touch at one vertex is right for a solid and wrong for
+a region. A consumer (axioval) re-feeds overlay output as plan regions and
+surfaces: two rooms meeting at a corner as one union ring, an L-shaped
+room wrapped round a column corner, a corridor eroded to a point, the same
+pinch reported through even-odd fill as a figure eight, a room minus door
+zones touching its walls. Each bounds a valid region, and its
+triangulation is a valid surface patch whose edges are the ring edges.
+
+- **The caller states the policy.** `profile::triangulate_with(rings,
+  PinchPolicy)`; `PinchPolicy` is `#[non_exhaustive]`. `Refuse` is
+  `triangulate`, used by everything that must close into a two-manifold
+  (extrusion and loft caps: a pinch extrudes to a wall edge shared by four
+  faces). `Accept` is for 2D regions and planar surface patches, including
+  the planar faces of a B-rep (a pinch inside one face leaves every edge
+  of the shell shared by two faces; the shell is at most pinched at a
+  vertex, which the face did not create).
+- **What is accepted.** Two edges meeting at one point that is a vertex of
+  at least one of them. A vertex inside another edge is inserted into it;
+  coincident vertices become one, referenced by their first index in
+  `outer ++ holes`. Crossing, overlapping along a stretch, a hole outside
+  the outer ring or inside another hole stay refused by name.
+- **How.** Each ring is split at its repeated vertices into simple loops;
+  a loop's nesting depth (one probe vertex off the other loop decides,
+  or, when every vertex is shared, the sector of the other loop that its
+  first edge leaves into) orients it: even depths counter-clockwise, odd
+  clockwise, so the region is the points inside an odd number of loops,
+  and a figure eight through a vertex reads as its two lobes. Round every
+  shared vertex the loops' edges, sorted by exact angle, must alternate
+  leaving and arriving; each wedge from a leaving edge counter-clockwise
+  to the next arriving one becomes one node. The nodes form the boundary
+  cycles of the region's connected parts; a cycle bounds from outside
+  when every visit of its lexicographically smallest vertex turns
+  strictly left, and each hole cycle goes to the innermost outer cycle
+  strictly around it. Each part is bridged and clipped as before; a
+  bridge from a hole cycle that visits its rightmost vertex twice leaves
+  from the visit whose sector it enters.
+- **Certificate.** Unchanged in kind, over the split loops: strictly
+  counter-clockwise triangles, every loop edge once from inside, every
+  other edge twinned, and `n + 2h - 2c` triangles for `n` loop vertices
+  (a pinch counted once per visit), `h` hole cycles and `c` parts.
+- **Unchanged.** Rings touching nowhere take the original path under
+  both policies and triangulate identically.
+
+| Option | Why not |
+| --- | --- |
+| Accept pinches everywhere | Extrusions of pinched caps are not two-manifolds; the solid path must keep refusing by name. |
+| Split the pinch into separate ring pieces only | Covers two lobes of one ring, not a hole touching the outer ring, which has to merge with it rather than split. |
+| Emit two solids touching at an edge for a pinched cap | No caller asked for it; a solid caller that wants it can split its profile and extrude the parts. |
