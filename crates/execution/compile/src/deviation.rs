@@ -108,10 +108,6 @@ pub enum DeviationPath {
     SurfaceCurveSweep,
     /// Sections placed along a spine.
     SectionedSpine,
-    /// Sections standing at stations along a directrix (#241).
-    StationedSpine,
-    /// Open sections at stations joined by tag (#241).
-    SectionedSurface,
     /// A half-space bounded by a polygon.
     BoundedHalfSpace,
     /// A CSG primitive.
@@ -124,6 +120,10 @@ pub enum DeviationPath {
     Boolean,
     /// A path that does not report its deviation.
     Unreported,
+    /// Sections standing at stations along a directrix (#241).
+    StationedSpine,
+    /// Open sections at stations joined by tag (#241).
+    SectionedSurface,
 }
 
 /// A bound on how far the exact surface may lie from the mesh.
