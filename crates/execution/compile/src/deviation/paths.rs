@@ -256,16 +256,20 @@ pub(crate) fn of_curve_bounded(
     graph: &GeometryGraph,
     basis: NodeId,
     boundaries: &[NodeId],
-    chord: Scalar,
     options: &ExecutionOptions,
     merged: Scalar,
 ) -> Deviation {
-    let stretch = match graph.get(basis) {
-        Some(GeometryNode::Surface(axiolid_surface::Surface::Plane(plane))) => {
-            axiolid_reference::bound::frame_stretch3(&plane.frame)
-        }
-        _ => Scalar::INFINITY,
+    // The boundaries were flattened to the budget shrunk by the stretch
+    // (`crate::bounded::boundary_options`), so read them at that budget.
+    let (stretch, options) = match graph.get(basis) {
+        Some(GeometryNode::Surface(axiolid_surface::Surface::Plane(plane))) => (
+            axiolid_reference::bound::frame_stretch3(&plane.frame),
+            crate::bounded::boundary_options(&plane.frame, options),
+        ),
+        _ => (Scalar::INFINITY, options.clone()),
     };
+    let options = &options;
+    let chord = crate::compiler::chord_error(options);
     let mut worst = DeviationBound::Proven(0.0);
     for &id in boundaries {
         let bound = match graph.get(id) {

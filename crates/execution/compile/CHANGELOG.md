@@ -36,7 +36,13 @@ caret rule for `0.x` versions.
   ellipse, polyline or B-spline are refused by name. The deviation report
   bounds such a boundary by its leaves (straight exact, certified families
   within the chord budget, others `Unbounded` by name) plus its widest
-  joint gap.
+  joint gap. A joint or closing gap no wider than its ends' own rounding
+  (`8` machine epsilons of the magnitudes they are computed from, as
+  #250 welds profile joints: `sin(2 pi)` at a full turn, `cos(pi / 2)` at
+  an arc's end) is welded and adds nothing, for atomic boundaries too.
+  Boundaries are flattened to the budget shrunk by the plane frame's
+  stretch bound, so a curve-bounded plane's reported bound stays within
+  the budget and `meets_requested` holds.
 
 ### Changed
 

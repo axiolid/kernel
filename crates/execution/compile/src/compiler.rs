@@ -549,12 +549,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .map(|(mesh, merged)| {
                 Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
                     .with_deviation(crate::deviation::of_curve_bounded(
-                        graph,
-                        *basis,
-                        boundaries,
-                        chord_error(options),
-                        options,
-                        merged,
+                        graph, *basis, boundaries, options, merged,
                     ))
             }),
             // Open sections at stations along a directrix: a sheet (#241).

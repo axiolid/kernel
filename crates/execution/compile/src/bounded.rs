@@ -16,7 +16,7 @@
 //! tolerance, as composite joints may be. An open one is refused by name.
 
 use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Point2, Point3, Scalar, Tolerance};
+use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance};
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
@@ -39,7 +39,6 @@ pub(crate) fn curve_bounded(
     implicit_outer: bool,
     options: &ExecutionOptions,
 ) -> GeomResult<(TriMesh, Scalar)> {
-    let chord = crate::compiler::chord_error(options);
     let tolerance = options.tolerance();
     if implicit_outer {
         // The outer loop would be the basis surface's own boundary, which a
@@ -75,10 +74,12 @@ pub(crate) fn curve_bounded(
             "curve-bounded plane has no boundary".to_owned(),
         ));
     }
+    let local = boundary_options(&frame, options);
+    let chord = crate::compiler::chord_error(&local);
     let mut rings: Vec<Vec<Point2>> = Vec::with_capacity(boundaries.len());
     let mut merged: Scalar = 0.0;
     for (index, &id) in boundaries.iter().enumerate() {
-        let mut ring = boundary_ring(graph, id, options, chord, tolerance, &mut merged)?;
+        let mut ring = boundary_ring(graph, id, &local, chord, tolerance, &mut merged)?;
         if ring.len() < 3 {
             return Err(GeomError::Degenerate(format!(
                 "curve-bounded boundary {index} has {} distinct points, need at least 3",
@@ -120,6 +121,27 @@ pub(crate) fn curve_bounded(
         GeomError::InvalidInput(format!("invalid curve-bounded plane mesh: {error}"))
     })?;
     Ok((mesh, merged))
+}
+
+/// The options boundaries are flattened with: the chord budget shrunk by
+/// the plane frame's stretch (the boundaries live in its parameters), so
+/// the deviation report's bound, that budget times the stretch, stays
+/// within the budget asked for (#255). Unchanged when the stretch is not a
+/// finite factor of at least one, or the shrunk budget is not positive.
+pub(crate) fn boundary_options(frame: &Frame3, options: &ExecutionOptions) -> ExecutionOptions {
+    let chord = crate::compiler::chord_error(options);
+    let stretch = axiolid_reference::bound::frame_stretch3(frame);
+    if !(stretch.is_finite() && stretch >= 1.0) {
+        return options.clone();
+    }
+    let mut budget = chord / stretch;
+    while budget > 0.0 && budget * stretch > chord {
+        budget = budget.next_down();
+    }
+    options
+        .clone()
+        .with_chord_error(budget)
+        .unwrap_or_else(|| options.clone())
 }
 
 /// A closed boundary as a ring in the plane's parameters.
@@ -201,18 +223,27 @@ fn boundary_ring(
             "curve-bounded boundary {id:?} has a non-finite point"
         )));
     }
-    // Drop repeated points and the closing repeat of the first.
+    // Drop repeated points and the closing repeat of the first. A repeat
+    // within the rounding of the points' own evaluation (a full turn ends
+    // `sin(2 pi) r` off its start) is the same point, welded exactly; only
+    // a wider one moves the ring and is counted (#255).
+    let weld = 2.0 * relation::JOINT_ROUNDING * relation::boundary_scale(graph, id, options);
+    let mut record = |distance: Scalar| {
+        if distance > weld {
+            *merged = merged.max(distance);
+        }
+    };
     let near = |a: Point2, b: Point2| (a.x - b.x).abs() <= linear && (a.y - b.y).abs() <= linear;
     let mut ring: Vec<Point2> = Vec::with_capacity(raw.len());
     for p in raw {
         match ring.last() {
-            Some(&q) if near(q, p) => *merged = merged.max((q - p).length()),
+            Some(&q) if near(q, p) => record((q - p).length()),
             _ => ring.push(p),
         }
     }
     while ring.len() > 1 && near(ring[0], ring[ring.len() - 1]) {
         let dropped = ring.pop().expect("non-empty");
-        *merged = merged.max((ring[0] - dropped).length());
+        record((ring[0] - dropped).length());
     }
     Ok(ring)
 }

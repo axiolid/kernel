@@ -22,7 +22,10 @@
 //! lifted copy exactly as the atomic boundaries are read: straight leaves
 //! are exact, certified families are within the chord budget, any other
 //! family is unbounded by name. A composite adds its widest joint gap
-//! (at most the linear tolerance), which the reader stitches shut.
+//! (at most the linear tolerance), which the reader stitches shut, unless
+//! the gap is within the rounding of the two ends' own evaluation
+//! ([`JOINT_ROUNDING`]): then the ends are one point, welded exactly, and
+//! add nothing.
 
 use std::collections::HashMap;
 
@@ -127,17 +130,98 @@ fn widest_joint(
     for segment in segments {
         let points = crate::directrix::points(graph, segment.curve, None, options).ok()?;
         let (first, last) = (*points.first()?, *points.last()?);
+        let scale = node_scale(graph, segment.curve, options, 0);
         ends.push(if segment.same_sense {
-            (first, last)
+            (first, last, scale)
         } else {
-            (last, first)
+            (last, first, scale)
         });
     }
     Some(
         ends.windows(2)
-            .map(|pair| pair[0].1.distance(pair[1].0))
+            .map(|pair| {
+                let gap = pair[0].1.distance(pair[1].0);
+                // Within the two evaluations' own rounding the ends are
+                // one point, welded exactly: nothing to add.
+                if gap <= JOINT_ROUNDING * (pair[0].2 + pair[1].2) {
+                    0.0
+                } else {
+                    gap
+                }
+            })
             .fold(0.0, Scalar::max),
     )
+}
+
+/// Rounding of one evaluated curve end, per unit of the magnitudes it is
+/// computed from: eight machine epsilons, as `axiolid_construct` welds a
+/// profile's joints (#250). A line's end `origin + direction t` rounds
+/// twice; an arc's `centre + x r cos + y r sin` adds the `sin`/`cos` error
+/// (a full turn ends `sin(2 pi) r` off its start) and axes unit only to an
+/// ulp. Two ends closer than that per unit of their magnitudes are the
+/// representation's rounding, not a gap anyone drew.
+pub(super) const JOINT_ROUNDING: Scalar = 8.0 * Scalar::EPSILON;
+
+/// The magnitude a boundary's points are computed from, for
+/// [`JOINT_ROUNDING`]; `0` (nothing welds) when it cannot be read.
+pub(super) fn boundary_scale(
+    graph: &GeometryGraph,
+    id: NodeId,
+    options: &ExecutionOptions,
+) -> Scalar {
+    lift(graph, id).map_or(0.0, |(lifted, root)| node_scale(&lifted, root, options, 0))
+}
+
+/// The magnitude a lifted node's points are computed from: a conic's
+/// centre plus its radii, a polyline's or B-spline's largest point, a
+/// line's origin plus its reach to the ends it is evaluated at, the
+/// largest of a composite's segments. `0` for any other family, so its
+/// ends never weld: an underestimate only counts a rounding gap.
+fn node_scale(
+    graph: &GeometryGraph,
+    id: NodeId,
+    options: &ExecutionOptions,
+    depth: usize,
+) -> Scalar {
+    if depth > MAX_DEPTH {
+        return 0.0;
+    }
+    let norm = |p: Point3| Vec3::new(p.x, p.y, p.z).length();
+    let line_reach = |origin: Point3| {
+        crate::directrix::points(graph, id, None, options).map_or(0.0, |points| {
+            let reach = points
+                .iter()
+                .map(|p| p.distance(origin))
+                .fold(0.0, Scalar::max);
+            norm(origin) + reach
+        })
+    };
+    let largest = |points: &[Point3]| points.iter().map(|&p| norm(p)).fold(0.0, Scalar::max);
+    match graph.get(id) {
+        Some(GeometryNode::Curve3(Curve3::Line(line))) => line_reach(line.origin),
+        Some(GeometryNode::Curve3(Curve3::Circle(c))) => {
+            norm(c.frame.origin) + c.radius.abs() * c.frame.x.length().max(c.frame.y.length())
+        }
+        Some(GeometryNode::Curve3(Curve3::Ellipse(e))) => {
+            norm(e.frame.origin)
+                + (e.semi_axis_x.abs() * e.frame.x.length())
+                    .max(e.semi_axis_y.abs() * e.frame.y.length())
+        }
+        Some(GeometryNode::Curve3(Curve3::Polyline(p))) => largest(&p.points),
+        Some(GeometryNode::Curve3(Curve3::BSpline(b))) => largest(&b.control_points),
+        Some(GeometryNode::CurveRelation(CurveRelation::Trimmed { basis, .. })) => {
+            match graph.get(*basis) {
+                // The trim's own ends, not the basis line's natural ones.
+                Some(GeometryNode::Curve3(Curve3::Line(line))) => line_reach(line.origin),
+                _ => node_scale(graph, *basis, options, depth + 1),
+            }
+        }
+        Some(GeometryNode::CurveRelation(CurveRelation::Composite { segments })) => segments
+            .iter()
+            .map(|segment| node_scale(graph, segment.curve, options, depth + 1))
+            .fold(0.0, Scalar::max),
+        _ => 0.0,
+    }
 }
 
 /// Copy the boundary's relation tree into a graph of its own, every 2D

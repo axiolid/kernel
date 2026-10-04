@@ -44,16 +44,25 @@ fn area(mesh: &TriMesh) -> Scalar {
 fn compile(
     build: impl FnOnce(&mut GeometryGraphBuilder) -> Vec<NodeId>,
 ) -> Result<(CompileOutcome, DeviationReport), GeomError> {
+    compile_on(
+        Frame3 {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        build,
+    )
+}
+
+/// [`compile`] over the plane frame `frame`.
+fn compile_on(
+    frame: Frame3,
+    build: impl FnOnce(&mut GeometryGraphBuilder) -> Vec<NodeId>,
+) -> Result<(CompileOutcome, DeviationReport), GeomError> {
     let mut b = GeometryGraphBuilder::new();
     let basis = b
-        .push(GeometryNode::Surface(Surface::Plane(Plane {
-            frame: Frame3 {
-                origin: Point3::new(0.0, 0.0, 0.0),
-                x: Vec3::X,
-                y: Vec3::Y,
-                z: Vec3::Z,
-            },
-        })))
+        .push(GeometryNode::Surface(Surface::Plane(Plane { frame })))
         .unwrap();
     let boundaries = build(&mut b);
     let root = b
@@ -82,14 +91,53 @@ fn plane_bound(report: &DeviationReport) -> DeviationBound {
     contribution.bound
 }
 
-/// Proven within the chord budget, plus the rounding-level gap a curve's
-/// computed end leaves at a joint or where the loop closes (a full turn's
-/// `sin(2 pi)`), which the bound counts rather than drops.
+/// Proven at exactly the chord budget, so the report meets it: the
+/// rounding-level gap a curve's computed end leaves at a joint or where the
+/// loop closes (a full turn's `sin(2 pi)`, an arc's `cos(pi / 2)`) is welded,
+/// not counted.
 fn assert_chord_bound(report: &DeviationReport) {
-    match plane_bound(report) {
-        DeviationBound::Proven(d) => assert!((CHORD..=CHORD + 1e-12).contains(&d), "{d}"),
+    assert_eq!(plane_bound(report), DeviationBound::Proven(CHORD));
+    assert!(report.meets_requested(), "{report:?}");
+}
+
+#[test]
+fn an_atomic_circle_boundary_meets_its_budget() {
+    // The full turn's closing point lands `sin(2 pi) r` from its start.
+    let r = 1.5;
+    let (outcome, report) = compile(|b| vec![push(b, circle2((2.0, 1.5), r))]).unwrap();
+    let (got, exact) = (area(&outcome.mesh), PI * r * r);
+    assert!(
+        got <= exact && exact - got <= TAU * r * CHORD,
+        "{got} vs {exact}"
+    );
+    assert_chord_bound(&report);
+}
+
+#[test]
+fn a_rotated_plane_still_meets_its_budget() {
+    // Axes unit and orthogonal only to rounding: the frame's stretch bound
+    // is a hair above one, and the boundaries are flattened to the budget
+    // shrunk by it, so the reported bound stays within the request.
+    let (s, c) = 0.7_f64.sin_cos();
+    let x = Vec3::new(c, s, 0.0);
+    let y = Vec3::new(-s * 0.6, c * 0.6, 0.8);
+    let frame = Frame3 {
+        origin: Point3::new(10.0, -4.0, 2.5),
+        x,
+        y,
+        z: x.cross(y),
+    };
+    let (outcome, report) = compile_on(frame, |b| vec![stadium(b)]).unwrap();
+    let got = area(&outcome.mesh);
+    assert!(
+        got <= STADIUM_AREA + 1e-9 && STADIUM_AREA - got <= STADIUM_PERIMETER * CHORD,
+        "{got} vs {STADIUM_AREA}"
+    );
+    match plane_bound(&report) {
+        DeviationBound::Proven(d) => assert!(d <= CHORD && d > 0.99 * CHORD, "{d}"),
         other => panic!("{other:?}"),
     }
+    assert!(report.meets_requested(), "{report:?}");
 }
 
 fn push(b: &mut GeometryGraphBuilder, node: GeometryNode) -> NodeId {
