@@ -64,6 +64,39 @@ Latest release, 0.3.13 (2026-10-03):
 
 ### Added
 
+- Oriented and tagged stations (#246, ADR 0082 amendment):
+  `station::resolve` also resolves an `OrientedCurveStation`, its frame
+  turned by the orientation, its point and `section` not. The new
+  `SectionsAtStations` spine and `OpenSectionsAtStations` sheet mesh like
+  the #241 relations (same deviation paths, the exact compiler refuses the
+  spine as a station-placed spine), each section's plane turned by its
+  orientation, interpolated between sections in the base frame. Tagged
+  closed sections are matched by tag: their profile must be a polygonal
+  contour (optionally under a derived transform), each ring rewound
+  outer counter-clockwise and holes clockwise, then re-started and
+  re-ordered to line up with the first section's rings; a tag count that
+  is not the vertex count, a curved or parametric profile, an outer ring
+  tagged as a hole and an order that is no rotation are refused by name.
+
+- A curve-bounded plane takes `CurveRelation` boundaries (#255): a
+  `Composite` of lines, polylines, arcs and other segments, each read in
+  its `same_sense`, and a `Trimmed` basis curve under every
+  `TrimSelector` kind (parameter, point, arc length), resolved to points by
+  the sweep directrix reader, 2D curves and point selectors lifted to
+  `z = 0`. The boundary must close within the linear tolerance; an open
+  one, a joint gap past it, an offset, surface-curve, parameter-curve or
+  station-offset relation, and a 2D family other than a line, circle,
+  ellipse, polyline or B-spline are refused by name. The deviation report
+  bounds such a boundary by its leaves (straight exact, certified families
+  within the chord budget, others `Unbounded` by name) plus its widest
+  joint gap. A joint or closing gap no wider than its ends' own rounding
+  (`8` machine epsilons of the magnitudes they are computed from, as
+  #250 welds profile joints: `sin(2 pi)` at a full turn, `cos(pi / 2)` at
+  an arc's end) is welded and adds nothing, for atomic boundaries too.
+  Boundaries are flattened to the budget shrunk by the plane frame's
+  stretch bound, so a curve-bounded plane's reported bound stays within
+  the budget and `meets_requested` holds.
+
 - Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
   node into its point and frame (`x` tangent, `y` up, `z` right). The
   reference mesh compiler meshes `SolidOperation::StationedSpine` as a
@@ -80,7 +113,38 @@ Latest release, 0.3.13 (2026-10-03):
   whose ring structure, vertex count or tags disagree, and an open
   section that is not a polyline.
 
+### Changed
+
+- A sectioned surface whose section runs its tags in reverse is joined
+  reversed instead of refused (#246).
+- An authored polygon face off its plane by more than the linear
+  tolerance is triangulated instead of refused as not planar (#254). It is
+  projected onto its fit plane (the outer ring's centroid and Newell
+  normal), ear clipped there and lifted back to its authored corners,
+  which are never moved. `compile_mesh_with_deviation` reports it as
+  `AuthoredMesh` with the detail `"non-planar authored face"`, always
+  `Certified`, never `Proven`: the largest distance of any corner (holes
+  included) from that fit plane, over the worst such face. That bounds the
+  distance between the mesh and the face flattened onto the plane both
+  ways, and is at least the largest corner distance from the plane the
+  face was triangulated in. Faces within the tolerance triangulate and
+  report exactly as before; rings that cross or enclose no area in the fit
+  plane are still refused by face index, and the exact compiler still
+  refuses polygon meshes by name.
+- A clockwise outer loop of a curve-bounded plane is reversed about its
+  first point, so a loop read backwards triangulates exactly as the loop
+  read forwards (#255).
+
 ### Fixed
+
+- `ReferenceExactCompiler` compiles a round web hole touching the flange
+  of an I-beam with root fillets (#249): exactly, with an empty report, at
+  `Tolerance::ZERO` with exact axes, and reading the contact under a
+  general placement. Its mesh is measured against the exact result
+  through `compile_mesh_with_deviation` and reported `Certified` (traced
+  pcurves now have certified chord bounds). A hole a fraction of the
+  tolerance off touching is refused by name ("... where the contact cannot
+  be placed").
 
 - `ReferenceExactCompiler` compiles placed differences whose round hole
   touches a planar face (#243): an I-beam whose web hole touches the

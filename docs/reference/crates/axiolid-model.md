@@ -42,6 +42,27 @@ Latest release, 0.3.5 (2026-10-03):
 
 ### Added
 
+- Explicit station orientation (#246, ADR 0082 amendment):
+  `StationOrientation { axis, ref_direction }`, both optional and given as
+  components in the station's base frame `(tangent, lateral, up)` -- the
+  reading of a linear placement's axes relative to its curve -- with the
+  axis the oriented up and the reference direction orthonormalised
+  against it (Gram-Schmidt, axis primary); `unit_axes` fills the defaults
+  `(0, 0, 1)` and `(1, 0, 0)`. `ORIENTATION_TOLERANCE` bounds the sine
+  below which the two count as parallel. Offsets stay in the base frame.
+- `GeometryNode::OrientedCurveStation(OrientedCurveStation)`: a curve
+  station with an orientation.
+- `SectionAtStation` (built by `new`, `with_tags`, `with_orientation`; it
+  is `#[non_exhaustive]`, so fields can follow additively) and its two
+  relations, `SolidOperation::SectionsAtStations` (closed profiles, the
+  general form of `StationedSpine`, matched by tag when tagged) and
+  `SurfaceRelation::OpenSectionsAtStations` (open sections, the general
+  form of `SectionedSurface`). Both variants are appended to their enums.
+  `From<StationedSection>` and `From<StationedOpenSection>` convert the
+  #241 sections.
+- `GraphError::InvalidStation` also names a zero, non-finite or parallel
+  orientation and a run of sections that mixes tagged and untagged ones.
+
 - Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
   lateral/vertical/longitudinal) along a basis curve, measured in that
   curve's convention -- plan distance on an elevated or banked curve, arc
@@ -59,5 +80,13 @@ Latest release, 0.3.5 (2026-10-03):
   than two stations in a run, distances that do not increase strictly,
   sections whose tags differ or repeat. A distance beyond the basis
   curve's length is refused when the station is resolved.
+
+### Changed
+
+- Tags are matched as sets (#246): every section of a run carries the
+  same tags, none repeated; an open section's tags may run in the first
+  section's order or in reverse, so a `SectionedSurface` whose sections
+  are authored in opposite directions is now accepted and joined
+  reversed. Any other order is still refused by name.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

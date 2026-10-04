@@ -94,7 +94,7 @@ axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", v
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.5" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.5" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.13" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.14" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.1" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.3" }
@@ -131,19 +131,19 @@ axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.13" }
 # versionless path dev-dependency when packaging, so downstream crates that
 # depend on axiolid-nurbs never need axiolid-oracle to exist on crates.io.
 axiolid-oracle = { path = "tools/oracle" }
-axiolid-contracts = { path = "crates/contracts/common/base", version = "0.3.2" }
+axiolid-contracts = { path = "crates/contracts/common/base", version = "0.3.3" }
 axiolid-guarantees = { path = "crates/contracts/guarantees", version = "0.3.1" }
 axiolid-mesh-contracts = { path = "crates/contracts/common/mesh", version = "0.3.1" }
 axiolid-mesh-compile-contract = { path = "crates/contracts/operations/compile", version = "0.3.2" }
 axiolid-exact-compile-contract = { path = "crates/contracts/operations/exact-compile", version = "0.3.1" }
-axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boolean", version = "0.3.1" }
+axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boolean", version = "0.3.2" }
 axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.3.1" }
 axiolid-curve-evaluate-contract = { path = "crates/contracts/operations/curve-evaluate", version = "0.3.2" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.3.1" }
-axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.1", default-features = false }
+axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.2", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.3.1", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.3.1", default-features = false }
-axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.3.3" }
+axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.3.4" }
 axiolid-pointcloud-reconstruction-sdf = { path = "crates/providers/pointcloud/sdf", version = "0.3.1" }
 glam = "0.29"
 thiserror = "2.0"

@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.13 (2026-10-03) |
+| Latest release | 0.3.14 (2026-10-04) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -63,32 +63,37 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.13 (2026-10-03):
+Latest release, 0.3.14 (2026-10-04):
 
 ### Fixed
 
-- **Restored: swept disks mitre their corners again (#245).** Since 0.3.11
-  (#232) `pipe::swept_disk_along_pieces` refused a non-tangent joint as
-  "undefined"; that was a regression (0.3.11 and 0.3.12). A disk swept
-  round a corner between two straight segments is mitred at half angle,
-  as `IfcSweptDiskSolid` defines it: both tubes are cut by the plane that
-  bisects the two tangents, and the two pieces share one ring on it whose
-  every vertex lies on both exact cylinders (the outgoing frame is the
-  least rotation of the incoming one, which agrees with the reflection in
-  the mitre plane). The walls are planar trapezoids, exact faces of the
-  ring prism; the ring is chorded to `(c/2) cos(theta/2)` for the
-  sharpest mitre, because the mitre stretches the section by
-  `1 / cos(theta/2)`, so the exact tube stays within the chord budget
-  (derivation in the module notes). Hollow disks mitre their bore the same
-  way. The near-tangent tolerance `joint_tolerance` is unchanged. Refused
-  by name: a segment whose mitres reach past its length
-  (`L <= r |g_perp|`, `r tan(theta/2)` for one mitre: the tube would cut
-  through itself), a reversal, and a corner beside an arc (no ring lies
-  on both the cylinder's and the torus's cut).
-- A disk radius equal to the fillet or bend radius is refused with its own
-  reason (#245): the format rule permits a fillet radius equal to the disk
-  radius, but the bend is then a horn torus whose inner wall pinches to a
-  point on the bend's axis, which no closed two-manifold mesh bounds
-  without meeting itself there.
+- **Parametric profiles with decimal sizes lower at `Tolerance::ZERO`
+  (#250).** `contour_lower::contour_to_arc_ring` demanded bit-equal
+  segment joints at `Tolerance::ZERO`, which a `Line2`/`Circle2` contour
+  cannot give for non-dyadic sizes: a line ends at a rounded
+  `origin + direction`, an arc at the `cos`/`sin` of its sweep. So every
+  I section with IPE or HEA sizes (sharp or with root fillets), and the
+  other families with decimal sizes, was refused before any boolean ran
+  ("contour segments leave a gap of 2.6e-18"). The section router already
+  computes each corner and tangent point once and hands it to both
+  segments; the ring takes one vertex per joint (the leaving segment's
+  start, a line's stored origin bit for bit), so it is closed by
+  construction. The joint check now allows the larger of the tolerance
+  and the rounding of the two evaluations meeting there (eight machine
+  epsilons of the magnitudes they are computed from); a contour open by
+  more is still refused at `Tolerance::ZERO`. Rings are bit-identical to
+  before wherever lowering succeeded, so results at a positive tolerance
+  are unchanged. Tests: I (IPE 300/200, HEA 200, HEB 340; sharp, root
+  fillets, toe radii), asymmetric I, T, U, L, Z, C, trapezium, rounded
+  and hollow rectangles and an annulus lower at ZERO with each line's
+  shared corner as its ring vertex, and extrude at ZERO to their
+  closed-form areas, fillet terms `(1 - pi/4) r^2` included; tapered
+  I/U/L/T lower and extrude at ZERO; joints far from the origin close to
+  their own rounding; contours open by 1e-13 or 1e-9 are refused at ZERO.
+  In `axiolid-mesh-compile`, an IPE 300 beam (with and without fillets)
+  minus a round web hole clear of the fillets compiles at ZERO under
+  exact placements with an empty report and the closed-form volume.
+  Mutation probe: `scripts/probe_section_zero_tolerance_mutants.py`
+  (9/9 killed).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

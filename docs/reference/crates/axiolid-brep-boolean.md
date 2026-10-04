@@ -55,6 +55,12 @@ Latest release, 0.1.5 (2026-10-03):
 
 ### Added
 
+- `BooleanError::ToleranceExceeded` (#251): a decision within tolerance
+  was asked for beyond the caller's tolerance, any at all at
+  `Tolerance::ZERO`. The report's session refuses it by name (and asserts
+  in debug builds) rather than return a result its report misdescribes;
+  no reading asks for one.
+
 - `BooleanError::UnsupportedContact` (#243): a plane read as touching a
   cylinder within tolerance is crossed by a curve whose meeting with their
   contact ruling this stage cannot place (a curve of the plane that is no
@@ -63,6 +69,50 @@ Latest release, 0.1.5 (2026-10-03):
   reading.
 
 ### Fixed
+
+- At `Tolerance::ZERO` the report is empty again (#251, the #236
+  contract). A support reading the exact predicate rejects was taken when
+  its `f64` measure was exactly `0`, and reported as a decision with
+  `linear` 0: a round hole across a wall under a general rotation, whose
+  axis and the wall's normals round to the same `f64` vector though the
+  numbers given (a frame orthonormal only to rounding) are not
+  perpendicular, was read `PlanePerpendicularToAxis` at zero. A tolerance
+  with a zero part now never takes a reading the exact predicate rejects
+  (coincident supports; a plane parallel or perpendicular to a cylinder's
+  axis or touching it): the exact answer stands, and the general closed
+  form cuts the hole, exactly, with an empty report. Point readings
+  already recorded only residues above the rounding floor and within the
+  tolerance, never at zero. Both positive parts: unchanged.
+- A round web hole touching an I-beam's flange is no longer refused when
+  the beam has root fillets (#249). The hole is then tangent to each
+  fillet cylinder where the fillet meets the flange, and the hole/fillet
+  section (perpendicular cylinders, axes skew by the difference of their
+  radii) is a quartic with a double point there: two loops round the
+  fillet crossing at the fillet/flange edge. It was refused ("a section
+  curve the general boolean does not build"): the trace over the fillet
+  face's parameter box met the crossing on the box's edge. Now (new
+  `tangency` module):
+  - a trace that cannot be decided in a face's box of a periodic carrier
+    is taken over the carrier's whole turn, where the crossing is inside
+    and both loops end at it (ADR 0077); a loop closing through such a
+    vertex is cut there like at any other cut;
+  - a section on a face is cut at a smooth edge of the face (a fillet
+    running tangent into the flange or web) where the edge itself crosses
+    the section's other surface, not where the section touches the
+    adjacent surface (a double root that rounding splits or loses);
+  - a traced section on the face's own surface keeps the traced curve as
+    its pcurve, instead of a second trace over the face's box;
+  - with the flange read as touching the hole within tolerance (#243),
+    the double point is placed on the contact, and a traced section on a
+    cylinder in a contact is cut where it crosses the contact ruling.
+  A hole that is exactly tangent (exact axes, dyadic sizes) gives an exact
+  result with an empty report at `Tolerance::ZERO`; under a general
+  placement the report carries the `PlaneTouchesCylinder` reading. A hole
+  a fraction of the tolerance into or short of the flange, which meets
+  each fillet in two arcs the contact would have to join (no single move
+  of one operand makes both readings hold), is refused by name
+  (`BooleanError::UnsupportedContact`). Holes cutting the fillets
+  transversally, or ten tolerances into the flange, are decided exactly.
 
 - A plane touching a cylinder within tolerance is read the same way by
   every face pair (#243). A round hole tangent to a planar face (an

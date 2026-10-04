@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-04
+
 ### Fixed
 
 - The declared scratch is an upper bound on a pool as well (#226). The old

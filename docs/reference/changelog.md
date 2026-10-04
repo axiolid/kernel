@@ -123,6 +123,12 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Added
 
+- `BooleanError::ToleranceExceeded` (#251): a decision within tolerance
+  was asked for beyond the caller's tolerance, any at all at
+  `Tolerance::ZERO`. The report's session refuses it by name (and asserts
+  in debug builds) rather than return a result its report misdescribes;
+  no reading asks for one.
+
 - `BooleanError::UnsupportedContact` (#243): a plane read as touching a
   cylinder within tolerance is crossed by a curve whose meeting with their
   contact ruling this stage cannot place (a curve of the plane that is no
@@ -131,6 +137,50 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   reading.
 
 ### Fixed
+
+- At `Tolerance::ZERO` the report is empty again (#251, the #236
+  contract). A support reading the exact predicate rejects was taken when
+  its `f64` measure was exactly `0`, and reported as a decision with
+  `linear` 0: a round hole across a wall under a general rotation, whose
+  axis and the wall's normals round to the same `f64` vector though the
+  numbers given (a frame orthonormal only to rounding) are not
+  perpendicular, was read `PlanePerpendicularToAxis` at zero. A tolerance
+  with a zero part now never takes a reading the exact predicate rejects
+  (coincident supports; a plane parallel or perpendicular to a cylinder's
+  axis or touching it): the exact answer stands, and the general closed
+  form cuts the hole, exactly, with an empty report. Point readings
+  already recorded only residues above the rounding floor and within the
+  tolerance, never at zero. Both positive parts: unchanged.
+- A round web hole touching an I-beam's flange is no longer refused when
+  the beam has root fillets (#249). The hole is then tangent to each
+  fillet cylinder where the fillet meets the flange, and the hole/fillet
+  section (perpendicular cylinders, axes skew by the difference of their
+  radii) is a quartic with a double point there: two loops round the
+  fillet crossing at the fillet/flange edge. It was refused ("a section
+  curve the general boolean does not build"): the trace over the fillet
+  face's parameter box met the crossing on the box's edge. Now (new
+  `tangency` module):
+  - a trace that cannot be decided in a face's box of a periodic carrier
+    is taken over the carrier's whole turn, where the crossing is inside
+    and both loops end at it (ADR 0077); a loop closing through such a
+    vertex is cut there like at any other cut;
+  - a section on a face is cut at a smooth edge of the face (a fillet
+    running tangent into the flange or web) where the edge itself crosses
+    the section's other surface, not where the section touches the
+    adjacent surface (a double root that rounding splits or loses);
+  - a traced section on the face's own surface keeps the traced curve as
+    its pcurve, instead of a second trace over the face's box;
+  - with the flange read as touching the hole within tolerance (#243),
+    the double point is placed on the contact, and a traced section on a
+    cylinder in a contact is cut where it crosses the contact ruling.
+  A hole that is exactly tangent (exact axes, dyadic sizes) gives an exact
+  result with an empty report at `Tolerance::ZERO`; under a general
+  placement the report carries the `PlaneTouchesCylinder` reading. A hole
+  a fraction of the tolerance into or short of the flange, which meets
+  each fillet in two arcs the contact would have to join (no single move
+  of one operand makes both readings hold), is refused by name
+  (`BooleanError::UnsupportedContact`). Holes cutting the fillets
+  transversally, or ten tolerances into the flange, are decided exactly.
 
 - A plane touching a cylinder within tolerance is read the same way by
   every face pair (#243). A round hole tangent to a planar face (an
@@ -365,6 +415,39 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.14 - 2026-10-04
+
+### Fixed
+
+- **Parametric profiles with decimal sizes lower at `Tolerance::ZERO`
+  (#250).** `contour_lower::contour_to_arc_ring` demanded bit-equal
+  segment joints at `Tolerance::ZERO`, which a `Line2`/`Circle2` contour
+  cannot give for non-dyadic sizes: a line ends at a rounded
+  `origin + direction`, an arc at the `cos`/`sin` of its sweep. So every
+  I section with IPE or HEA sizes (sharp or with root fillets), and the
+  other families with decimal sizes, was refused before any boolean ran
+  ("contour segments leave a gap of 2.6e-18"). The section router already
+  computes each corner and tangent point once and hands it to both
+  segments; the ring takes one vertex per joint (the leaving segment's
+  start, a line's stored origin bit for bit), so it is closed by
+  construction. The joint check now allows the larger of the tolerance
+  and the rounding of the two evaluations meeting there (eight machine
+  epsilons of the magnitudes they are computed from); a contour open by
+  more is still refused at `Tolerance::ZERO`. Rings are bit-identical to
+  before wherever lowering succeeded, so results at a positive tolerance
+  are unchanged. Tests: I (IPE 300/200, HEA 200, HEB 340; sharp, root
+  fillets, toe radii), asymmetric I, T, U, L, Z, C, trapezium, rounded
+  and hollow rectangles and an annulus lower at ZERO with each line's
+  shared corner as its ring vertex, and extrude at ZERO to their
+  closed-form areas, fillet terms `(1 - pi/4) r^2` included; tapered
+  I/U/L/T lower and extrude at ZERO; joints far from the origin close to
+  their own rounding; contours open by 1e-13 or 1e-9 are refused at ZERO.
+  In `axiolid-mesh-compile`, an IPE 300 beam (with and without fillets)
+  minus a round web hole clear of the fillets compiles at ZERO under
+  exact placements with an empty report and the closed-form volume.
+  Mutation probe: `scripts/probe_section_zero_tolerance_mutants.py`
+  (9/9 killed).
 
 ### 0.3.13 - 2026-10-03
 
@@ -751,6 +834,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-contracts
 
+### 0.3.3 - 2026-10-04
+
+### Added
+
+- `ScratchRequirement::Affine { base_bytes, bytes_per_element,
+  bytes_per_worker }` (#226): at most `base + per_element * elements +
+  per_worker * workers`. A purely per-element bound cannot be an upper
+  bound for an operation with fixed setup cost or one that runs on a
+  thread pool, whose workers each cost memory however small the input is.
+  Additive: the enum is `#[non_exhaustive]`.
+- `ScratchRequirement::upper_bound_bytes_on(elements, workers)` and
+  `ScratchRequirement::fits_budget_on(options, elements, workers)`, for a
+  caller that knows the width the operation runs on.
+- `Parallelism::worker_bound`: the most workers a preference allows
+  (`Serial` 1, `Threads(n)` n, `Auto` the available parallelism).
+
+### Changed
+
+- `ScratchRequirement::fits_budget` charges a per-worker term for
+  `Parallelism::worker_bound` of the options. `upper_bound_bytes` reports
+  `None` for an affine requirement with a per-worker term, which has no
+  bound without a worker count. Existing variants are unchanged.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -943,6 +1049,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.2 - 2026-10-04
+
+### Fixed
+
+- `MeshBooleanRegistry::boolean` budgets both operands (#226). It counted
+  the subject's triangles alone, so a provider's declared scratch was
+  checked at up to half the input it would really be given; `subtract_many`
+  and `union_many` already counted every operand.
+- A per-worker scratch term (`ScratchRequirement::Affine`) is charged for
+  the width of the pool configured with `with_execution` when it has more
+  than one thread, since every provider call runs inside it, and otherwise
+  for the options' `Parallelism`.
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -956,6 +1075,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 ### 0.3.5 - 2026-10-03
 
 ### Added
+
+- `station::SectionFrame::oriented` (#246, ADR 0082 amendment): turns a
+  section frame by an explicit axis and reference direction given as
+  components in that frame, `(tangent, lateral, up)` -- the axis becomes
+  the exact up, the reference direction is orthonormalised against it
+  (Gram-Schmidt, axis primary), the point stays -- and refuses a zero,
+  non-finite or parallel pair by name (`station::ORIENTATION_TOLERANCE`).
+- `bound::chord_bound2` bounds implicit curves (`Curve2::Implicit`, ADR
+  0077) one cell at a time (#249), and `continuity_breaks2` names their
+  cell joins. A regular cell's solved parameter is bounded through the
+  implicit function theorem with interval bounds of the field's partials
+  over the stretch's box (first and second order, the smaller kept); a
+  bridge cell into a crossing by its cubic's Bezier control points. The
+  deviation of a boolean whose exact result has traced pcurves (a hole
+  through an I-beam's root fillets) can now be certified.
 
 - `station` (#241, ADR 0082): `station_section2` and `station_section3`
   resolve a distance along a curve -- plan distance on an elevated or
@@ -1631,6 +1765,42 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-boolmesh
 
+### 0.3.4 - 2026-10-04
+
+### Fixed
+
+- The declared scratch is an upper bound on a pool as well (#226). The old
+  `PerElement { bytes_per_element: 4096 }` covered large inputs but not
+  small ones on rayon: each worker allocates its own bookkeeping when it
+  starts, and on a loaded machine that lands inside whichever boolean is
+  running. 24 triangles peaked at 113,608 bytes against the declared
+  98,304 in one gate run. The provider now declares
+  `ScratchRequirement::Affine` with a 64 KiB base, 1,536 bytes per input
+  triangle of all operands, and 16 KiB per worker with `parallel` (plus
+  the base per worker with `parallel-batch`, where each worker can run a
+  boolean of its own; zero without either feature). Each term is 1.7x to
+  2.9x its measurement; the doc comment of `scratch_requirement` has the
+  table.
+- With a memory budget, a boolean (and a `parallel-batch` `union_many`)
+  re-checks that bound against the width of the rayon pool it runs in and
+  refuses with `BudgetExceeded` when the pool is wider than the budget
+  check before dispatch assumed.
+
+### Changed
+
+- `tests/scratch_bound.rs` and the `scratch_probe` binary measure under a
+  forced worst-case schedule instead of whatever the machine's load gives:
+  with rayon each boolean runs in a pool of 1, 2, 4, 16 or 64 workers
+  started inside the measured window, with allocations stalled so join
+  halves are stolen. The test checks each peak against the bound for its
+  worker count, and checks that worker start-up is really inside the
+  window. Under the old declaration it now fails every run instead of
+  occasionally under load.
+- `scripts/probe_scratch_bound_mutants.py` kills a dropped base term, a
+  dropped per-worker term, a worker count ignored in the contract, the
+  dispatcher or the provider, a boolean budgeted for its subject alone,
+  and the old declaration.
+
 ### 0.3.3 - 2026-09-30
 
 ### Fixed
@@ -1690,6 +1860,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-contract
 
+### 0.3.2 - 2026-10-04
+
+### Changed
+
+- `MeshBoolean::scratch_requirement` says what it is charged for: the
+  input triangles of every operand together, and the worker threads the
+  call runs on (#226).
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -1714,6 +1892,39 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Added
 
+- Oriented and tagged stations (#246, ADR 0082 amendment):
+  `station::resolve` also resolves an `OrientedCurveStation`, its frame
+  turned by the orientation, its point and `section` not. The new
+  `SectionsAtStations` spine and `OpenSectionsAtStations` sheet mesh like
+  the #241 relations (same deviation paths, the exact compiler refuses the
+  spine as a station-placed spine), each section's plane turned by its
+  orientation, interpolated between sections in the base frame. Tagged
+  closed sections are matched by tag: their profile must be a polygonal
+  contour (optionally under a derived transform), each ring rewound
+  outer counter-clockwise and holes clockwise, then re-started and
+  re-ordered to line up with the first section's rings; a tag count that
+  is not the vertex count, a curved or parametric profile, an outer ring
+  tagged as a hole and an order that is no rotation are refused by name.
+
+- A curve-bounded plane takes `CurveRelation` boundaries (#255): a
+  `Composite` of lines, polylines, arcs and other segments, each read in
+  its `same_sense`, and a `Trimmed` basis curve under every
+  `TrimSelector` kind (parameter, point, arc length), resolved to points by
+  the sweep directrix reader, 2D curves and point selectors lifted to
+  `z = 0`. The boundary must close within the linear tolerance; an open
+  one, a joint gap past it, an offset, surface-curve, parameter-curve or
+  station-offset relation, and a 2D family other than a line, circle,
+  ellipse, polyline or B-spline are refused by name. The deviation report
+  bounds such a boundary by its leaves (straight exact, certified families
+  within the chord budget, others `Unbounded` by name) plus its widest
+  joint gap. A joint or closing gap no wider than its ends' own rounding
+  (`8` machine epsilons of the magnitudes they are computed from, as
+  #250 welds profile joints: `sin(2 pi)` at a full turn, `cos(pi / 2)` at
+  an arc's end) is welded and adds nothing, for atomic boundaries too.
+  Boundaries are flattened to the budget shrunk by the plane frame's
+  stretch bound, so a curve-bounded plane's reported bound stays within
+  the budget and `meets_requested` holds.
+
 - Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
   node into its point and frame (`x` tangent, `y` up, `z` right). The
   reference mesh compiler meshes `SolidOperation::StationedSpine` as a
@@ -1730,7 +1941,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   whose ring structure, vertex count or tags disagree, and an open
   section that is not a polyline.
 
+### Changed
+
+- A sectioned surface whose section runs its tags in reverse is joined
+  reversed instead of refused (#246).
+- An authored polygon face off its plane by more than the linear
+  tolerance is triangulated instead of refused as not planar (#254). It is
+  projected onto its fit plane (the outer ring's centroid and Newell
+  normal), ear clipped there and lifted back to its authored corners,
+  which are never moved. `compile_mesh_with_deviation` reports it as
+  `AuthoredMesh` with the detail `"non-planar authored face"`, always
+  `Certified`, never `Proven`: the largest distance of any corner (holes
+  included) from that fit plane, over the worst such face. That bounds the
+  distance between the mesh and the face flattened onto the plane both
+  ways, and is at least the largest corner distance from the plane the
+  face was triangulated in. Faces within the tolerance triangulate and
+  report exactly as before; rings that cross or enclose no area in the fit
+  plane are still refused by face index, and the exact compiler still
+  refuses polygon meshes by name.
+- A clockwise outer loop of a curve-bounded plane is reversed about its
+  first point, so a loop read backwards triangulates exactly as the loop
+  read forwards (#255).
+
 ### Fixed
+
+- `ReferenceExactCompiler` compiles a round web hole touching the flange
+  of an I-beam with root fillets (#249): exactly, with an empty report, at
+  `Tolerance::ZERO` with exact axes, and reading the contact under a
+  general placement. Its mesh is measured against the exact result
+  through `compile_mesh_with_deviation` and reported `Certified` (traced
+  pcurves now have certified chord bounds). A hole a fraction of the
+  tolerance off touching is refused by name ("... where the contact cannot
+  be placed").
 
 - `ReferenceExactCompiler` compiles placed differences whose round hole
   touches a planar face (#243): an I-beam whose web hole touches the
@@ -2191,6 +2433,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Added
 
+- Explicit station orientation (#246, ADR 0082 amendment):
+  `StationOrientation { axis, ref_direction }`, both optional and given as
+  components in the station's base frame `(tangent, lateral, up)` -- the
+  reading of a linear placement's axes relative to its curve -- with the
+  axis the oriented up and the reference direction orthonormalised
+  against it (Gram-Schmidt, axis primary); `unit_axes` fills the defaults
+  `(0, 0, 1)` and `(1, 0, 0)`. `ORIENTATION_TOLERANCE` bounds the sine
+  below which the two count as parallel. Offsets stay in the base frame.
+- `GeometryNode::OrientedCurveStation(OrientedCurveStation)`: a curve
+  station with an orientation.
+- `SectionAtStation` (built by `new`, `with_tags`, `with_orientation`; it
+  is `#[non_exhaustive]`, so fields can follow additively) and its two
+  relations, `SolidOperation::SectionsAtStations` (closed profiles, the
+  general form of `StationedSpine`, matched by tag when tagged) and
+  `SurfaceRelation::OpenSectionsAtStations` (open sections, the general
+  form of `SectionedSurface`). Both variants are appended to their enums.
+  `From<StationedSection>` and `From<StationedOpenSection>` convert the
+  #241 sections.
+- `GraphError::InvalidStation` also names a zero, non-finite or parallel
+  orientation and a run of sections that mixes tagged and untagged ones.
+
 - Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
   lateral/vertical/longitudinal) along a basis curve, measured in that
   curve's convention -- plan distance on an elevated or banked curve, arc
@@ -2208,6 +2471,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   than two stations in a run, distances that do not increase strictly,
   sections whose tags differ or repeat. A distance beyond the basis
   curve's length is refused when the station is resolved.
+
+### Changed
+
+- Tags are matched as sets (#246): every section of a run carries the
+  same tags, none repeated; an open section's tags may run in the first
+  section's order or in reverse, so a `SectionedSurface` whose sections
+  are authored in opposite directions is now accepted and joined
+  reversed. Any other order is still refused by name.
 
 ### 0.3.4 - 2026-10-03
 

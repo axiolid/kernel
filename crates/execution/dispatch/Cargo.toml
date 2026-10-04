@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-dispatch"
 description = "Provider registration, ordering, fallback, and execution policy"
-version = "0.3.1"
+version = "0.3.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

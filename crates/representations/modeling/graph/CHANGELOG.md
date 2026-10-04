@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-03
+
 ### Added
 
 - Explicit station orientation (#246, ADR 0082 amendment):
@@ -32,18 +34,6 @@ caret rule for `0.x` versions.
 - `GraphError::InvalidStation` also names a zero, non-finite or parallel
   orientation and a run of sections that mixes tagged and untagged ones.
 
-### Changed
-
-- Tags are matched as sets (#246): every section of a run carries the
-  same tags, none repeated; an open section's tags may run in the first
-  section's order or in reverse, so a `SectionedSurface` whose sections
-  are authored in opposite directions is now accepted and joined
-  reversed. Any other order is still refused by name.
-
-## [0.3.5] - 2026-10-03
-
-### Added
-
 - Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
   lateral/vertical/longitudinal) along a basis curve, measured in that
   curve's convention -- plan distance on an elevated or banked curve, arc
@@ -61,6 +51,14 @@ caret rule for `0.x` versions.
   than two stations in a run, distances that do not increase strictly,
   sections whose tags differ or repeat. A distance beyond the basis
   curve's length is refused when the station is resolved.
+
+### Changed
+
+- Tags are matched as sets (#246): every section of a run carries the
+  same tags, none repeated; an open section's tags may run in the first
+  section's order or in reverse, so a `SectionedSurface` whose sections
+  are authored in opposite directions is now accepted and joined
+  reversed. Any other order is still refused by name.
 
 ## [0.3.4] - 2026-10-03
 

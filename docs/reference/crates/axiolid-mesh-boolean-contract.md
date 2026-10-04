@@ -8,7 +8,7 @@ Portable mesh boolean request, result, evidence, and conformance contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-04) |
 | crates.io | [`axiolid-mesh-boolean-contract`](https://crates.io/crates/axiolid-mesh-boolean-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-boolean` |
 | Layer | contracts (`contract.operation`) |
@@ -32,11 +32,12 @@ implement it, and `axiolid-dispatch` chooses between them.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-04):
 
 ### Changed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- `MeshBoolean::scratch_requirement` says what it is charged for: the
+  input triangles of every operand together, and the worker threads the
+  call runs on (#226).
 
 Full history: [`crates/contracts/operations/mesh-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-boolean/CHANGELOG.md)

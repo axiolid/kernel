@@ -35,11 +35,11 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.2 | Common backend-neutral execution and diagnostic contracts |
+| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.3 | Common backend-neutral execution and diagnostic contracts |
 | [`axiolid-curve-evaluate-contract`](./crates/axiolid-curve-evaluate-contract) | `contract.operation` | 0.3.2 | Portable curve evaluation capability contract: point, tangent and oriented frame at a distance |
 | [`axiolid-exact-compile-contract`](./crates/axiolid-exact-compile-contract) | `contract.operation` | 0.3.1 | Portable graph-to-exact-B-rep compilation contract |
 | [`axiolid-guarantees`](./crates/axiolid-guarantees) | `contract.guarantees` | 0.3.1 | Certified-value and escalation vocabulary for geometry contracts |
-| [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.1 | Portable mesh boolean request, result, evidence, and conformance contract |
+| [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.2 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.2 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.1 | Shared mesh admissibility contracts |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.1 | Portable mesh plane-section request, result, and evidence contract |
@@ -55,7 +55,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.5 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.1 | Convex collision queries: separating axis, overlap, and separation distance |
 | [`axiolid-constraint2d`](./crates/axiolid-constraint2d) | `algorithm.planar` | 0.1.0 | Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination |
-| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.13 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
+| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.14 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.2 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.1 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.5 | Analytic and spline curve/surface evaluation, jets, and inversion |
@@ -84,7 +84,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.3 | boolmesh-backed MeshBoolean provider |
+| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.4 | boolmesh-backed MeshBoolean provider |
 | [`axiolid-pointcloud-reconstruction-sdf`](./crates/axiolid-pointcloud-reconstruction-sdf) | `provider.pointcloud` | 0.3.1 | Reference pointcloud reconstruction: signed-distance field from samples, extracted as a level set. |
 
 ## Execution
@@ -93,7 +93,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.1 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.1 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.1 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.2 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.13 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade

@@ -8,7 +8,7 @@ boolmesh-backed MeshBoolean provider.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-09-30) |
+| Latest release | 0.3.4 (2026-10-04) |
 | crates.io | [`axiolid-mesh-boolean-boolmesh`](https://crates.io/crates/axiolid-mesh-boolean-boolmesh) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | providers (`provider.mesh`) |
@@ -56,26 +56,40 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-09-30):
+Latest release, 0.3.4 (2026-10-04):
 
 ### Fixed
 
-- Unions of overlapping axis-aligned boxes no longer refuse inside the
-  solve with an odd edge-point count (#203). The winding number's xy
-  broad phase rejected queries beyond `min + cell * dim`, a rounded
-  product that can fall one ulp short of the operand's true bounding box,
-  so a vertex lying exactly on the other operand's extreme plane lost a
-  face from its winding number. The grid now rejects against the exact
-  bounding box. Grid unions at pitches 0.6 to 0.8 with k = 5 and 6
-  complete, sequentially, through `union_many` and on the fast winding
-  path, with the exact volume and a closed, consistently wound result
-  (`tests/overlapping_grid.rs`).
+- The declared scratch is an upper bound on a pool as well (#226). The old
+  `PerElement { bytes_per_element: 4096 }` covered large inputs but not
+  small ones on rayon: each worker allocates its own bookkeeping when it
+  starts, and on a loaded machine that lands inside whichever boolean is
+  running. 24 triangles peaked at 113,608 bytes against the declared
+  98,304 in one gate run. The provider now declares
+  `ScratchRequirement::Affine` with a 64 KiB base, 1,536 bytes per input
+  triangle of all operands, and 16 KiB per worker with `parallel` (plus
+  the base per worker with `parallel-batch`, where each worker can run a
+  boolean of its own; zero without either feature). Each term is 1.7x to
+  2.9x its measurement; the doc comment of `scratch_requirement` has the
+  table.
+- With a memory budget, a boolean (and a `parallel-batch` `union_many`)
+  re-checks that bound against the width of the rayon pool it runs in and
+  refuses with `BudgetExceeded` when the pool is wider than the budget
+  check before dispatch assumed.
 
 ### Changed
 
-- `tests/solve_failure.rs` is replaced: no admissible input is known to
-  reach a refusal inside the solve now, so the mapping to
-  `BackendContractViolation` is pinned by a unit test where
-  `compute_boolean`'s error lands.
+- `tests/scratch_bound.rs` and the `scratch_probe` binary measure under a
+  forced worst-case schedule instead of whatever the machine's load gives:
+  with rayon each boolean runs in a pool of 1, 2, 4, 16 or 64 workers
+  started inside the measured window, with allocations stalled so join
+  halves are stolen. The test checks each peak against the bound for its
+  worker count, and checks that worker start-up is really inside the
+  window. Under the old declaration it now fails every run instead of
+  occasionally under load.
+- `scripts/probe_scratch_bound_mutants.py` kills a dropped base term, a
+  dropped per-worker term, a worker count ignored in the contract, the
+  dispatcher or the provider, a boolean budgeted for its subject alone,
+  and the old declaration.
 
 Full history: [`crates/providers/mesh/boolmesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/mesh/boolmesh/CHANGELOG.md)

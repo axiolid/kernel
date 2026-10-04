@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-03
+
 ### Added
 
 - Oriented and tagged stations (#246, ADR 0082 amendment):
@@ -44,6 +46,22 @@ caret rule for `0.x` versions.
   stretch bound, so a curve-bounded plane's reported bound stays within
   the budget and `meets_requested` holds.
 
+- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
+  node into its point and frame (`x` tangent, `y` up, `z` right). The
+  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
+  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
+  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
+  in distance between stations and refining between them until each
+  section point's midpoint and each wall quad stay within the chord
+  budget; an `OffsetByStations` curve is sampled as a sweep directrix
+  (its parameter is the basis distance). Their deviation is reported
+  `Unbounded` by name (`DeviationPath::StationedSpine`,
+  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
+  refuses a station-placed spine by name. Refused by name: a station on
+  an instance or a curve relation, a distance beyond the curve, sections
+  whose ring structure, vertex count or tags disagree, and an open
+  section that is not a polyline.
+
 ### Changed
 
 - A sectioned surface whose section runs its tags in reverse is joined
@@ -76,28 +94,6 @@ caret rule for `0.x` versions.
   pcurves now have certified chord bounds). A hole a fraction of the
   tolerance off touching is refused by name ("... where the contact cannot
   be placed").
-
-## [0.3.13] - 2026-10-03
-
-### Added
-
-- Stations (#241, ADR 0082). `station::resolve` turns a `CurveStation`
-  node into its point and frame (`x` tangent, `y` up, `z` right). The
-  reference mesh compiler meshes `SolidOperation::StationedSpine` as a
-  closed loft and `SurfaceRelation::SectionedSurface` as an open sheet
-  (`MeshClosure::Surface`), interpolating profiles and offsets linearly
-  in distance between stations and refining between them until each
-  section point's midpoint and each wall quad stay within the chord
-  budget; an `OffsetByStations` curve is sampled as a sweep directrix
-  (its parameter is the basis distance). Their deviation is reported
-  `Unbounded` by name (`DeviationPath::StationedSpine`,
-  `DeviationPath::SectionedSurface`), and `ReferenceExactCompiler`
-  refuses a station-placed spine by name. Refused by name: a station on
-  an instance or a curve relation, a distance beyond the curve, sections
-  whose ring structure, vertex count or tags disagree, and an open
-  section that is not a polyline.
-
-### Fixed
 
 - `ReferenceExactCompiler` compiles placed differences whose round hole
   touches a planar face (#243): an I-beam whose web hole touches the

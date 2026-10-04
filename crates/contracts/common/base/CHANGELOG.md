@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-04
+
 ### Added
 
 - `ScratchRequirement::Affine { base_bytes, bytes_per_element,

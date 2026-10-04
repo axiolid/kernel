@@ -94,19 +94,19 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.13",
-      "released_date": "2026-10-03",
+      "released": "0.3.14",
+      "released_date": "2026-10-04",
       "role": "algorithm.construction",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
       "layer": "contracts",
       "path": "crates/contracts/common/base",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-04",
       "role": "contract.common",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-core": {
       "description": "Geometry data types and tolerance policy. No algorithms, no backends.",
@@ -157,10 +157,10 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-04",
       "role": "execution.dispatch",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
@@ -292,19 +292,19 @@
       "description": "boolmesh-backed MeshBoolean provider",
       "layer": "providers",
       "path": "crates/providers/mesh/boolmesh",
-      "released": "0.3.3",
-      "released_date": "2026-09-30",
+      "released": "0.3.4",
+      "released_date": "2026-10-04",
       "role": "provider.mesh",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-mesh-boolean-contract": {
       "description": "Portable mesh boolean request, result, evidence, and conformance contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-boolean",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-04",
       "role": "contract.operation",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-mesh-compile": {
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",

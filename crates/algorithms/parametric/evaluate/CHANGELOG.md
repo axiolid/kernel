@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-03
+
 ### Added
 
 - `station::SectionFrame::oriented` (#246, ADR 0082 amendment): turns a
@@ -25,10 +27,6 @@ caret rule for `0.x` versions.
   bridge cell into a crossing by its cubic's Bezier control points. The
   deviation of a boolean whose exact result has traced pcurves (a hole
   through an I-beam's root fillets) can now be certified.
-
-## [0.3.5] - 2026-10-03
-
-### Added
 
 - `station` (#241, ADR 0082): `station_section2` and `station_section3`
   resolve a distance along a curve -- plan distance on an elevated or

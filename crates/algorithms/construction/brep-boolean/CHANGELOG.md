@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-03
+
 ### Added
 
 - `BooleanError::ToleranceExceeded` (#251): a decision within tolerance
@@ -16,6 +18,13 @@ caret rule for `0.x` versions.
   `Tolerance::ZERO`. The report's session refuses it by name (and asserts
   in debug builds) rather than return a result its report misdescribes;
   no reading asks for one.
+
+- `BooleanError::UnsupportedContact` (#243): a plane read as touching a
+  cylinder within tolerance is crossed by a curve whose meeting with their
+  contact ruling this stage cannot place (a curve of the plane that is no
+  line, a curve of the cylinder that is no ruling or conic). Refused by
+  name rather than sewn against exact roots that disagree with the
+  reading.
 
 ### Fixed
 
@@ -62,19 +71,6 @@ caret rule for `0.x` versions.
   of one operand makes both readings hold), is refused by name
   (`BooleanError::UnsupportedContact`). Holes cutting the fillets
   transversally, or ten tolerances into the flange, are decided exactly.
-
-## [0.1.5] - 2026-10-03
-
-### Added
-
-- `BooleanError::UnsupportedContact` (#243): a plane read as touching a
-  cylinder within tolerance is crossed by a curve whose meeting with their
-  contact ruling this stage cannot place (a curve of the plane that is no
-  line, a curve of the cylinder that is no ruling or conic). Refused by
-  name rather than sewn against exact roots that disagree with the
-  reading.
-
-### Fixed
 
 - A plane touching a cylinder within tolerance is read the same way by
   every face pair (#243). A round hole tangent to a planar face (an

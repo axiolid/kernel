@@ -44,6 +44,21 @@ Latest release, 0.3.5 (2026-10-03):
 
 ### Added
 
+- `station::SectionFrame::oriented` (#246, ADR 0082 amendment): turns a
+  section frame by an explicit axis and reference direction given as
+  components in that frame, `(tangent, lateral, up)` -- the axis becomes
+  the exact up, the reference direction is orthonormalised against it
+  (Gram-Schmidt, axis primary), the point stays -- and refuses a zero,
+  non-finite or parallel pair by name (`station::ORIENTATION_TOLERANCE`).
+- `bound::chord_bound2` bounds implicit curves (`Curve2::Implicit`, ADR
+  0077) one cell at a time (#249), and `continuity_breaks2` names their
+  cell joins. A regular cell's solved parameter is bounded through the
+  implicit function theorem with interval bounds of the field's partials
+  over the stretch's box (first and second order, the smaller kept); a
+  bridge cell into a crossing by its cubic's Bezier control points. The
+  deviation of a boolean whose exact result has traced pcurves (a hole
+  through an I-beam's root fillets) can now be certified.
+
 - `station` (#241, ADR 0082): `station_section2` and `station_section3`
   resolve a distance along a curve -- plan distance on an elevated or
   banked curve, arc length (through `arc_parameter`) on any other -- to a
