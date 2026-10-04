@@ -19,6 +19,12 @@ pub trait MeshBoolean: Backend {
     /// Callers budget against this before dispatch. Defaults to
     /// [`ScratchRequirement::Unbounded`] so an unaudited provider is treated as
     /// unbudgetable rather than silently assumed cheap.
+    ///
+    /// The elements are the input triangles of every operand together, which
+    /// is what `axiolid-dispatch` charges. A provider that runs on a thread
+    /// pool declares what each worker costs as well
+    /// ([`ScratchRequirement::Affine`]), since that cost does not shrink with
+    /// the input (#226).
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::Unbounded
     }

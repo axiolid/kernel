@@ -9,6 +9,40 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- The declared scratch is an upper bound on a pool as well (#226). The old
+  `PerElement { bytes_per_element: 4096 }` covered large inputs but not
+  small ones on rayon: each worker allocates its own bookkeeping when it
+  starts, and on a loaded machine that lands inside whichever boolean is
+  running. 24 triangles peaked at 113,608 bytes against the declared
+  98,304 in one gate run. The provider now declares
+  `ScratchRequirement::Affine` with a 64 KiB base, 1,536 bytes per input
+  triangle of all operands, and 16 KiB per worker with `parallel` (plus
+  the base per worker with `parallel-batch`, where each worker can run a
+  boolean of its own; zero without either feature). Each term is 1.7x to
+  2.9x its measurement; the doc comment of `scratch_requirement` has the
+  table.
+- With a memory budget, a boolean (and a `parallel-batch` `union_many`)
+  re-checks that bound against the width of the rayon pool it runs in and
+  refuses with `BudgetExceeded` when the pool is wider than the budget
+  check before dispatch assumed.
+
+### Changed
+
+- `tests/scratch_bound.rs` and the `scratch_probe` binary measure under a
+  forced worst-case schedule instead of whatever the machine's load gives:
+  with rayon each boolean runs in a pool of 1, 2, 4, 16 or 64 workers
+  started inside the measured window, with allocations stalled so join
+  halves are stolen. The test checks each peak against the bound for its
+  worker count, and checks that worker start-up is really inside the
+  window. Under the old declaration it now fails every run instead of
+  occasionally under load.
+- `scripts/probe_scratch_bound_mutants.py` kills a dropped base term, a
+  dropped per-worker term, a worker count ignored in the contract, the
+  dispatcher or the provider, a boolean budgeted for its subject alone,
+  and the old declaration.
+
 ## [0.3.3] - 2026-09-30
 
 ### Fixed

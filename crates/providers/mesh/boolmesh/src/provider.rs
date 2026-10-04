@@ -36,6 +36,22 @@ use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BoolmeshBoolean;
 
+/// Fixed scratch of one boolean; see [`MeshBoolean::scratch_requirement`].
+const SCRATCH_BASE_BYTES: usize = 64 * 1024;
+/// Scratch per input triangle, all operands together.
+const SCRATCH_BYTES_PER_TRIANGLE: usize = 1536;
+/// A rayon worker's bookkeeping and the work stolen onto it.
+#[cfg(feature = "parallel")]
+const WORKER_BYTES: usize = 16 * 1024;
+#[cfg(not(feature = "parallel"))]
+const WORKER_BYTES: usize = 0;
+/// Per worker thread: with `parallel-batch` a worker also runs a boolean of
+/// its own, which pays the fixed scratch.
+#[cfg(feature = "parallel-batch")]
+const SCRATCH_BYTES_PER_WORKER: usize = WORKER_BYTES + SCRATCH_BASE_BYTES;
+#[cfg(not(feature = "parallel-batch"))]
+const SCRATCH_BYTES_PER_WORKER: usize = WORKER_BYTES;
+
 impl BoolmeshBoolean {
     /// Stable identifier used in errors and explicit provider selection.
     pub const ID: BackendId = BackendId::new("boolmesh");
@@ -177,37 +193,66 @@ impl MeshBoolean for BoolmeshBoolean {
         Determinism::Topological
     }
 
-    /// Measured, not guessed.
+    /// Measured, not guessed: [`ScratchRequirement::Affine`] over the input
+    /// triangles of all operands and the worker threads the call runs on.
     ///
     /// `boolmesh` builds a Morton collider and intersection tables sized by the
     /// combined input. It exposes no bound, so this was measured directly with
     /// a counting global allocator (`src/bin/scratch_probe/`) across all four
     /// operations at 24 to 1,536 input triangles, after one discarded warmup
     /// call so the first operation measured is not charged for process
-    /// startup (#110):
+    /// startup (#110). With rayon each boolean runs in a pool started inside
+    /// the measured window, with the join halves forced onto other workers
+    /// (#226; the module docs of `scratch.rs` say how). Worst peak in bytes
+    /// over the four operations and ten runs with `parallel`, six on an idle
+    /// 20-core machine and four at load average 20 to 43:
     ///
     /// ```text
-    ///  triangles   peak bytes   bytes/triangle   worst operation
-    ///         24        52424             2184   SymmetricDifference
-    ///         96        98920             1030   SymmetricDifference
-    ///        384       343768              895   SymmetricDifference
-    ///       1536      1349668              878   SymmetricDifference
+    ///  triangles   1 worker   4 workers   16 workers   64 workers
+    ///         24      59752       65656       160136       471736
+    ///         96     108232      112152       193504       460672
+    ///        384     348792      357000       422472       680384
+    ///       1536    1354692     1362900      1411548      1702180
     /// ```
     ///
-    /// Consumption is linear in input size, converging to under 1 KiB per
-    /// triangle; the higher ratio at small inputs is fixed setup cost being
-    /// divided by few triangles. `SymmetricDifference` is worst because it is
-    /// composed from three passes and holds intermediates alive.
+    /// Three terms, each with its own evidence:
     ///
-    /// The declared bound is 4 KiB per triangle: about 1.9x the worst
-    /// observed ratio, as headroom for allocator variance and future operand
-    /// shapes. `tests/scratch_bound.rs` measures the same workloads and fails
-    /// if any peak exceeds it. A declared bound that is occasionally too low
-    /// is worse than `Unbounded`, because it makes a budget look enforced
-    /// when it is not.
+    /// - Per triangle, 1,536 bytes. The slope is linear and flat at about
+    ///   880 bytes per triangle from 384 up to 24,576 triangles (one worker,
+    ///   checked once at the two larger sizes), so this is 1.7x it.
+    ///   `SymmetricDifference` is the worst operation because it is composed
+    ///   from three passes and holds intermediates alive.
+    /// - Base, 64 KiB: fixed setup that dominates small inputs. 24 triangles
+    ///   peak at 59,752 bytes on one worker, 22 KiB above the per-triangle
+    ///   term, so the base is 2.9x that excess.
+    /// - Per worker, 16 KiB with `parallel`. A rayon worker's own
+    ///   bookkeeping (deque, registry slot, thread-locals) is 4.8 KB at most
+    ///   from 1 to 512 threads, and it is charged to whichever boolean runs
+    ///   while the worker starts, which on a loaded machine can be any of
+    ///   them. Work stolen onto it adds its scratch alongside the rest. The
+    ///   measured excess over one worker is at most 6.7 KB per extra
+    ///   worker, idle or loaded, so this is 2.4x it. With `parallel-batch` each worker can also run a
+    ///   boolean of its own, so it is charged the base too. Without either
+    ///   feature nothing runs off the calling thread and the term is zero.
+    ///
+    /// The old `PerElement { bytes_per_element: 4096 }` was 2x the large-input
+    /// slope but no bound at all for small inputs on a pool: 24 triangles
+    /// on 16 workers peak at 125,688 to 160,136 bytes against its 98,304
+    /// (#226).
+    /// `tests/scratch_bound.rs` measures the same workloads on 1 to 64
+    /// workers and fails if any peak exceeds this. A declared bound that is
+    /// occasionally too low is worse than `Unbounded`, because it makes a
+    /// budget look enforced when it is not.
+    ///
+    /// The worker count is only known where the call runs, so with a memory
+    /// budget every boolean re-checks this bound against the pool it is in
+    /// and refuses with `BudgetExceeded` when that pool is wider than the
+    /// budget check before dispatch assumed.
     fn scratch_requirement(&self) -> ScratchRequirement {
-        ScratchRequirement::PerElement {
-            bytes_per_element: 4096,
+        ScratchRequirement::Affine {
+            base_bytes: SCRATCH_BASE_BYTES,
+            bytes_per_element: SCRATCH_BYTES_PER_TRIANGLE,
+            bytes_per_worker: SCRATCH_BYTES_PER_WORKER,
         }
     }
 
@@ -282,6 +327,29 @@ impl BoolmeshBoolean {
         self.boolean_impl(subject, tool, operation, options, true)
     }
 
+    /// Refuse when the declared scratch, charged for the pool this call runs
+    /// on, exceeds the caller's memory budget (#226).
+    ///
+    /// The budget check before dispatch charges the per-worker term for the
+    /// width the options or the dispatcher name; rayon runs this call on
+    /// whatever pool it is in, which can be wider (a larger global pool, a
+    /// caller's own pool). Only here is the real width known. Without a
+    /// budget nothing is asked, so an unbudgeted call does not start rayon's
+    /// global pool early.
+    #[cfg(any(feature = "parallel", feature = "parallel-batch"))]
+    fn fits_current_pool(&self, elements: usize, options: &ExecutionOptions) -> GeomResult<()> {
+        if options.memory_budget_bytes().is_some()
+            && !self.scratch_requirement().fits_budget_on(
+                options,
+                elements,
+                rayon::current_num_threads(),
+            )
+        {
+            return Err(GeomError::BudgetExceeded { resource: "memory" });
+        }
+        Ok(())
+    }
+
     fn boolean_impl(
         &self,
         subject: &TriMesh,
@@ -290,6 +358,8 @@ impl BoolmeshBoolean {
         options: &ExecutionOptions,
         fast_winding: bool,
     ) -> GeomResult<BooleanOutcome> {
+        #[cfg(feature = "parallel")]
+        self.fits_current_pool(subject.triangle_count() + tool.triangle_count(), options)?;
         // `SymmetricDifference` has no `boolmesh` counterpart. Compose it from
         // the three primitives rather than pretending the backend's operation
         // set is the contract's; `sub_operations` in the evidence records that
@@ -657,6 +727,11 @@ impl BoolmeshBoolean {
             let evidence = evidence_for(&empty, &borrowed, &empty, 0);
             return Ok(BooleanOutcome::new(empty, evidence));
         }
+
+        // The pairs of a level run concurrently on the pool, so the batch is
+        // charged for its width before any of them starts.
+        #[cfg(feature = "parallel-batch")]
+        self.fits_current_pool(solids.iter().map(TriMesh::triangle_count).sum(), options)?;
 
         // Every solid carries solids[0]'s channel set, so a channel the
         // result keeps is defined (or explicitly unmapped) on every piece.

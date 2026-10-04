@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ScratchRequirement::Affine { base_bytes, bytes_per_element,
+  bytes_per_worker }` (#226): at most `base + per_element * elements +
+  per_worker * workers`. A purely per-element bound cannot be an upper
+  bound for an operation with fixed setup cost or one that runs on a
+  thread pool, whose workers each cost memory however small the input is.
+  Additive: the enum is `#[non_exhaustive]`.
+- `ScratchRequirement::upper_bound_bytes_on(elements, workers)` and
+  `ScratchRequirement::fits_budget_on(options, elements, workers)`, for a
+  caller that knows the width the operation runs on.
+- `Parallelism::worker_bound`: the most workers a preference allows
+  (`Serial` 1, `Threads(n)` n, `Auto` the available parallelism).
+
+### Changed
+
+- `ScratchRequirement::fits_budget` charges a per-worker term for
+  `Parallelism::worker_bound` of the options. `upper_bound_bytes` reports
+  `None` for an affine requirement with a per-worker term, which has no
+  bound without a worker count. Existing variants are unchanged.
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

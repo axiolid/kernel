@@ -54,6 +54,24 @@ pub enum Parallelism {
     Threads(usize),
 }
 
+impl Parallelism {
+    /// Most worker threads this preference lets an operation run on.
+    ///
+    /// What [`ScratchRequirement::fits_budget`] charges a per-worker scratch
+    /// term against. `Serial` is one worker and `Threads(n)` is `n`. `Auto`
+    /// is the machine's available parallelism, the width of a default
+    /// thread pool, or 1 when it cannot be determined (the same fallback
+    /// such a pool uses). A provider that runs on a wider pool than this
+    /// must check its budget against the width it actually runs on.
+    pub fn worker_bound(self) -> usize {
+        match self {
+            Self::Serial => 1,
+            Self::Threads(workers) => workers,
+            Self::Auto => std::thread::available_parallelism().map_or(1, usize::from),
+        }
+    }
+}
+
 /// Device selection preference. `Auto` is a policy request, not permission to
 /// silently reduce precision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,16 +183,68 @@ pub enum ScratchRequirement {
     /// Callers must treat this as "may allocate arbitrarily"; a memory budget
     /// cannot be enforced against it.
     Unbounded,
+    /// At most `base_bytes + bytes_per_element * elements +
+    /// bytes_per_worker * workers` of scratch, where `workers` is the number
+    /// of threads the operation may run on.
+    ///
+    /// For an operation whose scratch is not purely per element: a fixed
+    /// setup cost dominates small inputs, and a threaded operation pays per
+    /// worker (pool bookkeeping, work stolen onto another thread being live
+    /// at the same time as the rest) no matter how small the input is
+    /// (#226). A [`Self::PerElement`] bound tight enough for large inputs is
+    /// then below the real peak for small ones.
+    Affine {
+        /// Upper bound independent of input size and worker count, in bytes.
+        base_bytes: usize,
+        /// Upper bound per input element, in bytes.
+        bytes_per_element: usize,
+        /// Upper bound per worker thread, in bytes. Zero for an operation
+        /// that never runs on more than the calling thread.
+        bytes_per_worker: usize,
+    },
 }
 
 impl ScratchRequirement {
     /// Upper bound for `elements` inputs, or `None` when unbounded.
+    ///
+    /// An [`Self::Affine`] requirement with a per-worker term has no bound
+    /// without a worker count, so it reports `None` here; use
+    /// [`Self::upper_bound_bytes_on`].
     pub const fn upper_bound_bytes(self, elements: usize) -> Option<usize> {
+        match self {
+            Self::Affine {
+                bytes_per_worker, ..
+            } if bytes_per_worker > 0 => None,
+            _ => self.upper_bound_bytes_on(elements, 0),
+        }
+    }
+
+    /// Upper bound for `elements` inputs run on `workers` threads, or `None`
+    /// when unbounded or when the bound overflows `usize`.
+    ///
+    /// Only [`Self::Affine`] depends on `workers`.
+    pub const fn upper_bound_bytes_on(self, elements: usize, workers: usize) -> Option<usize> {
         match self {
             Self::None => Some(0),
             Self::Fixed { bytes } => Some(bytes),
             Self::PerElement { bytes_per_element } => bytes_per_element.checked_mul(elements),
             Self::Unbounded => None,
+            Self::Affine {
+                base_bytes,
+                bytes_per_element,
+                bytes_per_worker,
+            } => {
+                let Some(per_elements) = bytes_per_element.checked_mul(elements) else {
+                    return None;
+                };
+                let Some(per_workers) = bytes_per_worker.checked_mul(workers) else {
+                    return None;
+                };
+                let Some(variable) = per_elements.checked_add(per_workers) else {
+                    return None;
+                };
+                base_bytes.checked_add(variable)
+            }
         }
     }
 
@@ -182,15 +252,37 @@ impl ScratchRequirement {
     ///
     /// An unbounded requirement never fits a declared budget: allowing it would
     /// make the budget advisory, which is the failure this type exists to stop.
-    /// Whether this requirement fits the caller's memory budget.
+    /// A per-worker term is charged for [`Parallelism::worker_bound`] of
+    /// `options`' parallelism; a caller that knows the operation runs on a
+    /// different number of threads uses [`Self::fits_budget_on`].
     ///
     /// No longer `const`: it reads an [`ExecutionOptions`] that now owns a
     /// shared cancellation handle, so it cannot be destructured at compile
     /// time. Budget checks happen once per dispatch, not on a hot path.
     pub fn fits_budget(self, options: &ExecutionOptions, elements: usize) -> bool {
+        // The worker count is resolved only when a budget is declared, so an
+        // unbudgeted check never asks the machine for its parallelism.
         match options.memory_budget_bytes() {
             None => true,
-            Some(budget) => match self.upper_bound_bytes(elements) {
+            Some(_) => self.fits_budget_on(options, elements, options.parallelism().worker_bound()),
+        }
+    }
+
+    /// Whether this requirement fits `options`' memory budget for `elements`
+    /// run on `workers` threads.
+    ///
+    /// For a caller that knows the width the operation actually runs on: a
+    /// dispatcher scoping the call to its own pool, or a provider checking the
+    /// pool it finds itself in.
+    pub fn fits_budget_on(
+        self,
+        options: &ExecutionOptions,
+        elements: usize,
+        workers: usize,
+    ) -> bool {
+        match options.memory_budget_bytes() {
+            None => true,
+            Some(budget) => match self.upper_bound_bytes_on(elements, workers) {
                 Some(needed) => needed <= budget,
                 None => false,
             },

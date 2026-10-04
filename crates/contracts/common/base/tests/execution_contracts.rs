@@ -1,7 +1,7 @@
 //! Contract gates for the execution policy surface.
 
 use axiolid_contracts::{
-    BackendId, DataResidency, Determinism, ExecutionOptions, GeomError, Residency,
+    BackendId, DataResidency, Determinism, ExecutionOptions, GeomError, Parallelism, Residency,
     ScratchRequirement,
 };
 use axiolid_core::Tolerance;
@@ -176,6 +176,88 @@ fn budgets_admit_what_fits_and_reject_what_does_not() {
 
     assert!(per_element.fits_budget(&budgeted, 100), "1000 <= 1000");
     assert!(!per_element.fits_budget(&budgeted, 101), "1010 > 1000");
+}
+
+/// Every term of an affine bound counts, the worker term per worker (#226).
+#[test]
+fn affine_bounds_charge_base_elements_and_workers() {
+    let affine = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 10,
+        bytes_per_worker: 100,
+    };
+    assert_eq!(affine.upper_bound_bytes_on(0, 0), Some(1_000), "base alone");
+    assert_eq!(affine.upper_bound_bytes_on(5, 0), Some(1_050));
+    assert_eq!(affine.upper_bound_bytes_on(5, 3), Some(1_350));
+    // A worker term cannot be bounded without a worker count.
+    assert_eq!(affine.upper_bound_bytes(5), None);
+    let unthreaded = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 10,
+        bytes_per_worker: 0,
+    };
+    assert_eq!(unthreaded.upper_bound_bytes(5), Some(1_050));
+    assert_eq!(unthreaded.upper_bound_bytes_on(5, 64), Some(1_050));
+}
+
+#[test]
+fn affine_bounds_refuse_on_overflow_in_any_term() {
+    for (base_bytes, bytes_per_element, bytes_per_worker) in [
+        (usize::MAX, 0, 1),
+        (0, usize::MAX, 1),
+        (0, 1, usize::MAX),
+        (usize::MAX, 1, 0),
+    ] {
+        let affine = ScratchRequirement::Affine {
+            base_bytes,
+            bytes_per_element,
+            bytes_per_worker,
+        };
+        assert_eq!(affine.upper_bound_bytes_on(2, 2), None, "{affine:?}");
+        assert!(!affine.fits_budget_on(&options().with_memory_budget(usize::MAX), 2, 2));
+    }
+}
+
+/// The budget check charges the worker term for the requested parallelism,
+/// and `fits_budget_on` for the width the caller says the call runs on.
+#[test]
+fn affine_budgets_follow_the_worker_count() {
+    let affine = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 10,
+        bytes_per_worker: 100,
+    };
+    let budget = |parallelism| {
+        options()
+            .with_memory_budget(1_250)
+            .with_parallelism(parallelism)
+            .expect("valid parallelism")
+    };
+    // 1000 + 10*5 + 100*2 = 1250.
+    assert!(affine.fits_budget(&budget(Parallelism::Threads(2)), 5));
+    assert!(!affine.fits_budget(&budget(Parallelism::Threads(3)), 5));
+    assert!(affine.fits_budget(&budget(Parallelism::Serial), 5));
+    assert!(
+        !affine.fits_budget(&budget(Parallelism::Serial), 16),
+        "1000+160+100"
+    );
+    assert!(affine.fits_budget_on(&budget(Parallelism::Serial), 5, 2));
+    assert!(!affine.fits_budget_on(&budget(Parallelism::Serial), 5, 3));
+    let auto = budget(Parallelism::Auto);
+    let width = Parallelism::Auto.worker_bound();
+    assert_eq!(
+        affine.fits_budget(&auto, 5),
+        affine.fits_budget_on(&auto, 5, width)
+    );
+    // No budget admits anything, whatever the width.
+    assert!(affine.fits_budget_on(&options(), usize::MAX, usize::MAX));
+}
+
+#[test]
+fn worker_bounds_follow_the_parallelism_preference() {
+    assert_eq!(Parallelism::Serial.worker_bound(), 1);
+    assert_eq!(Parallelism::Threads(7).worker_bound(), 7);
+    assert!(Parallelism::Auto.worker_bound() >= 1);
 }
 
 #[test]

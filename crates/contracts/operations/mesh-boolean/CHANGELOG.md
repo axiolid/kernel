@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `MeshBoolean::scratch_requirement` says what it is charged for: the
+  input triangles of every operand together, and the worker threads the
+  call runs on (#226).
+
 ## [0.3.1] - 2026-09-28
 
 ### Changed

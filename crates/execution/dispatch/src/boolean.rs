@@ -118,11 +118,7 @@ impl MeshBooleanRegistry {
             // Budget is checked before dispatch, not after: a provider that
             // cannot fit the caller's memory bound must never get the chance to
             // allocate. Treated as retryable so a leaner provider can still run.
-            if !entry
-                .provider
-                .scratch_requirement()
-                .fits_budget(options, elements)
-            {
+            if !self.fits_budget(entry.provider.as_ref(), options, elements) {
                 over_budget = Some(GeomError::BudgetExceeded { resource: "memory" });
                 continue;
             }
@@ -140,6 +136,31 @@ impl MeshBooleanRegistry {
                 backend: BackendId::new("mesh-boolean-registry"),
                 operation: Operation::MeshBoolean,
             }))
+    }
+
+    /// Whether `provider`'s declared scratch fits `options`' memory budget.
+    ///
+    /// A per-worker scratch term is charged for the width the call will run
+    /// on: the configured pool's when there is one, since every provider call
+    /// runs inside it, and otherwise the width `options`' parallelism allows
+    /// (#226).
+    fn fits_budget(
+        &self,
+        provider: &dyn MeshBoolean,
+        options: &ExecutionOptions,
+        elements: usize,
+    ) -> bool {
+        let scratch = provider.scratch_requirement();
+        #[cfg(feature = "parallel")]
+        if let Some(execution) = &self.execution {
+            let workers = execution.thread_count().get();
+            // A one-thread context installs no pool (`CpuExecution::install`),
+            // so the call runs wherever the caller does: fall through.
+            if workers > 1 {
+                return scratch.fits_budget_on(options, elements, workers);
+            }
+        }
+        scratch.fits_budget(options, elements)
     }
 
     /// Run one provider call, inside the configured pool when there is one.
@@ -179,7 +200,11 @@ impl MeshBooleanRegistry {
         // Admissibility is contract-level and checked before any provider sees
         // the operands, so dispatch cannot change which inputs are legal.
         SolidRequirements::Oriented.validate_operands(subject, &[tool])?;
-        self.dispatch(options, subject.triangle_count(), |provider| {
+        // Both operands are input: a provider's scratch grows with the tool
+        // as much as with the subject, so budgeting the subject alone
+        // admitted work up to twice the declared bound (#226).
+        let elements = subject.triangle_count() + tool.triangle_count();
+        self.dispatch(options, elements, |provider| {
             provider.boolean(subject, tool, operation, options)
         })
     }

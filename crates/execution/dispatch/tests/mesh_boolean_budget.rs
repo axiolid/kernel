@@ -1,6 +1,6 @@
 #![cfg(feature = "mesh-boolean")]
 
-use axiolid_contracts::{ExecutionOptions, Precision};
+use axiolid_contracts::{ExecutionOptions, Parallelism, Precision};
 use axiolid_core::Tolerance;
 
 fn options() -> ExecutionOptions {
@@ -147,4 +147,110 @@ fn a_leaner_provider_still_runs_after_an_over_budget_one() {
 
     assert_eq!(greedy_calls.load(Ordering::SeqCst), 0);
     assert_eq!(lean_calls.load(Ordering::SeqCst), 1);
+}
+
+/// Registry with one budgeted provider, and the counter of its calls.
+fn single(scratch: ScratchRequirement) -> (MeshBooleanRegistry, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = MeshBooleanRegistry::new();
+    registry.register(
+        0,
+        Budgeted {
+            id: BackendId::new("budgeted"),
+            scratch,
+            calls: Arc::clone(&calls),
+        },
+    );
+    (registry, calls)
+}
+
+/// Both operands are input: budgeting the subject's 12 triangles alone
+/// admitted a 24-triangle boolean at half its declared scratch (#226).
+#[test]
+fn a_boolean_is_budgeted_for_both_operands() {
+    let scratch = ScratchRequirement::PerElement {
+        bytes_per_element: 100,
+    };
+    let (registry, calls) = single(scratch);
+    let cube = mesh();
+    let run = |budget| {
+        registry.boolean(
+            &cube,
+            &cube,
+            BooleanOperator::Union,
+            &options().with_memory_budget(budget),
+        )
+    };
+    assert!(matches!(
+        run(2_399),
+        Err(GeomError::BudgetExceeded { resource: "memory" })
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "12 + 12 triangles need 2400"
+    );
+    run(2_400).expect("fits exactly");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// A per-worker term is charged for the parallelism the options allow.
+#[test]
+fn a_per_worker_term_is_charged_for_the_requested_width() {
+    let scratch = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 0,
+        bytes_per_worker: 100,
+    };
+    let (registry, calls) = single(scratch);
+    let cube = mesh();
+    let run = |threads| {
+        registry.boolean(
+            &cube,
+            &cube,
+            BooleanOperator::Union,
+            &options()
+                .with_memory_budget(1_200)
+                .with_parallelism(Parallelism::Threads(threads))
+                .expect("nonzero"),
+        )
+    };
+    assert!(matches!(
+        run(3),
+        Err(GeomError::BudgetExceeded { resource: "memory" })
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    run(2).expect("1000 + 2 * 100 fits");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// With a configured pool every call runs inside it, so the per-worker term
+/// is charged for the pool's width whatever the options ask for (#226).
+#[cfg(feature = "parallel")]
+#[test]
+fn a_per_worker_term_is_charged_for_the_configured_pool() {
+    use axiolid_backend_cpu::CpuExecutionBuilder;
+    use std::num::NonZeroUsize;
+
+    let scratch = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 0,
+        bytes_per_worker: 100,
+    };
+    let serial_budget = options()
+        .with_memory_budget(1_200)
+        .with_parallelism(Parallelism::Serial)
+        .expect("serial");
+    let cube = mesh();
+    for (threads, fits) in [(2, true), (3, false)] {
+        let (registry, calls) = single(scratch);
+        let execution = CpuExecutionBuilder::new()
+            .threads(NonZeroUsize::new(threads).expect("nonzero"))
+            .build()
+            .expect("cpu execution");
+        let registry = registry.with_execution(execution);
+        let outcome = registry.boolean(&cube, &cube, BooleanOperator::Union, &serial_budget);
+        assert_eq!(outcome.is_ok(), fits, "{threads} workers");
+        assert_eq!(calls.load(Ordering::SeqCst), usize::from(fits));
+    }
 }
