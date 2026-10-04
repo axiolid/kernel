@@ -312,12 +312,11 @@ fn volume(mesh: &TriMesh, name: &str) -> Scalar {
 
 /// Sweep a disk of `radius` along `curve` over `range` at `budget`, and
 /// check it: closed, the contribution named `detail`, every dense sample
-/// of the exact tube within the reported bound, the bound not above 1.5
-/// times the budget (the sweep's stations are placed on a second-order
-/// estimate that may use the whole budget, and the certificate settles
-/// once within it, so a bound a little over is honest) nor more than 2.5
-/// times the measured maximum, and the volume `pi r^2 L3D` (Pappus) up to
-/// the inscribed rings.
+/// of the exact tube within the reported bound, the bound within the
+/// budget (the stations are placed on a second-order estimate, and a
+/// certificate over the budget makes the compiler rebuild finer) and not
+/// more than 2.5 times the measured maximum, and the volume `pi r^2 L3D`
+/// (Pappus) up to the inscribed rings.
 fn assert_tube(
     name: &str,
     curve: &Curve3,
@@ -359,7 +358,10 @@ fn assert_tube(
             .fold(0.0, Scalar::max);
         assert!(lean <= 1e-9, "{name}: end ring at {end} leans {lean:e}");
     }
-    assert!(bound <= 1.5 * budget, "{name}: {bound} over {budget}");
+    assert!(
+        report.meets_requested(),
+        "{name}: {bound:e} over {budget:e}"
+    );
     assert!(bound <= 2.5 * worst, "{name}: {bound} against {worst}");
     let exact = PI * radius * radius * length3(curve, range.0, range.1);
     let v = volume(&mesh, name);

@@ -39,6 +39,16 @@ caret rule for `0.x` versions.
   aspect ratio of 256), and the search settles once within the budget.
   A 60 m tube that exhausted the work cap at 4.5 times its measured
   deviation now certifies at 1.1-1.6 times it.
+- A disk swept along a smooth curve whose certified bound lands over the
+  chord budget is rebuilt finer and certified again (#252): the
+  construction's chord shrinks by the overshoot (with a 0.9 margin), at
+  most three times, keeping a rebuild only when it lowers the bound. The
+  stations are placed on a second-order estimate, so bounds landed 4-8%
+  over and `DeviationReport::meets_requested()` read false; every elevated,
+  banked and gradient-curve tube at 1 mm and 0.1 mm now meets it, at
+  6-54% more triangles where a rebuild was needed (none where the first
+  mesh was within). A bound the rebuilds cannot bring within the budget
+  is still reported as it is.
 
 ## [0.3.13] - 2026-10-03
 

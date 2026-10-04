@@ -5,7 +5,8 @@ derivative bound (the plan's `k^2`, the arc's factor 3, the polynomial's
 falling factorial, the pivot's length scaling), a part of the second
 derivative, a named break or a grade corner, misreads the plan's domain,
 or lets the compiler sweep an elevated curve as one segment, as smooth
-across a grade break, or without its end tangents, and must turn a test
+across a grade break, or without its end tangents, or skips the rebuild that brings a
+certified bound over the budget within it, and must turn a test
 red. `tests/elevated.rs` checks the bounds against dense sampling and
 finite differences; `tests/elevated_directrix.rs` samples the exact tubes
 against the compiled meshes.
@@ -25,6 +26,7 @@ AL = "crates/algorithms/parametric/evaluate/src/arc_length.rs"
 CH = "crates/algorithms/parametric/evaluate/src/chain.rs"
 BK = "crates/algorithms/parametric/evaluate/src/banked.rs"
 DX = "crates/execution/compile/src/directrix/elevated.rs"
+CO = "crates/execution/compile/src/compiler.rs"
 EVAL = ["-p", "axiolid-evaluate", "--test", "elevated"]
 SWEEP = ["-p", "axiolid-mesh-compile", "--test", "elevated_directrix"]
 
@@ -86,6 +88,12 @@ MUTANTS = [
     ('grade break taken as smooth', DX,
      '        .map_or(true, |corners| corners.iter().any(|&c| c > lo && c < hi))',
      '        .map_or(true, |_| false)', [SWEEP]),
+    ('refinement loop skipped', CO,
+     '        for _ in 0..REFINE_ROUNDS {',
+     '        for _ in 0..0 {', [SWEEP]),
+    ('refinement keeps the coarse mesh', CO,
+     '                _ => (mesh, deviation) = (refined, certified),',
+     '                _ => {}', [SWEEP]),
     ('elevated end tangents not reported', DX,
      '    Some([unit(start)?, unit(end)?])',
      '    Some([unit(start)?, unit(end)?]).filter(|_| false)', [SWEEP]),

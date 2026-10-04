@@ -522,8 +522,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 })
             }
             GeometryNode::SolidOperation(operation) => {
-                let mesh = self.build_solid(graph, operation, options)?;
-                let deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
+                let (mesh, deviation) = self.build_solid_within(graph, operation, options)?;
                 Ok(Built::leaf(mesh).with_deviation(deviation))
             }
             GeometryNode::BRep(brep) => {
@@ -661,6 +660,45 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             tool_fates,
             outcome.evidence.attribute_fates,
         ))
+    }
+
+    /// A non-boolean solid and its deviation. A swept disk along a smooth
+    /// directrix places its stations by a second-order estimate, so its
+    /// certified bound can land a little over the budget: it is rebuilt
+    /// with the construction's chord shrunk by the overshoot, and
+    /// certified again against the requested budget, at most
+    /// [`REFINE_ROUNDS`] times. A bound still over it is reported as it
+    /// is, never trimmed (#252).
+    fn build_solid_within(
+        &self,
+        graph: &GeometryGraph,
+        operation: &SolidOperation,
+        options: &ExecutionOptions,
+    ) -> GeomResult<(TriMesh, crate::deviation::Deviation)> {
+        let mut mesh = self.build_solid(graph, operation, options)?;
+        let mut deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
+        if !matches!(operation, SolidOperation::SweptDisk { .. }) {
+            return Ok((mesh, deviation));
+        }
+        let budget = chord_error(options);
+        let mut chord = budget;
+        for _ in 0..REFINE_ROUNDS {
+            let Some(over) = deviation.certified_over(budget) else {
+                break;
+            };
+            chord *= REFINE_MARGIN * budget / over;
+            let Some(finer) = options.clone().with_chord_error(chord) else {
+                break;
+            };
+            let refined = self.build_solid(graph, operation, &finer)?;
+            let certified = crate::deviation::of_solid(graph, operation, options, &refined)?;
+            match certified.certified_over(budget) {
+                // No better: the overshoot is not the stations' to remove.
+                Some(next) if next >= over => break,
+                _ => (mesh, deviation) = (refined, certified),
+            }
+        }
+        Ok((mesh, deviation))
     }
 
     /// Every non-boolean solid family; unsupported ones are explicitly
@@ -994,6 +1032,13 @@ fn instance_local_tolerance(
 /// tolerance. Kept separate from the tolerance because the tolerance is a
 /// coincidence test: at `Tolerance::MILLIMETRE` it leaves a 5 mm arc four
 /// chords per half turn, percent-level area error on a slot or a gutter.
+/// Rebuilds a certified sweep may take to bring its bound within budget.
+const REFINE_ROUNDS: usize = 3;
+
+/// Each rebuild's chord is the last one shrunk by the overshoot and this
+/// margin, so one round usually settles it.
+const REFINE_MARGIN: Scalar = 0.9;
+
 pub(crate) fn chord_error(options: &ExecutionOptions) -> Scalar {
     options
         .chord_error()

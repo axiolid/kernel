@@ -315,6 +315,19 @@ impl Deviation {
         )
     }
 
+    /// The worst certified bound above `budget`, if any: what a mesh
+    /// rebuilt finer could still bring within it. A proven bound is the
+    /// construction's own and does not move with a finer mesh.
+    pub(crate) fn certified_over(&self, budget: Scalar) -> Option<Scalar> {
+        self.0
+            .iter()
+            .filter_map(|c| match c.bound {
+                DeviationBound::Certified(value) if value > budget => Some(value),
+                _ => None,
+            })
+            .reduce(Scalar::max)
+    }
+
     pub(crate) fn report(&self, requested: Scalar) -> DeviationReport {
         let bound = if self.0.is_empty() {
             None
