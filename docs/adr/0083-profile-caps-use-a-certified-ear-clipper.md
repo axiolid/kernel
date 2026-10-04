@@ -79,8 +79,8 @@ edge lines coincide constantly.
 
 **Follow-ups / risks to watch**
 
-- `axiolid-mesh-compile` still uses earcut for planar faces; ADR 0015 stands
-  there.
+- `axiolid-mesh-compile` still used earcut for planar faces; it moved to
+  this clipper in #260 (amendment below), and ADR 0015 is superseded.
 
 ## Relation to existing code
 
@@ -143,3 +143,33 @@ triangulation is a valid surface patch whose edges are the ring edges.
 | Accept pinches everywhere | Extrusions of pinched caps are not two-manifolds; the solid path must keep refusing by name. |
 | Split the pinch into separate ring pieces only | Covers two lobes of one ring, not a hole touching the outer ring, which has to merge with it rather than split. |
 | Emit two solids touching at an edge for a pinched cap | No caller asked for it; a solid caller that wants it can split its profile and extrude the parts. |
+
+## Amendment 2026-10-04: mesh-compile's planar faces (#260)
+
+`axiolid-mesh-compile` triangulated authored polygon faces, curve-bounded
+planes, planar B-rep faces and curved faces' parameter domains with
+earcut, so the T-junction above could open those meshes too, and the
+planar B-rep path checked nothing at all. They now go through this clipper
+(`planar::clip_projected`), over the dependency `axiolid-mesh-compile`
+already had on `axiolid-construct`; no crate edge changes and the clipper
+does not move.
+
+- **Policy: `PinchPolicy::Accept` on every face.** A face is a surface
+  patch. A pinch inside one face of a closed solid leaves every edge of
+  the shell shared by two faces: the face's ring edges are exactly the
+  edges its neighbours share, whatever its rings touch. At worst the shell
+  is pinched at that vertex, which the face did not create; the mesh's
+  own closure audit still reports it. Only extrusion and loft caps, which
+  build the walls themselves, refuse pinches.
+- **Corners.** A corner repeating its predecessor exactly (an exporter's
+  closing point) is dropped first, as earcut dropped it; every other
+  corner is a triangle corner, so curved faces no longer need their
+  skipped trim samples put back.
+- **The certificate replaces the area cross-check** the authored path ran
+  on earcut's output, and closes the gap on planar B-rep faces, whose
+  `Proven(0)` and slab bounds assume a cover. Rings that bound no region
+  are refused by name where earcut returned a partial cover.
+- **The noise-band split stays.** Export noise puts corners nanometres
+  off the straight run they lie on; the clipper may cut a sliver across
+  them whose diagonal a neighbouring face cuts too, using that edge four
+  times. `split_invented_edges` still removes such slivers on planar faces.

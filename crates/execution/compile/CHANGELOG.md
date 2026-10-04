@@ -78,6 +78,45 @@ caret rule for `0.x` versions.
   and the exact compiler refuses B-rep nodes altogether. Faces within the
   tolerance, and faces with a declared plane (bounded against that plane
   as before), are unchanged.
+- **Planar faces are triangulated by the certified ear clipper (#260).**
+  Authored polygon faces, curve-bounded planes, planar B-rep faces and
+  curved faces' parameter domains used earcut, the triangulator that left
+  #253's T-junction in profile caps (a triangle edge along a band of holes
+  past their inner corners), and the planar B-rep path checked its output
+  not at all. All of them now go through `axiolid-construct`'s clipper
+  (`profile::triangulate_with`, ADR 0083 amendment), whose certificate
+  proves the triangles tile the projected face exactly once with every
+  ring edge a triangle edge; it replaces the authored path's area
+  cross-check and backs the `Proven(0)` and slab bounds of planar B-rep
+  faces, which assume that cover. Faces are surface patches, so rings
+  touching at a single point (#262: a hole touching the outer ring or
+  another hole, an outer ring pinched at a vertex) triangulate under
+  `PinchPolicy::Accept`; a pinch inside one face of a closed solid leaves
+  every shell edge shared by two faces. A corner repeating its predecessor
+  exactly is still dropped; every other corner is a triangle corner, so
+  curved faces no longer put skipped trim samples back. Rings that bound no
+  region are refused by name where earcut returned a partial cover:
+  `PolygonRefusal::AreaMismatch` is now `PolygonRefusal::Rings`, carrying
+  the clipper's reason (crossing, overlapping, a hole outside). The
+  noise-band split of planar faces stays, for slivers across corners a
+  few nanometres off a straight run. Triangle sets differ from earcut's
+  (a different ear order); areas, closure, authored corners and every
+  deviation report are unchanged. A test fixture whose four cylinder
+  edges each carried the whole closed trim as its pcurve traced its
+  rectangle four times over, an overlapping ring earcut triangulated
+  silently; it now gives each edge its own side. `earcut` is no longer a
+  dependency of this crate or the workspace. Tests
+  (`tests/planar_certified.rs`): #253's side-by-side and three-on-a-ray
+  holes and 60 seeded random layouts become the top and bottom faces of
+  prisms, authored and as faceted B-reps, which compile closed with
+  volume area x depth and planar faces reported `Proven(0)`; footprints
+  touching at a corner and holes touching the outer ring or each other
+  triangulate as single faces, authored and as surface models, with
+  their exact area, facing up; a doubled corner inside a ring is dropped;
+  the extrusion of a profile with a hole touching the outer ring is
+  refused by name. Mutation probes: `scripts/probe_polygon_faces_mutants.py` (26/26
+  killed) and `scripts/probe_closed_mesh_mutants.py` (11/11, the split on
+  the clipper's output).
 
 ## [0.3.13] - 2026-10-03
 

@@ -12,6 +12,10 @@ ring not all on one line, and a Python model of that loop over every mix of
 0..4 corners per side (125 cases) gave identical triangles with and without
 the per-ear collinearity test, never a degenerate ear and never the
 fallback. The test was removed; the mutant with it.
+
+#260: the split now runs on the certified clipper's triangles instead of
+earcut's. 11 / 11 still killed: noisy stair and census-slab corners still
+need it, so it stays.
 """
 import pathlib, subprocess, sys
 

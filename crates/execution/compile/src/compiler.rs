@@ -438,8 +438,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 continue;
             }
             // A repeated corner (an exporter's closing point, a doubled
-            // corner) needs no handling here: earcut drops coincident
-            // consecutive points itself (`a_repeated_closing_corner_is_not_a_triangle`).
+            // corner) needs no handling here: `planar::clip_projected` drops
+            // coincident consecutive points itself
+            // (`a_repeated_closing_corner_is_not_a_triangle`).
             let rings: Vec<&Vec<u32>> = face_rings(face).collect();
             let points: Vec<Vec<axiolid_core::Point3>> = rings
                 .iter()

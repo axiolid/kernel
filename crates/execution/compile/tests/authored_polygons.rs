@@ -863,7 +863,9 @@ fn a_warped_self_crossing_ring_is_refused_by_face_index() {
     )
     .expect_err("crossing rings have no triangulation");
     assert!(
-        is_invalid_naming(&error, "face 1") && is_invalid_naming(&error, "cross"),
+        is_invalid_naming(&error, "face 1")
+            && (is_invalid_naming(&error, "cross")
+                || is_invalid_naming(&error, "intersects itself")),
         "{error:?}"
     );
 }

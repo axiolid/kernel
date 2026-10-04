@@ -2,9 +2,20 @@
 //!
 //! A brep face is a planar polygon in an arbitrary plane, possibly
 //! concave or holed. A triangle fan is wrong for both, so each face is
-//! projected to its own plane, triangulated with the same earcut path
-//! profiles use, and lifted back. Shared vertices stay shared: the loop
-//! indices already reference interned topology vertices.
+//! projected to its own plane, triangulated with the certified ear clipper
+//! profiles use (`crate::planar`, ADR 0083, #260), and lifted back. Shared
+//! vertices stay shared: the loop indices already reference interned
+//! topology vertices.
+//!
+//! The clipper's certificate proves that the triangles tile the projected
+//! face exactly once, every ring edge a triangle edge. Before #260 this
+//! path triangulated with earcut and checked nothing, so a T-junction or a
+//! partial cover went through silently; the `Proven(0)` bound of a planar
+//! face and the slab bound of a warped one both assume that cover, which
+//! is now certified rather than assumed. Rings touching at a single point
+//! are accepted (a face is a surface patch); rings that do not bound a
+//! region are refused by name. Curved faces triangulate their parameter
+//! domain with the same clipper.
 //!
 //! # Deviation (#232)
 //!
@@ -76,7 +87,7 @@ use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
 use std::collections::{HashMap, HashSet};
 
-use crate::planar::{earcut_planar_face, earcut_projected, newell_normal, plane_axes};
+use crate::planar::{clip_planar_face, clip_projected, newell_normal, plane_axes};
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -150,6 +161,21 @@ fn consume_tessellation_work(total: &mut usize, count: usize) -> GeomResult<()> 
     }
     *total = next;
     Ok(())
+}
+
+/// A face the certified clipper refused (#260), named, the error's kind
+/// kept: `InvalidInput` for rings that bound no region, `Degenerate` for a
+/// failed certificate.
+fn face_triangulation_error(what: &str, error: GeomError) -> GeomError {
+    match error {
+        GeomError::InvalidInput(reason) => {
+            GeomError::InvalidInput(format!("{what} cannot be triangulated: {reason}"))
+        }
+        GeomError::Degenerate(reason) => {
+            GeomError::Degenerate(format!("{what} cannot be triangulated: {reason}"))
+        }
+        other => other,
+    }
 }
 
 fn checked_output_len(
@@ -501,14 +527,8 @@ fn append_face(
         }
     }
 
-    let indices = earcut_planar_face(&flat, &hole_starts, ctx.tolerance.linear());
-    if indices.is_empty() || indices.len() % 3 != 0 {
-        return Err(GeomError::Degenerate(format!(
-            "face triangulation produced {} indices for {} vertices",
-            indices.len(),
-            flat.len()
-        )));
-    }
+    let indices = clip_planar_face(&flat, &hole_starts, ctx.tolerance.linear())
+        .map_err(|error| face_triangulation_error("planar face", error))?;
     checked_output_len(
         mesh.indices.len(),
         indices.len(),
@@ -836,7 +856,7 @@ struct SurfaceVertex {
     uv: Point2,
     mesh: u32,
     /// Face-local identity. Unlike `mesh`, periodic seam occurrences remain
-    /// distinct while adjacent Earcut triangles share the same occurrence.
+    /// distinct while adjacent trim triangles share the same occurrence.
     local: u32,
 }
 
@@ -1016,7 +1036,7 @@ fn validate_curved_rings(rings: &[CurvedRing]) -> GeomResult<usize> {
 ///
 /// Cylinders, cones, spheres and tori are trimmed by constant-u and
 /// constant-v curves in the overwhelmingly common case, and such a patch
-/// has a structure a polygon triangulator cannot see. Earcut works in UV,
+/// has a structure a polygon triangulator cannot see. The clipper works in UV,
 /// where one unit of u and one unit of v are interchangeable; in 3D they
 /// are not. On a cylinder of radius r, a step in u is r times longer than
 /// the same step in v, so a triangulation that is perfectly reasonable in
@@ -1039,8 +1059,8 @@ struct GridPatch {
 /// Recognise a boundary as a rectangular patch, or decline.
 ///
 /// Declining is not a failure: a trimmed face with a hole, a slanted trim
-/// or an irregular sample layout is genuinely not a grid, and earcut
-/// remains the right tool for it. This only claims the cases it can prove.
+/// or an irregular sample layout is genuinely not a grid, and the polygon
+/// triangulator remains the right tool for it. This only claims the cases it can prove.
 fn recognise_grid(boundary: &CurvedBoundary) -> Option<GridPatch> {
     // A hole means the patch is not simply a rectangle.
     if !boundary.hole_starts.is_empty() || boundary.uv.len() < 4 {
@@ -1410,16 +1430,13 @@ fn append_curved_face(
         }
     }
     let flat: Vec<[Scalar; 2]> = boundary.uv.iter().map(|p| [p.x, p.y]).collect();
-    let indices = earcut_projected(&flat, &boundary.hole_starts);
-    if indices.is_empty() || indices.len() % 3 != 0 {
-        return Err(GeomError::Degenerate(format!(
-            "curved face trim triangulation produced {} indices for {} points",
-            indices.len(),
-            flat.len()
-        )));
-    }
+    // Every trim sample is a corner of the clipper's triangles, so a
+    // straight trim sampled into many points (a shared edge, for the curved
+    // face across it) keeps every sample its neighbour uses; earcut dropped
+    // them and they had to be put back (#232).
+    let indices = clip_projected(&flat, &boundary.hole_starts)
+        .map_err(|error| face_triangulation_error("curved face trim", error))?;
     let ring_edges = local_boundary_edges(boundary.uv.len(), &boundary.hole_starts)?;
-    let indices = restore_collinear_samples(&flat, indices);
     // Flipped in a metric where a unit of u and of v are about as long on
     // the surface: a cylinder's u is its radius times longer than its v.
     let metric = parameter_metric(surface, &boundary.uv);
@@ -1456,9 +1473,10 @@ fn append_curved_face(
     let next_local = u32::try_from(boundary.uv.len()).map_err(|_| GeomError::BudgetExceeded {
         resource: "curved-face local vertices",
     })?;
-    // Earcut is trusted to cover the trim polygon; a triangulation whose
-    // parameter area misses the polygon's would leave part of the face
-    // unmeshed, so the bound is withdrawn rather than claimed.
+    // The clipper certifies its cover of the trim polygon; the parameter
+    // area is still compared after the flips, and a triangulation whose
+    // area misses the polygon's would leave part of the face unmeshed, so
+    // the bound is withdrawn rather than claimed.
     if !covers_polygon(&boundary, &triangles) {
         bound.unbounded("curved face triangulation does not cover its trim");
     }
@@ -2323,8 +2341,8 @@ impl<'s> FaceBound<'s> {
 /// the budget has its widest free edge split (#232); deeper ones are
 /// accepted and their bound reported as it is.
 const CERTIFIED_DEPTH: u8 = 24;
-/// The depth guard of the pass that makes certified splits. Earcut fans
-/// thin triangles out of a trim corner, and narrowing them by halving takes
+/// The depth guard of the pass that makes certified splits. Ear clipping
+/// fans thin triangles out of a trim corner, and narrowing them by halving takes
 /// more generations than the measurement checks ever asked for; the face's
 /// vertex budget still bounds the work, and a pass that exhausts either is
 /// discarded (see [`refine_curved_face`]).
@@ -2334,47 +2352,6 @@ const MAX_CERTIFIED_REFINEMENT_DEPTH: u8 = 40;
 /// derivative-net bounds can ask for many times the triangles the
 /// measurement checks need.
 const CERTIFIED_FACE_VERTICES: usize = 1 << 15;
-
-/// Put back the trim samples earcut skipped as collinear.
-///
-/// Earcut drops a ring point that lies on the line through its neighbours,
-/// so a straight trim sampled into many points (as a shared edge is, for
-/// the curved face across it) comes back as one long triangle edge. The
-/// neighbouring face still uses every sample, which leaves T-junctions in
-/// the shell, and the long edge is not a trim edge any more, so refinement
-/// splits it at points the neighbour does not have (#232). Each skipped
-/// sample lying strictly inside a triangle edge splits that triangle in
-/// two, which keeps the triangles' parameter area.
-fn restore_collinear_samples(flat: &[[Scalar; 2]], mut indices: Vec<usize>) -> Vec<usize> {
-    let mut used = vec![false; flat.len()];
-    for &i in &indices {
-        used[i] = true;
-    }
-    for (point, _) in used.iter().enumerate().filter(|(_, &u)| !u) {
-        let p = flat[point];
-        'triangles: for t in 0..indices.len() / 3 {
-            for edge in 0..3 {
-                let (a, b) = (indices[3 * t + edge], indices[3 * t + (edge + 1) % 3]);
-                let (pa, pb) = (flat[a], flat[b]);
-                let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
-                let (ex, ey) = (p[0] - pa[0], p[1] - pa[1]);
-                let length2 = dx * dx + dy * dy;
-                let along = ex * dx + ey * dy;
-                let cross = dx * ey - dy * ex;
-                if !(along > 0.0 && along < length2) || cross.abs() > 1e-12 * length2 {
-                    continue;
-                }
-                let c = indices[3 * t + (edge + 2) % 3];
-                indices[3 * t] = a;
-                indices[3 * t + 1] = point;
-                indices[3 * t + 2] = c;
-                indices.extend([point, b, c]);
-                break 'triangles;
-            }
-        }
-    }
-    indices
-}
 
 /// Scales for u and v that make them about equally long on the surface:
 /// the bounds of `|S_u|` and `|S_v|` over the trim's box, or unit scales

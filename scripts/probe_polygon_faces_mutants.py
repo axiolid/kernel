@@ -31,6 +31,15 @@ corner distance (the #254 bound)" and "lowest corner not tracked".
 `brep_warped_faces` target and four B-rep mutants added (unmeasured,
 reported proven, folded into the exact "plane" contribution, hole
 corners dropped). 25 / 25 killed on the first run.
+
+#260 (planar faces through the certified ear clipper of axiolid-construct,
+rings touching at a point accepted): the area cross-check and the winding
+swap went with earcut -- the clipper's certificate proves the cover and
+its triangles are counter-clockwise -- and their three mutants with them.
+"holes not passed to earcut" now drops the holes before the clipper, and
+the `planar_certified` target and five mutants of `clip_projected` were
+added (repeated and closing corners kept, triangles not mapped back past
+a dropped corner, pinches refused). 26 / 26 killed on the first run.
 """
 import pathlib, subprocess, sys
 
@@ -42,6 +51,7 @@ TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "authored_polygons"],
     ["-p", "axiolid-mesh-compile", "--lib", "planar"],
     ["-p", "axiolid-mesh-compile", "--test", "brep_warped_faces"],
+    ["-p", "axiolid-mesh-compile", "--test", "planar_certified"],
 ]
 
 MUTANTS = [
@@ -99,18 +109,21 @@ MUTANTS = [
     ("worst warp across faces dropped", C,
      "                warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));",
      "                warp = Some(face_warp);"),
-    ("triangle winding always flipped", P,
-     "        if area < 0.0 {\n            triangle.swap(1, 2);",
-     "        if area >= 0.0 {\n            triangle.swap(1, 2);"),
-    ("area cross-check skipped", P,
-     "    if expected <= slack || (covered - expected).abs() > slack {",
-     "    if expected <= slack {"),
-    ("holes added instead of subtracted", P,
-     "        expected += if index == 0 { area } else { -area };",
-     "        expected += area;"),
-    ("holes not passed to earcut", P,
-     "    let mut indices = earcut_projected(&flat, &hole_starts);\n    if indices.len() % 3 != 0 {",
-     "    let mut indices = earcut_projected(&flat[..hole_starts.first().copied().unwrap_or(flat.len())], &[]);\n    if indices.len() % 3 != 0 {"),
+    ("holes not passed to the clipper", P,
+     "    let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(|error| {",
+     "    let indices = clip_planar_face(&flat[..hole_starts.first().copied().unwrap_or(flat.len())], &[], linear).map_err(|error| {"),
+    ("repeated corner kept (#260)", P,
+     "            if ring.last() != Some(&point) {",
+     "            if true {"),
+    ("closing corner kept (#260)", P,
+     "        while ring.len() > 1 && ring.first() == ring.last() {",
+     "        while false && ring.len() > 1 && ring.first() == ring.last() {"),
+    ("triangles not mapped back past a dropped corner (#260)", P,
+     "        .map(|corner| kept[corner as usize])",
+     "        .map(|corner| corner as usize)"),
+    ("faces refuse rings touching at a point (#260)", P,
+     "        PinchPolicy::Accept,\n    )?;",
+     "        PinchPolicy::Refuse,\n    )?;"),
     ("triangles pass through untriangulated", C,
      "            if face.outer.len() == 3 && face.holes.is_empty() {",
      "            if face.holes.is_empty() {"),

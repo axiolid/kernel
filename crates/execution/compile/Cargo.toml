@@ -29,7 +29,6 @@ axiolid-brep.workspace = true
 axiolid-brep-boolean.workspace = true
 axiolid-reference.workspace = true
 axiolid-surface.workspace = true
-earcut = "0.4"
 
 [dev-dependencies]
 # The measurement oracle. `volume_properties` audits closed-two-manifoldness

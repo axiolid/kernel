@@ -870,27 +870,36 @@ fn a_curved_face_with_a_pcurve_is_sampled_on_its_surface() {
         )))
         .expect("surface");
     // A rectangle in parameter space: a quarter turn, two metres tall.
+    // Each edge carries its own side of it as its pcurve (#260: one closed
+    // trim shared by all four edges traced the rectangle four times over,
+    // a ring overlapping itself, which earcut triangulated silently and
+    // the certified clipper refuses by name).
     let quarter = std::f64::consts::FRAC_PI_2;
-    let trim = builder
-        .push(GeometryNode::Curve2(axiolid_curve::Curve2::Polyline(
-            axiolid_curve::Polyline2 {
-                points: vec![
-                    axiolid_core::Point2::new(0.0, 0.0),
-                    axiolid_core::Point2::new(quarter, 0.0),
-                    axiolid_core::Point2::new(quarter, 2.0),
-                    axiolid_core::Point2::new(0.0, 2.0),
-                ],
-                closed: true,
-            },
-        )))
-        .expect("trim");
+    let corners = [
+        axiolid_core::Point2::new(0.0, 0.0),
+        axiolid_core::Point2::new(quarter, 0.0),
+        axiolid_core::Point2::new(quarter, 2.0),
+        axiolid_core::Point2::new(0.0, 2.0),
+    ];
+    let trims: Vec<_> = (0..4)
+        .map(|i| {
+            builder
+                .push(GeometryNode::Curve2(axiolid_curve::Curve2::Polyline(
+                    axiolid_curve::Polyline2 {
+                        points: vec![corners[i], corners[(i + 1) % 4]],
+                        closed: false,
+                    },
+                )))
+                .expect("trim")
+        })
+        .collect();
 
     let mut brep: BRep<axiolid_model::NodeId> = BRep::default();
-    let v: Vec<_> = (0..4)
-        .map(|i| {
-            let a = quarter * f64::from(i % 2);
+    let v: Vec<_> = corners
+        .iter()
+        .map(|c| {
             brep.add_vertex(Vertex {
-                position: axiolid_core::Point3::new(radius * a.cos(), radius * a.sin(), 0.0),
+                position: axiolid_core::Point3::new(radius * c.x.cos(), radius * c.x.sin(), c.y),
             })
         })
         .collect();
@@ -906,7 +915,8 @@ fn a_curved_face_with_a_pcurve_is_sampled_on_its_surface() {
     let wire = brep.add_loop(Loop {
         edges: e
             .iter()
-            .map(|&edge| EdgeUse {
+            .zip(&trims)
+            .map(|(&edge, &trim)| EdgeUse {
                 edge,
                 orientation: Orientation::Forward,
                 pcurve: Some(trim),

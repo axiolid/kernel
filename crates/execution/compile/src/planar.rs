@@ -10,7 +10,17 @@
 //! 2. projection onto orthonormal in-plane axes `(u, v)` with `u x v = n`,
 //!    so a ring that winds counter-clockwise about `n` stays
 //!    counter-clockwise in 2D;
-//! 3. ear clipping (`earcut`) of the projected outer ring with its holes.
+//! 3. the certified ear clipper of `axiolid-construct` (ADR 0083, #260)
+//!    on the projected outer ring with its holes, under
+//!    [`PinchPolicy::Accept`]: a face is a surface patch, so rings touching
+//!    at a single point (a hole whose corner sits on the outer ring or on
+//!    another hole, an outer ring pinched at a vertex) bound a valid face,
+//!    and every edge of the shell is still shared by two faces. Its
+//!    certificate proves the triangles tile the projected face exactly
+//!    once, every ring edge a triangle edge, so no triangle edge runs past
+//!    a corner and the face's own edges are the edges its neighbours
+//!    share; rings that do not bound a region (crossing, overlapping) are
+//!    refused by name.
 //!
 //! # Warped authored faces (#254)
 //!
@@ -51,7 +61,7 @@
 //!   outer corners' `d_i` sum to zero and `min d_i <= 0 <= max d_i`.
 //! - The mesh lies in `S` too, and it is a graph over the projected face:
 //!   its triangles are those of a triangulation of the face's projection
-//!   `R` onto `P` (outer ring minus holes, checked by area), each lifted to
+//!   `R` onto `P` (outer ring minus holes, certified by the clipper), each lifted to
 //!   the authored corners. Over every point `x'` of `R` there is exactly
 //!   one mesh point `x = x' + h(x') n`, with `h(x')` in `[min d_i, max d_i]`.
 //! - So for every point `y` of any reading in `S` whose projection `y'`
@@ -83,8 +93,9 @@
 //! as before, when a corner lies further than the linear tolerance from
 //! `P`.
 
-use axiolid_contracts::GeomError;
-use axiolid_core::{Scalar, Vec3};
+use axiolid_construct::profile::{triangulate_with, PinchPolicy, Rings};
+use axiolid_contracts::{GeomError, GeomResult};
+use axiolid_core::{Point2, Scalar, Vec3};
 
 /// Newell normal of a closed ring: correct for concave rings and rings that
 /// start with collinear corners. Its length is twice the ring's area.
@@ -128,52 +139,81 @@ pub(crate) fn plane_axes(normal: Vec3) -> Option<(Vec3, Vec3)> {
     Some((u, v))
 }
 
-/// Ear-clip a projected polygon: the outer ring first, each hole starting at
-/// the matching entry of `hole_starts`. Returns three indices per triangle
-/// into `flat`, or an empty list when earcut found no triangle.
+/// Triangulate a projected polygon with the certified ear clipper (#260):
+/// the outer ring first, each hole starting at the matching entry of
+/// `hole_starts`. Returns three indices per triangle into `flat`, every
+/// triangle counter-clockwise, every corner used.
 ///
-/// earcut may leave out a corner that lies on a straight run of its ring.
-/// Planar faces that share such a corner with a neighbour must use
-/// [`earcut_planar_face`] instead, which puts those corners back.
-pub(crate) fn earcut_projected(flat: &[[Scalar; 2]], hole_starts: &[usize]) -> Vec<usize> {
-    let mut earcutter = earcut::Earcut::new();
-    let mut indices: Vec<usize> = Vec::new();
-    earcutter.earcut(flat.iter().copied(), hole_starts, &mut indices);
-    indices
+/// A corner repeating the one before it exactly (an exporter's closing
+/// point, a doubled corner) is dropped first and appears in no triangle;
+/// earcut dropped it too. Rings that touch at single points are accepted
+/// ([`PinchPolicy::Accept`], see the module notes).
+///
+/// # Errors
+///
+/// The clipper's refusal, by name: rings with fewer than three distinct
+/// corners, non-finite, crossing, overlapping or folding back, a hole
+/// outside the outer ring or inside another, or a triangulation that fails
+/// its certificate.
+pub(crate) fn clip_projected(
+    flat: &[[Scalar; 2]],
+    hole_starts: &[usize],
+) -> GeomResult<Vec<usize>> {
+    let mut bounds = Vec::with_capacity(hole_starts.len() + 2);
+    bounds.push(0);
+    bounds.extend(hole_starts.iter().map(|&start| start.min(flat.len())));
+    bounds.push(flat.len());
+    let mut kept: Vec<usize> = Vec::with_capacity(flat.len());
+    let mut rings: Vec<Vec<Point2>> = Vec::with_capacity(bounds.len() - 1);
+    for span in bounds.windows(2) {
+        let mut ring: Vec<Point2> = Vec::with_capacity(span[1].saturating_sub(span[0]));
+        for (index, corner) in flat.iter().enumerate().take(span[1]).skip(span[0]) {
+            let point = Point2::new(corner[0], corner[1]);
+            if ring.last() != Some(&point) {
+                ring.push(point);
+                kept.push(index);
+            }
+        }
+        while ring.len() > 1 && ring.first() == ring.last() {
+            ring.pop();
+            kept.pop();
+        }
+        rings.push(ring);
+    }
+    let outer = rings.remove(0);
+    let (_, triangles) = triangulate_with(
+        &Rings {
+            outer,
+            holes: rings,
+        },
+        PinchPolicy::Accept,
+    )?;
+    Ok(triangles
+        .into_iter()
+        .flatten()
+        .map(|corner| kept[corner as usize])
+        .collect())
 }
 
-/// [`earcut_projected`] for a planar face whose corners are shared with
-/// neighbouring faces: no triangle edge passes over a corner of the face.
+/// [`clip_projected`] for a planar face whose corners are shared with
+/// neighbouring faces, then the noise-band split of
+/// [`split_invented_edges`].
 ///
-/// earcut returns a correct triangulation of ONE polygon, but two of its
-/// habits break a mesh built from several faces:
-///
-/// - it drops a corner that lies on a straight run of its ring (its
-///   `filter_points` removes any corner with zero turn), and
-/// - it may bridge collinear corners of different rings with one long
-///   edge, e.g. a window head flush with a door head in the same wall face.
-///
-/// Either way a triangle edge of this face passes over a corner that the
-/// neighbouring face still splits its edge at, so the two faces stop
-/// sharing an edge and the mesh gets a T-junction crack. A closed authored
-/// shell then fails its closure check and a boolean sees a non-manifold
-/// operand. Real exports carry these corners wherever a face meets a finer
-/// neighbour (a wall face against a split floor slab, a reveal against a
-/// window lining, openings whose heads line up).
-///
-/// Curved faces keep [`earcut_projected`]: their parameter-space boundary
-/// is refined afterwards against the surface, which this split would
-/// disturb.
-pub(crate) fn earcut_planar_face(
+/// The clipper never runs a triangle edge exactly past a corner, and every
+/// ring edge is a triangle edge, so the face meets its neighbours along its
+/// own edges. Export noise still puts corners a few nanometres off the
+/// straight run they lie on, and the clipper may then cut a sliver across
+/// them whose long diagonal another face, sharing those corners, cuts too:
+/// that edge is used four times and the closed shell reads as
+/// non-manifold. The split removes such slivers as it did for earcut.
+pub(crate) fn clip_planar_face(
     flat: &[[Scalar; 2]],
     hole_starts: &[usize],
     linear: Scalar,
-) -> Vec<usize> {
-    let mut indices = earcut_projected(flat, hole_starts);
-    if indices.len() % 3 == 0 && !indices.is_empty() {
-        split_invented_edges(flat, hole_starts, collinear_band(linear), &mut indices);
-    }
-    indices
+) -> GeomResult<Vec<usize>> {
+    let mut indices = clip_projected(flat, hole_starts)?;
+    split_invented_edges(flat, hole_starts, collinear_band(linear), &mut indices);
+    Ok(indices)
 }
 
 /// How far off a segment a corner may lie and still count as on it.
@@ -191,20 +231,22 @@ pub(crate) fn collinear_band(linear: Scalar) -> Scalar {
     1.0e-3 * linear
 }
 
-/// Split every edge earcut invented where it passes over a corner of the
-/// face.
+/// Split every edge the triangulation invented where it passes over a
+/// corner of the face, within the collinearity band.
 ///
 /// An authored ring edge is shared with the neighbouring face exactly as
-/// written, so it is never split. Every other triangle edge is earcut's:
-/// a diagonal, a hole bridge, or a shortcut over a corner it dropped from
-/// a straight run. When such an edge passes over a corner `c` of the face,
+/// written, so it is never split. Every other triangle edge is invented:
+/// a diagonal or a hole bridge (and, under earcut before #260, a shortcut
+/// over a corner it dropped from a straight run; the certified clipper
+/// passes exactly over no corner, so only corners within the band but off
+/// the edge remain). When such an edge passes over a corner `c` of the face,
 /// the neighbour that meets the face at `c` has an edge ending there, so
 /// the mesh cracks unless the edge is split at `c`.
 ///
 /// Two steps:
 ///
-/// 1. Slivers go. Along a straight run earcut can emit a zero-area
-///    triangle `(a, m, b)` with `m` on segment `a-b`. Its three edges cancel
+/// 1. Slivers go. Along a straight run the triangulation can emit a
+///    triangle `(a, m, b)` with `m` on segment `a-b` within the band. Its three edges cancel
 ///    on that line once every edge there is split at every corner, so it
 ///    adds nothing but duplicate edges; it is dropped.
 /// 2. The corners strictly inside each remaining invented edge are found
@@ -217,8 +259,8 @@ pub(crate) fn collinear_band(linear: Scalar) -> Scalar {
 /// side, which is what a closed mesh needs.
 ///
 /// Work is `O(triangles * corners)`; beyond `MAX_SPLIT_WORK` the face keeps
-/// earcut's output unchanged, which is no worse than before this pass and
-/// is reported downstream as an open mesh, not hidden.
+/// the clipper's output unchanged, which is certified on its own and at
+/// worst reported downstream as an open mesh, not hidden.
 fn split_invented_edges(
     flat: &[[Scalar; 2]],
     hole_starts: &[usize],
@@ -246,8 +288,7 @@ fn split_invented_edges(
     }
 
     // Step 1: drop slivers, triangles with one corner on the segment
-    // between the other two, where that segment is an edge earcut
-    // invented. Its two short sides then lie on the same straight run, and
+    // between the other two, where that segment is an invented edge. Its two short sides then lie on the same straight run, and
     // splitting the invented long side at the corner cancels the triangle
     // against itself, so it carries no area and no edge the mesh needs.
     //
@@ -404,24 +445,8 @@ fn strictly_between(a: [Scalar; 2], c: [Scalar; 2], b: [Scalar; 2], noise: Scala
     turn.abs() <= (1e-9 * length).max(noise * length.sqrt())
 }
 
-/// Twice the signed area of a projected triangle.
-fn doubled_area(a: [Scalar; 2], b: [Scalar; 2], c: [Scalar; 2]) -> Scalar {
-    (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
-}
-
-/// Twice the signed area of a projected ring (shoelace).
-fn doubled_ring_area(ring: &[[Scalar; 2]]) -> Scalar {
-    let mut sum = 0.0;
-    for index in 0..ring.len() {
-        let p = ring[index];
-        let q = ring[(index + 1) % ring.len()];
-        sum += p[0] * q[1] - q[0] * p[1];
-    }
-    sum
-}
-
 /// Why an authored polygon face could not be triangulated.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PolygonRefusal {
     /// The outer ring has zero or non-finite area, so it has no plane.
     NoPlane,
@@ -430,14 +455,11 @@ pub(crate) enum PolygonRefusal {
     /// whose callers mean the polygon to be planar (a curve-bounded plane);
     /// an authored face reports its warp instead (#254).
     NotPlanar(Scalar),
-    /// The triangles do not cover the polygon's area: the rings cross
-    /// themselves or each other, or a hole is not inside the outer ring.
-    AreaMismatch {
-        /// Area of the outer ring minus its holes.
-        polygon: Scalar,
-        /// Area covered by the triangles.
-        triangles: Scalar,
-    },
+    /// The rings do not bound a region in the face's plane: the clipper's
+    /// refusal (#260), naming the ring -- crossing or overlapping rings, a
+    /// hole outside the outer ring or inside another, too few distinct
+    /// corners -- or its certificate's.
+    Rings(String),
 }
 
 impl core::fmt::Display for PolygonRefusal {
@@ -449,11 +471,7 @@ impl core::fmt::Display for PolygonRefusal {
                 "it is not planar: a corner lies {distance:e} from the face plane, \
                  beyond the linear tolerance"
             ),
-            Self::AreaMismatch { polygon, triangles } => write!(
-                f,
-                "its rings cross or a hole lies outside the outer ring \
-                 (polygon area {polygon:e}, triangulated area {triangles:e})"
-            ),
+            Self::Rings(reason) => write!(f, "its rings do not bound a region: {reason}"),
         }
     }
 }
@@ -467,9 +485,8 @@ impl core::fmt::Display for PolygonRefusal {
 /// # Refusals
 ///
 /// Returns a [`PolygonRefusal`] rather than a triangulation that could be
-/// wrong: no plane, a corner off the plane by more than `linear`, or
-/// triangles whose area differs from the polygon's (earcut returns a partial
-/// result on crossing rings instead of failing, so the area is checked).
+/// wrong: no plane, a corner off the plane by more than `linear`, or rings
+/// the certified clipper refuses (crossing, overlapping, a hole outside).
 pub(crate) fn triangulate_polygon(
     rings: &[&[Vec3]],
     linear: Scalar,
@@ -533,52 +550,26 @@ fn triangulate_in_fit_plane(
 
     let mut flat: Vec<[Scalar; 2]> = Vec::new();
     let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
-    let mut expected = 0.0;
     for (index, ring) in rings.iter().enumerate() {
         if index > 0 {
             hole_starts.push(flat.len());
         }
-        let start = flat.len();
         flat.extend(ring.iter().map(|&p| {
             let d = p - centroid;
             [d.dot(u), d.dot(v)]
         }));
-        let area = doubled_ring_area(&flat[start..]).abs();
-        expected += if index == 0 { area } else { -area };
     }
 
-    let mut indices = earcut_projected(&flat, &hole_starts);
-    if indices.len() % 3 != 0 {
-        indices.clear();
-    }
-    let mut covered = 0.0;
-    for triangle in indices.chunks_exact_mut(3) {
-        let area = doubled_area(flat[triangle[0]], flat[triangle[1]], flat[triangle[2]]);
-        // The outer ring is counter-clockwise in (u, v) by construction of
-        // the axes, so every triangle must be too. earcut 0.4 already emits
-        // them that way, so this never fires today; it keeps the authored
-        // winding independent of earcut's output convention across
-        // upgrades (an equivalent mutant in the probe, deliberately kept).
-        if area < 0.0 {
-            triangle.swap(1, 2);
-        }
-        covered += area.abs();
-    }
-    // Earcut only adds diagonals between existing corners, so a correct
-    // result covers the polygon exactly up to rounding in the projection.
-    let scale = flat
-        .iter()
-        .fold(0.0_f64, |m, p| m.max(p[0].abs()).max(p[1].abs()));
-    let slack = 1e-9 * expected.abs().max(scale * scale) + f64::EPSILON;
-    if expected <= slack || (covered - expected).abs() > slack {
-        return Err(PolygonRefusal::AreaMismatch {
-            polygon: expected / 2.0,
-            triangles: covered / 2.0,
-        });
-    }
-    // After the area check, so it judges earcut's own cover; each split
-    // keeps winding and moves area only by float noise.
-    split_invented_edges(&flat, &hole_starts, collinear_band(linear), &mut indices);
+    // The outer ring is counter-clockwise in (u, v) by construction of the
+    // axes, and the clipper's triangles always are, so they keep the
+    // authored winding. Its certificate replaces the area cross-check that
+    // earcut, which returned partial covers on crossing rings, needed.
+    let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(|error| {
+        PolygonRefusal::Rings(match error {
+            GeomError::InvalidInput(reason) | GeomError::Degenerate(reason) => reason,
+            other => other.to_string(),
+        })
+    })?;
     Ok((indices, warp))
 }
 
@@ -693,6 +684,11 @@ pub(crate) fn face_error(face: usize, refusal: PolygonRefusal) -> GeomError {
 mod tests {
     use super::*;
 
+    /// Twice the signed area of a projected triangle.
+    fn doubled_area(a: [Scalar; 2], b: [Scalar; 2], c: [Scalar; 2]) -> Scalar {
+        (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+    }
+
     /// Undirected edge use counts of a triangle list.
     fn edge_uses(indices: &[usize]) -> std::collections::HashMap<(usize, usize), usize> {
         let mut uses = std::collections::HashMap::new();
@@ -772,7 +768,8 @@ mod tests {
     /// diagonals; with a band scaled to the face's size those diagonals
     /// were split unevenly (one side saw a corner, the other did not) and
     /// three edges were left unpaired. With the tolerance-tied band every
-    /// edge is used at most twice and the authored ring edges exactly once.
+    /// edge is used at most twice and the authored ring edges exactly once,
+    /// on the certified clipper's triangles as on earcut's (#260).
     #[test]
     fn a_stair_stringer_with_noisy_collinear_steps_stays_paired() {
         // (x, z) of the stringer's outer ring, projected onto its plane
@@ -808,8 +805,7 @@ mod tests {
             .iter()
             .map(|p| [(p.0 - o.0) * dir.0 + (p.1 - o.1) * dir.1, p.2 - o.2])
             .collect();
-        let mut indices = earcut_projected(&flat, &[]);
-        split_invented_edges(&flat, &[], collinear_band(1.0e-3), &mut indices);
+        let indices = clip_planar_face(&flat, &[], 1.0e-3).expect("the stringer triangulates");
         let uses = edge_uses(&indices);
         assert!(uses.values().all(|&n| n <= 2), "over-used edge: {uses:?}");
         for k in 0..flat.len() {
@@ -835,9 +831,7 @@ mod tests {
             [1.2022602528833906, -0.267596768443262],
             [1.2022292140899142, -0.2675563179000615],
         ];
-        let mut indices = earcut_projected(&flat, &[]);
-        assert_eq!(indices.len(), 3, "earcut keeps the one triangle");
-        split_invented_edges(&flat, &[], collinear_band(1.0e-3), &mut indices);
+        let indices = clip_planar_face(&flat, &[], 1.0e-3).expect("one triangle");
         assert_eq!(indices.len(), 3, "the face is not a sliver: {indices:?}");
     }
 
