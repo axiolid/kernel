@@ -20,6 +20,12 @@ orders, written for the "outer ring only" and "worst across faces"
 mutants before the first run. Not listed, as equivalent at test
 resolution: dropping the 16-ulp rounding allowance (`Some(worst)`), which
 no fixture can resolve.
+
+#261 (the warp is the slab width, max - min signed corner distance from
+the fit plane, not the largest corner distance): the #254 anchors moved
+into `CornerSpread`; added "largest signed distance only", "largest
+corner distance (the #254 bound)" and "lowest corner not tracked".
+21 / 21 killed on the first run.
 """
 import pathlib, subprocess, sys
 
@@ -33,10 +39,11 @@ TARGETS = [
 
 MUTANTS = [
     ("planarity check skipped", P,
-     "    let warp = if worst > linear {",
-     "    let warp = if worst > linear && false {"),
+     "        (self.largest > linear).then(|| self.slab_width())",
+     "        (self.largest > linear && false).then(|| self.slab_width())"),
     ("planarity against zero, not tolerance", P,
-     "    let warp = if worst > linear {", "    let warp = if worst > 0.0 {"),
+     "        (self.largest > linear).then(|| self.slab_width())",
+     "        (self.largest > 0.0).then(|| self.slab_width())"),
     ("planar callers no longer refuse a warp", P,
      "    triangulate_in_fit_plane(rings, linear, true).map(|(indices, _)| indices)",
      "    triangulate_in_fit_plane(rings, linear, false).map(|(indices, _)| indices)"),
@@ -44,14 +51,23 @@ MUTANTS = [
      "    triangulate_in_fit_plane(rings, linear, false)\n",
      "    triangulate_in_fit_plane(rings, linear, true)\n"),
     ("warp halved", P,
-     "        Some(worst + 16.0 * f64::EPSILON * reach)",
-     "        Some(0.5 * worst)"),
+     "        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach",
+     "        0.5 * (self.above - self.below)"),
     ("rounding allowance subtracted", P,
-     "        Some(worst + 16.0 * f64::EPSILON * reach)",
-     "        Some(worst - 16.0 * f64::EPSILON * reach)"),
-    ("warp measured on the outer ring only", P,
-     "    for ring in rings {\n        for &p in *ring {\n            let offset = p - centroid;",
-     "    for ring in &rings[..1] {\n        for &p in *ring {\n            let offset = p - centroid;"),
+     "        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach",
+     "        (self.above - self.below) - 64.0 * f64::EPSILON * self.reach"),
+    ("warp measured on the outer ring only (hole corners ignored)", P,
+     "        for ring in rings {\n            for &p in *ring {\n                let offset = p - centroid;",
+     "        for ring in &rings[..1] {\n            for &p in *ring {\n                let offset = p - centroid;"),
+    ("slab: largest signed distance only, not max - min (#261)", P,
+     "        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach",
+     "        self.above + 64.0 * f64::EPSILON * self.reach"),
+    ("slab: largest corner distance, the #254 bound (#261)", P,
+     "        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach",
+     "        self.largest + 64.0 * f64::EPSILON * self.reach"),
+    ("slab: lowest corner not tracked (#261)", P,
+     "                spread.below = spread.below.min(distance);\n",
+     ""),
     ("warp reported as proven", C,
      "                                crate::deviation::DeviationBound::Certified(warp),",
      "                                crate::deviation::DeviationBound::Proven(warp),"),

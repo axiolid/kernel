@@ -26,11 +26,14 @@
 //!   adds nothing. A face warped beyond it has no unique surface (#254):
 //!   it is triangulated in its fit plane and reported
 //!   [`DeviationBound::Certified`] under the detail
-//!   `"non-planar authored face"`, never `Proven`. The value is the largest
-//!   distance of a corner from that fit plane, which bounds the distance
-//!   between the mesh and the face flattened onto the plane both ways
-//!   (`crate::planar` gives the argument); the worst face of the mesh is
-//!   reported.
+//!   `"non-planar authored face"`, never `Proven`. The value is the width
+//!   of the slab the face's corners (holes included) span about that fit
+//!   plane, largest minus smallest signed distance (#261): every reading
+//!   of the face that lies in that slab (either diagonal triangulation,
+//!   the face flattened onto the plane, a bilinear patch) is within it of
+//!   the mesh wherever it lies over the face, and the mesh within it of
+//!   each reading that covers the face (`crate::planar` gives the
+//!   argument); the worst face of the mesh is reported.
 //! - Profiles ([`axiolid_construct::profile::profile_deviation`]): the
 //!   chord budget for every family the flattener certifies (lines, arcs,
 //!   circles, ellipses, B-splines), plus any merged near-duplicate point,

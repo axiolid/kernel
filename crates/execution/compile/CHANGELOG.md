@@ -31,6 +31,20 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- A warped authored polygon face (#254) now reports the width of the slab
+  its corners span about its fit plane, largest minus smallest signed
+  distance over every corner, holes included, plus rounding (#261),
+  instead of the largest corner distance from that plane. A warped face
+  has no single true surface; either diagonal triangulation, the face
+  flattened onto its fit plane and a bilinear patch all lie in that slab,
+  so each is within its width of the mesh wherever it lies over the face.
+  The largest corner distance understated how far two such readings can
+  be apart. The bound grows by up to twice: a saddle with corners at
+  `+-h` reports `2h` (was `h`); a square with one corner lifted by `h`
+  reports `h/2`, the gap between its two triangulations at the centre
+  (was `h/4`). Still `DeviationBound::Certified` under "non-planar
+  authored face", never `Proven`; faces within the linear tolerance of
+  their plane are unchanged.
 - A disk swept along a smooth curve (ellipse, B-spline, and now elevated
   and banked curves) is certified with a search suited to a long tube's
   long, thin quads (#252): quads twisted by up to a twentieth of the

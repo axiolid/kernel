@@ -29,17 +29,59 @@
 //! back to the authored corners, which are never moved. Rings that cross
 //! in that projection, or enclose no area in it, are still refused.
 //!
-//! The reported bound `w` is the largest distance of any corner (outer
-//! ring and holes) from `P`, plus the rounding of computing it. It is a
-//! bound against the authored polygon flattened onto `P` (each corner
-//! replaced by its foot on `P`): the mesh point over a point `x'` of a
-//! projected triangle with feet `c_i'` is `x = sum l_i c_i` for the same
-//! barycentric weights `l_i`, so `x - x' = sum l_i (c_i - c_i')` is a
-//! convex combination of offsets along `n`, each at most `w` long. Every
-//! point of the flattened polygon is therefore within `w` of the mesh,
-//! every mesh point within `w` of it, and every authored corner is a mesh
-//! vertex. `w` is at least the largest distance of a corner from the plane
-//! the face was triangulated in.
+//! # The reported bound: the slab width (#261)
+//!
+//! Let `d_i` be the signed distance of corner `i` (outer ring and holes)
+//! from `P` along `n`, and `S` the slab of points whose distance lies in
+//! `[min d_i, max d_i]`. The reported bound is its width
+//! `W = max d_i - min d_i`, plus the rounding of computing it.
+//!
+//! A warped face has no single true surface. Either diagonal of a quad,
+//! the face flattened onto `P` (each corner replaced by its foot) and a
+//! bilinear patch through the corners are all reasonable readings, and
+//! they differ from each other by up to the whole spread of the corners
+//! along `n`: with one corner of a square lifted by `h`, the two diagonal
+//! triangulations are `h / 2` apart at the centre while every corner is
+//! only `h / 4` from `P`. `W` bounds that difference for every reading:
+//!
+//! - Every reading lies in `S`. A triangulation through the corners or a
+//!   bilinear patch lies in the corners' convex hull, and `S` is convex
+//!   and holds every corner. `P` itself lies in `S`, so the flattened
+//!   face does too: `P` passes through the outer ring's centroid, so the
+//!   outer corners' `d_i` sum to zero and `min d_i <= 0 <= max d_i`.
+//! - The mesh lies in `S` too, and it is a graph over the projected face:
+//!   its triangles are those of a triangulation of the face's projection
+//!   `R` onto `P` (outer ring minus holes, checked by area), each lifted to
+//!   the authored corners. Over every point `x'` of `R` there is exactly
+//!   one mesh point `x = x' + h(x') n`, with `h(x')` in `[min d_i, max d_i]`.
+//! - So for every point `y` of any reading in `S` whose projection `y'`
+//!   onto `P` lies in `R`, the mesh point over `y'` differs from `y` only
+//!   along `n`, by the difference of two distances in `[min d_i, max d_i]`:
+//!   `y` is within `W` of the mesh.
+//!
+//! Readings that cover exactly `R` in projection get the bound both ways:
+//! every triangulation through the corners that triangulates `R` in
+//! projection, the flattened face (which is `R` lifted onto `P`), and a
+//! bilinear patch over a quad whose projection is convex (projection is
+//! linear, so the patch projects to the bilinear patch over the projected
+//! corners, which covers exactly that convex quad). Over each point of `R`
+//! such a reading and the mesh are then within `W` of each other along
+//! `n`, so each is within `W` of the other. What `W` does not bound is a
+//! reading that spills outside `R` in projection, over a concave notch or
+//! a hole the face does not cover; that is a different face, not a reading
+//! of this one. Every authored corner is a mesh vertex.
+//!
+//! `W` lies between the largest corner distance from `P` (the bound before
+//! #261, which `min d_i <= 0 <= max d_i` keeps below it) and twice that.
+//! A saddle whose corners alternate `+h` and `-h` reports `2h`. A square
+//! with one corner lifted by `h` is `z = h x y`: its fit plane takes the
+//! linear part and leaves a saddle of `+-h/4` about it, so it reports
+//! `h/2` (along the tilted normal, a fraction of a percent less), exactly
+//! the gap between its two diagonal triangulations at the centre; the
+//! plane of the three unlifted corners would give a slab `h` wide, which
+//! also holds every reading but is twice as loose. A face counts as warped,
+//! as before, when a corner lies further than the linear tolerance from
+//! `P`.
 
 use axiolid_contracts::GeomError;
 use axiolid_core::{Scalar, Vec3};
@@ -483,31 +525,11 @@ fn triangulate_in_fit_plane(
     // The plane through the outer ring's centroid, with the Newell normal:
     // Newell's is the least-squares plane direction for a near-planar ring.
     let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
-    let mut worst: Scalar = 0.0;
-    let mut reach: Scalar = 0.0;
-    for ring in rings {
-        for &p in *ring {
-            let offset = p - centroid;
-            let distance = offset.dot(n).abs();
-            if !distance.is_finite() {
-                return Err(PolygonRefusal::NoPlane);
-            }
-            worst = worst.max(distance);
-            reach = reach.max(offset.length());
-        }
+    let spread = CornerSpread::of(rings, centroid, n)?;
+    let warp = spread.beyond(linear);
+    if refuse_warp && warp.is_some() {
+        return Err(PolygonRefusal::NotPlanar(spread.largest));
     }
-    let warp = if worst > linear {
-        if refuse_warp {
-            return Err(PolygonRefusal::NotPlanar(worst));
-        }
-        // The computed distance differs from the true distance to the plane
-        // through `centroid` along `n` (both as stored) by the rounding of a
-        // subtraction, a three-term dot product and the normalisation of
-        // `n`: well within 16 ulps of the corner's distance from `centroid`.
-        Some(worst + 16.0 * f64::EPSILON * reach)
-    } else {
-        None
-    };
 
     let mut flat: Vec<[Scalar; 2]> = Vec::new();
     let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
@@ -558,6 +580,75 @@ fn triangulate_in_fit_plane(
     // keeps winding and moves area only by float noise.
     split_invented_edges(&flat, &hole_starts, collinear_band(linear), &mut indices);
     Ok((indices, warp))
+}
+
+/// How the corners of a polygon spread about its fit plane (#254, #261):
+/// the plane through `centroid` with unit normal `n`, as stored.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CornerSpread {
+    /// The largest corner distance from the plane, `max |d_i|`: what the
+    /// planarity check compares with the linear tolerance.
+    largest: Scalar,
+    /// The largest signed distance `max d_i`.
+    above: Scalar,
+    /// The smallest signed distance `min d_i`.
+    below: Scalar,
+    /// The largest corner distance from `centroid`, which scales the
+    /// rounding of every distance.
+    reach: Scalar,
+}
+
+impl CornerSpread {
+    /// Measure every corner of every ring, holes included. A non-finite
+    /// distance has no plane.
+    fn of(rings: &[&[Vec3]], centroid: Vec3, n: Vec3) -> Result<Self, PolygonRefusal> {
+        let mut spread = Self {
+            largest: 0.0,
+            above: 0.0,
+            below: 0.0,
+            reach: 0.0,
+        };
+        for ring in rings {
+            for &p in *ring {
+                let offset = p - centroid;
+                let distance = offset.dot(n);
+                if !distance.is_finite() {
+                    return Err(PolygonRefusal::NoPlane);
+                }
+                spread.largest = spread.largest.max(distance.abs());
+                spread.above = spread.above.max(distance);
+                spread.below = spread.below.min(distance);
+                spread.reach = spread.reach.max(offset.length());
+            }
+        }
+        Ok(spread)
+    }
+
+    /// The slab width `max d_i - min d_i` plus its rounding (#261): the
+    /// bound the module notes derive.
+    ///
+    /// Starting `above` and `below` at zero changes nothing: the plane
+    /// passes through the outer ring's centroid, so the outer corners'
+    /// signed distances sum to zero and already straddle it.
+    ///
+    /// Each computed distance differs from the true distance to the plane
+    /// through `centroid` along `n` (both as stored) by the rounding of a
+    /// subtraction, a three-term dot product and the normalisation of `n`,
+    /// within 16 ulps of `reach`; the difference of two such distances is
+    /// within 32, and the subtraction and the final sum each round by at
+    /// most another ulp of `2 reach`. The projection axes `(u, v)` are
+    /// orthogonal to `n` up to a few ulps, which tilts the direction the
+    /// mesh is a graph along by as much. 64 ulps of `reach` cover all of it.
+    fn slab_width(self) -> Scalar {
+        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach
+    }
+
+    /// The warp a caller reports: `None` when every corner lies within
+    /// `linear` of the plane (the face counts as planar, as it always
+    /// did), else the [`Self::slab_width`].
+    fn beyond(self, linear: Scalar) -> Option<Scalar> {
+        (self.largest > linear).then(|| self.slab_width())
+    }
 }
 
 /// A typed error naming the authored face that could not be triangulated.
@@ -769,8 +860,59 @@ mod tests {
         ));
         let authored = triangulate_authored_polygon(&warped, 1e-3).unwrap();
         assert_eq!(authored.indices.len(), 6);
+        // The +-5 cm saddle's slab is 10 cm wide (#261).
         let warp = authored.warp.unwrap();
-        assert!((0.05..0.05 + 1e-12).contains(&warp), "{warp}");
+        assert!((0.1..0.1 + 1e-12).contains(&warp), "{warp}");
+    }
+
+    /// The slab width (#261): a saddle reports its full spread, a lifted
+    /// corner the spread about its fit plane, and holes count.
+    #[test]
+    fn the_warp_is_the_slab_width_of_every_corner() {
+        let h = 0.05;
+        let lifted: [&[Vec3]; 1] = [&[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, h),
+            Vec3::new(0.0, 1.0, 0.0),
+        ]];
+        let saddle: [&[Vec3]; 1] = [&[
+            Vec3::new(0.0, 0.0, h),
+            Vec3::new(1.0, 0.0, -h),
+            Vec3::new(1.0, 1.0, h),
+            Vec3::new(0.0, 1.0, -h),
+        ]];
+        // A flat outer ring whose hole has one corner below it.
+        let holed: [&[Vec3]; 2] = [
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(4.0, 4.0, 0.0),
+                Vec3::new(0.0, 4.0, 0.0),
+            ],
+            &[
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(1.0, 2.0, 0.0),
+                Vec3::new(2.0, 2.0, -h),
+                Vec3::new(2.0, 1.0, 0.0),
+            ],
+        ];
+        // The lifted quad is `z = h x y`: its fit plane takes the linear
+        // part, leaving a saddle of +-h/4 about it, so the slab is h/2
+        // wide along that plane's normal (Newell normal (-h, -h, 2)), the
+        // gap between the two diagonal triangulations at the centre.
+        let tilt = 2.0 / (4.0 + 2.0 * h * h).sqrt();
+        for (rings, want) in [
+            (&lifted[..], 0.5 * h * tilt),
+            (&saddle[..], 2.0 * h),
+            (&holed[..], h),
+        ] {
+            let warp = triangulate_authored_polygon(rings, 1e-3)
+                .unwrap()
+                .warp
+                .unwrap();
+            assert!((want..want + 1e-12).contains(&warp), "{warp}, want {want}");
+        }
     }
 
     /// An authored ring edge is shared with the neighbour exactly as

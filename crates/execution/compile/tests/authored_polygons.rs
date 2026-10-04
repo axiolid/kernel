@@ -7,7 +7,8 @@
 //! back from the compiler.
 //!
 //! Faces warped beyond the tolerance are triangulated in their fit plane
-//! and reported with a certified bound (#254).
+//! and reported with a certified bound (#254): the width of the slab their
+//! corners span about that plane (#261).
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Point3, Tolerance, Vec3};
@@ -565,6 +566,21 @@ fn largest_corner_distance_from_fit_plane(corners: &[Point3]) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// The width of the slab the corners span about the same plane: the
+/// largest minus the smallest signed distance.
+fn corner_slab_about_fit_plane(corners: &[Point3]) -> f64 {
+    let mut normal = Vec3::ZERO;
+    for (i, &a) in corners.iter().enumerate() {
+        let b = corners[(i + 1) % corners.len()];
+        normal += a.cross(b);
+    }
+    let n = normal.normalize();
+    let centroid = corners.iter().fold(Vec3::ZERO, |s, &c| s + c) / corners.len() as f64;
+    let signed: Vec<f64> = corners.iter().map(|&c| (c - centroid).dot(n)).collect();
+    signed.iter().copied().fold(f64::MIN, f64::max)
+        - signed.iter().copied().fold(f64::MAX, f64::min)
+}
+
 /// Distance to the nearest triangle of the cube's top face (corners 4..8).
 fn distance_to_top(point: Point3, mesh: &TriMesh) -> f64 {
     mesh.indices
@@ -582,7 +598,7 @@ fn distance_to_top(point: Point3, mesh: &TriMesh) -> f64 {
 /// #254's done-when: a faceted box with its top face 5 cm out of plane (a
 /// saddle, corners alternately 5 cm above and below the fit plane z = 1)
 /// compiles as a closed, consistently oriented mesh with a certified, not
-/// exact, bound of at least 5 cm.
+/// exact, bound. Since #261 that is the corners' slab width, 10 cm.
 #[test]
 fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp() {
     let (outcome, report) =
@@ -614,9 +630,9 @@ fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp(
     let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
         panic!("a warped face is certified, never proven or absent: {report:?}");
     };
-    assert!(warp >= 0.05, "warp {warp}");
-    // Sound, and not absurd: the corners are 5 cm off the fit plane z = 1.
-    assert!(warp <= 0.05 + 1e-12, "warp {warp}");
+    assert!(warp >= 0.1, "warp {warp}");
+    // Sound, and not absurd: the corners span z = 0.95 to 1.05.
+    assert!(warp <= 0.1 + 1e-12, "warp {warp}");
     assert!(report.bound.is_some_and(|b| b >= 0.05), "{report:?}");
     assert!(!report.meets_requested(), "not exact: {report:?}");
     assert!(
@@ -657,10 +673,13 @@ fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp(
 }
 
 /// One corner lifted 5 cm: the fit plane takes the twist, so every corner
-/// is a quarter of the lift from it. The bound covers the largest corner
-/// distance from that plane, computed here independently.
+/// is a quarter of the lift from it, alternately above and below. The
+/// bound is the slab the corners span about that plane (#261), computed
+/// here independently: half the lift, the gap between the face's two
+/// diagonal triangulations at its centre, which the largest corner
+/// distance alone (#254) understated by half.
 #[test]
-fn a_lifted_corner_reports_at_least_its_distance_from_the_fit_plane() {
+fn a_lifted_corner_reports_the_slab_its_corners_span() {
     let top = [1.0, 1.0, 1.05, 1.0];
     let (outcome, report) = compile_reported(cube_with_top(top)).expect("compiles");
     assert!(is_closed_two_manifold(&outcome.mesh));
@@ -670,8 +689,12 @@ fn a_lifted_corner_reports_at_least_its_distance_from_the_fit_plane() {
         p(1.0, 1.0, top[2]),
         p(0.0, 1.0, top[3]),
     ];
-    let want = largest_corner_distance_from_fit_plane(&corners);
-    assert!((want - 0.0125).abs() < 1e-3, "fixture: {want}");
+    assert!(
+        (largest_corner_distance_from_fit_plane(&corners) - 0.0125).abs() < 1e-3,
+        "fixture"
+    );
+    let want = corner_slab_about_fit_plane(&corners);
+    assert!((want - 0.025).abs() < 1e-4, "fixture: {want}");
     let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
         panic!("{report:?}");
     };
@@ -679,6 +702,11 @@ fn a_lifted_corner_reports_at_least_its_distance_from_the_fit_plane() {
         warp >= want && warp <= want + 1e-12,
         "warp {warp}, want {want}"
     );
+    // The two readings it covers: at the centre the diagonal 0-2 is at
+    // z = 1 + h/2, the diagonal 1-3 at z = 1, so they are h/2 apart
+    // vertically, a fraction of a percent less along the tilted normal.
+    let gap = (top[0] + top[2]) / 2.0 - (top[1] + top[3]) / 2.0;
+    assert!(gap.abs() * 0.999 <= warp, "gap {gap} over warp {warp}");
 }
 
 /// A warp inside the linear tolerance is exporter noise: the face is
@@ -726,11 +754,13 @@ fn a_scaled_instance_of_a_warped_box_scales_its_warp() {
     let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
         panic!("{report:?}");
     };
-    assert!(warp >= 0.1, "warp {warp}");
+    // The 10 cm slab, doubled.
+    assert!((0.2..0.2 + 1e-12).contains(&warp), "warp {warp}");
 }
 
 /// A hole off its face's plane warps the face too: the bound covers every
-/// corner, not only the outer ring's.
+/// corner, not only the outer ring's. The flat outer ring fixes the fit
+/// plane at z = 0, so the slab runs from 0 to the hole corner's 5 cm.
 #[test]
 fn a_hole_off_the_plane_of_its_face_is_measured() {
     let (outcome, report) = compile_reported(PolygonMesh {
@@ -757,7 +787,8 @@ fn a_hole_off_the_plane_of_its_face_is_measured() {
     assert!((0.05..0.05 + 1e-12).contains(&warp), "warp {warp}");
 }
 
-/// Of several warped faces the worst is reported, whichever comes first.
+/// Of several warped faces the worst is reported, whichever comes first:
+/// the +-5 cm saddle's 10 cm slab.
 #[test]
 fn the_worst_warped_face_sets_the_bound() {
     let saddle = |x: f64, h: f64| {
@@ -779,7 +810,7 @@ fn the_worst_warped_face_sets_the_bound() {
         let Some(DeviationBound::Certified(warp)) = warp_of(&report) else {
             panic!("{report:?}");
         };
-        assert!((0.05..0.05 + 1e-12).contains(&warp), "warp {warp}");
+        assert!((0.1..0.1 + 1e-12).contains(&warp), "warp {warp}");
     }
 }
 

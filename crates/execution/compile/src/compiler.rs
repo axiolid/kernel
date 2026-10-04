@@ -379,7 +379,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// with an error naming its index. A face off its plane by more than
     /// the linear tolerance has no unique surface; it is triangulated in
     /// its fit plane all the same (#254), and the largest warp of any such
-    /// face is returned with the mesh, `None` when every face is planar.
+    /// face (the width of the slab its corners span about that plane, #261)
+    /// is returned with the mesh, `None` when every face is planar.
     /// [`crate::planar`] states what that warp bounds; the caller reports
     /// it as a certified deviation, never as exact.
     fn compile_authored_polygons(
