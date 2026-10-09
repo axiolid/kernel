@@ -41,6 +41,7 @@ import pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 E = "crates/algorithms/parametric/evaluate/src/station.rs"
 C = "crates/execution/compile/src/station.rs"
+B = "crates/execution/compile/src/station/basis.rs"
 V = "crates/representations/modeling/graph/src/validation.rs"
 G = "crates/representations/modeling/graph/src/station.rs"
 EVAL = ["-p", "axiolid-evaluate", "--test", "station"]
@@ -85,7 +86,7 @@ MUTANTS = [
     ('no interpolation between stations', C,
      '    a + (b - a) * u',
      '    a', [COMPILE]),
-    ('plan frame ignored', C,
+    ('plan frame ignored', B,
      '            StationFrame::Plan => section.plan(),',
      '            StationFrame::Plan => Ok(section),', [COMPILE]),
     ('midpoint test skipped', C,

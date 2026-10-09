@@ -118,6 +118,8 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/representations/analytic/curve/src/seam.rs` (#263)
 - ADR 0081 (banked section frame), #239 (`arc_parameter`).
 - `crates/execution/compile/tests/station_placement.rs` (#264).
+- `crates/algorithms/parametric/evaluate/src/station/composite.rs` and
+  `crates/execution/compile/src/station/basis.rs` (#285).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -354,3 +356,96 @@ Still open: stations along a curve relation (a composite of placed
 segments included) and along a tilted placement (refused by name), exact
 pieces of a placed directrix, and a certified bound for a placement on a
 curved basis.
+
+## Amendment 2026-10-09: curve relations as station bases (#285)
+
+The consumer (openbimrs/ifc#311, and ifc#346 part 2) measures stations
+along curve relations: a plain composite curve, and a segmented reference
+curve whose segments are placed at stations of a base that is itself a
+composite of placed segments over a composite. Stations along any
+relation were refused (#246, #264).
+
+- **The representation is unchanged.** A basis may be a `Composite`, a
+  `Trimmed`, a `SurfaceCurve` whose 3D curve governs, or an
+  `InstanceAtStation`, nested and placed in any combination, 2D or 3D.
+  The graph already accepts them where a curve is expected; only the
+  resolvers change. An `Offset`, a `ParameterCurve`, an
+  `OffsetByStations` and an `Instance` stay refused by name.
+- **Flattening.** A resolver reads the relation as a composite directrix
+  is read: segments in order, one whose `same_sense` is false traversed
+  backwards; an untrimmed line inside a composite is its parameter domain
+  `[0, 1]`; a trim of an atomic curve spans the parameters its selectors
+  name (a point inverted, an arc length measured, a closed conic's trim
+  possibly across its parameter seam, at most one turn); a trim of a
+  relation spans its parameter selectors read as arc length along it, so
+  a relation measured in plan distance cannot be trimmed (refused by
+  name); a placed curve is its source carried by the placement. The
+  result is a list of spans of atomic curves, each between two distances
+  in its curve's station measure, reversed or not, under a composed rigid
+  placement (`axiolid-evaluate`'s `StationPiece`), measured as one
+  `CompositeBasis`. The evaluator holds this neutral form; the compiler
+  owns the graph walk.
+- **Which distance.** The distance runs end to end: the lengths of the
+  pieces before a point plus its distance into its own piece, each in its
+  own curve's convention. Those must agree. Every piece plan-measured (an
+  elevated or banked curve, trimmed, reversed, or placed by a motion that
+  keeps `+Z`): plan distance. No piece plan-measured (lines, conics,
+  polylines, B-splines, intrinsic curves and chains, 2D or 3D, placed or
+  not): arc length. Both: refused by name, since no one distance runs
+  through it. A composite of 3D segments placed at stations of an
+  elevated curve is therefore measured by its OWN segments' arc length:
+  a placed segment is a rigidly moved copy of its source, and its source
+  (a line, a clothoid) is arc-length-measured whatever base it was placed
+  on. Only a composite whose pieces are themselves elevated or banked
+  curves is measured in plan distance.
+- **Joints.** Consecutive pieces must meet: the end of one within
+  `JOINT_TOLERANCE * max(1, |p|)` (`1e-9`, relative to the joint's
+  largest coordinate) of the next one's start. Otherwise the joint is
+  refused by name, as a reversed piece where the pieces meet end to end
+  or start to start (a sense that was not declared), as a gap with its
+  size elsewhere. Every interior joint is a seam under the #263 rule,
+  never smooth (a declared `Transition` is not a guarantee in the data):
+  a station within the arc-length tolerance of it reads the piece its
+  `SeamSide` names at the joint's distance, the incoming piece at its
+  end, the outgoing one at its start, each at its own point (pieces that
+  meet within the joint tolerance are not snapped together). At the
+  composite's ends, and at each piece's own ends, the piece is read from
+  inside, so a trim that starts on a seam of its curve never reads what
+  it trims away. Runs mitre at a joint like at any seam; a joint whose
+  pieces are farther apart than the mitre's own position tolerance is
+  refused there by name. `station::seams` lists the joints and each
+  piece's seams inside it; a joint after an ellipse or a B-spline piece
+  is not exact (its length is a quadrature) and is refused typed by the
+  exact reading.
+- **Reversed pieces.** A piece traversed backwards is read at `end - u`,
+  its seam sides swapped, its tangent and lateral negated and its up
+  kept: the reference-up and planar frames of the reversed curve exactly;
+  for a banked curve the same rolled section seen from the other end.
+- **Tilted placements.** #264 refused a station along a curve placed in a
+  frame that tilts `+Z`. A rigid motion keeps arc length, so for an
+  arc-length-measured source the station is well defined: its point and
+  tangent are carried, and its frame is the placed curve's own
+  reference-up frame against `+Z` (`SectionFrame::carried`), which is the
+  frame every other 3D curve gets. That is what a segment placed in a
+  grade-leaning section frame needs. An elevated or banked source so
+  placed stays refused by name: its plan distance and its frame are not
+  the placed curve's.
+- **Exactness.** A frame on a composite is exact, rounding aside, only
+  where every piece up to and including the one it is read on is a line
+  placed, if at all, exactly: those pieces' lengths make the distance and
+  the read piece makes the frame. A placement there reports `exact`; any
+  other is `Unbounded` by name under `DeviationPath::StationPlacement` and
+  refused by the exact compiler, as for #264.
+
+| Option | Why not |
+| --- | --- |
+| Measure every composite by 3D arc length | A composite of elevated pieces is authored in plan distance; it would misplace stations by the grade factor, as the original decision says. |
+| Plan distance for a composite of segments placed on an elevated base | The segments are rigid copies of arc-length-measured curves; their plan length is not stored anywhere, and a tilted segment's plan distance would need a quadrature the data does not ask for. |
+| Snap the two sides of a joint onto one point | A substitute position; reading each side's own point is honest, and the mitre refuses a joint too wide to mitre. |
+| Refuse a declared reversed piece (`same_sense = false`) | Legitimate data; the reversed reading is exact for every frame the kernel builds. |
+| Keep refusing tilted placements | Leaves the segments of a segmented reference curve on a grade unmeasurable, although arc length and the reference-up frame are both well defined there. |
+
+Still open: a trim of a plan-measured relation, a closed conic's trim of
+more than one turn, an exact compilation of a placement on a composite
+whose read piece is not a line, and the seam side on the
+curve-evaluation contract's point, tangent and frame queries (#286).

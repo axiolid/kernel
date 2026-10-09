@@ -228,9 +228,9 @@ fn a_station_beyond_the_curve_or_on_a_relation_is_refused_by_name() {
         resolve(&graph, on_relation).unwrap_err(),
         GeomError::UnsupportedInput {
             operation: Operation::CurveEvaluation,
-            input: "a station along an instanced curve or a curve relation",
+            input,
             ..
-        }
+        } if input.contains("a curve relation other than a composite, a trim")
     ));
     assert!(resolve(&graph, clothoid).is_err(), "not a station node");
 }

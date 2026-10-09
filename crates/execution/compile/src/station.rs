@@ -8,9 +8,13 @@
 //! carries (the arc-length inverse's `ARC_LENGTH_TOLERANCE` where the
 //! measure is numerical).
 //!
-//! The basis must be an atomic 2D or 3D curve node; an instance or a curve
-//! relation is refused by name, since its measure would be the relation's,
-//! not its basis's.
+//! The basis is an atomic 2D or 3D curve node, a curve placed at a station
+//! (#264), or a curve relation a distance runs along (#285): a composite,
+//! a trim, a surface curve whose 3D curve governs, nested and placed in any
+//! combination, measured as one composite (see
+//! [Composite bases](#composite-bases-285)). An instance and any other
+//! relation (an offset, a p-curve, an offset curve by stations) are
+//! refused by name.
 //!
 //! # Meshing between stations
 //!
@@ -52,8 +56,9 @@
 //! curve's roll alone) is sampled as before.
 //!
 //! [`seams`] reads where a graph curve's seams are without evaluating it:
-//! an atomic curve's from its stored data, a 3D composite or trim of
-//! lines, polylines and circles at the running sum of its pieces' lengths.
+//! an atomic curve's from its stored data, a composite basis's joints at
+//! the running sum of its pieces' lengths with each piece's own seams
+//! inside it (#285).
 //!
 //! # Placing at a station (#264)
 //!
@@ -70,11 +75,44 @@
 //! A station along a placed curve is its source's station carried by the
 //! placement: a rigid motion keeps arc length, and one that keeps `+Z`
 //! keeps plan distance and carries the source's section frame
-//! (reference-up, banked or 2D) onto the placed curve's own. The source
-//! must be an atomic curve or a placed one. A placement that tilts `+Z`
-//! is refused by name: there the carried frame is not the placed curve's
-//! own reference-up frame, and an elevated source's plan distance is not
-//! the placed curve's.
+//! (reference-up, banked or 2D) onto the placed curve's own. Where the
+//! placement tilts `+Z` (#285), an arc-length-measured source's station
+//! keeps its carried point and tangent and takes the placed curve's own
+//! reference-up frame against `+Z`, since the carried frame is not it; an
+//! elevated or banked source so placed is refused by name, its plan
+//! distance not being the placed curve's
+//! (`axiolid_reference::station::SectionFrame::carried`). The source may
+//! be any curve a station can be measured along, a relation included.
+//!
+//! # Composite bases (#285)
+//!
+//! A curve relation is flattened into the spans of atomic curves it runs
+//! along (`axiolid_reference::station::StationPiece`), read as a
+//! composite directrix reads it: segments in order, one whose sense
+//! disagrees reversed, an untrimmed line its domain `[0, 1]`, a trim
+//! between the parameters its selectors name (a closed conic's possibly
+//! across its parameter seam), a trim of a relation between parameter
+//! selectors read as its arc length, a placed curve carried by its
+//! placement. The spans are measured as one
+//! `axiolid_reference::station::CompositeBasis`, whose module
+//! documentation states the rules:
+//!
+//! - the distance runs end to end through the pieces, each in its own
+//!   convention, all of which must agree: plan distance when every piece
+//!   is an elevated or banked curve, arc length when none is (so a
+//!   composite of segments placed at stations of an elevated curve is
+//!   measured in its own segments' arc length); mixed pieces are refused
+//!   by name;
+//! - consecutive pieces must meet within
+//!   `axiolid_reference::station::JOINT_TOLERANCE` (relative); a gap and
+//!   a piece whose undeclared sense runs it backwards are refused by name;
+//! - every joint is a seam under the #263 rule: a station on it reads the
+//!   piece its [`SeamSide`] names, the incoming one at its end or the
+//!   outgoing one at its start; a run crossing a joint whose tangents
+//!   differ is mitred there like any seam;
+//! - a frame on a composite is exact only where every piece up to and
+//!   including the one read is a line placed, if at all, exactly
+//!   ([`ResolvedPlacement::exact`]).
 //!
 //! [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
@@ -87,8 +125,8 @@
 use axiolid_construct::loft::{loft_tapered, Station as LoftStation};
 use axiolid_construct::profile::{profile_rings, Rings};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3, Vec3};
-use axiolid_curve::{Curve2, Curve3};
+use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3};
+use axiolid_curve::Curve2;
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
     CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, OrientedCurveStation,
@@ -96,11 +134,11 @@ use axiolid_model::{
 };
 use axiolid_profile::{Contour, Profile};
 use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
-use axiolid_reference::station::{
-    exact_station_seams2, exact_station_seams3, station_frame_is_exact2, station_frame_is_exact3,
-    station_seams2, station_seams3, station_section2_on, station_section3_on, Mitre, SectionFrame,
-    StationSeam,
-};
+use axiolid_reference::station::{Mitre, SectionFrame, StationSeam};
+
+mod basis;
+
+pub(crate) use basis::Basis;
 
 /// Most sections one interval between two stations is bisected into.
 const MAX_DEPTH: u32 = 12;
@@ -137,9 +175,11 @@ pub struct ResolvedStation {
 /// # Errors
 ///
 /// A node that is not a [`GeometryNode::CurveStation`] or a
-/// [`GeometryNode::OrientedCurveStation`], a basis that is not an atomic
-/// curve or a curve placed at a station (#264, see the
-/// [module documentation](self#placing-at-a-station-264)), a distance
+/// [`GeometryNode::OrientedCurveStation`], a basis no station can be
+/// measured along (see the [module documentation](self): an instance, an
+/// offset relation, a composite with a gap, an undeclared reversed piece
+/// or pieces measured differently, a tilted plan-measured placement), a
+/// distance
 /// beyond the basis curve's length, a degenerate orientation, and every
 /// refusal of the curve evaluators, by name.
 pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation> {
@@ -185,7 +225,7 @@ fn resolve_oriented(
             section,
         },
         turned,
-        basis.exact,
+        basis.frame_is_exact(station.distance, *seam),
     ))
 }
 
@@ -202,9 +242,11 @@ pub struct ResolvedPlacement {
     /// Whether the frame is exact, rounding aside: the basis is a line
     /// (`axiolid_reference::station::station_frame_is_exact2` and
     /// `station_frame_is_exact3`), itself placed, if at all, in exact
-    /// frames. Otherwise the frame is the exact curve's at a distance read
-    /// by an estimate (the arc-length inverse, quadrature), and nothing
-    /// placed in it is reported exact.
+    /// frames; on a composite basis (#285), every piece up to and
+    /// including the one the station is read on is such a line. Otherwise
+    /// the frame is the exact curve's at a distance read by an estimate
+    /// (the arc-length inverse, quadrature), and nothing placed in it is
+    /// reported exact.
     pub exact: bool,
 }
 
@@ -220,8 +262,9 @@ pub struct ResolvedPlacement {
 /// A node that is not an [`InstanceAtStation`], and every refusal of
 /// [`resolve`]: a distance beyond the basis curve's length, a zero or
 /// vertical tangent where the frame needs a plan, a degenerate
-/// orientation, a basis that is not an atomic or placed curve, each by
-/// name.
+/// orientation, a basis no station can be measured along (an instance, an
+/// offset relation, a composite whose pieces do not meet or are measured
+/// differently), each by name.
 ///
 /// [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 pub fn placement(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedPlacement> {
@@ -248,203 +291,48 @@ fn placement_at(
     })
 }
 
-/// Most curves placed at stations a station basis may be nested through.
-const MAX_PLACEMENT_DEPTH: usize = 64;
-
-/// How far a placement's image of `+Z` may lean for a station along the
-/// placed curve: rounding only.
-const KEEPS_UP: Scalar = 1e-12;
-
-/// An atomic curve.
-#[derive(Debug, Clone, Copy)]
-enum Atomic<'g> {
-    Two(&'g Curve2),
-    Three(&'g Curve3),
-}
-
-/// A station's basis: an atomic curve, possibly placed at stations
-/// (#264) by a rigid motion that keeps `+Z`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Basis<'g> {
-    curve: Atomic<'g>,
-    /// The composed placements, when the curve is placed.
-    placed: Option<Transform3>,
-    /// Whether a frame read on it is exact (a line, placed in exact
-    /// frames).
-    exact: bool,
-}
-
-impl<'g> Basis<'g> {
-    pub(crate) fn of(graph: &'g GeometryGraph, id: NodeId) -> GeomResult<Self> {
-        Self::of_depth(graph, id, 0)
-    }
-
-    fn of_depth(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult<Self> {
-        if depth > MAX_PLACEMENT_DEPTH {
-            return Err(GeomError::BudgetExceeded {
-                resource: "curves placed at stations nested in a station basis",
-            });
-        }
-        match graph.get(id) {
-            Some(GeometryNode::Curve2(curve)) => Ok(Self {
-                curve: Atomic::Two(curve),
-                placed: None,
-                exact: station_frame_is_exact2(curve),
-            }),
-            Some(GeometryNode::Curve3(curve)) => Ok(Self {
-                curve: Atomic::Three(curve),
-                placed: None,
-                exact: station_frame_is_exact3(curve),
-            }),
-            // A curve placed at a station (#264): its source's stations
-            // carried by the placement, where that is the placed curve's
-            // own.
-            Some(GeometryNode::InstanceAtStation(placed)) => {
-                let source = Self::of_depth(graph, placed.source, depth + 1)?;
-                let placement = placement_at(graph, &placed.station, depth + 1)?;
-                let transform = placement.transform * source.placed.unwrap_or(Transform3::IDENTITY);
-                if (transform.transform_vector3(Vec3::Z) - Vec3::Z).length() > KEEPS_UP {
-                    return Err(GeomError::UnsupportedInput {
-                        backend: crate::BACKEND_ID,
-                        operation: Operation::CurveEvaluation,
-                        input: PLACED_BASIS_TILTED,
-                    });
-                }
-                Ok(Self {
-                    curve: source.curve,
-                    placed: Some(transform),
-                    exact: source.exact && placement.exact,
-                })
-            }
-            Some(GeometryNode::Instance(_) | GeometryNode::CurveRelation(_)) => {
-                Err(GeomError::UnsupportedInput {
-                    backend: crate::BACKEND_ID,
-                    operation: Operation::CurveEvaluation,
-                    input: "a station along an instanced curve or a curve relation",
-                })
-            }
-            Some(_) => Err(GeomError::InvalidInput(format!(
-                "station basis {id:?} is not a curve"
-            ))),
-            None => Err(GeomError::InvalidInput(format!(
-                "station basis {id:?} is outside the graph"
-            ))),
-        }
-    }
-
-    /// The section frame at `distance`, in `frame`, read from `side` on a
-    /// seam.
-    pub(crate) fn section_on(
-        self,
-        distance: Scalar,
-        frame: StationFrame,
-        side: SeamSide,
-    ) -> GeomResult<SectionFrame> {
-        let section = match self.curve {
-            Atomic::Two(curve) => station_section2_on(curve, distance, side)?,
-            Atomic::Three(curve) => station_section3_on(curve, distance, side)?,
-        };
-        let section = match self.placed {
-            Some(transform) => section.moved(transform),
-            None => section,
-        };
-        match frame {
-            StationFrame::Section => Ok(section),
-            StationFrame::Plan => section.plan(),
-            _ => Err(GeomError::UnsupportedInput {
-                backend: crate::BACKEND_ID,
-                operation: Operation::CurveEvaluation,
-                input: "a station frame this compiler does not know",
-            }),
-        }
-    }
-
-    /// Every seam of the curve, located (a B-spline's corner knots by
-    /// quadrature). A placement moves none of them.
-    fn seams(self) -> GeomResult<Vec<StationSeam>> {
-        match self.curve {
-            Atomic::Two(curve) => station_seams2(curve),
-            Atomic::Three(curve) => station_seams3(curve),
-        }
-    }
-
-    /// Every seam of the curve, each exact or refused.
-    fn exact_seams(self) -> GeomResult<Vec<StationSeam>> {
-        match self.curve {
-            Atomic::Two(curve) => exact_station_seams2(curve),
-            Atomic::Three(curve) => exact_station_seams3(curve),
-        }
-    }
-}
-
-/// The refusal of a station along a curve placed in a tilted frame (#264).
-pub(crate) const PLACED_BASIS_TILTED: &str =
-    "a station along a curve placed at a station whose frame tilts +Z: the source's section \
-     frame carried by the placement is not the placed curve's own reference-up frame, and an \
-     elevated source's plan distance is not the placed curve's (#264)";
-
 /// Where a graph curve's seams are, read from its stored data (#263): the
 /// distances in its station measure, with the curve's own parameter.
 ///
 /// An atomic 2D or 3D curve reports
 /// `axiolid_reference::station::exact_station_seams2` or
-/// `exact_station_seams3` (every seam exact, or refused). A 3D composite
-/// or trim of lines, polylines and circles (what a plain composite curve
-/// lowers to) reports the joins of its pieces in the direction of travel,
-/// at the running sum of their lengths, which is also the parameter; none
-/// of them is smooth, since a join's continuity is declared, not
-/// guaranteed by the data.
+/// `exact_station_seams3` (every seam exact, or refused), and a curve
+/// placed at a station its source's. A curve relation a station can be
+/// measured along (#285: a composite, a trim, nested and placed, 2D or 3D)
+/// reports `axiolid_reference::station::CompositeBasis::exact_seams`: the
+/// joints of its pieces in the direction of travel, at the running sum of
+/// their lengths in the station measure, and the seams of each piece's
+/// curve inside the piece; the distance is also the parameter reported.
+/// No joint is smooth, since a joint's continuity is declared, not
+/// guaranteed by the data. `options` is not read: the seams are the
+/// curve's, whatever the tolerance.
 ///
 /// # Errors
 ///
 /// A seam whose distance would need a quadrature (a B-spline's corner
-/// knot), a relation holding any other curve, a 2D relation, an instance,
-/// and a node that is not a curve, each by name.
+/// knot, a joint after an ellipse or a B-spline piece), a relation no
+/// station can be measured along, a composite whose pieces do not meet or
+/// are measured differently, an instance, and a node that is not a curve,
+/// each by name.
 pub fn seams(
     graph: &GeometryGraph,
     curve: NodeId,
-    options: &ExecutionOptions,
+    _options: &ExecutionOptions,
 ) -> GeomResult<Vec<StationSeam>> {
-    let unsupported = |input: &'static str| GeomError::UnsupportedInput {
-        backend: crate::BACKEND_ID,
-        operation: Operation::CurveEvaluation,
-        input,
-    };
     match graph.get(curve) {
-        Some(GeometryNode::Curve2(curve)) => exact_station_seams2(curve),
-        Some(GeometryNode::Curve3(curve)) => exact_station_seams3(curve),
-        Some(GeometryNode::CurveRelation(
-            CurveRelation::Composite { .. } | CurveRelation::Trimmed { .. },
-        )) => {
-            let pieces = match crate::directrix::exact_pieces(graph, curve, options) {
-                Ok(Some(pieces)) => pieces,
-                Ok(None) => {
-                    return Err(unsupported(
-                        "seams of a curve relation holding a curve other than a line, a \
-                         polyline or a circle: its lengths are not stored data",
-                    ))
-                }
-                Err(GeomError::InvalidInput(detail)) if detail.contains("not a 3D curve") => {
-                    return Err(unsupported(
-                        "seams of a 2D curve relation: only 3D composites and trims are read",
-                    ))
-                }
-                Err(error) => return Err(error),
-            };
-            let mut out = Vec::with_capacity(pieces.len().saturating_sub(1));
-            let mut run = 0.0;
-            for piece in pieces.iter().take(pieces.len().saturating_sub(1)) {
-                run += piece.length();
-                out.push(StationSeam::new(run, run, false, true));
-            }
-            Ok(out)
-        }
-        Some(GeometryNode::CurveRelation(_)) => Err(unsupported(
-            "seams of a curve relation other than a composite or a trim",
-        )),
-        Some(GeometryNode::Instance(_)) => Err(unsupported("seams of an instanced curve")),
-        // A curve placed at a station: its source's seams (#264).
-        Some(GeometryNode::InstanceAtStation(_)) => Basis::of(graph, curve)?.exact_seams(),
+        Some(GeometryNode::Instance(_)) => Err(GeomError::UnsupportedInput {
+            backend: crate::BACKEND_ID,
+            operation: Operation::CurveEvaluation,
+            input: "seams of an instanced curve",
+        }),
+        // An atomic curve, a curve placed at a station (its source's seams,
+        // #264) and a curve relation measured as a composite (#285).
+        Some(
+            GeometryNode::Curve2(_)
+            | GeometryNode::Curve3(_)
+            | GeometryNode::InstanceAtStation(_)
+            | GeometryNode::CurveRelation(_),
+        ) => Basis::of(graph, curve)?.exact_seams(),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "node {curve:?} is not a curve"
         ))),
@@ -569,7 +457,7 @@ impl<'g> Run<'g> {
             mitres: Vec::new(),
             end: None,
         };
-        for seam in basis.seams()? {
+        for seam in run.basis.seams()? {
             let at = seam.distance;
             if seam.smooth || at <= first + seam_slack(first) || at > last + seam_slack(last) {
                 continue;
@@ -578,8 +466,8 @@ impl<'g> Run<'g> {
                 run.end = Some(last);
                 continue;
             }
-            let incoming = basis.section_on(at, frame, SeamSide::Incoming)?;
-            let outgoing = basis.section_on(at, frame, SeamSide::Outgoing)?;
+            let incoming = run.basis.section_on(at, frame, SeamSide::Incoming)?;
+            let outgoing = run.basis.section_on(at, frame, SeamSide::Outgoing)?;
             let Some(mitre) = Mitre::between(&incoming, &outgoing)? else {
                 continue;
             };

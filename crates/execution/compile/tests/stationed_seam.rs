@@ -516,15 +516,13 @@ fn a_composite_of_lines_and_an_arc_reports_its_joins() {
     let vertex = seams(&graph, polyline, &options()).unwrap();
     assert_eq!(vertex.len(), 1);
     assert_eq!((vertex[0].distance, vertex[0].parameter), (10.0, 1.0));
-    // Refused by name: a corner only quadrature locates, a 2D relation.
-    for (id, needle) in [
-        (spline, "its arc length to the knot is a quadrature"),
-        (plan_trim, "seams of a 2D curve relation"),
-    ] {
-        let error = seams(&graph, id, &options()).unwrap_err();
-        assert!(
-            matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains(needle)),
-            "{error:?}"
-        );
-    }
+    // A 2D relation is read too (#285): a trimmed line has none.
+    assert!(seams(&graph, plan_trim, &options()).unwrap().is_empty());
+    // Refused by name: a corner only quadrature locates.
+    let error = seams(&graph, spline, &options()).unwrap_err();
+    assert!(
+        matches!(&error, GeomError::UnsupportedInput { input, .. }
+            if input.contains("its arc length to the knot is a quadrature")),
+        "{error:?}"
+    );
 }

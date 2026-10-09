@@ -2,8 +2,10 @@
 //! oriented curve station, its local `x`, `y`, `z` on the station's
 //! tangent, left lateral and up. Frames are checked against closed forms
 //! computed here, never against the evaluator under test; exactness is
-//! claimed on a line basis only; stations along a placed curve work where
-//! the placement keeps `+Z` and are refused by name where it tilts it.
+//! claimed on a line basis only; stations along a placed curve carry the
+//! source's where the placement keeps `+Z`, read the placed curve's own
+//! frame where it tilts it (#285), and are refused by name on a tilted
+//! plan-measured source.
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3};
@@ -524,7 +526,12 @@ fn a_station_along_a_curve_placed_in_plan_is_the_source_station_carried() {
 }
 
 #[test]
-fn a_station_along_a_curve_placed_in_a_tilted_frame_is_refused_by_name() {
+fn a_station_along_a_curve_placed_in_a_tilted_frame_reads_its_own_frame() {
+    // #285: a placement that tilts +Z keeps arc length, so a station along
+    // an arc-length-measured source is the placed curve's own: its point
+    // and tangent carried, its frame the reference-up frame against +Z of
+    // that tangent, NOT the carried (tilted) frame. A plan-measured source
+    // so placed is refused by name.
     let mut b = GeometryGraphBuilder::new();
     let grade = b
         .push_value(Curve3::Elevated(Elevated3::new(
@@ -553,15 +560,65 @@ fn a_station_along_a_curve_placed_in_a_tilted_frame_is_refused_by_name() {
             ),
         ))
         .unwrap();
+    let elevated_leaning = b
+        .push_value(InstanceAtStation::new(
+            grade,
+            at(grade, Station::at(10.0), StationFrame::Section),
+        ))
+        .unwrap();
     let on_leaning = b
         .push_value(CurveStation::new(leaning, Station::at(1.0)))
         .unwrap();
     let on_rolled = b
-        .push_value(CurveStation::new(rolled, Station::at(1.0)))
+        .push_value(CurveStation::new(
+            rolled,
+            Station::new(1.0, StationOffsets::new(0.5, 0.0, 0.0)),
+        ))
         .unwrap();
-    let graph = b.finish(vec![on_leaning, on_rolled]).unwrap();
-    refused_naming(resolve(&graph, on_leaning), "tilts +Z");
-    refused_naming(resolve(&graph, on_rolled), "tilts +Z");
-    // The placement itself is fine.
+    let on_elevated = b
+        .push_value(CurveStation::new(elevated_leaning, Station::at(1.0)))
+        .unwrap();
+    let graph = b.finish(vec![on_leaning, on_rolled, on_elevated]).unwrap();
+
+    // Leaning: placed at (10, 0, 100.2) along t = (1, 0, 0.02) / k; one
+    // further along it, the reference-up frame of t: lateral +y, up
+    // (-0.02, 0, 1) / k (here the carried frame agrees).
+    let k = (1.0_f64 + 0.02 * 0.02).sqrt();
+    let t = Vec3::new(1.0, 0.0, 0.02) / k;
+    let leaned = resolve(&graph, on_leaning).unwrap();
+    close3(
+        leaned.point,
+        Point3::new(10.0, 0.0, 100.2) + t,
+        EPS,
+        "leaning point",
+    );
+    close3(leaned.frame.x, t, EPS, "leaning tangent");
+    close3(
+        leaned.frame.y,
+        Vec3::new(-0.02, 0.0, 1.0) / k,
+        EPS,
+        "leaning up",
+    );
+
+    // Rolled about +y by the axis (0, 0.1, 1): the placed line runs +y from
+    // (2, 2, 0), but its own frame is upright (lateral -x, up +Z), not the
+    // carried lateral (-1, 0, -0.1) / |.|. One along it, half to the left:
+    // (1.5, 3, 0).
+    let upright = resolve(&graph, on_rolled).unwrap();
+    close3(
+        upright.point,
+        Point3::new(1.5, 3.0, 0.0),
+        EPS,
+        "rolled point",
+    );
+    close3(upright.frame.x, Vec3::Y, EPS, "rolled tangent");
+    close3(upright.frame.y, Vec3::Z, EPS, "rolled up stays +Z");
+    close3(upright.frame.z, Vec3::X, EPS, "rolled right stays +x");
+
+    // An elevated curve placed tilted: its plan distance is not the placed
+    // curve's.
+    refused_naming(resolve(&graph, on_elevated), "tilts +Z");
+    // The placements themselves are fine.
     assert!(placement(&graph, leaning).is_ok());
+    assert!(placement(&graph, elevated_leaning).is_ok());
 }

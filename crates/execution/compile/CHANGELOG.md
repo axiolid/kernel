@@ -27,6 +27,25 @@ caret rule for `0.x` versions.
   cross or touch other than neighbours at their joint. Polyline
   boundaries are unchanged.
 
+- Stations along curve relations (#285, ADR 0082 amendment):
+  `station::resolve`, `station::placement` and every run of stations
+  (offset curves, sectioned spines and surfaces) take a composite, a
+  trim, a surface curve whose 3D curve governs and a curve placed at a
+  station as their basis, nested and placed in any combination, 2D or
+  3D: the relation is flattened into spans of atomic curves (as a
+  composite directrix reads it) and measured as one
+  `axiolid_reference::station::CompositeBasis`. A station on a joint
+  reads the piece its `SeamSide` names; a run across a joint whose
+  tangents differ is mitred there. A placement on a composite is exact
+  only where every piece up to the one read is an exactly placed line.
+  Pieces measured differently, a gap, and an undeclared reversed piece
+  are refused by name.
+- `station::seams` reads every relation a station can be measured along
+  -- 2D relations, nested composites, trims of relations, placed
+  segments, elevated pieces -- at the running sum of its pieces' lengths,
+  with each piece's own seams inside it; a joint after an ellipse or a
+  B-spline piece is refused as inexact by name.
+
 ### Changed
 
 - Oblique extrusions with arcs compile to the right exact solid (#280,
@@ -45,6 +64,14 @@ caret rule for `0.x` versions.
   `"extrusion direction in the profile plane"` (#281, through
   `axiolid-construct`'s `extrude_profile`), where it returned a sliver or
   flat mesh; the exact compiler already refused it by that name.
+
+- A station along a curve placed in a frame that tilts `+Z` (#264) is no
+  longer refused when the source is measured by arc length: its point and
+  tangent are carried and its frame is the placed curve's own
+  reference-up frame against `+Z`. An elevated or banked source so placed
+  is still refused by name.
+- The refusal of an unsupported station basis now names what is
+  supported ("... a curve relation other than a composite, a trim, ...").
 
 ### Fixed
 

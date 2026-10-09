@@ -10,7 +10,7 @@ use axiolid_model::{
 
 mod elevated;
 mod pieces;
-pub(crate) use pieces::{exact_pieces, pieces};
+pub(crate) use pieces::pieces;
 
 const MAX_DEPTH: usize = 256;
 const MAX_POINTS: usize = 1_000_000;
@@ -254,7 +254,7 @@ fn unsupported_curve_evaluation() -> GeomError {
     }
 }
 
-fn parameter(
+pub(crate) fn parameter(
     selectors: &[TrimSelector],
     preference: TrimmingPreference,
     label: &str,
@@ -348,7 +348,7 @@ fn parameter_kind(
 }
 
 /// Parameter selectors only, for a basis with no invertible analytic curve.
-fn parameter_only(
+pub(crate) fn parameter_only(
     selectors: &[TrimSelector],
     preference: TrimmingPreference,
     label: &str,
@@ -435,7 +435,7 @@ fn sample_periodic_trim(
 
 /// The unwrapped basis interval `[lo, hi]` of a periodic trim, narrowed to
 /// a sweep `range` when one is given (see [`sample_periodic_trim`]).
-fn periodic_trim_interval(
+pub(crate) fn periodic_trim_interval(
     period: Scalar,
     a: Scalar,
     b: Scalar,

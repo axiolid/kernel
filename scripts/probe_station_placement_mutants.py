@@ -4,7 +4,8 @@ Each mutant breaks one step a placement rests on: the axis mapping (local
 x, y, z onto tangent, left lateral, up), the origin on the station's
 offset point, the oriented (not base) frame, the seam side passed through,
 the exactness claim and what the compilers do with it, the frame a
-station along a placed curve carries and the refusal of a tilted one, the
+station along a placed curve carries and the refusal of a tilted
+plan-measured one (#285 reads a tilted arc-length one in its own frame), the
 directrix moved by the placement, and the graph's validation (family,
 dimension, station checks, references). Each must turn a test red:
 `evaluate/tests/station_placement.rs` checks the placement against closed
@@ -23,6 +24,7 @@ import pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 E = "crates/algorithms/parametric/evaluate/src/station.rs"
 C = "crates/execution/compile/src/station.rs"
+B = "crates/execution/compile/src/station/basis.rs"
 K = "crates/execution/compile/src/compiler.rs"
 X = "crates/execution/compile/src/exact.rs"
 D = "crates/execution/compile/src/directrix.rs"
@@ -60,15 +62,15 @@ MUTANTS = [
     ('placement in the unturned frame', C,
      '    let mut transform = turned.placement();',
      '    let mut transform = resolved.section.placement();', [PLACE]),
-    ('a placed basis is not carried', C,
-     '            Some(transform) => section.moved(transform),',
-     '            Some(_) => section,', [PLACE]),
-    ('a tilted placed basis accepted', C,
-     '                if (transform.transform_vector3(Vec3::Z) - Vec3::Z).length() > KEEPS_UP {',
-     '                if false {', [PLACE]),
-    ('a placed basis loses its seams', C,
-     '        Some(GeometryNode::InstanceAtStation(_)) => Basis::of(graph, curve)?.exact_seams(),',
-     '        Some(GeometryNode::InstanceAtStation(_)) => Ok(Vec::new()),', [PLACE]),
+    ('a placed basis is not carried', B,
+     '                    Some(rigid) => section.carried(*rigid, curve.convention())?,',
+     '                    Some(_) => section,', [PLACE]),
+    ('a tilted plan-measured placed basis accepted', E,
+     '        if measure == DistanceConvention::PlanDistance {',
+     '        if false {', [PLACE]),
+    ('a placed basis loses its seams', B,
+     '                StationCurve::Two(curve) => exact_station_seams2(curve),',
+     '                StationCurve::Two(_) => Ok(Vec::new()),', [PLACE]),
     ('an inexact placement reported bounded', K,
      '                if !placement.exact {',
      '                if false {', [PLACE]),
