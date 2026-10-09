@@ -18,7 +18,7 @@
 //! with the refusal's name.
 
 use std::collections::HashMap;
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, PI};
 use std::time::Instant;
 
 use axiolid_brep::ExactBRep;
@@ -56,6 +56,15 @@ impl Graph {
         self.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
             profile,
             direction: Vec3::Z,
+            depth,
+        }))
+    }
+
+    fn extrusion_along(&mut self, profile: Profile, direction: Vec3, depth: Scalar) -> NodeId {
+        let profile = self.push(GeometryNode::Profile(profile));
+        self.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction,
             depth,
         }))
     }
@@ -406,6 +415,78 @@ fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
         &options,
     );
     assert_measured("slab, round shaft", case, &options, 2.0);
+}
+
+/// A slab less an oblique round shaft and an oblique rounded opening,
+/// both extruded along directions leaning off the normal (#280).
+///
+/// Each operand is exact on its own: its arc walls are oblique circular
+/// cylinders, audited clean, of the sheared prism's closed-form volume.
+/// The exact boolean does not yet cut such a wall and refuses by name, so
+/// the mesh's report stays unbounded with that name: it is never certified
+/// against a solid that is not the operands' boolean. Before #280 the
+/// rounded operand stood its corner walls upright on the profile plane, a
+/// shear away from the mesh's.
+#[test]
+fn a_slab_with_oblique_round_openings_is_never_certified_against_a_wrong_solid() {
+    let budget = 1e-3;
+    let options = options(budget);
+    let mut operands = Vec::new();
+    let case = compile(
+        |g| {
+            let slab = g.extrusion(rect(4.0, 3.0), 0.25);
+            let slab = g.place(slab, building());
+            let lean = Vec3::new(0.3, -0.2, 1.0);
+            let shaft = g.extrusion_along(circle(0.3), lean, 0.75);
+            let local = Transform3::from_translation(Vec3::new(-1.0, 0.4, -0.25));
+            let shaft = g.place(shaft, building() * local);
+            operands.push((shaft, PI * 0.09, lean));
+            let slab = g.boolean(slab, shaft, BooleanOperator::Difference);
+            let rounded = Profile::Rectangle(RectangleProfile {
+                x: 0.8,
+                y: 0.5,
+                thickness: None,
+                outer_radius: Some(0.15),
+                inner_radius: None,
+            });
+            let lean = Vec3::new(-0.4, 0.25, -1.0);
+            let opening = g.extrusion_along(rounded, lean, 0.75);
+            let local = Transform3::from_translation(Vec3::new(0.9, -0.5, 0.5));
+            let opening = g.place(opening, building() * local);
+            operands.push((opening, 0.4 - (4.0 - PI) * 0.0225, lean));
+            g.boolean(slab, opening, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (graph, root, _, report, _) = case;
+    let refusal = "exact boolean over a curve or surface it cannot evaluate";
+    assert_eq!(report.bound, None, "{report:?}");
+    assert!(
+        report
+            .contributions
+            .iter()
+            .all(|c| c.bound == DeviationBound::Unbounded(refusal)),
+        "{report:?}"
+    );
+    assert!(ReferenceExactCompiler::new()
+        .compile_exact(&graph, root, &options)
+        .is_err());
+    for (operand, area, lean) in operands {
+        let exact = ReferenceExactCompiler::new()
+            .compile_exact(&graph, operand, &options)
+            .expect("an oblique operand is exact");
+        let health = axiolid_brep_audit::geometric_audit(&exact, options.tolerance());
+        assert!(health.is_consistent(), "{:?}", health.defects());
+        let volume = axiolid_measure::exact_properties(&exact, options.tolerance())
+            .expect("measurable")
+            .signed_volume;
+        // A shear keeps volume: area times the normal part of the offset.
+        let expected = area * 0.75 * lean.z.abs() / lean.length();
+        assert!(
+            (volume - expected).abs() <= 1e-9 * expected,
+            "volume {volume}, expected {expected}"
+        );
+    }
 }
 
 /// A gable wall under two roof planes `z = 2.4 -+ 0.3 x` (world

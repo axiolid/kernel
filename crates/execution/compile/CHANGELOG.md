@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Oblique extrusions with arcs compile to the right exact solid (#280,
+  through `axiolid-construct`): a leaning circle or arc wall is an
+  oblique circular cylinder, an `EllipticalCylinder` along the
+  direction, where `ReferenceExactCompiler` returned upright cylinder
+  walls a shear away from the mesh (and refused an oblique circle). The
+  general exact boolean does not yet cut such a wall and refuses by name,
+  so a boolean with an oblique round opening stays
+  `DeviationBound::Unbounded` under that name, never certified against a
+  wrong solid (`tests/boolean_deviation.rs`). A face on such a surface
+  is meshed within its reported bound (`tests/deviation_report.rs`).
+
 ## [0.3.15] - 2026-10-09
 
 ### Added

@@ -33,7 +33,7 @@ use axiolid_mesh_compile::{DeviationBound, DeviationPath, DeviationReport, Refer
 use axiolid_model::{GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation};
 use axiolid_primitive::Primitive;
 use axiolid_profile::{Contour, ContourProfile, EllipseProfile, Profile, ProfileSegment};
-use axiolid_surface::{BSplineSurface, Cone, Cylinder, Sphere, Surface, Torus};
+use axiolid_surface::{BSplineSurface, Cone, Cylinder, EllipticalCylinder, Sphere, Surface, Torus};
 use axiolid_topology::{
     BRep, Edge, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex,
 };
@@ -744,6 +744,33 @@ fn a_cylinder_face_is_within_its_reported_bound() {
         Surface::Cylinder(Cylinder {
             frame: frame3(),
             radius: 0.3,
+        }),
+        (0.0, 2.0),
+        (0.0, 0.5),
+        None,
+        3.0,
+    );
+}
+
+/// The wall an arc sweeps along a leaning direction (#280): an elliptical
+/// cylinder whose axis is the direction, not `z`, and whose semi-axes are
+/// the arc's radius and the radius times the direction's normal component.
+#[test]
+fn an_oblique_elliptical_cylinder_face_is_within_its_reported_bound() {
+    let (r, d) = (0.3, Vec3::new(0.3, -0.2, 1.0).normalize());
+    let plan = Vec3::new(d.x, d.y, 0.0).normalize();
+    let across = Vec3::new(-plan.y, plan.x, 0.0);
+    brep_case(
+        "oblique elliptical cylinder face",
+        Surface::EllipticalCylinder(EllipticalCylinder {
+            frame: Frame3 {
+                origin: Point3::new(0.4, -0.1, 0.2),
+                x: across,
+                y: d.cross(across),
+                z: d,
+            },
+            semi_axis_x: r,
+            semi_axis_y: r * d.z,
         }),
         (0.0, 2.0),
         (0.0, 0.5),

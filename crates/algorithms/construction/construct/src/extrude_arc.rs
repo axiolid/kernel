@@ -14,6 +14,20 @@
 //! no sampling, no tessellation. The bulge is converted to centre, radius
 //! and sweep by closed form, verified against the defining circle before
 //! any B-rep is built.
+//!
+//! # Oblique walls (#280)
+//!
+//! An offset that leans off the profile normal shears the top cap by the
+//! offset's plan part: every far vertex, edge and cap is its base
+//! counterpart moved by the whole offset. A straight edge then sweeps a
+//! plane containing the offset, and an arc sweeps an OBLIQUE circular
+//! cylinder: the circle `c + r (cos t, sin t, 0)` moved along the unit
+//! direction `d`. That is not a right [`Cylinder`] -- its section
+//! perpendicular to `d` is an ellipse -- so it is built as the
+//! [`EllipticalCylinder`] with axis `d` it is (see [`ObliqueWall`]), with
+//! the rim pcurves the [`Sinusoid2`] graphs the profile plane and the far
+//! cap trace across it. An offset along the normal keeps the right
+//! cylinder, unchanged.
 
 use axiolid_brep::{ExactBRep, ExactBRepBuilder, FaceName, SweptFace};
 use axiolid_contracts::{GeomError, GeomResult};
@@ -23,7 +37,7 @@ use axiolid_curve::{
 };
 use axiolid_nurbs::exact_surface_intersection;
 use axiolid_overlay::ArcRing;
-use axiolid_surface::{Cylinder, Plane, Surface};
+use axiolid_surface::{Cylinder, EllipticalCylinder, Plane, Surface};
 use axiolid_topology::{
     Edge, EdgeId, EdgeUse, Face, FaceBound, FaceId, LoopId, Orientation, Vertex, VertexId,
 };
@@ -416,11 +430,15 @@ fn add_arc_ring(
         // far harder to see than a refusal.
         for (is_top, vertices) in [(false, &bottom_vertices), (true, &top_vertices)] {
             let level = span.level(is_top);
+            // The far rim is the base rim moved by the whole offset, so its
+            // edges are supported where its vertices are: over the plan
+            // section moved by the shear (#280). Only the top of an oblique
+            // span has one; sloped spans have none.
+            let shift = if is_top { span.shear } else { Vec2::ZERO };
+            let (from, to) = (from + shift, to + shift);
             let (curve, interval) = if bulge == 0.0 {
                 // A straight edge at either level is the chord between its
-                // two vertices at that level, flat or sloped. The shear is
-                // deliberately not applied to the edge support: the flat
-                // path has always built edges over the plan section.
+                // two vertices at that level, flat or sloped.
                 let start = Point3::new(from.x, from.y, level.at(from));
                 let end = Point3::new(to.x, to.y, level.at(to));
                 (
@@ -582,6 +600,8 @@ pub(crate) fn circle_of(arc: &ArcGeometry, level: Scalar, start: Point3) -> Geom
 /// `v` above the bottom level's anchor height. A flat rim is the straight
 /// pcurve `v = const`; a sloped rim is the [`Sinusoid2`] the plane traces
 /// across the cylinder, so the trim stays exact rather than approximated.
+/// A leaning span sweeps the [`ObliqueWall`] instead, whose rims are
+/// [`Sinusoid2`] graphs too.
 fn add_cylindrical_wall(
     builder: &mut ExactBRepBuilder,
     ring: &ArcRing,
@@ -595,6 +615,43 @@ fn add_cylindrical_wall(
     let to = ring.vertices[next].point;
     let arc = arc_geometry(from, to, ring.vertices[index].bulge)?;
     let anchor = span.bottom.height;
+    if span.shear != Vec2::ZERO {
+        // Leaning: an oblique cylinder, not a right one (#280). Only flat
+        // levels reach here (`build_arc_rings` refuses a sloped one).
+        let offset = Vec3::new(
+            span.shear.x,
+            span.shear.y,
+            span.top.height - span.bottom.height,
+        );
+        let centre = Point3::new(arc.centre.x, arc.centre.y, anchor);
+        let wall = ObliqueWall::new(centre, arc.radius, offset)?;
+        let start = wall.angle_of(Point3::new(from.x, from.y, anchor));
+        let end = start + arc.sweep;
+        let surface = builder.add_surface(Surface::EllipticalCylinder(wall.surface));
+        let uses = [
+            (
+                topology.bottom_edges[index],
+                Orientation::Forward,
+                wall.rim(0.0, start, end),
+            ),
+            (
+                topology.vertical_edges[next],
+                Orientation::Forward,
+                wall.ruling(end),
+            ),
+            (
+                topology.top_edges[index],
+                Orientation::Reversed,
+                wall.rim(1.0, start, end),
+            ),
+            (
+                topology.vertical_edges[index],
+                Orientation::Reversed,
+                wall.ruling(start),
+            ),
+        ];
+        return Ok(wall_face(builder, surface, uses));
+    }
     let circle = circle_of(&arc, anchor, Point3::new(from.x, from.y, anchor))?;
     let surface = builder.add_surface(Surface::Cylinder(Cylinder {
         frame: circle.frame,
@@ -662,6 +719,153 @@ fn add_cylindrical_wall(
         ),
     ];
     Ok(wall_face(builder, surface, uses))
+}
+
+/// The oblique circular cylinder a circle sweeps along a leaning offset
+/// (#280).
+///
+/// The circle `c + r (cos t, sin t, 0)` moved along the unit direction
+/// `d = (d_h h, d_z)`, `h` the unit plan direction it leans towards and
+/// `d_h, d_z > 0`, is the set of points whose section perpendicular to
+/// `d` is the circle projected along `d`. The plan direction `w = z x h`
+/// is perpendicular to `d`, so it keeps its length `r`; the plan direction
+/// `h` makes the angle whose cosine is `d_z` with that section, so it
+/// shortens to `r d_z`. The surface is therefore exactly the
+/// [`EllipticalCylinder`] with frame `(w, d x w, d)` and semi-axes `r` and
+/// `r d_z`, with no approximation:
+///
+/// `S(u, v) = c + r cos u w + r d_z sin u (d x w) + v d`, and since
+/// `d x w = d_h z - d_z h`, the point at `u` lies at height
+/// `d_z (v + r d_h sin u)` above the circle's plane and, there, at plan
+/// position `c + r (cos u w - sin u h)`.
+///
+/// So `u` is the plan angle about `c` measured from `w` counter-clockwise
+/// (`w x (-h) = z`), the angle a [`Circle3`] rim edge runs with, and the
+/// rim at height `H` is the graph `v = H / d_z - r d_h sin u`: a
+/// [`Sinusoid2`] with no cosine term. A ruling at angle `u` is the
+/// straight segment `v` from the base rim to the far one. With `d_z > 0`
+/// the frame is right-handed with `u` counter-clockwise from above, like
+/// the right cylinder's, so the surface normal `S_u x S_v` points out of
+/// the circle and a wall face takes the same orientation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObliqueWall {
+    pub(crate) surface: EllipticalCylinder,
+    /// `w`, the plan direction `u` is measured from.
+    across: Vec3,
+    /// `-h`, the plan direction at `u = pi / 2`.
+    along: Vec3,
+    /// The base circle's centre.
+    centre: Point3,
+    /// `v` per unit height above the base: `1 / d_z`.
+    slant: Scalar,
+    /// The rim's `sin u` amplitude, `-r d_h`.
+    lean: Scalar,
+    /// The offset's height `o.z`: the far rim's.
+    height: Scalar,
+}
+
+impl ObliqueWall {
+    /// The wall swept by the circle of `radius` about `centre` (in a plane
+    /// `z = centre.z`) along `offset`, which must lean (`o.x` or `o.y`
+    /// non-zero) and rise (`o.z > 0`).
+    pub(crate) fn new(centre: Point3, radius: Scalar, offset: Vec3) -> GeomResult<Self> {
+        let plan = Vec2::new(offset.x, offset.y);
+        let plan_length = plan.length();
+        let length = offset.length();
+        if !(plan_length > 0.0 && offset.z > 0.0 && length.is_finite() && radius > 0.0) {
+            return Err(GeomError::Degenerate(
+                "an oblique wall needs a leaning, rising offset and a positive radius".to_owned(),
+            ));
+        }
+        let h = plan / plan_length;
+        let across = Vec3::new(-h.y, h.x, 0.0);
+        let along = Vec3::new(-h.x, -h.y, 0.0);
+        let z = offset / length;
+        let y = z.cross(across);
+        let (lateral, rise) = (plan_length / length, offset.z / length);
+        let surface = EllipticalCylinder {
+            frame: Frame3 {
+                origin: centre,
+                x: across,
+                y,
+                z,
+            },
+            semi_axis_x: radius,
+            semi_axis_y: radius * rise,
+        };
+        let wall = Self {
+            surface,
+            across,
+            along,
+            centre,
+            slant: length / offset.z,
+            lean: -radius * lateral,
+            height: offset.z,
+        };
+        if !(y.is_finite()
+            && z.is_finite()
+            && wall.slant.is_finite()
+            && wall.lean.is_finite()
+            && surface.semi_axis_y > 0.0)
+        {
+            return Err(GeomError::Degenerate(
+                "an oblique wall produced a non-finite or flat cylinder".to_owned(),
+            ));
+        }
+        Ok(wall)
+    }
+
+    /// The wall angle `u` of a point on the base circle.
+    pub(crate) fn angle_of(&self, point: Point3) -> Scalar {
+        let radial = point - self.centre;
+        radial.dot(self.along).atan2(radial.dot(self.across))
+    }
+
+    /// `v` of the rim at `fraction` of the offset's height (0 the base, 1
+    /// the far cap) above angle `u`.
+    pub(crate) fn v(&self, fraction: Scalar, u: Scalar) -> Scalar {
+        self.mean(fraction) + self.lean * u.sin()
+    }
+
+    fn mean(&self, fraction: Scalar) -> Scalar {
+        fraction * self.height * self.slant
+    }
+
+    /// The rim pcurve at `fraction` of the height, spanning `start..end`.
+    pub(crate) fn rim(&self, fraction: Scalar, start: Scalar, end: Scalar) -> (Curve2, Interval) {
+        (
+            Curve2::Sinusoid(Sinusoid2 {
+                mean: self.mean(fraction),
+                cosine: 0.0,
+                sine: self.lean,
+            }),
+            Interval::new(start, end),
+        )
+    }
+
+    /// The ruling pcurve at angle `u`, from the base rim to the far rim.
+    pub(crate) fn ruling(&self, u: Scalar) -> (Curve2, Interval) {
+        let low = self.v(0.0, u);
+        let high = self.v(1.0, u);
+        (
+            Curve2::Line(Line2 {
+                origin: Vec2::new(u, low),
+                direction: Vec2::new(0.0, high - low),
+            }),
+            Interval::UNIT,
+        )
+    }
+
+    /// The plan direction `u = 0` points at, the frame x-axis a full-circle
+    /// rim edge starts from.
+    pub(crate) fn across(&self) -> Vec3 {
+        self.across
+    }
+
+    /// The plan direction at `u = pi / 2`.
+    pub(crate) fn along(&self) -> Vec3 {
+        self.along
+    }
 }
 
 /// A planar wall swept by a straight edge.

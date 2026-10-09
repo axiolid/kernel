@@ -9,6 +9,42 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Oblique exact extrusions of profiles with arcs are the sheared prism
+  (#280).** For an offset leaning off the profile normal, the arc
+  extruder (rounded rectangles, contours with arcs or round holes,
+  sections with fillets, centre-line profiles, composites) built each arc
+  wall as a right `Cylinder` standing on the profile plane and left the
+  far rim's edges over the unsheared plan section, while the far vertices
+  and cap were sheared: the solid was wrong by the horizontal shear
+  (about 0.25 in the geometric audit for `(0.3, -0.2, 1)` at depth 0.75)
+  and nothing refused it. Since #275 the downward case inherited it
+  through the mirror. The far rim is now the base rim moved by the whole
+  offset, and an arc sweeps the oblique circular cylinder it is: an
+  `EllipticalCylinder` with its axis along the unit direction `d`,
+  semi-axes `r` (across the lean) and `r d.z`, and rims traced by
+  `Sinusoid2` pcurves (`v = H / d.z - r |d_h| sin u`), all closed form.
+  Along the normal the walls stay right cylinders, unchanged.
+
+### Changed
+
+- **An oblique circle extrudes exactly (#280)** instead of being refused
+  as `"oblique circle extrusion"`: its wall is the same oblique
+  cylinder, its seam at the wall's angle origin. An oblique ellipse is
+  still refused, as `"oblique ellipse extrusion"`: its swept section has
+  principal axes other than the profile's. Tests
+  (`tests/oblique_extrusion.rs`): the issue's repro, and every family
+  with arcs (rounded and hollow rounded rectangles, a round hole, a round
+  contour, a 270-degree arc, a curved centre line, a circle, a derived
+  and a composite profile, a filleted I section) along four leaning
+  directions, up and down, each audited clean, of volume
+  `area * depth * |d.z|` (a closed form, or the straight prism of the
+  same height), with far vertices the base ones moved by the offset and
+  wall points that shear back onto the profile's circles; the downward
+  family sweep now covers oblique curved families too. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
+
 ## [0.3.16] - 2026-10-09
 
 ### Added

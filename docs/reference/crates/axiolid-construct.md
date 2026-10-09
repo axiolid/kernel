@@ -21,7 +21,9 @@ Solid generation from exact inputs: extrusion, revolution, sweeps, lofts,
 centre-line profiles, half-space clipping proxies, offsets, fillets and
 chamfers on supported families, and focused exact booleans (planar
 polyhedra, coaxial column solids). Every `Profile` variant extrudes to an
-exact B-rep, along or against its profile normal, and revolution -- a full turn, or a partial turn capped by
+exact B-rep, along or against its profile normal, and every one but
+the ellipse along a direction leaning off it (arcs sweeping oblique
+circular cylinders), and revolution -- a full turn, or a partial turn capped by
 the profile at both ends -- covers any profile that lowers to a contour;
 a disk swept along a segment or an arc is exact; other sweeps and lofts
 produce meshes by default, a disk swept along a chain of segments and

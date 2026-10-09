@@ -191,43 +191,55 @@ fn exact_extrusion_refuses_families_whose_supports_are_not_populated() {
     }
 }
 
+/// An oblique circle sweeps an oblique circular cylinder (#280), never a
+/// right cylinder mislabelled as its support: the wall is the elliptical
+/// cylinder with its axis along the direction.
 #[test]
-fn oblique_circle_extrusion_refuses_instead_of_mislabeling_a_cylinder() {
+fn oblique_circle_extrusion_builds_an_oblique_cylinder_not_a_right_one() {
     let profile = Profile::Circle(CircleProfile {
         radius: 1.0,
         thickness: None,
     });
-    let error = extrude_profile_exact(&profile, Vec3::new(1.0, 0.0, 1.0), 1.0, Tolerance::METRE)
-        .expect_err("oblique circle needs a non-cylindrical swept support");
-
-    assert!(matches!(
-        error,
-        GeomError::UnsupportedInput {
-            operation: Operation::Sweep,
-            input: "oblique circle extrusion",
-            ..
-        }
-    ));
+    let direction = Vec3::new(1.0, 0.0, 1.0);
+    let solid = extrude_profile_exact(&profile, direction, 1.0, Tolerance::METRE)
+        .expect("an oblique circle extrudes exactly");
+    assert_complete_and_closed(&solid);
+    assert_pcurve_surface_agreement(&solid);
+    let walls: Vec<_> = solid
+        .surfaces()
+        .iter()
+        .filter(|surface| !matches!(surface, Surface::Plane(_)))
+        .collect();
+    assert_eq!(walls.len(), 1);
+    let Surface::EllipticalCylinder(wall) = walls[0] else {
+        panic!(
+            "an oblique circle's wall is not a right cylinder: {:?}",
+            walls[0]
+        );
+    };
+    let unit = direction.normalize();
+    assert!((wall.frame.z - unit).length() < 1e-15);
+    assert!((wall.semi_axis_x - 1.0).abs() < 1e-15);
+    assert!((wall.semi_axis_y - unit.z).abs() < 1e-15);
 }
 
+/// A lean below tolerance is still a lean: the exact constructor builds the
+/// oblique cylinder it denotes rather than snapping it to the normal.
 #[test]
-fn sub_tolerance_oblique_circle_refuses_instead_of_snapping_geometry() {
+fn sub_tolerance_oblique_circle_is_not_snapped_to_the_normal() {
     let profile = Profile::Circle(CircleProfile {
         radius: 1.0,
         thickness: None,
     });
     let direction = Vec3::new(Tolerance::METRE.linear() * 0.5, 0.0, 1.0);
-    let error = extrude_profile_exact(&profile, direction, 1.0, Tolerance::METRE)
-        .expect_err("an exact constructor must not tolerance-snap an oblique direction");
-
-    assert!(matches!(
-        error,
-        GeomError::UnsupportedInput {
-            operation: Operation::Sweep,
-            input: "oblique circle extrusion",
-            ..
-        }
-    ));
+    let solid = extrude_profile_exact(&profile, direction, 1.0, Tolerance::METRE)
+        .expect("a slightly leaning circle extrudes exactly");
+    assert_complete_and_closed(&solid);
+    assert_pcurve_surface_agreement(&solid);
+    assert!(solid
+        .surfaces()
+        .iter()
+        .any(|surface| matches!(surface, Surface::EllipticalCylinder(_))));
 }
 
 #[test]

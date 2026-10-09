@@ -109,13 +109,13 @@ fn polygon_with_holes() -> Profile {
     })
 }
 
-/// A profile family, its closed-form area, and whether its boundary is
-/// straight-edged.
+/// A profile family, its closed-form area, and whether it extrudes along
+/// a direction leaning off the normal.
 struct Family {
     name: &'static str,
     profile: Profile,
     area: f64,
-    straight: bool,
+    leans: bool,
 }
 
 fn curved(name: &'static str, profile: Profile, area: f64) -> Family {
@@ -123,7 +123,7 @@ fn curved(name: &'static str, profile: Profile, area: f64) -> Family {
         name,
         profile,
         area,
-        straight: false,
+        leans: true,
     }
 }
 
@@ -132,7 +132,7 @@ fn straight(name: &'static str, profile: Profile, area: f64) -> Family {
         name,
         profile,
         area,
-        straight: true,
+        leans: true,
     }
 }
 
@@ -165,14 +165,18 @@ fn families() -> Vec<Family> {
             }),
             core::f64::consts::PI * 2.25,
         ),
-        curved(
-            "ellipse",
-            Profile::Ellipse(EllipseProfile {
-                semi_axis_x: 2.0,
-                semi_axis_y: 1.0,
-            }),
-            core::f64::consts::PI * 2.0,
-        ),
+        // An ellipse refuses a leaning direction by name.
+        Family {
+            leans: false,
+            ..curved(
+                "ellipse",
+                Profile::Ellipse(EllipseProfile {
+                    semi_axis_x: 2.0,
+                    semi_axis_y: 1.0,
+                }),
+                core::f64::consts::PI * 2.0,
+            )
+        },
         curved("contour with holes", holed_contour(), holed_contour_area()),
         straight(
             "derived",
@@ -254,14 +258,11 @@ fn a_rectangle_extrudes_down_the_normal() {
     }
 }
 
-/// Every builder family along the normal, and every straight-edged one
+/// Every builder family along the normal, and every one but the ellipse
 /// along oblique directions too: the downward solid is the forward solid
 /// mirrored in the profile plane, closed, consistent, and of the same
-/// positive closed-form volume.
-///
-/// Curved families go along the normal only: a circle or ellipse refuses an
-/// oblique direction, and the arc path's oblique walls are a separate
-/// defect of the forward build, not of the mirror.
+/// positive closed-form volume. Oblique arc walls are oblique cylinders
+/// since #280; an ellipse refuses an oblique direction.
 #[test]
 fn every_family_extrudes_down_as_the_mirror_of_its_forward_prism() {
     let depth = 0.75;
@@ -269,11 +270,11 @@ fn every_family_extrudes_down_as_the_mirror_of_its_forward_prism() {
         name,
         profile,
         area,
-        straight,
+        leans,
     } in families()
     {
         let mut directions = vec![Vec3::Z];
-        if straight {
+        if leans {
             directions.extend([Vec3::new(0.3, -0.2, 1.0), Vec3::new(-1.0, 2.0, 1.5)]);
         }
         for up in directions {
@@ -425,24 +426,24 @@ fn a_direction_in_the_profile_plane_is_refused_by_name() {
     }
 }
 
-/// A circle along `-z` still refuses an oblique direction rather than
-/// mislabeling a cylinder.
+/// An ellipse along `-z` still refuses an oblique direction rather than
+/// mislabeling an elliptical cylinder.
 #[test]
-fn an_oblique_downward_circle_still_refuses() {
+fn an_oblique_downward_ellipse_still_refuses() {
     let error = extrude_profile_exact(
-        &Profile::Circle(CircleProfile {
-            radius: 1.0,
-            thickness: None,
+        &Profile::Ellipse(EllipseProfile {
+            semi_axis_x: 2.0,
+            semi_axis_y: 1.0,
         }),
         Vec3::new(1.0, 0.0, -1.0),
         1.0,
         tol(),
     )
-    .expect_err("oblique circle");
+    .expect_err("oblique ellipse");
     assert!(matches!(
         error,
         GeomError::UnsupportedInput {
-            input: "oblique circle extrusion",
+            input: "oblique ellipse extrusion",
             ..
         }
     ));

@@ -20,6 +20,18 @@
 //! Only an offset within tolerance of the profile plane, `|o.z| <=
 //! tolerance`, is refused, as `"extrusion direction in the profile plane"`:
 //! it bounds no volume either way.
+//!
+//! # Oblique directions (#280)
+//!
+//! An offset that leans off the normal builds the sheared prism: the far
+//! cap is the profile moved by the whole offset, straight edges sweep
+//! planes containing it, and an arc or a full circle sweeps the oblique
+//! circular cylinder `ObliqueWall` describes -- an `EllipticalCylinder`
+//! with its axis along the direction, exact, never a right `Cylinder`
+//! standing on the profile plane. Its volume is the straight prism's,
+//! `area * o.z`. An ellipse swept obliquely is an elliptical cylinder
+//! whose principal axes differ from the profile's; it is not built and is
+//! refused as `"oblique ellipse extrusion"`.
 
 use std::f64::consts::TAU;
 
@@ -38,7 +50,7 @@ use axiolid_topology::{
 
 use crate::center_line_exact::center_line_contour;
 use crate::contour_lower::{contour_to_arc_ring, orient_arc_ring};
-use crate::extrude_arc::extrude_arc_rings;
+use crate::extrude_arc::{extrude_arc_rings, ObliqueWall};
 use crate::profile_lower::lower_derived;
 use crate::section_lower::{rectangle_contour, section_contour};
 use crate::BACKEND_ID;
@@ -57,9 +69,13 @@ pub(crate) struct RingTopology {
 /// below the profile plane builds the mirror image of the prism above it,
 /// outward oriented (see the module docs). A direction within tolerance of
 /// the profile plane is refused as `"extrusion direction in the profile
-/// plane"`. A circle or ellipse extrudes only along the normal (either
-/// way); a family the builders do not cover returns a typed refusal instead
-/// of taking the tessellation path.
+/// plane"`. A direction leaning off the normal builds the oblique prism:
+/// its far cap is the profile moved by the whole offset, and an arc or a
+/// circle sweeps an oblique circular cylinder, built exactly as the
+/// elliptical cylinder it is (#280). An ellipse extrudes only along the
+/// normal (either way) and is refused as `"oblique ellipse extrusion"`
+/// otherwise; a family the builders do not cover returns a typed refusal
+/// instead of taking the tessellation path.
 pub fn extrude_profile_exact(
     profile: &Profile,
     direction: Vec3,
@@ -562,19 +578,31 @@ fn extrude_circle(circle: &CircleProfile, offset: Vec3) -> GeomResult<ExactBRep>
             circle.radius
         )));
     }
-    if offset.x != 0.0 || offset.y != 0.0 {
-        return Err(unsupported("oblique circle extrusion"));
-    }
+    // A leaning offset sweeps an oblique circular cylinder (#280): its rims
+    // and seam are laid out from the wall's own angle origin, so the seam
+    // sits where `u = 0` and the rims are graphs over `u`.
+    let oblique = if offset.x != 0.0 || offset.y != 0.0 {
+        Some(ObliqueWall::new(Point3::ZERO, circle.radius, offset)?)
+    } else {
+        None
+    };
+    let (x, y) = oblique.map_or((Vec3::X, Vec3::Y), |wall| (wall.across(), wall.along()));
 
     let depth = offset.z;
-    let frame_bottom = identity_frame3(Vec3::ZERO);
-    let frame_top = identity_frame3(offset);
+    let rim_frame = |origin: Point3| Frame3 {
+        origin,
+        x,
+        y,
+        z: Vec3::Z,
+    };
+    let frame_bottom = rim_frame(Vec3::ZERO);
+    let frame_top = rim_frame(offset);
     let frame2 = Frame2 {
         origin: Vec2::ZERO,
-        x: Vec2::X,
-        y: Vec2::Y,
+        x: x.truncate(),
+        y: y.truncate(),
     };
-    let bottom_point = Vec3::new(circle.radius, 0.0, 0.0);
+    let bottom_point = x * circle.radius;
     let top_point = bottom_point + offset;
 
     let mut builder = ExactBRepBuilder::default();
@@ -622,30 +650,50 @@ fn extrude_circle(circle: &CircleProfile, offset: Vec3) -> GeomResult<ExactBRep>
     let bottom_loop = add_circle_cap_loop(&mut builder, bottom_edge, frame2, circle.radius);
     let top_loop = add_circle_cap_loop(&mut builder, top_edge, frame2, circle.radius);
 
-    let side_curves = [
-        Curve2::Line(Line2 {
-            origin: Vec2::ZERO,
-            direction: Vec2::X,
-        }),
-        Curve2::Line(Line2 {
-            origin: Vec2::new(TAU, 0.0),
-            direction: Vec2::new(0.0, depth),
-        }),
-        Curve2::Line(Line2 {
-            origin: Vec2::new(0.0, depth),
-            direction: Vec2::X,
-        }),
-        Curve2::Line(Line2 {
-            origin: Vec2::ZERO,
-            direction: Vec2::new(0.0, depth),
-        }),
-    ];
-    let side_edges = [
-        (bottom_edge, Orientation::Forward, Interval::new(0.0, TAU)),
-        (seam_edge, Orientation::Forward, Interval::UNIT),
-        (top_edge, Orientation::Reversed, Interval::new(TAU, 0.0)),
-        (seam_edge, Orientation::Reversed, Interval::new(1.0, 0.0)),
-    ];
+    let (side_curves, side_edges) = if let Some(wall) = oblique {
+        // The rims are the wall's graphs over the full turn and the seam its
+        // ruling at `u = 0` and `u = 2 pi`.
+        let (bottom_rim, _) = wall.rim(0.0, 0.0, TAU);
+        let (top_rim, _) = wall.rim(1.0, 0.0, TAU);
+        let (seam_end, _) = wall.ruling(TAU);
+        let (seam_start, _) = wall.ruling(0.0);
+        (
+            [bottom_rim, seam_end, top_rim, seam_start],
+            [
+                (bottom_edge, Orientation::Forward, Interval::new(0.0, TAU)),
+                (seam_edge, Orientation::Forward, Interval::UNIT),
+                (top_edge, Orientation::Reversed, Interval::new(TAU, 0.0)),
+                (seam_edge, Orientation::Reversed, Interval::new(1.0, 0.0)),
+            ],
+        )
+    } else {
+        (
+            [
+                Curve2::Line(Line2 {
+                    origin: Vec2::ZERO,
+                    direction: Vec2::X,
+                }),
+                Curve2::Line(Line2 {
+                    origin: Vec2::new(TAU, 0.0),
+                    direction: Vec2::new(0.0, depth),
+                }),
+                Curve2::Line(Line2 {
+                    origin: Vec2::new(0.0, depth),
+                    direction: Vec2::X,
+                }),
+                Curve2::Line(Line2 {
+                    origin: Vec2::ZERO,
+                    direction: Vec2::new(0.0, depth),
+                }),
+            ],
+            [
+                (bottom_edge, Orientation::Forward, Interval::new(0.0, TAU)),
+                (seam_edge, Orientation::Forward, Interval::UNIT),
+                (top_edge, Orientation::Reversed, Interval::new(TAU, 0.0)),
+                (seam_edge, Orientation::Reversed, Interval::new(1.0, 0.0)),
+            ],
+        )
+    };
     let mut side_uses = Vec::with_capacity(4);
     let mut side_intervals = Vec::with_capacity(4);
     for ((edge, orientation, interval), curve) in side_edges.into_iter().zip(side_curves) {
@@ -659,14 +707,21 @@ fn extrude_circle(circle: &CircleProfile, offset: Vec3) -> GeomResult<ExactBRep>
     }
     let side_loop = add_loop(&mut builder, side_uses, side_intervals);
 
+    // The caps keep the identity axes: only their pcurves' frames turn
+    // with the seam.
     let bottom_surface = builder.add_surface(Surface::Plane(Plane {
-        frame: frame_bottom,
+        frame: identity_frame3(Vec3::ZERO),
     }));
-    let top_surface = builder.add_surface(Surface::Plane(Plane { frame: frame_top }));
-    let side_surface = builder.add_surface(Surface::Cylinder(Cylinder {
-        frame: frame_bottom,
-        radius: circle.radius,
+    let top_surface = builder.add_surface(Surface::Plane(Plane {
+        frame: identity_frame3(offset),
     }));
+    let side_surface = builder.add_surface(match oblique {
+        Some(wall) => Surface::EllipticalCylinder(wall.surface),
+        None => Surface::Cylinder(Cylinder {
+            frame: frame_bottom,
+            radius: circle.radius,
+        }),
+    });
     let bottom_face = add_single_bound_face(
         &mut builder,
         bottom_surface,
