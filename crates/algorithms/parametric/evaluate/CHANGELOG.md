@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceCurveEvaluator` reads a seam side (#286, ADR 0082
+  amendment): `point_at_on`, `tangent_at_on` and `frame_at_on` answer a
+  measure ON a seam by the station rule (within `ARC_LENGTH_TOLERANCE *
+  max(1, s)`, for both sides) with `station_section3_on`, so a placement
+  framed through the contract agrees with the same station lowered as
+  geometry; the frame is built against the evaluator's reference up, and
+  a banked curve's against `+Z` only, as side-lessly. Off a seam both
+  sides are the side-less answer. A distance is located in the provider's
+  convention, as is an elevated or banked curve's native parameter; the
+  incoming side at a polyline's or a B-spline's native parameter is
+  refused by a typed `UnsupportedInput`.
+
 ## [0.3.8] - 2026-10-09
 
 ### Added

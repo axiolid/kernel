@@ -120,6 +120,8 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
 - `crates/execution/compile/tests/station_placement.rs` (#264).
 - `crates/algorithms/parametric/evaluate/src/station/composite.rs` and
   `crates/execution/compile/src/station/basis.rs` (#285).
+- `crates/contracts/operations/curve-evaluate/src/contract.rs` and
+  `crates/algorithms/parametric/evaluate/src/provider.rs` (#286).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -448,4 +450,67 @@ relation were refused (#246, #264).
 Still open: a trim of a plan-measured relation, a closed conic's trim of
 more than one turn, an exact compilation of a placement on a composite
 whose read piece is not a line, and the seam side on the
-curve-evaluation contract's point, tangent and frame queries (#286).
+curve-evaluation contract's point, tangent and frame queries (#286, see
+below).
+
+## Amendment 2026-10-09: the seam side on the curve-evaluation contract (#286)
+
+A consumer that frames a placement through `CurveEvaluator` (openbimrs/ifc#409,
+IFC4X3 ADD2 8.9.3.48.3: the previous segment's tangent governs) could not
+name a side: `point_at`, `tangent_at` and `frame_at` read the piece the
+measure falls in, the outgoing one on a seam. The same station lowered as
+geometry could read the incoming one (#263), so the two disagreed exactly
+where the consumer cares.
+
+- **The contract reads a side additively.** `point_at_on`,
+  `tangent_at_on` and `frame_at_on(curve, at, SeamSide)` are new trait
+  methods WITH defaults, so no provider breaks (a defaulted trait method
+  is a minor change, and `cargo semver-checks` accepts it). The default
+  answers `Outgoing` with the side-less method, which reads what the
+  outgoing side reads exactly on a seam. Every other side is refused by a
+  typed `UnsupportedInput` naming `SEAM_SIDE_UNSUPPORTED`, on and off a
+  seam: the contract does not know where a provider's seams are, and an
+  `Incoming` answered with the outgoing frame is the silent substitute
+  this issue is about. `SeamSide` is `axiolid-curve`'s, re-exported, so
+  there is one enum.
+- **What a side means is the station rule.** A measure within
+  `ARC_LENGTH_TOLERANCE * max(1, s)` of a seam whose frame may jump is ON
+  it and is read at the seam from the named side's piece; off a seam, and
+  at the curve's ends, both sides agree with the side-less answer. The
+  reference provider does not restate the rule: it asks the station module
+  whether the measure is on a seam (the predicate `station_section3_on`
+  itself uses) and, if so, answers with `station_section3_on`, for both
+  sides, so `Outgoing` a hair before a seam reads the outgoing piece at
+  the seam, as a station does. Elsewhere it answers side-lessly, so its
+  refusals and its domain (a line's negative distance, a circle past one
+  turn) are unchanged. The side-less queries keep reading the piece the
+  measure falls in, without the tolerance: changing them is a behaviour
+  change no consumer asked for, and they agree with `Outgoing` on a seam
+  itself, rounding aside.
+- **Which measure is located.** A distance in the provider's convention,
+  which on every family it measures is the station measure (plan distance
+  on an elevated or banked curve, arc length on a polyline), and the
+  native parameter of an elevated or banked curve, which is its plan
+  distance. A polyline's or a B-spline's native parameter is not a
+  station measure: `Outgoing` there is the side-less reading, `Incoming`
+  is refused by name.
+- **Frame and up.** On a seam the frame is the station's section in the
+  provider layout (`x` tangent, `y` up, `z` right) for `+Z`; for another
+  reference up, the reference-up frame of the side's point and tangent
+  against it; a banked curve's rolled section only against `+Z`, refused
+  otherwise, as `frame_at` refuses it.
+- **#242.** The contract text now names the axes the provider has always
+  returned, `x` tangent, `y` up, `z` right (ADR 0063's own wording); the
+  layout this ADR resolves frames in is the documented one. No behaviour
+  changed, so consumers of `frame_at` need no change.
+
+| Option | Why not |
+| --- | --- |
+| A sided `CurveMeasure` (`Distance { at, side }`) | `CurveMeasure` says how a number locates a place; a side is a second question, and a provider unaware of a new variant would refuse every sided query, `Outgoing` included. |
+| Default `Incoming` to the outgoing answer off a seam | The default cannot tell a seam; answering anywhere would answer wrongly on one. |
+| Snap the side-less queries to seams too | A behaviour change of the existing queries for every consumer; the sided ones carry the rule. |
+| Locate a polyline's native parameter as a seam | A vertex index is not a station measure; a consumer holding one maps it to a distance first, or asks side-lessly. |
+
+Still open: a point or tangent on a seam whose side's piece is vertical
+(the station frame refuses it, so the sided point and tangent do too), and
+sides on 2D curves, which the contract does not evaluate.

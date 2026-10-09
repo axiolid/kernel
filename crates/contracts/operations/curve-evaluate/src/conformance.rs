@@ -4,8 +4,12 @@
 //! that passes them can be swapped for another without a consumer
 //! noticing, which is the whole point of naming the capability.
 
-use axiolid_core::{Frame3, Point3, Scalar, Vec3};
-use axiolid_curve::{Circle3, CurvatureLaw, Curve3, Intrinsic3, Line3};
+use axiolid_contracts::GeomError;
+use axiolid_core::{Frame3, Point2, Point3, Scalar, Vec2, Vec3};
+use axiolid_curve::{
+    Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic3, Line2, Line3,
+    Polyline3, SeamSide,
+};
 
 use crate::{CurveEvaluator, CurveMeasure};
 
@@ -37,6 +41,8 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_frame_is_orthonormal(provider));
     out.extend(check_refusals(provider));
     out.extend(check_measure_routes_differ(provider));
+    out.extend(check_sides_agree_off_a_seam(provider));
+    out.extend(check_sides_at_seams(provider));
     out
 }
 
@@ -310,6 +316,255 @@ fn check_measure_routes_differ<E: CurveEvaluator>(provider: &E) -> Vec<Conforman
                 "parameter and distance are distinct",
                 format!("{value} gave the same point as a parameter and as a distance"),
             ));
+        }
+    }
+    out
+}
+
+// --- seam sides (#286) --------------------------------------------------------
+
+/// Whether a sided query was refused because the provider does not read
+/// that side, as the contract's defaults refuse it: unsupported, typed.
+fn side_refused(error: &GeomError) -> bool {
+    matches!(
+        error,
+        GeomError::Unsupported { .. } | GeomError::UnsupportedInput { .. }
+    )
+}
+
+fn frame_off(a: &Frame3, b: &Frame3) -> Scalar {
+    [
+        (a.origin - b.origin).length(),
+        (a.x - b.x).length(),
+        (a.y - b.y).length(),
+        (a.z - b.z).length(),
+    ]
+    .into_iter()
+    .fold(0.0, Scalar::max)
+}
+
+/// The three sided answers at `at`, or `None` when the provider refused
+/// `Incoming` as unsupported on all three (it does not read sides).
+type Sided = Option<(Point3, Vec3, Frame3)>;
+
+fn sided<E: CurveEvaluator>(
+    provider: &E,
+    curve: &Curve3,
+    at: CurveMeasure,
+    side: SeamSide,
+) -> Result<Sided, String> {
+    match (
+        provider.point_at_on(curve, at, side),
+        provider.tangent_at_on(curve, at, side),
+        provider.frame_at_on(curve, at, side),
+    ) {
+        (Ok(p), Ok(t), Ok(f)) => Ok(Some((p, t, f))),
+        (Err(a), Err(b), Err(c))
+            if side == SeamSide::Incoming
+                && side_refused(&a)
+                && side_refused(&b)
+                && side_refused(&c) =>
+        {
+            Ok(None)
+        }
+        (p, t, f) => Err(format!(
+            "point {:?}, tangent {:?}, frame {:?}",
+            p.err(),
+            t.err(),
+            f.err()
+        )),
+    }
+}
+
+/// Off a seam both sides read the same piece: `Outgoing` must be the
+/// side-less answer, and `Incoming`, where a provider reads it, too. A
+/// provider that does not read `Incoming` must refuse it as UNSUPPORTED,
+/// never answer it with something else or refuse it as bad input. A
+/// sided query keeps the side-less refusals of a non-finite measure.
+fn check_sides_agree_off_a_seam<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    for curve in sample_curves() {
+        if !provider.distance_convention(&curve).is_supported() {
+            continue;
+        }
+        for distance in [0.0, 1.5, 4.0] {
+            let at = CurveMeasure::Distance(distance);
+            let (Ok(point), Ok(tangent), Ok(frame)) = (
+                provider.point_at(&curve, at),
+                provider.tangent_at(&curve, at),
+                provider.frame_at(&curve, at),
+            ) else {
+                continue;
+            };
+            for side in [SeamSide::Outgoing, SeamSide::Incoming] {
+                match sided(provider, &curve, at, side) {
+                    Ok(Some((p, t, f))) => {
+                        let off = (p - point)
+                            .length()
+                            .max((t - tangent).length())
+                            .max(frame_off(&f, &frame));
+                        if off > 1e-9 {
+                            out.push(fail(
+                                "both sides agree off a seam",
+                                format!(
+                                    "{side:?} is {off:e} off the side-less answer at {distance}"
+                                ),
+                            ));
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(detail) => out.push(fail(
+                        "a side is answered or refused as unsupported",
+                        format!("{side:?} at {distance}: {detail}"),
+                    )),
+                }
+            }
+        }
+        for bad in [Scalar::NAN, Scalar::INFINITY] {
+            let at = CurveMeasure::Distance(bad);
+            for side in [SeamSide::Outgoing, SeamSide::Incoming] {
+                if provider.point_at_on(&curve, at, side).is_ok()
+                    || provider.tangent_at_on(&curve, at, side).is_ok()
+                    || provider.frame_at_on(&curve, at, side).is_ok()
+                {
+                    out.push(fail(
+                        "non-finite distance is refused",
+                        format!("a {side:?} query accepted {bad}"),
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A seam, its distance, the point there and the unit tangents of the
+/// pieces ending and starting there, from closed forms.
+struct Seam {
+    what: &'static str,
+    curve: Curve3,
+    distance: Scalar,
+    point: Point3,
+    incoming: Vec3,
+    outgoing: Vec3,
+}
+
+fn seams() -> Vec<Seam> {
+    let grade = |g: Scalar| Vec3::new(1.0, 0.0, g) / g.hypot(1.0);
+    vec![
+        // A polyline's corner: 4 m along +x, then 3 m along +y.
+        Seam {
+            what: "polyline corner",
+            curve: Curve3::Polyline(Polyline3 {
+                points: vec![
+                    Point3::new(0.0, 0.0, 0.0),
+                    Point3::new(4.0, 0.0, 0.0),
+                    Point3::new(4.0, 3.0, 0.0),
+                ],
+                closed: false,
+            }),
+            distance: 4.0,
+            point: Point3::new(4.0, 0.0, 0.0),
+            incoming: Vec3::X,
+            outgoing: Vec3::Y,
+        },
+        // A grade break at plan distance 50 on a straight plan: +2% up to
+        // it, -1% after.
+        Seam {
+            what: "grade break",
+            curve: Curve3::Elevated(Elevated3::new(
+                Curve2::Line(Line2 {
+                    origin: Point2::ZERO,
+                    direction: Vec2::X,
+                }),
+                ElevationLaw::Piecewise {
+                    breaks: vec![50.0],
+                    laws: vec![
+                        ElevationLaw::constant_grade(0.0, 0.02),
+                        ElevationLaw::constant_grade(1.0, -0.01),
+                    ],
+                },
+            )),
+            distance: 50.0,
+            point: Point3::new(50.0, 0.0, 1.0),
+            incoming: grade(0.02),
+            outgoing: grade(-0.01),
+        },
+    ]
+}
+
+/// On a seam each side reads its own piece -- for a provider that reads
+/// sides also a hair either side of the seam, within the ADR 0082
+/// tolerance `1e-12 * max(1, s)` -- and `Outgoing` is what the side-less
+/// query reads exactly on it. A provider that does not read `Incoming`
+/// must refuse it as unsupported rather than answer with the outgoing
+/// piece.
+fn check_sides_at_seams<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    for seam in seams() {
+        if !provider.distance_convention(&seam.curve).is_supported() {
+            continue;
+        }
+        let (what, curve) = (seam.what, &seam.curve);
+        let on = CurveMeasure::Distance(seam.distance);
+        if let (Ok(t), Ok(t_on)) = (
+            provider.tangent_at(curve, on),
+            provider.tangent_at_on(curve, on, SeamSide::Outgoing),
+        ) {
+            if (t - t_on).length() > 1e-9 {
+                out.push(fail(
+                    "outgoing is the side-less reading on a seam",
+                    format!("{what}: {t:?} side-less, {t_on:?} outgoing"),
+                ));
+            }
+        }
+        // The tolerance is part of the seam rule a provider reading sides
+        // implements; one that does not answers `Outgoing` side-lessly,
+        // which reads the piece the measure falls in.
+        let reads_sides = matches!(sided(provider, curve, on, SeamSide::Incoming), Ok(Some(_)));
+        let hair = 0.25e-12 * seam.distance;
+        let distances = if reads_sides {
+            vec![seam.distance, seam.distance - hair, seam.distance + hair]
+        } else {
+            vec![seam.distance]
+        };
+        for distance in distances {
+            let at = CurveMeasure::Distance(distance);
+            for (side, want) in [
+                (SeamSide::Outgoing, seam.outgoing),
+                (SeamSide::Incoming, seam.incoming),
+            ] {
+                let (point, tangent, frame) = match sided(provider, curve, at, side) {
+                    Ok(Some(answers)) => answers,
+                    Ok(None) => continue,
+                    Err(detail) => {
+                        out.push(fail(
+                            "a seam side reads its own piece",
+                            format!("{what}, {side:?} at {distance}: {detail}"),
+                        ));
+                        continue;
+                    }
+                };
+                let checks = [
+                    ("point", (point - seam.point).length()),
+                    ("tangent", (tangent - want).length()),
+                    ("frame x", (frame.x - want).length()),
+                    ("frame origin", (frame.origin - seam.point).length()),
+                    ("frame x.y", frame.x.dot(frame.y)),
+                    (
+                        "frame handedness",
+                        frame.x.cross(frame.y).dot(frame.z) - 1.0,
+                    ),
+                ];
+                for (name, value) in checks {
+                    if value.abs() > 1e-9 {
+                        out.push(fail(
+                            "a seam side reads its own piece",
+                            format!("{what}, {side:?} at {distance}: {name} off by {value:e}"),
+                        ));
+                    }
+                }
+            }
         }
     }
     out

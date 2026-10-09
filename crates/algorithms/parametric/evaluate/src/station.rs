@@ -45,8 +45,12 @@
 //!
 //! [`SectionFrame::frame`] returns the axes in the curve-evaluation
 //! provider's layout: `x` the tangent, `y` up, `z = -lateral` (to the
-//! right). The contract's documentation of `frame_at` still says `z` is up
-//! (#242); this module follows the provider.
+//! right), the layout the contract's `frame_at` documents (#242).
+//!
+//! The curve-evaluation provider reads a seam side through this module:
+//! `ReferenceCurveEvaluator`'s `point_at_on`, `tangent_at_on` and
+//! `frame_at_on` answer a measure on a seam (below) with
+//! [`station_section3_on`] (#286).
 //!
 //! [`SectionFrame::plan`] is the vertical alternative: the tangent's
 //! horizontal projection, the horizontal left normal and `+Z`, with grade
@@ -571,6 +575,27 @@ pub fn station_section2_on(
     }
     let t = parameter_at_arc_length2(curve, start2(curve), distance)?;
     planar_frame(evaluate2(curve, t)?, derivative2(curve, t)?)
+}
+
+/// Whether a station at `distance` along a 3D curve lies ON a seam it
+/// reads two ways, by the rule [`station_section3_on`] applies (#286):
+/// the curve-evaluation provider's sided queries read a station there
+/// through it and answer every other measure side-lessly.
+///
+/// A distance outside `[0, L]` lies on no interior seam: `false`, so the
+/// side-less query keeps its own refusal or answer there.
+///
+/// # Errors
+///
+/// A curve whose length or seams cannot be read, by name.
+pub(crate) fn station_on_seam3(curve: &Curve3, distance: Scalar) -> GeomResult<bool> {
+    if !seam::sided3(curve) {
+        return Ok(false);
+    }
+    let Ok(distance) = admitted(distance, station_length3(curve)?) else {
+        return Ok(false);
+    };
+    Ok(seam::seam_at3(curve, distance)?.is_some())
 }
 
 /// The section of a 3D curve at `distance` from its start: plan distance

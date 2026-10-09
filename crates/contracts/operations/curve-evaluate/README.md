@@ -5,7 +5,9 @@ frame at a place on a `Curve3`, plus a conformance suite every provider must
 pass. A caller says whether its number is a distance or a native parameter
 (`CurveMeasure`), and a provider says which distance it measures for each
 curve (`DistanceConvention`) or that it cannot. Frames are reference-up, not
-Frenet. This crate evaluates nothing itself; `axiolid-evaluate` provides the
+Frenet: `x` tangent, `y` up, `z` right. The `*_on` queries read a seam side
+(`SeamSide`) by the station seam rule of ADR 0082; a provider that does not
+implement them refuses `Incoming` by name. This crate evaluates nothing itself; `axiolid-evaluate` provides the
 scalar implementation. See ADR 0063.
 
 ```bash

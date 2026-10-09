@@ -440,7 +440,7 @@ fn sided2(curve: &Curve2) -> bool {
     matches!(curve, Curve2::Polyline(_) | Curve2::BSpline(_))
 }
 
-fn sided3(curve: &Curve3) -> bool {
+pub(super) fn sided3(curve: &Curve3) -> bool {
     matches!(
         curve,
         Curve3::Polyline(_) | Curve3::BSpline(_) | Curve3::Elevated(_) | Curve3::Banked(_)
@@ -488,6 +488,16 @@ pub(super) fn seam_section2(
     Ok(Some(frame))
 }
 
+/// The seam a station at the admitted `distance` along a 3D curve lies ON
+/// and reads two ways, if any: the rule [`seam_section3`] applies, and
+/// the curve-evaluation provider's sided queries with it (#286).
+pub(crate) fn seam_at3(curve: &Curve3, distance: Scalar) -> GeomResult<Option<StationSeam>> {
+    if !sided3(curve) {
+        return Ok(None);
+    }
+    Ok(seam_near(station_seams3(curve)?, distance))
+}
+
 /// The section of a 3D curve ON a seam near `distance`, read from `side`;
 /// `None` when no seam is near.
 pub(super) fn seam_section3(
@@ -495,10 +505,7 @@ pub(super) fn seam_section3(
     distance: Scalar,
     side: SeamSide,
 ) -> GeomResult<Option<SectionFrame>> {
-    if !sided3(curve) {
-        return Ok(None);
-    }
-    let Some(seam) = seam_near(station_seams3(curve)?, distance) else {
+    let Some(seam) = seam_at3(curve, distance)? else {
         return Ok(None);
     };
     let incoming = side == SeamSide::Incoming;
