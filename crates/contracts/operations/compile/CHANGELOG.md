@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-09
+
 ### Added
 
 - `MeshClosure::OpenSolid` (#265): the source declared a solid, but the

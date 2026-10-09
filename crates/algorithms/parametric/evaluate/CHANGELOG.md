@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-09
+
 ### Added
 
 - Placing at a station (#264, ADR 0082 amendment):

@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-04) |
+| Latest release | 0.3.7 (2026-10-09) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -41,38 +41,47 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-04):
+Latest release, 0.3.7 (2026-10-09):
 
 ### Added
 
-- Elevated curves through the generic 3D curve functions (#252):
-  `curve::evaluate3`, `derivative3`, `second_derivative3` and `domain3`
-  read a `Curve3::Elevated` by PLAN distance (ADR 0082, like `Banked3`):
-  the derivative is `(p', grade)`, not unit, the second `(k n, z'')`,
-  the domain `[0, L]` over the plan's length (unbounded for a line plan,
-  a full turn for a circle); `second_derivative3` also reads a
-  `Curve3::Banked` (`banked::banked_second_derivative`, the pivot's `e''`
-  added).
-- `elevated` module (#252): `elevated_derivative`,
-  `elevated_second_derivative`, `elevated_span`, and the certified
-  `elevated_chord_bound` -- `sqrt(P^2 + Z^2)`, the plan's Taylor chord
-  bound `h^2/8 sup |k|` and the profile's `elevation_chord_bound` at
-  equal plan distance, orthogonal parts composed in quadrature (the
-  module documents the derivation and why the plan's own `chord_bound2`
-  does not compose) -- with `banked_chord_bound`,
-  `elevated_derivative_bounds` and `banked_derivative_bounds`
-  (`sup |c'|, |c''|, |c'''|`, plan and profile combined per law, a
-  chain's parametric piece through its own derivative suprema),
-  `elevated_breaks`/`banked_breaks`, and `grade_corners3`, the seams
-  across which the grade jumps, read from the laws on either side.
-  `bound::chord_bound3`, `curve_derivative_bounds3`, `continuity_breaks3`
-  and `certifies_flattening3` dispatch to them, so `flatten3` certifies an
-  elevated curve over a certified plan with a closed-form profile.
+- Placing at a station (#264, ADR 0082 amendment):
+  `SectionFrame::placement` is the rigid motion taking local `x`, `y`,
+  `z` onto the tangent, the left lateral and up and the origin onto the
+  point (a linear placement's reading, not the provider layout of
+  `SectionFrame::frame`); `SectionFrame::moved` carries a frame by a
+  rigid motion; `station_frame_is_exact2` / `station_frame_is_exact3`
+  say whether a station frame is exact (a line only: every other family
+  reads its distance by the arc-length inverse or its point by
+  quadrature).
+
+- Seams of a station's basis curve (#263, ADR 0082 amendment), in
+  `station::seam`: `station_seams2` / `station_seams3` list where two
+  pieces of a curve meet -- a polyline's vertices at the running sum of
+  its segment lengths, a B-spline's corner knots (multiplicity at least
+  its degree; by quadrature, flagged not exact), an intrinsic curve's and
+  a chain's law seams and joins (smooth), an elevated curve's plan and
+  profile seams, a banked curve's cant and pivot seams -- as
+  `StationSeam { distance, parameter, smooth, exact }`, without
+  evaluating the curve; `exact_station_seams2` / `exact_station_seams3`
+  refuse an inexact seam with a typed `UnsupportedInput`.
+- `station_section2_on` / `station_section3_on`: a station within the
+  arc-length tolerance of a seam that is not smooth is read at the seam
+  from the piece the `SeamSide` names, the incoming one as the curve
+  truncated at the seam (a polyline's previous segment, a B-spline's
+  previous span, a profile and cant and pivot law cut there).
+- `Mitre`: the plane a run of sections crossing a seam stands in, normal
+  to the bisector of the two tangents; `Mitre::between` is `None` within
+  `SEAM_TANGENT_TOLERANCE` and refuses a near reversal (`MITRE_TOLERANCE`
+  on the cosine of half the turn) and a seam whose sides do not share
+  their point by name; `Mitre::place` projects a section point placed in
+  each side's frame along that side's tangent onto the plane.
 
 ### Changed
 
-- `elevation`: an intrinsic reading carries its profile arc length, and
-  `frenet`'s pointwise curvature-law value is shared crate-wide (#252);
-  no public signature changed.
+- `station_section2` / `station_section3` read a station on a seam (within
+  `ARC_LENGTH_TOLERANCE * max(1, s)`) at the seam itself, from the piece
+  starting there. On a polyline or a B-spline the arc-length inverse could
+  previously land a hair either side of the vertex, and so either frame.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

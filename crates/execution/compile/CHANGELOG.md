@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-10-09
+
 ### Added
 
 - Nodes placed at stations (#264, ADR 0082 amendment):

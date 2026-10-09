@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-10-09
+
 ### Added
 
 - `profile::ring_touches` and `profile::RingTouch` (#265): every vertex

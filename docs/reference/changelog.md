@@ -416,6 +416,93 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.16 - 2026-10-09
+
+### Added
+
+- `profile::ring_touches` and `profile::RingTouch` (#265): every vertex
+  lying inside another ring edge, which `triangulate_with` under
+  `PinchPolicy::Accept` inserts into that edge, found by the same exact
+  validation and listed once per vertex and edge. A caller whose rings
+  share their edges with neighbouring patches (the faces of a closed
+  shell) splits the neighbour's copy of each such edge at the same vertex,
+  so the patches do not meet at a T-junction.
+
+- **A ring joining its hole by a seam run both ways triangulates on
+  surface paths (#270).** Exporters write a planar face with a hole as one
+  ring: the outer boundary, a seam to the hole, the hole, and the seam
+  back (a keyhole). It bounds the outer polygon minus the hole, but the
+  certified clipper refused it as "outer ring overlaps itself".
+  `triangulate_with(.., PinchPolicy::Accept)` now takes a seam -- an edge
+  and a later edge of one ring between the same two points in opposite
+  directions, used by no other edge, nesting with the ring's other seams
+  and met by no other edge except at its ends -- out of the ring, splits
+  the ring into the loops it joins and triangulates them on the pinch
+  path (ADR 0083 amendment). The seam's two copies cancel, so the
+  certificate over the loops is the ring's; its ends are repeated
+  vertices and triangles use a point's first index. A hole loop of either
+  winding is a hole, a seam between two loops side by side leaves two
+  parts, and a keyhole may touch other rings at points. Refused by name:
+  a "seam" running back along only part of an edge, one edge twice in one
+  direction or three times, interleaving seams, seams in a row, an edge
+  crossing, touching or running along a seam, and a loop folding back
+  where its seam left it. `profile::ring_touches` (#265) validates such a
+  ring the same way and lists its loops' touches by the ring's own edge
+  and vertex indices.
+
+### Changed
+
+- `triangulate` and `PinchPolicy::Refuse` (extrusion and loft caps)
+  refuse a ring with a seam as "profile outer ring runs along a seam both
+  ways (edges i and j), which a solid cannot extrude" instead of "profile
+  outer ring intersects itself" (#270): an extruded keyhole puts two
+  coincident wall faces on the seam. Tests for #270: the issue's keyhole
+  (hole wound either way), a thin rim with a 2^-13 m seam and one at
+  0.1 mm, a seam from inside an outer edge to a hole's corner, two
+  keyholes in one ring, a keyhole with a pinch, a seam between loops side
+  by side, each from every start vertex, either way round and under eight
+  zero-sign patterns with the exact-tiling checks (the seam's copies
+  cancelling in the edge cover), random keyhole layouts, every refusal
+  above by name, and the solid refusals.
+
+### Fixed
+
+- **Exact extrusions whose direction points against the profile normal
+  build (#275).** `extrude_profile_exact` refused any offset with
+  `offset.z <= tolerance` as `"non-forward planar extrusion"`, so an
+  opening cut down from a slab's top (`ExtrudedDirection (0, 0, -1)`) had
+  no exact result and a boolean with it no certified mesh deviation. Such
+  an extrusion is the forward prism along `(o.x, o.y, -o.z)` mirrored in
+  the profile plane; it is now built that way, through
+  `ExactBRep::transformed`, for every profile family and for oblique
+  directions. Negating `z` is exact, so the profile-plane cap keeps the
+  profile's coordinates bit for bit, and the reflection flips every face,
+  so the solid stays outward with the forward prism's positive volume.
+  Only a direction within tolerance of the profile plane
+  (`|o.z| <= tolerance`) is refused, now named `"extrusion direction in
+  the profile plane"`. The mesh path already built these solids; both now
+  agree. Mutation probe: `scripts/probe_downward_extrusion_mutants.py`.
+
+- **A ring's orientation is no longer misread at a `-0.0` twin of its
+  lowest corner (#269).** The certified clipper reads a ring's turn at its
+  lexicographically smallest vertex, found with `f64::total_cmp`, which
+  orders `-0.0` before `0.0`. A rectangle with a straight corner at
+  `(-0.0, 2)` and its true lowest corner at `(0, 0)` was read at the
+  straight corner, taken for clockwise and reversed, and both pinch
+  policies then refused it with "found no ear". Projecting a face onto
+  plane axes writes exactly such rings (`0.0 * -k = -0.0` next to the
+  origin's `0.0`); a downstream triage found 35 refused rectangular faces
+  in two models. Every coordinate comparison of the clipper now orders by
+  value, `-0.0` equal to `0.0` (still total and deterministic): the lowest
+  corner of a ring and of a pinch path's boundary cycle, the order of
+  touching vertices along an edge, the bridge order of holes and the edge
+  sweep. `polyhedron::triangulate` and `offset::offset_solid` key corners
+  with `-0.0` read as `0.0` too, so a corner written both ways welds into
+  one vertex. Tests: the issue's rectangle and a hole with the same
+  corner under both policies, every pinch fixture under eight zero-sign
+  patterns, random hole and pinch layouts with zeros negated at random,
+  and a cube with a face written in `-0.0`.
+
 ### 0.3.15 - 2026-10-04
 
 ### Added
@@ -977,6 +1064,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.4 - 2026-10-09
+
+### Added
+
+- `SeamSide` (#263, ADR 0082 amendment): which piece a position exactly on
+  a seam of a composite curve is read from -- `Outgoing`, the piece that
+  starts there and what every evaluator reads (the default), or
+  `Incoming`, the piece that ends there. `#[non_exhaustive]`; shared by
+  `axiolid-model`'s stations and `axiolid-evaluate`'s station readers.
+
 ### 0.3.3 - 2026-10-03
 
 ### Added
@@ -1159,6 +1256,49 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.7 - 2026-10-09
+
+### Added
+
+- Placing at a station (#264, ADR 0082 amendment):
+  `SectionFrame::placement` is the rigid motion taking local `x`, `y`,
+  `z` onto the tangent, the left lateral and up and the origin onto the
+  point (a linear placement's reading, not the provider layout of
+  `SectionFrame::frame`); `SectionFrame::moved` carries a frame by a
+  rigid motion; `station_frame_is_exact2` / `station_frame_is_exact3`
+  say whether a station frame is exact (a line only: every other family
+  reads its distance by the arc-length inverse or its point by
+  quadrature).
+
+- Seams of a station's basis curve (#263, ADR 0082 amendment), in
+  `station::seam`: `station_seams2` / `station_seams3` list where two
+  pieces of a curve meet -- a polyline's vertices at the running sum of
+  its segment lengths, a B-spline's corner knots (multiplicity at least
+  its degree; by quadrature, flagged not exact), an intrinsic curve's and
+  a chain's law seams and joins (smooth), an elevated curve's plan and
+  profile seams, a banked curve's cant and pivot seams -- as
+  `StationSeam { distance, parameter, smooth, exact }`, without
+  evaluating the curve; `exact_station_seams2` / `exact_station_seams3`
+  refuse an inexact seam with a typed `UnsupportedInput`.
+- `station_section2_on` / `station_section3_on`: a station within the
+  arc-length tolerance of a seam that is not smooth is read at the seam
+  from the piece the `SeamSide` names, the incoming one as the curve
+  truncated at the seam (a polyline's previous segment, a B-spline's
+  previous span, a profile and cant and pivot law cut there).
+- `Mitre`: the plane a run of sections crossing a seam stands in, normal
+  to the bisector of the two tangents; `Mitre::between` is `None` within
+  `SEAM_TANGENT_TOLERANCE` and refuses a near reversal (`MITRE_TOLERANCE`
+  on the cosine of half the turn) and a seam whose sides do not share
+  their point by name; `Mitre::place` projects a section point placed in
+  each side's frame along that side's tangent onto the plane.
+
+### Changed
+
+- `station_section2` / `station_section3` read a station on a seam (within
+  `ARC_LENGTH_TOLERANCE * max(1, s)`) at the seam itself, from the piece
+  starting there. On a polyline or a B-spline the arc-length inverse could
+  previously land a hair either side of the vertex, and so either frame.
 
 ### 0.3.6 - 2026-10-04
 
@@ -2010,6 +2150,114 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.15 - 2026-10-09
+
+### Added
+
+- Nodes placed at stations (#264, ADR 0082 amendment):
+  `station::placement` resolves a `GeometryNode::InstanceAtStation` to a
+  `ResolvedPlacement { transform, station, exact }` -- its oriented
+  station resolved as `station::resolve` does, seam side included, and
+  the rigid motion taking the source's local `x`, `y`, `z` onto the
+  oriented tangent, left lateral and up. `ReferenceMeshCompiler` meshes a
+  placed solid or surface like an instance; on a basis other than a line
+  the placement is reported `DeviationBound::Unbounded` under the new
+  `DeviationPath::StationPlacement` (appended last).
+  `ReferenceExactCompiler` places a source exactly on a line basis and
+  refuses any other by name. A placed curve sweeps as a directrix (a 2D
+  source sampled in its own `z = 0`, then moved), sampled rather than as
+  exact pieces; an exact swept disk along it and a 2D relation as its
+  source are refused by name.
+- Stations along a placed curve (#264): a `CurveStation`, an
+  `OrientedCurveStation` and every run of stations may take a curve
+  placed at a station (an atomic curve, or a placed one, as source) as
+  their basis: the source's station carried by the placement, its seams
+  unchanged (`station::seams` too). A placement whose frame tilts `+Z` is
+  refused by name: there the carried frame is not the placed curve's own
+  reference-up frame, and an elevated source's plan distance is not the
+  placed curve's.
+
+- `station::seams` (#263, ADR 0082 amendment): where a graph curve's
+  seams are, from its stored data -- an atomic curve's (refusing a
+  B-spline's corner knot, which only a quadrature locates), and a 3D
+  composite or trim of lines, polylines and circles at the running sum of
+  its pieces' lengths; any other relation and a 2D relation are refused
+  by name.
+
+### Changed
+
+- Stations on seams (#263): `station::resolve` reads an
+  `OrientedCurveStation` on a seam of its basis from the piece its `seam`
+  names (a plain `CurveStation` the outgoing one). Offset curves by
+  stations, station-placed spines and sectioned surfaces read the outgoing
+  piece at their first station and the incoming one at their last, and
+  where they cross a seam whose tangents differ -- between two stations or
+  at one -- place a section in its mitre plane (the bisector of the two
+  tangents), sampling each side as its piece alone; a near reversal and an
+  authored section the mitre would cut are refused by name, and a seam
+  whose tangents agree is sampled as before. Their deviation is still
+  reported unbounded by name.
+
+### Fixed
+
+- **Booleans with an operand extruded against its profile normal are
+  exact and certified (#275).** `ReferenceExactCompiler` refused an
+  extrusion whose direction points down the profile normal (an opening
+  cut down from a slab's top, `ExtrudedDirection (0, 0, -1)`) as
+  `"non-forward planar extrusion"`, so `compile_mesh_with_deviation` left
+  every boolean with such an operand unbounded. It now compiles them
+  through `axiolid-construct`'s mirrored build: the slab of the issue
+  certifies the same bound whether its opening is cut up or down, and a
+  round extrusion along `-z` clipped by a half-space is exact with its
+  closed-form volume. A direction within tolerance of the profile plane
+  is still refused, as `"extrusion direction in the profile plane"`.
+- A ring corner inside a shared edge no longer opens a solid that is
+  still reported `Solid` (#265). Since #260 a planar face's certified
+  clipper inserts a corner lying inside one of the face's own ring edges
+  (a pocket rim touching the face's outer edge at an interior point, a
+  hole touching another hole's edge) into that edge, but the neighbouring
+  face sharing the edge kept it whole: a T-junction, with boundary edges,
+  in a mesh reported as a solid. B-rep and authored polygon faces now
+  collect those corners first, with the clipper's own exact tests
+  (`axiolid_construct::profile::ring_touches`), and every face using such
+  an edge takes them too, a triangle face included, so the shell is welded
+  through them: closed, two-manifold and of the exact volume. No position
+  is moved or added.
+- A mesh labelled a solid is checked to close (#265). A declared B-rep
+  solid, an operation's solid and a boolean result are reported
+  `MeshClosure::OpenSolid` (new, in `axiolid-mesh-compile-contract`)
+  unless every edge is shared by exactly two triangles running it in
+  opposite directions; `solid_mesh` refuses it by name, a collection
+  containing it keeps the name, and a boolean refuses it as an operand.
+  An empty boolean result still bounds the empty solid, and a B-rep
+  declared a solid whose shell is itself open (a lone face) is no longer
+  reported one. Faces the weld cannot reach (a curved B-rep face samples
+  its own edges) are caught here rather than claimed as a solid.
+- **Keyhole faces compile (#270).** An authored polygon face or a
+  faceted B-rep face whose one ring joins its hole by a seam run both
+  ways (as `IfcPolygonalFaceSet` exporters write a rim or basin outline)
+  was refused as "its rings do not bound a region: profile outer ring
+  overlaps itself"; a downstream triage found 216 such faces leaving 41
+  sanitary terminals unmeasured. Faces triangulate under
+  `PinchPolicy::Accept`, which now accepts seams (`axiolid-construct`'s
+  Unreleased notes). Tests: the issue's keyhole, a seam from inside an
+  outer edge and a thin rim, in every axis and diagonal plane, facing
+  either way, from every start corner, authored and as faceted B-rep
+  faces, with the exact area; the seam's corners named once and twice; a
+  seam the ring crosses refused by name.
+- **Planar faces that project with a `-0.0` corner compile (#269).** A
+  faceted B-rep face is projected from its first corner onto in-plane
+  axes; in a plane at 45 degrees between two axes a corner level with the
+  origin lands at `-0.0`, and `axiolid-construct`'s clipper read the
+  ring's orientation at that twin of its lowest corner and refused the
+  face with "found no ear". The clipper now orders coordinates by value
+  (`axiolid-construct`'s Unreleased notes); a downstream triage traced 35
+  refused rectangular faces in two models to it. Tests: the issue's
+  rectangle with a straight corner, one with straight corners on two
+  sides and the same shape as a hole, in every axis and diagonal plane,
+  facing either way, from every start corner, authored and as faceted
+  B-rep faces, each with its exact area.
+
 ### 0.3.14 - 2026-10-04
 
 ### Added
@@ -2604,6 +2852,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile-contract
 
+### 0.3.3 - 2026-10-09
+
+### Added
+
+- `MeshClosure::OpenSolid` (#265): the source declared a solid, but the
+  compiled mesh is not closed (some edge is not shared by exactly two
+  triangles running it in opposite directions). A compiler reports it
+  instead of claiming `Solid` for a mesh with boundary edges;
+  `CompileOutcome::solid_mesh` refuses it by name. `MeshClosure` is
+  `#[non_exhaustive]`, so the new variant is additive.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -2661,6 +2920,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.6 - 2026-10-09
+
+### Added
+
+- Nodes placed at stations (#264, ADR 0082 amendment):
+  `InstanceAtStation { source, station: OrientedCurveStation }`
+  (`#[non_exhaustive]`, built by `InstanceAtStation::new`) and the node
+  variant `GeometryNode::InstanceAtStation`, appended last. It reuses a
+  curve, solid or surface in the frame of an oriented station, the
+  station kept symbolic with its frame, orientation and seam side; the
+  source's local `x`, `y`, `z` map onto the oriented tangent, left
+  lateral and up, its origin onto the station's point (a linear
+  placement's reading), as the `station` module documents. A placed
+  curve is a 3D curve whatever its source (accepted where a curve or 3D
+  curve is, refused in 2D slots), a placed solid or surface keeps its
+  family, a placed profile is no longer a profile. The station is
+  validated as an oriented station's is when the node is pushed; the
+  node references its source, then the station's basis.
+
+- Station seam sides (#263, ADR 0082 amendment): `OrientedCurveStation`
+  gains `seam: SeamSide` (re-exported from `axiolid-curve`), the piece a
+  station on a seam of its basis reads; `OrientedCurveStation::new` sets
+  `SeamSide::Outgoing`, the stated default and the evaluators' behaviour,
+  and `with_seam_side` changes it. `CurveStation` has public fields, so it
+  keeps reading the outgoing piece; `CurveStation::with_seam_side` returns
+  the oriented station in its base frame reading the given side, and
+  `From<CurveStation> for OrientedCurveStation` the unturned outgoing one.
+  The `station` module documents the seam rule and how runs of sections
+  and offsets are mitred across a seam instead of taking a side.
 
 ### 0.3.5 - 2026-10-03
 

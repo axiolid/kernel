@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-03) |
+| Latest release | 0.3.6 (2026-10-09) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -38,55 +38,34 @@ identifiers outside the graph.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-03):
+Latest release, 0.3.6 (2026-10-09):
 
 ### Added
 
-- Explicit station orientation (#246, ADR 0082 amendment):
-  `StationOrientation { axis, ref_direction }`, both optional and given as
-  components in the station's base frame `(tangent, lateral, up)` -- the
-  reading of a linear placement's axes relative to its curve -- with the
-  axis the oriented up and the reference direction orthonormalised
-  against it (Gram-Schmidt, axis primary); `unit_axes` fills the defaults
-  `(0, 0, 1)` and `(1, 0, 0)`. `ORIENTATION_TOLERANCE` bounds the sine
-  below which the two count as parallel. Offsets stay in the base frame.
-- `GeometryNode::OrientedCurveStation(OrientedCurveStation)`: a curve
-  station with an orientation.
-- `SectionAtStation` (built by `new`, `with_tags`, `with_orientation`; it
-  is `#[non_exhaustive]`, so fields can follow additively) and its two
-  relations, `SolidOperation::SectionsAtStations` (closed profiles, the
-  general form of `StationedSpine`, matched by tag when tagged) and
-  `SurfaceRelation::OpenSectionsAtStations` (open sections, the general
-  form of `SectionedSurface`). Both variants are appended to their enums.
-  `From<StationedSection>` and `From<StationedOpenSection>` convert the
-  #241 sections.
-- `GraphError::InvalidStation` also names a zero, non-finite or parallel
-  orientation and a run of sections that mixes tagged and untagged ones.
+- Nodes placed at stations (#264, ADR 0082 amendment):
+  `InstanceAtStation { source, station: OrientedCurveStation }`
+  (`#[non_exhaustive]`, built by `InstanceAtStation::new`) and the node
+  variant `GeometryNode::InstanceAtStation`, appended last. It reuses a
+  curve, solid or surface in the frame of an oriented station, the
+  station kept symbolic with its frame, orientation and seam side; the
+  source's local `x`, `y`, `z` map onto the oriented tangent, left
+  lateral and up, its origin onto the station's point (a linear
+  placement's reading), as the `station` module documents. A placed
+  curve is a 3D curve whatever its source (accepted where a curve or 3D
+  curve is, refused in 2D slots), a placed solid or surface keeps its
+  family, a placed profile is no longer a profile. The station is
+  validated as an oriented station's is when the node is pushed; the
+  node references its source, then the station's basis.
 
-- Stations (#241, ADR 0082): `Station` (a distance and `StationOffsets`
-  lateral/vertical/longitudinal) along a basis curve, measured in that
-  curve's convention -- plan distance on an elevated or banked curve, arc
-  length on any other -- with offsets in its section frame
-  (`StationFrame::Section`, or the upright `StationFrame::Plan`).
-  `GeometryNode::CurveStation(CurveStation)` is a point and frame at a
-  station; `CurveRelation::OffsetByStations` a 3D curve through offsets
-  at stations, interpolated linearly in distance;
-  `SolidOperation::StationedSpine` closed profiles standing at stations
-  (`StationedSection`), matched by ring and vertex index;
-  `SurfaceRelation::SectionedSurface` open sections at stations
-  (`StationedOpenSection`) joined by tag.
-- `GraphError::InvalidStation` names a malformed station when the node is
-  pushed: a non-finite or negative distance, a non-finite offset, fewer
-  than two stations in a run, distances that do not increase strictly,
-  sections whose tags differ or repeat. A distance beyond the basis
-  curve's length is refused when the station is resolved.
-
-### Changed
-
-- Tags are matched as sets (#246): every section of a run carries the
-  same tags, none repeated; an open section's tags may run in the first
-  section's order or in reverse, so a `SectionedSurface` whose sections
-  are authored in opposite directions is now accepted and joined
-  reversed. Any other order is still refused by name.
+- Station seam sides (#263, ADR 0082 amendment): `OrientedCurveStation`
+  gains `seam: SeamSide` (re-exported from `axiolid-curve`), the piece a
+  station on a seam of its basis reads; `OrientedCurveStation::new` sets
+  `SeamSide::Outgoing`, the stated default and the evaluators' behaviour,
+  and `with_seam_side` changes it. `CurveStation` has public fields, so it
+  keeps reading the outgoing piece; `CurveStation::with_seam_side` returns
+  the oriented station in its base frame reading the given side, and
+  `From<CurveStation> for OrientedCurveStation` the unturned outgoing one.
+  The `station` module documents the seam rule and how runs of sections
+  and offsets are mitred across a seam instead of taking a side.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

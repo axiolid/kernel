@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-09
+
 ### Added
 
 - `SeamSide` (#263, ADR 0082 amendment): which piece a position exactly on
