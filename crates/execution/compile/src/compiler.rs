@@ -688,16 +688,58 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (&built.mesh, Some(&built.fates), Some(&built.deviation))
             }
         };
-        // Faces of the two operands within the tolerance of each other are
-        // moved together first, so a skin or sliver thinner than the
-        // tolerance is not cut as one (#276, `crate::snap`).
+        // Faces of the two operands a rounding residue apart are moved
+        // together first, so a skin or sliver that thin is not cut as one
+        // (#276, narrowed to rounding in #291; `crate::snap`).
         let settled = crate::snap::settle(&subject.mesh, tool, options.tolerance());
-        let outcome = self.boolean.boolean(
-            settled.subject.as_ref().unwrap_or(&subject.mesh),
-            settled.tool.as_ref().unwrap_or(tool),
-            operator,
-            options,
-        )?;
+        let snapped = if settled.moved > 0.0 {
+            // A snap never turns a working boolean into a refusal (#291):
+            // where the snapped operands are refused, or their result touches
+            // itself, they are cut as given below, and no snap is reported.
+            self.cut(
+                settled.subject.as_ref().unwrap_or(&subject.mesh),
+                settled.tool.as_ref().unwrap_or(tool),
+                operator,
+                options,
+            )
+            .ok()
+        } else {
+            None
+        };
+        let (outcome, moved) = match snapped {
+            Some(outcome) => (outcome, settled.moved),
+            None => (self.cut(&subject.mesh, tool, operator, options)?, 0.0),
+        };
+        let mut built = channels::after_boolean(
+            outcome.mesh,
+            &subject.fates,
+            tool_fates,
+            outcome.evidence.attribute_fates,
+        );
+        built.deviation.carry_snaps(&subject.deviation);
+        if let Some(tool) = tool_deviation {
+            built.deviation.carry_snaps(tool);
+        }
+        if moved > 0.0 {
+            built.deviation.add(
+                crate::deviation::DeviationPath::Boolean,
+                crate::deviation::SNAPPED_OPERANDS,
+                crate::deviation::DeviationBound::Certified(moved),
+            );
+        }
+        Ok(built)
+    }
+
+    /// The mesh boolean of `subject` and `tool`, refused where its result
+    /// touches itself (#194).
+    fn cut(
+        &self,
+        subject: &TriMesh,
+        tool: &TriMesh,
+        operator: axiolid_core::BooleanOperator,
+        options: &ExecutionOptions,
+    ) -> GeomResult<axiolid_mesh_boolean_contract::BooleanOutcome> {
+        let outcome = self.boolean.boolean(subject, tool, operator, options)?;
         if let Some(pinch) = crate::pinch::find(&outcome.mesh) {
             return Err(GeomError::Degenerate(match pinch {
                 crate::pinch::Pinch::Edge { from, to } => format!(
@@ -711,24 +753,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 ),
             }));
         }
-        let mut built = channels::after_boolean(
-            outcome.mesh,
-            &subject.fates,
-            tool_fates,
-            outcome.evidence.attribute_fates,
-        );
-        built.deviation.carry_snaps(&subject.deviation);
-        if let Some(tool) = tool_deviation {
-            built.deviation.carry_snaps(tool);
-        }
-        if settled.moved > 0.0 {
-            built.deviation.add(
-                crate::deviation::DeviationPath::Boolean,
-                crate::deviation::SNAPPED_OPERANDS,
-                crate::deviation::DeviationBound::Certified(settled.moved),
-            );
-        }
-        Ok(built)
+        Ok(outcome)
     }
 
     /// A non-boolean solid and its deviation. A swept disk along a smooth

@@ -417,3 +417,73 @@ kept; zero tolerance), the snap's unit tests in
 `crates/execution/compile/src/snap.rs`, and
 `crates/algorithms/construction/brep-boolean/tests/openings.rs`; probe
 `scripts/probe_thin_skin_mutants.py`.
+
+## Amendment 2026-10-09: the snap closes rounding only, and never refuses (#291)
+
+The #276 snap reached the whole linear tolerance, and consumers pass one
+of a millimetre. On a real model it took authored skins of 0.1-1 mm
+(seven hosts lost their whole body; walls lost their skin at near-flush
+slab openings), and a slab 0.3 m thick extruded downward from its top,
+with 22 openings flush with both faces, that mesh-compile 0.3.15 meshed
+was refused as "a void tangent to its host's face". The snap had moved
+the openings' bottoms onto planes within rounding of the slab's bottom
+face: a normal normalised to `0.9999999999999999`, a frame turned by a
+rounded half turn (`sin pi = 1.2e-16`), a profile edge's end evaluated as
+`a + (b - a)`. Some vertices landed above the face, some below, and only
+those within the distance of a face's triangle moved, so the openings'
+faces bent across the slab's.
+
+- **Decision: the reach is the rounding scale.** A coordinate moves by at
+  most `reach = min(eps / sqrt 3, 16 f64::EPSILON S)`, `S` the largest
+  coordinate magnitude of the two operands, so a vertex moves by at most
+  `eps`. Sixteen relative epsilons cover a few composed placements (each
+  about `3 f64::EPSILON S`) and a 15-digit export (`4.5 f64::EPSILON`
+  relative); the #276 wall's `4.5e-15` is `5.5 f64::EPSILON S` there
+  (`S = 3.67`, reach `1.3e-14`). At georeferenced coordinates (`S` about
+  `6e6`) the reach is about `2e-8`: a residue of an ulp or a few closes,
+  a micrometre skin is fifty reaches and stays. Anything above the reach
+  is authored and kept, whatever the tolerance. A skin of `1e-12`-`1e-9`
+  computed near the origin is above it, kept, and placed at
+  georeferenced coordinates may cross itself again: the residue is the
+  rounding of the coordinates it was made at, which the snap does not
+  see.
+- **Decision: an exact landing only.** Only faces whose three corners
+  share a coordinate exactly (an axis-aligned plane `x_k = c`) are landed
+  on, and the coordinate becomes `c` itself. It moves by value: every
+  vertex of the moving operand with that coordinate value gets `c`, so
+  an operand's own axis-aligned face moves whole and stays planar even
+  where most of it lies past the other operand (a door a micrometre below
+  its wall's floor and a rounding error short of its face). A value near
+  two planes, or on one and near another, stays. A face axis-aligned only
+  within rounding is cut as given: no `f64` point lies on it, and a
+  rounding-scale move onto it lands on either side.
+- **Decision: never worse.** Where the snapped operands' mesh boolean is
+  refused, or its result touches itself (#194), the boolean is cut from
+  the operands as given; that result is returned with no snap reported,
+  and when both are refused, the refusal of the operands as given. The
+  guard is per boolean: a chain whose earlier snapped result makes a
+  later boolean fail is not compared with the whole chain unsnapped.
+- **The exact boolean keeps its reading, and gets the same guard.** It
+  reads coincident faces within the caller's tolerance by design (above)
+  and reports it; the #276 end merge is that reading's consequence on an
+  imprinted edge, and the door a rounding error past the face
+  (`1e-12`-`1e-9`) still needs it, so it is not narrowed to rounding.
+  But it left a door `1e-6`-`5e-4` past the face under a millimetre
+  tolerance unsewn, refused where before #276 it was cut. A boolean
+  refused after an end merge above the rounding floor is now cut again
+  with ends merged only within it, its report holding only that run's
+  decisions.
+
+Tests: `crates/execution/compile/tests/flush_through_cut.rs` (the slab in
+exact half-turn and reflected frames, openings exact, reflected or under a
+rounded half turn, with storey-rounded tops, in its frame and placed; the
+reproduction under a rounded half turn with openings round-tripped through
+world coordinates; a property over 160 random walls at `(6.1e5, 5.6e6)`
+with faces flush, a few ulps off, or `1e-6`/`1e-4` off: none compiled as
+given is refused after the snap, rounding residues close, authored skins
+stay), `crates/execution/compile/tests/thin_skin.rs` (skins of
+`1e-6`-`5e-4` kept under a millimetre; a nanometre at georeferenced
+coordinates closed; the fallback with a mesh boolean that refuses the
+snapped operands), the snap's unit tests, and
+`crates/algorithms/construction/brep-boolean/tests/openings.rs`; probe
+`scripts/probe_thin_skin_mutants.py`.

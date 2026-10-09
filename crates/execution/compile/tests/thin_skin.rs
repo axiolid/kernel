@@ -1,5 +1,6 @@
 //! A difference whose tool stops a rounding error short of its host's
-//! face, or reaches that far past it (#276).
+//! face, or reaches that far past it (#276); and one a little further
+//! short, whose skin is authored and kept (#291).
 //!
 //! The wall is `3.65 x 0.25 x 3.67`, centred on `x` and `y`, standing on
 //! `z = 0`; two door openings `1.01 x 2.26` stand on its floor face and run
@@ -13,14 +14,22 @@
 //! coordinates, as `ifc-geometry` lowers openings: a skin kept as two faces
 //! `4.5e-15` apart crosses itself once its coordinates round to about
 //! `1e-9`, and the volume kernel refuses it as self-intersecting.
+//!
+//! The mesh compiler closes only a residue at the rounding scale of the
+//! operands' coordinates (`16 f64::EPSILON` of their largest magnitude:
+//! about `1.3e-14` for this wall, about `2e-8` at georeferenced
+//! coordinates); a skin above that is kept whatever the tolerance (#291).
+//! The exact compiler reads coincident faces within the tolerance, as
+//! before.
 
 use axiolid_brep::ExactBRep;
-use axiolid_contracts::{ExecutionOptions, GeomError};
+use axiolid_contracts::{Backend, BackendDescriptor, ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{BooleanOperator, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_inspect::{enclosed_volume, VolumeInterval};
 use axiolid_measure::exact_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_boolean_contract::{BooleanOutcome, MeshBoolean};
 use axiolid_mesh_compile::deviation::SNAPPED_OPERANDS;
 use axiolid_mesh_compile::{
     BooleanReport, DeviationBound, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
@@ -200,23 +209,32 @@ fn closed(brep: &ExactBRep) {
 }
 
 /// Short of the face (a skin) and past it (an overlap), from the exported
-/// residue to a thousandth of the tolerance.
+/// residue to a thousandth of the tolerance: what the exact compiler reads
+/// as coincident.
 const THIN: [Scalar; 6] = [4.5e-15, -4.5e-15, 1e-12, -1e-12, 1e-9, -1e-9];
 
+/// The exported residue: rounding for the wall's coordinates (`3.67`), so
+/// the mesh compiler snaps it.
+const ROUNDING: [Scalar; 2] = [4.5e-15, -4.5e-15];
+
+/// Above the rounding of the wall's coordinates, so the mesh compiler keeps
+/// the skin (or cuts past the face) as authored, under any tolerance.
+const ABOVE_ROUNDING: [Scalar; 4] = [1e-12, -1e-12, 1e-9, -1e-9];
+
 #[test]
-fn a_skin_thinner_than_the_tolerance_is_snapped_away_and_reported() {
+fn a_skin_at_the_rounding_scale_is_snapped_away_and_reported() {
     let tolerance = Tolerance::METRE;
     let (flush, flush_report) = mesh(0.0, None, tolerance);
     assert_eq!(snapped(&flush_report), None, "flush needs no snap");
     let flush_volume = enclosed_volume(&flush).expect("a valid solid");
     assert!(flush_volume.contains(net()));
-    for gap in THIN {
+    for gap in ROUNDING {
         let (mesh, report) = mesh(gap, None, tolerance);
         let moved = snapped(&report).unwrap_or_else(|| panic!("gap {gap}: {report:?}"));
         // The doors' ends moved onto the wall's face: by the gap, never
-        // beyond the tolerance.
+        // beyond the rounding of the wall's coordinates.
         assert!(
-            moved >= 0.5 * gap.abs() && moved <= tolerance.linear(),
+            moved >= 0.5 * gap.abs() && moved <= 16.0 * ulp(HEIGHT),
             "{gap}: {moved}"
         );
         assert_eq!(triangles(&mesh), triangles(&flush), "gap {gap}");
@@ -243,9 +261,127 @@ fn an_inner_booleans_snap_stays_reported_under_the_outer_one() {
 }
 
 #[test]
+fn a_skin_above_the_rounding_scale_is_kept_and_not_reported() {
+    for tolerance in [Tolerance::METRE, Tolerance::MILLIMETRE] {
+        for gap in ABOVE_ROUNDING {
+            let (kept, report) = mesh(gap, None, tolerance);
+            assert_eq!(snapped(&report), None, "gap {gap}: {report:?}");
+            let volume = enclosed_volume(&kept).expect("a valid solid");
+            // A door reaching past the face cuts the wall through. The mesh
+            // boolean keeps the skin as given, its faces within their own
+            // thickness of where they are stated.
+            let expected = net() + skin(gap.max(0.0));
+            assert_volume(volume, expected, AREA * gap.abs(), &format!("gap {gap}"));
+            if gap >= 1e-9 {
+                assert!(!volume.contains(net()), "gap {gap}: the skin is kept");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_skin_of_a_micrometre_to_half_a_millimetre_is_kept_under_a_millimetre_tolerance() {
+    // Authored skins: on one model, snapping skins this thin within the
+    // tolerance took seven hosts' whole bodies, and walls' skins at
+    // near-flush slab openings (#291).
+    let tolerance = Tolerance::MILLIMETRE;
+    for gap in [1e-6, 1e-4, 5e-4] {
+        let (kept, report) = mesh(gap, None, tolerance);
+        assert_eq!(snapped(&report), None, "gap {gap}: {report:?}");
+        let volume = enclosed_volume(&kept).expect("a valid solid");
+        assert_volume(volume, net() + skin(gap), 0.0, &format!("gap {gap}"));
+        assert!(!volume.contains(net()), "gap {gap}: the skin is kept");
+        for (name, placement) in [("site", site()), ("far", far())] {
+            let (placed, report) = mesh(gap, Some(placement), tolerance);
+            assert_eq!(snapped(&report), None, "gap {gap}, {name}: {report:?}");
+            let volume = enclosed_volume(&placed).expect("a valid placed solid");
+            assert_volume(
+                volume,
+                net() + skin(gap),
+                AREA * 4.0 * ulp(5.7e6),
+                &format!("gap {gap}, {name}"),
+            );
+        }
+    }
+}
+
+/// The wall and its doors each placed by `placement`, the doors `gap`
+/// short: the difference is computed at the placement's coordinates.
+fn placed_operands(gap: Scalar, placement: Transform3) -> (GeometryGraph, NodeId) {
+    let mut b = GeometryGraphBuilder::new();
+    let mut push = |node| b.push(node).expect("a valid node");
+    let profile = push(GeometryNode::Profile(rect(LENGTH, THICKNESS)));
+    let body = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+        profile,
+        direction: Vec3::Z,
+        depth: HEIGHT,
+    }));
+    let mut body = push(GeometryNode::Instance(Instance {
+        source: body,
+        transform: placement,
+    }));
+    for cx in DOORS {
+        let profile = push(GeometryNode::Profile(rect(DOOR_WIDTH, DOOR_HEIGHT)));
+        let door = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: THICKNESS + 0.2,
+        }));
+        let start = placement.transform_point3(Vec3::new(cx, -THICKNESS / 2.0, DOOR_HEIGHT / 2.0));
+        let across = Transform3::from_cols(
+            Vec3::NEG_X,
+            Vec3::Z,
+            Vec3::Y,
+            start + Vec3::new(0.0, gap, 0.0),
+        );
+        let door = push(GeometryNode::Instance(Instance {
+            source: door,
+            transform: across,
+        }));
+        body = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: body,
+            right: door,
+            operator: BooleanOperator::Difference,
+        }));
+    }
+    (b.finish(vec![body]).expect("a valid graph"), body)
+}
+
+#[test]
+fn a_residue_of_a_few_ulps_at_georeferenced_coordinates_is_snapped_away() {
+    // Operands placed in world coordinates rather than in the wall's frame:
+    // there a nanometre is an ulp or a few, and is closed; a micrometre is
+    // fifty times the reach, and is kept.
+    let at = Transform3::from_translation(Vec3::new(6.0e5, 5.6e6, 0.0));
+    let tolerance = Tolerance::MILLIMETRE;
+    let compile = |gap: Scalar| {
+        let (graph, root) = placed_operands(gap, at);
+        ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_with_deviation(&graph, root, &options(tolerance))
+            .unwrap_or_else(|e| panic!("gap {gap}: {e}"))
+    };
+    for gap in [1e-9, -1e-9, 4e-9, -4e-9] {
+        let (outcome, report) = compile(gap);
+        let moved = snapped(&report).unwrap_or_else(|| panic!("gap {gap}: {report:?}"));
+        assert!(moved <= 16.0 * ulp(5.6e6), "gap {gap}: {moved}");
+        let volume = enclosed_volume(&outcome.mesh).unwrap_or_else(|e| panic!("{gap}: {e:?}"));
+        let slack = AREA * (moved + 4.0 * ulp(5.7e6));
+        assert_volume(volume, net(), slack, &format!("gap {gap}"));
+    }
+    for gap in [1e-6, -1e-6] {
+        let (outcome, report) = compile(gap);
+        assert_eq!(snapped(&report), None, "gap {gap}: {report:?}");
+        let volume = enclosed_volume(&outcome.mesh).unwrap_or_else(|e| panic!("{gap}: {e:?}"));
+        let slack = AREA * 4.0 * ulp(5.7e6);
+        let expected = net() + skin(gap.max(0.0));
+        assert_volume(volume, expected, slack, &format!("gap {gap}"));
+    }
+}
+
+#[test]
 fn a_snapped_wall_placed_at_georeferenced_coordinates_keeps_a_certified_volume() {
     let tolerance = Tolerance::METRE;
-    for gap in THIN {
+    for gap in ROUNDING {
         for (name, placement) in [("site", site()), ("far", far())] {
             let (mesh, report) = mesh(gap, Some(placement), tolerance);
             let moved = snapped(&report).expect("snapped");
@@ -351,4 +487,80 @@ fn at_zero_tolerance_nothing_is_snapped() {
             Err(other) => panic!("gap {gap}: {other}"),
         }
     }
+}
+
+/// The mesh boolean, refusing a tool with a vertex exactly on the wall's
+/// `-y` face (`refuse_given`: any tool). The snap lands the doors' ends
+/// there, so this stands for a snapped boolean that is refused while the
+/// operands as given are cut (#291).
+#[derive(Debug)]
+struct RefusesTheSnap {
+    inner: BoolmeshBoolean,
+    refuse_given: bool,
+}
+
+impl Backend for RefusesTheSnap {
+    fn descriptor(&self) -> BackendDescriptor {
+        self.inner.descriptor()
+    }
+}
+
+impl MeshBoolean for RefusesTheSnap {
+    fn boolean(
+        &self,
+        subject: &TriMesh,
+        tool: &TriMesh,
+        operation: BooleanOperator,
+        options: &ExecutionOptions,
+    ) -> GeomResult<BooleanOutcome> {
+        if self.refuse_given || tool.positions.iter().any(|p| p.y == -THICKNESS / 2.0) {
+            return Err(GeomError::Degenerate("refused for the test".into()));
+        }
+        self.inner.boolean(subject, tool, operation, options)
+    }
+}
+
+#[test]
+fn a_snapped_boolean_that_is_refused_falls_back_to_the_operands_as_given() {
+    let (graph, root) = wall(4.5e-15, None);
+    let options = options(Tolerance::METRE);
+    let compiler = ReferenceMeshCompiler::new(RefusesTheSnap {
+        inner: BoolmeshBoolean::new(),
+        refuse_given: false,
+    });
+    let (outcome, report) = compiler
+        .compile_mesh_with_deviation(&graph, root, &options)
+        .expect("the doors as given are cut");
+    // No snap reported: the doors were cut where they are given, exactly
+    // the mesh nothing is snapped for (at zero tolerance).
+    assert_eq!(snapped(&report), None, "{report:?}");
+    let (given, _) = mesh(4.5e-15, None, Tolerance::ZERO);
+    assert_eq!(outcome.mesh.positions, given.positions);
+    assert_eq!(outcome.mesh.indices, given.indices);
+    assert!(outcome
+        .mesh
+        .positions
+        .iter()
+        .all(|p| p.y != -THICKNESS / 2.0 || p.x.abs() > 1.5));
+    let volume = enclosed_volume(&outcome.mesh).expect("a valid solid");
+    assert_volume(
+        volume,
+        net() + skin(4.5e-15),
+        AREA * ulp(HEIGHT),
+        "fallback",
+    );
+}
+
+#[test]
+fn a_boolean_refused_snapped_and_as_given_is_refused() {
+    let (graph, root) = wall(4.5e-15, None);
+    let compiler = ReferenceMeshCompiler::new(RefusesTheSnap {
+        inner: BoolmeshBoolean::new(),
+        refuse_given: true,
+    });
+    let refused = compiler.compile_mesh_with_deviation(&graph, root, &options(Tolerance::METRE));
+    assert!(
+        matches!(refused, Err(GeomError::Degenerate(ref why)) if why == "refused for the test"),
+        "{refused:?}"
+    );
 }

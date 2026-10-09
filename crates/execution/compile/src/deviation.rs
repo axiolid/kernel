@@ -107,14 +107,16 @@
 //!   report, and only for the booleans whose result is emitted, not for
 //!   the inner booleans of a chain; the search stops once within the
 //!   requested budget.
-//! - Operands snapped together (#276): before the mesh boolean, operand
-//!   vertices within the linear tolerance of the other operand's faces are
-//!   moved onto them (`crate::snap`), so a skin thinner than the tolerance
-//!   is not cut as one. The largest move is a
+//! - Operands snapped together (#276, #291): before the mesh boolean,
+//!   operand coordinates a rounding residue (16 `f64::EPSILON` of the
+//!   operands' largest coordinate) from the other operand's axis-aligned
+//!   faces are set onto them exactly (`crate::snap`), so a skin that thin
+//!   is not cut as one; a thicker skin is kept. The largest move is a
 //!   [`DeviationBound::Certified`] contribution of
 //!   [`DeviationPath::Boolean`] under the detail [`SNAPPED_OPERANDS`],
 //!   carried through instances and enclosing booleans, the measured ones
-//!   included; it never exceeds the tolerance.
+//!   included; it never exceeds the tolerance. A boolean whose snapped
+//!   operands are refused is cut as given and reports no snap.
 //!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
@@ -138,10 +140,10 @@ pub(crate) const NUMERICAL_STATION_FRAME: &str = "frame at a numerically resolve
 pub(crate) const WARPED_BREP_FACE: &str = "non-planar face without a surface";
 
 /// The [`DeviationContribution::detail`] of a boolean whose operands were
-/// moved onto each other's faces within the linear tolerance before the
-/// mesh boolean cut them (#276): its bound is the largest distance any
-/// operand vertex moved, so the mesh is the boolean of operands perturbed
-/// by at most that much. It travels with the boolean's result through
+/// moved onto each other's faces by a rounding residue, within the linear
+/// tolerance, before the mesh boolean cut them (#276, #291): its bound is
+/// the largest distance any operand vertex moved, so the mesh is the
+/// boolean of operands perturbed by at most that much. It travels with the boolean's result through
 /// instances (scaled) and enclosing booleans, also where an enclosing
 /// boolean is measured against its exact result.
 pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tolerance";
