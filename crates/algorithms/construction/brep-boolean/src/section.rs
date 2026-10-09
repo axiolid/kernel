@@ -31,7 +31,9 @@
 //! - **Coincident supports** share a patch of surface. Each face's boundary
 //!   edges are imprinted on the other where they run inside it, so the
 //!   shared patch becomes a region of both faces; classification then sees
-//!   it on the other solid's boundary (see `crate::boolean`).
+//!   it on the other solid's boundary (see `crate::boolean`). An imprinted
+//!   edge's cuts are merged as a section's, and a cut within tolerance of
+//!   the edge's own end is that end (#276, `imprint_cuts`).
 //!
 //! Work that cannot matter is skipped through sound boxes (`crate::bounds`,
 //! enlarged by the tolerance): face pairs whose boxes are apart are not
@@ -701,6 +703,7 @@ fn imprint(
         // together with the shared surface it defines the edge's curve.
         let bounding = from.cutter(face, edge, &curve, span, tolerance, false)?;
         let (cuts, along) = onto.cuts(other, &curve, &bounding, None, contacts, tolerance)?;
+        let cuts = imprint_cuts(&curve, span, cuts, tolerance)?;
         let shared = onto.surface(other)?;
         for piece in pieces_within(&curve, span, cuts) {
             let mid = sample(&curve, piece, [shared, &bounding], contacts)?;
@@ -898,6 +901,45 @@ fn merge_close(
         let (first, last) = (at(out[0])?, at(out[out.len() - 1])?);
         if merged((first - last).length()) {
             out.pop();
+        }
+    }
+    Ok(out)
+}
+
+/// The cuts that split an imprinted edge (`curve` over `span`), as a
+/// section's cuts are settled ([`merge_close`]), and with every cut within
+/// the tolerance of one of the edge's own ends read as that end (#276).
+///
+/// The edge's ends are vertices of its own operand, where the faces that
+/// bound it meet; a cut there is the other operand's boundary crossing the
+/// edge where that operand's face is read as coincident with, or as
+/// running along, the face the edge ends on. Kept apart, the cut would
+/// leave a piece a fraction of the tolerance long that lies on the other
+/// face's boundary, which no point can classify (a door's jamb on a wall's
+/// floor face, with the door a rounding error longer than the wall is
+/// thick). Merging it moves the other operand's boundary onto the end by
+/// at most the tolerance, the reading its coincident faces already stand
+/// for; recorded as [`ToleranceDecisionKind::MergedPoints`] above the
+/// rounding floor, and at [`Tolerance::ZERO`] only a rounding residue
+/// merges.
+fn imprint_cuts(
+    curve: &Curve3,
+    span: Interval,
+    cuts: Vec<Scalar>,
+    tolerance: Tolerance,
+) -> Result<Vec<Scalar>, BooleanError> {
+    let cuts = merge_close(curve, cuts, tolerance)?;
+    let at = |t: Scalar| evaluate3(curve, t).map_err(|_| BooleanError::Evaluation);
+    let ends = [at(span.start)?, at(span.end)?];
+    let mut out = Vec::with_capacity(cuts.len());
+    for cut in cuts {
+        let point = at(cut)?;
+        let gap = ends
+            .iter()
+            .map(|end| (point - *end).length())
+            .fold(Scalar::INFINITY, Scalar::min);
+        if !report::near(ToleranceDecisionKind::MergedPoints, gap, tolerance) {
+            out.push(cut);
         }
     }
     Ok(out)

@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A door standing on a wall's floor face and reaching a rounding error
+  past the wall's face (or stopping that short of it) is cut, not refused
+  as "a point too close to a face boundary to classify" (#276). Where two
+  coincident faces imprint each other's edges, a cut within the tolerance
+  of the imprinted edge's own end is that end (`MergedPoints` above the
+  rounding floor), and cuts within the tolerance of each other merge as on
+  a section; the piece between was a fraction of the tolerance long and
+  lay on the other face's boundary.
+
 ## [0.1.5] - 2026-10-03
 
 ### Added

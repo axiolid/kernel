@@ -227,3 +227,54 @@ fn a_door_on_the_floor_then_a_window_under_any_placement() {
         close(name, volume(&two), L * T * H - (0.9 * 2.1 + 1.44) * T);
     }
 }
+
+/// A door standing on a wall's floor face (its bottom exactly coplanar
+/// with the wall's) and reaching a rounding error past the wall's face, or
+/// stopping that short of it (#276). The door's end face is read as the
+/// wall's face; the wall's floor edge along that face then crosses the
+/// door's floor edge within the tolerance of the door's corner, and is cut
+/// there, not a fraction of the tolerance away, where the piece between
+/// lies on the wall's boundary and no point can classify it.
+#[test]
+fn a_floor_standing_door_a_rounding_error_past_or_short_of_the_face() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    for gap in [-1e-9, -1e-12, -4.5e-15, 4.5e-15, 1e-12, 1e-9] {
+        let door = solid(square(1.0, gap, 2.0, 0.5), 0.0, 2.0);
+        let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+            &wall,
+            &door,
+            BooleanOperator::Difference,
+            tol(),
+        )
+        .unwrap_or_else(|e| panic!("gap {gap}: {e}"));
+        let topology = axiolid_topology::audit_brep(cut.topology());
+        assert!(topology.is_closed_manifold(), "gap {gap}: {topology:?}");
+        // The door's end moved onto the wall's face, and that is reported.
+        assert!(!report.is_exact(), "gap {gap}: {report:?}");
+        let moved = report
+            .decisions()
+            .iter()
+            .map(|d| d.linear)
+            .fold(0.0, f64::max);
+        assert!(moved <= tol().linear(), "{report:?}");
+        let got = volume(&cut);
+        assert!(
+            (got - (3.0 - 0.5)).abs() <= 40.0 * moved + 1e-12,
+            "gap {gap}: {got}"
+        );
+    }
+    // Ten tolerances short, the skin is kept; ten tolerances past, the
+    // wall's floor edge is cut where it crosses the door's, not at the
+    // door's corner.
+    let door = solid(square(1.0, 1e-5, 2.0, 0.5), 0.0, 2.0);
+    let cut = difference(&wall, &door);
+    close("skin", volume(&cut), 3.0 - 0.5 + 2.0 * 1e-5);
+    let door = solid(square(1.0, -1e-5, 2.0, 0.5), 0.0, 2.0);
+    let (cut, report) =
+        axiolid_brep_boolean::boolean_with_report(&wall, &door, BooleanOperator::Difference, tol())
+            .expect("past by ten tolerances");
+    assert!(report.is_exact(), "{report:?}");
+    let topology = axiolid_topology::audit_brep(cut.topology());
+    assert!(topology.is_closed_manifold(), "{topology:?}");
+    close("past", volume(&cut), 3.0 - 0.5);
+}
