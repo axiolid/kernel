@@ -528,6 +528,7 @@ dependencies = [
  "axiolid-dispatch",
  "axiolid-exact-compile-contract",
  "axiolid-guarantees",
+ "axiolid-inspect",
  "axiolid-measure",
  "axiolid-mesh",
  "axiolid-mesh-boolean-boolmesh",

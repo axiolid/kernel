@@ -361,3 +361,59 @@ Tests: `crates/algorithms/construction/brep-boolean/tests/fillet_tangent.rs`,
 the filleted cases of `crates/execution/compile/tests/exact_tangent_hole.rs`
 and `crates/execution/compile/tests/boolean_deviation.rs`; probe
 `scripts/probe_placed_boolean_mutants.py` (fillet mutants).
+
+## Amendment 2026-10-09: a skin thinner than the tolerance (#276)
+
+A door exported `4.5e-15` m short of its wall's face left a skin that
+thin. Subtracted in the wall's own frame (as `ifc-geometry` 0.13 lowers
+openings) and then placed at georeferenced coordinates (about `5.6e6`, a
+coordinate rounding to about `1e-9`), the mesh's two skin faces crossed,
+and the volume kernel refused the solid as self-intersecting: 32 of 40
+walls on one consumer model. The exact boolean read the door's end face as
+the wall's (`CoincidentSupports`), but refused a door standing on the
+wall's floor face that reached a rounding error past the face.
+
+- **Reading unchanged.** The guarantee above already allows the result to
+  be the boolean of operands perturbed within the tolerance, reported. A
+  skin or sliver thinner than the tolerance is such a perturbation away
+  from none; one thicker is kept, by both compilers.
+- **Exact boolean.** Where coincident faces imprint each other's edges, a
+  cut within `eps` of the imprinted edge's own end is that end
+  (`MergedPoints` above the rounding floor), and cuts within `eps` of each
+  other merge as on a section. The cut was the other face's boundary
+  crossing the edge where the door's end face is already read as the
+  wall's; kept apart, it left a piece shorter than the tolerance lying on
+  the other face's boundary, which no point classifies.
+- **Mesh compiler.** The mesh boolean decides on the `f64` numbers it is
+  given and has no tolerance, so the reading is made before it: each
+  vertex of the tool within `eps` of a subject triangle moves onto that
+  triangle's plane (onto the common line or point of two or three such
+  planes, by the smallest move), then each subject vertex within `eps` of
+  the moved tool onto the tool's planes. A vertex moves only by at most
+  `eps`, never between two parallel planes within `eps` of it, and no move
+  is made that would turn or flatten an operand's triangle. Every operand
+  point then moved by at most `eps`. Onto an axis-aligned plane the vertex
+  lands exactly, so a host subtracted in its own frame meets the tool's
+  face exactly and the mesh boolean's coplanar rule removes the skin.
+- **Reported, and nothing at zero.** The largest move is a `Certified`
+  contribution of the boolean path under `deviation::SNAPPED_OPERANDS`,
+  carried through instances and enclosing booleans, including those
+  measured against their exact result. At a zero linear tolerance nothing
+  moves.
+- **Placement is not checked differently.** A placed mesh is still
+  refused when it intersects itself: a skin thicker than the tolerance but
+  thinner than the placement's rounding is a real near-degeneracy the
+  caller's tolerance does not cover.
+- **Known limit.** Under a general rotation an `f64` point lands only
+  within rounding of a plane, so a boolean computed far from the origin in
+  a rotated frame (operands placed in world coordinates rather than in the
+  host's frame) can still leave a skin at the rounding of those
+  coordinates.
+
+Tests: `crates/execution/compile/tests/thin_skin.rs` (the issue's wall,
+doors short and long by `4.5e-15` to `1e-9`, at the origin and placed at
+`(6e5, 5.6e6)` turned by 2.3 degrees and at `(4e5, 4e5)`; ten tolerances
+kept; zero tolerance), the snap's unit tests in
+`crates/execution/compile/src/snap.rs`, and
+`crates/algorithms/construction/brep-boolean/tests/openings.rs`; probe
+`scripts/probe_thin_skin_mutants.py`.

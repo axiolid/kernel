@@ -11,6 +11,7 @@ mod directrix;
 mod half_space_boundary;
 mod pinch;
 mod planar;
+mod snap;
 pub mod station;
 mod weld;
 

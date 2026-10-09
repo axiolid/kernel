@@ -561,9 +561,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 Ok(match measure {
                     // Measured against the exact result only when a report
                     // asks for it: it compiles the exact boolean (#235).
+                    // Operands snapped within tolerance stay reported (#276).
                     Measure::Deviation(emitted) if emitted.contains(&id) => {
-                        let deviation =
+                        let mut deviation =
                             crate::deviation::of_boolean(graph, id, options, &built.mesh);
+                        deviation.carry_snaps(&built.deviation);
                         built.with_deviation(deviation)
                     }
                     Measure::Deviation(_) | Measure::Skip => built,
@@ -678,17 +680,24 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         };
         // A bounded half-space is built here from the subject, so it has no
         // upstream fates of its own.
-        let (tool, tool_fates) = match bounded_tool.as_ref() {
-            Some(tool) => (tool, None),
+        let (tool, tool_fates, tool_deviation) = match bounded_tool.as_ref() {
+            Some(tool) => (tool, None, None),
             None => {
                 let built = self.cached(cache, right, Budget::of(options))?;
                 refuse_surface_operand(built, "tool")?;
-                (&built.mesh, Some(&built.fates))
+                (&built.mesh, Some(&built.fates), Some(&built.deviation))
             }
         };
-        let outcome = self
-            .boolean
-            .boolean(&subject.mesh, tool, operator, options)?;
+        // Faces of the two operands within the tolerance of each other are
+        // moved together first, so a skin or sliver thinner than the
+        // tolerance is not cut as one (#276, `crate::snap`).
+        let settled = crate::snap::settle(&subject.mesh, tool, options.tolerance());
+        let outcome = self.boolean.boolean(
+            settled.subject.as_ref().unwrap_or(&subject.mesh),
+            settled.tool.as_ref().unwrap_or(tool),
+            operator,
+            options,
+        )?;
         if let Some(pinch) = crate::pinch::find(&outcome.mesh) {
             return Err(GeomError::Degenerate(match pinch {
                 crate::pinch::Pinch::Edge { from, to } => format!(
@@ -702,12 +711,24 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 ),
             }));
         }
-        Ok(channels::after_boolean(
+        let mut built = channels::after_boolean(
             outcome.mesh,
             &subject.fates,
             tool_fates,
             outcome.evidence.attribute_fates,
-        ))
+        );
+        built.deviation.carry_snaps(&subject.deviation);
+        if let Some(tool) = tool_deviation {
+            built.deviation.carry_snaps(tool);
+        }
+        if settled.moved > 0.0 {
+            built.deviation.add(
+                crate::deviation::DeviationPath::Boolean,
+                crate::deviation::SNAPPED_OPERANDS,
+                crate::deviation::DeviationBound::Certified(settled.moved),
+            );
+        }
+        Ok(built)
     }
 
     /// A non-boolean solid and its deviation. A swept disk along a smooth

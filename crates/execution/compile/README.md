@@ -31,3 +31,8 @@ cargo add axiolid-mesh-compile
   A mesh is reported `MeshClosure::Solid` only when it is a closed,
   consistently wound two-manifold; a declared solid that tessellates open
   is `MeshClosure::OpenSolid`, and `solid_mesh` refuses it.
+- Before a mesh boolean, operand vertices within the linear tolerance of
+  the other operand's faces are moved onto them, so a tool a rounding
+  error short of its host's face leaves no skin that thin (#276). The move
+  is at most the tolerance, none at zero, and the deviation report names
+  it (`deviation::SNAPPED_OPERANDS`).

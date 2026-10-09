@@ -29,6 +29,7 @@ use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::deviation::SNAPPED_OPERANDS;
 use axiolid_mesh_compile::{
     DeviationBound, DeviationPath, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
@@ -229,8 +230,25 @@ fn assert_measured(
     ceiling: Scalar,
 ) -> (Scalar, Scalar) {
     let (graph, root, mesh, report, seconds) = case;
-    assert_eq!(report.contributions.len(), 1, "{report:?}");
-    let contribution = report.contributions[0];
+    // Operands moved onto each other within the tolerance before the mesh
+    // boolean (#276) are reported apart, by at most the tolerance.
+    let snapped = report
+        .contributions
+        .iter()
+        .filter(|c| c.detail == SNAPPED_OPERANDS)
+        .map(|c| match c.bound {
+            DeviationBound::Certified(moved) => moved,
+            other => panic!("{name}: a snap is certified, got {other:?}"),
+        })
+        .fold(0.0, Scalar::max);
+    assert!(snapped <= options.tolerance().linear(), "{report:?}");
+    let measured: Vec<_> = report
+        .contributions
+        .iter()
+        .filter(|c| c.detail != SNAPPED_OPERANDS)
+        .collect();
+    assert_eq!(measured.len(), 1, "{report:?}");
+    let contribution = *measured[0];
     assert_eq!(contribution.path, DeviationPath::Boolean);
     // Within tolerance, or the exact boolean of the given operands (#236).
     assert!(
@@ -242,7 +260,7 @@ fn assert_measured(
     let DeviationBound::Certified(bound) = contribution.bound else {
         panic!("{name}: expected a certified bound, got {report:?}");
     };
-    assert_eq!(report.bound, Some(bound));
+    assert_eq!(report.bound, Some(bound.max(snapped)));
     let exact = ReferenceExactCompiler::new()
         .compile_exact(&graph, root, options)
         .expect("the exact result");

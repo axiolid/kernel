@@ -45,6 +45,12 @@ caret rule for `0.x` versions.
   segments, elevated pieces -- at the running sum of its pieces' lengths,
   with each piece's own seams inside it; a joint after an ellipse or a
   B-spline piece is refused as inexact by name.
+- `deviation::SNAPPED_OPERANDS` (#276): the detail of the
+  `DeviationPath::Boolean` contribution that reports operands snapped
+  together within the tolerance (see Fixed), its
+  `Certified` bound the largest distance any operand vertex moved. It is
+  carried through instances (scaled) and enclosing booleans, also where
+  the enclosing boolean is measured against its exact result.
 
 ### Changed
 
@@ -86,6 +92,19 @@ caret rule for `0.x` versions.
   split that does not bound the clipper's cover along the same edges is
   discarded for the cover. Every ring corner of a planar B-rep or
   authored polygon face is a triangle corner again.
+
+- A difference whose tool stops a rounding error short of its host's face,
+  or reaches that far past it, no longer leaves a skin or sliver that thin
+  (#276). Kept as two faces `4.5e-15` apart, such a skin crossed itself
+  once the mesh was placed at georeferenced coordinates, and the volume
+  kernel refused it as self-intersecting. `ReferenceMeshCompiler` now
+  moves the tool's vertices within the linear tolerance of the subject's
+  faces onto them, then the subject's onto the moved tool's, before the
+  mesh boolean: by the smallest move onto every plane in reach, at most
+  the tolerance, exactly onto axis-aligned planes, never folding a
+  triangle, and not at all at a zero tolerance. The result is the boolean
+  of operands perturbed within the tolerance (ADR 0080). A skin thicker
+  than the tolerance is kept.
 
 ## [0.3.15] - 2026-10-09
 

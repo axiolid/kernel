@@ -39,6 +39,7 @@ axiolid-surface.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-boolean-boolmesh.workspace = true
 axiolid-brep-audit.workspace = true
+axiolid-inspect.workspace = true
 axiolid-mesh-section-contract.workspace = true
 axiolid-dispatch = { workspace = true, features = ["mesh-section"] }
 
@@ -49,4 +50,4 @@ role = "execution.orchestration"
 domain = "graph.compile"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-inspect", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]

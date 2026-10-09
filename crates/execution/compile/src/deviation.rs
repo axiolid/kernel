@@ -107,6 +107,14 @@
 //!   report, and only for the booleans whose result is emitted, not for
 //!   the inner booleans of a chain; the search stops once within the
 //!   requested budget.
+//! - Operands snapped together (#276): before the mesh boolean, operand
+//!   vertices within the linear tolerance of the other operand's faces are
+//!   moved onto them (`crate::snap`), so a skin thinner than the tolerance
+//!   is not cut as one. The largest move is a
+//!   [`DeviationBound::Certified`] contribution of
+//!   [`DeviationPath::Boolean`] under the detail [`SNAPPED_OPERANDS`],
+//!   carried through instances and enclosing booleans, the measured ones
+//!   included; it never exceeds the tolerance.
 //!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
@@ -128,6 +136,15 @@ pub(crate) const NUMERICAL_STATION_FRAME: &str = "frame at a numerically resolve
 /// The [`DeviationContribution::detail`] of B-rep faces that declare no
 /// surface and are warped beyond the linear tolerance (#257).
 pub(crate) const WARPED_BREP_FACE: &str = "non-planar face without a surface";
+
+/// The [`DeviationContribution::detail`] of a boolean whose operands were
+/// moved onto each other's faces within the linear tolerance before the
+/// mesh boolean cut them (#276): its bound is the largest distance any
+/// operand vertex moved, so the mesh is the boolean of operands perturbed
+/// by at most that much. It travels with the boolean's result through
+/// instances (scaled) and enclosing booleans, also where an enclosing
+/// boolean is measured against its exact result.
+pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tolerance";
 
 /// The construction path a part of the mesh came from.
 #[non_exhaustive]
@@ -321,6 +338,17 @@ impl Deviation {
     pub(crate) fn absorb(&mut self, other: &Self) {
         for c in &other.0 {
             self.add(c.path, c.detail, c.bound);
+        }
+    }
+
+    /// Fold in `other`'s [`SNAPPED_OPERANDS`] contributions: a boolean's
+    /// snap stays reported when an enclosing boolean replaces the rest of
+    /// its deviation (#276).
+    pub(crate) fn carry_snaps(&mut self, other: &Self) {
+        for c in &other.0 {
+            if c.path == DeviationPath::Boolean && c.detail == SNAPPED_OPERANDS {
+                self.add(c.path, c.detail, c.bound);
+            }
         }
     }
 
