@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Station seam sides (#263, ADR 0082 amendment): `OrientedCurveStation`
+  gains `seam: SeamSide` (re-exported from `axiolid-curve`), the piece a
+  station on a seam of its basis reads; `OrientedCurveStation::new` sets
+  `SeamSide::Outgoing`, the stated default and the evaluators' behaviour,
+  and `with_seam_side` changes it. `CurveStation` has public fields, so it
+  keeps reading the outgoing piece; `CurveStation::with_seam_side` returns
+  the oriented station in its base frame reading the given side, and
+  `From<CurveStation> for OrientedCurveStation` the unturned outgoing one.
+  The `station` module documents the seam rule and how runs of sections
+  and offsets are mitred across a seam instead of taking a side.
+
 ## [0.3.5] - 2026-10-03
 
 ### Added

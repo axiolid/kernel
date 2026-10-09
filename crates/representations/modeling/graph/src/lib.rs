@@ -31,8 +31,9 @@ pub use id::NodeId;
 pub use node::{GeometryNode, Instance, OpenProfile, PointOnCurve, PointOnSurface};
 pub use solid_operation::{Section, SolidOperation};
 pub use station::{
-    CurveStation, OrientedCurveStation, SectionAtStation, Station, StationFrame, StationOffsets,
-    StationOrientation, StationedOpenSection, StationedSection, ORIENTATION_TOLERANCE,
+    CurveStation, OrientedCurveStation, SeamSide, SectionAtStation, Station, StationFrame,
+    StationOffsets, StationOrientation, StationedOpenSection, StationedSection,
+    ORIENTATION_TOLERANCE,
 };
 pub use surface_relation::SurfaceRelation;
 pub use value::BuiltInNode;

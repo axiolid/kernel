@@ -61,6 +61,28 @@
 //! along `up'`). The OFFSETS stay in the base frame: they locate the
 //! station's origin, which the orientation does not move.
 //!
+//! # Seams (#263)
+//!
+//! A basis curve made of pieces -- a polyline, a B-spline with a corner
+//! knot, an elevated curve whose profile's grade breaks, a banked curve
+//! whose cant or pivot law jumps -- has two frames where two pieces meet.
+//! A station within the arc-length tolerance of such a seam is ON it and
+//! reads the frame of one piece, chosen by [`SeamSide`]: the piece that
+//! starts there ([`SeamSide::Outgoing`], the default and what every curve
+//! evaluator reads) or the one that ends there ([`SeamSide::Incoming`]).
+//! An [`OrientedCurveStation`] carries the side ([`OrientedCurveStation::seam`]);
+//! a plain [`CurveStation`] reads the outgoing piece, and
+//! [`CurveStation::with_seam_side`] turns it into an oriented station in
+//! its base frame that reads the other one.
+//!
+//! A run of sections or offsets ([`Station`]s along one directrix) needs
+//! no side: a section standing exactly on an interior seam where the
+//! tangent turns is cut in the mitre plane, the bisector of the incoming
+//! and outgoing tangents, and so is the run where it crosses such a seam
+//! between two of its stations. The run's first station reads the
+//! outgoing piece and its last the incoming one, the pieces the run lies
+//! on. A seam where the tangent does not turn keeps the outgoing frame.
+//!
 //! # Sections between stations
 //!
 //! A profile placed at a station maps its `x` onto the lateral axis and its
@@ -96,6 +118,7 @@
 //!   needs the profile's vertices.
 
 use axiolid_core::{Scalar, Vec3};
+pub use axiolid_curve::SeamSide;
 
 use crate::NodeId;
 
@@ -200,6 +223,17 @@ impl CurveStation {
             frame: StationFrame::Section,
         }
     }
+
+    /// This station, unturned, reading `side` of a seam it lies on (#263).
+    ///
+    /// A plain curve station always reads the outgoing piece; the side is
+    /// carried by an [`OrientedCurveStation`] whose orientation is the base
+    /// frame, so the node to push is
+    /// [`GeometryNode::OrientedCurveStation`](crate::GeometryNode::OrientedCurveStation).
+    #[must_use]
+    pub const fn with_seam_side(self, side: SeamSide) -> OrientedCurveStation {
+        OrientedCurveStation::new(self, StationOrientation::new(None, None)).with_seam_side(side)
+    }
 }
 
 /// A closed profile standing at a station along a sectioned spine's
@@ -299,11 +333,13 @@ impl StationOrientation {
     }
 }
 
-/// A [`CurveStation`] with an explicit orientation (#246).
+/// A [`CurveStation`] with an explicit orientation (#246) and the side of
+/// a seam it reads (#263).
 ///
 /// Its point is the station's, offsets read in the base frame; its frame
 /// is the base frame turned by `orientation` (see the
-/// [module documentation](self)).
+/// [module documentation](self)). On a seam of the basis curve the base
+/// frame is the one of the piece `seam` names.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrientedCurveStation {
@@ -311,16 +347,36 @@ pub struct OrientedCurveStation {
     pub station: CurveStation,
     /// The axis and reference direction, in the base frame.
     pub orientation: StationOrientation,
+    /// The piece read when the station lies on a seam of its basis curve;
+    /// [`SeamSide::Outgoing`] unless set by [`Self::with_seam_side`].
+    pub seam: SeamSide,
 }
 
 impl OrientedCurveStation {
-    /// `station` turned by `orientation`.
+    /// `station` turned by `orientation`, reading the outgoing piece on a
+    /// seam.
     #[must_use]
     pub const fn new(station: CurveStation, orientation: StationOrientation) -> Self {
         Self {
             station,
             orientation,
+            seam: SeamSide::Outgoing,
         }
+    }
+
+    /// The same station reading `side` of a seam it lies on.
+    #[must_use]
+    pub const fn with_seam_side(mut self, side: SeamSide) -> Self {
+        self.seam = side;
+        self
+    }
+}
+
+impl From<CurveStation> for OrientedCurveStation {
+    /// The station in its base frame, reading the outgoing piece on a seam:
+    /// what the plain station means.
+    fn from(station: CurveStation) -> Self {
+        Self::new(station, StationOrientation::default())
     }
 }
 

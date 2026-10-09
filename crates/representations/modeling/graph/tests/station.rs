@@ -375,3 +375,29 @@ fn an_oriented_station_and_general_sections_validate_and_reference() {
         vec![basis, path, path]
     );
 }
+
+#[test]
+fn a_station_names_the_side_of_a_seam_it_reads() {
+    use axiolid_model::{OrientedCurveStation, SeamSide, StationOrientation};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let plain = CurveStation::new(basis, Station::at(2.0));
+    // Outgoing unless told otherwise, as every curve evaluator reads.
+    assert_eq!(SeamSide::default(), SeamSide::Outgoing);
+    assert_eq!(OrientedCurveStation::from(plain).seam, SeamSide::Outgoing);
+    assert_eq!(
+        OrientedCurveStation::new(plain, StationOrientation::default()).seam,
+        SeamSide::Outgoing
+    );
+    let incoming = plain.with_seam_side(SeamSide::Incoming);
+    assert_eq!(incoming.seam, SeamSide::Incoming);
+    assert_eq!(incoming.station, plain);
+    assert!(incoming.orientation.is_base());
+    let id = b.push_value(incoming).unwrap();
+    let graph = b.finish(vec![id]).unwrap();
+    assert_eq!(
+        graph.get(id),
+        Some(&GeometryNode::OrientedCurveStation(incoming))
+    );
+    assert_eq!(graph.get(id).unwrap().references(), vec![basis]);
+}

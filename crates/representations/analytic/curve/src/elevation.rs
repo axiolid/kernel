@@ -284,7 +284,7 @@ impl ElevationLaw {
     /// Descends through nested [`Self::Piecewise`] laws, so the returned law
     /// is never piecewise; any other law is its own piece at the unchanged
     /// distance. Seams belong to the piece that starts there, as in
-    /// `height_at`. `None` when the distance is not finite or a piece list
+    /// `height_at` ([`SeamSide::Outgoing`](crate::SeamSide::Outgoing)). `None` when the distance is not finite or a piece list
     /// is malformed.
     ///
     /// This is what an evaluator needs to read a law it evaluates itself

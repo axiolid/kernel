@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SeamSide` (#263, ADR 0082 amendment): which piece a position exactly on
+  a seam of a composite curve is read from -- `Outgoing`, the piece that
+  starts there and what every evaluator reads (the default), or
+  `Incoming`, the piece that ends there. `#[non_exhaustive]`; shared by
+  `axiolid-model`'s stations and `axiolid-evaluate`'s station readers.
+
 ## [0.3.3] - 2026-10-03
 
 ### Added
