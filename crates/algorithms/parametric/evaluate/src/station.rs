@@ -64,6 +64,20 @@
 //! reference direction is made perpendicular to it (Gram-Schmidt, axis
 //! primary) and becomes the oriented tangent. The point does not move.
 //!
+//! # Seams (#263)
+//!
+//! A curve made of pieces has two frames where a polyline turns at a
+//! vertex, a B-spline at a corner knot, an elevated curve's grade breaks
+//! or a banked curve's cant jumps. A station within
+//! [`ARC_LENGTH_TOLERANCE`]` * max(1, s)` of such a seam is ON it: it is
+//! read at the seam's own distance, from the piece that starts there
+//! (`SeamSide::Outgoing`, [`station_section2`] and [`station_section3`])
+//! or from the side [`station_section2_on`] and [`station_section3_on`]
+//! are given. [`station_seams2`] and [`station_seams3`] say where the
+//! seams are without evaluating the curve, and [`Mitre`] is the plane a
+//! run of sections crossing one stands in; see [`seam`] for both. At the
+//! curve's start and end there is one piece, and both sides read it.
+//!
 //! # Accuracy contract
 //!
 //! The point and frame are the exact curve's at a measure within
@@ -71,11 +85,20 @@
 //! numerical (a conic, a polyline is exact, a B-spline), at `s` itself on a
 //! line, an intrinsic curve, a chain and an elevated or banked curve (their
 //! parameter is the measure), each evaluated to its own stated accuracy
-//! (Gauss-Legendre quadrature for intrinsic positions, ADR 0060).
+//! (Gauss-Legendre quadrature for intrinsic positions, ADR 0060). A station
+//! on a seam is read at the seam's distance, within the same tolerance of
+//! its own.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
-use axiolid_curve::{Curve2, Curve3};
+use axiolid_curve::{Curve2, Curve3, SeamSide};
+
+pub mod seam;
+
+pub use seam::{
+    exact_station_seams2, exact_station_seams3, station_seams2, station_seams3, Mitre, StationSeam,
+    MITRE_TOLERANCE, SEAM_TANGENT_TOLERANCE,
+};
 
 use crate::arc_parameter::{
     arc_length2, arc_length3, parameter_at_arc_length2, parameter_at_arc_length3,
@@ -244,6 +267,18 @@ fn reference_up_frame(point: Point3, derivative: Vec3) -> GeomResult<SectionFram
     })
 }
 
+/// A banked curve's rolled section at plan distance `d`, as a station
+/// frame.
+fn banked_frame(curve: &axiolid_curve::Banked3, d: Scalar) -> GeomResult<SectionFrame> {
+    let section = crate::banked::banked_section(curve, d)?;
+    Ok(SectionFrame {
+        point: section.point,
+        tangent: section.tangent,
+        lateral: section.lateral,
+        up: section.up,
+    })
+}
+
 /// Check `distance` against the curve length `length` (`None`:
 /// unbounded) and return the distance to read, clamped onto `L` within
 /// tolerance.
@@ -395,7 +430,25 @@ pub fn station_length3(curve: &Curve3) -> GeomResult<Option<Scalar>> {
 /// A distance that is not finite, negative or beyond the curve's length,
 /// an unmeasurable family, and the evaluators' refusals, by name.
 pub fn station_section2(curve: &Curve2, distance: Scalar) -> GeomResult<SectionFrame> {
+    station_section2_on(curve, distance, SeamSide::Outgoing)
+}
+
+/// [`station_section2`] reading `side` of a seam the station lies on (see
+/// the [module documentation](self#seams-263)); off a seam the side does
+/// not matter.
+///
+/// # Errors
+///
+/// As [`station_section2`].
+pub fn station_section2_on(
+    curve: &Curve2,
+    distance: Scalar,
+    side: SeamSide,
+) -> GeomResult<SectionFrame> {
     let distance = admitted(distance, station_length2(curve)?)?;
+    if let Some(section) = seam::seam_section2(curve, distance, side)? {
+        return Ok(section);
+    }
     let t = parameter_at_arc_length2(curve, start2(curve), distance)?;
     planar_frame(evaluate2(curve, t)?, derivative2(curve, t)?)
 }
@@ -409,17 +462,27 @@ pub fn station_section2(curve: &Curve2, distance: Scalar) -> GeomResult<SectionF
 /// As [`station_section2`], and a vertical tangent where the reference-up
 /// frame is built.
 pub fn station_section3(curve: &Curve3, distance: Scalar) -> GeomResult<SectionFrame> {
+    station_section3_on(curve, distance, SeamSide::Outgoing)
+}
+
+/// [`station_section3`] reading `side` of a seam the station lies on (see
+/// the [module documentation](self#seams-263)); off a seam the side does
+/// not matter.
+///
+/// # Errors
+///
+/// As [`station_section3`].
+pub fn station_section3_on(
+    curve: &Curve3,
+    distance: Scalar,
+    side: SeamSide,
+) -> GeomResult<SectionFrame> {
     let distance = admitted(distance, station_length3(curve)?)?;
+    if let Some(section) = seam::seam_section3(curve, distance, side)? {
+        return Ok(section);
+    }
     match curve {
-        Curve3::Banked(banked) => {
-            let section = crate::banked::banked_section(banked, distance)?;
-            Ok(SectionFrame {
-                point: section.point,
-                tangent: section.tangent,
-                lateral: section.lateral,
-                up: section.up,
-            })
-        }
+        Curve3::Banked(banked) => banked_frame(banked, distance),
         Curve3::Elevated(elevated) => reference_up_frame(
             crate::arc_length::elevated_point(elevated, distance)?,
             crate::arc_length::elevated_tangent(elevated, distance)?,

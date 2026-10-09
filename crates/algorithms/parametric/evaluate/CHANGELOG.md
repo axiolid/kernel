@@ -9,6 +9,37 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Seams of a station's basis curve (#263, ADR 0082 amendment), in
+  `station::seam`: `station_seams2` / `station_seams3` list where two
+  pieces of a curve meet -- a polyline's vertices at the running sum of
+  its segment lengths, a B-spline's corner knots (multiplicity at least
+  its degree; by quadrature, flagged not exact), an intrinsic curve's and
+  a chain's law seams and joins (smooth), an elevated curve's plan and
+  profile seams, a banked curve's cant and pivot seams -- as
+  `StationSeam { distance, parameter, smooth, exact }`, without
+  evaluating the curve; `exact_station_seams2` / `exact_station_seams3`
+  refuse an inexact seam with a typed `UnsupportedInput`.
+- `station_section2_on` / `station_section3_on`: a station within the
+  arc-length tolerance of a seam that is not smooth is read at the seam
+  from the piece the `SeamSide` names, the incoming one as the curve
+  truncated at the seam (a polyline's previous segment, a B-spline's
+  previous span, a profile and cant and pivot law cut there).
+- `Mitre`: the plane a run of sections crossing a seam stands in, normal
+  to the bisector of the two tangents; `Mitre::between` is `None` within
+  `SEAM_TANGENT_TOLERANCE` and refuses a near reversal (`MITRE_TOLERANCE`
+  on the cosine of half the turn) and a seam whose sides do not share
+  their point by name; `Mitre::place` projects a section point placed in
+  each side's frame along that side's tangent onto the plane.
+
+### Changed
+
+- `station_section2` / `station_section3` read a station on a seam (within
+  `ARC_LENGTH_TOLERANCE * max(1, s)`) at the seam itself, from the piece
+  starting there. On a polyline or a B-spline the arc-length inverse could
+  previously land a hair either side of the vertex, and so either frame.
+
 ## [0.3.6] - 2026-10-04
 
 ### Added

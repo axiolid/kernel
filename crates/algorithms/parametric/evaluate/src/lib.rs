@@ -51,6 +51,8 @@ pub use frenet::{frenet_frame, frenet_point, frenet_tangent};
 pub use intrinsic_relation::{join_intrinsic3, offset_intrinsic3, trim_intrinsic3};
 pub use provider::ReferenceCurveEvaluator;
 pub use station::{
-    station_length2, station_length3, station_section2, station_section3, SectionFrame,
+    exact_station_seams2, exact_station_seams3, station_length2, station_length3, station_seams2,
+    station_seams3, station_section2, station_section2_on, station_section3, station_section3_on,
+    Mitre, SectionFrame, StationSeam,
 };
 pub use surface::{partials, Patch, ScalarSurface};
