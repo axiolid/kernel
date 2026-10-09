@@ -48,6 +48,26 @@
 //! the limit is cleared. The step budget is fixed; when it runs out the
 //! interval returned is still sound, only wider.
 //!
+//! # Touching and crossing boundaries
+//!
+//! Where the boundaries meet, the distance is zero, but witnesses at patch
+//! centres and edge midpoints land on the contact only by chance, so the
+//! refinement alone would close on it only when the patches round it were
+//! within the accuracy -- often not within the step budget. A pair popped
+//! with a lower bound of zero is therefore first asked for a point of each
+//! element that the two share (#273): the closest points of two line edges,
+//! or a point of a line edge and the point of a planar face at the same
+//! place, each evaluated on its own boundary as any witness is, the face's
+//! certified by the face's domain. Two such points no farther apart than
+//! the rounding margin the lower bounds carry end the search with
+//! `[0, d]`, `d` their distance and they the witnesses: no lower bound can
+//! rise above zero there, so this is the interval the search would only
+//! converge to. Two boxes sharing a face, or crossing, stop within a few
+//! steps. A gap wider than that margin (a nanometre at unit scale) is never
+//! taken for a touch, and boundaries that are apart measure exactly as
+//! before. Curved faces and circle or ellipse edges show no touch this way
+//! and are refined as before.
+//!
 //! # In plan
 //!
 //! [`plan_boundary_distance`] measures between the bodies' projections
@@ -84,6 +104,8 @@ use axiolid_surface::Surface;
 
 use crate::exact::ExactMeasureError;
 use crate::exact_domain::Domain;
+
+mod touch;
 
 /// Pairs refined before a query stops and reports what it has.
 const MAX_STEPS: usize = 400_000;
@@ -1262,6 +1284,9 @@ pub(crate) struct Found {
     /// The element of each boundary holding `point_a` and `point_b`.
     pub(crate) on: (Shape, Shape),
     pub(crate) overlap: Option<Point2>,
+    /// Pairs refined, which the tests count.
+    #[cfg(test)]
+    pub(crate) steps: usize,
 }
 
 pub(crate) fn search(
@@ -1281,6 +1306,20 @@ pub(crate) fn search_within(
     metric: Metric,
     max_steps: usize,
     done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+) -> Result<Found, ExactMeasureError> {
+    search_with(a, b, tolerance, metric, max_steps, done, true)
+}
+
+/// [`search_within`], with the early end on a touch in space (#273) on or
+/// off: off, it is the search before it, which the tests compare against.
+fn search_with(
+    a: &ExactBRep,
+    b: &ExactBRep,
+    tolerance: Tolerance,
+    metric: Metric,
+    max_steps: usize,
+    done: &mut dyn FnMut(Scalar, Scalar) -> bool,
+    early_touch: bool,
 ) -> Result<Found, ExactMeasureError> {
     let linear = tolerance.linear().max(1e-12);
     let side_a = Side::new(a, linear, metric)?;
@@ -1315,6 +1354,17 @@ pub(crate) fn search_within(
             if let Some((at, wa, wb)) = plan_patches_overlap(&side_a, &ea, &side_b, &eb)? {
                 overlap = Some(at);
                 best = Some((0.0, wa, wb, (ea.shape, eb.shape)));
+                break;
+            }
+        }
+        // Boundaries shown to meet within rounding: no lower bound can rise
+        // above zero, so the search would only close on this (#273).
+        if early_touch && metric == Metric::Space && bound == 0.0 {
+            if let Some((wa, wb)) = touch::touch(&side_a, &ea, &side_b, &eb)? {
+                let d = apart(wa, wb);
+                if best.is_none_or(|(current, ..)| d < current) {
+                    best = Some((d, wa, wb, (ea.shape, eb.shape)));
+                }
                 break;
             }
         }
@@ -1390,6 +1440,8 @@ pub(crate) fn search_within(
         },
         on,
         overlap,
+        #[cfg(test)]
+        steps,
     })
 }
 
