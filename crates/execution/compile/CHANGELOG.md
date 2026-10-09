@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Booleans with an operand extruded against its profile normal are
+  exact and certified (#275).** `ReferenceExactCompiler` refused an
+  extrusion whose direction points down the profile normal (an opening
+  cut down from a slab's top, `ExtrudedDirection (0, 0, -1)`) as
+  `"non-forward planar extrusion"`, so `compile_mesh_with_deviation` left
+  every boolean with such an operand unbounded. It now compiles them
+  through `axiolid-construct`'s mirrored build: the slab of the issue
+  certifies the same bound whether its opening is cut up or down, and a
+  round extrusion along `-z` clipped by a half-space is exact with its
+  closed-form volume. A direction within tolerance of the profile plane
+  is still refused, as `"extrusion direction in the profile plane"`.
+
 ## [0.3.14] - 2026-10-04
 
 ### Added

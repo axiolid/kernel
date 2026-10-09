@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Exact extrusions whose direction points against the profile normal
+  build (#275).** `extrude_profile_exact` refused any offset with
+  `offset.z <= tolerance` as `"non-forward planar extrusion"`, so an
+  opening cut down from a slab's top (`ExtrudedDirection (0, 0, -1)`) had
+  no exact result and a boolean with it no certified mesh deviation. Such
+  an extrusion is the forward prism along `(o.x, o.y, -o.z)` mirrored in
+  the profile plane; it is now built that way, through
+  `ExactBRep::transformed`, for every profile family and for oblique
+  directions. Negating `z` is exact, so the profile-plane cap keeps the
+  profile's coordinates bit for bit, and the reflection flips every face,
+  so the solid stays outward with the forward prism's positive volume.
+  Only a direction within tolerance of the profile plane
+  (`|o.z| <= tolerance`) is refused, now named `"extrusion direction in
+  the profile plane"`. The mesh path already built these solids; both now
+  agree. Mutation probe: `scripts/probe_downward_extrusion_mutants.py`.
+
 ## [0.3.15] - 2026-10-04
 
 ### Added

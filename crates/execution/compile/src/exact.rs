@@ -3,7 +3,8 @@
 //! Exact and mesh compilation are separate result domains. One exact batch owns
 //! a `NodeId -> ExactBRep` memo table; a discrete value cannot enter that cache.
 //!
-//! It never falls back to mesh compilation. Extrusions, revolutions,
+//! It never falls back to mesh compilation. Extrusions (either way along
+//! the profile normal, #275), revolutions,
 //! booleans of sharp rectangle prisms along +z, differences of placed
 //! extrusions ([`boolean`], #228), clips of those by half-spaces ([`clip`],
 //! #234), disks swept along one segment or one arc, and instances of any

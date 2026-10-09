@@ -1,10 +1,33 @@
 //! Exact analytic linear-extrusion constructors.
+//!
+//! # Direction against the profile normal (#275)
+//!
+//! Every builder below assembles a prism whose offset leaves the profile
+//! plane towards `+z`: its caps, walls and pcurve charts are laid out for
+//! a positive height. An offset `o` with `o.z < 0` bounds a valid solid all
+//! the same -- IFC authors an opening cut down from a slab's top this way
+//! -- and that solid is the mirror image, in the profile plane `z = 0`, of
+//! the prism along `o' = (o.x, o.y, -o.z)`: reflecting `p + t o'` in the
+//! plane gives `p + t o` for every profile point `p`, because `p.z = 0`.
+//! So [`extrude_profile_exact`] builds the forward prism along `o'` and
+//! reflects it with [`ExactBRep::transformed`]. The reflection only negates
+//! `z` coordinates, which is exact in `f64`, so the profile-plane cap keeps
+//! the profile's own coordinates bit for bit; it flips every face, so the
+//! result stays outward oriented and measures the same positive volume as
+//! the forward prism. A support the reflection cannot carry exactly is
+//! refused by name, never approximated.
+//!
+//! Only an offset within tolerance of the profile plane, `|o.z| <=
+//! tolerance`, is refused, as `"extrusion direction in the profile plane"`:
+//! it bounds no volume either way.
 
 use std::f64::consts::TAU;
 
-use axiolid_brep::{EdgeName, ExactBRep, ExactBRepBuilder, FaceName, SweptFace};
+use axiolid_brep::{EdgeName, ExactBRep, ExactBRepBuilder, FaceName, SweptFace, TransformError};
 use axiolid_contracts::{GeomError, GeomResult, Operation};
-use axiolid_core::{Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_core::{
+    Frame2, Frame3, Interval, Mat3, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3,
+};
 use axiolid_curve::{Circle2, Circle3, Curve2, Curve3, Ellipse2, Ellipse3, Line2, Line3};
 use axiolid_profile::{CircleProfile, ContourProfile, EllipseProfile, Profile, RectangleProfile};
 use axiolid_surface::{Cylinder, EllipticalCylinder, Plane, Surface};
@@ -30,10 +53,13 @@ pub(crate) struct RingTopology {
 
 /// Extrude a supported profile into an exact, closed analytic B-rep.
 ///
-/// Initial exact families are deliberately narrow: sharp filled/hollow
-/// rectangles under a forward non-coplanar linear extrusion, and filled circles
-/// along the positive profile normal. Every other family returns a typed refusal
-/// instead of taking the existing tessellation path.
+/// The direction may point either way along the profile normal: an offset
+/// below the profile plane builds the mirror image of the prism above it,
+/// outward oriented (see the module docs). A direction within tolerance of
+/// the profile plane is refused as `"extrusion direction in the profile
+/// plane"`. A circle or ellipse extrudes only along the normal (either
+/// way); a family the builders do not cover returns a typed refusal instead
+/// of taking the tessellation path.
 pub fn extrude_profile_exact(
     profile: &Profile,
     direction: Vec3,
@@ -41,6 +67,27 @@ pub fn extrude_profile_exact(
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
     let offset = extrusion_offset(direction, depth, tolerance)?;
+    if offset.z > 0.0 {
+        return extrude_forward(profile, offset, tolerance);
+    }
+    // Against the normal: the mirror image of the forward prism in the
+    // profile plane (see the module docs).
+    let forward = extrude_forward(profile, Vec3::new(offset.x, offset.y, -offset.z), tolerance)?;
+    mirror_in_profile_plane(&forward)
+}
+
+/// The reflection `z -> -z` of a prism built along the mirrored offset.
+fn mirror_in_profile_plane(forward: &ExactBRep) -> GeomResult<ExactBRep> {
+    let mirror = Transform3::from_mat3(Mat3::from_diagonal(Vec3::new(1.0, 1.0, -1.0)));
+    forward.transformed(&mirror).map_err(|error| match error {
+        TransformError::Unsupported(what) => unsupported(what),
+        other => GeomError::InvalidInput(format!("exact extrusion mirror: {other}")),
+    })
+}
+
+/// Extrude `profile` along an `offset` that leaves the profile plane
+/// towards `+z` (`offset.z > tolerance`).
+fn extrude_forward(profile: &Profile, offset: Vec3, tolerance: Tolerance) -> GeomResult<ExactBRep> {
     match profile {
         Profile::Rectangle(rectangle) => extrude_rectangle(rectangle, offset, tolerance),
         Profile::Circle(circle) => extrude_circle(circle, offset),
@@ -55,7 +102,7 @@ pub fn extrude_profile_exact(
             // the LOWERED profile (not the basis) keeps one code path for
             // each shape kind instead of a transform-aware variant of each.
             let lowered = lower_derived(basis, transform, tolerance)?;
-            extrude_profile_exact(&lowered, direction, depth, tolerance)
+            extrude_forward(&lowered, offset, tolerance)
         }
         Profile::Composite(members) => extrude_composite(members, offset, tolerance),
         Profile::CenterLine(center_line) => {
@@ -113,8 +160,10 @@ fn extrusion_offset(direction: Vec3, depth: Scalar, tolerance: Tolerance) -> Geo
             "exact extrusion direction could not be scaled without range loss".to_owned(),
         ));
     }
-    if offset.z <= tolerance.linear() {
-        return Err(unsupported("non-forward planar extrusion"));
+    // Either side of the profile plane bounds a solid; only a direction
+    // within tolerance of the plane itself bounds none.
+    if offset.z.abs() <= tolerance.linear() {
+        return Err(unsupported("extrusion direction in the profile plane"));
     }
     Ok(offset)
 }
