@@ -71,6 +71,16 @@ fn curve_has_dimension(root: NodeId, nodes: &[GeometryNode], dimension: CurveDim
                     return false;
                 }
             }
+            // A curve placed at a station is 3D whatever its source's
+            // dimension (#264); its source must still be a curve.
+            GeometryNode::InstanceAtStation(placed) => {
+                if dimension != CurveDimension::Three
+                    || !(curve_has_dimension(placed.source, nodes, CurveDimension::Two)
+                        || curve_has_dimension(placed.source, nodes, CurveDimension::Three))
+                {
+                    return false;
+                }
+            }
             // A 3D curve whatever its basis: a 2D basis lies in `z = 0` and
             // the vertical offsets lift it.
             GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {
@@ -387,9 +397,19 @@ impl ExpectedReference {
             _ => {}
         }
 
-        // An instance preserves the dimensional/reference family of its source.
-        while let GeometryNode::Instance(instance) = node {
-            node = &nodes[instance.source.index()];
+        // An instance preserves the dimensional/reference family of its
+        // source; one placed at a station (#264) too, except a 2D profile,
+        // which a 3D placement takes out of its plane.
+        loop {
+            node = match node {
+                GeometryNode::Instance(instance) => &nodes[instance.source.index()],
+                GeometryNode::InstanceAtStation(placed)
+                    if !matches!(self, Self::Profile | Self::OpenProfile) =>
+                {
+                    &nodes[placed.source.index()]
+                }
+                _ => break,
+            };
         }
 
         let surface = matches!(
@@ -485,6 +505,12 @@ pub(crate) fn validate_reference_types(
             expect_reference(nodes, value.station.basis, ExpectedReference::Curve)?;
             validate_station(&value.station.station)?;
             validate_orientation(&value.orientation)
+        }
+        GeometryNode::InstanceAtStation(value) => {
+            let station = &value.station;
+            expect_reference(nodes, station.station.basis, ExpectedReference::Curve)?;
+            validate_station(&station.station.station)?;
+            validate_orientation(&station.orientation)
         }
     }
 }
@@ -638,6 +664,7 @@ fn node_kind(node: &GeometryNode) -> &'static str {
         GeometryNode::Collection(_) => "collection",
         GeometryNode::CurveStation(_) => "curve-station",
         GeometryNode::OrientedCurveStation(_) => "oriented-curve-station",
+        GeometryNode::InstanceAtStation(_) => "instance-at-station",
     }
 }
 

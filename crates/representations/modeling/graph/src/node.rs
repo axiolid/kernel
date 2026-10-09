@@ -9,7 +9,8 @@ use axiolid_surface::Surface;
 use axiolid_topology::BRep;
 
 use crate::{
-    CurveRelation, CurveStation, NodeId, OrientedCurveStation, SolidOperation, SurfaceRelation,
+    CurveRelation, CurveStation, InstanceAtStation, NodeId, OrientedCurveStation, SolidOperation,
+    SurfaceRelation,
 };
 
 /// Point constrained to a curve parameter.
@@ -131,6 +132,10 @@ pub enum GeometryNode {
     /// A curve station with an explicit in-section orientation (#246). See
     /// [`crate::station`].
     OrientedCurveStation(OrientedCurveStation),
+    /// A node reused in the frame of an oriented curve station (#264): a
+    /// curve, solid or surface placed along a basis curve. See
+    /// [`crate::station`].
+    InstanceAtStation(InstanceAtStation),
 }
 
 impl GeometryNode {
@@ -161,6 +166,9 @@ impl GeometryNode {
             Self::Collection(values) => references.extend(values.iter().copied()),
             Self::CurveStation(value) => references.push(value.basis),
             Self::OrientedCurveStation(value) => references.push(value.station.basis),
+            Self::InstanceAtStation(value) => {
+                references.extend([value.source, value.station.station.basis]);
+            }
             Self::Point2(_)
             | Self::Point3(_)
             | Self::Vector2(_)

@@ -83,6 +83,32 @@
 //! outgoing piece and its last the incoming one, the pieces the run lies
 //! on. A seam where the tangent does not turn keeps the outgoing frame.
 //!
+//! # Placing a node at a station (#264)
+//!
+//! [`InstanceAtStation`] reuses a node -- a curve, a solid, a surface --
+//! in the frame of an [`OrientedCurveStation`], the way [`Instance`]
+//! reuses one under a fixed transform. The station stays symbolic: a
+//! kernel resolves its frame when it evaluates the node, with the
+//! station's [`StationFrame`], orientation and [`SeamSide`]. The source's
+//! local axes map onto the station's oriented frame as a linear placement
+//! reads them (buildingSMART IFC 4.3, `IfcAxis2PlacementLinear`):
+//!
+//! - local `x` onto the oriented tangent (`tangent'`),
+//! - local `y` onto the oriented lateral, to the LEFT (`lateral'`),
+//! - local `z` onto the oriented up (`up' = tangent' x lateral'`),
+//! - the local origin onto the station's point, its offsets read in the
+//!   base frame.
+//!
+//! This is a rigid motion (right-handed, no scale). It is not the profile
+//! mapping above (a section's `x` along lateral and `y` along up), and not
+//! the provider layout a resolved station presents (`x` tangent, `y` up,
+//! `z` right): a placed curve is laid ALONG the curve, a section ACROSS
+//! it. A 2D source curve lies in its local `z = 0`, so it is placed in the
+//! plane of the oriented tangent and lateral, and the placed curve is a 3D
+//! curve whatever the source's dimension.
+//!
+//! [`Instance`]: crate::Instance
+//!
 //! # Sections between stations
 //!
 //! A profile placed at a station maps its `x` onto the lateral axis and its
@@ -443,5 +469,32 @@ impl From<StationedSection> for SectionAtStation {
 impl From<StationedOpenSection> for SectionAtStation {
     fn from(section: StationedOpenSection) -> Self {
         Self::new(section.profile, section.station).with_tags(section.tags)
+    }
+}
+
+/// A node reused in the frame of an [`OrientedCurveStation`] (#264): the
+/// station-framed form of [`Instance`](crate::Instance).
+///
+/// The source's local `x`, `y`, `z` and origin are placed on the
+/// station's oriented tangent, left lateral, up and point (see the
+/// [module documentation](self#placing-a-node-at-a-station-264)); the
+/// frame is resolved at evaluation, reading the side of a seam the station
+/// names. A placed curve is a 3D curve, a placed solid or surface keeps
+/// its family. Built with [`InstanceAtStation::new`], so fields can be
+/// added without breaking callers.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InstanceAtStation {
+    /// The reused node, in its own local coordinates.
+    pub source: NodeId,
+    /// The station whose oriented frame places it.
+    pub station: OrientedCurveStation,
+}
+
+impl InstanceAtStation {
+    /// `source` placed in the frame of `station`.
+    #[must_use]
+    pub const fn new(source: NodeId, station: OrientedCurveStation) -> Self {
+        Self { source, station }
     }
 }

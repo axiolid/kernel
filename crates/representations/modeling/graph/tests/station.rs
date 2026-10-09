@@ -401,3 +401,186 @@ fn a_station_names_the_side_of_a_seam_it_reads() {
     );
     assert_eq!(graph.get(id).unwrap().references(), vec![basis]);
 }
+
+#[test]
+fn an_instance_at_a_station_round_trips_and_references_source_and_basis() {
+    use axiolid_core::Vec3;
+    use axiolid_model::{InstanceAtStation, OrientedCurveStation, SeamSide, StationOrientation};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let source = b
+        .push_value(Curve2::Line(Line2 {
+            origin: Point2::ZERO,
+            direction: Vec2::Y,
+        }))
+        .unwrap();
+    let station = OrientedCurveStation::new(
+        CurveStation {
+            basis,
+            station: Station::new(3.5, StationOffsets::new(0.25, -1.0, 0.5)),
+            frame: StationFrame::Plan,
+        },
+        StationOrientation::new(Some(Vec3::new(0.0, 0.6, 0.8)), None),
+    )
+    .with_seam_side(SeamSide::Incoming);
+    let placed = InstanceAtStation::new(source, station);
+    let id = b.push_value(placed).unwrap();
+    let graph = b.finish(vec![id]).unwrap();
+    let Some(GeometryNode::InstanceAtStation(stored)) = graph.get(id) else {
+        panic!("not an instance at a station");
+    };
+    // Exact stored data: the station stays symbolic, its side included.
+    assert_eq!(*stored, placed);
+    assert_eq!(stored.station.seam, SeamSide::Incoming);
+    assert_eq!(stored.station.station.station.distance, 3.5);
+    assert_eq!(graph.get(id).unwrap().references(), vec![source, basis]);
+}
+
+#[test]
+fn a_curve_placed_at_a_station_is_a_3d_curve_and_a_placed_solid_a_solid() {
+    use axiolid_core::Vec3;
+    use axiolid_model::{CurveSegment, InstanceAtStation, Transition};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let source = line(&mut b);
+    let at = CurveStation::new(basis, Station::at(1.0)).into();
+    let placed = b.push_value(InstanceAtStation::new(source, at)).unwrap();
+    // A 3D slot takes it: a sweep's directrix, a composite's segment.
+    b.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+        directrix: placed,
+        radius: 0.1,
+        inner_radius: None,
+        parameter_range: Some((0.0, 1.0)),
+        fillet_radius: None,
+    }))
+    .unwrap();
+    b.push(GeometryNode::CurveRelation(CurveRelation::Composite {
+        segments: vec![CurveSegment {
+            curve: placed,
+            same_sense: true,
+            transition: Transition::Continuous,
+        }],
+    }))
+    .unwrap();
+    // A 2D slot does not: it left its plane.
+    assert!(matches!(
+        b.push_value(OpenProfile::new(placed)),
+        Err(GraphError::InvalidReferenceType { .. })
+    ));
+    let plane = b
+        .push_value(axiolid_surface::Surface::Plane(axiolid_surface::Plane {
+            frame: axiolid_core::Frame3 {
+                origin: Vec3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+        }))
+        .unwrap();
+    assert!(matches!(
+        b.push(GeometryNode::CurveRelation(CurveRelation::ParameterCurve {
+            basis_surface: plane,
+            reference_curve: placed,
+        })),
+        Err(GraphError::InvalidReferenceType {
+            expected: "curve2",
+            ..
+        })
+    ));
+    // ... and a 3D-only slot takes it.
+    b.push(GeometryNode::CurveRelation(CurveRelation::SurfaceCurve {
+        curve_3d: placed,
+        sides: axiolid_model::SurfaceSides::one(plane, source),
+        master: axiolid_model::MasterRepresentation::Curve3d,
+    }))
+    .unwrap();
+    // A placed profile is no longer a profile, and not a curve.
+    let profile = rectangle(&mut b);
+    let placed_profile = b.push_value(InstanceAtStation::new(profile, at)).unwrap();
+    assert!(matches!(
+        b.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile: placed_profile,
+            direction: Vec3::Z,
+            depth: 1.0,
+        })),
+        Err(GraphError::InvalidReferenceType {
+            expected: "profile",
+            ..
+        })
+    ));
+    assert!(matches!(
+        b.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+            directrix: placed_profile,
+            radius: 0.1,
+            inner_radius: None,
+            parameter_range: None,
+            fillet_radius: None,
+        })),
+        Err(GraphError::InvalidReferenceType {
+            expected: "curve",
+            ..
+        })
+    ));
+    // A placed solid stays a solid.
+    let solid = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 1.0,
+        }))
+        .unwrap();
+    let placed_solid = b.push_value(InstanceAtStation::new(solid, at)).unwrap();
+    b.push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: placed_solid,
+        right: solid,
+        operator: axiolid_model::BooleanOperator::Difference,
+    }))
+    .unwrap();
+}
+
+#[test]
+fn an_instance_at_a_malformed_station_is_refused_by_name() {
+    use axiolid_core::Vec3;
+    use axiolid_model::{InstanceAtStation, OrientedCurveStation, StationOrientation};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let source = line(&mut b);
+    let push = |b: &mut GeometryGraphBuilder, station: Station, turn| {
+        b.push_value(InstanceAtStation::new(
+            source,
+            OrientedCurveStation::new(CurveStation::new(basis, station), turn),
+        ))
+    };
+    invalid(
+        push(&mut b, Station::at(-2.0), StationOrientation::default()),
+        "negative",
+    );
+    invalid(
+        push(
+            &mut b,
+            Station::new(1.0, StationOffsets::new(0.0, Scalar::INFINITY, 0.0)),
+            StationOrientation::default(),
+        ),
+        "offset is not finite",
+    );
+    invalid(
+        push(
+            &mut b,
+            Station::at(1.0),
+            StationOrientation::new(None, Some(Vec3::new(0.0, 0.0, 5.0))),
+        ),
+        "parallel",
+    );
+    // The basis must be a curve.
+    let profile = rectangle(&mut b);
+    assert!(matches!(
+        b.push_value(InstanceAtStation::new(
+            source,
+            CurveStation::new(profile, Station::at(1.0)).into(),
+        )),
+        Err(GraphError::InvalidReferenceType {
+            expected: "curve",
+            ..
+        })
+    ));
+}

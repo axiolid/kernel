@@ -11,6 +11,21 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Nodes placed at stations (#264, ADR 0082 amendment):
+  `InstanceAtStation { source, station: OrientedCurveStation }`
+  (`#[non_exhaustive]`, built by `InstanceAtStation::new`) and the node
+  variant `GeometryNode::InstanceAtStation`, appended last. It reuses a
+  curve, solid or surface in the frame of an oriented station, the
+  station kept symbolic with its frame, orientation and seam side; the
+  source's local `x`, `y`, `z` map onto the oriented tangent, left
+  lateral and up, its origin onto the station's point (a linear
+  placement's reading), as the `station` module documents. A placed
+  curve is a 3D curve whatever its source (accepted where a curve or 3D
+  curve is, refused in 2D slots), a placed solid or surface keeps its
+  family, a placed profile is no longer a profile. The station is
+  validated as an oriented station's is when the node is pushed; the
+  node references its source, then the station's basis.
+
 - Station seam sides (#263, ADR 0082 amendment): `OrientedCurveStation`
   gains `seam: SeamSide` (re-exported from `axiolid-curve`), the piece a
   station on a seam of its basis reads; `OrientedCurveStation::new` sets
