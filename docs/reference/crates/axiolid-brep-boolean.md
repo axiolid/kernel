@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.7 (2026-10-09) |
+| Latest release | 0.1.8 (2026-10-09) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,20 +51,18 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.7 (2026-10-09):
+Latest release, 0.1.8 (2026-10-09):
 
 ### Fixed
 
-- A box is cut by a reflected cylinder wall -- a prism extruded along
-  `-z`, which `extrude_profile_exact` builds by reflecting the `+z` one
-  (#275) -- as by the same wall built directly, not refused as "the kept
-  faces did not sew into a valid exact B-rep" (#288). The reflected wall
-  reads its angle `2 pi - u`, a turn away from the surface inverse's
-  `(-pi, pi]`. Where a section ended on such a face's edge, the cut was
-  placed on the edge's line pcurve a turn of the pcurve's own parameter
-  from the cut point -- a turn is the same point only on a conic's or a
-  sinusoid's pcurve -- so the face was not split. A candidate parameter
-  must now land on the cut point. Reflected spheres, cones and tori are
-  cut by boxes under every operator too.
+- A floor-standing door `1e-6` to `5e-4` past a wall's face under a
+  millimetre tolerance is cut again, not refused as "the kept faces did
+  not sew into a valid exact B-rep" (#291). Merging a cut on an
+  imprinted edge into the edge's own end within the tolerance (#276)
+  left those faces unsewn; a boolean refused after such a merge above
+  the rounding floor is now cut again with ends merged only within the
+  rounding floor, as before #276, and its report holds only the second
+  run's decisions. The merge within the tolerance stays: the door a
+  rounding error (`1e-12`-`1e-9`) past the face still needs it.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

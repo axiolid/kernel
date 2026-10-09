@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep-boolean"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

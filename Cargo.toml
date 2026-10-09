@@ -107,7 +107,7 @@ axiolid-collide = { path = "crates/algorithms/query/collide", version = "0.3.1" 
 axiolid-spatial = { path = "crates/algorithms/query/spatial", version = "0.3.3" }
 axiolid-inspect = { path = "crates/algorithms/query/inspect", version = "0.3.5" }
 axiolid-measure = { path = "crates/algorithms/query/measure", version = "0.3.10" }
-axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.7" }
+axiolid-brep-boolean = { path = "crates/algorithms/construction/brep-boolean", version = "0.1.8" }
 axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.1" }
 axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.11" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.1" }
@@ -125,7 +125,7 @@ axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.1" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.7" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.17" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.18" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that

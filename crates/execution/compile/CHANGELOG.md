@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-10-09
+
 ### Changed
 
 - The mesh boolean's operand snap (#276) closes only rounding residues

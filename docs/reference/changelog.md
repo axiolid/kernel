@@ -119,6 +119,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.8 - 2026-10-09
+
+### Fixed
+
+- A floor-standing door `1e-6` to `5e-4` past a wall's face under a
+  millimetre tolerance is cut again, not refused as "the kept faces did
+  not sew into a valid exact B-rep" (#291). Merging a cut on an
+  imprinted edge into the edge's own end within the tolerance (#276)
+  left those faces unsewn; a boolean refused after such a merge above
+  the rounding floor is now cut again with ends merged only within the
+  rounding floor, as before #276, and its report holds only the second
+  run's decisions. The merge within the tolerance stays: the door a
+  rounding error (`1e-12`-`1e-9`) past the face still needs it.
+
 ### 0.1.7 - 2026-10-09
 
 ### Fixed
@@ -2361,6 +2375,45 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.18 - 2026-10-09
+
+### Changed
+
+- The mesh boolean's operand snap (#276) closes only rounding residues
+  again: a coordinate moves at most `16 f64::EPSILON` of the operands'
+  largest coordinate magnitude (about `1.3e-14` for a 4 m wall, about
+  `2e-8` at georeferenced coordinates), capped by the linear tolerance,
+  instead of the whole tolerance (#291). Skins and slivers above that
+  are kept as authored: a 0.1-1 mm skin under a 1 mm tolerance stays in
+  the mesh, as it did before 0.3.16. On one model the wider snap took
+  seven hosts' whole bodies, and walls' skins at near-flush slab
+  openings. A `1e-12`-`1e-9` skin computed near the origin is now kept
+  too; placed at georeferenced coordinates it may be refused as
+  self-intersecting, as before 0.3.16.
+- The snap lands exactly or not at all: a coordinate is set onto a face
+  of the other operand only where the face's three corners share it
+  exactly (an axis-aligned plane), and every vertex with that coordinate
+  value moves with it, so an operand's own axis-aligned faces stay
+  planar (#291). Faces axis-aligned only within rounding are cut as
+  given.
+
+### Fixed
+
+- A slab extruded downward from its top, cut through by 22 openings
+  flush with both faces, is meshed again with its closed-form volume, in
+  its frame and placed at georeferenced coordinates (#291). Since 0.3.16
+  the snap moved openings' vertices onto planes within rounding of the
+  slab's faces (a normal normalised to `0.9999999999999999`, a frame
+  turned by a rounded half turn, a profile edge's end evaluated as
+  `a + (b - a)`), some landing above a face and some below, and the
+  difference was refused as a void tangent to its host's face, or its
+  volume as self-intersecting.
+- A snap never turns a working boolean into a refusal (#291): where the
+  snapped operands' mesh boolean is refused or its result touches
+  itself, the boolean is cut from the operands as given, and that result
+  is returned with no snap reported; when both are refused, the refusal
+  of the operands as given is returned.
 
 ### 0.3.17 - 2026-10-09
 

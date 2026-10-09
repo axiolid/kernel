@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.7",
+      "released": "0.1.8",
       "released_date": "2026-10-09",
       "role": "algorithm.construction",
-      "version": "0.1.7"
+      "version": "0.1.8"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.17",
+      "released": "0.3.18",
       "released_date": "2026-10-09",
       "role": "execution.orchestration",
-      "version": "0.3.17"
+      "version": "0.3.18"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",

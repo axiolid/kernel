@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-09
+
 ### Fixed
 
 - A floor-standing door `1e-6` to `5e-4` past a wall's face under a
