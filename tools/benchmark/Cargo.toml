@@ -27,7 +27,9 @@ axiolid-spatial.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 # The exact placed-openings benchmark (#228) compiles a graph exactly and
-# validates the volume before timing.
+# validates the volume before timing; the boundary-distance benchmark (#273)
+# measures between the exact elements it compiles.
+axiolid-brep.workspace = true
 axiolid-contracts.workspace = true
 axiolid-exact-compile-contract.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
@@ -52,6 +54,7 @@ allowed-internal-dependencies = [
     "axiolid-guarantees",
     "axiolid-measure",
     "axiolid-spatial",
+    "axiolid-brep",
     "axiolid-contracts",
     "axiolid-exact-compile-contract",
     "axiolid-mesh-compile",
@@ -77,4 +80,8 @@ harness = false
 
 [[bench]]
 name = "exact_openings"
+harness = false
+
+[[bench]]
+name = "boundary_distance"
 harness = false
