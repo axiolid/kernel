@@ -15,7 +15,10 @@
 //!    cut out of it.
 //! 2. Boundary uses are split wherever a section edge ends on them; an
 //!    end within tolerance of the use's own end, or of another cut, is that
-//!    point, not a sliver (#228).
+//!    point, not a sliver (#228). The cut's pcurve parameter is the one
+//!    that lands on the cut point: a face's angles may lie a turn away
+//!    from the surface inverse's (a reflected wall reads `2 pi - u`), and
+//!    a turn of a line pcurve's own parameter is another point (#288).
 //! 3. The pieces form a graph in `(u, v)`: boundary pieces are walked the
 //!    way their loop runs, section pieces both ways. Starting from each
 //!    unused half-edge, the walk turns at every vertex to the first
@@ -33,7 +36,7 @@ use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Tolerance, Vec2};
 use axiolid_curve::{Curve2, Curve3, Ellipse2, Line2, Sinusoid2};
 use axiolid_evaluate::curve::{derivative2, evaluate2, locate2, locate3, second_derivative2};
 use axiolid_evaluate::evaluate3;
-use axiolid_evaluate::surface::locate;
+use axiolid_evaluate::surface::{evaluate as surface_point, locate};
 use axiolid_measure::FaceDomain;
 use axiolid_surface::Surface;
 use axiolid_topology::{EdgeId, FaceId, Orientation};
@@ -1048,12 +1051,29 @@ fn split_use(
                     piece.pspan.start.min(piece.pspan.end),
                     piece.pspan.start.max(piece.pspan.end),
                 );
-                let candidates = [p - TAU, p, p + TAU];
-                if let Some(p) = candidates
-                    .into_iter()
-                    .find(|c| *c >= plo - slack && *c <= phi + slack)
-                {
-                    found = Some(p);
+                // A turn of the pcurve's own parameter is the same point
+                // only on a pcurve periodic in it (a conic's angle, a
+                // sinusoid over the face's angle); on a line it is another
+                // point, which a face whose angles lie a turn away from
+                // the surface inverse's (a reflected wall, #288) would
+                // otherwise cut at. So a candidate must land where the edge
+                // is cut, within what a pcurve and its edge may differ by.
+                let lands = |c: Scalar| -> Result<bool, BooleanError> {
+                    if c < plo - slack || c > phi + slack {
+                        return Ok(false);
+                    }
+                    let at = evaluate2(&piece.pcurve, c).map_err(|_| BooleanError::Evaluation)?;
+                    let back =
+                        surface_point(surface, at.x, at.y).map_err(|_| BooleanError::Evaluation)?;
+                    Ok((back - on).length() <= 2.0 * report::floored(tolerance).linear())
+                };
+                for c in [p - TAU, p, p + TAU] {
+                    if lands(c)? {
+                        found = Some(c);
+                        break;
+                    }
+                }
+                if found.is_some() {
                     break;
                 }
             }

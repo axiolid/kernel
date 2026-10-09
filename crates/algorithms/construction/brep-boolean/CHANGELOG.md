@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A box is cut by a reflected cylinder wall -- a prism extruded along
+  `-z`, which `extrude_profile_exact` builds by reflecting the `+z` one
+  (#275) -- as by the same wall built directly, not refused as "the kept
+  faces did not sew into a valid exact B-rep" (#288). The reflected wall
+  reads its angle `2 pi - u`, a turn away from the surface inverse's
+  `(-pi, pi]`. Where a section ended on such a face's edge, the cut was
+  placed on the edge's line pcurve a turn of the pcurve's own parameter
+  from the cut point -- a turn is the same point only on a conic's or a
+  sinusoid's pcurve -- so the face was not split. A candidate parameter
+  must now land on the cut point. Reflected spheres, cones and tori are
+  cut by boxes under every operator too.
+
 ## [0.1.6] - 2026-10-09
 
 ### Fixed
