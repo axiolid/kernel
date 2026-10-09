@@ -26,6 +26,9 @@ enum ExpectedReference {
     OpenProfile,
     Solid,
     HalfSpace,
+    /// A bounded half-space's boundary: a 2D curve, or a profile whose
+    /// region the boundary encloses (#277).
+    HalfSpaceBoundary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +376,7 @@ impl ExpectedReference {
             Self::OpenProfile => "open profile",
             Self::Solid => "solid",
             Self::HalfSpace => "half-space",
+            Self::HalfSpaceBoundary => "curve2 or profile",
         }
     }
 
@@ -393,6 +397,10 @@ impl ExpectedReference {
             Self::BoundedOpenCurve2 => return curve_is_bounded_open_2d(reference, nodes),
             Self::Curve3 => {
                 return curve_has_dimension(reference, nodes, CurveDimension::Three);
+            }
+            Self::HalfSpaceBoundary => {
+                return Self::Curve2.accepts(reference, node, nodes)
+                    || Self::Profile.accepts(reference, node, nodes);
             }
             _ => {}
         }
@@ -431,6 +439,7 @@ impl ExpectedReference {
                     | GeometryNode::TriMesh(_)
             ),
             Self::HalfSpace => matches!(node, GeometryNode::HalfSpace(_)),
+            Self::HalfSpaceBoundary => false,
         }
     }
 }
@@ -859,9 +868,10 @@ fn validate_solid_operation(
         } => {
             expect_reference(nodes, *half_space, ExpectedReference::HalfSpace)?;
             // The boundary is authored in the placement frame's XY plane, so
-            // it is a 2D curve; a 3D one validated here and then could never
-            // compile (#162).
-            expect_reference(nodes, *boundary, ExpectedReference::Curve2)
+            // it is a 2D curve or a profile; a 3D curve validated here and
+            // then could never compile (#162). A profile carries the line
+            // and circular-arc segments a polyline cannot (#277).
+            expect_reference(nodes, *boundary, ExpectedReference::HalfSpaceBoundary)
         }
     }
 }

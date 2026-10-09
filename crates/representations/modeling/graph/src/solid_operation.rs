@@ -93,8 +93,18 @@ pub enum SolidOperation {
     /// Unbounded half-space clipped by a finite boundary geometry.
     BoundedHalfSpace {
         half_space: NodeId,
-        /// A closed 2D curve in `placement`'s XY plane. A 3D curve is
-        /// refused when the graph is built.
+        /// The boundary in `placement`'s XY plane: a closed 2D curve, or a
+        /// `Profile` node whose region it is (#277). A 3D curve, or any
+        /// other node, is refused when the graph is built.
+        ///
+        /// A profile is how a boundary of line and circular-arc segments
+        /// is stated: a [`Profile::Contour`](axiolid_profile::Profile)
+        /// keeps each arc an exact `Circle2` span, which a polyline
+        /// cannot. The half-space is then its side of the plane within the
+        /// infinite prism of that region, swept along the plane normal, so
+        /// an arc segment bounds it by a right circular cylinder. Which
+        /// profile families a compiler accepts is the compiler's to say;
+        /// it refuses the others by name.
         boundary: NodeId,
         /// The boundary's own frame, independent of the clip plane.
         ///

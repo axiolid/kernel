@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A `SolidOperation::BoundedHalfSpace` boundary may be a `Profile` node
+  as well as a 2D curve (#277, ADR 0084): a contour of lines and exact
+  circular arcs states a boundary a polyline cannot. Graph validation
+  accepts either and refuses anything else as `"curve2 or profile"` (a
+  3D curve was refused as `"curve2"`). No type, variant or field changed.
+
 ## [0.3.6] - 2026-10-09
 
 ### Added

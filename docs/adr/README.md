@@ -68,3 +68,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0081](./0081-banked-curves-name-their-cant-convention.md) | Banked curves name their cant convention |
 | [0082](./0082-stations-measure-in-their-basis-curves-convention.md) | Stations measure in their basis curve's convention |
 | [0083](./0083-profile-caps-use-a-certified-ear-clipper.md) | Profile caps use a certified ear clipper |
+| [0084](./0084-bounded-half-space-boundaries-are-profiles.md) | Bounded half-space boundaries may be profiles |
