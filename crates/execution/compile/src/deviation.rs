@@ -151,7 +151,7 @@ pub enum DeviationPath {
     SurfaceCurveSweep,
     /// Sections placed along a spine.
     SectionedSpine,
-    /// A half-space bounded by a polygon.
+    /// A half-space bounded by a polygon or a profile.
     BoundedHalfSpace,
     /// A CSG primitive.
     Primitive,

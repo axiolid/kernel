@@ -8,6 +8,7 @@ mod certify;
 mod channels;
 pub mod deviation;
 mod directrix;
+mod half_space_boundary;
 mod pinch;
 mod planar;
 pub mod station;

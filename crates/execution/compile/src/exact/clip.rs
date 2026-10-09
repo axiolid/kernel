@@ -3,13 +3,29 @@
 //! A building model clips a wall by a roof plane: the wall minus the side of
 //! the plane above the roof, and a gable wall is clipped by two. The clip is
 //! a boolean whose tool is a half-space (`GeometryNode::HalfSpace`), or a
-//! half-space bounded by a polygon in its plane
+//! half-space bounded by a polygon or a profile in its plane
 //! (`SolidOperation::BoundedHalfSpace`), either read through rigid
 //! placements. Both keep the mesh compiler's semantics: `agreement`
 //! selects the normal side of the plane as the half-space; a bounded one is
-//! that side intersected with the infinite prism of its boundary polyline,
-//! swept along the plane normal, the polyline framed by the operation's
-//! placement projected into the plane.
+//! that side intersected with the infinite prism of its boundary, swept
+//! along the plane normal, the boundary framed by the operation's placement
+//! projected into the plane.
+//!
+//! # Boundaries with arcs (#277)
+//!
+//! A boundary of line and circular-arc segments is a profile node, and the
+//! prism is the exact extrusion of that profile
+//! ([`extrude_profile_exact`]): a line becomes a plane wall, an arc a right
+//! circular cylinder wall, exactly, never chords. The sweep is along the
+//! plane normal, perpendicular to the profile, so no arc wall is oblique.
+//! The profile is checked first, as the mesh compiler checks it
+//! (`crate::half_space_boundary`): open, self-crossing or zero-radius
+//! contours are refused by name. Like the polygon, the profile is mirrored
+//! in its `x` axis when the kept side is opposite the normal, so that the
+//! prism's frame stays a rotation; it is lowered as a derived profile,
+//! segment by segment, rather than extruded along `-z` and reflected,
+//! because the general boolean refuses some cuts by a reflected cylinder
+//! wall that it makes by the same wall built directly.
 //!
 //! # A finite tool through the general boolean
 //!
@@ -25,7 +41,7 @@
 //! The prism stands on the clip plane and covers the subject's envelope (a
 //! sound box around it, see below) plus a margin `m`. For an unbounded
 //! half-space its footprint is the envelope's projection into the plane,
-//! widened by `m`; for a bounded one it is the boundary polyline. It reaches
+//! widened by `m`; for a bounded one it is the boundary. It reaches
 //! `m` past the envelope's farthest point on the kept side of the plane.
 //!
 //! **Why the result does not depend on the margin.** Write the half-space as
@@ -60,7 +76,8 @@
 //!
 //! A union with a half-space (unbounded), a half-space as the subject, a
 //! subject not built from placed extrusions, a bounded half-space whose
-//! boundary is not a polyline or whose plane is placed by an instance, a
+//! boundary curve is not a polyline, whose profile does not bound a region
+//! or cannot be extruded exactly, or whose plane is placed by an instance, a
 //! scaled or sheared placement, an envelope with an edge family it cannot
 //! bound, and every refusal of the general boolean. An emptied subject is
 //! `GeomError::Degenerate`. The model's half-space carries a plane, so a
@@ -68,10 +85,13 @@
 
 use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
+use axiolid_construct::center_line_exact::center_line_contour;
 use axiolid_construct::extrude::extrude_profile_exact;
+use axiolid_construct::section_lower::section_contour;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{
-    BooleanOperator, Interval, PlaneFrame, Point2, Point3, Scalar, Transform3, Vec2, Vec3,
+    BooleanOperator, Interval, PlaneFrame, Point2, Point3, Scalar, Tolerance, Transform2,
+    Transform3, Vec2, Vec3,
 };
 use axiolid_curve::{Curve2, Curve3, Line2};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
@@ -100,6 +120,15 @@ enum Clip {
         /// The boundary's own frame.
         frame: Transform3,
     },
+}
+
+/// A bounded half-space's boundary, in its own frame.
+#[derive(Debug, Clone)]
+enum Footprint {
+    /// A closed polyline's distinct points, as wound.
+    Polygon(Vec<Point2>),
+    /// A profile: lines and circular arcs, exactly (#277).
+    Profile(Profile),
 }
 
 /// What the envelope alone decides.
@@ -254,7 +283,7 @@ impl ExactCompilation<'_> {
     fn clip_solid(
         &self,
         half_space: &HalfSpace,
-        footprint: Option<&(Vec<Point2>, Transform3)>,
+        footprint: Option<&(Footprint, Transform3)>,
         placement: &Transform3,
         envelope: Envelope,
         operator: BooleanOperator,
@@ -366,13 +395,18 @@ impl ExactCompilation<'_> {
                 });
                 (profile, (lo + hi) * 0.5)
             }
-            Some((points, _)) => {
+            Some((Footprint::Polygon(points), _)) => {
                 let points: Vec<Point2> = points
                     .iter()
                     .map(|p| Point2::new(p.x, p.y * flip))
                     .collect();
                 (polygon(&points), Vec2::ZERO)
             }
+            // A profile (#277) turns over with `y` as the polygon does.
+            // Every arc of it becomes a right circular cylinder wall: the
+            // sweep is along the plane normal, never oblique.
+            Some((Footprint::Profile(profile), _)) if flip > 0.0 => (profile.clone(), Vec2::ZERO),
+            Some((Footprint::Profile(profile), _)) => (mirrored(profile, tolerance)?, Vec2::ZERO),
         };
         let prism = extrude_profile_exact(&profile, Vec3::Z, far + margin, tolerance)
             .map_err(remap_construction_error)?;
@@ -391,11 +425,20 @@ impl ExactCompilation<'_> {
     }
 
     /// A bounded half-space's boundary, read as the mesh compiler reads it.
-    fn boundary(&self, id: NodeId) -> GeomResult<Vec<Point2>> {
-        let Some(GeometryNode::Curve2(curve)) = self.graph.get(id) else {
-            return Err(GeomError::InvalidInput(format!(
-                "half-space boundary {id:?} is not a Curve2 node"
-            )));
+    fn boundary(&self, id: NodeId) -> GeomResult<Footprint> {
+        let curve = match self.graph.get(id) {
+            Some(GeometryNode::Curve2(curve)) => curve,
+            // Lines and circular arcs, exactly (#277); whatever the exact
+            // extruder refuses of it is refused by its name.
+            Some(GeometryNode::Profile(profile)) => {
+                crate::half_space_boundary::check(profile, self.options.tolerance())?;
+                return Ok(Footprint::Profile(profile.clone()));
+            }
+            _ => {
+                return Err(GeomError::InvalidInput(format!(
+                    "half-space boundary {id:?} is neither a Curve2 nor a Profile node"
+                )))
+            }
         };
         let Curve2::Polyline(polyline) = curve else {
             return Err(unsupported(
@@ -412,7 +455,7 @@ impl ExactCompilation<'_> {
                 "half-space boundary needs at least 3 distinct points".to_owned(),
             ));
         }
-        Ok(points)
+        Ok(Footprint::Polygon(points))
     }
 
     /// A sound box around what `id` compiles to.
@@ -523,6 +566,34 @@ fn polygon(points: &[Point2]) -> Profile {
     Profile::Contour(ContourProfile {
         outer: Contour::new(segments),
         holes: Vec::new(),
+    })
+}
+
+/// `profile` mirrored in its `x` axis, `y -> -y`, exactly.
+///
+/// The centred rectangle, circle and ellipse are their own mirror images.
+/// Every other family is a contour, or lowers to one, and is mirrored as a
+/// derived profile, which the exact extruder lowers segment by segment: a
+/// line stays a line and an arc the same arc, its sense restored. The
+/// prism is not built along `-z` and reflected instead: the general
+/// boolean refuses some cuts by a reflected cylinder wall ("kept faces do
+/// not sew into a solid") that it makes from the same wall built directly.
+fn mirrored(profile: &Profile, tolerance: Tolerance) -> GeomResult<Profile> {
+    let contour = match profile {
+        Profile::Rectangle(_) | Profile::Circle(_) | Profile::Ellipse(_) => {
+            return Ok(profile.clone())
+        }
+        Profile::Section(section) => {
+            Profile::Contour(section_contour(section).map_err(remap_construction_error)?)
+        }
+        Profile::CenterLine(center_line) => Profile::Contour(
+            center_line_contour(center_line, tolerance).map_err(remap_construction_error)?,
+        ),
+        other => other.clone(),
+    };
+    Ok(Profile::Derived {
+        basis: Box::new(contour),
+        transform: Transform2::from_scale(Vec2::new(1.0, -1.0)),
     })
 }
 

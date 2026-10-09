@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Bounded half-spaces whose boundary is a profile of lines and circular
+  arcs (#277, ADR 0084). `ReferenceExactCompiler` clips by the exact
+  extrusion of the profile along the plane normal, each arc a right
+  circular cylinder wall, so a wall clipped by the consumer's boundary
+  (six segments, two arcs over a circle of radius 1.2) has its
+  closed-form volume; for the side opposite the normal the profile is
+  mirrored as a derived profile, as the polyline is.
+  `ReferenceMeshCompiler` flattens the profile under the chord budget,
+  and the clipped solid's deviation is certified against the exact
+  result (#235), within the budget under dense sampling. Both compilers
+  check the profile first and refuse, as `InvalidInput` naming the
+  fault, a contour that does not close (the flattener alone bridged the
+  gap), an arc of no radius, a segment of no length, and edges that
+  cross or touch other than neighbours at their joint. Polyline
+  boundaries are unchanged.
+
 ### Changed
 
 - Oblique extrusions with arcs compile to the right exact solid (#280,

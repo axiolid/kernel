@@ -137,22 +137,34 @@ enum Measure<'m> {
 type Cache = std::collections::HashMap<EvalKey, Built>;
 
 impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
-    /// Resolve a node handle, blaming the graph rather than panicking.
-    /// Resolve a closed 2D boundary curve into rings.
+    /// Resolve a bounded half-space's boundary into rings.
     ///
-    /// Only a closed polyline boundary is handled: its points ARE the ring.
-    /// An analytic boundary needs the curve evaluator, and an open one does
-    /// not bound anything, so both are refused rather than guessed at.
+    /// A closed polyline's points ARE the ring, taken as wound. A profile
+    /// (#277) is flattened as an extrusion's is, every arc chorded within
+    /// `chord` by the certified flattener, the rings oriented outer
+    /// counter-clockwise; an open, self-crossing or degenerate one is
+    /// refused there or by the cap triangulation, by name. Any other curve
+    /// needs the curve evaluator, and an open one does not bound anything,
+    /// so both are refused rather than guessed at.
     fn boundary_rings(
         &self,
         graph: &GeometryGraph,
         id: NodeId,
+        chord: Scalar,
+        options: &ExecutionOptions,
     ) -> GeomResult<axiolid_construct::profile::Rings> {
         let node = self.node(graph, id)?;
-        let GeometryNode::Curve2(curve) = node else {
-            return Err(GeomError::InvalidInput(format!(
-                "half-space boundary {id:?} is not a Curve2 node"
-            )));
+        let curve = match node {
+            GeometryNode::Curve2(curve) => curve,
+            GeometryNode::Profile(shape) => {
+                crate::half_space_boundary::check(shape, options.tolerance())?;
+                return profile_rings(shape, chord, options.tolerance());
+            }
+            _ => {
+                return Err(GeomError::InvalidInput(format!(
+                    "half-space boundary {id:?} is neither a Curve2 nor a Profile node"
+                )))
+            }
         };
         match curve {
             axiolid_curve::Curve2::Polyline(p) => {
@@ -963,7 +975,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         "half-space {half_space:?} is not a HalfSpace node"
                     )));
                 };
-                let rings = self.boundary_rings(graph, *boundary)?;
+                let rings = self.boundary_rings(graph, *boundary, chord_error(options), options)?;
                 // The declared margin is the contract's own knob for how far
                 // an unbounded half-space extends before it can be meshed.
                 let margin = axiolid_primitive::ClipMargin::new(2.0)
