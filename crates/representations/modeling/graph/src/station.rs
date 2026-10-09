@@ -14,6 +14,22 @@
 //! past the curve's length; the graph refuses a non-finite or negative one
 //! when the node is pushed.
 //!
+//! A basis may also be a curve relation a distance runs along (#285): a
+//! [`CurveRelation::Composite`], a [`CurveRelation::Trimmed`], a curve
+//! placed by an [`InstanceAtStation`], nested in any combination. The
+//! distance then runs end to end through the atomic curves it is made of,
+//! each span in its own curve's convention, and those must agree: plan
+//! distance when every span is an elevated or banked curve, arc length
+//! when none is. A composite of segments placed at stations of another
+//! curve is measured along its own segments, whatever curve they were
+//! placed on. Each joint of a composite is a seam (below), and its pieces
+//! must meet end to start; a resolver refuses by name pieces measured
+//! differently, a gap, and a piece whose undeclared sense runs it
+//! backwards.
+//!
+//! [`CurveRelation::Composite`]: crate::CurveRelation::Composite
+//! [`CurveRelation::Trimmed`]: crate::CurveRelation::Trimmed
+//!
 //! # Frame and offsets
 //!
 //! The basis curve's section frame at the distance has three unit axes:

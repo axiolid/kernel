@@ -17,6 +17,11 @@ caret rule for `0.x` versions.
   accepts either and refuses anything else as `"curve2 or profile"` (a
   3D curve was refused as `"curve2"`). No type, variant or field changed.
 
+- The `station` module documents curve relations as station bases
+  (#285): a composite, a trim and a curve placed at a station, nested,
+  measured end to end in their pieces' common convention, each joint a
+  seam. No API change.
+
 ## [0.3.6] - 2026-10-09
 
 ### Added

@@ -584,3 +584,51 @@ fn an_instance_at_a_malformed_station_is_refused_by_name() {
         })
     ));
 }
+
+#[test]
+fn a_station_along_a_composite_of_placed_segments_round_trips() {
+    // #285: a composite of a segment placed at a station of another
+    // composite is a station basis: pushed, stored exactly, references
+    // followed through every level.
+    use axiolid_model::{
+        CurveSegment, InstanceAtStation, OrientedCurveStation, SeamSide, Transition,
+    };
+    let mut b = GeometryGraphBuilder::new();
+    let first = line(&mut b);
+    let second = line(&mut b);
+    let segment = |curve| CurveSegment {
+        curve,
+        same_sense: true,
+        transition: Transition::ContinuousSameGradient,
+    };
+    let base = b
+        .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+            segments: vec![segment(first), segment(second)],
+        }))
+        .unwrap();
+    let source = line(&mut b);
+    let at = OrientedCurveStation::from(CurveStation::new(base, Station::at(1.0)))
+        .with_seam_side(SeamSide::Incoming);
+    let placed = b.push_value(InstanceAtStation::new(source, at)).unwrap();
+    let segmented = b
+        .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+            segments: vec![segment(placed)],
+        }))
+        .unwrap();
+    let station = CurveStation {
+        basis: segmented,
+        station: Station::new(0.5, StationOffsets::new(0.25, 0.0, 0.0)),
+        frame: StationFrame::Plan,
+    };
+    let id = b.push_value(station).unwrap();
+    let graph = b.finish(vec![id]).unwrap();
+    assert_eq!(graph.get(id), Some(&GeometryNode::CurveStation(station)));
+    assert_eq!(graph.get(id).unwrap().references(), vec![segmented]);
+    assert_eq!(graph.get(segmented).unwrap().references(), vec![placed]);
+    let Some(GeometryNode::InstanceAtStation(stored)) = graph.get(placed) else {
+        panic!("not a placed segment");
+    };
+    assert_eq!(stored.station, at);
+    assert_eq!(graph.get(placed).unwrap().references(), vec![source, base]);
+    assert_eq!(graph.get(base).unwrap().references(), vec![first, second]);
+}
