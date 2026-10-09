@@ -22,10 +22,10 @@
 //! (`crate::half_space_boundary`): open, self-crossing or zero-radius
 //! contours are refused by name. Like the polygon, the profile is mirrored
 //! in its `x` axis when the kept side is opposite the normal, so that the
-//! prism's frame stays a rotation; it is lowered as a derived profile,
-//! segment by segment, rather than extruded along `-z` and reflected,
-//! because the general boolean refuses some cuts by a reflected cylinder
-//! wall that it makes by the same wall built directly.
+//! prism's frame stays a rotation: its prism, extruded as authored, is
+//! reflected in the profile's `x` axis by the same placement
+//! (`ExactBRep::transformed`), and the general boolean cuts by the
+//! reflected cylinder wall as by one built directly (#288).
 //!
 //! # A finite tool through the general boolean
 //!
@@ -85,13 +85,10 @@
 
 use axiolid_brep::{ExactBRep, TransformError};
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
-use axiolid_construct::center_line_exact::center_line_contour;
 use axiolid_construct::extrude::extrude_profile_exact;
-use axiolid_construct::section_lower::section_contour;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{
-    BooleanOperator, Interval, PlaneFrame, Point2, Point3, Scalar, Tolerance, Transform2,
-    Transform3, Vec2, Vec3,
+    BooleanOperator, Interval, Mat3, PlaneFrame, Point2, Point3, Scalar, Transform3, Vec2, Vec3,
 };
 use axiolid_curve::{Curve2, Curve3, Line2};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
@@ -402,18 +399,25 @@ impl ExactCompilation<'_> {
                     .collect();
                 (polygon(&points), Vec2::ZERO)
             }
-            // A profile (#277) turns over with `y` as the polygon does.
-            // Every arc of it becomes a right circular cylinder wall: the
-            // sweep is along the plane normal, never oblique.
-            Some((Footprint::Profile(profile), _)) if flip > 0.0 => (profile.clone(), Vec2::ZERO),
-            Some((Footprint::Profile(profile), _)) => (mirrored(profile, tolerance)?, Vec2::ZERO),
+            // A profile (#277) is extruded as authored. Every arc of it
+            // becomes a right circular cylinder wall: the sweep is along
+            // the plane normal, never oblique.
+            Some((Footprint::Profile(profile), _)) => (profile.clone(), Vec2::ZERO),
         };
         let prism = extrude_profile_exact(&profile, Vec3::Z, far + margin, tolerance)
             .map_err(remap_construction_error)?;
         let base = anchor + x * centre.x + y * centre.y;
         let frame = Transform3::from_cols(x, y, side, base);
+        // A profile turns over with `y` as the polygon does, by reflecting
+        // its prism in the profile's `x` axis (#288).
+        let turned = match footprint {
+            Some((Footprint::Profile(_), _)) if flip < 0.0 => {
+                frame * Transform3::from_mat3(Mat3::from_diagonal(Vec3::new(1.0, -1.0, 1.0)))
+            }
+            _ => frame,
+        };
         prism
-            .transformed(&(*placement * frame))
+            .transformed(&(*placement * turned))
             .map(Ok)
             .map_err(|error| match error {
                 TransformError::NotRigid => {
@@ -566,34 +570,6 @@ fn polygon(points: &[Point2]) -> Profile {
     Profile::Contour(ContourProfile {
         outer: Contour::new(segments),
         holes: Vec::new(),
-    })
-}
-
-/// `profile` mirrored in its `x` axis, `y -> -y`, exactly.
-///
-/// The centred rectangle, circle and ellipse are their own mirror images.
-/// Every other family is a contour, or lowers to one, and is mirrored as a
-/// derived profile, which the exact extruder lowers segment by segment: a
-/// line stays a line and an arc the same arc, its sense restored. The
-/// prism is not built along `-z` and reflected instead: the general
-/// boolean refuses some cuts by a reflected cylinder wall ("kept faces do
-/// not sew into a solid") that it makes from the same wall built directly.
-fn mirrored(profile: &Profile, tolerance: Tolerance) -> GeomResult<Profile> {
-    let contour = match profile {
-        Profile::Rectangle(_) | Profile::Circle(_) | Profile::Ellipse(_) => {
-            return Ok(profile.clone())
-        }
-        Profile::Section(section) => {
-            Profile::Contour(section_contour(section).map_err(remap_construction_error)?)
-        }
-        Profile::CenterLine(center_line) => Profile::Contour(
-            center_line_contour(center_line, tolerance).map_err(remap_construction_error)?,
-        ),
-        other => other.clone(),
-    };
-    Ok(Profile::Derived {
-        basis: Box::new(contour),
-        transform: Transform2::from_scale(Vec2::new(1.0, -1.0)),
     })
 }
 

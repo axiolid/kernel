@@ -2,14 +2,12 @@
 
 Each mutant breaks one decision of the profile boundary -- that the graph
 accepts a profile and nothing else, that both compilers read it, check it
-and frame it alike, that the exact prism is mirrored rather than reflected
-for the opposite side, and each refusal of the boundary check -- and must
-turn a test red.
+and frame it alike, that the exact prism is reflected in the profile's
+`x` axis for the opposite side (#288), and each refusal of the boundary
+check -- and must turn a test red.
 
-Equivalent mutants, deliberately not listed: mirroring the centred
-rectangle, circle and ellipse as derived profiles (they are their own
-mirror images, and the derived lowering keeps them exact); checking only
-the outer ring of a composite member (the tests' composites are none).
+Equivalent mutants, deliberately not listed: checking only the outer ring
+of a composite member (the tests' composites are none).
 """
 import pathlib, subprocess, sys
 
@@ -48,12 +46,15 @@ MUTANTS = [
     ("the exact compiler skips the boundary check", C,
      "                crate::half_space_boundary::check(profile, self.options.tolerance())?;",
      "                let _ = crate::half_space_boundary::check;"),
-    ("the profile not mirrored for the opposite side", C,
-     "            Some((Footprint::Profile(profile), _)) if flip > 0.0 => (profile.clone(), Vec2::ZERO),",
-     "            Some((Footprint::Profile(profile), _)) if true => (profile.clone(), Vec2::ZERO),"),
-    ("the mirror is the identity", C,
-     "        transform: Transform2::from_scale(Vec2::new(1.0, -1.0)),",
-     "        transform: Transform2::from_scale(Vec2::new(1.0, 1.0)),"),
+    ("the profile not reflected for the opposite side", C,
+     "            Some((Footprint::Profile(_), _)) if flip < 0.0 => {",
+     "            Some((Footprint::Profile(_), _)) if false => {"),
+    ("the reflection is the identity", C,
+     "Mat3::from_diagonal(Vec3::new(1.0, -1.0, 1.0))",
+     "Mat3::from_diagonal(Vec3::new(1.0, 1.0, 1.0))"),
+    ("the reflection a half turn instead", C,
+     "Mat3::from_diagonal(Vec3::new(1.0, -1.0, 1.0))",
+     "Mat3::from_diagonal(Vec3::new(-1.0, -1.0, 1.0))"),
     ("a zero radius let through to lowering", B,
      "            if !(circle.radius.is_finite() && circle.radius > 0.0) {",
      "            if false {"),

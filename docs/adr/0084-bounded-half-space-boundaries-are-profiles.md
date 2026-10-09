@@ -44,9 +44,11 @@ a 2D curve. A boundary with arcs is a `Profile::Contour` of `Line2` and
   meet within the tolerance other than neighbours at their joint. A
   boundary that fails is refused with `InvalidInput` naming the fault.
 - **Exact.** The prism is `extrude_profile_exact` of the profile, mirrored
-  in its `x` axis as a derived profile when the kept side is opposite the
-  normal (as the polyline is), never extruded along `-z` and reflected:
-  the general boolean refuses some cuts by a reflected cylinder wall.
+  in its `x` axis when the kept side is opposite the normal (as the
+  polyline is). **Amended (#288):** the mirror was first a derived
+  profile, because the general boolean refused some cuts by a reflected
+  cylinder wall; with that fixed, the prism of the profile as authored is
+  reflected by its placement instead.
 - **Mesh.** The profile is flattened with the chord budget; a clipped
   solid's deviation is certified against the exact result, as for every
   boolean the exact compiler builds (#235).
@@ -78,15 +80,15 @@ a 2D curve. A boundary with arcs is a `Profile::Contour` of `Line2` and
 **Follow-ups / risks to watch**
 
 - The general boolean's refusal of some cuts by a reflected cylinder wall
-  (a downward extrusion of an arc profile) is worked around here, not
-  fixed.
+  (a downward extrusion of an arc profile) was worked around here at
+  first; #288 fixed it in the boolean (a boundary cut placed on a line
+  pcurve a turn of its parameter away) and removed the workaround.
 
 ## Relation to existing code
 
 - `crates/representations/modeling/graph/src/solid_operation.rs`,
   `validation.rs` (`ExpectedReference::HalfSpaceBoundary`).
 - `crates/execution/compile/src/half_space_boundary.rs`,
-  `compiler.rs` (`boundary_rings`), `exact/clip.rs` (`Footprint`,
-  `mirrored`).
+  `compiler.rs` (`boundary_rings`), `exact/clip.rs` (`Footprint`).
 - `crates/execution/compile/tests/bounded_half_space_arcs.rs`,
   `scripts/probe_arc_bounded_half_space_mutants.py`.

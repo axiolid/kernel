@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A bounded half-space whose profile boundary keeps the side opposite the
+  plane normal reflects the profile's prism in its `x` axis with its
+  placement, instead of mirroring the profile as a derived profile first
+  (#288, ADR 0084). The general boolean now cuts by a reflected cylinder
+  wall as by one built directly, so the #277 workaround is gone; the
+  clipped volumes are unchanged.
+
 ## [0.3.16] - 2026-10-09
 
 ### Added
