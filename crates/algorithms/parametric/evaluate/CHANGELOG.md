@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-09
+
 ### Added
 
 - Composite station bases (#285, ADR 0082 amendment), in

@@ -119,6 +119,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.6 - 2026-10-09
+
+### Fixed
+
+- A door standing on a wall's floor face and reaching a rounding error
+  past the wall's face (or stopping that short of it) is cut, not refused
+  as "a point too close to a face boundary to classify" (#276). Where two
+  coincident faces imprint each other's edges, a cut within the tolerance
+  of the imprinted edge's own end is that end (`MergedPoints` above the
+  rounding floor), and cuts within the tolerance of each other merge as on
+  a section; the piece between was a fraction of the tolerance long and
+  lay on the other face's boundary.
+
 ### 0.1.5 - 2026-10-03
 
 ### Added
@@ -415,6 +428,58 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.17 - 2026-10-09
+
+### Fixed
+
+- **Oblique exact extrusions of profiles with arcs are the sheared prism
+  (#280).** For an offset leaning off the profile normal, the arc
+  extruder (rounded rectangles, contours with arcs or round holes,
+  sections with fillets, centre-line profiles, composites) built each arc
+  wall as a right `Cylinder` standing on the profile plane and left the
+  far rim's edges over the unsheared plan section, while the far vertices
+  and cap were sheared: the solid was wrong by the horizontal shear
+  (about 0.25 in the geometric audit for `(0.3, -0.2, 1)` at depth 0.75)
+  and nothing refused it. Since #275 the downward case inherited it
+  through the mirror. The far rim is now the base rim moved by the whole
+  offset, and an arc sweeps the oblique circular cylinder it is: an
+  `EllipticalCylinder` with its axis along the unit direction `d`,
+  semi-axes `r` (across the lean) and `r d.z`, and rims traced by
+  `Sinusoid2` pcurves (`v = H / d.z - r |d_h| sin u`), all closed form.
+  Along the normal the walls stay right cylinders, unchanged.
+
+### Changed
+
+- **An oblique circle extrudes exactly (#280)** instead of being refused
+  as `"oblique circle extrusion"`: its wall is the same oblique
+  cylinder, its seam at the wall's angle origin. An oblique ellipse is
+  still refused, as `"oblique ellipse extrusion"`: its swept section has
+  principal axes other than the profile's. Tests
+  (`tests/oblique_extrusion.rs`): the issue's repro, and every family
+  with arcs (rounded and hollow rounded rectangles, a round hole, a round
+  contour, a 270-degree arc, a curved centre line, a circle, a derived
+  and a composite profile, a filleted I section) along four leaning
+  directions, up and down, each audited clean, of volume
+  `area * depth * |d.z|` (a closed form, or the straight prism of the
+  same height), with far vertices the base ones moved by the offset and
+  wall points that shear back onto the profile's circles; the downward
+  family sweep now covers oblique curved families too. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
+
+- **Behaviour change: the mesh extrusion refuses a direction in the
+  profile plane (#281)**, as the exact path does. `extrude_profile`
+  returned a sliver solid for an offset within tolerance of the profile
+  plane, and a flat zero-volume "solid" at exactly `o.z = 0`; it now
+  refuses `|o.z| <= tolerance` with the exact path's typed refusal,
+  `UnsupportedInput { operation: Sweep, input: "extrusion direction in
+  the profile plane" }`. `extrude`, which takes no tolerance, refuses an
+  offset exactly in the plane by the same name. A caller that relied on
+  the degenerate mesh now gets the error; `axiolid-mesh-compile` meshes
+  extrusions through `extrude_profile`, so it refuses them too. Test:
+  both paths refuse `z = 0`, `-0.0` and `+-tol / 2`, and build `+-2 tol`
+  with the same closed-form volume. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
 
 ### 0.3.16 - 2026-10-09
 
@@ -1257,6 +1322,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.8 - 2026-10-09
+
+### Added
+
+- Composite station bases (#285, ADR 0082 amendment), in
+  `station::composite`: `CompositeBasis` measures stations along
+  `StationPiece`s -- spans of atomic 2D or 3D curves (`StationCurve`)
+  between two distances in the curve's station measure, reversed or
+  carried by a rigid placement -- laid end to end. The distance runs
+  through the pieces in their common convention (plan distance when
+  every piece is an elevated or banked curve, arc length when none is;
+  mixed pieces refused by name); consecutive pieces must meet within
+  `JOINT_TOLERANCE` (relative), a gap and an undeclared reversed piece
+  refused by name; every joint is a seam read by the #263 rule
+  (`section_on` with a `SeamSide`); `seams` / `exact_seams` list the
+  joints and each piece's own seams; `frame_is_exact_at` claims an exact
+  frame only where every piece up to the one read is an exactly placed
+  line; `pieces_between` clips the pieces a trim of the composite keeps.
+- `SectionFrame::carried`: the frame a station on a curve placed by a
+  rigid motion has -- the source's moved where the motion keeps `+Z`
+  (within the new `KEEPS_UP_TOLERANCE`), the placed curve's own
+  reference-up frame of the moved point and tangent where it tilts `+Z`
+  on an arc-length-measured source; an elevated or banked source so
+  placed is refused by a typed `UnsupportedInput`.
+- `station::DistanceConvention`, the curve-evaluation contract's
+  convention re-exported so a caller can name a basis's measure.
+
 ### 0.3.7 - 2026-10-09
 
 ### Added
@@ -1712,6 +1804,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-measure
 
+### 0.3.10 - 2026-10-09
+
+### Changed
+
+- `boundary_distance`, `boundary_clearance` and the `body_*` distance and
+  clearance in space stop as soon as the two boundaries are shown to meet
+  (#273): a pair the search pops with a lower bound of zero is first asked
+  for a point of each element that the two share -- the closest points of
+  two line edges, or a point of a line edge and the point of a planar face
+  at the same place, the face's certified by its domain. Two such points
+  within the rounding margin the lower bounds carry give `[0, d]` with
+  them as the witnesses, the interval the refinement would only converge
+  to. Touching or crossing elements no longer refine round the contact
+  until the accuracy or the step budget: two boxes sharing a face or
+  crossing stop within a few steps, and on the `boundary_distance`
+  benchmark a wall standing on a slab under a general placement measures
+  in about 35 us instead of about 0.3 s (where the old search also ran out
+  of budget at `[0, 1e-3]`), two crossing walls in about 55 us instead of
+  27 ms. A gap wider than the rounding margin is never taken for a touch,
+  and boundaries that are apart measure bit for bit as before. Curved faces
+  and circle or ellipse edges show no touch this way and are refined as
+  before.
+
 ### 0.3.9 - 2026-10-03
 
 ### Added
@@ -2149,6 +2264,105 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.16 - 2026-10-09
+
+### Added
+
+- Bounded half-spaces whose boundary is a profile of lines and circular
+  arcs (#277, ADR 0084). `ReferenceExactCompiler` clips by the exact
+  extrusion of the profile along the plane normal, each arc a right
+  circular cylinder wall, so a wall clipped by the consumer's boundary
+  (six segments, two arcs over a circle of radius 1.2) has its
+  closed-form volume; for the side opposite the normal the profile is
+  mirrored as a derived profile, as the polyline is.
+  `ReferenceMeshCompiler` flattens the profile under the chord budget,
+  and the clipped solid's deviation is certified against the exact
+  result (#235), within the budget under dense sampling. Both compilers
+  check the profile first and refuse, as `InvalidInput` naming the
+  fault, a contour that does not close (the flattener alone bridged the
+  gap), an arc of no radius, a segment of no length, and edges that
+  cross or touch other than neighbours at their joint. Polyline
+  boundaries are unchanged.
+
+- Stations along curve relations (#285, ADR 0082 amendment):
+  `station::resolve`, `station::placement` and every run of stations
+  (offset curves, sectioned spines and surfaces) take a composite, a
+  trim, a surface curve whose 3D curve governs and a curve placed at a
+  station as their basis, nested and placed in any combination, 2D or
+  3D: the relation is flattened into spans of atomic curves (as a
+  composite directrix reads it) and measured as one
+  `axiolid_reference::station::CompositeBasis`. A station on a joint
+  reads the piece its `SeamSide` names; a run across a joint whose
+  tangents differ is mitred there. A placement on a composite is exact
+  only where every piece up to the one read is an exactly placed line.
+  Pieces measured differently, a gap, and an undeclared reversed piece
+  are refused by name.
+- `station::seams` reads every relation a station can be measured along
+  -- 2D relations, nested composites, trims of relations, placed
+  segments, elevated pieces -- at the running sum of its pieces' lengths,
+  with each piece's own seams inside it; a joint after an ellipse or a
+  B-spline piece is refused as inexact by name.
+- `deviation::SNAPPED_OPERANDS` (#276): the detail of the
+  `DeviationPath::Boolean` contribution that reports operands snapped
+  together within the tolerance (see Fixed), its
+  `Certified` bound the largest distance any operand vertex moved. It is
+  carried through instances (scaled) and enclosing booleans, also where
+  the enclosing boolean is measured against its exact result.
+
+### Changed
+
+- Oblique extrusions with arcs compile to the right exact solid (#280,
+  through `axiolid-construct`): a leaning circle or arc wall is an
+  oblique circular cylinder, an `EllipticalCylinder` along the
+  direction, where `ReferenceExactCompiler` returned upright cylinder
+  walls a shear away from the mesh (and refused an oblique circle). The
+  general exact boolean does not yet cut such a wall and refuses by name,
+  so a boolean with an oblique round opening stays
+  `DeviationBound::Unbounded` under that name, never certified against a
+  wrong solid (`tests/boolean_deviation.rs`). A face on such a surface
+  is meshed within its reported bound (`tests/deviation_report.rs`).
+
+- **Behaviour change:** `ReferenceMeshCompiler` refuses an extrusion
+  whose direction lies within tolerance of its profile plane, as
+  `"extrusion direction in the profile plane"` (#281, through
+  `axiolid-construct`'s `extrude_profile`), where it returned a sliver or
+  flat mesh; the exact compiler already refused it by that name.
+
+- A station along a curve placed in a frame that tilts `+Z` (#264) is no
+  longer refused when the source is measured by arc length: its point and
+  tangent are carried and its frame is the placed curve's own
+  reference-up frame against `+Z`. An elevated or banked source so placed
+  is still refused by name.
+- The refusal of an unsupported station basis now names what is
+  supported ("... a curve relation other than a composite, a trim, ...").
+
+### Fixed
+
+- A planar face no longer drops a corner lying within the noise band of
+  a line through its neighbours (#278, ADR 0083 amendment). The sliver
+  split after the certified clipper re-tested the band for the corners of
+  the slivers it dropped; the band is not transitive, so a cap corner
+  0.4 um off `a-b`, with `a` 1 um off `p1-b`, ended up in no triangle of
+  the cap while the side faces kept it, and a closed faceted prism meshed
+  `OpenSolid`. The edge a dropped sliver leaves behind now takes exactly
+  that sliver's corners, chained through slivers dropped next to it, and a
+  split that does not bound the clipper's cover along the same edges is
+  discarded for the cover. Every ring corner of a planar B-rep or
+  authored polygon face is a triangle corner again.
+
+- A difference whose tool stops a rounding error short of its host's face,
+  or reaches that far past it, no longer leaves a skin or sliver that thin
+  (#276). Kept as two faces `4.5e-15` apart, such a skin crossed itself
+  once the mesh was placed at georeferenced coordinates, and the volume
+  kernel refused it as self-intersecting. `ReferenceMeshCompiler` now
+  moves the tool's vertices within the linear tolerance of the subject's
+  faces onto them, then the subject's onto the moved tool's, before the
+  mesh boolean: by the smallest move onto every plane in reach, at most
+  the tolerance, exactly onto axis-aligned planes, never folding a
+  triangle, and not at all at a zero tolerance. The result is the boolean
+  of operands perturbed within the tolerance (ADR 0080). A skin thicker
+  than the tolerance is kept.
 
 ### 0.3.15 - 2026-10-09
 
@@ -2921,6 +3135,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.7 - 2026-10-09
+
+### Changed
+
+- A `SolidOperation::BoundedHalfSpace` boundary may be a `Profile` node
+  as well as a 2D curve (#277, ADR 0084): a contour of lines and exact
+  circular arcs states a boundary a polyline cannot. Graph validation
+  accepts either and refuses anything else as `"curve2 or profile"` (a
+  3D curve was refused as `"curve2"`). No type, variant or field changed.
+
+- The `station` module documents curve relations as station bases
+  (#285): a composite, a trim and a curve placed at a station, nested,
+  measured end to end in their pieces' common convention, each joint a
+  seam. No API change.
+
 ### 0.3.6 - 2026-10-09
 
 ### Added
@@ -3318,6 +3547,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.11 - 2026-10-09
+
+### Fixed
+
+- Small rings far from the origin keep their area and orientation (#274).
+  A ring's orientation and its `ZeroArea` check came from a shoelace over
+  the coordinates as given, whose rounding at georeferenced positions
+  (6e5, 5.6e6 m) swamps the area of a small ring: a 1e-4 m² triangle was
+  refused as `ZeroArea`, and a clockwise sliver of a chorded round corner
+  read as counter-clockwise made the union of two triangles sharing an
+  edge fail with `SelfIntersection`. Both are now exact signs of the area
+  taken as a fan of triangles from the ring's first vertex, at every site
+  that decides with them: validation (`overlay`, `union_soup`,
+  `Region::new`, and `validate_arc_ring` for a ring without arcs), the
+  exact boolean's winding weights, canonical output orientation,
+  settling, the outer-or-hole decision when linking result rings, and the
+  orientation `arc_overlay` and `ArcArrangement` give their operands. A
+  ring now decides the same at any distance from the origin.
+  `arc_ring_area`, `ring_area`, `polygon_area` and `Region::area` sum from
+  the first vertex too, so their rounding scales with the ring's extent.
+- A ring whose vertices all lie exactly on one line is a valid operand
+  wherever it lies; a boolean leaves it out, as it encloses nothing (#219).
+  Before, its rounded area decided whether validation refused it as
+  `ZeroArea`, so the plan shadow of a vertical face passed at `x = 4.2`
+  and was refused at `x = 4`. A ring with arcs, or one passed to
+  `validate_arc_ring`, is still refused, as the arc path has no rule
+  leaving it out.
 
 ### 0.3.10 - 2026-10-02
 

@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.16 (2026-10-09) |
+| Latest release | 0.3.17 (2026-10-09) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -65,91 +65,56 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.16 (2026-10-09):
-
-### Added
-
-- `profile::ring_touches` and `profile::RingTouch` (#265): every vertex
-  lying inside another ring edge, which `triangulate_with` under
-  `PinchPolicy::Accept` inserts into that edge, found by the same exact
-  validation and listed once per vertex and edge. A caller whose rings
-  share their edges with neighbouring patches (the faces of a closed
-  shell) splits the neighbour's copy of each such edge at the same vertex,
-  so the patches do not meet at a T-junction.
-
-- **A ring joining its hole by a seam run both ways triangulates on
-  surface paths (#270).** Exporters write a planar face with a hole as one
-  ring: the outer boundary, a seam to the hole, the hole, and the seam
-  back (a keyhole). It bounds the outer polygon minus the hole, but the
-  certified clipper refused it as "outer ring overlaps itself".
-  `triangulate_with(.., PinchPolicy::Accept)` now takes a seam -- an edge
-  and a later edge of one ring between the same two points in opposite
-  directions, used by no other edge, nesting with the ring's other seams
-  and met by no other edge except at its ends -- out of the ring, splits
-  the ring into the loops it joins and triangulates them on the pinch
-  path (ADR 0083 amendment). The seam's two copies cancel, so the
-  certificate over the loops is the ring's; its ends are repeated
-  vertices and triangles use a point's first index. A hole loop of either
-  winding is a hole, a seam between two loops side by side leaves two
-  parts, and a keyhole may touch other rings at points. Refused by name:
-  a "seam" running back along only part of an edge, one edge twice in one
-  direction or three times, interleaving seams, seams in a row, an edge
-  crossing, touching or running along a seam, and a loop folding back
-  where its seam left it. `profile::ring_touches` (#265) validates such a
-  ring the same way and lists its loops' touches by the ring's own edge
-  and vertex indices.
-
-### Changed
-
-- `triangulate` and `PinchPolicy::Refuse` (extrusion and loft caps)
-  refuse a ring with a seam as "profile outer ring runs along a seam both
-  ways (edges i and j), which a solid cannot extrude" instead of "profile
-  outer ring intersects itself" (#270): an extruded keyhole puts two
-  coincident wall faces on the seam. Tests for #270: the issue's keyhole
-  (hole wound either way), a thin rim with a 2^-13 m seam and one at
-  0.1 mm, a seam from inside an outer edge to a hole's corner, two
-  keyholes in one ring, a keyhole with a pinch, a seam between loops side
-  by side, each from every start vertex, either way round and under eight
-  zero-sign patterns with the exact-tiling checks (the seam's copies
-  cancelling in the edge cover), random keyhole layouts, every refusal
-  above by name, and the solid refusals.
+Latest release, 0.3.17 (2026-10-09):
 
 ### Fixed
 
-- **Exact extrusions whose direction points against the profile normal
-  build (#275).** `extrude_profile_exact` refused any offset with
-  `offset.z <= tolerance` as `"non-forward planar extrusion"`, so an
-  opening cut down from a slab's top (`ExtrudedDirection (0, 0, -1)`) had
-  no exact result and a boolean with it no certified mesh deviation. Such
-  an extrusion is the forward prism along `(o.x, o.y, -o.z)` mirrored in
-  the profile plane; it is now built that way, through
-  `ExactBRep::transformed`, for every profile family and for oblique
-  directions. Negating `z` is exact, so the profile-plane cap keeps the
-  profile's coordinates bit for bit, and the reflection flips every face,
-  so the solid stays outward with the forward prism's positive volume.
-  Only a direction within tolerance of the profile plane
-  (`|o.z| <= tolerance`) is refused, now named `"extrusion direction in
-  the profile plane"`. The mesh path already built these solids; both now
-  agree. Mutation probe: `scripts/probe_downward_extrusion_mutants.py`.
+- **Oblique exact extrusions of profiles with arcs are the sheared prism
+  (#280).** For an offset leaning off the profile normal, the arc
+  extruder (rounded rectangles, contours with arcs or round holes,
+  sections with fillets, centre-line profiles, composites) built each arc
+  wall as a right `Cylinder` standing on the profile plane and left the
+  far rim's edges over the unsheared plan section, while the far vertices
+  and cap were sheared: the solid was wrong by the horizontal shear
+  (about 0.25 in the geometric audit for `(0.3, -0.2, 1)` at depth 0.75)
+  and nothing refused it. Since #275 the downward case inherited it
+  through the mirror. The far rim is now the base rim moved by the whole
+  offset, and an arc sweeps the oblique circular cylinder it is: an
+  `EllipticalCylinder` with its axis along the unit direction `d`,
+  semi-axes `r` (across the lean) and `r d.z`, and rims traced by
+  `Sinusoid2` pcurves (`v = H / d.z - r |d_h| sin u`), all closed form.
+  Along the normal the walls stay right cylinders, unchanged.
 
-- **A ring's orientation is no longer misread at a `-0.0` twin of its
-  lowest corner (#269).** The certified clipper reads a ring's turn at its
-  lexicographically smallest vertex, found with `f64::total_cmp`, which
-  orders `-0.0` before `0.0`. A rectangle with a straight corner at
-  `(-0.0, 2)` and its true lowest corner at `(0, 0)` was read at the
-  straight corner, taken for clockwise and reversed, and both pinch
-  policies then refused it with "found no ear". Projecting a face onto
-  plane axes writes exactly such rings (`0.0 * -k = -0.0` next to the
-  origin's `0.0`); a downstream triage found 35 refused rectangular faces
-  in two models. Every coordinate comparison of the clipper now orders by
-  value, `-0.0` equal to `0.0` (still total and deterministic): the lowest
-  corner of a ring and of a pinch path's boundary cycle, the order of
-  touching vertices along an edge, the bridge order of holes and the edge
-  sweep. `polyhedron::triangulate` and `offset::offset_solid` key corners
-  with `-0.0` read as `0.0` too, so a corner written both ways welds into
-  one vertex. Tests: the issue's rectangle and a hole with the same
-  corner under both policies, every pinch fixture under eight zero-sign
-  patterns, random hole and pinch layouts with zeros negated at random,
-  and a cube with a face written in `-0.0`.
+### Changed
+
+- **An oblique circle extrudes exactly (#280)** instead of being refused
+  as `"oblique circle extrusion"`: its wall is the same oblique
+  cylinder, its seam at the wall's angle origin. An oblique ellipse is
+  still refused, as `"oblique ellipse extrusion"`: its swept section has
+  principal axes other than the profile's. Tests
+  (`tests/oblique_extrusion.rs`): the issue's repro, and every family
+  with arcs (rounded and hollow rounded rectangles, a round hole, a round
+  contour, a 270-degree arc, a curved centre line, a circle, a derived
+  and a composite profile, a filleted I section) along four leaning
+  directions, up and down, each audited clean, of volume
+  `area * depth * |d.z|` (a closed form, or the straight prism of the
+  same height), with far vertices the base ones moved by the offset and
+  wall points that shear back onto the profile's circles; the downward
+  family sweep now covers oblique curved families too. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
+
+- **Behaviour change: the mesh extrusion refuses a direction in the
+  profile plane (#281)**, as the exact path does. `extrude_profile`
+  returned a sliver solid for an offset within tolerance of the profile
+  plane, and a flat zero-volume "solid" at exactly `o.z = 0`; it now
+  refuses `|o.z| <= tolerance` with the exact path's typed refusal,
+  `UnsupportedInput { operation: Sweep, input: "extrusion direction in
+  the profile plane" }`. `extrude`, which takes no tolerance, refuses an
+  offset exactly in the plane by the same name. A caller that relied on
+  the degenerate mesh now gets the error; `axiolid-mesh-compile` meshes
+  extrusions through `extrude_profile`, so it refuses them too. Test:
+  both paths refuse `z = 0`, `-0.0` and `+-tol / 2`, and build `+-2 tol`
+  with the same closed-form volume. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

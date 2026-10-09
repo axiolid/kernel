@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-09
+
 ### Fixed
 
 - A door standing on a wall's floor face and reaching a rounding error

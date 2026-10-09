@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-02) |
+| Latest release | 0.3.11 (2026-10-09) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -39,52 +39,32 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-02):
+Latest release, 0.3.11 (2026-10-09):
 
 ### Fixed
 
-- Features closer than the tolerance touch (#222). Before the exact
-  boolean, a vertex within `tolerance.linear()` of an earlier vertex moves
-  onto it, and one within it of another ring's edge is inserted into that
-  edge. A door opening computed as `3.9999999999999996..4.199999999999999`
-  between rooms ending at 4 and starting at 4.2 used to leave a gap one ulp
-  wide, so the union came back in three pieces and coverage could not pass
-  through the opening; the grid backend before 0.3.5 had closed it. Inputs
-  with nothing that near another feature come back bit for bit as before.
-
-### Added
-
-- Minkowski sums and erosions with a non-convex polygon (#145):
-  `Region::minkowski_sum` and `Region::minkowski_erosion` now take any
-  simple polygon, where a non-convex one was refused with
-  `MinkowskiError::NotConvex`. New `Region::minkowski_sum_region` and
-  `Region::minkowski_erosion_region` take a whole region as the other
-  operand -- non-convex, with holes, several components; the region sum is
-  symmetric and cuts the operand with fewer vertices. A non-convex shape is
-  cut into convex pieces of its own vertices (holes bridged in, ear
-  clipping, then Hertel-Mehlhorn merging across diagonals while convex),
-  every decision an exact orientation, and the cut is certified to tile the
-  shape (the triangles' boundaries sum to the shape's); the pieces' sums
-  with every boundary edge are united in the same exact arrangement as the
-  convex case, so vertex sums are rounded once and output vertices once.
-  Should no certified cut be found, the sum is taken from edge-pair
-  parallelograms instead. Convex polygons take the path they took before,
-  and give the same results bit for bit. A comb-shaped room of 152
-  vertices with a hole per two teeth is summed with a rectangle in about
-  30 ms, an L-shape (two pieces) in about 55 ms and a plus (three pieces)
-  in about 180 ms; erosion takes about 1.3 times as long. The cost grows
-  with the number of pieces times the region's edges.
-- `MinkowskiError::EmptyStructuring`: an erosion by an empty region, under
-  which every point would qualify.
-
-### Fixed
-
-- `Region::minkowski_erosion` by a polygon that does not hold the origin
-  was cut to the region itself, so a translate of the polygon lying
-  inside the region from a point outside it was missed (eroding
-  `[0, 1] x [0, 10]` by `[5, 5.5] x [0, 1]` came out empty instead of
-  `[-5, -4.5] x [0, 9]`). The erosion is now anchored on the region moved
-  by a point of the polygon. Polygons holding the origin, and the disc
-  erosions, are unchanged.
+- Small rings far from the origin keep their area and orientation (#274).
+  A ring's orientation and its `ZeroArea` check came from a shoelace over
+  the coordinates as given, whose rounding at georeferenced positions
+  (6e5, 5.6e6 m) swamps the area of a small ring: a 1e-4 m² triangle was
+  refused as `ZeroArea`, and a clockwise sliver of a chorded round corner
+  read as counter-clockwise made the union of two triangles sharing an
+  edge fail with `SelfIntersection`. Both are now exact signs of the area
+  taken as a fan of triangles from the ring's first vertex, at every site
+  that decides with them: validation (`overlay`, `union_soup`,
+  `Region::new`, and `validate_arc_ring` for a ring without arcs), the
+  exact boolean's winding weights, canonical output orientation,
+  settling, the outer-or-hole decision when linking result rings, and the
+  orientation `arc_overlay` and `ArcArrangement` give their operands. A
+  ring now decides the same at any distance from the origin.
+  `arc_ring_area`, `ring_area`, `polygon_area` and `Region::area` sum from
+  the first vertex too, so their rounding scales with the ring's extent.
+- A ring whose vertices all lie exactly on one line is a valid operand
+  wherever it lies; a boolean leaves it out, as it encloses nothing (#219).
+  Before, its rounded area decided whether validation refused it as
+  `ZeroArea`, so the plan shadow of a vertical face passed at `x = 4.2`
+  and was refused at `x = 4`. A ring with arcs, or one passed to
+  `validate_arc_ring`, is still refused, as the arc path has no rule
+  leaving it out.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-09
+
 ### Changed
 
 - A `SolidOperation::BoundedHalfSpace` boundary may be a `Profile` node

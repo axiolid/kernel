@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-09
+
 ### Fixed
 
 - Small rings far from the origin keep their area and orientation (#274).

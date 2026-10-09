@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-03) |
+| Latest release | 0.3.10 (2026-10-09) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -40,33 +40,27 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-03):
+Latest release, 0.3.10 (2026-10-09):
 
-### Added
+### Changed
 
-- Plan distance, clearance and overlap between bodies of several exact
-  solids (#237): `body_plan_boundary_distance`,
-  `body_plan_boundary_clearance` and `body_plan_overlap` take a
-  `PlacedBody` (or a slice of items) per side, as the `body_*` queries in
-  space. The plan distance is the least over item pairs of the distance
-  between their shadows on the XY plane, by one shared search, so far
-  pairs are never refined; it is zero where an item's shadow overlaps or
-  lies inside one of the other body's, and the witnesses name their items
-  (`BodyDistance`). `body_plan_overlap` answers `BodyPlanOverlap`: an
-  overlap of positive area with the two items that show it, a certified
-  gap, or undecided. Items of one body may overlap or touch freely in
-  plan, so no layout is checked. The placement is applied before
-  projecting along the world's `z`: a body turned about `z` measures as
-  its plan turned, and a tilted body casts its tilted items' shadows.
-
-### Fixed
-
-- `plan_overlap` no longer leaves undecided an overlap that two level
-  planar faces show when their shadows overlap only in part (a block over
-  part of a column's disc): when the distance search shows neither an
-  overlap nor a gap -- its budget taken by walls and edges whose shadows
-  merely cross, or its run ended by a plan distance of zero met between
-  two boundary points -- a second search over patches of planar faces
-  that are not vertical alone, coarsest pair first, looks for one.
+- `boundary_distance`, `boundary_clearance` and the `body_*` distance and
+  clearance in space stop as soon as the two boundaries are shown to meet
+  (#273): a pair the search pops with a lower bound of zero is first asked
+  for a point of each element that the two share -- the closest points of
+  two line edges, or a point of a line edge and the point of a planar face
+  at the same place, the face's certified by its domain. Two such points
+  within the rounding margin the lower bounds carry give `[0, d]` with
+  them as the witnesses, the interval the refinement would only converge
+  to. Touching or crossing elements no longer refine round the contact
+  until the accuracy or the step budget: two boxes sharing a face or
+  crossing stop within a few steps, and on the `boundary_distance`
+  benchmark a wall standing on a slab under a general placement measures
+  in about 35 us instead of about 0.3 s (where the old search also ran out
+  of budget at `[0, 1e-3]`), two crossing walls in about 55 us instead of
+  27 ms. A gap wider than the rounding margin is never taken for a touch,
+  and boundaries that are apart measure bit for bit as before. Curved faces
+  and circle or ellipse edges show no touch this way and are refined as
+  before.
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

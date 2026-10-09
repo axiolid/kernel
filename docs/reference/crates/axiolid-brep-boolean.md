@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.5 (2026-10-03) |
+| Latest release | 0.1.6 (2026-10-09) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,95 +51,17 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.5 (2026-10-03):
-
-### Added
-
-- `BooleanError::ToleranceExceeded` (#251): a decision within tolerance
-  was asked for beyond the caller's tolerance, any at all at
-  `Tolerance::ZERO`. The report's session refuses it by name (and asserts
-  in debug builds) rather than return a result its report misdescribes;
-  no reading asks for one.
-
-- `BooleanError::UnsupportedContact` (#243): a plane read as touching a
-  cylinder within tolerance is crossed by a curve whose meeting with their
-  contact ruling this stage cannot place (a curve of the plane that is no
-  line, a curve of the cylinder that is no ruling or conic). Refused by
-  name rather than sewn against exact roots that disagree with the
-  reading.
+Latest release, 0.1.6 (2026-10-09):
 
 ### Fixed
 
-- At `Tolerance::ZERO` the report is empty again (#251, the #236
-  contract). A support reading the exact predicate rejects was taken when
-  its `f64` measure was exactly `0`, and reported as a decision with
-  `linear` 0: a round hole across a wall under a general rotation, whose
-  axis and the wall's normals round to the same `f64` vector though the
-  numbers given (a frame orthonormal only to rounding) are not
-  perpendicular, was read `PlanePerpendicularToAxis` at zero. A tolerance
-  with a zero part now never takes a reading the exact predicate rejects
-  (coincident supports; a plane parallel or perpendicular to a cylinder's
-  axis or touching it): the exact answer stands, and the general closed
-  form cuts the hole, exactly, with an empty report. Point readings
-  already recorded only residues above the rounding floor and within the
-  tolerance, never at zero. Both positive parts: unchanged.
-- A round web hole touching an I-beam's flange is no longer refused when
-  the beam has root fillets (#249). The hole is then tangent to each
-  fillet cylinder where the fillet meets the flange, and the hole/fillet
-  section (perpendicular cylinders, axes skew by the difference of their
-  radii) is a quartic with a double point there: two loops round the
-  fillet crossing at the fillet/flange edge. It was refused ("a section
-  curve the general boolean does not build"): the trace over the fillet
-  face's parameter box met the crossing on the box's edge. Now (new
-  `tangency` module):
-  - a trace that cannot be decided in a face's box of a periodic carrier
-    is taken over the carrier's whole turn, where the crossing is inside
-    and both loops end at it (ADR 0077); a loop closing through such a
-    vertex is cut there like at any other cut;
-  - a section on a face is cut at a smooth edge of the face (a fillet
-    running tangent into the flange or web) where the edge itself crosses
-    the section's other surface, not where the section touches the
-    adjacent surface (a double root that rounding splits or loses);
-  - a traced section on the face's own surface keeps the traced curve as
-    its pcurve, instead of a second trace over the face's box;
-  - with the flange read as touching the hole within tolerance (#243),
-    the double point is placed on the contact, and a traced section on a
-    cylinder in a contact is cut where it crosses the contact ruling.
-  A hole that is exactly tangent (exact axes, dyadic sizes) gives an exact
-  result with an empty report at `Tolerance::ZERO`; under a general
-  placement the report carries the `PlaneTouchesCylinder` reading. A hole
-  a fraction of the tolerance into or short of the flange, which meets
-  each fillet in two arcs the contact would have to join (no single move
-  of one operand makes both readings hold), is refused by name
-  (`BooleanError::UnsupportedContact`). Holes cutting the fillets
-  transversally, or ten tolerances into the flange, are decided exactly.
-
-- A plane touching a cylinder within tolerance is read the same way by
-  every face pair (#243). A round hole tangent to a planar face (an
-  I-beam's web hole touching the flange) placed under a general rotation,
-  or reaching a fraction of the tolerance into or short of the face (the
-  #234 roof plane in a column), was refused ("split face pieces do not
-  close", "point too close to a face boundary", "do not sew"): the
-  plane/cylinder pair read one contact ruling while the cap disks' chords,
-  the circles of faces across the axis and the plane's own edges kept the
-  exact roots, `2 sqrt(2 r d)` apart. The reading is now taken once per
-  pair of supports, over the largest common box of their faces, and every
-  crossing of a curve on one of the two by the other is placed on the
-  contact ruling, as the moved plane gives it (`TangentCrossing`); points
-  where the given and the moved plane disagree on a side never decide a
-  piece or region. The result is the exact boolean of operands whose plane
-  moved by at most the reported `PlaneTouchesCylinder` distance. Exactly
-  tangent pairs are still decided by the exact predicates, and succeed at
-  `Tolerance::ZERO` with an empty report.
-- Cuts merged within tolerance on a circle or ellipse on both sides of its
-  parameter origin (one point named at `0` and at `2 pi`) averaged to the
-  opposite side of the curve, so a flush hole's circle was split in the
-  wrong place and the result did not sew (#243). They are unwrapped to one
-  turn first.
-- A section's window reaches `2^-20` of its diagonal past the two faces'
-  common box (#243). Its planes ran through the faces' extremes, so a
-  section touching a face there (a tool resting on a face, at
-  `Tolerance::ZERO`) left the window next to the touching point, and the
-  piece between could not be classified.
+- A door standing on a wall's floor face and reaching a rounding error
+  past the wall's face (or stopping that short of it) is cut, not refused
+  as "a point too close to a face boundary to classify" (#276). Where two
+  coincident faces imprint each other's edges, a cut within the tolerance
+  of the imprinted edge's own end is that end (`MergedPoints` above the
+  rounding floor), and cuts within the tolerance of each other merge as on
+  a section; the piece between was a fraction of the tolerance long and
+  lay on the other face's boundary.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

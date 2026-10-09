@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-10-09
+
 ### Changed
 
 - `boundary_distance`, `boundary_clearance` and the `body_*` distance and

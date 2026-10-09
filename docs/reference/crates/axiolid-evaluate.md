@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-09) |
+| Latest release | 0.3.8 (2026-10-09) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,47 +42,31 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-09):
+Latest release, 0.3.8 (2026-10-09):
 
 ### Added
 
-- Placing at a station (#264, ADR 0082 amendment):
-  `SectionFrame::placement` is the rigid motion taking local `x`, `y`,
-  `z` onto the tangent, the left lateral and up and the origin onto the
-  point (a linear placement's reading, not the provider layout of
-  `SectionFrame::frame`); `SectionFrame::moved` carries a frame by a
-  rigid motion; `station_frame_is_exact2` / `station_frame_is_exact3`
-  say whether a station frame is exact (a line only: every other family
-  reads its distance by the arc-length inverse or its point by
-  quadrature).
-
-- Seams of a station's basis curve (#263, ADR 0082 amendment), in
-  `station::seam`: `station_seams2` / `station_seams3` list where two
-  pieces of a curve meet -- a polyline's vertices at the running sum of
-  its segment lengths, a B-spline's corner knots (multiplicity at least
-  its degree; by quadrature, flagged not exact), an intrinsic curve's and
-  a chain's law seams and joins (smooth), an elevated curve's plan and
-  profile seams, a banked curve's cant and pivot seams -- as
-  `StationSeam { distance, parameter, smooth, exact }`, without
-  evaluating the curve; `exact_station_seams2` / `exact_station_seams3`
-  refuse an inexact seam with a typed `UnsupportedInput`.
-- `station_section2_on` / `station_section3_on`: a station within the
-  arc-length tolerance of a seam that is not smooth is read at the seam
-  from the piece the `SeamSide` names, the incoming one as the curve
-  truncated at the seam (a polyline's previous segment, a B-spline's
-  previous span, a profile and cant and pivot law cut there).
-- `Mitre`: the plane a run of sections crossing a seam stands in, normal
-  to the bisector of the two tangents; `Mitre::between` is `None` within
-  `SEAM_TANGENT_TOLERANCE` and refuses a near reversal (`MITRE_TOLERANCE`
-  on the cosine of half the turn) and a seam whose sides do not share
-  their point by name; `Mitre::place` projects a section point placed in
-  each side's frame along that side's tangent onto the plane.
-
-### Changed
-
-- `station_section2` / `station_section3` read a station on a seam (within
-  `ARC_LENGTH_TOLERANCE * max(1, s)`) at the seam itself, from the piece
-  starting there. On a polyline or a B-spline the arc-length inverse could
-  previously land a hair either side of the vertex, and so either frame.
+- Composite station bases (#285, ADR 0082 amendment), in
+  `station::composite`: `CompositeBasis` measures stations along
+  `StationPiece`s -- spans of atomic 2D or 3D curves (`StationCurve`)
+  between two distances in the curve's station measure, reversed or
+  carried by a rigid placement -- laid end to end. The distance runs
+  through the pieces in their common convention (plan distance when
+  every piece is an elevated or banked curve, arc length when none is;
+  mixed pieces refused by name); consecutive pieces must meet within
+  `JOINT_TOLERANCE` (relative), a gap and an undeclared reversed piece
+  refused by name; every joint is a seam read by the #263 rule
+  (`section_on` with a `SeamSide`); `seams` / `exact_seams` list the
+  joints and each piece's own seams; `frame_is_exact_at` claims an exact
+  frame only where every piece up to the one read is an exactly placed
+  line; `pieces_between` clips the pieces a trim of the composite keeps.
+- `SectionFrame::carried`: the frame a station on a curve placed by a
+  rigid motion has -- the source's moved where the motion keeps `+Z`
+  (within the new `KEEPS_UP_TOLERANCE`), the placed curve's own
+  reference-up frame of the moved point and tangent where it tilts `+Z`
+  on an arc-length-measured source; an elevated or banked source so
+  placed is refused by a typed `UnsupportedInput`.
+- `station::DistanceConvention`, the curve-evaluation contract's
+  convention re-exported so a caller can name a basis's measure.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

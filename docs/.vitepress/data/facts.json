@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.5",
-      "released_date": "2026-10-03",
+      "released": "0.1.6",
+      "released_date": "2026-10-09",
       "role": "algorithm.construction",
-      "version": "0.1.5"
+      "version": "0.1.6"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.16",
+      "released": "0.3.17",
       "released_date": "2026-10-09",
       "role": "algorithm.construction",
-      "version": "0.3.16"
+      "version": "0.3.17"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -166,10 +166,10 @@
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.7",
+      "released": "0.3.8",
       "released_date": "2026-10-09",
       "role": "algorithm.parametric",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -274,10 +274,10 @@
       "description": "Metric properties: area, volume, centroid, moments of inertia.",
       "layer": "algorithms",
       "path": "crates/algorithms/query/measure",
-      "released": "0.3.9",
-      "released_date": "2026-10-03",
+      "released": "0.3.10",
+      "released_date": "2026-10-09",
       "role": "algorithm.query",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-mesh": {
       "description": "Triangle meshes: the discrete representation every backend consumes.",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.15",
+      "released": "0.3.16",
       "released_date": "2026-10-09",
       "role": "execution.orchestration",
-      "version": "0.3.15"
+      "version": "0.3.16"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.6",
+      "released": "0.3.7",
       "released_date": "2026-10-09",
       "role": "representation.graph",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.10",
-      "released_date": "2026-10-02",
+      "released": "0.3.11",
+      "released_date": "2026-10-09",
       "role": "algorithm.planar",
-      "version": "0.3.10"
+      "version": "0.3.11"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-09) |
+| Latest release | 0.3.7 (2026-10-09) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -38,34 +38,19 @@ identifiers outside the graph.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-09):
+Latest release, 0.3.7 (2026-10-09):
 
-### Added
+### Changed
 
-- Nodes placed at stations (#264, ADR 0082 amendment):
-  `InstanceAtStation { source, station: OrientedCurveStation }`
-  (`#[non_exhaustive]`, built by `InstanceAtStation::new`) and the node
-  variant `GeometryNode::InstanceAtStation`, appended last. It reuses a
-  curve, solid or surface in the frame of an oriented station, the
-  station kept symbolic with its frame, orientation and seam side; the
-  source's local `x`, `y`, `z` map onto the oriented tangent, left
-  lateral and up, its origin onto the station's point (a linear
-  placement's reading), as the `station` module documents. A placed
-  curve is a 3D curve whatever its source (accepted where a curve or 3D
-  curve is, refused in 2D slots), a placed solid or surface keeps its
-  family, a placed profile is no longer a profile. The station is
-  validated as an oriented station's is when the node is pushed; the
-  node references its source, then the station's basis.
+- A `SolidOperation::BoundedHalfSpace` boundary may be a `Profile` node
+  as well as a 2D curve (#277, ADR 0084): a contour of lines and exact
+  circular arcs states a boundary a polyline cannot. Graph validation
+  accepts either and refuses anything else as `"curve2 or profile"` (a
+  3D curve was refused as `"curve2"`). No type, variant or field changed.
 
-- Station seam sides (#263, ADR 0082 amendment): `OrientedCurveStation`
-  gains `seam: SeamSide` (re-exported from `axiolid-curve`), the piece a
-  station on a seam of its basis reads; `OrientedCurveStation::new` sets
-  `SeamSide::Outgoing`, the stated default and the evaluators' behaviour,
-  and `with_seam_side` changes it. `CurveStation` has public fields, so it
-  keeps reading the outgoing piece; `CurveStation::with_seam_side` returns
-  the oriented station in its base frame reading the given side, and
-  `From<CurveStation> for OrientedCurveStation` the unturned outgoing one.
-  The `station` module documents the seam rule and how runs of sections
-  and offsets are mitred across a seam instead of taking a side.
+- The `station` module documents curve relations as station bases
+  (#285): a composite, a trim and a curve placed at a station, nested,
+  measured end to end in their pieces' common convention, each joint a
+  seam. No API change.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)
