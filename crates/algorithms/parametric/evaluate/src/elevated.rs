@@ -212,7 +212,9 @@ pub fn elevated_breaks(curve: &Elevated3, k: usize) -> Vec<Scalar> {
 
 /// [`elevated_breaks`] of a banked curve's point path, plus the seams of
 /// its pivot law (its rate may jump there). The cant law moves only the
-/// section frame, not the point, so its seams are not named.
+/// section frame, not the point, so its seams are not named -- except
+/// where a held-rail pivot piece derives the point from the cant (#279):
+/// the cant's seams there are the pivot's.
 #[must_use]
 pub fn banked_breaks(curve: &Banked3, k: usize) -> Vec<Scalar> {
     if k == 0 {
@@ -220,6 +222,7 @@ pub fn banked_breaks(curve: &Banked3, k: usize) -> Vec<Scalar> {
     }
     let mut out = elevated_breaks(&curve.base, k);
     out.extend(curve.pivot.seams());
+    out.extend(crate::banked::derived_cant_seams(curve));
     out.sort_by(Scalar::total_cmp);
     out.dedup();
     out
@@ -273,7 +276,7 @@ pub fn banked_chord_bound(curve: &Banked3, a: Scalar, b: Scalar) -> Option<Scala
     let taylor = h * h * 0.125;
     let plan = taylor * plan_bounds(&curve.base.plan, lo, hi)?[1];
     let profile = crate::elevation::elevation_chord_bound(&curve.base.elevation, lo, hi)?;
-    let pivot = taylor * crate::banked::pivot_bounds(&curve.pivot, lo, hi)?[1];
+    let pivot = taylor * crate::banked::pivot_bounds(curve, lo, hi)?[1];
     let bound = plan.hypot(profile + pivot) * (1.0 + ROUNDING);
     bound.is_finite().then_some(bound)
 }
@@ -311,7 +314,7 @@ pub fn banked_derivative_bounds(
     }
     let plan = plan_bounds(&curve.base.plan, lo, hi)?;
     let profile = crate::elevation::profile_bounds(&curve.base.elevation, lo, hi)?;
-    let pivot = crate::banked::pivot_bounds(&curve.pivot, lo, hi)?;
+    let pivot = crate::banked::pivot_bounds(curve, lo, hi)?;
     combined(
         plan,
         [
@@ -371,14 +374,15 @@ pub(crate) fn certifies_elevated(curve: &Elevated3) -> bool {
 ///
 /// The laws' refusals at a seam, by name.
 pub fn grade_corners3(curve: &Curve3, angle: Scalar) -> GeomResult<Vec<Scalar>> {
-    let (elevated, pivot) = match curve {
+    let (elevated, banked) = match curve {
         Curve3::Elevated(e) => (e, None),
-        Curve3::Banked(b) => (&b.base, Some(&b.pivot)),
+        Curve3::Banked(b) => (&b.base, Some(b)),
         _ => return Ok(Vec::new()),
     };
     let mut seams = crate::elevation::elevation_seams(&elevated.elevation);
-    if let Some(pivot) = pivot {
-        seams.extend(pivot.seams());
+    if let Some(banked) = banked {
+        seams.extend(banked.pivot.seams());
+        seams.extend(crate::banked::derived_cant_seams(banked));
     }
     seams.sort_by(Scalar::total_cmp);
     seams.dedup();
@@ -386,9 +390,9 @@ pub fn grade_corners3(curve: &Curve3, angle: Scalar) -> GeomResult<Vec<Scalar>> 
     for seam in seams {
         let mut before = crate::elevation::elevation_grade_before(&elevated.elevation, seam)?;
         let mut after = crate::elevation::elevation_grade(&elevated.elevation, seam)?;
-        if let Some(pivot) = pivot {
+        if let Some(banked) = banked {
             let rate = |before: bool| {
-                crate::banked::pivot_jet(pivot, seam, before)
+                crate::banked::pivot_jet(banked, seam, before)
                     .map(|jet| jet[1])
                     .ok_or_else(|| invalid("banked curve: pivot law has no rate at a seam"))
             };

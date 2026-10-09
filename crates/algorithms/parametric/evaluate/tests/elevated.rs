@@ -2,12 +2,15 @@
 //! (#252): points, derivatives and second derivatives in plan distance
 //! against finite differences, and the certified derivative and chord
 //! bounds against dense sampling, over straight, arc, clothoid and chain
-//! plans with line, circular-arc, parabolic and intrinsic profiles.
+//! plans with line, circular-arc, parabolic and intrinsic profiles. A
+//! banked curve rotating about a held rail through a Viennese bend (#279)
+//! derives its point path from the cant law and is held to the same
+//! checks.
 
 use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2,
-    CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2,
+    CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2, RailSide,
 };
 use axiolid_evaluate::bound::{
     certifies_flattening3, chord_bound3, continuity_breaks3, curve_derivative_bounds3,
@@ -161,6 +164,50 @@ fn banked() -> Curve3 {
     ))
 }
 
+/// Rotation about the held right rail (#279): level 20 m, a Viennese bend
+/// to 150 mm over 60 m, then held; the point path follows `D / 2`.
+fn held_rail(plan: Curve2, profile: ElevationLaw, convention: BankConvention) -> Curve3 {
+    let top = (0.15_f64 / 1.5).asin();
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(plan, profile),
+        CantLaw::new(vec![
+            CantPiece::constant(20.0, 0.0),
+            CantPiece::viennese_bend(60.0, 0.0, top),
+            CantPiece::constant(40.0, 0.15),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(120.0, RailSide::Right, 0.02)]),
+        1.5,
+        convention,
+    ))
+}
+
+/// The banked curves every check runs over: rotation about a moving
+/// pivot law, and about a held rail on a curved and on a straight level
+/// alignment (where the pivot alone bends the point path).
+fn banked_curves() -> Vec<(String, Curve3, Scalar)> {
+    vec![
+        ("banked".into(), banked(), 120.0),
+        (
+            "held rail".into(),
+            held_rail(
+                clothoid(),
+                parabolic_profile(),
+                BankConvention::VerticalRise,
+            ),
+            120.0,
+        ),
+        (
+            "held rail only".into(),
+            held_rail(
+                straight(),
+                ElevationLaw::level(0.0),
+                BankConvention::TangentRotation,
+            ),
+            120.0,
+        ),
+    ]
+}
+
 /// `[0, length]` cut at the curve's `C^2` breaks.
 fn smooth_spans(curve: &Curve3, length: Scalar) -> Vec<(Scalar, Scalar)> {
     let mut cuts = vec![0.0];
@@ -176,7 +223,7 @@ fn smooth_spans(curve: &Curve3, length: Scalar) -> Vec<(Scalar, Scalar)> {
 #[test]
 fn derivatives_match_finite_differences() {
     let mut all = curves();
-    all.push(("banked".into(), banked(), 120.0));
+    all.extend(banked_curves());
     for (name, curve, length) in &all {
         for (lo, hi) in smooth_spans(curve, *length) {
             for i in 1..10 {
@@ -224,7 +271,7 @@ fn the_point_is_the_composition_and_the_domain_is_the_plans() {
 #[test]
 fn derivative_bounds_hold_over_every_smooth_span() {
     let mut all = curves();
-    all.push(("banked".into(), banked(), 120.0));
+    all.extend(banked_curves());
     for (name, curve, length) in &all {
         for (lo, hi) in smooth_spans(curve, *length) {
             // Several sub-spans: the bound over each must cover it.
@@ -274,7 +321,7 @@ fn to_segment(p: Point3, a: Point3, b: Point3) -> Scalar {
 #[test]
 fn the_composed_chord_bound_holds_and_is_not_loose() {
     let mut all = curves();
-    all.push(("banked".into(), banked(), 120.0));
+    all.extend(banked_curves());
     // Level and straight: the pivot alone bends the point path.
     all.push((
         "pivot only".into(),
@@ -320,7 +367,13 @@ fn the_composed_chord_bound_holds_and_is_not_loose() {
                     // these gently varying curves. A pivot's bound is its
                     // form's supremum over the whole piece, so over part
                     // of a sine transition it is looser.
-                    let ceiling = if name == "pivot only" { 16.0 } else { 4.0 };
+                    // Over a whole Viennese bend a held-rail pivot bends
+                    // both ways, so its chord deviates less than h^2/8 |e''|.
+                    let ceiling = match name.as_str() {
+                        "pivot only" => 16.0,
+                        "held rail only" => 8.0,
+                        _ => 4.0,
+                    };
                     if worst > 1e-6 {
                         assert!(
                             bound <= ceiling * worst,
@@ -418,6 +471,74 @@ fn corners_are_grade_jumps_read_from_the_laws() {
     ));
     assert_eq!(grade_corners3(&pivot_kink, 1e-9).unwrap(), vec![50.0]);
     assert!(grade_corners3(&banked(), 1e-9).unwrap().is_empty());
+    // A held rail through a Viennese bend is smooth at the cant's seams;
+    // through a linear ramp its rate jumps there, where the pivot law
+    // itself has no seam.
+    let held = held_rail(straight(), line_profile(), BankConvention::VerticalRise);
+    assert!(grade_corners3(&held, 1e-9).unwrap().is_empty());
+    let ramped = Curve3::Banked(Banked3::new(
+        Elevated3::new(straight(), line_profile()),
+        CantLaw::new(vec![
+            CantPiece::linear(50.0, 0.0, 0.1),
+            CantPiece::constant(50.0, 0.1),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(100.0, RailSide::Left, 0.0)]),
+        1.5,
+        BankConvention::TangentRotation,
+    ));
+    assert_eq!(grade_corners3(&ramped, 1e-9).unwrap(), vec![50.0]);
+}
+
+/// The cant's seams are the point path's where a held-rail pivot derives
+/// it from the cant (#279), and only there.
+#[test]
+fn a_held_rail_pivot_names_the_cant_seams_it_covers() {
+    let held = held_rail(
+        straight(),
+        ElevationLaw::level(0.0),
+        BankConvention::VerticalRise,
+    );
+    assert_eq!(continuity_breaks3(&held, 1), vec![20.0, 80.0]);
+    assert_eq!(continuity_breaks3(&held, 2), vec![20.0, 80.0]);
+    assert!(chord_bound3(&held, 10.0, 30.0).is_none());
+    assert!(curve_derivative_bounds3(&held, 70.0, 90.0).is_none());
+    assert!(chord_bound3(&held, 20.0, 80.0).is_some());
+    // Rotating about the centreline over the bend and about the rail only
+    // after it: the seam at 20 m is no longer the pivot's.
+    let Curve3::Banked(mut later) = held else {
+        unreachable!()
+    };
+    later.pivot = CantLaw::new(vec![
+        CantPiece::constant(50.0, 0.0),
+        CantPiece::about_rail(70.0, RailSide::Right, -0.075),
+    ]);
+    assert_eq!(
+        continuity_breaks3(&Curve3::Banked(later), 1),
+        vec![50.0, 80.0]
+    );
+}
+
+/// Flattening a held-rail curve against its certified chord bound keeps
+/// every dense sample within the tolerance.
+#[test]
+fn a_held_rail_curve_flattens_within_its_tolerance() {
+    for (name, curve, length) in banked_curves().into_iter().skip(1) {
+        for tol in [1e-3, 1e-4] {
+            let points = flatten3(&curve, Interval::new(0.0, length), tol, 20).unwrap();
+            for i in 0..=2000 {
+                let d = length * i as Scalar / 2000.0;
+                let p = evaluate3(&curve, d).unwrap();
+                let near = points
+                    .windows(2)
+                    .map(|w| to_segment(p, w[0], w[1]))
+                    .fold(Scalar::INFINITY, Scalar::min);
+                assert!(
+                    near <= tol * (1.0 + 1e-9),
+                    "{name} tol {tol}: {near} at {d}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

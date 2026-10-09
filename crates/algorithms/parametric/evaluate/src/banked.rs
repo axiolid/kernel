@@ -8,6 +8,22 @@
 //! through a transition) tilts the tangent by exactly what it adds to the
 //! grade. With a constant pivot it is the centreline's tangent.
 //!
+//! A held-rail pivot piece (`CantForm::AboutRail`, #279) is derived from
+//! the cant law: `e = e0 + s D / 2`, `s = +-1`. Over a height piece of the
+//! cant its derivatives are `s D^(k) / 2`; over an angle piece, with
+//! `D = b sin(psi)`,
+//! `e' = s (b / 2) cos(psi) psi'`,
+//! `e'' = s (b / 2) (cos(psi) psi'' - sin(psi) psi'^2)` and
+//! `e''' = s (b / 2) (cos(psi) psi''' - 3 sin(psi) psi' psi'' - cos(psi) psi'^3)`,
+//! so with `P_k = sup |psi^(k)|` the certified bounds are
+//! `(b / 2) P_1`, `(b / 2) (P_2 + P_1^2)` and
+//! `(b / 2) (P_3 + 3 P_1 P_2 + P_1^3)`. The Viennese bend's `P_k` are
+//! exact over the span asked for: each derivative of its shape is taken at
+//! the span's ends and at its critical points inside (`viennese_sup`);
+//! over a whole piece they are `140 / 64`, `16.8 / sqrt(5)` and `52.5`
+//! times `|dpsi| / L^k`. Where the pivot is derived, the cant law's seams
+//! are the pivot's too (`derived_cant_seams`).
+//!
 //! The section is rolled about that tangent `t`. With `n` the horizontal
 //! left normal and `u = t x n`, the roll `rho` gives the lateral axis
 //! `l = cos(rho) n + sin(rho) u` (towards the left rail head) and the
@@ -97,6 +113,9 @@ fn plan_direction(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> {
 
 /// The cant law covers `d`, or the station has no section.
 fn covered(curve: &Banked3, d: Scalar) -> GeomResult<()> {
+    if curve.cant.has_rail_pieces() {
+        return Err(refused(BankError::RailInCant));
+    }
     curve.cant.value_at(d).map(|_| ()).ok_or_else(|| {
         refused(BankError::OutsideLaw {
             law: "cant",
@@ -163,10 +182,9 @@ pub fn banked_second_derivative(curve: &Banked3, d: Scalar) -> GeomResult<Vec3> 
         return Err(invalid("plan distance must be finite"));
     }
     covered(curve, d)?;
-    if curve.pivot.has_angle_pieces() {
-        return Err(refused(BankError::AngleInPivot));
-    }
-    let [_, _, bend] = pivot_jet(&curve.pivot, d, false).ok_or_else(|| {
+    // Every refusal of the laws by name first, then the jet.
+    curve.pivot_at(d).map_err(refused)?;
+    let [_, _, bend] = pivot_jet(curve, d, false).ok_or_else(|| {
         refused(BankError::OutsideLaw {
             law: "pivot",
             distance: d,
@@ -195,10 +213,64 @@ fn piece_at(law: &CantLaw, d: Scalar, before: bool) -> Option<(&CantPiece, Scala
     None
 }
 
-/// `(e, e', e'')` of a height law at `d`, in plan distance; `None` off
-/// the law or for an angle piece.
-pub(crate) fn pivot_jet(law: &CantLaw, d: Scalar, before: bool) -> Option<[Scalar; 3]> {
-    let (piece, s) = piece_at(law, d, before)?;
+/// `(e, e', e'')` of a banked curve's pivot at `d`, in plan distance,
+/// read from the piece starting there or with `before` the one ending
+/// there; `None` off the law, for an angle piece, or where a held-rail
+/// piece's cant has no value.
+pub(crate) fn pivot_jet(curve: &Banked3, d: Scalar, before: bool) -> Option<[Scalar; 3]> {
+    let (piece, s) = piece_at(&curve.pivot, d, before)?;
+    if let CantForm::AboutRail { rail, elevation } = piece.form {
+        let half = 0.5 * rail.pivot_sign();
+        let [cant, rate, bend] = cant_jet(curve, d, before)?;
+        let out = [elevation + half * cant, half * rate, half * bend];
+        return out.iter().all(|v| v.is_finite()).then_some(out);
+    }
+    height_jet(piece, s)
+}
+
+/// `(D, D', D'')` of a banked curve's cant at `d`, in plan distance: a
+/// height piece's own, an angle piece's through `D = b sin(psi)`. `None`
+/// off the law, for a held-rail piece, or where `|D| > b` or
+/// `|psi| > pi / 2`.
+fn cant_jet(curve: &Banked3, d: Scalar, before: bool) -> Option<[Scalar; 3]> {
+    let b = curve.rail_head_distance;
+    if !(b.is_finite() && b > 0.0) {
+        return None;
+    }
+    let (piece, s) = piece_at(&curve.cant, d, before)?;
+    let out = if let CantForm::VienneseBend { start, change } = piece.form {
+        let length = piece.length;
+        let xi = s / length;
+        let xi2 = xi * xi;
+        let one_minus = 1.0 - xi;
+        let shape = xi2 * xi2 * (35.0 + xi * (-84.0 + xi * (70.0 - 20.0 * xi)));
+        let slope = 140.0 * xi2 * xi * one_minus * one_minus * one_minus;
+        let bend = 420.0 * xi2 * one_minus * one_minus * (1.0 - 2.0 * xi);
+        let psi = start + change * shape;
+        if !psi.is_finite() || psi.abs() > core::f64::consts::FRAC_PI_2 {
+            return None;
+        }
+        let rate = change * slope / length;
+        let accel = change * bend / (length * length);
+        let (sin, cos) = psi.sin_cos();
+        [
+            b * sin,
+            b * cos * rate,
+            b * (cos * accel - sin * rate * rate),
+        ]
+    } else {
+        let jet = height_jet(piece, s)?;
+        if jet[0].abs() > b {
+            return None;
+        }
+        jet
+    };
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// `(v, v', v'')` of a height piece `s` into it, in plan distance; `None`
+/// for an angle or held-rail piece.
+fn height_jet(piece: &CantPiece, s: Scalar) -> Option<[Scalar; 3]> {
     let length = piece.length;
     let xi = s / length;
     let (value, slope, bend) = match &piece.form {
@@ -239,22 +311,103 @@ pub(crate) fn pivot_jet(law: &CantLaw, d: Scalar, before: bool) -> Option<[Scala
     out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
-/// Certified `(sup |e'|, sup |e''|, sup |e'''|)` of a height law over
-/// `[lo, hi]` inside ONE piece (#252); `None` across a seam, off the law,
+/// Certified `(sup |e'|, sup |e''|, sup |e'''|)` of a banked curve's pivot
+/// over `[lo, hi]` inside ONE piece (#252), and for a held-rail piece
+/// inside one piece of the cant law too (#279: half the cant's bounds, see
+/// the [module documentation](self)); `None` across a seam, off the law,
 /// or for an angle piece.
+pub(crate) fn pivot_bounds(curve: &Banked3, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
+    let (lo, hi) = (lo.min(hi), lo.max(hi));
+    let (piece, s_lo) = within_one_piece(&curve.pivot, lo, hi)?;
+    if let CantForm::AboutRail { .. } = piece.form {
+        return cant_bounds(curve, lo, hi).map(|bounds| bounds.map(|v| 0.5 * v));
+    }
+    height_bounds(piece, s_lo, s_lo + (hi - lo))
+}
+
+/// The piece of `law` holding all of `[lo, hi]`, and `lo`'s distance into
+/// it.
+fn within_one_piece(law: &CantLaw, lo: Scalar, hi: Scalar) -> Option<(&CantPiece, Scalar)> {
+    let (piece, s_lo) = piece_at(law, lo, false)?;
+    (s_lo + (hi - lo) <= piece.length * (1.0 + 1e-12)).then_some((piece, s_lo))
+}
+
+/// Certified `(sup |D'|, sup |D''|, sup |D'''|)` of a banked curve's cant
+/// over `[lo, hi]` inside one of its pieces: a height piece's own, an
+/// angle piece's through `D = b sin(psi)` (module documentation).
+fn cant_bounds(curve: &Banked3, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
+    let b = curve.rail_head_distance;
+    if !(b.is_finite() && b > 0.0) {
+        return None;
+    }
+    let (piece, s_lo) = within_one_piece(&curve.cant, lo, hi)?;
+    let out = if let CantForm::VienneseBend { change, .. } = piece.form {
+        let length = piece.length;
+        let c = change.abs();
+        let span = (s_lo / length, (s_lo + (hi - lo)) / length);
+        let p1 = c * viennese_sup(1, span) / length;
+        let p2 = c * viennese_sup(2, span) / (length * length);
+        let p3 = c * viennese_sup(3, span) / (length * length * length);
+        [
+            b * p1,
+            b * (p2 + p1 * p1),
+            b * (p3 + 3.0 * p1 * p2 + p1 * p1 * p1),
+        ]
+        .map(|v| v * (1.0 + crate::bound::ROUNDING))
+    } else {
+        height_bounds(piece, s_lo, s_lo + (hi - lo))?
+    };
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// `sup |f^(k)|` over `xi` in `[lo, hi]` (clamped to `[0, 1]`) of the
+/// Viennese bend's shape `f = xi^4 (35 - 84 xi + 70 xi^2 - 20 xi^3)`, for
+/// `k` in `1..=3`:
+/// `f' = 140 w^3`, `f'' = 420 w^2 (1 - 2 xi)`, `f''' = 840 w (1 - 5 w)`
+/// with `w = xi (1 - xi)`. Each is smooth, so its supremum over the span
+/// is at an end or at a critical point inside: `1/2` for `f'`,
+/// `1/2 +- 1 / sqrt(20)` for `f''`, `1/2` and `1/2 +- sqrt(0.15)` for
+/// `f'''`. Over the whole piece that is `140 / 64`, `16.8 / sqrt(5)` and
+/// `52.5`. The values are inflated by [`crate::bound::ROUNDING`] relative
+/// and `1e-15` absolute for the rounding of their own evaluation.
+fn viennese_sup(k: usize, (lo, hi): (Scalar, Scalar)) -> Scalar {
+    let (lo, hi) = (lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0));
+    let derivative = |xi: Scalar| -> Scalar {
+        let w = xi * (1.0 - xi);
+        match k {
+            1 => 140.0 * w * w * w,
+            2 => 420.0 * w * w * (1.0 - 2.0 * xi),
+            _ => 840.0 * w * (1.0 - 5.0 * w),
+        }
+    };
+    let critical: &[Scalar] = match k {
+        1 => &[0.5],
+        2 => &[0.5 - 0.223_606_797_749_979, 0.5 + 0.223_606_797_749_979],
+        _ => &[
+            0.5 - 0.387_298_334_620_741_7,
+            0.5,
+            0.5 + 0.387_298_334_620_741_7,
+        ],
+    };
+    let sup = critical
+        .iter()
+        .copied()
+        .filter(|&xi| xi > lo && xi < hi)
+        .chain([lo, hi])
+        .map(|xi| derivative(xi).abs())
+        .fold(0.0, Scalar::max);
+    sup * (1.0 + crate::bound::ROUNDING) + 1e-15
+}
+
+/// Certified `(sup |v'|, sup |v''|, sup |v'''|)` of a height piece over
+/// `[s_lo, s_hi]` into it; `None` for an angle or held-rail piece.
 ///
 /// In the piece's `xi = s / L`, the `k`-th derivative in plan distance is
 /// the form's `k`-th in `xi` over `L^k`: a polynomial's by
 /// `sum i!/(i-k)! |c_i| m^(i-k)` with `m` the larger `|xi|`, the
 /// half-cosine's `|dD| / 2 pi^k`, the sine transition's `2 |dD|`,
 /// `2 pi |dD|`, `4 pi^2 |dD|`.
-pub(crate) fn pivot_bounds(law: &CantLaw, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
-    let (lo, hi) = (lo.min(hi), lo.max(hi));
-    let (piece, s_lo) = piece_at(law, lo, false)?;
-    let s_hi = s_lo + (hi - lo);
-    if s_hi > piece.length * (1.0 + 1e-12) {
-        return None;
-    }
+fn height_bounds(piece: &CantPiece, s_lo: Scalar, s_hi: Scalar) -> Option<[Scalar; 3]> {
     let length = piece.length;
     let in_xi = match &piece.form {
         CantForm::Polynomial { coefficients } => {
@@ -291,6 +444,30 @@ pub(crate) fn pivot_bounds(law: &CantLaw, lo: Scalar, hi: Scalar) -> Option<[Sca
     ]
     .map(|v| v * (1.0 + crate::bound::ROUNDING));
     out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// The cant law's seams inside or bounding a held-rail piece of the
+/// pivot law, ascending: where the pivot derived from the cant may lose
+/// smoothness (#279). Empty when the pivot has no held-rail piece.
+pub(crate) fn derived_cant_seams(curve: &Banked3) -> Vec<Scalar> {
+    let mut spans = Vec::new();
+    let mut start = 0.0;
+    for piece in &curve.pivot.pieces {
+        let end = start + piece.length;
+        if matches!(piece.form, CantForm::AboutRail { .. }) {
+            spans.push((start, end));
+        }
+        start = end;
+    }
+    if spans.is_empty() {
+        return Vec::new();
+    }
+    curve
+        .cant
+        .seams()
+        .into_iter()
+        .filter(|&seam| spans.iter().any(|&(a, b)| seam >= a && seam <= b))
+        .collect()
 }
 
 /// The section at plan distance `d`: rotation point, rolled frame, cant,

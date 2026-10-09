@@ -22,6 +22,19 @@ caret rule for `0.x` versions.
   convention, as is an elevated or banked curve's native parameter; the
   incoming side at a polyline's or a B-spline's native parameter is
   refused by a typed `UnsupportedInput`.
+- Banked curves rotating about a held rail (#279, ADR 0081 amendment):
+  a pivot piece `CantForm::AboutRail` is evaluated from the cant law,
+  point, tangent and section alike. `banked_second_derivative` adds
+  `e'' = s D'' / 2`, for an angle piece
+  `s (b / 2) (cos(psi) psi'' - sin(psi) psi'^2)`.
+  `banked_derivative_bounds` and `banked_chord_bound` take half the
+  cant's bounds there, for a Viennese bend `(b / 2) P_1`,
+  `(b / 2)(P_2 + P_1^2)` and `(b / 2)(P_3 + 3 P_1 P_2 + P_1^3)` with
+  `P_k` the bend's exact derivative suprema over the span (its ends and
+  critical points), so `flatten3` and the sweep certification carry
+  over. `banked_breaks` and `grade_corners3` name the cant's seams inside
+  a held-rail piece as the point path's. A cant law with a held-rail
+  piece is refused by name.
 
 ## [0.3.8] - 2026-10-09
 

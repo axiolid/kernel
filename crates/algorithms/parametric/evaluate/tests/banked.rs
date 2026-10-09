@@ -4,7 +4,7 @@
 use axiolid_core::{Frame2, Interval, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BankConvention, Banked3, CantLaw, CantPiece, Circle2, Curve2, Curve3, Elevated3, ElevationLaw,
-    Line2,
+    Line2, RailSide,
 };
 use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConvention};
 use axiolid_evaluate::banked::{banked_point, banked_section, banked_tangent, BankedSection};
@@ -488,4 +488,154 @@ fn a_banked_curve_evaluates_and_flattens_by_plan_distance_uncertified() {
     );
     // Midpoint-sagitta flattening, not a certified bound (#232).
     assert!(!certifies_flattening3(&curve));
+}
+
+// --- rotation about a held rail (#279) ---------------------------------------
+
+/// The Viennese bend's bank angle at `xi`, written out independently.
+fn viennese_angle(change: Scalar, xi: Scalar) -> Scalar {
+    change * (35.0 * xi.powi(4) - 84.0 * xi.powi(5) + 70.0 * xi.powi(6) - 20.0 * xi.powi(7))
+}
+
+/// Cant 0 -> `top_cant` (the left rail up, or the right one for a
+/// negative cant) through a Viennese bend over 100 m, then held 50 m,
+/// rotating about `rail` at `e0` above the profile.
+fn held_rail_bend(
+    base: Elevated3,
+    top_cant: Scalar,
+    rail: RailSide,
+    e0: Scalar,
+    convention: BankConvention,
+) -> Banked3 {
+    let top = (top_cant / 1.5).asin();
+    banked(
+        base,
+        CantLaw::new(vec![
+            CantPiece::viennese_bend(100.0, 0.0, top),
+            CantPiece::constant(50.0, top_cant),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(150.0, rail, e0)]),
+        convention,
+    )
+}
+
+/// The consumer's case: left cant 0 -> 150 mm, right cant 0, and its
+/// mirror. Under a vertical rise the held rail head stays `e0` above the
+/// profile at every station, on the level and on a 2% grade, and the
+/// other rises `b sin(psi)` above it, `psi` the bend written out here.
+#[test]
+fn a_held_rail_bend_keeps_its_rail_and_lifts_the_other_by_b_sin_psi() {
+    let level = {
+        let mut base = straight_two_percent();
+        base.elevation = ElevationLaw::level(100.0);
+        base
+    };
+    let top = (0.15_f64 / 1.5).asin();
+    for (name, base, grade) in [("level", level, 0.0), ("2%", straight_two_percent(), 0.02)] {
+        for (rail, sign) in [(RailSide::Right, 1.0), (RailSide::Left, -1.0)] {
+            let curve = held_rail_bend(
+                base.clone(),
+                sign * 0.15,
+                rail,
+                0.004,
+                BankConvention::VerticalRise,
+            );
+            for i in 0..=150 {
+                let d = i as Scalar;
+                let profile = 100.0 + grade * d;
+                let psi = sign * viennese_angle(top, (d / 100.0).min(1.0));
+                let section = banked_section(&curve, d).unwrap();
+                let (left, right) = section.rail_heads();
+                let held = if sign > 0.0 { right } else { left };
+                assert!(
+                    (held.z - profile - 0.004).abs() <= 1e-12,
+                    "{name} {rail:?} at {d}: held rail off by {:e}",
+                    held.z - profile - 0.004
+                );
+                assert!(
+                    (left.z - right.z - 1.5 * psi.sin()).abs() <= 1e-12,
+                    "{name} {rail:?} at {d}: rise {} vs b sin(psi) {}",
+                    left.z - right.z,
+                    1.5 * psi.sin()
+                );
+                close(section.bank_angle, psi, "psi");
+                // The pivot is the held rail plus half the cant's magnitude.
+                let (e, rate) = curve.pivot_at(d).unwrap();
+                close(section.pivot, e, "section pivot");
+                close(e, 0.004 + 0.75 * psi.sin().abs(), "e");
+                close(section.grade, grade + rate, "grade plus the pivot's rate");
+                assert_orthonormal(&section, name);
+            }
+        }
+    }
+}
+
+/// Under a tangent rotation the held rail drifts by
+/// `(D / 2)(1 - cos theta)`, `theta` the climb the pivot itself makes.
+#[test]
+fn a_held_rail_under_a_tangent_rotation_drifts_by_the_climb() {
+    let mut base = straight_two_percent();
+    base.elevation = ElevationLaw::level(0.0);
+    let curve = held_rail_bend(
+        base,
+        0.15,
+        RailSide::Right,
+        0.0,
+        BankConvention::TangentRotation,
+    );
+    for d in [10.0, 35.0, 50.0, 72.5, 99.0] {
+        let section = banked_section(&curve, d).unwrap();
+        let cos = 1.0 / section.grade.hypot(1.0);
+        let (_, right) = section.rail_heads();
+        close(right.z, 0.5 * section.cant * (1.0 - cos), "drift");
+        assert!(section.grade > 0.0, "the pivot climbs through the bend");
+    }
+}
+
+/// `pivot_at` and the point path agree with finite differences.
+#[test]
+fn a_held_rail_point_path_moves_at_its_derived_rate() {
+    let curve = held_rail_bend(
+        straight_two_percent(),
+        0.15,
+        RailSide::Right,
+        0.0,
+        BankConvention::VerticalRise,
+    );
+    let h = 1e-4;
+    for d in [5.0, 25.0, 50.0, 75.0, 95.0, 120.0] {
+        let p = |t| banked_point(&curve, t).unwrap();
+        let fd = (p(d + h) - p(d - h)) / (2.0 * h);
+        let derivative = derivative3(&Curve3::Banked(curve.clone()), d).unwrap();
+        assert!((fd - derivative).length() < 1e-9, "c' at {d}");
+        let e = |t| curve.pivot_at(t).unwrap().0;
+        let rate = curve.pivot_at(d).unwrap().1;
+        assert!(
+            ((e(d + h) - e(d - h)) / (2.0 * h) - rate).abs() < 1e-10,
+            "e' at {d}"
+        );
+        close3(
+            banked_tangent(&curve, d).unwrap(),
+            derivative.normalize(),
+            "tangent",
+        );
+    }
+}
+
+/// A cant law with a held-rail piece is refused by name at every station.
+#[test]
+fn a_held_rail_cant_law_is_refused_by_name() {
+    let curve = Curve3::Banked(banked(
+        straight_two_percent(),
+        CantLaw::new(vec![CantPiece::about_rail(10.0, RailSide::Left, 0.0)]),
+        CantLaw::zero(10.0),
+        BankConvention::TangentRotation,
+    ));
+    for result in [
+        evaluate3(&curve, 5.0).map(|_| ()),
+        derivative3(&curve, 5.0).map(|_| ()),
+    ] {
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("held-rail"), "{message}");
+    }
 }
