@@ -17,11 +17,14 @@
 //!
 //! # Closure rides along too (#161)
 //!
-//! [`Built::leaf`] claims a solid. Anything that may not bound one goes
+//! [`Built::leaf`] claims a solid, once its mesh is checked to close
+//! ([`checked_solid`], #265). Anything that may not bound one goes
 //! through [`Built::with_closure`]: a B-rep is a solid only when it declares
 //! one, never because its shells happen to be watertight, since a surface
-//! model's mesh can be closed. A collection is a solid only if every member
-//! is ([`combined_closure`]), and a boolean refuses a surface operand.
+//! model's mesh can be closed, and only when its mesh closes, since a
+//! declared solid can still tessellate open (`MeshClosure::OpenSolid`,
+//! #265). A collection is a solid only if every member is
+//! ([`combined_closure`]), and a boolean refuses a surface operand.
 //! Gate: `tests/surface_models.rs`.
 
 mod boolean;
@@ -53,9 +56,11 @@ pub(crate) struct Built {
 
 impl Built {
     /// A solid made here from source data: every channel it carries is
-    /// original.
+    /// original. Its closure is checked, not assumed ([`checked_solid`],
+    /// #265).
     pub fn leaf(mesh: TriMesh) -> Self {
-        Self::with_closure(mesh, MeshClosure::Solid)
+        let closure = checked_solid(&mesh);
+        Self::with_closure(mesh, closure)
     }
 
     /// A mesh made here from source data, with its closure.
@@ -79,16 +84,40 @@ impl Built {
     }
 }
 
-/// The closure of several parts together: a solid only if every part is.
-pub(crate) fn combined_closure<'a>(parts: impl IntoIterator<Item = &'a Built>) -> MeshClosure {
-    if parts
-        .into_iter()
-        .all(|part| part.closure == MeshClosure::Solid)
-    {
+/// The closure of a mesh built to bound a solid (#265):
+/// [`MeshClosure::Solid`] when every edge of its index connectivity is
+/// shared by exactly two triangles running it in opposite directions, else
+/// [`MeshClosure::OpenSolid`]. A solid is never claimed for a mesh with a
+/// boundary edge, a T-junction or an edge three faces share. An empty mesh
+/// (a boolean whose result is empty) has no edge and bounds the empty
+/// solid; triangles that all repeat a corner cover no edge and bound
+/// nothing.
+pub(crate) fn checked_solid(mesh: &TriMesh) -> MeshClosure {
+    if mesh.indices.is_empty() {
+        return MeshClosure::Solid;
+    }
+    let adjacency = axiolid_mesh::EdgeAdjacency::build(mesh);
+    if adjacency.edge_count() > 0 && adjacency.is_closed_two_manifold() {
         MeshClosure::Solid
     } else {
-        MeshClosure::Surface
+        MeshClosure::OpenSolid
     }
+}
+
+/// The closure of several parts together: a solid only if every part is.
+/// A declared solid whose mesh does not close ([`MeshClosure::OpenSolid`],
+/// #265) keeps that name in the whole, so the defect is not read as a
+/// surface model.
+pub(crate) fn combined_closure<'a>(parts: impl IntoIterator<Item = &'a Built>) -> MeshClosure {
+    let mut closure = MeshClosure::Solid;
+    for part in parts {
+        closure = match (closure, part.closure) {
+            (MeshClosure::OpenSolid, _) | (_, MeshClosure::OpenSolid) => MeshClosure::OpenSolid,
+            (MeshClosure::Solid, MeshClosure::Solid) => MeshClosure::Solid,
+            _ => MeshClosure::Surface,
+        };
+    }
+    closure
 }
 
 /// Per-channel fates, in first-seen order, each the worst seen so far.

@@ -40,6 +40,11 @@ its triangles are counter-clockwise -- and their three mutants with them.
 the `planar_certified` target and five mutants of `clip_projected` were
 added (repeated and closing corners kept, triangles not mapped back past
 a dropped corner, pinches refused). 26 / 26 killed on the first run.
+
+#265 (shared edges welded): "faces refuse rings touching at a point" and
+"triangles pass through untriangulated" re-anchored on the refactored
+`clip_projected` and on the face's rings after the weld; the weld itself
+is probed by `probe_shared_edge_weld_mutants.py`.
 """
 import pathlib, subprocess, sys
 
@@ -122,11 +127,11 @@ MUTANTS = [
      "        .map(|corner| kept[corner as usize])",
      "        .map(|corner| corner as usize)"),
     ("faces refuse rings touching at a point (#260)", P,
-     "        PinchPolicy::Accept,\n    )?;",
-     "        PinchPolicy::Refuse,\n    )?;"),
+     "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Accept)?;",
+     "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Refuse)?;"),
     ("triangles pass through untriangulated", C,
-     "            if face.outer.len() == 3 && face.holes.is_empty() {",
-     "            if face.holes.is_empty() {"),
+     "            if rings.len() == 1 && rings[0].len() == 3 {",
+     "            if rings.len() == 1 {"),
     ("hole indices not range-checked", C,
      "            .flat_map(|face| face_rings(face).flatten().copied())",
      "            .flat_map(|face| face.outer.iter().copied())"),

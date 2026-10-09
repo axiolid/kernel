@@ -23,6 +23,12 @@ pub enum MeshClosure {
     Surface,
     /// The compiler did not report it.
     Unknown,
+    /// The source declared a solid, but the compiled mesh is not closed:
+    /// some edge is not shared by exactly two triangles running it in
+    /// opposite directions (#265). Neither its volume nor its closure can
+    /// be trusted; the compiler reports this rather than claiming a solid
+    /// for a mesh with boundary edges.
+    OpenSolid,
 }
 
 /// A compiled mesh and, when the compiler tracks it, each channel's fate.
@@ -84,8 +90,10 @@ impl CompileOutcome {
     ///
     /// # Errors
     ///
-    /// [`GeomError::InvalidInput`] for [`MeshClosure::Surface`] and for
-    /// [`MeshClosure::Unknown`]: an unreported closure is not a solid.
+    /// [`GeomError::InvalidInput`] for [`MeshClosure::Surface`], for
+    /// [`MeshClosure::Unknown`] (an unreported closure is not a solid) and
+    /// for [`MeshClosure::OpenSolid`] (a declared solid whose mesh does not
+    /// close).
     pub fn solid_mesh(&self) -> GeomResult<&TriMesh> {
         match self.closure {
             MeshClosure::Solid => Ok(&self.mesh),
@@ -94,6 +102,11 @@ impl CompileOutcome {
             )),
             MeshClosure::Unknown => Err(GeomError::InvalidInput(
                 "compiler did not report whether the mesh bounds a solid".to_owned(),
+            )),
+            MeshClosure::OpenSolid => Err(GeomError::InvalidInput(
+                "compiled mesh of a declared solid is not closed: it has boundary or \
+                 non-manifold edges, so it encloses no volume"
+                    .to_owned(),
             )),
         }
     }

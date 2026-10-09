@@ -38,11 +38,13 @@ pub(crate) fn after_boolean(
     for (name, fate) in composed {
         fates.record(&name, fate);
     }
-    // Callers refuse surface operands, so a boolean result bounds a solid.
+    // Callers refuse surface operands, so a boolean result bounds a solid,
+    // once its mesh is checked to close (#265).
+    let closure = super::checked_solid(&mesh);
     Built {
         mesh,
         fates,
-        closure: axiolid_mesh_compile_contract::MeshClosure::Solid,
+        closure,
         // Cutting moves the intersection curve, and a one-sided bound on
         // each operand says nothing about where it lands (#232).
         deviation: crate::deviation::Deviation::one(

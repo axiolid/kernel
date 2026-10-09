@@ -17,6 +17,18 @@
 //! region are refused by name. Curved faces triangulate their parameter
 //! domain with the same clipper.
 //!
+//! # Shared edges and closure (#265)
+//!
+//! The clipper inserts a corner lying inside one of the face's own ring
+//! edges into that edge (a pocket rim touching the face's outer edge). The
+//! neighbouring face shares that edge, so before any face is triangulated
+//! the corners every planar face would insert are collected and each face
+//! using such an edge takes them too ([`crate::weld`]); the shell then
+//! meets itself along the same pieces of the edge on both sides. A
+//! declared solid is reported [`MeshClosure::Solid`] only when its mesh is
+//! a closed, consistently wound two-manifold by index; otherwise it is
+//! [`MeshClosure::OpenSolid`], never a solid with boundary edges.
+//!
 //! # Deviation (#232)
 //!
 //! Every face also reports a certified bound on how far its exact surface
@@ -87,7 +99,8 @@ use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
 use std::collections::{HashMap, HashSet};
 
-use crate::planar::{clip_planar_face, clip_projected, newell_normal, plane_axes};
+use crate::planar::{clip_planar_face, clip_projected, edge_touches, newell_normal, plane_axes};
+use crate::weld::EdgeSplits;
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -218,7 +231,9 @@ fn check_mesh_budget(mesh: &TriMesh) -> GeomResult<()> {
 /// Tessellate one faceted B-rep into a triangle mesh.
 ///
 /// With solids, every solid's outer shell and void shells contribute
-/// surface and the result is [`MeshClosure::Solid`]; several disjoint solids
+/// surface and the result is [`MeshClosure::Solid`] once the mesh is
+/// checked to close, [`MeshClosure::OpenSolid`] when it does not (#265);
+/// several disjoint solids
 /// mesh as several closed components. A void is a cavity: its
 /// triangles face into it, away from the material, so the mesh's signed
 /// volume is the outer volume less every cavity. A void can only remove
@@ -313,6 +328,7 @@ pub fn tessellate(
         tolerance,
         chord_error,
         closure,
+        splits: shared_edge_splits(brep, graph, &shells),
     };
     let mut edge_cache: EdgeSamples = EdgeSamples::new();
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
@@ -344,6 +360,7 @@ pub fn tessellate(
             face_into_cavity(&mut mesh, first_index);
         }
     }
+    let closure = checked_closure(&mesh, closure);
     Ok((mesh, closure, deviation))
 }
 
@@ -409,6 +426,9 @@ struct FaceContext<'a> {
     /// surface model, where a planar face that encloses no area covers
     /// nothing and is skipped (#171). In a solid it stays refused.
     closure: MeshClosure,
+    /// The corners planar faces insert into shared edges, which every face
+    /// using such an edge takes too (#265).
+    splits: EdgeSplits<axiolid_topology::VertexId>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -453,29 +473,7 @@ fn append_face(
         "plane",
         planar_face_bound(ctx, face, support)?,
     );
-    let mut rings: Vec<Vec<(axiolid_topology::VertexId, Vec3)>> = Vec::new();
-    let mut outer_index = None;
-    for bound in &face.bounds {
-        let points = loop_points(brep, bound)?;
-        if points.len() < 3 {
-            return Err(GeomError::Degenerate(
-                "planar face bound has fewer than three vertices".into(),
-            ));
-        }
-        if bound.outer && outer_index.is_none() {
-            outer_index = Some(rings.len());
-        }
-        rings.push(points);
-    }
-    if rings.is_empty() {
-        return Err(GeomError::Degenerate(
-            "planar face has no non-degenerate bounds".into(),
-        ));
-    }
-    let outer_index = outer_index.ok_or_else(|| {
-        GeomError::InvalidInput("planar face has no outer bound after topology audit".into())
-    })?;
-    rings.swap(0, outer_index);
+    let mut rings = planar_rings(brep, face)?;
 
     for (index, ring) in rings.iter().enumerate() {
         if plane_axes(newell_normal(ring.iter().map(|&(_, p)| p))).is_none() {
@@ -507,25 +505,15 @@ fn append_face(
     if support.is_none() {
         report_warp(ctx, &rings, deviation)?;
     }
-    let normal = newell_normal(rings[0].iter().map(|&(_, p)| p));
-    let (u, v) = plane_axes(normal).ok_or_else(|| {
+    // Weld through every corner a face inserts into a shared edge (#265):
+    // this face takes each such corner on its own copy of the edge.
+    ctx.splits
+        .split(&mut rings, |corner| corner, |vertex, point| (vertex, point));
+    let (flat, hole_starts) = project_rings(&rings).ok_or_else(|| {
         GeomError::Degenerate("planar face outer bound has no stable plane".into())
     })?;
-    let origin = rings[0][0].1;
-
-    let mut flat: Vec<[Scalar; 2]> = Vec::new();
-    let mut positions: Vec<(axiolid_topology::VertexId, Vec3)> = Vec::new();
-    let mut hole_starts: Vec<usize> = Vec::new();
-    for (index, ring) in rings.iter().enumerate() {
-        if index > 0 {
-            hole_starts.push(flat.len());
-        }
-        for &(vertex, point) in ring {
-            let d = point - origin;
-            flat.push([d.dot(u), d.dot(v)]);
-            positions.push((vertex, point));
-        }
-    }
+    let positions: Vec<(axiolid_topology::VertexId, Vec3)> =
+        rings.iter().flatten().copied().collect();
 
     let indices = clip_planar_face(&flat, &hole_starts, ctx.tolerance.linear())
         .map_err(|error| face_triangulation_error("planar face", error))?;
@@ -569,6 +557,114 @@ fn append_face(
         }
     }
     Ok(())
+}
+
+/// A planar face's bounds as rings of corners, the outer ring first and the
+/// holes in their authored order after it.
+fn planar_rings(
+    brep: &BRep<NodeId>,
+    face: &axiolid_topology::Face<NodeId>,
+) -> GeomResult<Vec<Vec<(axiolid_topology::VertexId, Vec3)>>> {
+    let mut rings: Vec<Vec<(axiolid_topology::VertexId, Vec3)>> = Vec::new();
+    let mut outer_index = None;
+    for bound in &face.bounds {
+        let points = loop_points(brep, bound)?;
+        if points.len() < 3 {
+            return Err(GeomError::Degenerate(
+                "planar face bound has fewer than three vertices".into(),
+            ));
+        }
+        if bound.outer && outer_index.is_none() {
+            outer_index = Some(rings.len());
+        }
+        rings.push(points);
+    }
+    if rings.is_empty() {
+        return Err(GeomError::Degenerate(
+            "planar face has no non-degenerate bounds".into(),
+        ));
+    }
+    let outer_index = outer_index.ok_or_else(|| {
+        GeomError::InvalidInput("planar face has no outer bound after topology audit".into())
+    })?;
+    rings.swap(0, outer_index);
+    Ok(rings)
+}
+
+/// A planar face's rings projected onto the plane of the outer ring's
+/// Newell normal, about its first corner, with the index in the
+/// projection at which each hole starts; `None` when the outer ring has
+/// no stable plane.
+fn project_rings(
+    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
+) -> Option<(Vec<[Scalar; 2]>, Vec<usize>)> {
+    let outer = rings.first()?;
+    let (u, v) = plane_axes(newell_normal(outer.iter().map(|&(_, p)| p)))?;
+    let origin = outer.first()?.1;
+    let mut flat: Vec<[Scalar; 2]> = Vec::new();
+    let mut hole_starts: Vec<usize> = Vec::new();
+    for (index, ring) in rings.iter().enumerate() {
+        if index > 0 {
+            hole_starts.push(flat.len());
+        }
+        flat.extend(ring.iter().map(|&(_, point)| {
+            let d = point - origin;
+            [d.dot(u), d.dot(v)]
+        }));
+    }
+    Some((flat, hole_starts))
+}
+
+/// The corners the planar faces of `shells` insert into their own ring
+/// edges, recorded against those edges (#265, [`crate::weld`]). A face that
+/// cannot be read or projected here is skipped: tessellating it refuses it
+/// by name.
+fn shared_edge_splits(
+    brep: &BRep<NodeId>,
+    graph: &axiolid_model::GeometryGraph,
+    shells: &[(&axiolid_topology::Shell, bool)],
+) -> EdgeSplits<axiolid_topology::VertexId> {
+    let mut splits = EdgeSplits::new();
+    for &(face_id, _) in shells.iter().flat_map(|(shell, _)| shell.faces.iter()) {
+        let Some(face) = brep.faces().get(face_id.index()) else {
+            continue;
+        };
+        match face_surface(graph, face) {
+            Ok(None) => {}
+            Ok(Some(surface)) if surface_is_planar(surface) => {}
+            _ => continue,
+        }
+        let Ok(rings) = planar_rings(brep, face) else {
+            continue;
+        };
+        // One triangle has no corner inside its own edge.
+        if rings.len() == 1 && rings[0].len() == 3 {
+            continue;
+        }
+        let Some((flat, hole_starts)) = project_rings(&rings) else {
+            continue;
+        };
+        let touches = edge_touches(&flat, &hole_starts);
+        if !touches.is_empty() {
+            let corners: Vec<_> = rings.into_iter().flatten().collect();
+            splits.record(&corners, &touches);
+        }
+    }
+    splits
+}
+
+/// The declared closure, unless a declared solid's mesh does not close:
+/// then [`MeshClosure::OpenSolid`] ([`crate::channels::checked_solid`]).
+/// The weld of [`crate::weld`] closes every shell the clipper's insertions
+/// would otherwise open; this check is why a declared solid is never
+/// reported as one while its mesh is still open (#265), for instance where
+/// a curved face, which samples its edges itself, could not take a corner.
+fn checked_closure(mesh: &TriMesh, declared: MeshClosure) -> MeshClosure {
+    if declared == MeshClosure::Solid {
+        crate::channels::checked_solid(mesh)
+    } else {
+        declared
+    }
 }
 
 /// Measure the warp of a face that declares no surface (#257) and report it

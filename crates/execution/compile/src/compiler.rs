@@ -373,7 +373,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// `IfcIndexedPolygonalFaceWithVoids`) -- is triangulated in its own
     /// plane by [`crate::planar::triangulate_polygon`]. Positions are kept
     /// as authored and shared, so the output welds exactly where the input
-    /// did; no corner is moved or added.
+    /// did; no position is moved or added. A corner that one face's
+    /// triangulation inserts into a ring edge (a hole touching the outer
+    /// edge at an interior point) is inserted into every face sharing that
+    /// edge by index, a triangle face included, so the faces still meet
+    /// along the same pieces of it ([`crate::weld`], #265).
     ///
     /// A face with no area, or whose rings cross in its plane, is refused
     /// with an error naming its index. A face off its plane by more than
@@ -431,17 +435,22 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             })?;
 
         let linear = options.tolerance().linear();
+        let splits = authored_edge_splits(mesh);
         let mut warp: Option<Scalar> = None;
         for (face_index, face) in mesh.faces.iter().enumerate() {
-            if face.outer.len() == 3 && face.holes.is_empty() {
-                indices.extend_from_slice(&face.outer);
+            let mut rings: Vec<Vec<u32>> = face_rings(face).cloned().collect();
+            // Weld through every corner a face inserts into a shared edge
+            // (#265): this face takes each such corner on its own copy of
+            // the edge, a triangle face included, which then has four.
+            splits.split(&mut rings, |i| (i, mesh.positions[i as usize]), |i, _| i);
+            if rings.len() == 1 && rings[0].len() == 3 {
+                indices.extend_from_slice(&rings[0]);
                 continue;
             }
             // A repeated corner (an exporter's closing point, a doubled
             // corner) needs no handling here: `planar::clip_projected` drops
             // coincident consecutive points itself
             // (`a_repeated_closing_corner_is_not_a_triangle`).
-            let rings: Vec<&Vec<u32>> = face_rings(face).collect();
             let points: Vec<Vec<axiolid_core::Point3>> = rings
                 .iter()
                 .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
@@ -452,7 +461,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             if let Some(face_warp) = local.warp {
                 warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));
             }
-            let corners: Vec<u32> = rings.into_iter().flatten().copied().collect();
+            let corners: Vec<u32> = rings.into_iter().flatten().collect();
             indices.extend(local.indices.into_iter().map(|corner| corners[corner]));
         }
 
@@ -1229,23 +1238,56 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     }
 }
 
+/// The corners the authored polygon faces of `mesh` insert into their own
+/// ring edges, recorded against those edges by position index (#265,
+/// [`crate::weld`]). Every index is in range: the caller checked.
+fn authored_edge_splits(mesh: &axiolid_mesh::PolygonMesh) -> crate::weld::EdgeSplits<u32> {
+    let mut splits = crate::weld::EdgeSplits::new();
+    for face in &mesh.faces {
+        // One triangle has no corner inside its own edge.
+        if face.outer.len() == 3 && face.holes.is_empty() {
+            continue;
+        }
+        let points: Vec<Vec<axiolid_core::Point3>> = face_rings(face)
+            .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
+            .collect();
+        let views: Vec<&[axiolid_core::Point3]> = points.iter().map(Vec::as_slice).collect();
+        let touches = crate::planar::authored_edge_touches(&views);
+        if !touches.is_empty() {
+            let corners: Vec<(u32, axiolid_core::Point3)> = face_rings(face)
+                .flatten()
+                .map(|&i| (i, mesh.positions[i as usize]))
+                .collect();
+            splits.record(&corners, &touches);
+        }
+    }
+    splits
+}
+
 /// A face's outer ring followed by its holes.
 fn face_rings(face: &axiolid_mesh::PolygonFace) -> impl Iterator<Item = &Vec<u32>> {
     std::iter::once(&face.outer).chain(face.holes.iter())
 }
 
-/// A boolean needs two volumes; a surface model has none (#161).
+/// A boolean needs two volumes; a surface model has none (#161), and
+/// neither has a declared solid whose mesh does not close (#265).
 ///
 /// Refused rather than handed to the provider, which would see a closed
 /// surface model as a valid solid and return a confident, meaningless
 /// result.
 fn refuse_surface_operand(built: &Built, role: &'static str) -> GeomResult<()> {
-    if built.closure == axiolid_mesh_compile_contract::MeshClosure::Solid {
-        return Ok(());
+    match built.closure {
+        axiolid_mesh_compile_contract::MeshClosure::Solid => Ok(()),
+        axiolid_mesh_compile_contract::MeshClosure::OpenSolid => {
+            Err(GeomError::InvalidInput(format!(
+                "boolean {role} is a solid whose mesh is not closed: it encloses no volume to \
+                 combine"
+            )))
+        }
+        _ => Err(GeomError::InvalidInput(format!(
+            "boolean {role} is a surface model: it encloses no volume to combine"
+        ))),
     }
-    Err(GeomError::InvalidInput(format!(
-        "boolean {role} is a surface model: it encloses no volume to combine"
-    )))
 }
 
 /// An authored mesh, with its closure read from its structure (#161).

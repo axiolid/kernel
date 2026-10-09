@@ -22,6 +22,28 @@ caret rule for `0.x` versions.
   round extrusion along `-z` clipped by a half-space is exact with its
   closed-form volume. A direction within tolerance of the profile plane
   is still refused, as `"extrusion direction in the profile plane"`.
+- A ring corner inside a shared edge no longer opens a solid that is
+  still reported `Solid` (#265). Since #260 a planar face's certified
+  clipper inserts a corner lying inside one of the face's own ring edges
+  (a pocket rim touching the face's outer edge at an interior point, a
+  hole touching another hole's edge) into that edge, but the neighbouring
+  face sharing the edge kept it whole: a T-junction, with boundary edges,
+  in a mesh reported as a solid. B-rep and authored polygon faces now
+  collect those corners first, with the clipper's own exact tests
+  (`axiolid_construct::profile::ring_touches`), and every face using such
+  an edge takes them too, a triangle face included, so the shell is welded
+  through them: closed, two-manifold and of the exact volume. No position
+  is moved or added.
+- A mesh labelled a solid is checked to close (#265). A declared B-rep
+  solid, an operation's solid and a boolean result are reported
+  `MeshClosure::OpenSolid` (new, in `axiolid-mesh-compile-contract`)
+  unless every edge is shared by exactly two triangles running it in
+  opposite directions; `solid_mesh` refuses it by name, a collection
+  containing it keeps the name, and a boolean refuses it as an operand.
+  An empty boolean result still bounds the empty solid, and a B-rep
+  declared a solid whose shell is itself open (a lone face) is no longer
+  reported one. Faces the weld cannot reach (a curved B-rep face samples
+  its own edges) are caught here rather than claimed as a solid.
 
 ## [0.3.14] - 2026-10-04
 

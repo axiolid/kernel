@@ -173,3 +173,38 @@ does not move.
   off the straight run they lie on; the clipper may cut a sliver across
   them whose diagonal a neighbouring face cuts too, using that edge four
   times. `split_invented_edges` still removes such slivers on planar faces.
+
+## Amendment 2026-10-09: welding shared edges through inserted vertices (#265)
+
+The #260 amendment claimed that under `Accept` "the face's ring edges are
+exactly the edges its neighbours share, whatever its rings touch". That
+holds for rings touching at a shared vertex, not for a vertex lying
+inside another ring's edge: the clipper inserts it into that edge, so the
+face runs along the edge in two pieces while the neighbouring face that
+shares it keeps it whole. The mesh had a T-junction, and mesh-compile
+still reported the B-rep as `Solid` (a consumer's closure audit caught
+it).
+
+- **Weld through.** `profile::ring_touches(rings)` returns every vertex
+  the accepted triangulation inserts into an edge, from the same exact
+  validation. Before triangulating, mesh-compile projects each planar
+  B-rep or authored polygon face exactly as it will triangulate it,
+  records each touch against the edge's two shared corners (topological
+  vertex, position index), and inserts the recorded corners into every
+  face's copy of that edge, in order along it. The touching face then
+  sees the corner twice at one point, a pinch it accepts; the neighbour
+  gains a corner on its edge. No position is moved or added, so the
+  volume is unchanged and the shell is closed and two-manifold.
+- **Check what is claimed.** A mesh labelled `Solid` (a declared B-rep
+  solid, an operation's solid, a boolean result) is checked by index:
+  every edge used exactly twice in opposite directions. Otherwise it is
+  `MeshClosure::OpenSolid`, which `solid_mesh` and booleans refuse by
+  name. This catches what the weld cannot reach, such as a curved B-rep
+  face, which samples its own edges, sharing an edge with a planar face
+  whose corner lies inside it.
+
+| Option | Why not |
+| --- | --- |
+| Refuse vertices inside edges on B-rep faces | Valid faceted exports have them (pockets touching a face edge); refusing them drops geometry that tessellates correctly once welded. |
+| Repair T-junctions after triangulating | Needs a geometric "on this edge" decision on the welded mesh, separate from the clipper's exact one; the pre-pass reuses the clipper's own. |
+| Only demote to `Surface` | Loses the reason: a surface model and a broken solid are different findings for a consumer. |

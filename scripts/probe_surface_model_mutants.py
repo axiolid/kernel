@@ -4,6 +4,9 @@ Each mutant weakens one decision: which shells a solid-less B-rep
 tessellates, how closure is labelled and propagated, and the refusals built
 on it. `tests/surface_models.rs` must fail on each. A build error also
 counts as killed.
+
+#265: "collection solid if any member is" re-anchored on the three-way
+`combined_closure` that keeps `OpenSolid`.
 """
 import pathlib, subprocess, sys
 
@@ -29,8 +32,8 @@ MUTANTS = [
      "            (vec![shell], MeshClosure::Solid)",
      "            (vec![shell], MeshClosure::Surface)"),
     ("collection solid if any member is", CH,
-     "        .all(|part| part.closure == MeshClosure::Solid)",
-     "        .any(|part| part.closure == MeshClosure::Solid)"),
+     "            (MeshClosure::Solid, MeshClosure::Solid) => MeshClosure::Solid,",
+     "            (MeshClosure::Solid, _) | (_, MeshClosure::Solid) => MeshClosure::Solid,"),
     ("placement forgets closure", TR,
      "        closure: built.closure,",
      "        closure: axiolid_mesh_compile_contract::MeshClosure::Solid,"),

@@ -11,6 +11,7 @@ mod directrix;
 mod pinch;
 mod planar;
 pub mod station;
+mod weld;
 
 use axiolid_contracts::BackendId;
 

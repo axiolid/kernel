@@ -15,7 +15,9 @@
 //!    [`PinchPolicy::Accept`]: a face is a surface patch, so rings touching
 //!    at a single point (a hole whose corner sits on the outer ring or on
 //!    another hole, an outer ring pinched at a vertex) bound a valid face,
-//!    and every edge of the shell is still shared by two faces. Its
+//!    and every edge of the shell is still shared by two faces once a
+//!    corner the clipper inserts into a shared edge is inserted into the
+//!    neighbour's copy too ([`edge_touches`], [`crate::weld`], #265). Its
 //!    certificate proves the triangles tile the projected face exactly
 //!    once, every ring edge a triangle edge, so no triangle edge runs past
 //!    a corner and the face's own edges are the edges its neighbours
@@ -93,7 +95,7 @@
 //! as before, when a corner lies further than the linear tolerance from
 //! `P`.
 
-use axiolid_construct::profile::{triangulate_with, PinchPolicy, Rings};
+use axiolid_construct::profile::{ring_touches, triangulate_with, PinchPolicy, Rings};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
 
@@ -159,6 +161,20 @@ pub(crate) fn clip_projected(
     flat: &[[Scalar; 2]],
     hole_starts: &[usize],
 ) -> GeomResult<Vec<usize>> {
+    let (rings, kept) = projected_rings(flat, hole_starts);
+    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Accept)?;
+    Ok(triangles
+        .into_iter()
+        .flatten()
+        .map(|corner| kept[corner as usize])
+        .collect())
+}
+
+/// The rings [`clip_projected`] hands the clipper, and for each of their
+/// points (in `outer ++ holes` order) its index in `flat`: a corner
+/// repeating the one before it exactly is dropped, as is a ring's closing
+/// repeat of its first corner.
+fn projected_rings(flat: &[[Scalar; 2]], hole_starts: &[usize]) -> (Rings, Vec<usize>) {
     let mut bounds = Vec::with_capacity(hole_starts.len() + 2);
     bounds.push(0);
     bounds.extend(hole_starts.iter().map(|&start| start.min(flat.len())));
@@ -181,18 +197,51 @@ pub(crate) fn clip_projected(
         rings.push(ring);
     }
     let outer = rings.remove(0);
-    let (_, triangles) = triangulate_with(
-        &Rings {
+    (
+        Rings {
             outer,
             holes: rings,
         },
-        PinchPolicy::Accept,
-    )?;
-    Ok(triangles
+        kept,
+    )
+}
+
+/// A corner of a face lying inside one of the face's ring edges (#265):
+/// the edge runs from corner `from` to corner `to`, indices into `flat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EdgeTouch {
+    pub from: usize,
+    pub to: usize,
+    pub corner: usize,
+}
+
+/// Every corner that [`clip_projected`] inserts into a ring edge of the
+/// same face, found by the clipper's own exact tests
+/// ([`axiolid_construct::profile::ring_touches`]) on exactly the rings it
+/// triangulates. Empty when the rings do not bound a region: the
+/// triangulation then refuses them by name.
+pub(crate) fn edge_touches(flat: &[[Scalar; 2]], hole_starts: &[usize]) -> Vec<EdgeTouch> {
+    let (rings, kept) = projected_rings(flat, hole_starts);
+    let Ok(touches) = ring_touches(&rings) else {
+        return Vec::new();
+    };
+    let mut starts = Vec::with_capacity(rings.holes.len() + 1);
+    let mut start = 0;
+    for ring in std::iter::once(&rings.outer).chain(&rings.holes) {
+        starts.push((start, ring.len()));
+        start += ring.len();
+    }
+    touches
         .into_iter()
-        .flatten()
-        .map(|corner| kept[corner as usize])
-        .collect())
+        .map(|touch| {
+            let (start, len) = starts[touch.ring];
+            EdgeTouch {
+                from: kept[start + touch.edge],
+                to: kept[start + (touch.edge + 1) % len],
+                corner: kept[touch.vertex],
+            }
+        })
+        .collect()
 }
 
 /// [`clip_projected`] for a planar face whose corners are shared with
@@ -548,17 +597,7 @@ fn triangulate_in_fit_plane(
         return Err(PolygonRefusal::NotPlanar(spread.largest));
     }
 
-    let mut flat: Vec<[Scalar; 2]> = Vec::new();
-    let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
-    for (index, ring) in rings.iter().enumerate() {
-        if index > 0 {
-            hole_starts.push(flat.len());
-        }
-        flat.extend(ring.iter().map(|&p| {
-            let d = p - centroid;
-            [d.dot(u), d.dot(v)]
-        }));
-    }
+    let (flat, hole_starts) = project_about(rings, centroid, u, v);
 
     // The outer ring is counter-clockwise in (u, v) by construction of the
     // axes, and the clipper's triangles always are, so they keep the
@@ -571,6 +610,44 @@ fn triangulate_in_fit_plane(
         })
     })?;
     Ok((indices, warp))
+}
+
+/// `rings` projected onto the axes `(u, v)` about `origin`, concatenated,
+/// with the index at which each hole starts.
+fn project_about(
+    rings: &[&[Vec3]],
+    origin: Vec3,
+    u: Vec3,
+    v: Vec3,
+) -> (Vec<[Scalar; 2]>, Vec<usize>) {
+    let mut flat: Vec<[Scalar; 2]> = Vec::new();
+    let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
+    for (index, ring) in rings.iter().enumerate() {
+        if index > 0 {
+            hole_starts.push(flat.len());
+        }
+        flat.extend(ring.iter().map(|&p| {
+            let d = p - origin;
+            [d.dot(u), d.dot(v)]
+        }));
+    }
+    (flat, hole_starts)
+}
+
+/// [`edge_touches`] of an authored polygon face, projected exactly as
+/// [`triangulate_authored_polygon`] projects it: the corners its
+/// triangulation inserts into one of its own ring edges, by index into the
+/// rings concatenated (#265). Empty when the face has no plane.
+pub(crate) fn authored_edge_touches(rings: &[&[Vec3]]) -> Vec<EdgeTouch> {
+    let Some(outer) = rings.first().filter(|outer| !outer.is_empty()) else {
+        return Vec::new();
+    };
+    let Some((u, v)) = plane_axes(newell_normal(outer.iter().copied())) else {
+        return Vec::new();
+    };
+    let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
+    let (flat, hole_starts) = project_about(rings, centroid, u, v);
+    edge_touches(&flat, &hole_starts)
 }
 
 /// How the corners of a polygon spread about its fit plane (#254, #261):

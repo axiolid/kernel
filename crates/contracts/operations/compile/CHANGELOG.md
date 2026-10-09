@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshClosure::OpenSolid` (#265): the source declared a solid, but the
+  compiled mesh is not closed (some edge is not shared by exactly two
+  triangles running it in opposite directions). A compiler reports it
+  instead of claiming `Solid` for a mesh with boundary edges;
+  `CompileOutcome::solid_mesh` refuses it by name. `MeshClosure` is
+  `#[non_exhaustive]`, so the new variant is additive.
+
 ## [0.3.2] - 2026-09-28
 
 ### Changed

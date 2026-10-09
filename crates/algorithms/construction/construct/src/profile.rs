@@ -464,7 +464,9 @@ pub enum PinchPolicy {
     /// Triangulate the region the touching rings bound. For 2D regions and
     /// planar surface patches: a plan footprint that is a union of shadows
     /// touching at a corner, a space-boundary surface, a planar face of a
-    /// B-rep (whose edges are the ring edges either way).
+    /// B-rep (whose edges are the ring edges either way, once a vertex
+    /// inside an edge, which [`ring_touches`] lists, is inserted into the
+    /// neighbouring face's copy of that edge too).
     Accept,
 }
 
@@ -507,6 +509,50 @@ pub fn triangulate_with(
         }
     }
     crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes, pinches)
+}
+
+/// A vertex lying inside an edge of a ring, away from both its ends, as
+/// [`triangulate_with`] finds it under [`PinchPolicy::Accept`] (#265).
+///
+/// Indices follow [`triangulate_with`]: ring `0` is the outer ring and ring
+/// `h + 1` hole `h`; edge `k` of a ring runs from its vertex `k` to its
+/// vertex `k + 1` (the last back to the first); `vertex` indexes
+/// `outer ++ holes`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RingTouch {
+    /// The ring whose edge the vertex lies in.
+    pub ring: usize,
+    /// The edge of that ring.
+    pub edge: usize,
+    /// The vertex, by its index in `outer ++ holes`.
+    pub vertex: usize,
+}
+
+/// Every vertex lying inside another edge of `rings`, decided by the same
+/// exact `orient2d` tests with which [`triangulate_with`] under
+/// [`PinchPolicy::Accept`] inserts it into that edge (#265).
+///
+/// The triangulation then splits that edge at the vertex, so its ring edges
+/// are no longer the rings' edges. A caller whose rings share their edges
+/// with neighbouring patches (the faces of a closed shell) splits the
+/// neighbour's copy of each such edge at the same vertex, or the patches
+/// meet at a T-junction. Validation runs as in [`triangulate_with`] and in
+/// the same order, so the touches come in a deterministic order, each
+/// vertex and edge pair once; nothing is triangulated.
+///
+/// # Errors
+///
+/// As [`triangulate_with`] under [`PinchPolicy::Accept`] for rings that do
+/// not bound a region: too few, non-finite or repeated vertices, a ring
+/// folding back, rings that cross or overlap along an edge.
+pub fn ring_touches(rings: &Rings) -> GeomResult<Vec<RingTouch>> {
+    crate::ring_triangulation::ring_touches(&rings.outer, &rings.holes).map(|touches| {
+        touches
+            .into_iter()
+            .map(|(ring, edge, vertex)| RingTouch { ring, edge, vertex })
+            .collect()
+    })
 }
 
 /// Apply a 2D affine transform to a ring in place.

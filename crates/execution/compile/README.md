@@ -28,3 +28,6 @@ cargo add axiolid-mesh-compile
   flattened to the linear tolerance.
 - Read volume through `CompileOutcome::solid_mesh`: a surface model can
   compile to a closed mesh without bounding a solid.
+  A mesh is reported `MeshClosure::Solid` only when it is a closed,
+  consistently wound two-manifold; a declared solid that tessellates open
+  is `MeshClosure::OpenSolid`, and `solid_mesh` refuses it.

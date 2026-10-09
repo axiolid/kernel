@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `profile::ring_touches` and `profile::RingTouch` (#265): every vertex
+  lying inside another ring edge, which `triangulate_with` under
+  `PinchPolicy::Accept` inserts into that edge, found by the same exact
+  validation and listed once per vertex and edge. A caller whose rings
+  share their edges with neighbouring patches (the faces of a closed
+  shell) splits the neighbour's copy of each such edge at the same vertex,
+  so the patches do not meet at a T-junction.
+
 ### Fixed
 
 - **Exact extrusions whose direction points against the profile normal

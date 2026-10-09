@@ -56,6 +56,27 @@ pub(crate) fn triangulate_rings(
     holes: &[Vec<Point2>],
     policy: PinchPolicy,
 ) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
+    let (points, rings) = gather(outer, holes)?;
+    validate::check_rings(&points, &rings)?;
+    let touches = validate::check_edges(&points, &rings, policy)?;
+    if let Some(canon) = pinch::canonical(&points, &touches) {
+        // Only `Accept` lets rings touch, so only it gets here.
+        let triangles = pinch::triangulate(&points, &rings, &canon, &touches)?;
+        return Ok((points, triangles));
+    }
+    let loops = validate::orient_and_place(&points, &rings)?;
+    let mut polygon = bridge::bridge_holes(&points, &loops)?;
+    let triangles = clip::clip_ears(&points, &mut polygon)?;
+    certify(&points, &loops, &triangles, 1, loops.len() - 1)?;
+    Ok((points, triangles))
+}
+
+/// The vertex list `outer ++ holes` with each ring's range in it, refused
+/// when a `u32` cannot index it.
+fn gather(
+    outer: &[Point2],
+    holes: &[Vec<Point2>],
+) -> GeomResult<(Vec<Point2>, Vec<core::ops::Range<usize>>)> {
     let mut points = Vec::with_capacity(outer.len() + holes.iter().map(Vec::len).sum::<usize>());
     let mut rings = Vec::with_capacity(1 + holes.len());
     for ring in core::iter::once(outer).chain(holes.iter().map(Vec::as_slice)) {
@@ -69,18 +90,29 @@ pub(crate) fn triangulate_rings(
             points.len()
         )));
     }
+    Ok((points, rings))
+}
+
+/// The vertices lying inside another edge, as `(ring, edge, vertex)`, from
+/// the validation [`triangulate_rings`] runs under [`PinchPolicy::Accept`]
+/// (#265), refused as that validation refuses them.
+pub(crate) fn ring_touches(
+    outer: &[Point2],
+    holes: &[Vec<Point2>],
+) -> GeomResult<Vec<(usize, usize, usize)>> {
+    let (points, rings) = gather(outer, holes)?;
     validate::check_rings(&points, &rings)?;
-    let touches = validate::check_edges(&points, &rings, policy)?;
-    if let Some(canon) = pinch::canonical(&points, &touches) {
-        // Only `Accept` lets rings touch, so only it gets here.
-        let triangles = pinch::triangulate(&points, &rings, &canon, &touches)?;
-        return Ok((points, triangles));
+    let touches = validate::check_edges(&points, &rings, PinchPolicy::Accept)?;
+    // A vertex inside an edge is found once per edge of its own that meets
+    // it there; list it once, in the order validation first finds it.
+    let mut listed = Vec::with_capacity(touches.len());
+    for touch in touches {
+        let entry = (touch.ring, touch.index, touch.vertex as usize);
+        if !listed.contains(&entry) {
+            listed.push(entry);
+        }
     }
-    let loops = validate::orient_and_place(&points, &rings)?;
-    let mut polygon = bridge::bridge_holes(&points, &loops)?;
-    let triangles = clip::clip_ears(&points, &mut polygon)?;
-    certify(&points, &loops, &triangles, 1, loops.len() - 1)?;
-    Ok((points, triangles))
+    Ok(listed)
 }
 
 /// One ring's vertex indices, in the order that keeps the polygon on the

@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use axiolid_construct::extrude::extrude_profile;
-use axiolid_construct::profile::{triangulate, triangulate_with, PinchPolicy, Rings};
+use axiolid_construct::profile::{ring_touches, triangulate, triangulate_with, PinchPolicy, Rings};
 use axiolid_contracts::GeomError;
 use axiolid_core::{Point2, Tolerance, Vec3};
 use axiolid_guarantees::Sign;
@@ -831,5 +831,57 @@ fn rings_touching_nowhere_triangulate_as_for_a_solid() {
             triangulate(&rings).expect("a solid cap too"),
             "round {round}"
         );
+    }
+}
+
+/// `ring_touches` names exactly the ring edges the accepted triangulation
+/// splits (#265): a ring edge is a triangle edge unless a vertex lies
+/// inside it, and then it is not. A caller welding a shared edge through
+/// that vertex relies on both directions.
+#[test]
+fn ring_touches_are_the_edges_the_triangulation_splits() {
+    let hole = vec![p(2.0, 0.0), p(3.0, 1.0), p(1.0, 1.0)];
+    let rings = region(rect(0.0, 0.0, 4.0, 4.0), vec![hole]);
+    let touches = ring_touches(&rings).expect("valid rings");
+    assert_eq!(touches.len(), 1, "{touches:?}");
+    let touch = touches[0];
+    assert_eq!((touch.ring, touch.edge, touch.vertex), (0, 0, 4));
+    assert!(ring_touches(&region(rect(0.0, 0.0, 4.0, 4.0), vec![]))
+        .expect("valid")
+        .is_empty());
+    let crossing = vec![p(-1.0, 1.0), p(1.0, 1.0), p(1.0, 2.0)];
+    assert!(ring_touches(&region(rect(0.0, 0.0, 4.0, 4.0), vec![crossing])).is_err());
+
+    let key = |q: Point2| ((q.x + 0.0).to_bits(), (q.y + 0.0).to_bits());
+    let mut rng = Lcg(0x2650);
+    for round in 0..200 {
+        let (rings, _) = pinched_layout(&mut rng, 1.0, p(0.0, 0.0));
+        let (points, triangles) = triangulate_with(&rings, PinchPolicy::Accept).expect("accepted");
+        let edges: std::collections::HashSet<(Key, Key)> = triangles
+            .iter()
+            .flat_map(|t| (0..3).map(move |i| (t[i], t[(i + 1) % 3])))
+            .map(|(a, b)| {
+                let (a, b) = (key(points[a as usize]), key(points[b as usize]));
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        let split: std::collections::HashSet<(usize, usize)> = ring_touches(&rings)
+            .expect("accepted rings are valid")
+            .iter()
+            .map(|touch| (touch.ring, touch.edge))
+            .collect();
+        for (r, ring) in std::iter::once(&rings.outer)
+            .chain(&rings.holes)
+            .enumerate()
+        {
+            for k in 0..ring.len() {
+                let (a, b) = (key(ring[k]), key(ring[(k + 1) % ring.len()]));
+                assert_eq!(
+                    edges.contains(&(a.min(b), a.max(b))),
+                    !split.contains(&(r, k)),
+                    "round {round}: ring {r} edge {k}"
+                );
+            }
+        }
     }
 }
