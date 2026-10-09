@@ -55,6 +55,28 @@
 //! an atomic curve's from its stored data, a 3D composite or trim of
 //! lines, polylines and circles at the running sum of its pieces' lengths.
 //!
+//! # Placing at a station (#264)
+//!
+//! An [`InstanceAtStation`] reuses a node in the frame of an oriented
+//! station: [`placement`] resolves that station exactly as [`resolve`]
+//! does (its frame, orientation and seam side) and returns the rigid
+//! motion taking the source's local `x`, `y`, `z` onto the oriented
+//! tangent, left lateral and up, its origin onto the station's point
+//! (`axiolid_model::station` names the mapping). The frame is exact only
+//! on a line ([`ResolvedPlacement::exact`]); on any other basis it is the
+//! exact curve's at a distance read by an estimate, so a mesh placed in
+//! it reports its placement [`DeviationBound::Unbounded`] by name.
+//!
+//! A station along a placed curve is its source's station carried by the
+//! placement: a rigid motion keeps arc length, and one that keeps `+Z`
+//! keeps plan distance and carries the source's section frame
+//! (reference-up, banked or 2D) onto the placed curve's own. The source
+//! must be an atomic curve or a placed one. A placement that tilts `+Z`
+//! is refused by name: there the carried frame is not the placed curve's
+//! own reference-up frame, and an elevated source's plan distance is not
+//! the placed curve's.
+//!
+//! [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
 //! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
 //! [`OpenSectionsAtStations`]: axiolid_model::SurfaceRelation::OpenSectionsAtStations
@@ -65,7 +87,7 @@
 use axiolid_construct::loft::{loft_tapered, Station as LoftStation};
 use axiolid_construct::profile::{profile_rings, Rings};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance};
+use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
@@ -75,8 +97,9 @@ use axiolid_model::{
 use axiolid_profile::{Contour, Profile};
 use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
 use axiolid_reference::station::{
-    exact_station_seams2, exact_station_seams3, station_seams2, station_seams3,
-    station_section2_on, station_section3_on, Mitre, SectionFrame, StationSeam,
+    exact_station_seams2, exact_station_seams3, station_frame_is_exact2, station_frame_is_exact3,
+    station_seams2, station_seams3, station_section2_on, station_section3_on, Mitre, SectionFrame,
+    StationSeam,
 };
 
 /// Most sections one interval between two stations is bisected into.
@@ -115,57 +138,184 @@ pub struct ResolvedStation {
 ///
 /// A node that is not a [`GeometryNode::CurveStation`] or a
 /// [`GeometryNode::OrientedCurveStation`], a basis that is not an atomic
-/// curve, a distance beyond the basis curve's length, a degenerate
-/// orientation, and every refusal of the curve evaluators, by name.
+/// curve or a curve placed at a station (#264, see the
+/// [module documentation](self#placing-at-a-station-264)), a distance
+/// beyond the basis curve's length, a degenerate orientation, and every
+/// refusal of the curve evaluators, by name.
 pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation> {
-    let (
-        CurveStation {
-            basis,
-            station,
-            frame,
-        },
-        orientation,
-        side,
-    ) = match graph.get(id) {
-        Some(GeometryNode::CurveStation(station)) => {
-            (station, StationOrientation::default(), SeamSide::Outgoing)
-        }
-        Some(GeometryNode::OrientedCurveStation(OrientedCurveStation {
-            station,
-            orientation,
-            seam,
-            ..
-        })) => (station, *orientation, *seam),
+    let station = match graph.get(id) {
+        Some(GeometryNode::CurveStation(station)) => OrientedCurveStation::from(*station),
+        Some(GeometryNode::OrientedCurveStation(station)) => *station,
         _ => {
             return Err(GeomError::InvalidInput(format!(
                 "node {id:?} is not a curve station"
             )))
         }
     };
-    let basis = Basis::of(graph, *basis)?;
-    let section = basis.section_on(station.distance, *frame, side)?;
+    resolve_oriented(graph, &station, 0).map(|(resolved, _, _)| resolved)
+}
+
+/// An oriented station resolved: the station, its turned frame, and
+/// whether that frame is exact (see [`ResolvedPlacement::exact`]).
+fn resolve_oriented(
+    graph: &GeometryGraph,
+    station: &OrientedCurveStation,
+    depth: usize,
+) -> GeomResult<(ResolvedStation, SectionFrame, bool)> {
+    let OrientedCurveStation {
+        station: CurveStation {
+            basis,
+            station,
+            frame,
+        },
+        orientation,
+        seam,
+        ..
+    } = station;
+    let basis = Basis::of_depth(graph, *basis, depth)?;
+    let section = basis.section_on(station.distance, *frame, *seam)?;
     let point = place(&section, &station.offsets, Point2::ZERO);
-    let mut placed = oriented(&section, &orientation, &orientation, 0.0)?.frame();
+    let turned = oriented(&section, orientation, orientation, 0.0)?;
+    let mut placed = turned.frame();
     placed.origin = point;
-    Ok(ResolvedStation {
-        point,
-        frame: placed,
-        section,
+    Ok((
+        ResolvedStation {
+            point,
+            frame: placed,
+            section,
+        },
+        turned,
+        basis.exact,
+    ))
+}
+
+/// A node placed at a station (#264), resolved.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedPlacement {
+    /// The rigid motion from the source's local coordinates: local `x`,
+    /// `y`, `z` onto the station's oriented tangent, left lateral and up,
+    /// the local origin onto [`ResolvedStation::point`].
+    pub transform: Transform3,
+    /// The station the node is placed at.
+    pub station: ResolvedStation,
+    /// Whether the frame is exact, rounding aside: the basis is a line
+    /// (`axiolid_reference::station::station_frame_is_exact2` and
+    /// `station_frame_is_exact3`), itself placed, if at all, in exact
+    /// frames. Otherwise the frame is the exact curve's at a distance read
+    /// by an estimate (the arc-length inverse, quadrature), and nothing
+    /// placed in it is reported exact.
+    pub exact: bool,
+}
+
+/// Resolve an [`InstanceAtStation`] node's placement (#264).
+///
+/// The frame is the one [`resolve`] gives the node's
+/// [`OrientedCurveStation`], seam side included; the transform maps the
+/// source's local `x`, `y`, `z` onto its oriented tangent, left lateral
+/// and up (`axiolid_model::station` names the mapping).
+///
+/// # Errors
+///
+/// A node that is not an [`InstanceAtStation`], and every refusal of
+/// [`resolve`]: a distance beyond the basis curve's length, a zero or
+/// vertical tangent where the frame needs a plan, a degenerate
+/// orientation, a basis that is not an atomic or placed curve, each by
+/// name.
+///
+/// [`InstanceAtStation`]: axiolid_model::InstanceAtStation
+pub fn placement(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedPlacement> {
+    match graph.get(id) {
+        Some(GeometryNode::InstanceAtStation(placed)) => placement_at(graph, &placed.station, 0),
+        _ => Err(GeomError::InvalidInput(format!(
+            "node {id:?} is not an instance at a station"
+        ))),
+    }
+}
+
+fn placement_at(
+    graph: &GeometryGraph,
+    station: &OrientedCurveStation,
+    depth: usize,
+) -> GeomResult<ResolvedPlacement> {
+    let (resolved, turned, exact) = resolve_oriented(graph, station, depth)?;
+    let mut transform = turned.placement();
+    transform.translation = resolved.point;
+    Ok(ResolvedPlacement {
+        transform,
+        station: resolved,
+        exact,
     })
 }
 
-/// An atomic basis curve.
+/// Most curves placed at stations a station basis may be nested through.
+const MAX_PLACEMENT_DEPTH: usize = 64;
+
+/// How far a placement's image of `+Z` may lean for a station along the
+/// placed curve: rounding only.
+const KEEPS_UP: Scalar = 1e-12;
+
+/// An atomic curve.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Basis<'g> {
+enum Atomic<'g> {
     Two(&'g Curve2),
     Three(&'g Curve3),
 }
 
+/// A station's basis: an atomic curve, possibly placed at stations
+/// (#264) by a rigid motion that keeps `+Z`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Basis<'g> {
+    curve: Atomic<'g>,
+    /// The composed placements, when the curve is placed.
+    placed: Option<Transform3>,
+    /// Whether a frame read on it is exact (a line, placed in exact
+    /// frames).
+    exact: bool,
+}
+
 impl<'g> Basis<'g> {
     pub(crate) fn of(graph: &'g GeometryGraph, id: NodeId) -> GeomResult<Self> {
+        Self::of_depth(graph, id, 0)
+    }
+
+    fn of_depth(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult<Self> {
+        if depth > MAX_PLACEMENT_DEPTH {
+            return Err(GeomError::BudgetExceeded {
+                resource: "curves placed at stations nested in a station basis",
+            });
+        }
         match graph.get(id) {
-            Some(GeometryNode::Curve2(curve)) => Ok(Self::Two(curve)),
-            Some(GeometryNode::Curve3(curve)) => Ok(Self::Three(curve)),
+            Some(GeometryNode::Curve2(curve)) => Ok(Self {
+                curve: Atomic::Two(curve),
+                placed: None,
+                exact: station_frame_is_exact2(curve),
+            }),
+            Some(GeometryNode::Curve3(curve)) => Ok(Self {
+                curve: Atomic::Three(curve),
+                placed: None,
+                exact: station_frame_is_exact3(curve),
+            }),
+            // A curve placed at a station (#264): its source's stations
+            // carried by the placement, where that is the placed curve's
+            // own.
+            Some(GeometryNode::InstanceAtStation(placed)) => {
+                let source = Self::of_depth(graph, placed.source, depth + 1)?;
+                let placement = placement_at(graph, &placed.station, depth + 1)?;
+                let transform = placement.transform * source.placed.unwrap_or(Transform3::IDENTITY);
+                if (transform.transform_vector3(Vec3::Z) - Vec3::Z).length() > KEEPS_UP {
+                    return Err(GeomError::UnsupportedInput {
+                        backend: crate::BACKEND_ID,
+                        operation: Operation::CurveEvaluation,
+                        input: PLACED_BASIS_TILTED,
+                    });
+                }
+                Ok(Self {
+                    curve: source.curve,
+                    placed: Some(transform),
+                    exact: source.exact && placement.exact,
+                })
+            }
             Some(GeometryNode::Instance(_) | GeometryNode::CurveRelation(_)) => {
                 Err(GeomError::UnsupportedInput {
                     backend: crate::BACKEND_ID,
@@ -190,9 +340,13 @@ impl<'g> Basis<'g> {
         frame: StationFrame,
         side: SeamSide,
     ) -> GeomResult<SectionFrame> {
-        let section = match self {
-            Self::Two(curve) => station_section2_on(curve, distance, side)?,
-            Self::Three(curve) => station_section3_on(curve, distance, side)?,
+        let section = match self.curve {
+            Atomic::Two(curve) => station_section2_on(curve, distance, side)?,
+            Atomic::Three(curve) => station_section3_on(curve, distance, side)?,
+        };
+        let section = match self.placed {
+            Some(transform) => section.moved(transform),
+            None => section,
         };
         match frame {
             StationFrame::Section => Ok(section),
@@ -206,14 +360,28 @@ impl<'g> Basis<'g> {
     }
 
     /// Every seam of the curve, located (a B-spline's corner knots by
-    /// quadrature).
+    /// quadrature). A placement moves none of them.
     fn seams(self) -> GeomResult<Vec<StationSeam>> {
-        match self {
-            Self::Two(curve) => station_seams2(curve),
-            Self::Three(curve) => station_seams3(curve),
+        match self.curve {
+            Atomic::Two(curve) => station_seams2(curve),
+            Atomic::Three(curve) => station_seams3(curve),
+        }
+    }
+
+    /// Every seam of the curve, each exact or refused.
+    fn exact_seams(self) -> GeomResult<Vec<StationSeam>> {
+        match self.curve {
+            Atomic::Two(curve) => exact_station_seams2(curve),
+            Atomic::Three(curve) => exact_station_seams3(curve),
         }
     }
 }
+
+/// The refusal of a station along a curve placed in a tilted frame (#264).
+pub(crate) const PLACED_BASIS_TILTED: &str =
+    "a station along a curve placed at a station whose frame tilts +Z: the source's section \
+     frame carried by the placement is not the placed curve's own reference-up frame, and an \
+     elevated source's plan distance is not the placed curve's (#264)";
 
 /// Where a graph curve's seams are, read from its stored data (#263): the
 /// distances in its station measure, with the curve's own parameter.
@@ -275,6 +443,8 @@ pub fn seams(
             "seams of a curve relation other than a composite or a trim",
         )),
         Some(GeometryNode::Instance(_)) => Err(unsupported("seams of an instanced curve")),
+        // A curve placed at a station: its source's seams (#264).
+        Some(GeometryNode::InstanceAtStation(_)) => Basis::of(graph, curve)?.exact_seams(),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "node {curve:?} is not a curve"
         ))),

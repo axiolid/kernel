@@ -161,6 +161,8 @@ fn resolve(
         }
         // No exact pieces: swept as sampled (#241).
         Some(GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. })) => Ok(None),
+        // A curve placed at a station (#264): swept as sampled.
+        Some(GeometryNode::InstanceAtStation(_)) => Ok(None),
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "sweep directrix {id:?} is not a 3D curve"

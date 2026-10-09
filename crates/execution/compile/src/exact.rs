@@ -15,7 +15,8 @@
 //! An instance places its source's exact B-rep with
 //! [`ExactBRep::transformed`] (#223): a rotation, a reflection and a
 //! translation are exact, and a scale or shear is refused, never
-//! approximated.
+//! approximated. An instance at a station (#264) is placed the same way
+//! when its frame is exact (a line basis) and refused by name otherwise.
 //!
 //! [`ReferenceExactCompiler::compile_exact_with_report`] also says, per
 //! body, whether any boolean on the way read a feature within the
@@ -263,6 +264,27 @@ impl<'a> ExactCompilation<'a> {
                         other => GeomError::InvalidInput(format!("instance transform: {other}")),
                     })
             }
+            // An instance in a station's frame (#264): exact only where the
+            // frame is (a line basis); any other frame is read at a distance
+            // resolved by an estimate, which an exact body must not carry.
+            GeometryNode::InstanceAtStation(placed) => {
+                let source_id = placed.source;
+                let placement = crate::station::placement(self.graph, root)?;
+                if !placement.exact {
+                    return Err(unsupported(
+                        "exact instance at a station whose frame is not exact: the basis is \
+                         not a line, so its distance is read by an estimate",
+                    ));
+                }
+                let source = self.compile(source_id)?;
+                self.set_report(root, self.report_of(source_id));
+                source
+                    .transformed(&placement.transform)
+                    .map_err(|error| match error {
+                        TransformError::Unsupported(what) => unsupported(what),
+                        other => GeomError::InvalidInput(format!("instance at a station: {other}")),
+                    })
+            }
             // A single segment or arc has no corners, so a fillet radius
             // has nothing to round there; one with corners is refused.
             GeometryNode::SolidOperation(SolidOperation::SweptDisk {
@@ -376,6 +398,7 @@ fn exact_input_family(node: &GeometryNode) -> &'static str {
         GeometryNode::Collection(_) => "collection",
         GeometryNode::CurveStation(_) => "curve station",
         GeometryNode::OrientedCurveStation(_) => "oriented curve station",
+        GeometryNode::InstanceAtStation(_) => "instance at a station",
         _ => "unknown geometry node",
     }
 }

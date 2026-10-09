@@ -169,6 +169,7 @@ pub(crate) fn emitted_booleans(graph: &GeometryGraph, root: NodeId) -> HashSet<N
         }
         match graph.get(id) {
             Some(GeometryNode::Instance(instance)) => stack.push(instance.source),
+            Some(GeometryNode::InstanceAtStation(placed)) => stack.push(placed.source),
             Some(GeometryNode::Collection(members)) => stack.extend(members.iter().copied()),
             Some(GeometryNode::SolidOperation(SolidOperation::Boolean { .. })) => {
                 emitted.insert(id);

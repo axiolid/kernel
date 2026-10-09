@@ -88,6 +88,12 @@
 //! of their diagonals.
 //! - Instances scale the bound by their transform's largest stretch;
 //!   collections take the worst member.
+//! - Instances at stations (#264) move their source rigidly: on a line
+//!   basis the frame is exact and the source's bound stands; on any other
+//!   the frame is the exact curve's at a distance read by an estimate (the
+//!   arc-length inverse, quadrature), so the placement is
+//!   [`DeviationBound::Unbounded`] under the path
+//!   [`DeviationPath::StationPlacement`].
 //! - Booleans (#235): cutting two meshes moves the intersection curve, and
 //!   a one-sided bound on each operand does not bound it, so nothing is
 //!   derived from the operands. Where `ReferenceExactCompiler` builds the
@@ -114,6 +120,10 @@ pub(crate) use paths::{of_curve_bounded, of_primitive, of_sectioned_surface, of_
 /// The [`DeviationContribution::detail`] of authored polygon faces warped
 /// beyond the linear tolerance (#254).
 pub(crate) const WARPED_AUTHORED_FACE: &str = "non-planar authored face";
+
+/// The [`DeviationContribution::detail`] of a node placed at a station
+/// whose frame is read at a numerically resolved distance (#264).
+pub(crate) const NUMERICAL_STATION_FRAME: &str = "frame at a numerically resolved station";
 
 /// The [`DeviationContribution::detail`] of B-rep faces that declare no
 /// surface and are warped beyond the linear tolerance (#257).
@@ -157,6 +167,9 @@ pub enum DeviationPath {
     StationedSpine,
     /// Open sections at stations joined by tag (#241).
     SectionedSurface,
+    /// A node placed in the frame of a curve station (#264), on a basis
+    /// whose frame is not exact.
+    StationPlacement,
 }
 
 /// A bound on how far the exact surface may lie from the mesh.

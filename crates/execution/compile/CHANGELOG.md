@@ -11,6 +11,29 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Nodes placed at stations (#264, ADR 0082 amendment):
+  `station::placement` resolves a `GeometryNode::InstanceAtStation` to a
+  `ResolvedPlacement { transform, station, exact }` -- its oriented
+  station resolved as `station::resolve` does, seam side included, and
+  the rigid motion taking the source's local `x`, `y`, `z` onto the
+  oriented tangent, left lateral and up. `ReferenceMeshCompiler` meshes a
+  placed solid or surface like an instance; on a basis other than a line
+  the placement is reported `DeviationBound::Unbounded` under the new
+  `DeviationPath::StationPlacement` (appended last).
+  `ReferenceExactCompiler` places a source exactly on a line basis and
+  refuses any other by name. A placed curve sweeps as a directrix (a 2D
+  source sampled in its own `z = 0`, then moved), sampled rather than as
+  exact pieces; an exact swept disk along it and a 2D relation as its
+  source are refused by name.
+- Stations along a placed curve (#264): a `CurveStation`, an
+  `OrientedCurveStation` and every run of stations may take a curve
+  placed at a station (an atomic curve, or a placed one, as source) as
+  their basis: the source's station carried by the placement, its seams
+  unchanged (`station::seams` too). A placement whose frame tilts `+Z` is
+  refused by name: there the carried frame is not the placed curve's own
+  reference-up frame, and an elevated source's plan distance is not the
+  placed curve's.
+
 - `station::seams` (#263, ADR 0082 amendment): where a graph curve's
   seams are, from its stored data -- an atomic curve's (refusing a
   B-spline's corner knot, which only a quadrature locates), and a 3D

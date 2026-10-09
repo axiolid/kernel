@@ -117,6 +117,7 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
 - `crates/algorithms/parametric/evaluate/src/station/seam.rs` and
   `crates/representations/analytic/curve/src/seam.rs` (#263)
 - ADR 0081 (banked section frame), #239 (`arc_parameter`).
+- `crates/execution/compile/tests/station_placement.rs` (#264).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -283,3 +284,73 @@ Still open: seam positions of 2D relations, a roll that jumps at a seam
 inside a run (sampled across as before), stations along a curve relation
 (still refused), a chain's parametric piece turning a corner inside
 itself (read as before), and a certified bound for a mitred run.
+
+## Amendment 2026-10-09: nodes placed at stations (#264)
+
+The consumer (openbimrs/ifc#311) places a curve in the frame of a station
+on another curve: an `IfcSegmentedReferenceCurve`'s segments are curve
+segments placed by an `IfcAxis2PlacementLinear`. `Instance` takes a
+resolved `Transform3` only, so the consumer would evaluate the station
+itself and bake the frame, losing the relation to the base and any claim
+about its accuracy; and a station along an instance was refused (#246).
+
+- **The relation.** `InstanceAtStation { source, station:
+  OrientedCurveStation }`, a new `GeometryNode` variant appended last:
+  the station-framed form of `Instance`. The station stays symbolic and
+  is resolved at evaluation with its `StationFrame`, its orientation and
+  its `SeamSide`, the oriented station's own rules, so a placement on a
+  seam reads the piece the station names. One node places a curve, a
+  solid or a surface; a placed curve is a 3D curve whatever its source's
+  dimension, a placed solid or surface keeps its family, and a placed 2D
+  profile is no longer a profile.
+- **The axes.** The source's local `x`, `y`, `z` map onto the oriented
+  frame's `tangent'`, `lateral'` (to the LEFT) and `up' = tangent' x
+  lateral'`, and its local origin onto the station's point (offsets read
+  in the base frame, as for every station). That is the linear
+  placement's own reading quoted in the #246 amendment (local `X` the
+  tangent, `Y` the left lateral, `Z` up), applied to the turned frame. It
+  is a rigid, right-handed motion (`SectionFrame::placement`). It is
+  deliberately NOT the section mapping (profile `x` along lateral, `y`
+  along up, normal along the tangent) and not the provider layout a
+  resolved station presents (`x` tangent, `y` up, `z` right): a placed
+  curve is laid along the basis, a section across it. A 2D source curve
+  lies in its local `z = 0`, the plane of `tangent'` and `lateral'`.
+- **Exactness.** The frame is exact, rounding aside, only on a line basis
+  (`station_frame_is_exact2` / `station_frame_is_exact3`), itself placed,
+  if at all, in exact frames. On every other basis the distance is read
+  by the arc-length inverse (an estimate) or the point by quadrature, so
+  `ResolvedPlacement::exact` is false, the mesh compiler reports the
+  placement `Unbounded` under `DeviationPath::StationPlacement`, and the
+  exact compiler refuses it by name; on a line it places the source's
+  exact B-rep rigidly.
+- **Refusals.** As the oriented station's, by name: a distance past the
+  basis's length, a vertical tangent where the section or plan frame
+  needs a horizontal direction, a basis with no tangent (a zero-direction
+  line), a degenerate orientation (refused when pushed), a basis that is
+  not an atomic or placed curve.
+- **Stations along a placed curve.** A station whose basis is a placed
+  curve is its source's station carried by the placement: a rigid motion
+  keeps arc length, and one that keeps `+Z` keeps plan distance and
+  carries the source's section frame (2D, reference-up, banked) onto the
+  placed curve's own, so the two readings agree. The source must be an
+  atomic curve or itself a placed curve (placements compose); its seams
+  are the source's. A placement whose frame tilts `+Z` (beyond `1e-12`) is
+  refused by name: there the carried frame is not the placed curve's own
+  reference-up frame against `+Z`, and an elevated source's plan distance
+  is not the placed curve's.
+- **Compilation.** A placed curve sweeps as a directrix, sampled (a 2D
+  source in its own `z = 0`, then moved); its exact pieces are not read,
+  so an exact swept disk along it is refused by name.
+
+| Option | Why not |
+| --- | --- |
+| `Instance` with a baked transform | The consumer would evaluate curves itself, the station's relation to its base and its seam side would be lost, and an inexact frame would read as exact. |
+| A `CurveRelation` variant for curves only | A second relation would be needed for solids; one node places both, as `Instance` does. |
+| A reference to a station node instead of an inline station | The station would have to be pushed first for every placement; an inline `OrientedCurveStation` is the same data and keeps one node per placement. |
+| Map local `x`, `y` onto lateral and up, as sections do | Contradicts the linear placement's reading (`X` along the tangent) the consumer needs; sections stand across the curve, placed curves run along it. |
+| Stations along a tilted placement in the carried frame | Would silently differ from the reference-up frame every other 3D curve gets, and from the plan distance on an elevated source. |
+
+Still open: stations along a curve relation (a composite of placed
+segments included) and along a tilted placement (refused by name), exact
+pieces of a placed directrix, and a certified bound for a placement on a
+curved basis.

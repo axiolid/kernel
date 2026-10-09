@@ -299,6 +299,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 instance.source,
                 instance_local_budget(instance.transform, budget)?,
             )],
+            // Placed in a station's frame (#264): a rigid motion resolved
+            // from the graph.
+            GeometryNode::InstanceAtStation(placed) => vec![EvalKey::new(
+                placed.source,
+                instance_local_budget(crate::station::placement(graph, key.id)?.transform, budget)?,
+            )],
             GeometryNode::Collection(members) => members.iter().copied().map(same).collect(),
             GeometryNode::SolidOperation(
                 operation @ SolidOperation::Boolean { left, right, .. },
@@ -507,6 +513,25 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 let source_budget = instance_local_budget(instance.transform, Budget::of(options))?;
                 let source = self.cached(cache, instance.source, source_budget)?;
                 Ok(channels::transform(source, instance.transform))
+            }
+            // An instance in a station's frame (#264): exact on a line,
+            // otherwise its placement is named unbounded.
+            GeometryNode::InstanceAtStation(placed) => {
+                let placement = crate::station::placement(graph, id)?;
+                let source_budget =
+                    instance_local_budget(placement.transform, Budget::of(options))?;
+                let source = self.cached(cache, placed.source, source_budget)?;
+                let mut built = channels::transform(source, placement.transform);
+                if !placement.exact {
+                    built.deviation.add(
+                        crate::deviation::DeviationPath::StationPlacement,
+                        crate::deviation::NUMERICAL_STATION_FRAME,
+                        crate::deviation::DeviationBound::Unbounded(
+                            "the station's frame is read at a distance resolved by an estimate",
+                        ),
+                    );
+                }
+                Ok(built)
             }
             GeometryNode::Collection(members) => {
                 let members = members

@@ -209,6 +209,34 @@ fn resolve(
             crate::station::offset_curve_points(graph, relation, range, options)
                 .map(|points| (points, None))
         }
+        // A curve placed at a station (#264): its source sampled in its own
+        // coordinates (a 2D one in `z = 0`), then moved rigidly.
+        Some(GeometryNode::InstanceAtStation(placed)) => {
+            let transform = crate::station::placement(graph, id)?.transform;
+            let (points, ends) = match graph.get(placed.source) {
+                Some(GeometryNode::Curve2(curve)) => sample_curve2(curve, range, options)?,
+                _ => resolve(graph, placed.source, range, options, depth + 1).map_err(|error| {
+                    match error {
+                        GeomError::InvalidInput(detail) if detail.contains("not a 3D curve") => {
+                            GeomError::UnsupportedInput {
+                                backend: crate::BACKEND_ID,
+                                operation: axiolid_contracts::Operation::CurveEvaluation,
+                                input: "a 2D curve relation placed at a station, as a sweep \
+                                        directrix: only an atomic 2D curve is lifted",
+                            }
+                        }
+                        other => other,
+                    }
+                })?,
+            };
+            Ok((
+                points
+                    .into_iter()
+                    .map(|p| transform.transform_point3(p))
+                    .collect(),
+                ends.map(|ends| ends.map(|v| transform.transform_vector3(v))),
+            ))
+        }
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "sweep directrix {id:?} is not a 3D curve"
@@ -470,8 +498,63 @@ fn sample_curve(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Resolved> {
-    let natural = axiolid_reference::curve::domain3(curve);
-    let domain = match range {
+    let domain = sweep_domain(
+        axiolid_reference::curve::domain3(curve),
+        matches!(curve, axiolid_curve::Curve3::Line(_)),
+        range,
+        options,
+    )?;
+    if elevated::is_elevated(curve) {
+        elevated::check_bounded(domain)?;
+    }
+    let points = axiolid_reference::curve::flatten3(
+        curve,
+        domain,
+        crate::compiler::chord_error(options),
+        MAX_FLATTEN_DEPTH,
+    )?;
+    Ok((points, smooth_ends(curve, domain.start, domain.end)))
+}
+
+/// A 2D curve sampled as [`sample_curve`] samples a 3D one, lying in
+/// `z = 0` (#264: the source of a curve placed at a station). It reports
+/// no end tangents, so a sweep along it is swept as sampled.
+fn sample_curve2(
+    curve: &axiolid_curve::Curve2,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<Resolved> {
+    let domain = sweep_domain(
+        axiolid_reference::curve::domain2(curve),
+        matches!(curve, axiolid_curve::Curve2::Line(_)),
+        range,
+        options,
+    )?;
+    let points = axiolid_reference::curve::flatten2(
+        curve,
+        domain,
+        crate::compiler::chord_error(options),
+        MAX_FLATTEN_DEPTH,
+    )?;
+    Ok((
+        points
+            .into_iter()
+            .map(|p| Point3::new(p.x, p.y, 0.0))
+            .collect(),
+        None,
+    ))
+}
+
+/// The parameter interval a sweep `range` selects of a curve whose
+/// natural domain is `natural`; an `unbounded` curve (a line) takes the
+/// range as given.
+fn sweep_domain(
+    natural: axiolid_core::Interval,
+    unbounded: bool,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<axiolid_core::Interval> {
+    Ok(match range {
         None => natural,
         Some((start, end)) => {
             if !(start.is_finite() && end.is_finite()) {
@@ -488,7 +571,7 @@ fn sample_curve(
             let mut hi = natural.start.max(natural.end);
             let rlo = start.min(end);
             let rhi = start.max(end);
-            if matches!(curve, axiolid_curve::Curve3::Line(_)) {
+            if unbounded {
                 lo = rlo;
                 hi = rhi;
             }
@@ -503,17 +586,7 @@ fn sample_curve(
                 end: rhi.min(hi),
             }
         }
-    };
-    if elevated::is_elevated(curve) {
-        elevated::check_bounded(domain)?;
-    }
-    let points = axiolid_reference::curve::flatten3(
-        curve,
-        domain,
-        crate::compiler::chord_error(options),
-        MAX_FLATTEN_DEPTH,
-    )?;
-    Ok((points, smooth_ends(curve, domain.start, domain.end)))
+    })
 }
 
 fn stitch(target: &mut Vec<Point3>, mut child: Vec<Point3>, tolerance: Scalar) -> GeomResult<()> {
@@ -783,6 +856,9 @@ fn exact_at(
             }
         }
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported(other)),
+        Some(GeometryNode::InstanceAtStation(_)) => Err(unsupported(
+            "exact swept disk along a curve placed at a station",
+        )),
         Some(_) => Err(GeomError::InvalidInput(format!(
             "sweep directrix {id:?} is not a 3D curve"
         ))),
@@ -911,6 +987,9 @@ fn smooth_kind(
             DirectrixKind::Other("composite directrix")
         }
         Some(GeometryNode::CurveRelation(_)) => DirectrixKind::Other("directrix relation"),
+        Some(GeometryNode::InstanceAtStation(_)) => {
+            DirectrixKind::Other("directrix placed at a station")
+        }
         _ => DirectrixKind::Other("not a 3D curve"),
     })
 }
