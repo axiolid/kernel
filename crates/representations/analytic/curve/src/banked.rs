@@ -27,6 +27,24 @@
 //! rotates about the centreline, `D / 2` (for a left-high cant) about the
 //! low rail. The banked curve's point is `base(d) + e(d) z`.
 //!
+//! # Rotation about a held rail
+//!
+//! A pivot piece may instead be [`CantForm::AboutRail`] (#279): the section
+//! rotates about one rail head, which keeps its height `e0` above the
+//! profile while the other moves by the cant. Its elevation is DERIVED from
+//! the cant law at the same plan distance,
+//! `e(d) = e0 + s (b / 2) sin(psi(d)) = e0 + s D(d) / 2`, with `s = +1`
+//! about the right rail and `-1` about the left, whether the cant law
+//! gives `D` or `psi` (`D = b sin(psi)`). So a Viennese bend, whose law is
+//! a polynomial in the bank angle, rotates about its low rail exactly,
+//! with rate `e' = s (b / 2) cos(psi) psi'`. Under
+//! [`BankConvention::VerticalRise`] the held rail head then stands exactly
+//! `e0` above the profile at every station, on any grade; under
+//! [`BankConvention::TangentRotation`] it does on level track, and drifts
+//! by `(D / 2)(1 - cos theta)` where the point path climbs at angle
+//! `theta`. A held-rail piece has no value of its own, so it belongs in a
+//! pivot law only ([`BankError::RailInCant`]).
+//!
 //! # Positive cant raises the LEFT rail
 //!
 //! `D` is the left rail head's height minus the right one's, left being
@@ -103,6 +121,43 @@ pub enum CantForm {
         /// Bank angle gained over the piece, radians.
         change: Scalar,
     },
+    /// A pivot piece rotating about the held `rail` (#279):
+    /// `e = elevation + s (b / 2) sin(psi) = elevation + s D / 2`, `D` and
+    /// `psi` the cant law's at the same plan distance, `s = +1` about the
+    /// right rail and `-1` about the left. See the
+    /// [module docs](self#rotation-about-a-held-rail).
+    ///
+    /// Derived, not a law of `xi`: [`CantLaw::value_at`] has no value for
+    /// it and [`Banked3::pivot_at`] reads it. Refused in a cant law.
+    AboutRail {
+        /// The rail head that keeps its height.
+        rail: RailSide,
+        /// Height `e0` of the held rail head above the profile.
+        elevation: Scalar,
+    },
+}
+
+/// A rail head of a canted track, left or right of the direction of
+/// travel along the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RailSide {
+    /// The rail head to the left, raised by a positive cant.
+    Left,
+    /// The rail head to the right.
+    Right,
+}
+
+impl RailSide {
+    /// `s` in `e = e0 + s D / 2` for a rotation about this rail: `+1`
+    /// about the right rail (the pivot rises with a left-high cant), `-1`
+    /// about the left.
+    #[must_use]
+    pub const fn pivot_sign(self) -> Scalar {
+        match self {
+            Self::Left => -1.0,
+            Self::Right => 1.0,
+        }
+    }
 }
 
 /// What a cant law gives at a station: a cant height or a bank angle.
@@ -230,6 +285,13 @@ impl CantPiece {
         )
     }
 
+    /// A pivot piece rotating about the held `rail`, whose head stands
+    /// `elevation` above the profile ([`CantForm::AboutRail`]).
+    #[must_use]
+    pub const fn about_rail(length: Scalar, rail: RailSide, elevation: Scalar) -> Self {
+        Self::new(length, CantForm::AboutRail { rail, elevation })
+    }
+
     /// Value and rate (per unit PLAN distance) at `s` into the piece.
     fn sample(&self, s: Scalar) -> Option<(CantValue, CantValue)> {
         let length = self.length;
@@ -276,6 +338,8 @@ impl CantPiece {
                 let rate = 140.0 * xi2 * xi * one_minus * one_minus * one_minus;
                 (start + change * shape, change * rate, true)
             }
+            // Derived from the cant law: no value of its own.
+            CantForm::AboutRail { .. } => return None,
         };
         let rate = slope / length;
         if !(value.is_finite() && rate.is_finite()) {
@@ -294,12 +358,17 @@ impl CantPiece {
             CantForm::Cosine { start, change }
             | CantForm::Sine { start, change }
             | CantForm::VienneseBend { start, change } => start.is_finite() && change.is_finite(),
+            CantForm::AboutRail { elevation, .. } => elevation.is_finite(),
         };
         finite && self.length.is_finite() && self.length > 0.0
     }
 
     fn is_angle(&self) -> bool {
         matches!(self.form, CantForm::VienneseBend { .. })
+    }
+
+    fn is_rail(&self) -> bool {
+        matches!(self.form, CantForm::AboutRail { .. })
     }
 }
 
@@ -361,9 +430,18 @@ impl CantLaw {
         self.pieces.iter().any(CantPiece::is_angle)
     }
 
+    /// Whether any piece rotates about a held rail
+    /// ([`CantForm::AboutRail`]), a pivot derived from the cant law.
+    #[must_use]
+    pub fn has_rail_pieces(&self) -> bool {
+        self.pieces.iter().any(CantPiece::is_rail)
+    }
+
     /// Value at plan distance `distance`.
     ///
-    /// `None` when the law is malformed or `distance` is outside it.
+    /// `None` when the law is malformed, `distance` is outside it, or the
+    /// piece there is a held-rail pivot ([`CantForm::AboutRail`]), whose
+    /// value comes from the cant law ([`Banked3::pivot_at`]).
     #[must_use]
     pub fn value_at(&self, distance: Scalar) -> Option<CantValue> {
         self.sample(distance).map(|(value, _)| value)
@@ -377,6 +455,13 @@ impl CantLaw {
     }
 
     fn sample(&self, distance: Scalar) -> Option<(CantValue, CantValue)> {
+        let (piece, s) = self.locate(distance)?;
+        piece.sample(s)
+    }
+
+    /// The piece owning `distance` (the one starting there, at a seam) and
+    /// the distance into it.
+    fn locate(&self, distance: Scalar) -> Option<(&CantPiece, Scalar)> {
         if !distance.is_finite() || distance < 0.0 || !self.is_well_formed() {
             return None;
         }
@@ -385,7 +470,7 @@ impl CantLaw {
         for (index, piece) in self.pieces.iter().enumerate() {
             let end = start + piece.length;
             if distance < end || (index == last && distance <= end) {
-                return piece.sample(distance - start);
+                return Some((piece, distance - start));
             }
             start = end;
         }
@@ -535,6 +620,9 @@ pub enum BankError {
     AngleInPivot,
     /// A non-finite cant, angle or grade.
     NonFinite,
+    /// The cant law has a held-rail piece ([`CantForm::AboutRail`]); only
+    /// a pivot derives from the cant.
+    RailInCant,
 }
 
 impl fmt::Display for BankError {
@@ -565,6 +653,10 @@ impl fmt::Display for BankError {
                 write!(f, "pivot law has an angle-form piece; a pivot is an elevation")
             }
             Self::NonFinite => write!(f, "cant, bank angle or grade is not finite"),
+            Self::RailInCant => write!(
+                f,
+                "cant law has a held-rail piece; only a pivot derives from the cant"
+            ),
         }
     }
 }
@@ -584,8 +676,9 @@ pub struct Banked3 {
     pub base: Elevated3,
     /// Cant `D(d)` (left rail head above right), or bank angle, by piece.
     pub cant: CantLaw,
-    /// Elevation `e(d)` of the rotation point above the profile. Height
-    /// pieces only.
+    /// Elevation `e(d)` of the rotation point above the profile: height
+    /// pieces, or held-rail pieces derived from the cant
+    /// ([`CantForm::AboutRail`]). No angle pieces.
     pub pivot: CantLaw,
     /// Rail-head distance `b`, from which `psi = asin(D / b)`.
     pub rail_head_distance: Scalar,
@@ -659,13 +752,41 @@ impl Banked3 {
         }
     }
 
+    /// Rate of the cant `dD/dd` per unit plan distance at `distance`: the
+    /// law's, or `b cos(psi) psi'` for an angle piece.
+    ///
+    /// # Errors
+    ///
+    /// As [`cant_at`](Self::cant_at).
+    pub fn cant_rate_at(&self, distance: Scalar) -> Result<Scalar, BankError> {
+        let psi = self.bank_angle_at(distance)?;
+        let outside = BankError::OutsideLaw {
+            law: "cant",
+            distance,
+        };
+        let rate = match self.cant.rate_at(distance).ok_or(outside)? {
+            CantValue::Height(rate) => rate,
+            CantValue::Angle(rate) => self.rail_head_distance * psi.cos() * rate,
+        };
+        if rate.is_finite() {
+            Ok(rate)
+        } else {
+            Err(BankError::NonFinite)
+        }
+    }
+
     /// Elevation `e` of the rotation point above the profile at `distance`,
     /// and its rate per unit plan distance.
+    ///
+    /// A held-rail piece ([`CantForm::AboutRail`]) derives both from the
+    /// cant law: `e = e0 + s D / 2` and `e' = s D' / 2`, which for an angle
+    /// piece are `e0 + s (b / 2) sin(psi)` and `s (b / 2) cos(psi) psi'`.
     ///
     /// # Errors
     ///
     /// [`BankError::AngleInPivot`] for a pivot law with an angle piece,
-    /// [`BankError::OutsideLaw`] off the law.
+    /// [`BankError::OutsideLaw`] off the law; for a held-rail piece, the
+    /// cant law's refusals at `distance` ([`cant_at`](Self::cant_at)).
     pub fn pivot_at(&self, distance: Scalar) -> Result<(Scalar, Scalar), BankError> {
         if self.pivot.has_angle_pieces() {
             return Err(BankError::AngleInPivot);
@@ -674,6 +795,13 @@ impl Banked3 {
             law: "pivot",
             distance,
         };
+        let (piece, _) = self.pivot.locate(distance).ok_or(outside)?;
+        if let CantForm::AboutRail { rail, elevation } = piece.form {
+            let half = 0.5 * rail.pivot_sign();
+            let cant = self.cant_at(distance)?;
+            let rate = self.cant_rate_at(distance)?;
+            return Ok((elevation + half * cant, half * rate));
+        }
         match (self.pivot.value_at(distance), self.pivot.rate_at(distance)) {
             (Some(CantValue::Height(value)), Some(CantValue::Height(rate))) => Ok((value, rate)),
             _ => Err(outside),
@@ -681,6 +809,9 @@ impl Banked3 {
     }
 
     fn cant_value(&self, distance: Scalar) -> Result<CantValue, BankError> {
+        if self.cant.has_rail_pieces() {
+            return Err(BankError::RailInCant);
+        }
         self.cant.value_at(distance).ok_or(BankError::OutsideLaw {
             law: "cant",
             distance,

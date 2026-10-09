@@ -9,6 +9,30 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Rotation about a held rail (#279, ADR 0081 amendment):
+  `CantForm::AboutRail { rail, elevation }`, a pivot piece whose
+  elevation is derived from the cant law at the same plan distance,
+  `e = e0 + s D / 2 = e0 + s (b / 2) sin(psi)`, `s = +1` about the right
+  rail and `-1` about the left (`RailSide`, `RailSide::pivot_sign`). A
+  Viennese bend, a polynomial in the bank angle, now rotates about its
+  low rail exactly; under `BankConvention::VerticalRise` the held rail
+  head stands `e0` above the profile at every station. Built with
+  `CantPiece::about_rail`; `CantLaw::has_rail_pieces` finds one.
+- `Banked3::cant_rate_at`: `dD/dd`, the law's own rate or
+  `b cos(psi) psi'` for an angle piece.
+- `BankError::RailInCant`: a held-rail piece in a cant law is refused by
+  name.
+
+### Changed
+
+- `Banked3::pivot_at` reads a held-rail piece from the cant law: value
+  `e0 + s D / 2` and rate `s D' / 2`, with the cant law's refusals at
+  that station. Height pieces read as before; an angle piece in the
+  pivot law is still `BankError::AngleInPivot`. `CantLaw::value_at` and
+  `rate_at` have no value on a held-rail piece.
+
 ## [0.3.4] - 2026-10-09
 
 ### Added

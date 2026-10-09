@@ -4,7 +4,7 @@
 use axiolid_core::{Point2, Vec2};
 use axiolid_curve::{
     bank_angle, BankConvention, BankError, Banked3, CantForm, CantLaw, CantPiece, CantValue,
-    Curve2, Elevated3, ElevationLaw, Line2,
+    Curve2, Elevated3, ElevationLaw, Line2, RailSide,
 };
 
 const EPS: f64 = 1e-12;
@@ -331,4 +331,116 @@ fn a_pivot_must_be_an_elevation() {
         BankConvention::VerticalRise,
     );
     assert_eq!(curve.pivot_at(5.0), Err(BankError::AngleInPivot));
+}
+
+// --- rotation about a held rail (#279) ---------------------------------------
+
+/// The Viennese bend's bank angle and its slope in `xi`, written out
+/// independently of the crate.
+fn viennese(start: f64, end: f64, xi: f64) -> (f64, f64) {
+    let change = end - start;
+    let shape = 35.0 * xi.powi(4) - 84.0 * xi.powi(5) + 70.0 * xi.powi(6) - 20.0 * xi.powi(7);
+    let slope = 140.0 * xi.powi(3) - 420.0 * xi.powi(4) + 420.0 * xi.powi(5) - 140.0 * xi.powi(6);
+    (start + change * shape, change * slope)
+}
+
+/// Left cant 0 -> 0.15 through a Viennese bend over 80 m, right cant 0:
+/// the pivot rotates about the right rail, which stays at `e0`.
+#[test]
+fn a_held_right_rail_pivot_follows_half_the_cant_of_a_viennese_bend() {
+    let b = 1.5;
+    let top = (0.15_f64 / b).asin();
+    let curve = Banked3::new(
+        straight(),
+        CantLaw::new(vec![
+            CantPiece::viennese_bend(80.0, 0.0, top),
+            CantPiece::constant(20.0, 0.15),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(100.0, RailSide::Right, 0.01)]),
+        b,
+        BankConvention::VerticalRise,
+    );
+    for d in [0.0, 7.5, 20.0, 40.0, 61.25, 79.9] {
+        let (psi, slope) = viennese(0.0, top, d / 80.0);
+        let (e, rate) = curve.pivot_at(d).unwrap();
+        close(e, 0.01 + 0.5 * b * psi.sin(), &format!("e at {d}"));
+        close(
+            rate,
+            0.5 * b * psi.cos() * slope / 80.0,
+            &format!("e' at {d}"),
+        );
+        // The rate is the derivative of the value.
+        let (lo, hi) = ((d - 1e-4_f64).max(0.0), d + 1e-4);
+        let fd = (curve.pivot_at(hi).unwrap().0 - curve.pivot_at(lo).unwrap().0) / (hi - lo);
+        assert!((fd - rate).abs() < 1e-9, "e' at {d}: {rate} vs {fd}");
+    }
+    // In the hold the cant is a height piece: e = e0 + D / 2, flat.
+    assert_eq!(curve.pivot_at(90.0), Ok((0.01 + 0.075, 0.0)));
+    // At the bend's end both readings agree: D = b sin(psi) = 0.15.
+    close(curve.pivot_at(80.0).unwrap().0, 0.085, "e at the seam");
+}
+
+#[test]
+fn a_held_left_rail_pivot_falls_with_a_height_cant() {
+    let curve = Banked3::new(
+        straight(),
+        CantLaw::new(vec![CantPiece::bloss(60.0, 0.0, 0.12)]),
+        CantLaw::new(vec![
+            CantPiece::constant(20.0, 0.0),
+            CantPiece::about_rail(40.0, RailSide::Left, 0.0),
+        ]),
+        1.5,
+        BankConvention::TangentRotation,
+    );
+    // Bloss at xi = 1/2: D = 0.06, D' = 0.12 * 6 xi (1 - xi) / 60 = 0.003.
+    let (e, rate) = curve.pivot_at(30.0).unwrap();
+    close(e, -0.03, "e = -D / 2 about the left rail");
+    close(rate, -0.0015, "e' = -D' / 2");
+    assert_eq!(curve.pivot_at(10.0), Ok((0.0, 0.0)));
+    close(curve.cant_rate_at(30.0).unwrap(), 0.003, "D'");
+    assert_eq!(RailSide::Left.pivot_sign(), -1.0);
+    assert_eq!(RailSide::Right.pivot_sign(), 1.0);
+}
+
+#[test]
+fn a_held_rail_piece_has_no_value_of_its_own_and_no_place_in_a_cant_law() {
+    let law = CantLaw::new(vec![CantPiece::about_rail(10.0, RailSide::Right, 0.0)]);
+    assert!(law.is_well_formed());
+    assert!(law.has_rail_pieces());
+    assert!(!law.has_angle_pieces());
+    assert_eq!(law.value_at(5.0), None);
+    assert_eq!(law.rate_at(5.0), None);
+    assert!(
+        !CantLaw::new(vec![CantPiece::about_rail(10.0, RailSide::Left, f64::NAN)]).is_well_formed()
+    );
+    assert_eq!(
+        CantPiece::about_rail(10.0, RailSide::Left, 0.2).form,
+        CantForm::AboutRail {
+            rail: RailSide::Left,
+            elevation: 0.2
+        }
+    );
+    // As a cant law it is refused by name, not read as off the law.
+    let curve = Banked3::new(
+        straight(),
+        law.clone(),
+        CantLaw::zero(10.0),
+        1.5,
+        BankConvention::TangentRotation,
+    );
+    assert_eq!(curve.cant_at(5.0), Err(BankError::RailInCant));
+    assert_eq!(curve.bank_angle_at(5.0), Err(BankError::RailInCant));
+    // A held-rail pivot inherits the cant's refusals.
+    let over = Banked3::new(
+        straight(),
+        CantLaw::new(vec![CantPiece::constant(10.0, 2.0)]),
+        law,
+        1.5,
+        BankConvention::TangentRotation,
+    );
+    assert!(matches!(
+        over.pivot_at(5.0),
+        Err(BankError::CantExceedsRailHeadDistance { .. })
+    ));
+    assert!(BankError::RailInCant.to_string().contains("held-rail"));
 }

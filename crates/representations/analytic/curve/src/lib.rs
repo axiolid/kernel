@@ -24,6 +24,7 @@ pub mod torus_section;
 
 pub use banked::{
     bank_angle, BankConvention, BankError, Banked3, CantForm, CantLaw, CantPiece, CantValue,
+    RailSide,
 };
 pub use chain::{Chain2, ChainPiece2};
 pub use conic::{Circle2, Circle3, Ellipse2, Ellipse3};
