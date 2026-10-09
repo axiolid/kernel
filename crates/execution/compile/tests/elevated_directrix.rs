@@ -19,7 +19,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve2, BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2,
-    Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2,
+    Curve3, Elevated3, ElevationLaw, Intrinsic2, KnotSpec, Line2, RailSide,
 };
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::volume_properties;
@@ -496,6 +496,52 @@ fn a_disk_swept_along_a_banked_directrix_is_certified() {
     };
     let lifted = axiolid_reference::curve::evaluate3(&curve, 45.0).unwrap();
     let base = axiolid_reference::elevated_point(&b.base, 45.0).unwrap();
+    assert!((lifted.z - base.z - 0.06).abs() < 1e-12);
+}
+
+/// Rotation about the held right rail through a Viennese bend (#279): the
+/// left cant goes 0 -> 120 mm as a polynomial in the bank angle, the right
+/// rail stays on the profile, and the rotation point rises by
+/// `(b / 2) sin(psi)`.
+fn held_rail() -> Curve3 {
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(clothoid(), ElevationLaw::parabolic(50.0, 0.02, -0.01, 60.0)),
+        CantLaw::new(vec![
+            CantPiece::viennese_bend(40.0, 0.0, (0.12_f64 / 1.5).asin()),
+            CantPiece::constant(20.0, 0.12),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(60.0, RailSide::Right, 0.0)]),
+        1.5,
+        BankConvention::VerticalRise,
+    ))
+}
+
+/// A disk swept along a held-rail bend is certified like any banked
+/// directrix: the pivot's derived derivative and chord bounds carry the
+/// sweep certification over. The graph keeps the curve as authored.
+#[test]
+fn a_disk_swept_along_a_held_rail_bend_is_certified() {
+    let curve = held_rail();
+    let mut builder = GeometryGraphBuilder::new();
+    let root = disk(&mut builder, curve.clone(), 0.1, Some((5.0, 55.0)));
+    let graph = builder.finish(vec![root]).unwrap();
+    assert!(graph
+        .iter()
+        .any(|(_, node)| *node == GeometryNode::Curve3(curve.clone())));
+    for (radius, budget, range) in [(0.1, 1e-3, (5.0, 55.0)), (0.05, 1e-4, (15.0, 30.0))] {
+        let report = assert_tube("held rail", &curve, radius, budget, range, "banked curve");
+        assert!(
+            matches!(report.contributions[0].bound, DeviationBound::Certified(_)),
+            "{report:?}"
+        );
+    }
+    // The tube is around the rotation point, half the cant above the
+    // held rail.
+    let Curve3::Banked(b) = &curve else {
+        unreachable!()
+    };
+    let lifted = axiolid_reference::curve::evaluate3(&curve, 50.0).unwrap();
+    let base = axiolid_reference::elevated_point(&b.base, 50.0).unwrap();
     assert!((lifted.z - base.z - 0.06).abs() < 1e-12);
 }
 
