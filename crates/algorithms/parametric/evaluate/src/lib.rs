@@ -53,6 +53,7 @@ pub use provider::ReferenceCurveEvaluator;
 pub use station::{
     exact_station_seams2, exact_station_seams3, station_frame_is_exact2, station_frame_is_exact3,
     station_length2, station_length3, station_seams2, station_seams3, station_section2,
-    station_section2_on, station_section3, station_section3_on, Mitre, SectionFrame, StationSeam,
+    station_section2_on, station_section3, station_section3_on, CompositeBasis, Mitre,
+    SectionFrame, StationCurve, StationPiece, StationSeam,
 };
 pub use surface::{partials, Patch, ScalarSurface};

@@ -85,7 +85,18 @@
 //! lateral and up, the origin onto the point (a linear placement's
 //! reading). [`station_frame_is_exact2`] and [`station_frame_is_exact3`]
 //! say whether that frame is exact (a line) or carries the tolerances
-//! below.
+//! below. [`SectionFrame::carried`] is the frame a station on the placed
+//! curve has (#285): the source's moved where the placement keeps `+Z`,
+//! the placed curve's own reference-up frame where it tilts it.
+//!
+//! # Composite bases (#285)
+//!
+//! [`CompositeBasis`] measures stations along pieces of atomic curves laid
+//! end to end ([`StationPiece`]: a span of a curve, reversed or placed),
+//! the neutral form of a composite curve relation. The distance runs
+//! through the pieces in their common convention, every joint is a seam
+//! read by the rule above, and a frame is exact only where every piece up
+//! to the one read is; see [`composite`].
 //!
 //! # Accuracy contract
 //!
@@ -101,9 +112,14 @@
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame3, Point3, Scalar, Transform3, Vec3};
 use axiolid_curve::{Curve2, Curve3, SeamSide};
+/// The convention a station basis is measured in (#285): the
+/// curve-evaluation contract's, re-exported so a caller can name it.
+pub use axiolid_curve_evaluate_contract::DistanceConvention;
 
+pub mod composite;
 pub mod seam;
 
+pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
 pub use seam::{
     exact_station_seams2, exact_station_seams3, station_seams2, station_seams3, Mitre, StationSeam,
     MITRE_TOLERANCE, SEAM_TANGENT_TOLERANCE,
@@ -119,6 +135,10 @@ use crate::curve::{derivative2, derivative3, domain2, domain3, evaluate2, evalua
 /// direction that still counts as parallel ([`SectionFrame::oriented`]);
 /// the graph refuses the same pairs when a station is pushed.
 pub const ORIENTATION_TOLERANCE: Scalar = 1e-9;
+
+/// How far a rigid placement's image of `+Z` may lean and still count as
+/// keeping `+Z` ([`SectionFrame::carried`]): rounding only.
+pub const KEEPS_UP_TOLERANCE: Scalar = 1e-12;
 
 fn invalid(detail: String) -> GeomError {
     GeomError::InvalidInput(detail)
@@ -246,6 +266,42 @@ impl SectionFrame {
         }
     }
 
+    /// This frame, read on a curve, as the section frame of that curve
+    /// carried by the rigid motion `rigid` (#264, #285): the frame a
+    /// station on the placed curve has, `measure` the convention the
+    /// source curve is measured in.
+    ///
+    /// Where `rigid` keeps `+Z` (within [`KEEPS_UP_TOLERANCE`]) this is
+    /// [`Self::moved`]: the moved reference-up, planar or banked frame is
+    /// the placed curve's own, and plan distance is kept. Where it tilts
+    /// `+Z`, an arc-length-measured curve (arc length is kept by any rigid
+    /// motion) gets the reference-up frame against `+Z` of its moved point
+    /// and tangent, which is the placed 3D curve's own section frame; the
+    /// moved frame would not be.
+    ///
+    /// # Errors
+    ///
+    /// A plan-measured curve (elevated or banked) under a motion that
+    /// tilts `+Z`, whose plan distance and section frame are not the placed
+    /// curve's, by a typed [`GeomError::UnsupportedInput`]; and a moved
+    /// tangent with no reference-up frame (vertical), by name.
+    pub fn carried(&self, rigid: Transform3, measure: DistanceConvention) -> GeomResult<Self> {
+        if (rigid.transform_vector3(Vec3::Z) - Vec3::Z).length() <= KEEPS_UP_TOLERANCE {
+            return Ok(self.moved(rigid));
+        }
+        if measure == DistanceConvention::PlanDistance {
+            return Err(GeomError::UnsupportedInput {
+                backend: axiolid_contracts::BackendId::new("axiolid-evaluate"),
+                operation: axiolid_contracts::Operation::CurveEvaluation,
+                input: PLAN_MEASURED_TILTED,
+            });
+        }
+        reference_up_frame(
+            rigid.transform_point3(self.point),
+            rigid.transform_vector3(self.tangent),
+        )
+    }
+
     /// The frame in the curve-evaluation provider's layout: `x` the
     /// tangent, `y` up, `z = x x y`, which is `-lateral` (to the right).
     #[must_use]
@@ -258,6 +314,12 @@ impl SectionFrame {
         }
     }
 }
+
+/// The refusal of a plan-measured curve placed in a tilted frame.
+const PLAN_MEASURED_TILTED: &str =
+    "a station along an elevated or banked curve placed at a station whose frame tilts +Z: its \
+     plan distance and its section frame carried by the placement are not the placed curve's own \
+     (#264)";
 
 /// A 2D curve's point and unit tangent lifted to `z = 0`, framed with the
 /// left normal and `+Z`.

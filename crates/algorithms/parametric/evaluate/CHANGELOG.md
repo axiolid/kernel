@@ -9,6 +9,31 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Composite station bases (#285, ADR 0082 amendment), in
+  `station::composite`: `CompositeBasis` measures stations along
+  `StationPiece`s -- spans of atomic 2D or 3D curves (`StationCurve`)
+  between two distances in the curve's station measure, reversed or
+  carried by a rigid placement -- laid end to end. The distance runs
+  through the pieces in their common convention (plan distance when
+  every piece is an elevated or banked curve, arc length when none is;
+  mixed pieces refused by name); consecutive pieces must meet within
+  `JOINT_TOLERANCE` (relative), a gap and an undeclared reversed piece
+  refused by name; every joint is a seam read by the #263 rule
+  (`section_on` with a `SeamSide`); `seams` / `exact_seams` list the
+  joints and each piece's own seams; `frame_is_exact_at` claims an exact
+  frame only where every piece up to the one read is an exactly placed
+  line; `pieces_between` clips the pieces a trim of the composite keeps.
+- `SectionFrame::carried`: the frame a station on a curve placed by a
+  rigid motion has -- the source's moved where the motion keeps `+Z`
+  (within the new `KEEPS_UP_TOLERANCE`), the placed curve's own
+  reference-up frame of the moved point and tangent where it tilts `+Z`
+  on an arc-length-measured source; an elevated or banked source so
+  placed is refused by a typed `UnsupportedInput`.
+- `station::DistanceConvention`, the curve-evaluation contract's
+  convention re-exported so a caller can name a basis's measure.
+
 ## [0.3.7] - 2026-10-09
 
 ### Added

@@ -128,7 +128,7 @@ fn slack(distance: Scalar) -> Scalar {
 
 /// Seams strictly inside `(0, length)`, sorted, those within tolerance of
 /// each other merged (smooth and exact only if every merged one is).
-fn tidy(mut seams: Vec<StationSeam>, length: Option<Scalar>) -> Vec<StationSeam> {
+pub(super) fn tidy(mut seams: Vec<StationSeam>, length: Option<Scalar>) -> Vec<StationSeam> {
     seams.retain(|seam| {
         seam.distance.is_finite()
             && seam.distance > slack(0.0)
