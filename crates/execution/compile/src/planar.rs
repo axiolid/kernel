@@ -24,6 +24,14 @@
 //!    share; rings that do not bound a region (crossing, overlapping) are
 //!    refused by name.
 //!
+//! Faces whose corners neighbours share then have the clipper's slivers
+//! along nearly straight runs split away ([`clip_planar_face`]). That
+//! split keeps every ring corner a triangle corner: a corner within the
+//! noise band of a sliver's side takes its triangles from the edge left
+//! behind, and a split that would still lose a corner or a ring edge is
+//! discarded for the certified cover (#278). A face never drops a corner
+//! its neighbours keep, which would open a closed shell.
+//!
 //! # Warped authored faces (#254)
 //!
 //! An authored polygon face whose corners lie off its plane by more than
@@ -254,7 +262,9 @@ pub(crate) fn edge_touches(flat: &[[Scalar; 2]], hole_starts: &[usize]) -> Vec<E
 /// straight run they lie on, and the clipper may then cut a sliver across
 /// them whose long diagonal another face, sharing those corners, cuts too:
 /// that edge is used four times and the closed shell reads as
-/// non-manifold. The split removes such slivers as it did for earcut.
+/// non-manifold. The split removes such slivers as it did for earcut,
+/// and keeps the clipper's cover where it cannot do so without losing a
+/// corner (#278).
 pub(crate) fn clip_planar_face(
     flat: &[[Scalar; 2]],
     hole_starts: &[usize],
@@ -292,16 +302,27 @@ pub(crate) fn collinear_band(linear: Scalar) -> Scalar {
 /// the neighbour that meets the face at `c` has an edge ending there, so
 /// the mesh cracks unless the edge is split at `c`.
 ///
-/// Two steps:
+/// Three steps:
 ///
 /// 1. Slivers go. Along a straight run the triangulation can emit a
-///    triangle `(a, m, b)` with `m` on segment `a-b` within the band. Its three edges cancel
-///    on that line once every edge there is split at every corner, so it
-///    adds nothing but duplicate edges; it is dropped.
-/// 2. The corners strictly inside each remaining invented edge are found
-///    once per undirected edge, so the two triangles sharing it insert the
-///    same corners and still pair up. A triangle whose sides gained corners
-///    is re-triangulated by [`split_triangle`] into proper triangles only.
+///    triangle `(a, m, b)` with `m` on segment `a-b` within the band. Its
+///    three edges cancel on that line once every edge there is split at
+///    every corner, so it adds nothing but duplicate edges; it is dropped.
+/// 2. Invented edges are split. A kept edge whose other side was a dropped
+///    sliver takes exactly the corners that sliver's short sides ran
+///    through, each short side expanded the same way when the sliver
+///    across it went too (#278): the dropped triangles, not the band,
+///    decide them, because the band is not transitive. Every other
+///    invented edge takes the corners strictly inside it, found once per
+///    undirected edge, so the two triangles sharing it insert the same
+///    corners and still pair up. A triangle whose sides gained corners is
+///    re-triangulated by [`split_triangle`] into proper triangles only.
+/// 3. The result is checked against the clipper's certified cover (#278):
+///    every triangle wound as the cover's, every ring edge used once in
+///    its direction, every other edge once each way. A split that fails
+///    is discarded and the face keeps the cover, thin triangles and all.
+///    So every ring corner stays a triangle corner: a corner is never
+///    missing from one face while the faces sharing it keep it.
 ///
 /// The result covers the same area with the same winding, and every
 /// segment between consecutive corners on a line is used once from each
@@ -337,39 +358,73 @@ fn split_invented_edges(
     }
 
     // Step 1: drop slivers, triangles with one corner on the segment
-    // between the other two, where that segment is an invented edge. Its two short sides then lie on the same straight run, and
-    // splitting the invented long side at the corner cancels the triangle
-    // against itself, so it carries no area and no edge the mesh needs.
+    // between the other two, where that segment is an invented edge. Its
+    // two short sides then lie on the same straight run, and splitting the
+    // invented long side at the corner cancels the triangle against itself,
+    // so it carries no area and no edge the mesh needs.
     //
     // When the long side is an authored ring edge the triangle is real
     // geometry, however thin: a faceted B-rep face may itself be a 1 um
     // wide triangle (a Revit fastener has 1,096 of them), and its long
     // edge is shared with a neighbour exactly as written. Dropping it
     // would delete the face.
-    let is_sliver = |t: &[usize]| {
-        (0..3).any(|i| {
+    //
+    // Each dropped sliver is recorded by its long side, directed as the
+    // sliver runs along it, with its apex: `(q, p) -> m` for the sliver
+    // `q -> p -> m`, whose short sides `p -> m -> q` replace `p -> q` in
+    // the triangle across.
+    let sliver_apex = |t: &[usize]| {
+        (0..3).find(|&i| {
             let (a, b) = (t[(i + 1) % 3], t[(i + 2) % 3]);
             !authored.contains(&(a.min(b), a.max(b)))
                 && strictly_between(flat[a], flat[t[i]], flat[b], noise)
         })
     };
-    let kept: Vec<usize> = indices
-        .chunks_exact(3)
-        .filter(|t| !is_sliver(t))
-        .flatten()
-        .copied()
-        .collect();
+    let mut slivers: std::collections::HashMap<(usize, usize), usize> =
+        std::collections::HashMap::new();
+    let mut kept: Vec<usize> = Vec::with_capacity(indices.len());
+    for t in indices.chunks_exact(3) {
+        match sliver_apex(t) {
+            Some(i) => {
+                slivers.insert((t[(i + 1) % 3], t[(i + 2) % 3]), t[i]);
+            }
+            None => kept.extend_from_slice(t),
+        }
+    }
 
-    // Step 2: corners strictly inside each invented edge, ordered from the
-    // lower index to the higher, computed on the canonical (low, high) key
-    // so both sides of an edge see the identical list.
+    // Step 2a (#278): a kept edge `p -> q` whose other side was a dropped
+    // sliver takes exactly the corners that sliver's short sides ran
+    // through, in order, each short side expanded the same way when the
+    // sliver across it was dropped too. That is decided by which triangles
+    // were dropped, not by the band again: the band is not transitive (a
+    // corner within it of `a-b`, with `a` within it of `p-b`, can lie
+    // outside it of `p-b`), and a second geometric test would leave such a
+    // corner in no triangle.
+    let mut exposed: std::collections::HashMap<(usize, usize), Vec<usize>> =
+        std::collections::HashMap::new();
+    for t in kept.chunks_exact(3) {
+        for i in 0..3 {
+            let (p, q) = (t[i], t[(i + 1) % 3]);
+            if slivers.contains_key(&(q, p)) {
+                let run = sliver_run(&mut slivers, p, q);
+                exposed.insert((p, q), run);
+            }
+        }
+    }
+
+    // Step 2b: corners strictly inside each other invented edge, ordered
+    // from the lower index to the higher, computed on the canonical
+    // (low, high) key so both sides of an edge see the identical list.
     let mut on_edge: std::collections::HashMap<(usize, usize), Vec<usize>> =
         std::collections::HashMap::new();
     for t in kept.chunks_exact(3) {
         for i in 0..3 {
             let (p, q) = (t[i], t[(i + 1) % 3]);
             let key = (p.min(q), p.max(q));
-            if authored.contains(&key) || on_edge.contains_key(&key) {
+            if authored.contains(&key)
+                || on_edge.contains_key(&key)
+                || exposed.contains_key(&(p, q))
+            {
                 continue;
             }
             let (a, b) = (flat[key.0], flat[key.1]);
@@ -392,6 +447,9 @@ fn split_invented_edges(
         // Corners on side i run from t[i] to t[i+1].
         let side = |i: usize| -> Vec<usize> {
             let (p, q) = (t[i], t[(i + 1) % 3]);
+            if let Some(run) = exposed.get(&(p, q)) {
+                return run.clone();
+            }
             let key = (p.min(q), p.max(q));
             let mut run = on_edge.get(&key).cloned().unwrap_or_default();
             if p > q {
@@ -406,7 +464,86 @@ fn split_invented_edges(
             split_triangle([t[0], t[1], t[2]], &sides, &mut out);
         }
     }
-    *indices = out;
+    // Step 3 (#278): keep the split only when it is a cover of the same
+    // face as the clipper's: every triangle wound as the clipper's, and running
+    // along the same boundary, each ring edge once and every other edge
+    // once each way. Otherwise keep the clipper's certified cover, which
+    // has every corner: a thin triangle, never a corner missing from one
+    // face while its neighbours keep it.
+    if same_cover(flat, indices, &out) {
+        *indices = out;
+    }
+}
+
+/// The corners strictly inside the run of dropped slivers that replaces
+/// the kept edge `p -> q`, in order from `p` to `q`: the apex `m` of the
+/// sliver `q -> p -> m` across it, preceded by the run replacing `p -> m`
+/// and followed by the run replacing `m -> q`. Each sliver is taken once,
+/// so the walk ends however the slivers were recorded.
+fn sliver_run(
+    slivers: &mut std::collections::HashMap<(usize, usize), usize>,
+    p: usize,
+    q: usize,
+) -> Vec<usize> {
+    enum Step {
+        Edge(usize, usize),
+        Corner(usize),
+    }
+    let mut run = Vec::new();
+    let mut stack = vec![Step::Edge(p, q)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::Corner(m) => run.push(m),
+            Step::Edge(p, q) => {
+                if let Some(m) = slivers.remove(&(q, p)) {
+                    stack.push(Step::Edge(m, q));
+                    stack.push(Step::Corner(m));
+                    stack.push(Step::Edge(p, m));
+                }
+            }
+        }
+    }
+    run
+}
+
+/// Whether `split` covers the same face as the certified `cover`: every
+/// triangle wound in `flat` as the cover is (counter-clockwise, from the
+/// clipper), and each edge's net use (once along it less once against it)
+/// the same in both.
+///
+/// The cover's net edges are its ring edges, each once in the ring's
+/// direction, so a split that passes keeps every ring edge, and with it
+/// every ring corner. Its triangles all wind one way around a boundary
+/// that winds once around each point of the face, so they cover each
+/// point once: no two overlap, no directed edge is used twice, and an edge
+/// with a corner inside it on one side only (a T-junction) would show as a
+/// net edge the cover lacks. Every edge it invented is used once each way.
+fn same_cover(flat: &[[Scalar; 2]], cover: &[usize], split: &[usize]) -> bool {
+    type Net = std::collections::HashMap<(usize, usize), i64>;
+    fn net(indices: &[usize]) -> Net {
+        let mut net = Net::with_capacity(indices.len());
+        for t in indices.chunks_exact(3) {
+            for i in 0..3 {
+                let (p, q) = (t[i], t[(i + 1) % 3]);
+                *net.entry((p.min(q), p.max(q))).or_insert(0) += if p < q { 1 } else { -1 };
+            }
+        }
+        net.retain(|_, n| *n != 0);
+        net
+    }
+    let doubled_area = |t: &[usize]| {
+        let [a, b, c] = [flat[t[0]], flat[t[1]], flat[t[2]]];
+        (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+    };
+    let winding: Scalar = cover
+        .chunks_exact(3)
+        .map(doubled_area)
+        .sum::<Scalar>()
+        .signum();
+    let wound = split
+        .chunks_exact(3)
+        .all(|t| doubled_area(t) * winding > 0.0);
+    wound && net(cover) == net(split)
 }
 
 /// Triangulate a proper triangle `t` whose side `i` (from `t[i]` to
@@ -798,6 +935,45 @@ mod tests {
         assert!((area - 8.0).abs() < 1e-12, "area {area}");
     }
 
+    /// Two corners on the shared diagonal 0-2, and a third (a hole pinched
+    /// to the outer corner 0) at its end: both halves take 4 then 5 in
+    /// order along it, in opposite directions, and not the pinch. A split
+    /// that took them out of order, or took the pinch, would fold over and
+    /// be discarded for the cover (#278), leaving the diagonal whole.
+    #[test]
+    fn a_shared_invented_edge_takes_its_corners_in_order_on_both_sides() {
+        let flat = [
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 2.0],
+            [0.0, 2.0],
+            [0.5, 0.5],
+            [1.5, 1.5],
+            [0.0, 0.0],
+        ];
+        let mut indices = vec![0, 1, 2, 0, 2, 3];
+        split_invented_edges(&flat, &[4], collinear_band(1.0e-3), &mut indices);
+        let uses = edge_uses(&indices);
+        for key in [(0, 4), (4, 5), (2, 5)] {
+            assert_eq!(uses.get(&key), Some(&2), "{key:?}: {indices:?}");
+        }
+        assert_eq!(
+            uses.get(&(0, 2)),
+            None,
+            "the diagonal is split: {indices:?}"
+        );
+        assert!(
+            !indices.contains(&6),
+            "the pinch is no corner of 0-2: {indices:?}"
+        );
+        for t in indices.chunks_exact(3) {
+            assert!(
+                doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]) > 0.0,
+                "{indices:?}"
+            );
+        }
+    }
+
     /// A zero-area triangle earcut left along a straight run: its apex
     /// lies on its opposite side. It must not survive with an unpaired
     /// long edge.
@@ -895,6 +1071,70 @@ mod tests {
                 assert_eq!(n, 2, "invented edge {key:?} unpaired: {indices:?}");
             }
         }
+        // The split took effect: the clipper's slivers are gone, not kept
+        // with its cover (#278).
+        let cover = clip_projected(&flat, &[]).expect("the stringer triangulates");
+        assert!(
+            slivers(&flat, &[], &cover) > 0,
+            "the clipper cuts no sliver"
+        );
+        assert_eq!(slivers(&flat, &[], &indices), 0, "{indices:?}");
+    }
+
+    /// How many triangles are slivers by the split's own test: a corner
+    /// within the band of the opposite side, which is no ring edge.
+    fn slivers(flat: &[[Scalar; 2]], hole_starts: &[usize], indices: &[usize]) -> usize {
+        let mut bounds = vec![0];
+        bounds.extend_from_slice(hole_starts);
+        bounds.push(flat.len());
+        let ring_edge = |a: usize, b: usize| {
+            bounds.windows(2).any(|ring| {
+                let (start, end) = (ring[0], ring[1]);
+                let next = |k: usize| if k + 1 == end { start } else { k + 1 };
+                (start..end).contains(&a) && (next(a) == b || next(b) == a)
+            })
+        };
+        let noise = collinear_band(1.0e-3);
+        indices
+            .chunks_exact(3)
+            .filter(|t| {
+                (0..3).any(|i| {
+                    let (a, b) = (t[(i + 1) % 3], t[(i + 2) % 3]);
+                    !ring_edge(a, b) && strictly_between(flat[a], flat[t[i]], flat[b], noise)
+                })
+            })
+            .count()
+    }
+
+    /// A face with a noisy straight run whose sliver the split removes,
+    /// and a hole corner 0.1 um inside its authored bottom edge, whose
+    /// triangle over that edge is real geometry. The split must keep that
+    /// triangle and that edge whole and still remove the sliver; otherwise
+    /// the face falls back to the clipper's cover, sliver and all (#278).
+    #[test]
+    fn a_sliver_goes_beside_a_thin_triangle_on_an_authored_edge() {
+        let flat = [
+            [0.0, 0.0],
+            [4.0, 0.0],
+            [4.0, 2.0],
+            [2.0, 2.0 + 5e-9],
+            [0.0, 2.0],
+            [1.0, 1e-7],
+            [0.5, 0.5],
+            [1.5, 0.5],
+        ];
+        let cover = clip_projected(&flat, &[5]).expect("the face triangulates");
+        assert!(slivers(&flat, &[5], &cover) > 0, "no sliver: {cover:?}");
+        let indices = clip_planar_face(&flat, &[5], 1.0e-3).expect("the face triangulates");
+        assert_eq!(slivers(&flat, &[5], &indices), 0, "{indices:?}");
+        let uses = edge_uses(&indices);
+        assert_eq!(uses.get(&(0, 1)), Some(&1), "{indices:?}");
+        assert!(uses.values().all(|&n| n <= 2), "{indices:?}");
+        let area: Scalar = indices
+            .chunks_exact(3)
+            .map(|t| doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]))
+            .sum();
+        assert!((area - 2.0 * (8.0 - 0.25)).abs() < 1e-6, "area {area}");
     }
 
     /// A face that is itself one thin triangle keeps it: every side is an
@@ -1016,6 +1256,125 @@ mod tests {
         planar[2].z = 0.0;
         assert_eq!(polygon_warp(&[&planar], 1e-3), Ok(None));
         assert_eq!(polygon_warp(&[], 1e-3), Err(PolygonRefusal::NoPlane));
+    }
+
+    /// Every ring corner in a triangle, every ring edge used once and
+    /// every other edge once each way, every triangle counter-clockwise.
+    fn assert_closed_cover(flat: &[[Scalar; 2]], indices: &[usize]) {
+        let n = flat.len();
+        let uses = edge_uses(indices);
+        for k in 0..n {
+            let key = (k.min((k + 1) % n), k.max((k + 1) % n));
+            assert_eq!(uses.get(&key), Some(&1), "ring edge {key:?}: {indices:?}");
+        }
+        for (key, &count) in &uses {
+            let ring = key.1 - key.0 == 1 || (key.0 == 0 && key.1 == n - 1);
+            if !ring {
+                assert_eq!(count, 2, "invented edge {key:?} unpaired: {indices:?}");
+            }
+        }
+        for t in indices.chunks_exact(3) {
+            let area = doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]);
+            assert!(area > 0.0, "{t:?} winds clockwise: {indices:?}");
+        }
+    }
+
+    /// The top cap of #278 as the B-rep path projects it (about `p0`):
+    /// `v` (3) lies 0.4 um off `a-b` (2-4) and `a` about 1 um off `p1-b`
+    /// (1-4). The clipper cuts the slivers `(a, v, b)` and `(b, p1, a)`;
+    /// both go, and the edge `p1-b` left behind takes both corners, `a`
+    /// from the sliver across it and `v` from the one across that sliver's
+    /// side. Before #278 it took `a` alone, `v` was in no triangle, and the
+    /// prism the cap closes meshed open. Now it is a fan from `p0`.
+    #[test]
+    fn a_corner_within_the_band_of_a_dropped_sliver_side_keeps_its_triangles() {
+        let flat = [
+            [0.0, 0.0],
+            [1.463449, 1.059852],
+            [0.877258, 2.548603],
+            [0.822303, 2.688173],
+            [0.6940839999999999, 3.013807],
+        ];
+        let cover = clip_projected(&flat, &[]).expect("the cap triangulates");
+        assert_eq!(cover, [4, 0, 1, 2, 3, 4, 4, 1, 2], "the clipper's slivers");
+        let indices = clip_planar_face(&flat, &[], 1.0e-3).expect("the cap triangulates");
+        assert_eq!(indices.len(), 9, "{indices:?}");
+        assert_closed_cover(&flat, &indices);
+        for t in indices.chunks_exact(3) {
+            assert!(t.contains(&0), "not a fan from p0: {indices:?}");
+            let area = doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]);
+            assert!(area > 0.1, "a sliver is left: {indices:?}");
+        }
+    }
+
+    /// A ring `a-m-b-c-m'`, `m` and `m'` nanometres either side of `a-b`,
+    /// covered by the two slivers `(a, m, b)` and `(a, b, m')` across
+    /// `a-b` and the triangle `(b, c, m')`. The slivers bound a thin quad
+    /// of real area with authored edges; both go, no kept edge was either
+    /// one's long side, and `b-m'` takes `m` only (it lies within the band
+    /// of that edge too). That split would leave `a` in no triangle and
+    /// three ring edges unused, so the face keeps the cover, slivers and
+    /// all (#278).
+    #[test]
+    fn a_split_that_would_lose_a_corner_keeps_the_cover() {
+        let flat = [
+            [0.0, 0.0],
+            [1.0, -5e-9],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 5e-9],
+        ];
+        let cover = vec![0, 1, 2, 0, 2, 4, 2, 3, 4];
+        assert_closed_cover(&flat, &cover);
+        let mut indices = cover.clone();
+        split_invented_edges(&flat, &[], collinear_band(1.0e-3), &mut indices);
+        assert_eq!(indices, cover);
+    }
+
+    /// A corner `c` right at the band's edge, 1 um off the invented edge
+    /// `p-q`: measured from `q` it is outside the band, so its triangle
+    /// `(q, p, c)` is no sliver, measured from `p` it is inside, so `p-q`
+    /// is split at `c`, in that triangle too, at its own apex. The split
+    /// triangles fold over, so the face keeps the cover (#278).
+    #[test]
+    fn a_corner_judged_differently_from_each_end_keeps_the_cover() {
+        let (p, c, q) = (
+            [2.0010139741904482, -1.4769585801927059],
+            [0.47388070694041173, 0.4295860653864178],
+            [-1.5635627300814559, 2.9732220774140643],
+        );
+        let noise = collinear_band(1.0e-3);
+        assert!(!strictly_between(q, c, p, noise) && strictly_between(p, c, q, noise));
+        let flat = [p, c, q, [-0.5618, 0.1229]];
+        let cover = vec![0, 2, 3, 2, 0, 1];
+        assert_closed_cover(&flat, &cover);
+        let mut indices = cover.clone();
+        split_invented_edges(&flat, &[], noise, &mut indices);
+        assert_eq!(indices, cover);
+    }
+
+    /// The cover check (#278) compares both what a split bounds and how its
+    /// triangles wind: a triangle and its mirror image add nothing to the
+    /// boundary, but the mirror image folds over.
+    #[test]
+    fn a_split_folding_over_is_not_the_same_cover() {
+        let flat = [
+            [0.0, 0.0],
+            [4.0, 0.0],
+            [4.0, 4.0],
+            [0.0, 4.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+            [1.0, 2.0],
+        ];
+        let cover = [0, 1, 2, 0, 2, 3];
+        assert!(same_cover(&flat, &cover, &[1, 2, 0, 2, 3, 0]));
+        assert!(
+            !same_cover(&flat, &cover, &[0, 1, 2]),
+            "a ring edge is lost"
+        );
+        let folded = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 5];
+        assert!(!same_cover(&flat, &cover, &folded), "a triangle folds over");
     }
 
     /// An authored ring edge is shared with the neighbour exactly as

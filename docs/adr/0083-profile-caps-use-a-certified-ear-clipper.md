@@ -265,3 +265,36 @@ place.
 | Accept the bridged ring as given and ear clip it | The clipper's ring is weakly simple only where it built the bridges itself; an input seam crossing or running along other edges would have to be validated the same way, and a seam to a pinched hole needs the pinch path's cycles anyway. |
 | Keep the seam as a forced triangle edge | Not needed for a tiling, and only one more edge for the neighbouring faces to share four times. |
 | Accept on solids too | An extruded keyhole is not a two-manifold. |
+
+## Amendment 2026-10-09: the noise-band split keeps every corner (#278)
+
+The #260 amendment kept mesh-compile's noise-band split
+(`planar::split_invented_edges`) after the clipper and said every corner
+other than an exporter's repeat is a triangle corner. The split broke that.
+It dropped each sliver whose apex lay within the band (1 um at a millimetre
+tolerance) of its invented long side, then split the remaining invented
+edges at every corner within the band of them, a second geometric test.
+The band is not transitive: on a real cap, `v` lay 0.4 um off `a-b` and
+`a` 1 um off `p1-b`, so both slivers `(a, v, b)` and `(b, p1, a)` went,
+but `v` was more than the band off `p1-b`, the edge left behind. `v` was
+in no triangle of that cap while the side faces kept it, and a closed
+faceted prism meshed open (`OpenSolid` since #265).
+
+- **The dropped triangles decide.** A kept edge whose other side was a
+  dropped sliver takes exactly the corners that sliver's short sides ran
+  through, in order, expanding a short side the same way when the sliver
+  across it was dropped too. The band is consulted once, to call a
+  triangle a sliver, and never again for the corners it removed.
+- **Checked against the cover.** The split is kept only if it bounds the
+  clipper's certified cover along the same edges: every triangle wound as
+  the cover's, each ring edge once in its direction, every other edge once
+  each way, no directed edge twice. Otherwise the face keeps the cover,
+  thin triangles included. The rule stated in #260 now holds again: every
+  ring corner is a triangle corner, and no face drops a corner the faces
+  sharing it keep.
+
+| Option | Why not |
+| --- | --- |
+| Drop the split | The clipper's slivers along shared noisy runs put one diagonal into two faces, four uses of one edge (the reason the split stayed in #260). |
+| Remove a near-collinear corner from every face sharing it | Moves the shell off its authored corners and needs the bound widened by the offset; keeping the corner costs nothing. |
+| Widen or tighten the band | Any band is non-transitive at its edge; the failure depends on the arrangement, not on one distance. |

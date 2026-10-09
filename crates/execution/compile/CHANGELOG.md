@@ -46,6 +46,20 @@ caret rule for `0.x` versions.
   `axiolid-construct`'s `extrude_profile`), where it returned a sliver or
   flat mesh; the exact compiler already refused it by that name.
 
+### Fixed
+
+- A planar face no longer drops a corner lying within the noise band of
+  a line through its neighbours (#278, ADR 0083 amendment). The sliver
+  split after the certified clipper re-tested the band for the corners of
+  the slivers it dropped; the band is not transitive, so a cap corner
+  0.4 um off `a-b`, with `a` 1 um off `p1-b`, ended up in no triangle of
+  the cap while the side faces kept it, and a closed faceted prism meshed
+  `OpenSolid`. The edge a dropped sliver leaves behind now takes exactly
+  that sliver's corners, chained through slivers dropped next to it, and a
+  split that does not bound the clipper's cover along the same edges is
+  discarded for the cover. Every ring corner of a planar B-rep or
+  authored polygon face is a triangle corner again.
+
 ## [0.3.15] - 2026-10-09
 
 ### Added

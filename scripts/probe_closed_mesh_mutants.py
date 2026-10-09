@@ -16,6 +16,15 @@ fallback. The test was removed; the mutant with it.
 #260: the split now runs on the certified clipper's triangles instead of
 earcut's. 11 / 11 still killed: noisy stair and census-slab corners still
 need it, so it stays.
+
+#278: "authored ring edges also split" and "slivers kept" re-anchored on
+the split's new step 1 and step 2b; the new steps are probed by
+`probe_sliver_split_mutants.py`. The split is now discarded for the
+clipper's cover when it does not bound the same face, so a broken split
+leaves slivers instead of an open mesh: 6 / 11 on the first run. The
+planar tests now also check that the split took effect (no sliver left
+on the stringer, a sliver beside a thin triangle on an authored edge,
+two corners in order on one shared diagonal): 11 / 11.
 """
 import pathlib, subprocess, sys
 
@@ -33,11 +42,11 @@ MUTANTS = [
      "    if triangles == 0 || triangles.saturating_mul(3).saturating_mul(n) > MAX_SPLIT_WORK {",
      "    if true || triangles == 0 || triangles.saturating_mul(3).saturating_mul(n) > MAX_SPLIT_WORK {"),
     ("authored ring edges also split", P,
-     "            if authored.contains(&key) || on_edge.contains_key(&key) {",
-     "            if on_edge.contains_key(&key) {"),
+     "            if authored.contains(&key)\n                || on_edge.contains_key(&key)",
+     "            if on_edge.contains_key(&key)\n                || on_edge.contains_key(&key)"),
     ("slivers kept", P,
-     "        .filter(|t| !is_sliver(t))",
-     "        .filter(|_t| true)"),
+     "        match sliver_apex(t) {",
+     "        match sliver_apex(t).filter(|_| false) {"),
     ("thin authored triangle dropped as sliver", P,
      "            !authored.contains(&(a.min(b), a.max(b)))\n                && strictly_between(",
      "            true\n                && strictly_between("),
