@@ -35,6 +35,26 @@
 //! section's, which needs a polygonal contour. The rules are
 //! `axiolid_model::station`'s; a mismatch is refused by name.
 //!
+//! # Seams (#263)
+//!
+//! A station on a seam of its basis curve (`axiolid_reference::station`'s
+//! module documentation says when it is on one) reads the piece its
+//! [`SeamSide`] names: an [`OrientedCurveStation`]'s own side, the
+//! outgoing piece for a plain [`CurveStation`]. A run of sections or
+//! offsets reads the outgoing piece at its first station and the incoming
+//! one at its last, the pieces it lies on. Where it crosses a seam whose
+//! two tangents differ -- between two stations, or at a station standing
+//! on the seam -- it gets a section in the seam's [`Mitre`] plane, the
+//! bisector of the two tangents, each side's placement projected along its
+//! own tangent onto the plane; the sampling meets that section exactly and
+//! refines on either side of it as before. A near reversal is refused by
+//! name. A seam whose tangents agree (a chain join, a jump in a banked
+//! curve's roll alone) is sampled as before.
+//!
+//! [`seams`] reads where a graph curve's seams are without evaluating it:
+//! an atomic curve's from its stored data, a 3D composite or trim of
+//! lines, polylines and circles at the running sum of its pieces' lengths.
+//!
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
 //! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
 //! [`OpenSectionsAtStations`]: axiolid_model::SurfaceRelation::OpenSectionsAtStations
@@ -50,10 +70,14 @@ use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
     CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, OrientedCurveStation,
-    SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
+    SeamSide, SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
 };
 use axiolid_profile::{Contour, Profile};
-use axiolid_reference::station::{station_section2, station_section3, SectionFrame};
+use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
+use axiolid_reference::station::{
+    exact_station_seams2, exact_station_seams3, station_seams2, station_seams3,
+    station_section2_on, station_section3_on, Mitre, SectionFrame, StationSeam,
+};
 
 /// Most sections one interval between two stations is bisected into.
 const MAX_DEPTH: u32 = 12;
@@ -72,7 +96,8 @@ pub struct ResolvedStation {
     /// layout.
     pub frame: Frame3,
     /// The basis curve's section frame at the distance, before the
-    /// offsets, in the requested [`StationFrame`].
+    /// offsets, in the requested [`StationFrame`]; on a seam, the frame of
+    /// the piece the station's [`SeamSide`] names.
     pub section: SectionFrame,
 }
 
@@ -82,7 +107,9 @@ pub struct ResolvedStation {
 /// See the [module documentation](self) and
 /// `axiolid_reference::station` for the conventions and the accuracy. An
 /// oriented station's frame is turned by its orientation; its point, and
-/// [`ResolvedStation::section`], are not.
+/// [`ResolvedStation::section`], are not. On a seam of the basis curve an
+/// oriented station reads the piece its `seam` names, a plain one the
+/// outgoing piece (#263).
 ///
 /// # Errors
 ///
@@ -98,13 +125,17 @@ pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation>
             frame,
         },
         orientation,
+        side,
     ) = match graph.get(id) {
-        Some(GeometryNode::CurveStation(station)) => (station, StationOrientation::default()),
+        Some(GeometryNode::CurveStation(station)) => {
+            (station, StationOrientation::default(), SeamSide::Outgoing)
+        }
         Some(GeometryNode::OrientedCurveStation(OrientedCurveStation {
             station,
             orientation,
+            seam,
             ..
-        })) => (station, *orientation),
+        })) => (station, *orientation, *seam),
         _ => {
             return Err(GeomError::InvalidInput(format!(
                 "node {id:?} is not a curve station"
@@ -112,7 +143,7 @@ pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation>
         }
     };
     let basis = Basis::of(graph, *basis)?;
-    let section = basis.section(station.distance, *frame)?;
+    let section = basis.section_on(station.distance, *frame, side)?;
     let point = place(&section, &station.offsets, Point2::ZERO);
     let mut placed = oriented(&section, &orientation, &orientation, 0.0)?.frame();
     placed.origin = point;
@@ -151,11 +182,17 @@ impl<'g> Basis<'g> {
         }
     }
 
-    /// The section frame at `distance`, in `frame`.
-    pub(crate) fn section(self, distance: Scalar, frame: StationFrame) -> GeomResult<SectionFrame> {
+    /// The section frame at `distance`, in `frame`, read from `side` on a
+    /// seam.
+    pub(crate) fn section_on(
+        self,
+        distance: Scalar,
+        frame: StationFrame,
+        side: SeamSide,
+    ) -> GeomResult<SectionFrame> {
         let section = match self {
-            Self::Two(curve) => station_section2(curve, distance)?,
-            Self::Three(curve) => station_section3(curve, distance)?,
+            Self::Two(curve) => station_section2_on(curve, distance, side)?,
+            Self::Three(curve) => station_section3_on(curve, distance, side)?,
         };
         match frame {
             StationFrame::Section => Ok(section),
@@ -166,6 +203,278 @@ impl<'g> Basis<'g> {
                 input: "a station frame this compiler does not know",
             }),
         }
+    }
+
+    /// Every seam of the curve, located (a B-spline's corner knots by
+    /// quadrature).
+    fn seams(self) -> GeomResult<Vec<StationSeam>> {
+        match self {
+            Self::Two(curve) => station_seams2(curve),
+            Self::Three(curve) => station_seams3(curve),
+        }
+    }
+}
+
+/// Where a graph curve's seams are, read from its stored data (#263): the
+/// distances in its station measure, with the curve's own parameter.
+///
+/// An atomic 2D or 3D curve reports
+/// `axiolid_reference::station::exact_station_seams2` or
+/// `exact_station_seams3` (every seam exact, or refused). A 3D composite
+/// or trim of lines, polylines and circles (what a plain composite curve
+/// lowers to) reports the joins of its pieces in the direction of travel,
+/// at the running sum of their lengths, which is also the parameter; none
+/// of them is smooth, since a join's continuity is declared, not
+/// guaranteed by the data.
+///
+/// # Errors
+///
+/// A seam whose distance would need a quadrature (a B-spline's corner
+/// knot), a relation holding any other curve, a 2D relation, an instance,
+/// and a node that is not a curve, each by name.
+pub fn seams(
+    graph: &GeometryGraph,
+    curve: NodeId,
+    options: &ExecutionOptions,
+) -> GeomResult<Vec<StationSeam>> {
+    let unsupported = |input: &'static str| GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: Operation::CurveEvaluation,
+        input,
+    };
+    match graph.get(curve) {
+        Some(GeometryNode::Curve2(curve)) => exact_station_seams2(curve),
+        Some(GeometryNode::Curve3(curve)) => exact_station_seams3(curve),
+        Some(GeometryNode::CurveRelation(
+            CurveRelation::Composite { .. } | CurveRelation::Trimmed { .. },
+        )) => {
+            let pieces = match crate::directrix::exact_pieces(graph, curve, options) {
+                Ok(Some(pieces)) => pieces,
+                Ok(None) => {
+                    return Err(unsupported(
+                        "seams of a curve relation holding a curve other than a line, a \
+                         polyline or a circle: its lengths are not stored data",
+                    ))
+                }
+                Err(GeomError::InvalidInput(detail)) if detail.contains("not a 3D curve") => {
+                    return Err(unsupported(
+                        "seams of a 2D curve relation: only 3D composites and trims are read",
+                    ))
+                }
+                Err(error) => return Err(error),
+            };
+            let mut out = Vec::with_capacity(pieces.len().saturating_sub(1));
+            let mut run = 0.0;
+            for piece in pieces.iter().take(pieces.len().saturating_sub(1)) {
+                run += piece.length();
+                out.push(StationSeam::new(run, run, false, true));
+            }
+            Ok(out)
+        }
+        Some(GeometryNode::CurveRelation(_)) => Err(unsupported(
+            "seams of a curve relation other than a composite or a trim",
+        )),
+        Some(GeometryNode::Instance(_)) => Err(unsupported("seams of an instanced curve")),
+        Some(_) => Err(GeomError::InvalidInput(format!(
+            "node {curve:?} is not a curve"
+        ))),
+        None => Err(GeomError::InvalidInput(format!(
+            "curve {curve:?} is outside the graph"
+        ))),
+    }
+}
+
+/// The arc-length tolerance around a distance: what counts as ON a seam.
+fn seam_slack(distance: Scalar) -> Scalar {
+    ARC_LENGTH_TOLERANCE * distance.abs().max(1.0)
+}
+
+/// A run of stations along one basis curve, with the seams it meets.
+struct Run<'g> {
+    basis: Basis<'g>,
+    frame: StationFrame,
+    /// Mitred sections at interior distances, each one of the run's
+    /// knots.
+    mitres: Vec<(Scalar, Mitre)>,
+    /// The run's last distance, when it lies on a seam: read from the
+    /// incoming piece there.
+    end: Option<Scalar>,
+}
+
+/// How a run reads a distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// The section the mesh stands there: mitred on a mitre's knot.
+    Placed,
+    /// On a mitre's knot, the plain section of the piece ending there: the
+    /// interval before it is sampled as that piece alone would be.
+    Incoming,
+    /// On a mitre's knot, the plain section of the piece starting there.
+    Outgoing,
+}
+
+/// A mitre's plane: a point on it and its unit normal.
+type MitrePlane = (Point3, axiolid_core::Vec3);
+
+/// The frames a run places one section in.
+enum RunFrame {
+    /// One frame: `base` locates the origin, `turned` orients the section.
+    /// `before` and `after` are the planes of the nearest mitres ahead of
+    /// and behind the section, which it must not cross.
+    Plain {
+        base: SectionFrame,
+        turned: SectionFrame,
+        before: Option<MitrePlane>,
+        after: Option<MitrePlane>,
+    },
+    /// A mitre, with each side's turned frame.
+    Mitred {
+        mitre: Mitre,
+        incoming: SectionFrame,
+        outgoing: SectionFrame,
+    },
+}
+
+impl RunFrame {
+    /// A section point `local` with `offsets`: placed in the frame, or in
+    /// each side's frame and projected onto the mitre plane. `None` for a
+    /// point of a plain section beyond the plane of a mitre next to it,
+    /// which that mitre would cut.
+    fn place(&self, offsets: &StationOffsets, local: Point2) -> Option<Point3> {
+        match self {
+            Self::Plain {
+                base,
+                turned,
+                before,
+                after,
+            } => {
+                let point = place_turned(base, turned, offsets, local);
+                // Signed height above a mitre plane, along its normal.
+                let height = |(on, normal): &MitrePlane| (point - *on).dot(*normal);
+                let slack = |(on, _): &MitrePlane| seam_slack((point - *on).length());
+                let crosses = before.as_ref().is_some_and(|m| height(m) > slack(m))
+                    || after.as_ref().is_some_and(|m| height(m) < -slack(m));
+                (!crosses).then_some(point)
+            }
+            Self::Mitred {
+                mitre,
+                incoming,
+                outgoing,
+            } => {
+                let across = StationOffsets::new(offsets.lateral, offsets.vertical, 0.0);
+                Some(mitre.place(
+                    place_turned(&mitre.incoming, incoming, &across, local),
+                    place_turned(&mitre.outgoing, outgoing, &across, local),
+                    offsets.longitudinal,
+                ))
+            }
+        }
+    }
+}
+
+/// Why a run cannot place a section: a mitre would cut it.
+fn cut_by_mitre() -> GeomError {
+    GeomError::InvalidInput(
+        "station: a section of the run reaches beyond the mitre plane of a seam the run \
+         crosses, so the mitre would cut it"
+            .into(),
+    )
+}
+
+impl<'g> Run<'g> {
+    /// The run over `knots` (ascending): the seams strictly between its
+    /// first and last knot whose tangents differ get a mitre and a knot of
+    /// their own (an existing knot within tolerance is reused); a seam on
+    /// the last knot is read from its incoming side. Returns the run and
+    /// its knots.
+    fn new(
+        basis: Basis<'g>,
+        frame: StationFrame,
+        mut knots: Vec<Scalar>,
+    ) -> GeomResult<(Self, Vec<Scalar>)> {
+        let (first, last) = (knots[0], knots[knots.len() - 1]);
+        let mut run = Self {
+            basis,
+            frame,
+            mitres: Vec::new(),
+            end: None,
+        };
+        for seam in basis.seams()? {
+            let at = seam.distance;
+            if seam.smooth || at <= first + seam_slack(first) || at > last + seam_slack(last) {
+                continue;
+            }
+            if at >= last - seam_slack(last) {
+                run.end = Some(last);
+                continue;
+            }
+            let incoming = basis.section_on(at, frame, SeamSide::Incoming)?;
+            let outgoing = basis.section_on(at, frame, SeamSide::Outgoing)?;
+            let Some(mitre) = Mitre::between(&incoming, &outgoing)? else {
+                continue;
+            };
+            let knot = match knots.iter().find(|k| (**k - at).abs() <= seam_slack(at)) {
+                Some(k) => *k,
+                None => {
+                    let index = knots.partition_point(|k| *k < at);
+                    knots.insert(index, at);
+                    at
+                }
+            };
+            run.mitres.push((knot, mitre));
+        }
+        Ok((run, knots))
+    }
+
+    /// The frames at `s` read as `reading`, the fraction `u` between
+    /// sections oriented `a` and `b`.
+    fn at(
+        &self,
+        s: Scalar,
+        reading: Reading,
+        a: &StationOrientation,
+        b: &StationOrientation,
+        u: Scalar,
+    ) -> GeomResult<RunFrame> {
+        if let Some((_, mitre)) = self.mitres.iter().find(|(knot, _)| *knot == s) {
+            let plain = |base: &SectionFrame| -> GeomResult<RunFrame> {
+                Ok(RunFrame::Plain {
+                    base: *base,
+                    turned: oriented(base, a, b, u)?,
+                    before: None,
+                    after: None,
+                })
+            };
+            return match reading {
+                Reading::Incoming => plain(&mitre.incoming),
+                Reading::Outgoing => plain(&mitre.outgoing),
+                Reading::Placed => Ok(RunFrame::Mitred {
+                    mitre: *mitre,
+                    incoming: oriented(&mitre.incoming, a, b, u)?,
+                    outgoing: oriented(&mitre.outgoing, a, b, u)?,
+                }),
+            };
+        }
+        let side = if self.end == Some(s) {
+            SeamSide::Incoming
+        } else {
+            SeamSide::Outgoing
+        };
+        let base = self.basis.section_on(s, self.frame, side)?;
+        let plane = |(_, mitre): &(Scalar, Mitre)| (mitre.outgoing.point, mitre.normal);
+        let before = self.mitres.iter().find(|(knot, _)| *knot > s).map(plane);
+        let after = self
+            .mitres
+            .iter()
+            .rev()
+            .find(|(knot, _)| *knot < s)
+            .map(plane);
+        Ok(RunFrame::Plain {
+            turned: oriented(&base, a, b, u)?,
+            base,
+            before,
+            after,
+        })
     }
 }
 
@@ -265,6 +574,12 @@ fn quad_spread(a: Point3, b: Point3, c: Point3, d: Point3) -> Scalar {
 
 /// Distances at which an interval `[a, b]` is meshed, `a` included and `b`
 /// excluded: bisected until [`passes`] holds, at most [`MAX_DEPTH`] deep.
+///
+/// The ends are read as the pieces inside the interval see them (#263): a
+/// mitre's knot at `a` as its outgoing piece's plain section, at `b` as its
+/// incoming piece's, so an interval beside a mitre is sampled as that
+/// piece alone would be. A midpoint section a mitre would cut (`None`) is
+/// not inserted: the interval is joined straight to its end instead.
 fn refine<F>(
     a: Scalar,
     b: Scalar,
@@ -274,21 +589,24 @@ fn refine<F>(
     out: &mut Vec<Scalar>,
 ) -> GeomResult<()>
 where
-    F: Fn(Scalar) -> GeomResult<Vec<Point3>>,
+    F: Fn(Scalar, Reading) -> GeomResult<Option<Vec<Point3>>>,
 {
-    let start = eval(a)?;
-    let end = eval(b)?;
+    let start = eval(a, Reading::Outgoing)?.ok_or_else(cut_by_mitre)?;
+    let end = eval(b, Reading::Incoming)?.ok_or_else(cut_by_mitre)?;
     // Depth-first, left half first, so distances come out increasing.
     let mut stack = vec![(a, b, start, end, 0u32)];
     while let Some((lo, hi, at_lo, at_hi, depth)) = stack.pop() {
         let mid = 0.5 * (lo + hi);
-        let at_mid = eval(mid)?;
-        let straight = passes(&at_lo, &at_hi, &at_mid, edges, chord);
-        if straight || depth >= MAX_DEPTH || !(mid > lo && mid < hi) {
-            out.push(lo);
-        } else {
-            stack.push((mid, hi, at_mid.clone(), at_hi, depth + 1));
-            stack.push((lo, mid, at_lo, at_mid, depth + 1));
+        let at_mid = eval(mid, Reading::Placed)?;
+        let straight = at_mid
+            .as_ref()
+            .is_none_or(|at_mid| passes(&at_lo, &at_hi, at_mid, edges, chord));
+        match at_mid {
+            Some(at_mid) if !(straight || depth >= MAX_DEPTH || !(mid > lo && mid < hi)) => {
+                stack.push((mid, hi, at_mid.clone(), at_hi, depth + 1));
+                stack.push((lo, mid, at_lo, at_mid, depth + 1));
+            }
+            _ => out.push(lo),
         }
         if out.len() > MAX_SECTIONS {
             return Err(GeomError::BudgetExceeded {
@@ -307,7 +625,7 @@ fn sample_run<F>(
     eval: F,
 ) -> GeomResult<Vec<Scalar>>
 where
-    F: Fn(Scalar) -> GeomResult<Vec<Point3>>,
+    F: Fn(Scalar, Reading) -> GeomResult<Option<Vec<Point3>>>,
 {
     let mut out = Vec::new();
     for pair in distances.windows(2) {
@@ -332,17 +650,21 @@ fn interval(distances: &[Scalar], s: Scalar) -> (usize, Scalar) {
     (i, ((s - a) / (b - a)).clamp(0.0, 1.0))
 }
 
-/// The point of an offset curve by stations at distance `s`.
+/// The point of an offset curve by stations at distance `s`, read as
+/// `reading`; `None` where a mitre would cut it.
 fn offset_point(
-    basis: Basis<'_>,
+    run: &Run<'_>,
     stations: &[Station],
     distances: &[Scalar],
-    frame: StationFrame,
     s: Scalar,
-) -> GeomResult<Point3> {
+    reading: Reading,
+) -> GeomResult<Option<Point3>> {
     let (i, u) = interval(distances, s);
     let offsets = lerp_offsets(&stations[i].offsets, &stations[i + 1].offsets, u);
-    Ok(place(&basis.section(s, frame)?, &offsets, Point2::ZERO))
+    let base = StationOrientation::default();
+    Ok(run
+        .at(s, reading, &base, &base, u)?
+        .place(&offsets, Point2::ZERO))
 }
 
 /// An [`CurveRelation::OffsetByStations`] sampled as a sweep directrix:
@@ -384,12 +706,15 @@ pub(crate) fn offset_curve_points(
         knots.insert(0, lo);
         knots.push(hi);
     }
+    let (run, knots) = Run::new(basis, *frame, knots)?;
     let chord = crate::compiler::chord_error(options);
-    let at = |s| offset_point(basis, stations, &distances, *frame, s);
-    let samples = sample_run(&knots, chord, &[], |s| at(s).map(|p| vec![p]))?;
+    let at = |s, reading| offset_point(&run, stations, &distances, s, reading);
+    let samples = sample_run(&knots, chord, &[], |s, reading| {
+        at(s, reading).map(|p| p.map(|p| vec![p]))
+    })?;
     let mut points = samples
         .into_iter()
-        .map(at)
+        .map(|s| at(s, Reading::Placed)?.ok_or_else(cut_by_mitre))
         .collect::<GeomResult<Vec<_>>>()?;
     if let Some((a, b)) = range {
         if a > b {
@@ -492,7 +817,8 @@ pub(crate) fn stationed_spine(
             "station-placed spine distances must increase strictly".into(),
         ));
     }
-    let placed = |s: Scalar| -> GeomResult<(Rings, Vec<Point3>)> {
+    let (run, knots) = Run::new(basis, frame, distances.clone())?;
+    let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<(Rings, Vec<Point3>)>> {
         let (i, u) = interval(&distances, s);
         let local = lerp_rings(&rings[i], &rings[i + 1], u);
         let offsets = lerp_offsets(
@@ -500,20 +826,20 @@ pub(crate) fn stationed_spine(
             &sections[i + 1].station.offsets,
             u,
         );
-        let section = basis.section(s, frame)?;
-        let turned = oriented(
-            &section,
+        let at = run.at(
+            s,
+            reading,
             &sections[i].orientation,
             &sections[i + 1].orientation,
             u,
         )?;
-        let points = local
+        let points: Option<Vec<Point3>> = local
             .outer
             .iter()
             .chain(local.holes.iter().flatten())
-            .map(|p| place_turned(&section, &turned, &offsets, *p))
+            .map(|p| at.place(&offsets, *p))
             .collect();
-        Ok((local, points))
+        Ok(points.map(|points| (local, points)))
     };
     // Wall edges: each ring closes on itself.
     let mut edges = Vec::new();
@@ -522,12 +848,12 @@ pub(crate) fn stationed_spine(
         edges.extend((0..len).map(|k| (base + k, base + (k + 1) % len)));
         base += len;
     }
-    let samples = sample_run(&distances, half, &edges, |s| {
-        placed(s).map(|(_, points)| points)
+    let samples = sample_run(&knots, half, &edges, |s, reading| {
+        placed(s, reading).map(|section| section.map(|(_, points)| points))
     })?;
     let mut stations = Vec::with_capacity(samples.len());
     for s in samples {
-        let (local, points) = placed(s)?;
+        let (local, points) = placed(s, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
         let mut it = points.into_iter();
         let mut loops = Vec::with_capacity(1 + local.holes.len());
         loops.push(it.by_ref().take(local.outer.len()).collect());
@@ -784,16 +1110,17 @@ pub(crate) fn sectioned_surface(
             "sectioned surface distances must increase strictly".into(),
         ));
     }
-    let placed = |s: Scalar| -> GeomResult<Vec<Point3>> {
+    let (run, knots) = Run::new(basis, frame, distances.clone())?;
+    let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<Vec<Point3>>> {
         let (i, u) = interval(&distances, s);
         let offsets = lerp_offsets(
             &sections[i].station.offsets,
             &sections[i + 1].station.offsets,
             u,
         );
-        let section = basis.section(s, frame)?;
-        let turned = oriented(
-            &section,
+        let at = run.at(
+            s,
+            reading,
             &sections[i].orientation,
             &sections[i + 1].orientation,
             u,
@@ -801,22 +1128,15 @@ pub(crate) fn sectioned_surface(
         Ok(polylines[i]
             .iter()
             .zip(&polylines[i + 1])
-            .map(|(p, q)| {
-                place_turned(
-                    &section,
-                    &turned,
-                    &offsets,
-                    Point2::new(lerp(p.x, q.x, u), lerp(p.y, q.y, u)),
-                )
-            })
+            .map(|(p, q)| at.place(&offsets, Point2::new(lerp(p.x, q.x, u), lerp(p.y, q.y, u))))
             .collect())
     };
     let chord = crate::compiler::chord_error(options);
     let edges: Vec<(usize, usize)> = (0..count - 1).map(|k| (k, k + 1)).collect();
-    let samples = sample_run(&distances, chord, &edges, placed)?;
+    let samples = sample_run(&knots, chord, &edges, placed)?;
     let mut positions = Vec::with_capacity(samples.len() * count);
     for s in &samples {
-        positions.extend(placed(*s)?);
+        positions.extend(placed(*s, Reading::Placed)?.ok_or_else(cut_by_mitre)?);
     }
     let mut indices = Vec::with_capacity((samples.len() - 1) * (count - 1) * 6);
     for row in 0..samples.len() - 1 {

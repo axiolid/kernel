@@ -10,7 +10,7 @@ use axiolid_model::{
 
 mod elevated;
 mod pieces;
-pub(crate) use pieces::pieces;
+pub(crate) use pieces::{exact_pieces, pieces};
 
 const MAX_DEPTH: usize = 256;
 const MAX_POINTS: usize = 1_000_000;

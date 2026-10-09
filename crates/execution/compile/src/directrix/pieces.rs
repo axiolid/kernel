@@ -31,6 +31,17 @@ pub(crate) fn pieces(
     Ok(pieces.filter(|p| !matches!(p.as_slice(), [PathPiece::Arc { .. }])))
 }
 
+/// The directrix as exact pieces in the direction of travel, a lone arc
+/// included, or `None` when it holds a curve other than a line, a
+/// polyline or a circle (#263: its joins are seams).
+pub(crate) fn exact_pieces(
+    graph: &GeometryGraph,
+    id: NodeId,
+    options: &ExecutionOptions,
+) -> GeomResult<Option<Vec<PathPiece>>> {
+    resolve(graph, id, None, options, 0)
+}
+
 type Resolved = Option<Vec<PathPiece>>;
 
 fn reversed(pieces: Resolved) -> Resolved {

@@ -114,6 +114,8 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
 - `crates/representations/modeling/graph/src/station.rs`
 - `crates/algorithms/parametric/evaluate/src/station.rs`
 - `crates/execution/compile/src/station.rs`
+- `crates/algorithms/parametric/evaluate/src/station/seam.rs` and
+  `crates/representations/analytic/curve/src/seam.rs` (#263)
 - ADR 0081 (banked section frame), #239 (`arc_parameter`).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
@@ -190,3 +192,94 @@ tags are given, closed profiles included.
 Still open: a station along an instance or a curve relation, and offset
 curves extended past the first and last station (non-blocking for the
 consumer).
+
+## Amendment 2026-10-09: seams (#263)
+
+The consumer (openbimrs/ifc#346) needs a stated frame where a station
+lands on a tangent discontinuity of its basis, and lets the PREVIOUS
+segment's tangent govern there (IFC4X3 ADD2 8.9.3.48.3); its section and
+offset runs across such a discontinuity are mitred (8.8.3.35.1). The
+evaluators took the next piece (`ElevationLaw::piece_at`: "seams belong
+to the piece that starts there"; a polyline's spans) without saying so,
+and on a polyline or a B-spline the numerical arc-length inverse could
+land a hair either side of a vertex, so the frame there was not even
+deterministic.
+
+- **What a seam is.** An interior place where two pieces of the basis
+  meet: a polyline's vertex, a B-spline's knot of multiplicity at least
+  its degree, an arc-length chain's join or an intrinsic law's seam
+  (smooth: the heading is continuous by construction), an elevated
+  curve's profile seam (the grade may jump), a banked curve's cant seam
+  (the roll may jump) and pivot seam (the grade of its point path may).
+- **The rule.** A station within `ARC_LENGTH_TOLERANCE * max(1, s)` of a
+  seam that is not smooth is ON it, and is read at the seam's own
+  distance from the piece its `SeamSide` names: `Outgoing`, the piece
+  that starts there, which is the default and what every evaluator
+  already read, or `Incoming`, the piece that ends there, read as the
+  curve truncated at the seam at its end (a polyline's previous segment,
+  a B-spline's previous span through the reversed spline, a profile, cant
+  and pivot law cut at the seam). At the curve's start and end there is
+  one piece, and both sides read it. A consumer with a coarser precision
+  snaps its distance to the seam position the kernel reports.
+- **Representation, additively.** `SeamSide` (`#[non_exhaustive]`,
+  default `Outgoing`) lives in `axiolid-curve`, which both `axiolid-model`
+  and `axiolid-evaluate` depend on; neither may depend on the other.
+  `OrientedCurveStation` is `#[non_exhaustive]`, so it gains a field,
+  `seam`, set by `with_seam_side`; `CurveStation` has public fields and
+  cannot, so `CurveStation::with_seam_side` returns the oriented station
+  in its base frame, and a plain `CurveStation` keeps reading the
+  outgoing piece. `Station`, shared by every run, is unchanged: a run
+  needs no side (below). The evaluator reads a side through
+  `station_section2_on` / `station_section3_on`; the side-less functions
+  are the outgoing reading. A frame placement at a station (#264) reuses
+  the oriented station and so its side.
+- **Runs.** `OffsetByStations`, `StationedSpine`, `SectionsAtStations`,
+  `SectionedSurface` and `OpenSectionsAtStations` read the outgoing piece
+  at their first station and the incoming one at their last, the pieces
+  they lie on. A seam strictly inside the run whose tangents (in the
+  run's `StationFrame`) differ by more than `SEAM_TANGENT_TOLERANCE =
+  1e-9` rad gets a section in its MITRE plane, through the seam's point
+  normal to `n = (t_in + t_out) / |t_in + t_out|`, whether it falls
+  between two stations or on one: each section point is placed in both
+  sides' frames (offsets and orientation as usual, the longitudinal
+  offset aside), each projected along its own side's tangent onto the
+  plane -- where that side's extrusion of the section meets it -- and the
+  midpoint taken; the two coincide when the outgoing frame is the
+  incoming one turned about `t_in x t_out` (a plan turn, a grade break on
+  a straight plan). The longitudinal offset moves the section along `n`.
+  `|t_in + t_out| / 2`, the cosine of half the turn, at most
+  `MITRE_TOLERANCE = 1e-6` is a near reversal and refused by name, as is
+  a seam whose two sides do not share their point. A seam whose tangents
+  agree -- a chain join, a jump in a banked curve's roll alone -- is
+  sampled as before.
+- **Sampling beside a mitre.** The interval on either side of a mitre is
+  refined as its piece alone would be (the test reads that piece's plain
+  section at the seam), then joined to the mitred section. A sampled
+  midpoint section the mitre plane would cut is not inserted; an authored
+  section it cuts is refused by name. The deviation of these meshes stays
+  `Unbounded` by name.
+- **Where the seams are.** `station_seams2` / `station_seams3` list a
+  curve's seams from its stored data: distance in the station measure,
+  native parameter, `smooth` (the data guarantees one frame on both
+  sides) and `exact` (no quadrature: false only for a B-spline's corner
+  knot). `exact_station_seams2` / `exact_station_seams3` refuse a curve
+  with an inexact seam by a typed `UnsupportedInput`, as they do a chain
+  whose parametric piece turns a corner inside itself.
+  `axiolid_mesh_compile::station::seams` reads a graph curve: an atomic
+  curve exactly, and a 3D composite or trim of lines, polylines and
+  circles -- what a plain composite curve lowers to -- at the running sum
+  of its pieces' lengths in the direction of travel; any other relation
+  and a 2D relation are refused by name.
+
+| Option | Why not |
+| --- | --- |
+| A side field on `Station` or `CurveStation` | Both have public fields: a new field breaks every struct literal; and a run's side is decided by the run. |
+| Exact equality with the seam distance instead of a tolerance | The polyline's numerical arc-length inverse lands within the tolerance either side of a vertex; equality would leave the frame at a seam to rounding. |
+| Mitre by rotating the incoming frame half way about `t_in x t_out` | Equal to the projection when the frames are compatible, and undefined in what to do with the roll between them when they are not (a turn on a grade); the projection lies in the plane either way. |
+| Refuse a mitre whose two projections differ | Refuses every turn on a grade under the reference-up frame, the case alignments have most. |
+| `SeamSide` in `axiolid-model` | `axiolid-evaluate` cannot depend on the graph; a second enum would be two sources of truth. |
+
+Still open: seam positions of 2D relations, a roll that jumps at a seam
+inside a run (sampled across as before), stations along a curve relation
+(still refused), a chain's parametric piece turning a corner inside
+itself (read as before), and a certified bound for a mitred run.

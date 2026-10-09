@@ -1,4 +1,5 @@
-"""Mutation probe for stations and station-placed sections (#241, #246).
+"""Mutation probe for stations and station-placed sections (#241, #246,
+#263).
 
 Each mutant breaks one step a station's point, frame or meshing rests on:
 the section frame's axes (left normal, reference-up lateral and up, the
@@ -24,6 +25,16 @@ station interval search with two stations, the surface's re-check of tags
 the graph already validated, and the sheet's winding (area is unsigned).
 For #246 likewise the compiler's re-check of mixed tagging, which the graph
 refuses before any compiler sees it.
+
+For #263 the seams: which piece a station on one reads (a polyline's,
+a B-spline's, a profile's and a cant law's incoming side, the tolerance
+that puts a station on a seam, the default side), where the seams are
+(running sums, merged flags, the refusal of an inexact one), the mitre
+(its normal, its projection, the tangent tolerance, the reversal), and how
+a run uses it (the resolved side, the mitre knot, the run's incoming end,
+sampling beside a mitre, the sections a mitre would cut):
+`evaluate/tests/station_seam.rs`, `compile/tests/stationed_seam.rs` and
+`graph/tests/station.rs`.
 """
 import pathlib, subprocess, sys
 
@@ -36,6 +47,9 @@ EVAL = ["-p", "axiolid-evaluate", "--test", "station"]
 COMPILE = ["-p", "axiolid-mesh-compile", "--test", "stationed"]
 MODEL = ["-p", "axiolid-model", "--test", "station"]
 ORIENTED = ["-p", "axiolid-mesh-compile", "--test", "stationed_oriented"]
+S = "crates/algorithms/parametric/evaluate/src/station/seam.rs"
+SEAM = ["-p", "axiolid-evaluate", "--test", "station_seam"]
+SEAMED = ["-p", "axiolid-mesh-compile", "--test", "stationed_seam"]
 
 MUTANTS = [
     ('planar lateral to the right', E,
@@ -48,8 +62,8 @@ MUTANTS = [
      '        up: right.cross(tangent),',
      '        up: Vec3::Z,', [EVAL]),
     ('banked lateral unrolled the wrong way', E,
-     '                lateral: section.lateral,',
-     '                lateral: -section.lateral,', [EVAL]),
+     '        lateral: section.lateral,',
+     '        lateral: -section.lateral,', [EVAL, SEAM]),
     ('plan frame lateral to the right', E,
      '            lateral: Vec3::new(-tangent.y, tangent.x, 0.0),',
      '            lateral: Vec3::new(tangent.y, -tangent.x, 0.0),', [EVAL]),
@@ -177,6 +191,64 @@ MUTANTS = [
      '                if dimension != CurveDimension::Three {',
      '            GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {\n'
      '                if dimension != CurveDimension::Two {', [MODEL]),
+    # --- #263: seams ---
+    ('incoming polyline side reads the outgoing segment', S,
+     '        SeamSide::Incoming => segments[..at].iter().rev().find(|s| s.2 > 0.0),',
+     '        SeamSide::Incoming => segments[at..].iter().find(|s| s.2 > 0.0),', [SEAM]),
+    ('incoming spline side reads the outgoing span', S,
+     '                    -derivative2(&Curve2::BSpline(reversed), pivot - seam.parameter)?',
+     '                    { let _ = (reversed, pivot); derivative2(curve, seam.parameter)? }',
+     [SEAM]),
+    ('incoming profile not cut at the seam', S,
+     '                    elevation: elevation_ending_at(&elevated.elevation, at),',
+     '                    elevation: elevated.elevation.clone(),', [SEAM]),
+    ('incoming cant law not cut at the seam', S,
+     '                    cant: law_ending_at(&banked.cant, at),',
+     '                    cant: banked.cant.clone(),', [SEAM]),
+    ('no tolerance puts a station on a seam', S,
+     '<= slack(distance))',
+     '<= 0.0)', [SEAM]),
+    ('polyline seam one segment late', S,
+     '                out.push(StationSeam::new(run, start as Scalar, false, true));',
+     '                out.push(StationSeam::new(run + length, start as Scalar, false, true));',
+     [SEAM]),
+    ('merged seam keeps the first flag', S,
+     '                last.smooth &= seam.smooth;',
+     '', [SEAM]),
+    ('inexact seam passed as exact', S,
+     '    if seams.iter().any(|seam| !seam.exact) {',
+     '    if false {', [SEAM]),
+    ('mitre normal is the outgoing tangent', S,
+     '            normal: sum / (2.0 * half),',
+     '            normal: t_out,', [SEAM]),
+    ('mitre projects along its normal', S,
+     '            point - frame.tangent * (height / frame.tangent.dot(self.normal))',
+     '            point - self.normal * height', [SEAM]),
+    ('tangent tolerance ignored', S,
+     '        if turn <= SEAM_TANGENT_TOLERANCE {',
+     '        if turn <= 0.0 {', [SEAM]),
+    ('reversal mitred', S,
+     '        if half <= MITRE_TOLERANCE {',
+     '        if false {', [SEAM]),
+    ('resolved station ignores its side', C,
+     '    let section = basis.section_on(station.distance, *frame, side)?;',
+     '    let section = basis.section_on(station.distance, *frame, SeamSide::Outgoing)?;',
+     [SEAMED]),
+    ('run ending on a seam reads the outgoing side', C,
+     '                run.end = Some(last);',
+     '                let _ = last;', [SEAMED]),
+    ('no mitre placed', C,
+     '            run.mitres.push((knot, mitre));',
+     '            let _ = (knot, mitre);', [SEAMED]),
+    ('sections a mitre cuts accepted', C,
+     '                (!crosses).then_some(point)',
+     '                Some(point)', [SEAMED]),
+    ('interval beside a mitre sampled against the mitre', C,
+     '    let end = eval(b, Reading::Incoming)?.ok_or_else(cut_by_mitre)?;',
+     '    let end = eval(b, Reading::Placed)?.ok_or_else(cut_by_mitre)?;', [SEAMED]),
+    ('oriented station defaults to the incoming side', G,
+     '            seam: SeamSide::Outgoing,',
+     '            seam: SeamSide::Incoming,', [MODEL, SEAMED]),
 ]
 
 

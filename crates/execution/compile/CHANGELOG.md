@@ -9,6 +9,29 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station::seams` (#263, ADR 0082 amendment): where a graph curve's
+  seams are, from its stored data -- an atomic curve's (refusing a
+  B-spline's corner knot, which only a quadrature locates), and a 3D
+  composite or trim of lines, polylines and circles at the running sum of
+  its pieces' lengths; any other relation and a 2D relation are refused
+  by name.
+
+### Changed
+
+- Stations on seams (#263): `station::resolve` reads an
+  `OrientedCurveStation` on a seam of its basis from the piece its `seam`
+  names (a plain `CurveStation` the outgoing one). Offset curves by
+  stations, station-placed spines and sectioned surfaces read the outgoing
+  piece at their first station and the incoming one at their last, and
+  where they cross a seam whose tangents differ -- between two stations or
+  at one -- place a section in its mitre plane (the bisector of the two
+  tangents), sampling each side as its piece alone; a near reversal and an
+  authored section the mitre would cut are refused by name, and a seam
+  whose tangents agree is sampled as before. Their deviation is still
+  reported unbounded by name.
+
 ### Fixed
 
 - **Booleans with an operand extruded against its profile normal are
