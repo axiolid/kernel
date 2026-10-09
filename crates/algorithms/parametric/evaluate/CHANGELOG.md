@@ -11,6 +11,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- Placing at a station (#264, ADR 0082 amendment):
+  `SectionFrame::placement` is the rigid motion taking local `x`, `y`,
+  `z` onto the tangent, the left lateral and up and the origin onto the
+  point (a linear placement's reading, not the provider layout of
+  `SectionFrame::frame`); `SectionFrame::moved` carries a frame by a
+  rigid motion; `station_frame_is_exact2` / `station_frame_is_exact3`
+  say whether a station frame is exact (a line only: every other family
+  reads its distance by the arc-length inverse or its point by
+  quadrature).
+
 - Seams of a station's basis curve (#263, ADR 0082 amendment), in
   `station::seam`: `station_seams2` / `station_seams3` list where two
   pieces of a curve meet -- a polyline's vertices at the running sum of

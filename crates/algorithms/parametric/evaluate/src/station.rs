@@ -78,6 +78,15 @@
 //! run of sections crossing one stands in; see [`seam`] for both. At the
 //! curve's start and end there is one piece, and both sides read it.
 //!
+//! # Placing at a station (#264)
+//!
+//! [`SectionFrame::placement`] is the rigid motion a node placed at a
+//! station is moved by: local `x`, `y`, `z` onto the tangent, the left
+//! lateral and up, the origin onto the point (a linear placement's
+//! reading). [`station_frame_is_exact2`] and [`station_frame_is_exact3`]
+//! say whether that frame is exact (a line) or carries the tolerances
+//! below.
+//!
 //! # Accuracy contract
 //!
 //! The point and frame are the exact curve's at a measure within
@@ -90,7 +99,7 @@
 //! its own.
 
 use axiolid_contracts::{GeomError, GeomResult};
-use axiolid_core::{Frame3, Point3, Scalar, Vec3};
+use axiolid_core::{Frame3, Point3, Scalar, Transform3, Vec3};
 use axiolid_curve::{Curve2, Curve3, SeamSide};
 
 pub mod seam;
@@ -205,6 +214,36 @@ impl SectionFrame {
             lateral: world(y),
             up: world(axis),
         })
+    }
+
+    /// The rigid placement this frame stands for (#264): local `x` onto the
+    /// tangent, `y` onto the lateral (to the left), `z` onto up, the local
+    /// origin onto the point.
+    ///
+    /// This is how a linear placement maps its local axes (buildingSMART
+    /// IFC 4.3, `IfcAxis2PlacementLinear`: `X` the tangent, `Y` the left
+    /// lateral, `Z` up), and how a node placed at a station is moved. It is
+    /// not [`Self::frame`]'s provider layout (`y` up, `z` right).
+    #[must_use]
+    pub fn placement(&self) -> Transform3 {
+        Transform3::from_cols(self.tangent, self.lateral, self.up, self.point)
+    }
+
+    /// This frame carried by a rigid motion: the point by `rigid`, the
+    /// axes by its linear part.
+    ///
+    /// A section frame on a curve moved rigidly is the moved curve's own
+    /// only where its convention does not depend on the world: always for
+    /// its tangent, and for the reference-up and plan frames only when
+    /// `rigid` keeps `+Z`; checking that is the caller's.
+    #[must_use]
+    pub fn moved(&self, rigid: Transform3) -> Self {
+        Self {
+            point: rigid.transform_point3(self.point),
+            tangent: rigid.transform_vector3(self.tangent),
+            lateral: rigid.transform_vector3(self.lateral),
+            up: rigid.transform_vector3(self.up),
+        }
     }
 
     /// The frame in the curve-evaluation provider's layout: `x` the
@@ -420,6 +459,25 @@ pub fn station_length3(curve: &Curve3) -> GeomResult<Option<Scalar>> {
         }
         _ => Err(unmeasured("3D")),
     }
+}
+
+/// Whether a station frame on this 2D curve is exact (#264): its point
+/// and axes at the station's distance itself, in closed form, rounding
+/// aside, with no quadrature or root find behind them.
+///
+/// Only a line: on every other family the distance is read by the
+/// arc-length inverse ([`ARC_LENGTH_TOLERANCE`], an estimate) or the point
+/// by quadrature (an intrinsic curve, a chain), so the frame is not exact
+/// and a placement in it must not be reported as exact.
+#[must_use]
+pub fn station_frame_is_exact2(curve: &Curve2) -> bool {
+    matches!(curve, Curve2::Line(_))
+}
+
+/// [`station_frame_is_exact2`] for a 3D curve: only a line.
+#[must_use]
+pub fn station_frame_is_exact3(curve: &Curve3) -> bool {
+    matches!(curve, Curve3::Line(_))
 }
 
 /// The section of a 2D curve at arc length `distance` from its start; see
