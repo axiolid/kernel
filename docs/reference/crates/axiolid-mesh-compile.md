@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.16 (2026-10-09) |
+| Latest release | 0.3.17 (2026-10-09) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -68,103 +68,15 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.16 (2026-10-09):
-
-### Added
-
-- Bounded half-spaces whose boundary is a profile of lines and circular
-  arcs (#277, ADR 0084). `ReferenceExactCompiler` clips by the exact
-  extrusion of the profile along the plane normal, each arc a right
-  circular cylinder wall, so a wall clipped by the consumer's boundary
-  (six segments, two arcs over a circle of radius 1.2) has its
-  closed-form volume; for the side opposite the normal the profile is
-  mirrored as a derived profile, as the polyline is.
-  `ReferenceMeshCompiler` flattens the profile under the chord budget,
-  and the clipped solid's deviation is certified against the exact
-  result (#235), within the budget under dense sampling. Both compilers
-  check the profile first and refuse, as `InvalidInput` naming the
-  fault, a contour that does not close (the flattener alone bridged the
-  gap), an arc of no radius, a segment of no length, and edges that
-  cross or touch other than neighbours at their joint. Polyline
-  boundaries are unchanged.
-
-- Stations along curve relations (#285, ADR 0082 amendment):
-  `station::resolve`, `station::placement` and every run of stations
-  (offset curves, sectioned spines and surfaces) take a composite, a
-  trim, a surface curve whose 3D curve governs and a curve placed at a
-  station as their basis, nested and placed in any combination, 2D or
-  3D: the relation is flattened into spans of atomic curves (as a
-  composite directrix reads it) and measured as one
-  `axiolid_reference::station::CompositeBasis`. A station on a joint
-  reads the piece its `SeamSide` names; a run across a joint whose
-  tangents differ is mitred there. A placement on a composite is exact
-  only where every piece up to the one read is an exactly placed line.
-  Pieces measured differently, a gap, and an undeclared reversed piece
-  are refused by name.
-- `station::seams` reads every relation a station can be measured along
-  -- 2D relations, nested composites, trims of relations, placed
-  segments, elevated pieces -- at the running sum of its pieces' lengths,
-  with each piece's own seams inside it; a joint after an ellipse or a
-  B-spline piece is refused as inexact by name.
-- `deviation::SNAPPED_OPERANDS` (#276): the detail of the
-  `DeviationPath::Boolean` contribution that reports operands snapped
-  together within the tolerance (see Fixed), its
-  `Certified` bound the largest distance any operand vertex moved. It is
-  carried through instances (scaled) and enclosing booleans, also where
-  the enclosing boolean is measured against its exact result.
+Latest release, 0.3.17 (2026-10-09):
 
 ### Changed
 
-- Oblique extrusions with arcs compile to the right exact solid (#280,
-  through `axiolid-construct`): a leaning circle or arc wall is an
-  oblique circular cylinder, an `EllipticalCylinder` along the
-  direction, where `ReferenceExactCompiler` returned upright cylinder
-  walls a shear away from the mesh (and refused an oblique circle). The
-  general exact boolean does not yet cut such a wall and refuses by name,
-  so a boolean with an oblique round opening stays
-  `DeviationBound::Unbounded` under that name, never certified against a
-  wrong solid (`tests/boolean_deviation.rs`). A face on such a surface
-  is meshed within its reported bound (`tests/deviation_report.rs`).
-
-- **Behaviour change:** `ReferenceMeshCompiler` refuses an extrusion
-  whose direction lies within tolerance of its profile plane, as
-  `"extrusion direction in the profile plane"` (#281, through
-  `axiolid-construct`'s `extrude_profile`), where it returned a sliver or
-  flat mesh; the exact compiler already refused it by that name.
-
-- A station along a curve placed in a frame that tilts `+Z` (#264) is no
-  longer refused when the source is measured by arc length: its point and
-  tangent are carried and its frame is the placed curve's own
-  reference-up frame against `+Z`. An elevated or banked source so placed
-  is still refused by name.
-- The refusal of an unsupported station basis now names what is
-  supported ("... a curve relation other than a composite, a trim, ...").
-
-### Fixed
-
-- A planar face no longer drops a corner lying within the noise band of
-  a line through its neighbours (#278, ADR 0083 amendment). The sliver
-  split after the certified clipper re-tested the band for the corners of
-  the slivers it dropped; the band is not transitive, so a cap corner
-  0.4 um off `a-b`, with `a` 1 um off `p1-b`, ended up in no triangle of
-  the cap while the side faces kept it, and a closed faceted prism meshed
-  `OpenSolid`. The edge a dropped sliver leaves behind now takes exactly
-  that sliver's corners, chained through slivers dropped next to it, and a
-  split that does not bound the clipper's cover along the same edges is
-  discarded for the cover. Every ring corner of a planar B-rep or
-  authored polygon face is a triangle corner again.
-
-- A difference whose tool stops a rounding error short of its host's face,
-  or reaches that far past it, no longer leaves a skin or sliver that thin
-  (#276). Kept as two faces `4.5e-15` apart, such a skin crossed itself
-  once the mesh was placed at georeferenced coordinates, and the volume
-  kernel refused it as self-intersecting. `ReferenceMeshCompiler` now
-  moves the tool's vertices within the linear tolerance of the subject's
-  faces onto them, then the subject's onto the moved tool's, before the
-  mesh boolean: by the smallest move onto every plane in reach, at most
-  the tolerance, exactly onto axis-aligned planes, never folding a
-  triangle, and not at all at a zero tolerance. The result is the boolean
-  of operands perturbed within the tolerance (ADR 0080). A skin thicker
-  than the tolerance is kept.
+- A bounded half-space whose profile boundary keeps the side opposite the
+  plane normal reflects the profile's prism in its `x` axis with its
+  placement, instead of mirroring the profile as a derived profile first
+  (#288, ADR 0084). The general boolean now cuts by a reflected cylinder
+  wall as by one built directly, so the #277 workaround is gone; the
+  clipped volumes are unchanged.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

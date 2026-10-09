@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-09) |
+| Latest release | 0.3.9 (2026-10-09) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,31 +42,33 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-09):
+Latest release, 0.3.9 (2026-10-09):
 
 ### Added
 
-- Composite station bases (#285, ADR 0082 amendment), in
-  `station::composite`: `CompositeBasis` measures stations along
-  `StationPiece`s -- spans of atomic 2D or 3D curves (`StationCurve`)
-  between two distances in the curve's station measure, reversed or
-  carried by a rigid placement -- laid end to end. The distance runs
-  through the pieces in their common convention (plan distance when
-  every piece is an elevated or banked curve, arc length when none is;
-  mixed pieces refused by name); consecutive pieces must meet within
-  `JOINT_TOLERANCE` (relative), a gap and an undeclared reversed piece
-  refused by name; every joint is a seam read by the #263 rule
-  (`section_on` with a `SeamSide`); `seams` / `exact_seams` list the
-  joints and each piece's own seams; `frame_is_exact_at` claims an exact
-  frame only where every piece up to the one read is an exactly placed
-  line; `pieces_between` clips the pieces a trim of the composite keeps.
-- `SectionFrame::carried`: the frame a station on a curve placed by a
-  rigid motion has -- the source's moved where the motion keeps `+Z`
-  (within the new `KEEPS_UP_TOLERANCE`), the placed curve's own
-  reference-up frame of the moved point and tangent where it tilts `+Z`
-  on an arc-length-measured source; an elevated or banked source so
-  placed is refused by a typed `UnsupportedInput`.
-- `station::DistanceConvention`, the curve-evaluation contract's
-  convention re-exported so a caller can name a basis's measure.
+- `ReferenceCurveEvaluator` reads a seam side (#286, ADR 0082
+  amendment): `point_at_on`, `tangent_at_on` and `frame_at_on` answer a
+  measure ON a seam by the station rule (within `ARC_LENGTH_TOLERANCE *
+  max(1, s)`, for both sides) with `station_section3_on`, so a placement
+  framed through the contract agrees with the same station lowered as
+  geometry; the frame is built against the evaluator's reference up, and
+  a banked curve's against `+Z` only, as side-lessly. Off a seam both
+  sides are the side-less answer. A distance is located in the provider's
+  convention, as is an elevated or banked curve's native parameter; the
+  incoming side at a polyline's or a B-spline's native parameter is
+  refused by a typed `UnsupportedInput`.
+- Banked curves rotating about a held rail (#279, ADR 0081 amendment):
+  a pivot piece `CantForm::AboutRail` is evaluated from the cant law,
+  point, tangent and section alike. `banked_second_derivative` adds
+  `e'' = s D'' / 2`, for an angle piece
+  `s (b / 2) (cos(psi) psi'' - sin(psi) psi'^2)`.
+  `banked_derivative_bounds` and `banked_chord_bound` take half the
+  cant's bounds there, for a Viennese bend `(b / 2) P_1`,
+  `(b / 2)(P_2 + P_1^2)` and `(b / 2)(P_3 + 3 P_1 P_2 + P_1^3)` with
+  `P_k` the bend's exact derivative suprema over the span (its ends and
+  critical points), so `flatten3` and the sweep certification carry
+  over. `banked_breaks` and `grade_corners3` name the cant's seams inside
+  a held-rail piece as the point path's. A cant law with a held-rail
+  piece is refused by name.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

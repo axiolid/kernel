@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-09) |
+| Latest release | 0.3.5 (2026-10-09) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -35,14 +35,30 @@ and surfaces free of a dependency cycle.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-09):
+Latest release, 0.3.5 (2026-10-09):
 
 ### Added
 
-- `SeamSide` (#263, ADR 0082 amendment): which piece a position exactly on
-  a seam of a composite curve is read from -- `Outgoing`, the piece that
-  starts there and what every evaluator reads (the default), or
-  `Incoming`, the piece that ends there. `#[non_exhaustive]`; shared by
-  `axiolid-model`'s stations and `axiolid-evaluate`'s station readers.
+- Rotation about a held rail (#279, ADR 0081 amendment):
+  `CantForm::AboutRail { rail, elevation }`, a pivot piece whose
+  elevation is derived from the cant law at the same plan distance,
+  `e = e0 + s D / 2 = e0 + s (b / 2) sin(psi)`, `s = +1` about the right
+  rail and `-1` about the left (`RailSide`, `RailSide::pivot_sign`). A
+  Viennese bend, a polynomial in the bank angle, now rotates about its
+  low rail exactly; under `BankConvention::VerticalRise` the held rail
+  head stands `e0` above the profile at every station. Built with
+  `CantPiece::about_rail`; `CantLaw::has_rail_pieces` finds one.
+- `Banked3::cant_rate_at`: `dD/dd`, the law's own rate or
+  `b cos(psi) psi'` for an angle piece.
+- `BankError::RailInCant`: a held-rail piece in a cant law is refused by
+  name.
+
+### Changed
+
+- `Banked3::pivot_at` reads a held-rail piece from the cant law: value
+  `e0 + s D / 2` and rate `s D' / 2`, with the cant law's refusals at
+  that station. Height pieces read as before; an angle piece in the
+  pivot law is still `BankError::AngleInPivot`. `CantLaw::value_at` and
+  `rate_at` have no value on a held-rail piece.
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)

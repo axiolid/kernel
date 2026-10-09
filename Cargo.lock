@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-brep-boolean"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "axiolid-core",
  "axiolid-linear",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve-evaluate-contract"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.16"
+version = "0.3.17"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

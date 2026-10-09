@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.6 (2026-10-09) |
+| Latest release | 0.1.7 (2026-10-09) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,17 +51,20 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.6 (2026-10-09):
+Latest release, 0.1.7 (2026-10-09):
 
 ### Fixed
 
-- A door standing on a wall's floor face and reaching a rounding error
-  past the wall's face (or stopping that short of it) is cut, not refused
-  as "a point too close to a face boundary to classify" (#276). Where two
-  coincident faces imprint each other's edges, a cut within the tolerance
-  of the imprinted edge's own end is that end (`MergedPoints` above the
-  rounding floor), and cuts within the tolerance of each other merge as on
-  a section; the piece between was a fraction of the tolerance long and
-  lay on the other face's boundary.
+- A box is cut by a reflected cylinder wall -- a prism extruded along
+  `-z`, which `extrude_profile_exact` builds by reflecting the `+z` one
+  (#275) -- as by the same wall built directly, not refused as "the kept
+  faces did not sew into a valid exact B-rep" (#288). The reflected wall
+  reads its angle `2 pi - u`, a turn away from the surface inverse's
+  `(-pi, pi]`. Where a section ended on such a face's edge, the cut was
+  placed on the edge's line pcurve a turn of the pcurve's own parameter
+  from the cut point -- a turn is the same point only on a conic's or a
+  sinusoid's pcurve -- so the face was not split. A candidate parameter
+  must now land on the cut point. Reflected spheres, cones and tori are
+  cut by boxes under every operator too.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

@@ -119,6 +119,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.7 - 2026-10-09
+
+### Fixed
+
+- A box is cut by a reflected cylinder wall -- a prism extruded along
+  `-z`, which `extrude_profile_exact` builds by reflecting the `+z` one
+  (#275) -- as by the same wall built directly, not refused as "the kept
+  faces did not sew into a valid exact B-rep" (#288). The reflected wall
+  reads its angle `2 pi - u`, a turn away from the surface inverse's
+  `(-pi, pi]`. Where a section ended on such a face's edge, the cut was
+  placed on the edge's line pcurve a turn of the pcurve's own parameter
+  from the cut point -- a turn is the same point only on a conic's or a
+  sinusoid's pcurve -- so the face was not split. A candidate parameter
+  must now land on the cut point. Reflected spheres, cones and tori are
+  cut by boxes under every operator too.
+
 ### 0.1.6 - 2026-10-09
 
 ### Fixed
@@ -1129,6 +1145,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.5 - 2026-10-09
+
+### Added
+
+- Rotation about a held rail (#279, ADR 0081 amendment):
+  `CantForm::AboutRail { rail, elevation }`, a pivot piece whose
+  elevation is derived from the cant law at the same plan distance,
+  `e = e0 + s D / 2 = e0 + s (b / 2) sin(psi)`, `s = +1` about the right
+  rail and `-1` about the left (`RailSide`, `RailSide::pivot_sign`). A
+  Viennese bend, a polynomial in the bank angle, now rotates about its
+  low rail exactly; under `BankConvention::VerticalRise` the held rail
+  head stands `e0` above the profile at every station. Built with
+  `CantPiece::about_rail`; `CantLaw::has_rail_pieces` finds one.
+- `Banked3::cant_rate_at`: `dD/dd`, the law's own rate or
+  `b cos(psi) psi'` for an angle piece.
+- `BankError::RailInCant`: a held-rail piece in a cant law is refused by
+  name.
+
+### Changed
+
+- `Banked3::pivot_at` reads a held-rail piece from the cant law: value
+  `e0 + s D / 2` and rate `s D' / 2`, with the cant law's refusals at
+  that station. Height pieces read as before; an angle piece in the
+  pivot law is still `BankError::AngleInPivot`. `CantLaw::value_at` and
+  `rate_at` have no value on a held-rail piece.
+
 ### 0.3.4 - 2026-10-09
 
 ### Added
@@ -1253,6 +1295,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.3 - 2026-10-09
+
+### Added
+
+- A seam side on point, tangent and frame queries (#286, ADR 0082
+  amendment): `CurveEvaluator::point_at_on`, `tangent_at_on` and
+  `frame_at_on` take a `SeamSide` (re-exported from `axiolid-curve`) and
+  read a measure on a seam -- a polyline's vertex, a grade break, a cant
+  jump -- from the piece that ends there (`Incoming`) or starts there
+  (`Outgoing`), by the station seam rule. They are defaulted, so no
+  provider breaks: `Outgoing` delegates to the side-less method, and
+  every other side is refused by a typed `GeomError::UnsupportedInput`
+  naming the new `SEAM_SIDE_UNSUPPORTED`, never answered with the
+  outgoing frame.
+- Conformance: both sides agree with the side-less answer off a seam and
+  keep its refusals; at a polyline corner and a grade break each side
+  reads its own piece, also within the seam tolerance for a provider that
+  reads sides; a side a provider does not read is refused as unsupported.
+
+### Changed
+
+- `CurveEvaluator::frame_at` documents the axes the reference provider
+  has always returned (#242): `x` the tangent, `y` up, `z` to the right.
+  The text used to call `z` up. No behaviour changes; `axiolid-evaluate`
+  pins the axes on a level line, a grade and a banked curve.
+
 ### 0.3.2 - 2026-10-03
 
 ### Changed
@@ -1321,6 +1389,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.9 - 2026-10-09
+
+### Added
+
+- `ReferenceCurveEvaluator` reads a seam side (#286, ADR 0082
+  amendment): `point_at_on`, `tangent_at_on` and `frame_at_on` answer a
+  measure ON a seam by the station rule (within `ARC_LENGTH_TOLERANCE *
+  max(1, s)`, for both sides) with `station_section3_on`, so a placement
+  framed through the contract agrees with the same station lowered as
+  geometry; the frame is built against the evaluator's reference up, and
+  a banked curve's against `+Z` only, as side-lessly. Off a seam both
+  sides are the side-less answer. A distance is located in the provider's
+  convention, as is an elevated or banked curve's native parameter; the
+  incoming side at a polyline's or a B-spline's native parameter is
+  refused by a typed `UnsupportedInput`.
+- Banked curves rotating about a held rail (#279, ADR 0081 amendment):
+  a pivot piece `CantForm::AboutRail` is evaluated from the cant law,
+  point, tangent and section alike. `banked_second_derivative` adds
+  `e'' = s D'' / 2`, for an angle piece
+  `s (b / 2) (cos(psi) psi'' - sin(psi) psi'^2)`.
+  `banked_derivative_bounds` and `banked_chord_bound` take half the
+  cant's bounds there, for a Viennese bend `(b / 2) P_1`,
+  `(b / 2)(P_2 + P_1^2)` and `(b / 2)(P_3 + 3 P_1 P_2 + P_1^3)` with
+  `P_k` the bend's exact derivative suprema over the span (its ends and
+  critical points), so `flatten3` and the sweep certification carry
+  over. `banked_breaks` and `grade_corners3` name the cant's seams inside
+  a held-rail piece as the point path's. A cant law with a held-rail
+  piece is refused by name.
 
 ### 0.3.8 - 2026-10-09
 
@@ -2264,6 +2361,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.17 - 2026-10-09
+
+### Changed
+
+- A bounded half-space whose profile boundary keeps the side opposite the
+  plane normal reflects the profile's prism in its `x` axis with its
+  placement, instead of mirroring the profile as a derived profile first
+  (#288, ADR 0084). The general boolean now cuts by a reflected cylinder
+  wall as by one built directly, so the #277 workaround is gone; the
+  clipped volumes are unchanged.
 
 ### 0.3.16 - 2026-10-09
 

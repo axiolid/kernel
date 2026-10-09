@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-10-09
+
 ### Changed
 
 - A bounded half-space whose profile boundary keeps the side opposite the

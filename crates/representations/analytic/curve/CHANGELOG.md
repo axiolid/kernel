@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-09
+
 ### Added
 
 - Rotation about a held rail (#279, ADR 0081 amendment):

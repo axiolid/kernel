@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-09
+
 ### Fixed
 
 - A box is cut by a reflected cylinder wall -- a prism extruded along

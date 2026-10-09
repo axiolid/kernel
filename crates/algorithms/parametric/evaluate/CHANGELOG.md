@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-09
+
 ### Added
 
 - `ReferenceCurveEvaluator` reads a seam side (#286, ADR 0082

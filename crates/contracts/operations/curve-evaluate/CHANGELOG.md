@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-09
+
 ### Added
 
 - A seam side on point, tangent and frame queries (#286, ADR 0082
