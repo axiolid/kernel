@@ -4,8 +4,18 @@
 //! what `axiolid-mesh-boolean-boolmesh` demands of its inputs. Getting the winding wrong here
 //! produces a mesh that looks valid and computes wrong booleans -- the failure
 //! mode that has already cost two debugging sessions.
+//!
+//! # A direction in the profile plane (#281)
+//!
+//! An offset with no component along the profile normal bounds no volume:
+//! its "solid" is a sliver, or flat at exactly `z = 0`. The exact path
+//! refuses an offset within tolerance of the plane, `|o.z| <= tolerance`,
+//! as `"extrusion direction in the profile plane"`, and so does
+//! [`extrude_profile`], by the same typed refusal, so the two paths agree
+//! on what they build. [`extrude`] carries no tolerance, so it refuses
+//! only an offset exactly in the plane, by the same name.
 
-use axiolid_contracts::{GeomError, GeomResult, Sign};
+use axiolid_contracts::{GeomError, GeomResult, Operation, Sign};
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_reference::arithmetic::{
@@ -22,6 +32,11 @@ pub use crate::extrude_exact::extrude_profile_exact;
 ///
 /// `boundary` lists the closed loops of the profile as index ranges into
 /// `points`: each loop is a contiguous run, matching `profile::Rings` layout.
+///
+/// An offset exactly in the profile plane (`o.z == 0`) bounds no volume and
+/// is refused as `"extrusion direction in the profile plane"`; with no
+/// tolerance here, a sliver just off the plane is built.
+/// [`extrude_profile`] refuses within its tolerance (see the module docs).
 pub fn extrude(
     points: &[Point2],
     triangles: &[[u32; 3]],
@@ -29,21 +44,9 @@ pub fn extrude(
     direction: Vec3,
     depth: Scalar,
 ) -> GeomResult<TriMesh> {
-    if !depth.is_finite() || depth <= 0.0 {
-        return Err(GeomError::InvalidInput(format!(
-            "extrusion depth must be positive and finite, got {depth}"
-        )));
-    }
-    if !direction.is_finite() || direction.length() <= 0.0 {
-        return Err(GeomError::InvalidInput(
-            "extrusion direction must be a finite non-zero vector".to_owned(),
-        ));
-    }
-    let offset = direction.normalize() * depth;
-    if !offset.is_finite() {
-        return Err(GeomError::Degenerate(
-            "extrusion direction could not be normalised".to_owned(),
-        ));
+    let offset = mesh_offset(direction, depth)?;
+    if offset.z == 0.0 {
+        return Err(in_profile_plane());
     }
 
     let n = points.len();
@@ -84,8 +87,8 @@ pub fn extrude(
     // case, so every triangle is inside-out (signed volume -area*depth) and a
     // boolean would refuse or silently invert it. Flipping each triangle once
     // restores outward orientation for caps and walls, outer and hole loops
-    // alike. An offset IN the plane (z == 0) bounds no volume either way and
-    // is left as it was.
+    // alike. An offset IN the plane bounds no volume either way and was
+    // refused above.
     if offset.z < 0.0 {
         for triangle in indices.chunks_exact_mut(3) {
             triangle.swap(1, 2);
@@ -100,12 +103,20 @@ pub fn extrude(
 /// The loop layout must match `triangulate`'s vertex order exactly, so the
 /// two are derived from the same `Rings` value here rather than by a caller
 /// reconstructing the ranges.
+///
+/// A direction within `tolerance` of the profile plane (`|o.z| <=
+/// tolerance` for the offset `o`) is refused as `"extrusion direction in
+/// the profile plane"`, exactly as [`extrude_profile_exact`] refuses it.
 pub fn extrude_profile(
     rings: &crate::profile::Rings,
     direction: Vec3,
     depth: Scalar,
-    _tolerance: axiolid_core::Tolerance,
+    tolerance: axiolid_core::Tolerance,
 ) -> GeomResult<TriMesh> {
+    // Refused before triangulating, by the exact path's rule (#281).
+    if mesh_offset(direction, depth)?.z.abs() <= tolerance.linear() {
+        return Err(in_profile_plane());
+    }
     let (points, triangles) = crate::profile::triangulate(rings)?;
     let mut loops = Vec::with_capacity(1 + rings.holes.len());
     let mut start = 0usize;
@@ -116,6 +127,36 @@ pub fn extrude_profile(
         start += hole.len();
     }
     extrude(&points, &triangles, &loops, direction, depth)
+}
+
+/// The offset `direction / |direction| * depth`, validated.
+fn mesh_offset(direction: Vec3, depth: Scalar) -> GeomResult<Vec3> {
+    if !depth.is_finite() || depth <= 0.0 {
+        return Err(GeomError::InvalidInput(format!(
+            "extrusion depth must be positive and finite, got {depth}"
+        )));
+    }
+    if !direction.is_finite() || direction.length() <= 0.0 {
+        return Err(GeomError::InvalidInput(
+            "extrusion direction must be a finite non-zero vector".to_owned(),
+        ));
+    }
+    let offset = direction.normalize() * depth;
+    if !offset.is_finite() {
+        return Err(GeomError::Degenerate(
+            "extrusion direction could not be normalised".to_owned(),
+        ));
+    }
+    Ok(offset)
+}
+
+/// The refusal both extrusion paths give an offset in the profile plane.
+fn in_profile_plane() -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: Operation::Sweep,
+        input: "extrusion direction in the profile plane",
+    }
 }
 
 /// Whether a closed mesh is outward-oriented.

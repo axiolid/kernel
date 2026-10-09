@@ -45,6 +45,20 @@ caret rule for `0.x` versions.
   family sweep now covers oblique curved families too. Mutation probe:
   `scripts/probe_oblique_extrusion_mutants.py`.
 
+- **Behaviour change: the mesh extrusion refuses a direction in the
+  profile plane (#281)**, as the exact path does. `extrude_profile`
+  returned a sliver solid for an offset within tolerance of the profile
+  plane, and a flat zero-volume "solid" at exactly `o.z = 0`; it now
+  refuses `|o.z| <= tolerance` with the exact path's typed refusal,
+  `UnsupportedInput { operation: Sweep, input: "extrusion direction in
+  the profile plane" }`. `extrude`, which takes no tolerance, refuses an
+  offset exactly in the plane by the same name. A caller that relied on
+  the degenerate mesh now gets the error; `axiolid-mesh-compile` meshes
+  extrusions through `extrude_profile`, so it refuses them too. Test:
+  both paths refuse `z = 0`, `-0.0` and `+-tol / 2`, and build `+-2 tol`
+  with the same closed-form volume. Mutation probe:
+  `scripts/probe_oblique_extrusion_mutants.py`.
+
 ## [0.3.16] - 2026-10-09
 
 ### Added

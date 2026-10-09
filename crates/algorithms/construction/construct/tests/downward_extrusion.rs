@@ -426,6 +426,76 @@ fn a_direction_in_the_profile_plane_is_refused_by_name() {
     }
 }
 
+/// The mesh path refuses a direction in the profile plane by the exact
+/// path's name and rule (#281): exactly in the plane and within half a
+/// tolerance of it either side are refused by both, twice the tolerance
+/// either side is built by both, as the same positive volume.
+#[test]
+fn the_mesh_and_exact_paths_agree_on_the_profile_plane() {
+    let tolerance = Tolerance::METRE;
+    let linear = tolerance.linear();
+    let rings = Rings {
+        outer: vec![
+            Point2::new(-1.0, -0.5),
+            Point2::new(1.0, -0.5),
+            Point2::new(1.0, 0.5),
+            Point2::new(-1.0, 0.5),
+        ],
+        holes: Vec::new(),
+    };
+    let profile = rectangle(2.0, 1.0, None);
+    let is_in_plane = |error: &GeomError| {
+        matches!(
+            error,
+            GeomError::UnsupportedInput {
+                operation: Operation::Sweep,
+                input: "extrusion direction in the profile plane",
+                ..
+            }
+        )
+    };
+    for z in [0.0, -0.0, 0.5 * linear, -0.5 * linear] {
+        let direction = Vec3::new(1.0, 0.25, z);
+        let mesh = extrude_profile(&rings, direction, 1.0, tolerance)
+            .expect_err("the mesh path refuses an in-plane direction");
+        let exact = extrude_profile_exact(&profile, direction, 1.0, tolerance)
+            .expect_err("the exact path refuses an in-plane direction");
+        assert!(is_in_plane(&mesh), "mesh at z = {z}: {mesh:?}");
+        assert!(is_in_plane(&exact), "exact at z = {z}: {exact:?}");
+    }
+    // Without a tolerance, the raw extruder still refuses the flat case.
+    let (points, triangles) = axiolid_construct::profile::triangulate(&rings).expect("triangles");
+    let outer = 0..rings.outer.len();
+    let flat = axiolid_construct::extrude::extrude(
+        &points,
+        &triangles,
+        core::slice::from_ref(&outer),
+        Vec3::new(1.0, 0.25, 0.0),
+        1.0,
+    )
+    .expect_err("an offset exactly in the plane");
+    assert!(is_in_plane(&flat), "{flat:?}");
+    for z in [2.0 * linear, -2.0 * linear] {
+        let direction = Vec3::new(1.0, 0.25, z);
+        let mesh = extrude_profile(&rings, direction, 1.0, tolerance).expect("mesh builds");
+        let exact =
+            extrude_profile_exact(&profile, direction, 1.0, tolerance).expect("exact builds");
+        let expected = 2.0 * (direction.normalize() * 1.0).z.abs();
+        let (mesh_volume, exact_volume) = (
+            mesh_signed_volume(&mesh),
+            signed_volume(&exact, "near plane"),
+        );
+        assert!(
+            (mesh_volume - expected).abs() <= 1e-9 * expected,
+            "mesh at z = {z}: {mesh_volume}, expected {expected}"
+        );
+        assert!(
+            (exact_volume - expected).abs() <= 1e-9 * expected,
+            "exact at z = {z}: {exact_volume}, expected {expected}"
+        );
+    }
+}
+
 /// An ellipse along `-z` still refuses an oblique direction rather than
 /// mislabeling an elliptical cylinder.
 #[test]

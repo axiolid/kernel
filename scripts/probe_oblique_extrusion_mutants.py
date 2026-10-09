@@ -1,15 +1,23 @@
-"""Mutation probe for oblique exact extrusion of arcs (#280).
+"""Mutation probe for oblique exact extrusion of arcs (#280) and the mesh
+path's refusal of a direction in the profile plane (#281).
 
 Each mutant stands an oblique arc wall upright again, gets the oblique
 cylinder's frame, semi-axes or rim graphs wrong, leaves the far rim
 unsheared, refuses an oblique circle again or builds it on a right
-cylinder, or stops refusing an oblique ellipse. Each must turn a test
-red in construct's `tests/oblique_extrusion.rs` (geometric audit,
+cylinder, stops refusing an oblique ellipse, or drops, narrows or
+renames the mesh path's in-plane refusal. Each must turn a test red in
+construct's `tests/oblique_extrusion.rs` (geometric audit,
 closed-form volume, sheared vertices, walls that shear back onto the
 profile's circles, the oblique cylinder's axis and semi-axes, the
 ellipse refusal), `tests/downward_extrusion.rs` (the mirror of the
-oblique prisms) or `tests/exact_extrusion.rs` (the oblique circle's
-support).
+oblique prisms, the two paths agreeing on the profile plane) or
+`tests/exact_extrusion.rs` (the oblique circle's support).
+
+Equivalent mutants, deliberately not listed: the mesh path's `<=`
+against the tolerance as `<` (the tests probe half and twice the
+tolerance, as #281 asks; the exact path's boundary is pinned by its own
+test), and `extrude`'s exact-zero check as `offset.z.abs() == 0.0` (the
+same test on an IEEE zero).
 """
 import pathlib, subprocess, sys
 
@@ -17,6 +25,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/algorithms/construction/construct/src"
 A = f"{C}/extrude_arc.rs"
 E = f"{C}/extrude_exact.rs"
+M = f"{C}/extrude.rs"
 TESTS = [
     "-p", "axiolid-construct",
     "--all-features",
@@ -64,6 +73,18 @@ MUTANTS = [
      '        return Err(unsupported("oblique ellipse extrusion"));',
      '    if false {\n'
      '        return Err(unsupported("oblique ellipse extrusion"));', TESTS),
+    ('mesh path builds within tolerance of the plane (#281 repro)', M,
+     '    if mesh_offset(direction, depth)?.z.abs() <= tolerance.linear() {',
+     '    if false {', TESTS),
+    ('mesh path refuses only above the plane', M,
+     '    if mesh_offset(direction, depth)?.z.abs() <= tolerance.linear() {',
+     '    if (0.0..=tolerance.linear()).contains(&mesh_offset(direction, depth)?.z) {', TESTS),
+    ('raw extruder builds a flat solid in the plane', M,
+     '    if offset.z == 0.0 {\n        return Err(in_profile_plane());',
+     '    if false {\n        return Err(in_profile_plane());', TESTS),
+    ('mesh refusal under another name', M,
+     '        input: "extrusion direction in the profile plane",',
+     '        input: "planar mesh extrusion",', TESTS),
 ]
 
 def run(target):

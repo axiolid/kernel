@@ -22,6 +22,12 @@ caret rule for `0.x` versions.
   wrong solid (`tests/boolean_deviation.rs`). A face on such a surface
   is meshed within its reported bound (`tests/deviation_report.rs`).
 
+- **Behaviour change:** `ReferenceMeshCompiler` refuses an extrusion
+  whose direction lies within tolerance of its profile plane, as
+  `"extrusion direction in the profile plane"` (#281, through
+  `axiolid-construct`'s `extrude_profile`), where it returned a sliver or
+  flat mesh; the exact compiler already refused it by that name.
+
 ## [0.3.15] - 2026-10-09
 
 ### Added

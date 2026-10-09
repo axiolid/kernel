@@ -19,7 +19,8 @@
 //!
 //! Only an offset within tolerance of the profile plane, `|o.z| <=
 //! tolerance`, is refused, as `"extrusion direction in the profile plane"`:
-//! it bounds no volume either way.
+//! it bounds no volume either way. The mesh extruder refuses the same
+//! offsets by the same name (#281).
 //!
 //! # Oblique directions (#280)
 //!
