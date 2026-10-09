@@ -3,9 +3,10 @@
 //!
 //! The reference evaluator's sided queries must be the station reading
 //! with the same side (`station_section3_on`), at a polyline corner, a
-//! grade break and a cant break, and on either side of each within the
-//! seam tolerance; off a seam both sides are the side-less answer. A
-//! provider that does not implement sides refuses `Incoming` by name.
+//! grade break, a cant break and the cant seam a held-rail pivot covers
+//! (#279), and on either side of each within the seam tolerance; off a
+//! seam both sides are the side-less answer. A provider that does not
+//! implement sides refuses `Incoming` by name.
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, ExecutionTarget, GeomError, GeomResult, Operation,
@@ -13,7 +14,7 @@ use axiolid_contracts::{
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BankConvention, Banked3, CantLaw, CantPiece, Curve2, Curve3, Elevated3, ElevationLaw, Line2,
-    Line3, Polyline3, SeamSide,
+    Line3, Polyline3, RailSide, SeamSide,
 };
 use axiolid_curve_evaluate_contract::{
     conformance, CurveEvaluator, CurveMeasure, DistanceConvention, SEAM_SIDE_UNSUPPORTED,
@@ -76,12 +77,29 @@ fn cant_break() -> Curve3 {
     ))
 }
 
+/// Level and straight: a 100 mm cant ramp over 50 m, then held, rotating
+/// about the held right rail (#279): the point path climbs at `D' / 2` on
+/// the ramp and is level after it, so the cant seam is a grade break.
+fn held_rail_ramp() -> Curve3 {
+    Curve3::Banked(Banked3::new(
+        Elevated3::new(straight_plan(), ElevationLaw::level(0.0)),
+        CantLaw::new(vec![
+            CantPiece::linear(50.0, 0.0, 0.1),
+            CantPiece::constant(50.0, 0.1),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(100.0, RailSide::Right, 0.0)]),
+        1.5,
+        BankConvention::VerticalRise,
+    ))
+}
+
 /// Each curve with its seam's distance.
-fn seams() -> [(&'static str, Curve3, Scalar); 3] {
+fn seams() -> [(&'static str, Curve3, Scalar); 4] {
     [
         ("polyline corner", corner(), 5.0),
         ("grade break", grade_break(), 50.0),
         ("cant break", cant_break(), 100.0),
+        ("held-rail ramp", held_rail_ramp(), 50.0),
     ]
 }
 

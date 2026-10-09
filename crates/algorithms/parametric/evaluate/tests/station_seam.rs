@@ -7,7 +7,8 @@ use axiolid_contracts::GeomError;
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, CurvatureLaw,
-    Curve2, Curve3, Elevated3, ElevationLaw, KnotSpec, Line2, Polyline2, Polyline3, SeamSide,
+    Curve2, Curve3, Elevated3, ElevationLaw, KnotSpec, Line2, Polyline2, Polyline3, RailSide,
+    SeamSide,
 };
 use axiolid_evaluate::station::{
     exact_station_seams2, exact_station_seams3, station_seams2, station_section2,
@@ -198,6 +199,49 @@ fn a_cant_jump_reads_the_roll_of_the_selected_piece() {
     assert_eq!(seams[0].distance, 100.0);
     assert!(!seams[0].smooth && seams[0].exact);
     assert!(Mitre::between(&incoming, &outgoing).unwrap().is_none());
+}
+
+/// A pivot rotating about the held right rail (#279) follows half the
+/// cant, so a seam of the cant law is a seam of its point path: on the
+/// ramp's side the curve climbs at `D' / 2`, on the hold's it is level.
+#[test]
+fn a_held_rail_pivot_reads_the_cant_seam_it_covers() {
+    let curve = Curve3::Banked(Banked3::new(
+        Elevated3::new(
+            Curve2::Line(Line2 {
+                origin: Point2::ZERO,
+                direction: Vec2::X,
+            }),
+            ElevationLaw::level(0.0),
+        ),
+        CantLaw::new(vec![
+            CantPiece::linear(50.0, 0.0, 0.1),
+            CantPiece::constant(50.0, 0.1),
+        ]),
+        CantLaw::new(vec![CantPiece::about_rail(100.0, RailSide::Right, 0.0)]),
+        1.5,
+        BankConvention::VerticalRise,
+    ));
+    let seams = exact_station_seams3(&curve).unwrap();
+    assert_eq!(seams.len(), 1);
+    assert_eq!(seams[0].distance, 50.0);
+    let incoming = station_section3_on(&curve, 50.0, SeamSide::Incoming).unwrap();
+    let outgoing = station_section3_on(&curve, 50.0, SeamSide::Outgoing).unwrap();
+    close3(
+        incoming.point,
+        Point3::new(50.0, 0.0, 0.05),
+        EPS,
+        "e = D / 2",
+    );
+    close3(outgoing.point, incoming.point, EPS, "one point");
+    close3(
+        incoming.tangent,
+        Vec3::new(1.0, 0.0, 0.001).normalize(),
+        EPS,
+        "climbing at D' / 2 = 0.001 on the ramp",
+    );
+    close3(outgoing.tangent, Vec3::X, EPS, "level in the hold");
+    assert!(Mitre::between(&incoming, &outgoing).unwrap().is_some());
 }
 
 /// Degree 2 with a double interior knot: the curve passes through the
