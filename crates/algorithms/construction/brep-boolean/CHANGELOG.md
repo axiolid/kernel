@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A floor-standing door `1e-6` to `5e-4` past a wall's face under a
+  millimetre tolerance is cut again, not refused as "the kept faces did
+  not sew into a valid exact B-rep" (#291). Merging a cut on an
+  imprinted edge into the edge's own end within the tolerance (#276)
+  left those faces unsewn; a boolean refused after such a merge above
+  the rounding floor is now cut again with ends merged only within the
+  rounding floor, as before #276, and its report holds only the second
+  run's decisions. The merge within the tolerance stays: the door a
+  rounding error (`1e-12`-`1e-9`) past the face still needs it.
+
 ## [0.1.7] - 2026-10-09
 
 ### Fixed

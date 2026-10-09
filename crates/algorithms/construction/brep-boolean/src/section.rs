@@ -922,6 +922,12 @@ fn merge_close(
 /// for; recorded as [`ToleranceDecisionKind::MergedPoints`] above the
 /// rounding floor, and at [`Tolerance::ZERO`] only a rounding residue
 /// merges.
+///
+/// The wider merge can itself leave faces that do not sew (a door a
+/// micrometre to half a millimetre past a wall's face, under a millimetre
+/// tolerance); the boolean is then cut again with ends merged only within
+/// the rounding floor, as before #276 (#291, `report::imprint_end_tolerance`,
+/// [`crate::boolean_with_report`]).
 fn imprint_cuts(
     curve: &Curve3,
     span: Interval,
@@ -938,8 +944,11 @@ fn imprint_cuts(
             .iter()
             .map(|end| (point - *end).length())
             .fold(Scalar::INFINITY, Scalar::min);
-        if !report::near(ToleranceDecisionKind::MergedPoints, gap, tolerance) {
+        let ends = report::imprint_end_tolerance(tolerance);
+        if !report::near(ToleranceDecisionKind::MergedPoints, gap, ends) {
             out.push(cut);
+        } else if gap > report::rounding() {
+            report::merged_an_end();
         }
     }
     Ok(out)

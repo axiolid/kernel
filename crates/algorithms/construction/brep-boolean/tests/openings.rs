@@ -278,3 +278,38 @@ fn a_floor_standing_door_a_rounding_error_past_or_short_of_the_face() {
     assert!(topology.is_closed_manifold(), "{topology:?}");
     close("past", volume(&cut), 3.0 - 0.5);
 }
+
+/// The floor-standing door a micrometre to half a millimetre past the
+/// wall's face under a millimetre tolerance (#291). Merging the wall's
+/// floor edge's cut into the door's corner within the tolerance (#276)
+/// left faces that did not sew, and the boolean was refused; it is cut
+/// again with ends merged only within the rounding floor, as before #276.
+#[test]
+fn a_floor_standing_door_an_authored_distance_past_the_face_is_not_refused() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    let millimetre = Tolerance::MILLIMETRE;
+    for gap in [-1e-6, -1e-4, -5e-4] {
+        let door = solid(square(1.0, gap, 2.0, 0.5), 0.0, 2.0);
+        let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+            &wall,
+            &door,
+            BooleanOperator::Difference,
+            millimetre,
+        )
+        .unwrap_or_else(|e| panic!("gap {gap}: {e}"));
+        let topology = axiolid_topology::audit_brep(cut.topology());
+        assert!(topology.is_closed_manifold(), "gap {gap}: {topology:?}");
+        // Read within the tolerance, and reported.
+        let moved = report
+            .decisions()
+            .iter()
+            .map(|d| d.linear)
+            .fold(0.0, f64::max);
+        assert!(moved <= millimetre.linear(), "{report:?}");
+        let got = volume(&cut);
+        assert!(
+            (got - (3.0 - 0.5)).abs() <= 40.0 * moved + 1e-12,
+            "gap {gap}: {got}"
+        );
+    }
+}

@@ -195,7 +195,17 @@ pub fn boolean_with_report(
     tolerance: Tolerance,
 ) -> Result<(ExactBRep, BooleanReport), BooleanError> {
     let session = report::open(&[a, b], tolerance);
-    let result = run(a, b, operator, tolerance)?;
+    let result = match run(a, b, operator, tolerance) {
+        Ok(result) => result,
+        // Never worse for the end merge (#291): a boolean refused after a
+        // cut was merged into an imprinted edge's end beyond the rounding
+        // floor (#276) is cut again with ends merged only within it.
+        Err(_) if session.merged_an_end() => {
+            session.retry_with_rounding_ends();
+            run(a, b, operator, tolerance)?
+        }
+        Err(refused) => return Err(refused),
+    };
     Ok((result, session.finish()?))
 }
 

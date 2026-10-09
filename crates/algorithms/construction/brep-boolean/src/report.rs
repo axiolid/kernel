@@ -243,6 +243,12 @@ struct Session {
     /// The linear rounding floor: [`ROUNDING`] times the operands' extent.
     rounding: Scalar,
     report: BooleanReport,
+    /// Whether a cut near an imprinted edge's end merges into it within the
+    /// caller's tolerance (`true`), or only within the rounding floor: the
+    /// retry of a boolean the wider merge left refused (#291).
+    ends_within_tolerance: bool,
+    /// Whether such a merge above the rounding floor was made.
+    merged_an_end: bool,
 }
 
 thread_local! {
@@ -290,6 +296,52 @@ impl Drop for Guard {
     }
 }
 
+impl Guard {
+    /// Whether this guard's own session merged a cut into an imprinted
+    /// edge's end above the rounding floor, so that a refusal may be the
+    /// merge's ([`imprint_end_tolerance`]); `false` for a joined session.
+    pub(crate) fn merged_an_end(&self) -> bool {
+        self.owner && SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.merged_an_end))
+    }
+
+    /// Start this guard's own session over, its decisions dropped, with
+    /// imprinted edges' ends merged only within the rounding floor (#291).
+    pub(crate) fn retry_with_rounding_ends(&self) {
+        if !self.owner {
+            return;
+        }
+        SESSION.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.report = BooleanReport::default();
+                s.exceeded = false;
+                s.ends_within_tolerance = false;
+                s.merged_an_end = false;
+            }
+        });
+    }
+}
+
+/// The tolerance within which a cut on an imprinted edge merges into the
+/// edge's own end: the caller's, or [`Tolerance::ZERO`] (the rounding floor
+/// only) on the retry of a boolean the wider merge left refused (#291).
+pub(crate) fn imprint_end_tolerance(tolerance: Tolerance) -> Tolerance {
+    let within = SESSION.with(|s| s.borrow().as_ref().is_none_or(|s| s.ends_within_tolerance));
+    if within {
+        tolerance
+    } else {
+        Tolerance::ZERO
+    }
+}
+
+/// Note a merge into an imprinted edge's end above the rounding floor.
+pub(crate) fn merged_an_end() {
+    SESSION.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut() {
+            s.merged_an_end = true;
+        }
+    });
+}
+
 /// Open a session for the given operands at the caller's tolerance, or
 /// join the one already open.
 pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
@@ -303,6 +355,8 @@ pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
                 extent,
                 rounding: ROUNDING * extent,
                 report: BooleanReport::default(),
+                ends_within_tolerance: true,
+                merged_an_end: false,
             });
         });
     }
