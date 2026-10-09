@@ -14,7 +14,7 @@ use core::ops::Range;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Point2;
 
-use super::{orient, segments_touch, within, Loop, PinchPolicy};
+use super::{by_value, lexicographic, orient, segments_touch, within, Loop, PinchPolicy};
 
 /// A vertex lying inside an edge of a ring, away from its ends: the edge
 /// `index` of ring `ring` (from its vertex `index` to the next) passes
@@ -148,7 +148,7 @@ pub(super) fn check_edges(
         }
     }
     let mut touches = Vec::new();
-    edges.sort_by(|e, f| e.a.x.min(e.b.x).total_cmp(&f.a.x.min(f.b.x)));
+    edges.sort_by(|e, f| by_value(e.a.x.min(e.b.x), f.a.x.min(f.b.x)));
     for (i, e) in edges.iter().enumerate() {
         let right = e.a.x.max(e.b.x);
         let (low, high) = (e.a.y.min(e.b.y), e.a.y.max(e.b.y));
@@ -291,15 +291,15 @@ pub(super) fn folds_back(a: Point2, v: Point2, b: Point2) -> bool {
 
 /// Whether a simple ring runs counter-clockwise, read exactly at its
 /// lexicographically smallest vertex, which is strictly convex.
+///
+/// The order is by value ([`lexicographic`]). Under `total_cmp` a straight
+/// corner at `(-0.0, 2)` came before the true lowest corner `(0, 0)`, its
+/// zero turn read as clockwise, and the ring was reversed into one with no
+/// ear (#269).
 pub(super) fn ring_turns_left(ring: &[Point2]) -> bool {
     let n = ring.len();
     let lowest = (0..n)
-        .min_by(|&i, &j| {
-            ring[i]
-                .x
-                .total_cmp(&ring[j].x)
-                .then(ring[i].y.total_cmp(&ring[j].y))
-        })
+        .min_by(|&i, &j| lexicographic(ring[i], ring[j]))
         .unwrap_or(0);
     orient(
         ring[(lowest + n - 1) % n],

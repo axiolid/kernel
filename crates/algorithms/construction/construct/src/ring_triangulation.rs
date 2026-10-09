@@ -34,6 +34,8 @@
 
 use std::collections::HashMap;
 
+use core::cmp::Ordering;
+
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
@@ -135,6 +137,22 @@ fn orient(a: Point2, b: Point2, c: Point2) -> i8 {
         Some(Sign::Negative) => -1,
         _ => 0,
     }
+}
+
+/// Two coordinates in order of value, `-0.0` equal to `0.0` (#269).
+///
+/// `f64::total_cmp` puts `-0.0` before `0.0`, so a lowest or leftmost pick
+/// made with it can take a `-0.0` twin of a coordinate for the smaller
+/// one: projecting a face onto plane axes writes `0.0 * -k = -0.0` next
+/// to the origin's `0.0`. Adding `0.0` turns `-0.0` into `0.0` and leaves
+/// every other value alone, so this is still a total, deterministic order.
+fn by_value(a: f64, b: f64) -> Ordering {
+    (a + 0.0).total_cmp(&(b + 0.0))
+}
+
+/// Points in lexicographic order, `x` then `y`, by [`by_value`].
+fn lexicographic(a: Point2, b: Point2) -> Ordering {
+    by_value(a.x, b.x).then(by_value(a.y, b.y))
 }
 
 /// Whether `c`, collinear with `a` and `b`, lies on the closed segment.

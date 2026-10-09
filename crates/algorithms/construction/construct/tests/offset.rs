@@ -221,3 +221,30 @@ fn a_non_convex_solid_offsets_its_reflex_edge_correctly() {
         "L-prism offset inward by {d}: expected {expected}, got {actual}"
     );
 }
+
+/// A cube with every zero coordinate of its first face written as `-0.0`,
+/// as projecting onto plane axes can write it: the same corners, which
+/// must weld to their twins on the other faces (#269).
+fn box_with_signed_zeros(max: f64) -> Polyhedron {
+    let base = box_solid([0.0, 0.0, 0.0], [max, max, max]);
+    let mut faces = base.faces().to_vec();
+    let flip = |v: f64| if v == 0.0 { -0.0 } else { v };
+    for p in &mut faces[0] {
+        *p = Point3::new(flip(p.x), flip(p.y), flip(p.z));
+    }
+    Polyhedron::new(faces).expect("the same cube")
+}
+
+#[test]
+fn a_corner_written_as_negative_zero_welds_to_its_twin() {
+    let cube = box_with_signed_zeros(2.0);
+    assert_eq!(
+        triangulate(&cube).positions.len(),
+        8,
+        "a cube has 8 corners"
+    );
+    assert!((volume(&cube) - 8.0).abs() < 1e-12);
+    // Each corner moves once, to the meeting point of all three planes.
+    let grown = offset_solid(&cube, 0.5, OffsetDirection::Outward).expect("offset");
+    assert!((volume(&grown) - 27.0).abs() < 1e-9, "{}", volume(&grown));
+}

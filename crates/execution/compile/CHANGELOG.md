@@ -67,6 +67,18 @@ caret rule for `0.x` versions.
   declared a solid whose shell is itself open (a lone face) is no longer
   reported one. Faces the weld cannot reach (a curved B-rep face samples
   its own edges) are caught here rather than claimed as a solid.
+- **Planar faces that project with a `-0.0` corner compile (#269).** A
+  faceted B-rep face is projected from its first corner onto in-plane
+  axes; in a plane at 45 degrees between two axes a corner level with the
+  origin lands at `-0.0`, and `axiolid-construct`'s clipper read the
+  ring's orientation at that twin of its lowest corner and refused the
+  face with "found no ear". The clipper now orders coordinates by value
+  (`axiolid-construct`'s Unreleased notes); a downstream triage traced 35
+  refused rectangular faces in two models to it. Tests: the issue's
+  rectangle with a straight corner, one with straight corners on two
+  sides and the same shape as a hole, in every axis and diagonal plane,
+  facing either way, from every start corner, authored and as faceted
+  B-rep faces, each with its exact area.
 
 ## [0.3.14] - 2026-10-04
 

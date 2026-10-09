@@ -679,7 +679,12 @@ pub fn triangulate(solid: &Polyhedron) -> TriMesh {
         let ring: Vec<u32> = face
             .iter()
             .map(|&p| {
-                let key = [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+                // `+ 0.0` keys -0.0 as 0.0, the same corner (#269).
+                let key = [
+                    (p.x + 0.0).to_bits(),
+                    (p.y + 0.0).to_bits(),
+                    (p.z + 0.0).to_bits(),
+                ];
                 let next = u32::try_from(positions.len()).unwrap_or(u32::MAX);
                 *lookup.entry(key).or_insert_with(|| {
                     positions.push(p);

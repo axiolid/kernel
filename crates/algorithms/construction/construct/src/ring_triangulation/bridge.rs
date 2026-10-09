@@ -16,7 +16,7 @@
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Point2;
 
-use super::{locally_inside, segments_touch, Loop};
+use super::{by_value, locally_inside, segments_touch, Loop};
 
 /// A ring of vertex indices as a doubly linked list. Bridge endpoints
 /// appear as two nodes with the same vertex.
@@ -113,9 +113,7 @@ pub(super) fn bridge_holes(points: &[Point2], loops: &[Loop]) -> GeomResult<Poly
         .collect();
     holes.sort_by(|&(h, k), &(g, j)| {
         let (p, q) = (at(loops[h].vertices[k]), at(loops[g].vertices[j]));
-        q.x.total_cmp(&p.x)
-            .then(q.y.total_cmp(&p.y))
-            .then(h.cmp(&g))
+        by_value(q.x, p.x).then(by_value(q.y, p.y)).then(h.cmp(&g))
     });
 
     let mut pending: Vec<bool> = vec![true; loops.len()];

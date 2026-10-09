@@ -103,7 +103,7 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
 
     // Edge parity in coordinates: an edge not twinned runs along a ring
     // edge in its own direction, and those pieces cover each ring edge once.
-    let key = |q: Point2| (q.x.to_bits(), q.y.to_bits());
+    let key = |q: Point2| ((q.x + 0.0).to_bits(), (q.y + 0.0).to_bits());
     let mut directed: HashMap<(Key, Key), (Point2, Point2, u32)> = HashMap::new();
     for t in &triangles {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
@@ -158,10 +158,69 @@ fn region(outer: Vec<Point2>, holes: Vec<Vec<Point2>>) -> Rings {
     Rings { outer, holes }
 }
 
+/// `rings` with the `k`-th zero coordinate (in ring order, `x` before `y`)
+/// written as `-0.0` where bit `k % 64` of `pattern` is set: the same
+/// points, as projecting onto plane axes can write them (#269).
+fn signed_zeros(rings: &Rings, pattern: u64) -> Rings {
+    let mut k = 0;
+    let mut flip = |v: f64| {
+        if v != 0.0 {
+            return v;
+        }
+        let negate = pattern >> (k % 64) & 1 == 1;
+        k += 1;
+        if negate {
+            -0.0
+        } else {
+            0.0
+        }
+    };
+    let mut ring = |r: &Vec<Point2>| -> Vec<Point2> {
+        r.iter()
+            .map(|q| {
+                let x = flip(q.x);
+                p(x, flip(q.y))
+            })
+            .collect()
+    };
+    let outer = ring(&rings.outer);
+    let holes = rings.holes.iter().map(&mut ring).collect();
+    region(outer, holes)
+}
+
+/// The zero-sign patterns every fixture is checked under: as written, every
+/// zero negative, and alternating in runs of one, two and four zeros, so
+/// any two of a fixture's first eight zeros differ in sign under one of
+/// them.
+const SIGN_PATTERNS: [u64; 8] = [
+    0,
+    u64::MAX,
+    0x5555_5555_5555_5555,
+    0xAAAA_AAAA_AAAA_AAAA,
+    0x3333_3333_3333_3333,
+    0xCCCC_CCCC_CCCC_CCCC,
+    0x0F0F_0F0F_0F0F_0F0F,
+    0xF0F0_F0F0_F0F0_F0F0,
+];
+
 /// Accepted with `triangles` triangles of twice-area `twice`, from every
-/// start vertex of the outer ring and either way round; refused by
-/// `triangulate` and the extrusion with a message containing `refusal`.
+/// start vertex of the outer ring, either way round and under every
+/// [`SIGN_PATTERNS`] of its zeros; refused by `triangulate` and the
+/// extrusion with a message containing `refusal`.
 fn check(rings: Rings, triangles: usize, twice: f64, refusal: &str, what: &str) {
+    for pattern in SIGN_PATTERNS {
+        let signed = signed_zeros(&rings, pattern);
+        check_signed(
+            signed,
+            triangles,
+            twice,
+            refusal,
+            &format!("{what}, zeros {pattern:x}"),
+        );
+    }
+}
+
+fn check_signed(rings: Rings, triangles: usize, twice: f64, refusal: &str, what: &str) {
     let n = rings.outer.len();
     for start in 0..n {
         for flip in [false, true] {
@@ -458,6 +517,28 @@ fn a_union_of_two_rooms_meeting_at_one_corner_triangulates() {
         8.0,
         "outer ring intersects itself",
         "rooms at a corner",
+    );
+    // The same with a straight corner on the left wall: under the zero
+    // sign patterns `(-0.0, 0.5)` comes before the corner `(0, 0)` in
+    // `total_cmp` order, and the left room's cycle read at it turns
+    // neither way (#269). n = 9, two parts: 5 triangles.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+        p(2.0, 1.0),
+        p(4.0, 1.0),
+        p(4.0, 2.0),
+        p(2.0, 2.0),
+        p(2.0, 1.0),
+        p(0.0, 1.0),
+        p(0.0, 0.5),
+    ];
+    check(
+        region(ring, vec![]),
+        5,
+        8.0,
+        "outer ring intersects itself",
+        "rooms at a corner, straight left wall",
     );
 }
 
@@ -792,6 +873,107 @@ fn random_pinched_layouts_tile_exactly() {
         pinched >= 250,
         "only {pinched} of 300 layouts touch anywhere"
     );
+}
+
+#[test]
+fn random_pinched_layouts_with_signed_zeros_tile_exactly() {
+    // As above, with zero coordinates written as -0.0 at random (#269);
+    // shifted by one cell too, so the first column of square holes and
+    // the diamonds' corners sit on the axes.
+    let mut rng = Lcg(0x269);
+    for round in 0..300 {
+        let shift = if round % 2 == 0 {
+            p(0.0, 0.0)
+        } else {
+            p(-1.0, -1.0)
+        };
+        let (rings, twice) = pinched_layout(&mut rng, 1.0, shift);
+        let pattern = rng.next() << 31 ^ rng.next();
+        let rings = signed_zeros(&rings, pattern);
+        let what = format!("signed-zero round {round}");
+        let (covered, _) = assert_tiles(&rings, &what, true);
+        assert_eq!(covered, twice, "{what}: area");
+        if let Ok(solid) = triangulate(&rings) {
+            assert_eq!(
+                Ok(solid),
+                triangulate_with(&rings, PinchPolicy::Accept),
+                "{what}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_straight_corner_on_negative_zero_does_not_flip_the_ring() {
+    // #269: a 1 x 3 rectangle, counter-clockwise, with a straight corner on
+    // its left side, which is -0.0 as projecting onto plane axes writes it.
+    // `total_cmp` read the orientation at (-0.0, 2), the straight corner,
+    // and reversed the ring.
+    let rings = region(
+        vec![
+            p(0.0, 0.0),
+            p(1.0, 0.0),
+            p(1.0, 3.0),
+            p(-0.0, 3.0),
+            p(-0.0, 2.0),
+        ],
+        vec![],
+    );
+    for policy in [PinchPolicy::Refuse, PinchPolicy::Accept] {
+        let (_, triangles) = triangulate_with(&rings, policy).expect("a rectangle triangulates");
+        assert_eq!(triangles.len(), 3);
+    }
+    let (covered, count) = assert_tiles(&rings, "rectangle at -0.0", true);
+    assert_eq!((covered, count), (6.0, 3));
+    // Every start vertex, either way round, under every zero sign.
+    check_accepted(&rings, 3, 6.0, "rectangle at -0.0");
+}
+
+#[test]
+fn a_hole_whose_lowest_corner_has_a_negative_zero_twin_triangulates() {
+    // The same ring as a hole of a 4 x 6 square: a misread hole is
+    // bridged the wrong way round and finds no ear either.
+    let hole = vec![
+        p(0.0, 0.0),
+        p(1.0, 0.0),
+        p(1.0, 3.0),
+        p(-0.0, 3.0),
+        p(-0.0, 2.0),
+    ];
+    for hole in [hole.clone(), reversed(hole)] {
+        let rings = region(rect(-2.0, -2.0, 2.0, 4.0), vec![hole]);
+        // n = 9 with one hole: 9 triangles over 24 - 3 units.
+        for policy in [PinchPolicy::Refuse, PinchPolicy::Accept] {
+            let (_, triangles) = triangulate_with(&rings, policy).expect("triangulates");
+            assert_eq!(triangles.len(), 9);
+        }
+        check_accepted(&rings, 9, 42.0, "hole at -0.0");
+    }
+}
+
+/// [`check`]'s acceptance half alone, for rings that touch nowhere.
+fn check_accepted(rings: &Rings, triangles: usize, twice: f64, what: &str) {
+    for pattern in SIGN_PATTERNS {
+        let signed = signed_zeros(rings, pattern);
+        let n = signed.outer.len();
+        for start in 0..n {
+            for flip in [false, true] {
+                let mut outer: Vec<Point2> =
+                    (0..n).map(|k| signed.outer[(start + k) % n]).collect();
+                let mut holes = signed.holes.clone();
+                if flip {
+                    outer.reverse();
+                    holes = holes.into_iter().map(reversed).collect();
+                }
+                let turned = region(outer, holes);
+                let what = format!("{what} (zeros {pattern:x}, start {start}, flipped {flip})");
+                let (covered, count) = assert_tiles(&turned, &what, true);
+                assert_eq!((covered, count), (twice, triangles), "{what}");
+                let solid = triangulate(&turned).unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                assert_eq!(solid.1.len(), triangles, "{what}");
+            }
+        }
+    }
 }
 
 #[test]

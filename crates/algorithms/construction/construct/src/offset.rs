@@ -102,7 +102,12 @@ struct VertexKey([u64; 3]);
 
 impl VertexKey {
     fn of(p: Point3) -> Self {
-        Self([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()])
+        // `+ 0.0` keys -0.0 as 0.0, the same corner (#269).
+        Self([
+            (p.x + 0.0).to_bits(),
+            (p.y + 0.0).to_bits(),
+            (p.z + 0.0).to_bits(),
+        ])
     }
 }
 

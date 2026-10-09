@@ -33,7 +33,11 @@ certifies its own output before returning it.
   ring folding back on or crossing itself, holes that overlap or touch each
   other or the outer ring, a hole outside the outer ring or inside another
   hole. Rings may come either way round; orientation is read exactly at
-  each ring's lexicographically smallest vertex.
+  each ring's lexicographically smallest vertex. Coordinates are ordered
+  by value there and wherever the clipper picks or sorts by them, `-0.0`
+  equal to `0.0` (#269): under `f64::total_cmp` a `-0.0` twin of the
+  lowest corner's `x`, which projecting a face onto plane axes writes,
+  was taken for the lowest corner, and a straight one reversed the ring.
 - **Bridge.** Holes join the boundary in order of decreasing largest x,
   each from its rightmost vertex, so a mutually visible vertex exists on the
   boundary built so far. Candidates are tried nearest first; one is taken

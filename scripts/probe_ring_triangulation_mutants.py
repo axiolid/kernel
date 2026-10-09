@@ -1,4 +1,4 @@
-"""Mutation probe for the certified profile triangulation (#253, #262).
+"""Mutation probe for the certified profile triangulation (#253, #262, #269).
 
 Each mutant weakens one exact decision of validation, bridging, ear
 clipping, the pinch path (rings touching at single points under
@@ -8,6 +8,13 @@ clipping, the pinch path (rings touching at single points under
 checked to alternate" survived because the fixture for holes crossing at
 shared corners was refused earlier, as a hole inside another. The square
 now starts outside the other hole, so only the spokes catch it: 52/52.
+
+#269 added 5 signed-zero mutants (`-0.0` ordered before `0.0`, or keyed
+apart from it). First run 4/5: a pinch path cycle read at a `-0.0` twin
+of its lowest corner survived, because no pinch fixture had a straight
+corner on the axis and the four zero-sign patterns never gave the corner
+and the twin opposite signs. A rooms-at-a-corner fixture with a straight
+left wall and eight patterns kill it: 57/57.
 
 Equivalent mutants, deliberately not listed:
 
@@ -29,6 +36,13 @@ Equivalent mutants, deliberately not listed:
 - reading a cycle's outer or hole side at its lexicographically largest
   vertex: the part's wedges are convex there too, and the outside of a
   hole cycle wraps round it as well.
+- ordering holes for bridging, touching vertices along an edge, or the
+  edge sweep with `total_cmp` (#269): two holes whose rightmost x differ
+  only in the sign of zero are equally right, so either may be bridged
+  first; two distinct points on one edge never tie in the axis it moves
+  along; and the sweep only needs edges in order of value, which ties
+  leave intact. Ordered by value anyway, so no order depends on how a zero
+  was written.
 """
 import pathlib, subprocess, sys
 
@@ -42,6 +56,8 @@ P = D + "/pinch.rs"
 TESTS = ["-p", "axiolid-construct", "--test", "profile_holes"]
 PINCHES = ["-p", "axiolid-construct", "--test", "profile_pinches"]
 LIB = ["-p", "axiolid-construct", "--lib", "ring_triangulation"]
+HOLES_SIGNED = ["-p", "axiolid-construct", "--test", "profile_holes", "signed_zeros"]
+OFFSET = ["-p", "axiolid-construct", "--test", "offset"]
 
 MUTANTS = [
     # Ear clipping.
@@ -177,6 +193,20 @@ MUTANTS = [
     ('certificate counts every part as one', M,
      '    let expected = (vertex_count + 2 * holes).saturating_sub(2 * outers);',
      '    let expected = (vertex_count + 2 * holes).saturating_sub(2);', PINCHES),
+    # Signed zeros (#269): every coordinate order by value.
+    ('coordinates ordered by total_cmp, -0.0 before 0.0', M,
+     '    (a + 0.0).total_cmp(&(b + 0.0))', '    a.total_cmp(&b)', PINCHES),
+    ('ring orientation read at a -0.0 twin of the lowest corner', V,
+     '        .min_by(|&i, &j| lexicographic(ring[i], ring[j]))',
+     '        .min_by(|&i, &j| ring[i].x.total_cmp(&ring[j].x).then(ring[i].y.total_cmp(&ring[j].y)))',
+     HOLES_SIGNED),
+    ('a cycle\'s side read at a -0.0 twin of its lowest corner', P,
+     '                .min_by(|&a, &b| lexicographic(a, b))',
+     '                .min_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)))', PINCHES),
+    ('polyhedron corners keyed with -0.0 apart from 0.0', 'crates/algorithms/construction/construct/src/polyhedron.rs',
+     '                    (p.x + 0.0).to_bits(),', '                    p.x.to_bits(),', OFFSET),
+    ('offset corners keyed with -0.0 apart from 0.0', 'crates/algorithms/construction/construct/src/offset.rs',
+     '            (p.x + 0.0).to_bits(),', '            p.x.to_bits(),', OFFSET),
     # Certificate (unit tests: the algorithm above never trips it).
     ('certificate skips the triangle count', M,
      '    if triangles.len() != expected {', '    if false {', LIB),

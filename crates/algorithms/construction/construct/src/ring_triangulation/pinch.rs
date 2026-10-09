@@ -46,7 +46,7 @@ use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Point2;
 
 use super::validate::{name, refuse, ring_turns_left, strictly_inside, Touch};
-use super::{bridge, certify, clip, locally_inside, orient, Loop};
+use super::{bridge, by_value, certify, clip, lexicographic, locally_inside, orient, Loop};
 
 /// The first index of each point's coordinates, if any two vertices
 /// coincide or `touches` is not empty; `None` when the rings touch nowhere
@@ -117,9 +117,9 @@ pub(super) fn triangulate(
                 list.sort_by(|&u, &v| {
                     let (pu, pv) = (at(u), at(v));
                     let along = if pa.x != pb.x {
-                        pu.x.total_cmp(&pv.x)
+                        by_value(pu.x, pv.x)
                     } else {
-                        pu.y.total_cmp(&pv.y)
+                        by_value(pu.y, pv.y)
                     };
                     if (pa.x != pb.x && pb.x < pa.x) || (pa.x == pb.x && pb.y < pa.y) {
                         along.reverse()
@@ -223,7 +223,7 @@ pub(super) fn triangulate(
             let lowest = cycle
                 .iter()
                 .map(|&n| at(nodes[n].vertex))
-                .min_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)))
+                .min_by(|&a, &b| lexicographic(a, b))
                 .unwrap_or(Point2::new(0.0, 0.0));
             cycle
                 .iter()

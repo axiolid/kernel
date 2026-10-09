@@ -37,6 +37,26 @@ caret rule for `0.x` versions.
   the profile plane"`. The mesh path already built these solids; both now
   agree. Mutation probe: `scripts/probe_downward_extrusion_mutants.py`.
 
+- **A ring's orientation is no longer misread at a `-0.0` twin of its
+  lowest corner (#269).** The certified clipper reads a ring's turn at its
+  lexicographically smallest vertex, found with `f64::total_cmp`, which
+  orders `-0.0` before `0.0`. A rectangle with a straight corner at
+  `(-0.0, 2)` and its true lowest corner at `(0, 0)` was read at the
+  straight corner, taken for clockwise and reversed, and both pinch
+  policies then refused it with "found no ear". Projecting a face onto
+  plane axes writes exactly such rings (`0.0 * -k = -0.0` next to the
+  origin's `0.0`); a downstream triage found 35 refused rectangular faces
+  in two models. Every coordinate comparison of the clipper now orders by
+  value, `-0.0` equal to `0.0` (still total and deterministic): the lowest
+  corner of a ring and of a pinch path's boundary cycle, the order of
+  touching vertices along an edge, the bridge order of holes and the edge
+  sweep. `polyhedron::triangulate` and `offset::offset_solid` key corners
+  with `-0.0` read as `0.0` too, so a corner written both ways welds into
+  one vertex. Tests: the issue's rectangle and a hole with the same
+  corner under both policies, every pinch fixture under eight zero-sign
+  patterns, random hole and pinch layouts with zeros negated at random,
+  and a cube with a face written in `-0.0`.
+
 ## [0.3.15] - 2026-10-04
 
 ### Added

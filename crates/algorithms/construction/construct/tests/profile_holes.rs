@@ -454,54 +454,138 @@ fn random_hole_layouts_triangulate_soundly() {
     let mut rng = Lcg(0x253);
     let mut checked = 0;
     for round in 0..400 {
-        // Quarter-unit grid, so every coordinate and every product below is
-        // exact in f64.
-        let q = 0.25;
-        let mut boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
-        let target = 1 + rng.below(9) as usize;
-        for _ in 0..target * 8 {
-            if boxes.len() == target {
-                break;
-            }
-            let w = (2 + rng.below(16)) as f64 * q;
-            let h = (2 + rng.below(16)) as f64 * q;
-            let x = (1 + rng.below(63)) as f64 * q - 8.0;
-            let y = (1 + rng.below(63)) as f64 * q - 8.0;
-            if x + w > 8.0 - q || y + h > 8.0 - q {
-                continue;
-            }
-            // Boxes keep at least a quarter apart, so even shapes that fill
-            // their box (rectangles) never touch.
-            let clear = boxes.iter().all(|&(bx, by, bw, bh)| {
-                x >= bx + bw + q || bx >= x + w + q || y >= by + bh + q || by >= y + h + q
-            });
-            if clear {
-                boxes.push((x, y, w, h));
-            }
-        }
-        let holes: Vec<Vec<Point2>> = boxes
-            .iter()
-            .map(|&(x, y, w, h)| {
-                let kind = rng.below(5);
-                shape(kind, w, h)
-                    .into_iter()
-                    .map(|p| Point2::new(p.x + x, p.y + y))
-                    .collect()
-            })
-            .collect();
-        // The outer ring sometimes carries collinear points too.
-        let outer = if round % 3 == 0 {
-            shape(4, 16.0, 16.0)
-                .into_iter()
-                .map(|p| Point2::new(p.x - 8.0, p.y - 8.0))
-                .collect()
-        } else {
-            rect(-8.0, -8.0, 8.0, 8.0)
-        };
+        let (outer, holes) = hole_layout(&mut rng, round);
         check(outer, holes, &format!("round {round}"));
         checked += 1;
     }
     assert_eq!(checked, 400);
+}
+
+/// The layouts above moved so that one hole's lowest corner is the origin,
+/// with zero coordinates written as -0.0 at random, as projecting onto
+/// plane axes writes them. Orientation is read at a ring's lowest corner,
+/// which a `-0.0` twin of its `x` used to displace (#269).
+#[test]
+fn random_hole_layouts_with_signed_zeros_triangulate_soundly() {
+    let mut rng = Lcg(0x269);
+    let mut moved = 0;
+    for round in 0..400 {
+        let (mut outer, mut holes) = hole_layout(&mut rng, round);
+        if holes.is_empty() {
+            continue;
+        }
+        let pick = rng.below(holes.len() as u64) as usize;
+        let origin = holes[pick]
+            .iter()
+            .copied()
+            .min_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)))
+            .expect("a hole has corners");
+        let mut sign = rng.next() << 31 ^ rng.next();
+        let mut place = |q: Point2| {
+            let mut coordinate = |v: f64| {
+                if v != 0.0 {
+                    return v;
+                }
+                sign = sign.rotate_left(1);
+                if sign & 1 == 1 {
+                    -0.0
+                } else {
+                    0.0
+                }
+            };
+            let x = coordinate(q.x - origin.x);
+            Point2::new(x, coordinate(q.y - origin.y))
+        };
+        outer = outer.into_iter().map(&mut place).collect();
+        for hole in &mut holes {
+            *hole = hole.iter().map(|&q| place(q)).collect();
+        }
+        moved += usize::from(
+            holes
+                .iter()
+                .flatten()
+                .any(|q| q.x.to_bits() == (-0.0f64).to_bits()),
+        );
+        let what = format!("signed-zero round {round}");
+        // Wound the other way too: a straight corner taken for the lowest
+        // one turns neither way, which reads as clockwise, so only rings
+        // given counter-clockwise show the misreading.
+        let flipped = Rings {
+            outer: cw(outer.clone()),
+            holes: holes.clone(),
+        };
+        let (points, triangles) =
+            triangulate(&flipped).unwrap_or_else(|e| panic!("{what}, flipped: {e:?}"));
+        let n = flipped.outer.len() + flipped.holes.iter().map(Vec::len).sum::<usize>();
+        assert_eq!(triangles.len(), n + 2 * holes.len() - 2, "{what}, flipped");
+        let covered: f64 = triangles
+            .iter()
+            .map(|t| {
+                twice_area(
+                    points[t[0] as usize],
+                    points[t[1] as usize],
+                    points[t[2] as usize],
+                )
+            })
+            .sum();
+        assert_eq!(
+            covered,
+            twice_expected_area(&flipped),
+            "{what}, flipped: area"
+        );
+        check(outer, holes, &what);
+    }
+    assert!(moved >= 150, "only {moved} layouts have a -0.0 corner");
+}
+
+/// One random layout of [`random_hole_layouts_triangulate_soundly`]: the
+/// outer ring and its holes, counter-clockwise.
+fn hole_layout(rng: &mut Lcg, round: usize) -> (Vec<Point2>, Vec<Vec<Point2>>) {
+    // Quarter-unit grid, so every coordinate and every product below is
+    // exact in f64.
+    let q = 0.25;
+    let mut boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
+    let target = 1 + rng.below(9) as usize;
+    for _ in 0..target * 8 {
+        if boxes.len() == target {
+            break;
+        }
+        let w = (2 + rng.below(16)) as f64 * q;
+        let h = (2 + rng.below(16)) as f64 * q;
+        let x = (1 + rng.below(63)) as f64 * q - 8.0;
+        let y = (1 + rng.below(63)) as f64 * q - 8.0;
+        if x + w > 8.0 - q || y + h > 8.0 - q {
+            continue;
+        }
+        // Boxes keep at least a quarter apart, so even shapes that fill
+        // their box (rectangles) never touch.
+        let clear = boxes.iter().all(|&(bx, by, bw, bh)| {
+            x >= bx + bw + q || bx >= x + w + q || y >= by + bh + q || by >= y + h + q
+        });
+        if clear {
+            boxes.push((x, y, w, h));
+        }
+    }
+    let holes: Vec<Vec<Point2>> = boxes
+        .iter()
+        .map(|&(x, y, w, h)| {
+            let kind = rng.below(5);
+            shape(kind, w, h)
+                .into_iter()
+                .map(|p| Point2::new(p.x + x, p.y + y))
+                .collect()
+        })
+        .collect();
+    // The outer ring sometimes carries collinear points too.
+    let outer = if round % 3 == 0 {
+        shape(4, 16.0, 16.0)
+            .into_iter()
+            .map(|p| Point2::new(p.x - 8.0, p.y - 8.0))
+            .collect()
+    } else {
+        rect(-8.0, -8.0, 8.0, 8.0)
+    };
+    (outer, holes)
 }
 
 /// Random regular polygons at arbitrary (non-dyadic) positions and turns
