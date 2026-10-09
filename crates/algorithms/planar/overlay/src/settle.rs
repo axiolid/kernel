@@ -17,8 +17,12 @@
 //! tolerance.
 
 use axiolid_core::{Point2, Tolerance};
+use axiolid_guarantees::Sign;
 
-use crate::{contains, cross, segments_intersect, signed, within_extent, Polygon, Ring};
+use crate::{
+    contains, cross, orientation, segments_intersect, signed, within_extent, zero_area, Polygon,
+    Ring,
+};
 
 /// Polygons whose every ring passes [`crate::validate_ring`].
 pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygon> {
@@ -29,9 +33,9 @@ pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygo
         for (ring, hole) in std::iter::once((polygon.outer, false))
             .chain(polygon.holes.into_iter().map(|h| (h, true)))
         {
-            let sense = signed(&ring) > 0.0;
+            let sense = orientation(&ring.points) == Sign::Positive;
             for piece in pieces(ring.points, eps) {
-                let same = (area(&piece) > 0.0) == sense;
+                let same = (orientation(&piece) == Sign::Positive) == sense;
                 if same != hole {
                     outers.push(piece);
                 } else {
@@ -109,7 +113,7 @@ fn pieces(points: Vec<Point2>, eps: f64) -> Vec<Vec<Point2>> {
     let mut budget = 64 + 8 * work[0].len();
     while let Some(mut ring) = work.pop() {
         merge_short(&mut ring, eps);
-        if ring.len() < 3 || area(&ring).abs() <= eps * eps {
+        if ring.len() < 3 || zero_area(&ring, eps) {
             continue;
         }
         if let Some((i, j)) = split_point(&ring) {

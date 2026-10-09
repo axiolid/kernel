@@ -24,6 +24,7 @@
 //! adapter in a later step so that library types never reach this API.
 
 use axiolid_core::{Point2, Tolerance};
+use axiolid_guarantees::Sign;
 
 use crate::OverlayError;
 
@@ -126,16 +127,21 @@ impl ArcRing {
 /// Keeping `theta` signed is what makes a reversed ring negate exactly: a
 /// clockwise circle must return `-pi r^2`, not `+pi r^2`. An unsigned
 /// segment term gets the disc right and the reversed disc wrong.
+///
+/// The polygon area is summed as triangles fanned from the first vertex,
+/// so its rounding scales with the ring's extent, not with its distance
+/// from the origin (#274).
 pub fn arc_ring_area(ring: &ArcRing) -> f64 {
     let count = ring.vertices.len();
     if count < 2 {
         return 0.0;
     }
+    let origin = ring.vertices[0].point;
     let mut area = 0.0;
-    for index in 0..count {
-        let from = ring.vertices[index];
-        let to = ring.vertices[(index + 1) % count];
-        area += from.point.x * to.point.y - to.point.x * from.point.y;
+    for index in 1..count - 1 {
+        let from = ring.vertices[index].point - origin;
+        let to = ring.vertices[index + 1].point - origin;
+        area += from.perp_dot(to);
     }
     area *= 0.5;
     for index in 0..count {
@@ -182,7 +188,10 @@ pub fn arc_edge_radius(from: ArcVertex, to: ArcVertex) -> Option<f64> {
 /// - a zero-length edge, which leaves the arc centre undefined
 /// - an arc whose implied radius is below tolerance, the zero-radius case
 ///   ADR 0050 flagged: such an arc is a point, not a boundary
-/// - a ring enclosing no measurable area
+/// - a ring enclosing no measurable area: at most `tolerance.linear()^2`,
+///   decided exactly for a ring without arcs (one on a line included, as
+///   the arc path has no rule leaving it out), and from [`arc_ring_area`]
+///   otherwise (#274)
 ///
 /// Self-intersection is NOT checked here. Arc/arc and arc/segment crossing
 /// tests are genuinely part of the overlay algorithm, and a cheap
@@ -220,10 +229,37 @@ pub fn validate_arc_ring(ring: &ArcRing, tolerance: Tolerance) -> Result<(), Ove
             }
         }
     }
-    if arc_ring_area(ring).abs() <= tolerance.linear().powi(2) {
+    let zero = if ring.is_polygonal() {
+        crate::zero_area(&points(ring), tolerance.linear())
+    } else {
+        arc_ring_area(ring).abs() <= tolerance.linear().powi(2)
+    };
+    if zero {
         return Err(OverlayError::ZeroArea);
     }
     Ok(())
+}
+
+fn points(ring: &ArcRing) -> Vec<Point2> {
+    ring.vertices.iter().map(|vertex| vertex.point).collect()
+}
+
+/// A ring's orientation: `Positive` counter-clockwise.
+///
+/// Exact for a ring without arcs (#274), the sign of [`arc_ring_area`]
+/// otherwise: a circular segment's area is transcendental in its bulge.
+pub(crate) fn arc_orientation(ring: &ArcRing) -> Sign {
+    if ring.is_polygonal() {
+        return crate::orientation(&points(ring));
+    }
+    let area = arc_ring_area(ring);
+    if area > 0.0 {
+        Sign::Positive
+    } else if area < 0.0 {
+        Sign::Negative
+    } else {
+        Sign::Zero
+    }
 }
 
 /// Reverse a ring's orientation, preserving its geometry.

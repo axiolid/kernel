@@ -9,6 +9,32 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Small rings far from the origin keep their area and orientation (#274).
+  A ring's orientation and its `ZeroArea` check came from a shoelace over
+  the coordinates as given, whose rounding at georeferenced positions
+  (6e5, 5.6e6 m) swamps the area of a small ring: a 1e-4 m² triangle was
+  refused as `ZeroArea`, and a clockwise sliver of a chorded round corner
+  read as counter-clockwise made the union of two triangles sharing an
+  edge fail with `SelfIntersection`. Both are now exact signs of the area
+  taken as a fan of triangles from the ring's first vertex, at every site
+  that decides with them: validation (`overlay`, `union_soup`,
+  `Region::new`, and `validate_arc_ring` for a ring without arcs), the
+  exact boolean's winding weights, canonical output orientation,
+  settling, the outer-or-hole decision when linking result rings, and the
+  orientation `arc_overlay` and `ArcArrangement` give their operands. A
+  ring now decides the same at any distance from the origin.
+  `arc_ring_area`, `ring_area`, `polygon_area` and `Region::area` sum from
+  the first vertex too, so their rounding scales with the ring's extent.
+- A ring whose vertices all lie exactly on one line is a valid operand
+  wherever it lies; a boolean leaves it out, as it encloses nothing (#219).
+  Before, its rounded area decided whether validation refused it as
+  `ZeroArea`, so the plan shadow of a vertical face passed at `x = 4.2`
+  and was refused at `x = 4`. A ring with arcs, or one passed to
+  `validate_arc_ring`, is still refused, as the arc path has no rule
+  leaving it out.
+
 ## [0.3.10] - 2026-10-02
 
 ### Fixed

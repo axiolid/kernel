@@ -17,8 +17,9 @@
 //! same contract the polygon path applies.
 
 use axiolid_core::Tolerance;
+use axiolid_guarantees::Sign;
 
-use crate::arc::{arc_ring_area, validate_arc_ring, ArcRing};
+use crate::arc::{arc_orientation, validate_arc_ring, ArcRing};
 use crate::exact_arc;
 use crate::{OverlayError, OverlayOperation};
 
@@ -71,7 +72,7 @@ fn count_edges(ring: &ArcRing) -> (usize, usize) {
 /// normalised on the way in (the exact core assumes the region lies left of
 /// its boundary) and results on the way out.
 fn oriented(ring: ArcRing, want_positive: bool) -> ArcRing {
-    if (arc_ring_area(&ring) > 0.0) == want_positive {
+    if (arc_orientation(&ring) == Sign::Positive) == want_positive {
         ring
     } else {
         crate::arc::reverse_arc_ring(&ring)

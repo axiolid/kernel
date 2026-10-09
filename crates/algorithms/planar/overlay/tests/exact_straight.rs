@@ -209,8 +209,9 @@ fn rectangles_sharing_a_corner_and_two_half_sides() {
     same_points(&result[0].outer, &rect(1.0, 0.0, 2.0, 1.0));
 }
 
-/// The shadow of a vertical face: three points on the line x = 4.2, whose
-/// rounded area is not quite zero, so validation lets it through. It
+/// The shadow of a vertical face: three points on the line x = 4.2.
+/// Validation lets a ring on one line through, decided exactly since #274
+/// (before, only because its rounded area was not quite zero). It
 /// encloses nothing: a union with it is the other operand, a union of it
 /// with itself is empty -- as the grid backend answered before 0.3.5,
 /// where the exact boolean refused it as self-intersecting (#219).

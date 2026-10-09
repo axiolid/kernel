@@ -288,16 +288,12 @@ pub fn stroke_polyline(
 /// Exposed because area monotonicity is the property callers most often want to
 /// assert about an offset, and re-deriving the shoelace formula per consumer
 /// invites sign-convention mistakes.
+///
+/// Summed relative to the first vertex, so a small ring far from the
+/// origin keeps its area (#274).
 #[must_use]
 pub fn ring_area(ring: &Ring) -> f64 {
-    ring.points
-        .iter()
-        .zip(ring.points.iter().cycle().skip(1))
-        .take(ring.points.len())
-        .map(|(a, b)| a.x * b.y - b.x * a.y)
-        .sum::<f64>()
-        .abs()
-        * 0.5
+    crate::signed(ring).abs()
 }
 
 /// Net area of a polygon: outer boundary minus its holes.

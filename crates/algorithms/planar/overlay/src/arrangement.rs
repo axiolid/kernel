@@ -17,8 +17,9 @@
 //! them by index.
 
 use axiolid_core::{Point2, Tolerance};
+use axiolid_guarantees::Sign;
 
-use crate::arc::{arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing};
+use crate::arc::{arc_orientation, reverse_arc_ring, validate_arc_ring, ArcRing};
 use crate::exact_arc::arrangement::{self, Raw};
 use crate::OverlayError;
 
@@ -122,7 +123,7 @@ impl ArcArrangement {
         let mut reversed = Vec::with_capacity(rings.len());
         for ring in rings {
             validate_arc_ring(ring, tolerance)?;
-            let flip = arc_ring_area(ring) < 0.0;
+            let flip = arc_orientation(ring) == Sign::Negative;
             oriented.push(if flip {
                 reverse_arc_ring(ring)
             } else {

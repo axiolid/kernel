@@ -67,7 +67,7 @@ use axiolid_core::Point2;
 use axiolid_exact::{Arith, Dyadic};
 use axiolid_guarantees::Sign;
 
-use crate::arc::{arc_ring_area, ArcRing, ArcVertex};
+use crate::arc::{arc_orientation, arc_ring_area, ArcRing, ArcVertex};
 use crate::{OverlayError, OverlayOperation};
 
 use edge::{crossings, orient_f64, Carrier, Edge};
@@ -719,8 +719,12 @@ fn assemble(kept: Vec<Piece>) -> Result<Vec<PieceRegion>, OverlayError> {
     let mut outers: Vec<(Vec<Piece>, f64, Vec<Mono>)> = Vec::new();
     let mut holes: Vec<(Vec<Piece>, XPoint)> = Vec::new();
     for pieces in rings {
-        let area = arc_ring_area(&to_ring(&pieces));
-        if area > 0.0 {
+        let ring = to_ring(&pieces);
+        // The sign is exact for a straight ring, so a small one far from
+        // the origin is not taken for a hole (#274); the area only ranks
+        // owners.
+        if arc_orientation(&ring) == Sign::Positive {
+            let area = arc_ring_area(&ring);
             let parts = ring_parts(&pieces);
             outers.push((pieces, area, parts));
         } else {

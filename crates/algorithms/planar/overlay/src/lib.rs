@@ -1,5 +1,14 @@
 #![forbid(unsafe_code)]
 //! Validated, deterministic planar boolean overlay and offset.
+//!
+//! A straight ring's orientation and its `ZeroArea` check are exact signs
+//! of its area taken as a fan of triangles from its first vertex (#274):
+//! a shoelace over the coordinates as given rounds at the size of the
+//! coordinates squared, which at georeferenced plan positions swamps the
+//! area of a small ring. Areas reported as values are summed the same way,
+//! so their rounding scales with the ring's extent, not its position.
+//! `scripts/probe_ring_orientation_mutants.py` lists the faults the tests
+//! in `tests/far_from_origin.rs` must catch.
 mod arc;
 mod arc_overlay;
 mod arrangement;
@@ -41,6 +50,8 @@ pub use segment_sweep::{
 pub use visibility::VisibilityError;
 
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
+use axiolid_exact::{certify, Arith, SignExpr};
+use axiolid_guarantees::Sign;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillRule {
@@ -159,14 +170,66 @@ pub struct OverlayResult {
     pub polygons: Vec<Polygon>,
     pub evidence: OverlayEvidence,
 }
+/// A ring's signed area, positive counter-clockwise, as a measure.
+///
+/// Summed as triangles fanned from the first vertex, so each term is the
+/// size of the ring's extent squared, not of its coordinates squared: a
+/// shoelace over the coordinates as given loses a small ring's whole area
+/// to rounding far from the origin (#274). Decisions use [`orientation`]
+/// and [`zero_area`], which are exact; this is for magnitudes only.
 fn signed(r: &Ring) -> f64 {
+    let Some(&o) = r.points.first() else {
+        return 0.0;
+    };
     r.points
-        .iter()
-        .zip(r.points.iter().cycle().skip(1))
-        .take(r.points.len())
-        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .windows(2)
+        .skip(1)
+        .map(|w| (w[0] - o).perp_dot(w[1] - o))
         .sum::<f64>()
         * 0.5
+}
+
+/// The sign of `2 * area - offset` for the ring through `points`, exactly.
+///
+/// The area is the fan of triangles from the first vertex,
+/// `sum((p[i] - p[0]) x (p[i + 1] - p[0]))`, which equals the shoelace in
+/// exact arithmetic but keeps the interval filter tight far from the
+/// origin (#274). Points must be finite; a refusal of the exact tier,
+/// which finite points never cause, reads as zero.
+struct TwiceArea<'a> {
+    points: &'a [Point2],
+    offset: f64,
+}
+
+impl SignExpr for TwiceArea<'_> {
+    fn sign_in<T: Arith>(&self) -> Option<Sign> {
+        let f = T::from_f64;
+        let o = self.points.first()?;
+        let local = |p: &Point2| (f(p.x).sub(&f(o.x)), f(p.y).sub(&f(o.y)));
+        let mut sum = f(self.offset).neg();
+        for w in self.points.windows(2).skip(1) {
+            let ((ax, ay), (bx, by)) = (local(&w[0]), local(&w[1]));
+            sum = sum.add(&ax.mul(&by).sub(&ay.mul(&bx)));
+        }
+        sum.sign()
+    }
+}
+
+fn area_sign(points: &[Point2], offset: f64) -> Sign {
+    certify(&TwiceArea { points, offset }).unwrap_or(Sign::Zero)
+}
+
+/// A ring's orientation, exactly: `Positive` counter-clockwise, `Negative`
+/// clockwise, `Zero` when its signed area is exactly zero.
+pub(crate) fn orientation(points: &[Point2]) -> Sign {
+    area_sign(points, 0.0)
+}
+
+/// Whether a ring's area is at most `linear^2`, decided exactly against
+/// that double (#274): the [`OverlayError::ZeroArea`] rule.
+pub(crate) fn zero_area(points: &[Point2], linear: f64) -> bool {
+    let bound = 2.0 * linear * linear;
+    area_sign(points, bound) != Sign::Positive && area_sign(points, -bound) != Sign::Negative
 }
 fn cross(a: Point2, b: Point2, c: Point2) -> f64 {
     (b - a).perp_dot(c - a)
@@ -218,6 +281,16 @@ fn self_intersects(r: &Ring, t: Tolerance) -> bool {
     false
 }
 
+/// Validate one ring: the contract every operand and every settled output
+/// meets.
+///
+/// Refused, in this order: fewer than three points, a non-finite point,
+/// an edge no longer than `t.linear()`, non-adjacent edges meeting within
+/// it, and an area of at most `t.linear()^2` (`ZeroArea`). The area is
+/// decided exactly, from the fan of triangles at the first vertex, so the
+/// same ring decides the same at any distance from the origin (#274). A
+/// ring whose vertices all lie exactly on one line is not refused: it
+/// encloses nothing, and a boolean leaves it out (#219).
 pub(crate) fn validate_ring(r: &Ring, t: Tolerance) -> Result<(), OverlayError> {
     if r.points.len() < 3 {
         return Err(OverlayError::RingTooShort);
@@ -236,7 +309,11 @@ pub(crate) fn validate_ring(r: &Ring, t: Tolerance) -> Result<(), OverlayError> 
     if self_intersects(r, t) {
         return Err(OverlayError::SelfIntersection);
     }
-    if signed(r).abs() <= t.linear().powi(2) {
+    // Both exact, so a ring decides the same wherever it lies (#274). A
+    // ring whose vertices all lie on one line encloses nothing and a
+    // boolean leaves it out (#219); it stays a valid operand, as the
+    // shadow of a vertical face in a plan soup is.
+    if zero_area(&r.points, t.linear()) && !exact_overlay::on_one_line(&r.points) {
         return Err(OverlayError::ZeroArea);
     };
     Ok(())
@@ -296,7 +373,7 @@ fn contains(r: &Ring, p: Point2) -> bool {
     inside
 }
 pub(crate) fn canonical(mut r: Ring, want_positive: bool) -> Ring {
-    if (signed(&r) > 0.) != want_positive {
+    if (orientation(&r.points) == Sign::Positive) != want_positive {
         r.points.reverse()
     };
     let k = r

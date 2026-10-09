@@ -41,7 +41,7 @@ use axiolid_guarantees::Sign;
 
 use crate::arc::{ArcRing, ArcVertex};
 use crate::exact_arc::{arrangement, orient_doubles};
-use crate::{signed, FillRule, OverlayError, OverlayOperation, Polygon, Ring};
+use crate::{orientation, FillRule, OverlayError, OverlayOperation, Polygon, Ring};
 
 /// Which operand a ring belongs to, and how it counts.
 struct Counted {
@@ -115,10 +115,10 @@ fn boolean_reduced(
             .filter(|points| points.len() >= 3 && !on_one_line(points))
             .collect();
         let rings_of = if reduced { reduce(given) } else { given };
-        for points in rings_of {
-            let ring = Ring { points };
-            let positive = signed(&ring) > 0.0;
-            let mut points = ring.points;
+        for mut points in rings_of {
+            // Exact, so a sliver far from the origin keeps its winding
+            // (#274).
+            let positive = orientation(&points) == Sign::Positive;
             if !positive {
                 points.reverse();
             }
@@ -323,7 +323,7 @@ fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
 /// ring encloses no area, whatever its rounded area says, and a boolean
 /// leaves it out. The exact subdivision assumes simple rings, and a ring
 /// running back over itself along a line is not one (#219).
-fn on_one_line(points: &[Point2]) -> bool {
+pub(crate) fn on_one_line(points: &[Point2]) -> bool {
     let Some(&a) = points.first() else {
         return true;
     };
