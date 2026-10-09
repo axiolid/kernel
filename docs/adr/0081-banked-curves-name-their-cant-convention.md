@@ -105,3 +105,61 @@ cant is the reference-up frame against `+Z`.
 - `crates/algorithms/parametric/evaluate/src/banked.rs`: point, tangent,
   `BankedSection`; wired into `curve.rs`, `provider.rs` and `bound.rs`.
 - `crates/representations/brep/src/transform.rs`: refusal by name.
+
+## Amendment 2026-10-09: rotation about a held rail (#279)
+
+The consumer (openbimrs/ifc#364) rotates a cant bend about its low rail
+where the transition is written for the bank angle (the Viennese bend,
+IFC 4.3 ADD2 8.7.2.1): left cant 0 -> 0.15, right cant 0. The held rail
+keeps its height, the other moves by `D = b sin(psi)`, so the pivot is
+`e0 + (b / 2) sin(psi)`, not a height polynomial. The cost named above
+(such a pivot refused rather than approximated) and the follow-up
+("add it as a new pivot form") are resolved here.
+
+- **A derived pivot piece.** `CantForm::AboutRail { rail, elevation }`
+  is a pivot-law piece whose elevation is read from the cant law at the
+  same plan distance: `e = e0 + s D / 2 = e0 + s (b / 2) sin(psi)`,
+  `s = +1` about the right rail and `-1` about the left
+  (`RailSide::pivot_sign`). One form serves height and angle cant pieces
+  alike, so a rotation about the low rail through a Bloss or sine
+  transition no longer restates the cant polynomial halved. Its rate is
+  `e' = s D' / 2`, for an angle piece `s (b / 2) cos(psi) psi'`.
+- **Additive.** `CantForm` is `#[non_exhaustive]`, so the variant is
+  new at its end; `Banked3` keeps `pivot: CantLaw` and gains no field.
+  The piece has no value of its own: `CantLaw::value_at` gives none, and
+  `Banked3::pivot_at` reads it. In a cant law it has no meaning and is
+  refused by name (`BankError::RailInCant`, new at the end of a
+  `#[non_exhaustive]` enum). `AngleInPivot` stays for an angle piece in
+  the pivot law, which still states nothing a pivot could be.
+- **What is held exactly.** The rail heads sit `(b / 2) l` either side of
+  the pivot, and the vertical part of `l` is `sin(rho) cos(theta)`,
+  `theta` the grade of the point path (which includes `e'`). Under
+  `VerticalRise` that is `D / b`, so the held rail head stands exactly
+  `e0` above the profile at every station, on any grade. Under
+  `TangentRotation` it is `sin(psi) cos(theta)`: the held rail drifts by
+  `(D / 2)(1 - cos theta)`, zero only where the point path is level. The
+  pivot follows the issue's formula, not a convention-dependent one,
+  because a `TangentRotation` pivot holding the rail exactly would need
+  `cos(theta)`, which depends on `e'` itself.
+- **Bounds.** Over an angle piece, `e'' = s (b / 2)(cos(psi) psi'' -
+  sin(psi) psi'^2)` and
+  `e''' = s (b / 2)(cos(psi) psi''' - 3 sin(psi) psi' psi'' - cos(psi) psi'^3)`,
+  bounded by `(b / 2) P_1`, `(b / 2)(P_2 + P_1^2)` and
+  `(b / 2)(P_3 + 3 P_1 P_2 + P_1^3)` with `P_k = sup |psi^(k)|`. The
+  Viennese bend's `P_k` are exact over the span asked for: each
+  derivative of its shape, `140 w^3`, `420 w^2 (1 - 2 xi)` and
+  `840 w (1 - 5 w)` with `w = xi (1 - xi)`, is taken at the span's ends
+  and its critical points inside (`1/2`; `1/2 +- 1 / sqrt(20)`; `1/2`
+  and `1/2 +- sqrt(0.15)`). Over a height piece the bounds are half the
+  cant's. So `banked_chord_bound`, `banked_derivative_bounds`, `flatten3`
+  and the sweep certification (#252) carry over; a disk swept along a
+  held-rail Viennese bend is certified.
+- **Seams.** Where a held-rail piece covers it, a cant seam is a seam of
+  the point path: `banked_breaks` and `grade_corners3` name it, with the
+  rate on either side read from the cant law cut there. Station seams
+  (#263, ADR 0082) already include every cant seam.
+
+`certifies_flattening3` still reports a banked curve uncertified: an
+angle piece in the pivot law has no bound, so certification is not
+claimed for every banked curve, though every held-rail and height pivot
+is bounded.
