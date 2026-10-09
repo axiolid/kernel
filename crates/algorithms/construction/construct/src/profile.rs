@@ -436,7 +436,8 @@ fn flatten_circle(radius: Scalar, chord_error: Scalar) -> GeomResult<Vec<Point2>
 ///
 /// `InvalidInput`, naming the ring, for rings that do not bound a polygon
 /// with holes: fewer than three or non-finite vertices, a repeated vertex,
-/// a ring that folds back on or crosses itself, holes that overlap or touch
+/// a ring that folds back on or crosses itself or runs along a seam both
+/// ways (a keyhole, #270), holes that overlap or touch
 /// each other or the outer ring, a hole outside the outer ring or inside
 /// another hole. `Degenerate` if the triangulation cannot be certified.
 ///
@@ -454,19 +455,24 @@ pub fn triangulate(rings: &Rings) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
 /// The region such rings bound is valid, but the surface an extrusion
 /// builds over it is not a two-manifold: the walls of the two rings meet
 /// along one edge, which four faces then share. So solids refuse it and
-/// regions and surface patches accept it.
+/// regions and surface patches accept it. The same holds for a ring that
+/// joins a hole by a seam it runs along both ways (#270): its region is
+/// the outer polygon less the hole, but an extrusion puts two coincident
+/// wall faces on the seam.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PinchPolicy {
-    /// Refuse touching rings with `InvalidInput` naming them. For anything
-    /// that must close into a two-manifold: extrusion and loft caps.
+    /// Refuse touching rings and seams with `InvalidInput` naming them. For
+    /// anything that must close into a two-manifold: extrusion and loft
+    /// caps.
     Refuse,
     /// Triangulate the region the touching rings bound. For 2D regions and
     /// planar surface patches: a plan footprint that is a union of shadows
     /// touching at a corner, a space-boundary surface, a planar face of a
     /// B-rep (whose edges are the ring edges either way, once a vertex
     /// inside an edge, which [`ring_touches`] lists, is inserted into the
-    /// neighbouring face's copy of that edge too).
+    /// neighbouring face's copy of that edge too). A ring joining a hole by
+    /// a seam run both ways (a keyhole, #270) is accepted too.
     Accept,
 }
 
@@ -485,11 +491,27 @@ pub enum PinchPolicy {
 /// are the rings' edges cut at every touching vertex. Rings touching
 /// nowhere triangulate exactly as under [`PinchPolicy::Refuse`].
 ///
+/// Under [`PinchPolicy::Accept`] a ring may also join a hole by a seam
+/// (#270): an edge and a later edge of the same ring between the same two
+/// points in opposite directions, which no other edge has, and which no
+/// other edge meets except at its ends -- a keyhole, the outer boundary,
+/// the seam, the hole and the seam back. The two copies cancel: the ring
+/// bounds what its other edges bound, and is split at its seams into the
+/// loops they join, triangulated as above (a hole loop drawn either way
+/// round is a hole; a seam between two loops side by side leaves two
+/// parts). A seam may be a triangle edge, once each way, or none at all.
+///
 /// # Errors
 ///
-/// As [`triangulate`], except that touching at single points is accepted
-/// under [`PinchPolicy::Accept`]. Rings that cross, at a shared vertex
-/// included, or overlap along an edge are refused by name under both.
+/// As [`triangulate`], except that touching at single points and seams
+/// are accepted under [`PinchPolicy::Accept`]. Rings that cross, at a
+/// shared vertex included, or overlap along an edge are refused by name
+/// under both, and so are, under [`PinchPolicy::Accept`], an edge running
+/// back along only part of another, the same edge in one direction twice
+/// or more than twice in all, seams interleaving along their ring instead
+/// of nesting, seams in a row, an edge crossing, touching or running along
+/// a seam away from its ends, and a loop folding back where a seam left
+/// it. [`PinchPolicy::Refuse`] refuses any seam by name.
 pub fn triangulate_with(
     rings: &Rings,
     pinches: PinchPolicy,
@@ -541,11 +563,18 @@ pub struct RingTouch {
 /// the same order, so the touches come in a deterministic order, each
 /// vertex and edge pair once; nothing is triangulated.
 ///
+/// A ring with a seam run both ways (a keyhole, #270) is validated as
+/// [`triangulate_with`] validates it, without its seams: the touches are
+/// those of the loops the seams join, on their edges, which are the ring's
+/// other edges. No vertex lies inside a seam, and a seam's ends, where the
+/// ring meets itself, are shared vertices, not touches.
+///
 /// # Errors
 ///
 /// As [`triangulate_with`] under [`PinchPolicy::Accept`] for rings that do
 /// not bound a region: too few, non-finite or repeated vertices, a ring
-/// folding back, rings that cross or overlap along an edge.
+/// folding back, rings that cross or overlap along an edge, a seam that is
+/// not one.
 pub fn ring_touches(rings: &Rings) -> GeomResult<Vec<RingTouch>> {
     crate::ring_triangulation::ring_touches(&rings.outer, &rings.holes).map(|touches| {
         touches

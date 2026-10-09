@@ -1,12 +1,15 @@
 //! Planar faces whose projected rings the certified clipper used to refuse.
 //!
-//! A face is projected onto in-plane axes before it is ear clipped. For a
-//! face whose normal points down an axis those axes carry `-1` and `-0.0`
-//! components, so a corner level with the origin projects to `-0.0` next
-//! to the origin's `0.0`, and the clipper read the ring's orientation at
-//! that twin (#269). Each shape here is placed in every axis plane, facing
-//! either way, from every start corner, and must compile, authored and as
-//! a faceted B-rep face, to its exact area.
+//! A face is projected onto in-plane axes before it is ear clipped. For
+//! some planes those axes carry `-0.0` components, so a corner level with
+//! the origin projects to `-0.0` next to the origin's `0.0`, and the
+//! clipper read the ring's orientation at that twin (#269). Each shape
+//! here is placed in every axis plane and every plane at 45 degrees
+//! between two axes, facing either way, from every start corner, and must
+//! compile, authored and as a faceted B-rep face, to its exact area (in a
+//! diagonal plane, within rounding). So must a face whose one ring
+//! joins its hole by a seam run both ways (a keyhole, #270), which the
+//! clipper refused as overlapping itself.
 //!
 //! Coordinates are dyadic, so areas are exact sums.
 
@@ -244,4 +247,103 @@ fn a_rectangle_with_a_straight_corner_compiles_in_every_plane() {
     ];
     let outer = [p(0.0, 0.0), p(3.0, 0.0), p(3.0, 5.0), p(0.0, 5.0)];
     check_face(&outer, &[hole], 24.0, "hole with a straight corner");
+}
+
+#[test]
+fn a_keyhole_face_compiles_in_every_plane() {
+    // #270: a 4 x 4 face less a 2 x 2 hole as one ring, the hole joined to
+    // the outer boundary by a seam run both ways, as `IfcPolygonalFaceSet`
+    // exporters write it.
+    let ring = [
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(1.0, 3.0),
+        p(3.0, 3.0),
+        p(3.0, 1.0),
+        p(1.0, 1.0),
+    ];
+    check_face(&ring, &[], 24.0, "keyhole");
+    // The seam leaving the outer ring inside its bottom edge for the
+    // corner of a diamond.
+    let ring = [
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+        p(2.0, 1.0),
+        p(1.0, 2.0),
+        p(2.0, 3.0),
+        p(3.0, 2.0),
+        p(2.0, 1.0),
+        p(2.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+    ];
+    check_face(&ring, &[], 28.0, "seam from an edge");
+    // The corpus shape: a rim and its inner outline 2^-13 apart.
+    let e = 1.0 / 8192.0;
+    let ring = [
+        p(0.0, 0.0),
+        p(0.5, 0.0),
+        p(0.5, 0.375),
+        p(0.0, 0.375),
+        p(0.0, 0.0),
+        p(e, e),
+        p(e, 0.375 - e),
+        p(0.5 - e, 0.375 - e),
+        p(0.5 - e, e),
+        p(e, e),
+    ];
+    let twice = 2.0 * (0.5 * 0.375 - (0.5 - 2.0 * e) * (0.375 - 2.0 * e));
+    check_face(&ring, &[], twice, "thin rim");
+}
+
+#[test]
+fn a_keyhole_face_naming_each_seam_corner_once_compiles() {
+    // The exporter's other spelling: the seam's ends are one corner index
+    // each, named twice in the ring.
+    let positions = [
+        (0.0, 0.0),
+        (4.0, 0.0),
+        (4.0, 4.0),
+        (0.0, 4.0),
+        (1.0, 1.0),
+        (1.0, 3.0),
+        (3.0, 3.0),
+        (3.0, 1.0),
+    ]
+    .map(|(x, y)| Point3::new(x, y, 0.0))
+    .to_vec();
+    let outer = [0, 1, 2, 3, 0, 4, 5, 6, 7, 4];
+    let mesh = compile_node(GeometryNode::PolygonMesh(authored(&positions, &outer, &[])))
+        .expect("a keyhole is a surface patch");
+    assert_eq!(twice_area(&mesh, Vec3::Z), 24.0);
+    let mesh = compile_node(GeometryNode::BRep(faceted(&positions, &outer, &[])))
+        .expect("a keyhole B-rep face");
+    assert_eq!(twice_area(&mesh, Vec3::Z), 24.0);
+}
+
+#[test]
+fn a_seam_crossing_the_hole_is_refused_by_name() {
+    // The hole loop comes back across its own seam: not a keyhole.
+    let positions = [
+        (0.0, 0.0),
+        (4.0, 0.0),
+        (4.0, 4.0),
+        (0.0, 4.0),
+        (2.0, 2.0),
+        (2.0, 3.0),
+        (3.0, 3.0),
+        (3.0, 0.5),
+        (0.5, 1.5),
+    ]
+    .map(|(x, y)| Point3::new(x, y, 0.0))
+    .to_vec();
+    let outer = [0, 1, 2, 3, 0, 4, 5, 6, 7, 8, 4];
+    let error = compile_node(GeometryNode::PolygonMesh(authored(&positions, &outer, &[])))
+        .expect_err("a seam crossing the ring");
+    assert!(error.to_string().contains("has a seam from"), "{error:?}");
 }

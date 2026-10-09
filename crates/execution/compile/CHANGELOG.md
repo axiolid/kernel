@@ -67,6 +67,18 @@ caret rule for `0.x` versions.
   declared a solid whose shell is itself open (a lone face) is no longer
   reported one. Faces the weld cannot reach (a curved B-rep face samples
   its own edges) are caught here rather than claimed as a solid.
+- **Keyhole faces compile (#270).** An authored polygon face or a
+  faceted B-rep face whose one ring joins its hole by a seam run both
+  ways (as `IfcPolygonalFaceSet` exporters write a rim or basin outline)
+  was refused as "its rings do not bound a region: profile outer ring
+  overlaps itself"; a downstream triage found 216 such faces leaving 41
+  sanitary terminals unmeasured. Faces triangulate under
+  `PinchPolicy::Accept`, which now accepts seams (`axiolid-construct`'s
+  Unreleased notes). Tests: the issue's keyhole, a seam from inside an
+  outer edge and a thin rim, in every axis and diagonal plane, facing
+  either way, from every start corner, authored and as faceted B-rep
+  faces, with the exact area; the seam's corners named once and twice; a
+  seam the ring crosses refused by name.
 - **Planar faces that project with a `-0.0` corner compile (#269).** A
   faceted B-rep face is projected from its first corner onto in-plane
   axes; in a plane at 45 degrees between two axes a corner level with the

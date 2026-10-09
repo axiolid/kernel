@@ -1,4 +1,5 @@
-"""Mutation probe for the certified profile triangulation (#253, #262, #269).
+"""Mutation probe for the certified profile triangulation (#253, #262, #269,
+#270).
 
 Each mutant weakens one exact decision of validation, bridging, ear
 clipping, the pinch path (rings touching at single points under
@@ -15,6 +16,9 @@ of its lowest corner survived, because no pinch fixture had a straight
 corner on the axis and the four zero-sign patterns never gave the corner
 and the twin opposite signs. A rooms-at-a-corner fixture with a straight
 left wall and eight patterns kill it: 57/57.
+
+#270 added 12 keyhole mutants (seams found, checked, split and refused
+on solids): 12/12 on the first run, 69/69 in all.
 
 Equivalent mutants, deliberately not listed:
 
@@ -43,6 +47,13 @@ Equivalent mutants, deliberately not listed:
   along; and the sweep only needs edges in order of value, which ties
   leave intact. Ordered by value anyway, so no order depends on how a zero
   was written.
+- accepting a seam that lies on one line with another edge sharing none
+  of its ends (#270): such an edge has an end inside the seam, where its
+  neighbour meets the seam off its ends, or runs past a seam end, which
+  is a vertex of a part, where it crosses that part; either is refused.
+- testing a seam's contact with another seam from both sides: a seam
+  passing through the other's end meets, at that end, the edges of the
+  part the end belongs to, off its own ends, and is refused for them.
 """
 import pathlib, subprocess, sys
 
@@ -53,6 +64,7 @@ V = D + "/validate.rs"
 B = D + "/bridge.rs"
 C = D + "/clip.rs"
 P = D + "/pinch.rs"
+S = D + "/seam.rs"
 TESTS = ["-p", "axiolid-construct", "--test", "profile_holes"]
 PINCHES = ["-p", "axiolid-construct", "--test", "profile_pinches"]
 LIB = ["-p", "axiolid-construct", "--lib", "ring_triangulation"]
@@ -207,6 +219,37 @@ MUTANTS = [
      '                    (p.x + 0.0).to_bits(),', '                    p.x.to_bits(),', OFFSET),
     ('offset corners keyed with -0.0 apart from 0.0', 'crates/algorithms/construction/construct/src/offset.rs',
      '            (p.x + 0.0).to_bits(),', '            p.x.to_bits(),', OFFSET),
+    # Seams under PinchPolicy::Accept (#270).
+    ('a seam traversed one way accepted', S,
+     '            [(r, i, fi), (s, j, fj)] if r == s && fi != fj => Some(Seam {',
+     '            [(r, i, _), (s, j, _)] if r == s => Some(Seam {', PINCHES),
+    ('a seam joining two rings accepted', S,
+     '            [(r, i, fi), (s, j, fj)] if r == s && fi != fj => Some(Seam {',
+     '            [(r, i, fi), (_, j, fj)] if fi != fj => Some(Seam {', PINCHES),
+    ('an edge used three times taken for a seam', S,
+     '        .filter_map(|list| match list[..] {',
+     '        .filter_map(|list| match list[..list.len().min(2)] {', PINCHES),
+    ('seam endpoints keyed with -0.0 apart from 0.0', S,
+     '    ((p.x + 0.0).to_bits(), (p.y + 0.0).to_bits())',
+     '    (p.x.to_bits(), p.y.to_bits())', PINCHES),
+    ('interleaving seams accepted', S,
+     '        if at + 1 != stack.len() {', '        if false {', PINCHES),
+    ('seams not checked against other edges', S,
+     '    check_clear(points, rings, seams)?;', '', PINCHES),
+    ('an edge meeting a seam inside it accepted', S,
+     '    on(a) || on(b)\n}', '    true\n}', PINCHES),
+    ('seams in a row accepted', S,
+     '                    if edges.is_empty() {', '                    if false {', PINCHES),
+    ('a part folding back where its seam left it accepted', S,
+     '                if folds_back(at(m - 1), at(0), at(1)) {',
+     '                if false && folds_back(at(m - 1), at(0), at(1)) {', PINCHES),
+    ('the second copy of a seam kept as an edge', S,
+     '        role.insert((seam.ring, seam.close), false);', '', PINCHES),
+    ('a seam end referenced by its part, not its first index', S,
+     '        .map(|t| t.map(|v| first[parts.back[v as usize] as usize]))',
+     '        .map(|t| t.map(|v| parts.back[v as usize]))', PINCHES),
+    ('a seam accepted on a solid', M,
+     '        if policy == PinchPolicy::Refuse {', '        if false {', PINCHES),
     # Certificate (unit tests: the algorithm above never trips it).
     ('certificate skips the triangle count', M,
      '    if triangles.len() != expected {', '    if false {', LIB),

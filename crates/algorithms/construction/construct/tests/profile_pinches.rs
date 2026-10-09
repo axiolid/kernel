@@ -11,6 +11,11 @@
 //! build solids, refuse the same rings by name: the extrusion would share
 //! one wall edge between four faces.
 //!
+//! A ring joined to its hole by a seam it runs along both ways (a keyhole,
+//! #270) is accepted the same way, its seam's two copies cancelling, and
+//! refused for a solid by name. Every fixture is also checked with its
+//! zero coordinates written as `-0.0` in several patterns (#269).
+//!
 //! Coordinates are dyadic, so areas are exact in `f64` and compared with
 //! `==`.
 
@@ -140,7 +145,17 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
     }
     if exact {
         for (k, &(u, v)) in ring_edges.iter().enumerate() {
-            let length = (v.x - u.x).abs() + (v.y - u.y).abs();
+            // A seam (#270): the ring runs along the same edge back, and
+            // the two copies cancel; the triangles cover neither.
+            let seam = ring_edges
+                .iter()
+                .enumerate()
+                .any(|(m, &(s, t))| m != k && s == v && t == u);
+            let length = if seam {
+                0.0
+            } else {
+                (v.x - u.x).abs() + (v.y - u.y).abs()
+            };
             assert_eq!(
                 along[k].abs(),
                 length,
@@ -1016,6 +1031,425 @@ fn rings_touching_nowhere_triangulate_as_for_a_solid() {
     }
 }
 
+// Keyholes (#270): a ring joined to its hole by a seam it runs along both
+// ways. The seam's two copies cancel, so the triangles tile what the ring's
+// other edges bound, as for the outer ring and the hole drawn apart, and a
+// solid refuses the seam by name.
+
+/// The issue's 4 x 4 square less its 2 x 2 hole as one ring: the outer
+/// boundary counter-clockwise, the seam (0, 0) -> (1, 1), the hole
+/// clockwise (counter-clockwise with `hole_ccw`), the seam back.
+fn keyhole(hole_ccw: bool) -> Vec<Point2> {
+    let hole = if hole_ccw {
+        [
+            p(1.0, 1.0),
+            p(3.0, 1.0),
+            p(3.0, 3.0),
+            p(1.0, 3.0),
+            p(1.0, 1.0),
+        ]
+    } else {
+        [
+            p(1.0, 1.0),
+            p(1.0, 3.0),
+            p(3.0, 3.0),
+            p(3.0, 1.0),
+            p(1.0, 1.0),
+        ]
+    };
+    let mut ring = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+    ];
+    ring.extend(hole);
+    ring
+}
+
+#[test]
+fn a_hole_joined_to_the_outer_boundary_by_a_seam_triangulates_on_surface_paths() {
+    // The issue's repro, as written.
+    let rings = region(keyhole(false), vec![]);
+    let (points, triangles) =
+        triangulate_with(&rings, PinchPolicy::Accept).expect("the square less its hole");
+    let area: f64 = triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| points[i as usize]);
+            ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2.0
+        })
+        .sum();
+    assert_eq!(area, 12.0);
+    // From every start vertex, either way round, under every zero sign:
+    // 8 loop vertices with one hole make 8 triangles, as for the two
+    // rings drawn apart. A hole loop wound like the outer one is a hole
+    // too: loops are turned by nesting, as at a pinch.
+    for hole_ccw in [false, true] {
+        check(
+            region(keyhole(hole_ccw), vec![]),
+            8,
+            24.0,
+            "seam both ways",
+            &format!("keyhole at a corner (hole ccw {hole_ccw})"),
+        );
+    }
+    let apart = region(
+        rect(0.0, 0.0, 4.0, 4.0),
+        vec![reversed(rect(1.0, 1.0, 3.0, 3.0))],
+    );
+    assert_eq!(triangulate(&apart).expect("drawn apart").1.len(), 8);
+}
+
+#[test]
+fn a_thin_rim_with_a_short_seam_triangulates() {
+    // The corpus shape: a basin rim, its outline and inner outline joined
+    // by a seam 2^-13 m long (0.12 mm), on a dyadic grid.
+    let e = 1.0 / 8192.0;
+    let ring = vec![
+        p(0.0, 0.0),
+        p(0.5, 0.0),
+        p(0.5, 0.375),
+        p(0.0, 0.375),
+        p(0.0, 0.0),
+        p(e, e),
+        p(e, 0.375 - e),
+        p(0.5 - e, 0.375 - e),
+        p(0.5 - e, e),
+        p(e, e),
+    ];
+    let twice = 2.0 * (0.5 * 0.375 - (0.5 - 2.0 * e) * (0.375 - 2.0 * e));
+    check(region(ring, vec![]), 8, twice, "seam both ways", "thin rim");
+    // The same at 0.1 mm, off the grid: the area within rounding.
+    let e = 1e-4;
+    let ring = vec![
+        p(0.2, 0.1),
+        p(0.7, 0.1),
+        p(0.7, 0.475),
+        p(0.2, 0.475),
+        p(0.2, 0.1),
+        p(0.2 + e, 0.1 + e),
+        p(0.2 + e, 0.475 - e),
+        p(0.7 - e, 0.475 - e),
+        p(0.7 - e, 0.1 + e),
+        p(0.2 + e, 0.1 + e),
+    ];
+    let rings = region(ring, vec![]);
+    let (covered, count) = assert_tiles(&rings, "thin rim at 0.1 mm", false);
+    let outer = (0.7 - 0.2) * (0.475 - 0.1);
+    let inner = (0.7 - e - (0.2 + e)) * (0.475 - e - (0.1 + e));
+    assert_eq!(count, 8);
+    assert!(
+        (covered - 2.0 * (outer - inner)).abs() <= 1e-12,
+        "thin rim at 0.1 mm: {covered}"
+    );
+}
+
+#[test]
+fn a_seam_from_inside_an_outer_edge_to_a_hole_corner_triangulates() {
+    // The seam leaves the bottom edge at (2, 0), a straight corner once it
+    // is removed, for the diamond's bottom corner (2, 1). n = 5 + 4 with
+    // one hole: 9 triangles over 16 - 2 units.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+        p(2.0, 1.0),
+        p(1.0, 2.0),
+        p(2.0, 3.0),
+        p(3.0, 2.0),
+        p(2.0, 1.0),
+        p(2.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+    ];
+    check(
+        region(ring, vec![]),
+        9,
+        28.0,
+        "seam both ways",
+        "seam from an edge",
+    );
+}
+
+#[test]
+fn two_keyholes_in_one_ring_triangulate() {
+    // Two holes, each on its own seam from a corner of the outer ring.
+    // n = 4 + 4 + 4 with two holes: 14 triangles over 32 - 1 - 4 units.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(1.0, 2.0),
+        p(2.0, 2.0),
+        p(2.0, 1.0),
+        p(1.0, 1.0),
+        p(0.0, 0.0),
+        p(8.0, 0.0),
+        p(7.0, 1.0),
+        p(5.0, 1.0),
+        p(5.0, 3.0),
+        p(7.0, 3.0),
+        p(7.0, 1.0),
+        p(8.0, 0.0),
+        p(8.0, 4.0),
+        p(0.0, 4.0),
+    ];
+    check(
+        region(ring, vec![]),
+        14,
+        54.0,
+        "seam both ways",
+        "two keyholes",
+    );
+}
+
+#[test]
+fn a_chain_of_seams_is_refused_by_name() {
+    // Two seams in a row, (0, 0) -> (1, 1) -> (2, 2), to a hole's corner:
+    // their middle vertex (1, 1) would be left in no loop, and a triangle
+    // edge could run past it, a T-junction for the faces sharing it.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(2.0, 2.0),
+        p(2.0, 3.0),
+        p(3.0, 3.0),
+        p(3.0, 2.0),
+        p(2.0, 2.0),
+        p(1.0, 1.0),
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+    ];
+    let message = match triangulate_with(&region(ring, vec![]), PinchPolicy::Accept) {
+        Err(GeomError::InvalidInput(message)) => message,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    assert!(
+        message.contains("outer ring has seams in a row through vertex 1"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_keyhole_and_a_pinch_triangulate_together() {
+    // A keyhole with a 1 x 1 hole, and a triangle hole touching that
+    // hole's corner (2, 2) and the outer ring's bottom edge at (3, 0):
+    // every loop joins one boundary cycle. n = 5 + 4 + 3 in one part:
+    // 10 triangles over 16 - 1 - 1 units.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(1.0, 2.0),
+        p(2.0, 2.0),
+        p(2.0, 1.0),
+        p(1.0, 1.0),
+    ];
+    let triangle = vec![p(2.0, 2.0), p(3.0, 0.0), p(3.0, 2.0)];
+    check(
+        region(ring, vec![triangle]),
+        10,
+        28.0,
+        "seam both ways",
+        "keyhole and pinch",
+    );
+}
+
+#[test]
+fn a_seam_between_two_loops_side_by_side_leaves_two_parts() {
+    // Two 2 x 2 squares joined by a seam (2, 1) -> (3, 1): the union of
+    // the squares, in two parts. n = 5 + 5: 6 triangles over 8 units.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+        p(2.0, 1.0),
+        p(3.0, 1.0),
+        p(3.0, 0.0),
+        p(5.0, 0.0),
+        p(5.0, 2.0),
+        p(3.0, 2.0),
+        p(3.0, 1.0),
+        p(2.0, 1.0),
+        p(2.0, 2.0),
+        p(0.0, 2.0),
+    ];
+    check(
+        region(ring, vec![]),
+        6,
+        16.0,
+        "seam both ways",
+        "side by side",
+    );
+}
+
+#[test]
+fn what_is_not_a_two_way_seam_stays_refused_by_name() {
+    let refused = |rings: Rings| match triangulate_with(&rings, PinchPolicy::Accept) {
+        Err(GeomError::InvalidInput(message)) => message,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    // An edge of a hole running exactly back along one of the outer
+    // ring's: a seam joins one ring to itself, so this is an overlap.
+    let outer = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 2.0),
+        p(0.0, 1.0),
+    ];
+    let message = refused(region(outer, vec![reversed(rect(0.0, 1.0, 1.0, 2.0))]));
+    assert!(
+        message.contains("hole 0 overlaps the outer ring"),
+        "{message}"
+    );
+    // Running back along only part of the edge out: (1, 1) -> (0, 0)
+    // overlaps (0, 0) -> (2, 2).
+    let ring = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+        p(2.0, 2.0),
+        p(2.0, 3.0),
+        p(1.0, 3.0),
+        p(1.0, 1.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(message.contains("outer ring overlaps itself"), "{message}");
+    // One edge twice in the same direction: two lobes sharing it.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(0.0, 2.0),
+        p(-1.0, 1.0),
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(2.0, 0.0),
+        p(1.0, -1.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(message.contains("outer ring overlaps itself"), "{message}");
+    // Two seams that interleave along the ring instead of nesting:
+    // (0, 0) - (0, 1) out as edge 0 and back as edge 8, (2, 1) - (2, 0)
+    // out as edge 3 and back as edge 10.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(0.0, 1.0),
+        p(1.0, 1.5),
+        p(2.0, 1.0),
+        p(2.0, 0.0),
+        p(1.0, -1.0),
+        p(-1.0, -1.0),
+        p(-1.0, 1.0),
+        p(0.0, 1.0),
+        p(0.0, 0.0),
+        p(2.0, 0.0),
+        p(2.0, 1.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(message.contains("outer ring overlaps itself"), "{message}");
+    // The same edge three times: out, back and out again.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(1.0, 2.0),
+        p(2.0, 2.0),
+        p(1.0, 1.0),
+        p(0.0, 0.0),
+        p(-1.0, 0.0),
+        p(-1.0, -1.0),
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(2.0, 1.0),
+        p(2.0, 0.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(message.contains("outer ring overlaps itself"), "{message}");
+    // A hole across the seam, one along it, and one with a corner on it.
+    for (hole, what) in [
+        (rect(0.25, 0.5, 0.75, 0.625), "across"),
+        (vec![p(0.25, 0.25), p(0.5, 0.5), p(0.25, 0.5)], "along"),
+        (vec![p(0.5, 0.5), p(0.5, 0.25), p(0.75, 0.25)], "on"),
+    ] {
+        let message = refused(region(keyhole(false), vec![hole]));
+        assert!(
+            message.contains(
+                "outer ring has a seam from (0, 0) to (1, 1) that crosses or overlaps hole 0"
+            ),
+            "{what}: {message}"
+        );
+    }
+    // The ring itself crossing its seam: the hole loop comes back across
+    // it.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+        p(2.0, 2.0),
+        p(2.0, 3.0),
+        p(3.0, 3.0),
+        p(3.0, 0.5),
+        p(0.5, 1.5),
+        p(2.0, 2.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(
+        message.contains(
+            "outer ring has a seam from (0, 0) to (2, 2) that crosses or overlaps itself"
+        ),
+        "{message}"
+    );
+    // A loop folding back where the seam left it: it leaves (1, 1) along
+    // y = 1 and comes back along the same line.
+    let ring = vec![
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(0.0, 0.0),
+        p(1.0, 1.0),
+        p(3.0, 1.0),
+        p(3.0, 3.0),
+        p(2.0, 1.0),
+        p(1.0, 1.0),
+    ];
+    let message = refused(region(ring, vec![]));
+    assert!(
+        message.contains("outer ring folds back on itself at vertex 5 once its seam is removed"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_solid_cap_refuses_a_seam_by_name() {
+    for ring in [keyhole(false), keyhole(true)] {
+        let rings = region(ring, vec![]);
+        for result in [
+            triangulate(&rings).map(|_| ()),
+            extrude_profile(&rings, Vec3::Z, 1.0, Tolerance::METRE).map(|_| ()),
+        ] {
+            match result {
+                Err(GeomError::InvalidInput(message)) => assert!(
+                    message
+                        .contains("profile outer ring runs along a seam both ways (edges 4 and 9)"),
+                    "{message}"
+                ),
+                other => panic!("a solid must refuse a seam, got {other:?}"),
+            }
+        }
+    }
+}
+
 /// `ring_touches` names exactly the ring edges the accepted triangulation
 /// splits (#265): a ring edge is a triangle edge unless a vertex lies
 /// inside it, and then it is not. A caller welding a shared edge through
@@ -1066,4 +1500,160 @@ fn ring_touches_are_the_edges_the_triangulation_splits() {
             }
         }
     }
+}
+
+/// A row of rectangular holes in a `w x 4` outer ring, most joined to its
+/// bottom edge by a vertical seam from their lower-left corner (#270),
+/// some drawn apart as holes of their own; small diamonds touching a
+/// hole's top edge or the outer ring's top edge inside it; the ring
+/// started anywhere and wound either way. Returns the rings, twice their
+/// area, and how many keyholes they have.
+fn keyhole_layout(rng: &mut Lcg) -> (Rings, f64, usize) {
+    let w = 4 + rng.below(8) as i64;
+    let mut ring = vec![p(0.0, 0.0)];
+    let mut holes = Vec::new();
+    let mut twice = 8.0 * w as f64;
+    let mut keyholes = 0;
+    let diamond = |x: f64, y: f64| {
+        vec![
+            p(x + 0.5, y),
+            p(x + 0.75, y + 0.25),
+            p(x + 0.5, y + 0.5),
+            p(x + 0.25, y + 0.25),
+        ]
+    };
+    for i in (1..w - 1).step_by(2) {
+        if rng.below(4) == 0 {
+            continue;
+        }
+        let (x0, x1) = (i as f64, (i + 1) as f64);
+        let top = (2 + rng.below(2)) as f64;
+        twice -= 2.0 * (top - 1.0);
+        if rng.below(2) == 0 {
+            // Touching the hole's top edge inside it.
+            holes.push(diamond(x0, top));
+            twice -= 0.25;
+        }
+        if rng.below(4) == 0 {
+            holes.push(rect(x0, 1.0, x1, top));
+            continue;
+        }
+        keyholes += 1;
+        ring.extend([
+            p(x0, 0.0),
+            p(x0, 1.0),
+            p(x0, top),
+            p(x1, top),
+            p(x1, 1.0),
+            p(x0, 1.0),
+            p(x0, 0.0),
+        ]);
+    }
+    for i in (0..w).step_by(2) {
+        if rng.below(3) == 0 {
+            // Touching the outer ring's top edge inside it.
+            holes.push(diamond(i as f64, 3.5));
+            let last = holes.len() - 1;
+            holes[last].rotate_left(2);
+            twice -= 0.25;
+        }
+    }
+    ring.extend([p(w as f64, 0.0), p(w as f64, 4.0), p(0.0, 4.0)]);
+    let k = rng.below(ring.len() as u64) as usize;
+    ring.rotate_left(k);
+    if rng.below(2) == 0 {
+        ring.reverse();
+    }
+    (region(ring, holes), twice, keyholes)
+}
+
+#[test]
+fn random_keyhole_layouts_tile_exactly() {
+    // Zeros signed at random too.
+    let mut rng = Lcg(0x270);
+    let mut keyholes = 0;
+    for round in 0..300 {
+        let (rings, twice, count) = keyhole_layout(&mut rng);
+        keyholes += count;
+        let pattern = rng.next() << 31 ^ rng.next();
+        let rings = signed_zeros(&rings, pattern);
+        let what = format!("keyhole round {round}");
+        let (covered, _) = assert_tiles(&rings, &what, true);
+        assert_eq!(covered, twice, "{what}: area");
+    }
+    assert!(keyholes >= 300, "only {keyholes} keyholes");
+}
+
+/// `ring_touches` stays the list of split edges with seams (#265, #270):
+/// every ring edge that is not a seam is a triangle edge unless a vertex
+/// lies inside it, and a seam, whichever way the triangles meet it, is
+/// never reported split.
+#[test]
+fn ring_touches_are_the_edges_a_keyhole_triangulation_splits() {
+    let key = |q: Point2| ((q.x + 0.0).to_bits(), (q.y + 0.0).to_bits());
+    let mut rng = Lcg(0x2700);
+    let mut inside_a_keyhole = 0;
+    for round in 0..300 {
+        let (rings, _, _) = keyhole_layout(&mut rng);
+        let pattern = rng.next() << 31 ^ rng.next();
+        let rings = signed_zeros(&rings, pattern);
+        let (points, triangles) = triangulate_with(&rings, PinchPolicy::Accept).expect("accepted");
+        let edges: std::collections::HashSet<(Key, Key)> = triangles
+            .iter()
+            .flat_map(|t| (0..3).map(move |i| (t[i], t[(i + 1) % 3])))
+            .map(|(a, b)| {
+                let (a, b) = (key(points[a as usize]), key(points[b as usize]));
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        let touches = ring_touches(&rings).expect("accepted rings are valid");
+        let split: std::collections::HashSet<(usize, usize)> = touches
+            .iter()
+            .map(|touch| (touch.ring, touch.edge))
+            .collect();
+        for touch in &touches {
+            // The vertex lies inside the edge it names.
+            let ring = if touch.ring == 0 {
+                &rings.outer
+            } else {
+                &rings.holes[touch.ring - 1]
+            };
+            let (a, b) = (ring[touch.edge], ring[(touch.edge + 1) % ring.len()]);
+            let all: Vec<Point2> = std::iter::once(&rings.outer)
+                .chain(&rings.holes)
+                .flatten()
+                .copied()
+                .collect();
+            let v = all[touch.vertex];
+            assert!(
+                on_segment(a, b, v) && v != a && v != b,
+                "round {round}: {touch:?} is not inside its edge"
+            );
+            inside_a_keyhole += usize::from(touch.ring == 0 && v.y != 4.0);
+        }
+        for (r, ring) in std::iter::once(&rings.outer)
+            .chain(&rings.holes)
+            .enumerate()
+        {
+            let n = ring.len();
+            for k in 0..n {
+                let (a, b) = (ring[k], ring[(k + 1) % n]);
+                let seam = (0..n).any(|m| m != k && ring[m] == b && ring[(m + 1) % n] == a);
+                if seam {
+                    assert!(!split.contains(&(r, k)), "round {round}: seam {k} split");
+                    continue;
+                }
+                let (a, b) = (key(a), key(b));
+                assert_eq!(
+                    edges.contains(&(a.min(b), a.max(b))),
+                    !split.contains(&(r, k)),
+                    "round {round}: ring {r} edge {k}"
+                );
+            }
+        }
+    }
+    assert!(
+        inside_a_keyhole >= 50,
+        "only {inside_a_keyhole} touches on a keyhole's hole"
+    );
 }

@@ -25,6 +25,10 @@
 //! [`PinchPolicy::Refuse`], which solids use: a pinch extrudes to a
 //! non-manifold edge. Under [`PinchPolicy::Accept`], for 2D regions and
 //! planar surface patches, [`pinch`] triangulates around them (#262).
+//! A ring that joins a hole by a seam it runs along both ways, a keyhole,
+//! is refused for solids by name too; under [`PinchPolicy::Accept`]
+//! [`seam`] removes its seams, whose two copies cancel, and triangulates
+//! the parts they separate on the pinch path (#270).
 //!
 //! This replaced `earcut` (ADR 0083). earcut drops nodes where the bridged
 //! ring runs straight on and lets only reflex nodes block an ear, so for two
@@ -46,6 +50,7 @@ use crate::profile::PinchPolicy;
 mod bridge;
 mod clip;
 mod pinch;
+mod seam;
 mod validate;
 
 /// Triangulate `outer` with `holes`, over the vertex list `outer ++ holes`.
@@ -60,10 +65,19 @@ pub(crate) fn triangulate_rings(
 ) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
     let (points, rings) = gather(outer, holes)?;
     validate::check_rings(&points, &rings)?;
-    let touches = validate::check_edges(&points, &rings, policy)?;
+    let seams = seam::find(&points, &rings);
+    if let Some(first) = seams.first() {
+        if policy == PinchPolicy::Refuse {
+            return seam::refuse_for_solid(first);
+        }
+        let triangles = seam::triangulate(&points, &rings, &seams)?;
+        return Ok((points, triangles));
+    }
+    let source: Vec<usize> = (0..rings.len()).collect();
+    let touches = validate::check_edges(&points, &rings, &source, policy)?;
     if let Some(canon) = pinch::canonical(&points, &touches) {
         // Only `Accept` lets rings touch, so only it gets here.
-        let triangles = pinch::triangulate(&points, &rings, &canon, &touches)?;
+        let triangles = pinch::triangulate(&points, &rings, &source, &canon, &touches)?;
         return Ok((points, triangles));
     }
     let loops = validate::orient_and_place(&points, &rings)?;
@@ -104,12 +118,21 @@ pub(crate) fn ring_touches(
 ) -> GeomResult<Vec<(usize, usize, usize)>> {
     let (points, rings) = gather(outer, holes)?;
     validate::check_rings(&points, &rings)?;
-    let touches = validate::check_edges(&points, &rings, PinchPolicy::Accept)?;
+    let seams = seam::find(&points, &rings);
+    let touches = if seams.is_empty() {
+        let source: Vec<usize> = (0..rings.len()).collect();
+        validate::check_edges(&points, &rings, &source, PinchPolicy::Accept)?
+            .into_iter()
+            .map(|touch| (touch.ring, touch.index, touch.vertex as usize))
+            .collect()
+    } else {
+        // Seams are taken out first (#270); no vertex lies inside one.
+        seam::touches(&points, &rings, &seams)?
+    };
     // A vertex inside an edge is found once per edge of its own that meets
     // it there; list it once, in the order validation first finds it.
     let mut listed = Vec::with_capacity(touches.len());
-    for touch in touches {
-        let entry = (touch.ring, touch.index, touch.vertex as usize);
+    for entry in touches {
         if !listed.contains(&entry) {
             listed.push(entry);
         }

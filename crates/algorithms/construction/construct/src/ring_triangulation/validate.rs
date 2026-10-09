@@ -7,7 +7,9 @@
 //! point that is a vertex of at least one of them (#262): the meeting is
 //! returned as a [`Touch`] when it lies inside the other edge, and the
 //! [`pinch`](super::pinch) path triangulates around it. Edges that cross,
-//! or overlap along a stretch, are refused under both policies.
+//! or overlap along a stretch, are refused under both policies; only a
+//! seam, one ring's edge and a later edge of it running exactly back, is
+//! taken out before these checks ([`seam`](super::seam), #270).
 
 use core::ops::Range;
 
@@ -113,6 +115,9 @@ pub(super) fn name(ring: usize) -> String {
 #[derive(Debug, Clone, Copy)]
 struct Edge {
     ring: usize,
+    /// The input ring `ring` was split from at a seam (#270), for
+    /// messages; `ring` itself without seams.
+    source: usize,
     index: usize,
     a: Point2,
     b: Point2,
@@ -127,10 +132,13 @@ struct Edge {
 /// are returned when the point lies inside the other edge.
 ///
 /// Edges are swept in order of their smallest x, so only pairs whose x
-/// ranges overlap are compared.
+/// ranges overlap are compared. `source` names each ring in messages: the
+/// input ring it is part of, which differs from its index only for the
+/// parts of rings split at seams (#270).
 pub(super) fn check_edges(
     points: &[Point2],
     rings: &[Range<usize>],
+    source: &[usize],
     policy: PinchPolicy,
 ) -> GeomResult<Vec<Touch>> {
     let mut edges = Vec::with_capacity(points.len());
@@ -139,6 +147,7 @@ pub(super) fn check_edges(
             let (ia, ib) = (ring.start + k, ring.start + (k + 1) % ring.len());
             edges.push(Edge {
                 ring: r,
+                source: source[r],
                 index: k,
                 a: points[ia],
                 b: points[ib],
@@ -258,7 +267,7 @@ fn check_pair_pinched(
 }
 
 fn overlap(e: &Edge, f: &Edge) -> GeomResult<()> {
-    let (r, s) = (e.ring.min(f.ring), e.ring.max(f.ring));
+    let (r, s) = (e.source.min(f.source), e.source.max(f.source));
     if r == s {
         refuse(format!("profile {} overlaps itself", name(r)))
     } else if r == 0 {
@@ -269,7 +278,7 @@ fn overlap(e: &Edge, f: &Edge) -> GeomResult<()> {
 }
 
 fn crossing(e: &Edge, f: &Edge) -> GeomResult<()> {
-    let (r, s) = (e.ring.min(f.ring), e.ring.max(f.ring));
+    let (r, s) = (e.source.min(f.source), e.source.max(f.source));
     if r == s {
         refuse(format!("profile {} intersects itself", name(r)))
     } else if r == 0 {

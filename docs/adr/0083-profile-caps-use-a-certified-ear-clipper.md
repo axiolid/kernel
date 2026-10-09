@@ -89,7 +89,8 @@ edge lines coincide constantly.
 ## Relation to existing code
 
 - `crates/algorithms/construction/construct/src/ring_triangulation.rs` and
-  its `validate`, `bridge` and `clip` submodules.
+  its `validate`, `bridge` and `clip` submodules; `pinch` (#262) and
+  `seam` (#270) under `PinchPolicy::Accept`.
 - `crates/algorithms/construction/construct/src/profile.rs` —
   `triangulate` delegates here.
 - `crates/algorithms/construction/construct/tests/profile_holes.rs` — the
@@ -212,3 +213,55 @@ it).
 | Refuse vertices inside edges on B-rep faces | Valid faceted exports have them (pockets touching a face edge); refusing them drops geometry that tessellates correctly once welded. |
 | Repair T-junctions after triangulating | Needs a geometric "on this edge" decision on the welded mesh, separate from the clipper's exact one; the pre-pass reuses the clipper's own. |
 | Only demote to `Surface` | Loses the reason: a surface model and a broken solid are different findings for a consumer. |
+
+## Amendment 2026-10-09: keyholes on surface paths (#270)
+
+A planar face can carry its hole in one ring: the outer boundary, a seam
+to the hole, the hole, and the same seam back. Exporters write
+`IfcPolygonalFaceSet` faces that way (a downstream triage found 216 such
+faces, all one shape, refused as "outer ring overlaps itself"). The ring
+is weakly simple and bounds the outer polygon minus the hole: it is the
+ring `bridge` builds before ear clipping, arriving with the bridge in
+place.
+
+- **What a seam is.** An edge and a later edge of one ring between the
+  same two points (compared by value) in opposite directions, used by no
+  other edge of any ring, nesting with the ring's other seams like
+  brackets along it. No other edge or seam may meet it except at its
+  ends. Anything else stays an overlap or a crossing, refused by name:
+  running back along part of an edge, one edge twice in one direction or
+  three times, interleaving seams, an edge crossing, touching or running
+  along a seam.
+- **How.** Under `PinchPolicy::Accept` the seams are removed and each
+  ring falls into the parts they separate; the parts go through the pinch
+  path as rings of their own, named after the ring they came from, so a
+  hole loop is oriented by nesting (either winding is a hole), a seam
+  between two loops side by side leaves two parts, and parts touching at
+  points are pinches. A part with fewer than three vertices or folding
+  back where its seam left it has no area; seams in a row leave their
+  shared end in no part, where a triangle edge could pass it, so they are
+  refused too.
+- **Certificate.** The pinch path's, over the parts. As boundary chains
+  the seam's two copies cancel, so the parts' edges bound exactly what the
+  ring bounds, and positive triangles bounded by them tile it once. The
+  seam's ends are repeated vertices, each part keeping its own visit, and
+  triangles use a point's first index in `outer ++ holes`. A seam may end
+  up a triangle edge, once each way, or not at all. Where it is not one,
+  the faces that share the seam (a rim's two end faces at its cut) pair
+  along it alone; where it is, the edge has four uses, paired by
+  direction but not two-manifold, which mesh-compile's closure check of
+  #265 reports. Some regions force it: a thin rim seamed at a corner has
+  no triangulation on its own vertices without the seam, since any fan at
+  the outer corner that skips the inner one covers it.
+- **Touches.** `profile::ring_touches` (#265) validates a ring with seams
+  the same way, without them, and lists the touches of its loops by the
+  ring's own edge and vertex indices. No vertex lies inside a seam, and
+  a seam's ends are shared vertices, not touches.
+- **Solids refuse.** `PinchPolicy::Refuse` names the seam: an extruded
+  keyhole puts two coincident wall faces on it.
+
+| Option | Why not |
+| --- | --- |
+| Accept the bridged ring as given and ear clip it | The clipper's ring is weakly simple only where it built the bridges itself; an input seam crossing or running along other edges would have to be validated the same way, and a seam to a pinched hole needs the pinch path's cycles anyway. |
+| Keep the seam as a forced triangle edge | Not needed for a tiling, and only one more edge for the neighbouring faces to share four times. |
+| Accept on solids too | An extruded keyhole is not a two-manifold. |

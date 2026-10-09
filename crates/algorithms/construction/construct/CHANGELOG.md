@@ -19,6 +19,43 @@ caret rule for `0.x` versions.
   shell) splits the neighbour's copy of each such edge at the same vertex,
   so the patches do not meet at a T-junction.
 
+- **A ring joining its hole by a seam run both ways triangulates on
+  surface paths (#270).** Exporters write a planar face with a hole as one
+  ring: the outer boundary, a seam to the hole, the hole, and the seam
+  back (a keyhole). It bounds the outer polygon minus the hole, but the
+  certified clipper refused it as "outer ring overlaps itself".
+  `triangulate_with(.., PinchPolicy::Accept)` now takes a seam -- an edge
+  and a later edge of one ring between the same two points in opposite
+  directions, used by no other edge, nesting with the ring's other seams
+  and met by no other edge except at its ends -- out of the ring, splits
+  the ring into the loops it joins and triangulates them on the pinch
+  path (ADR 0083 amendment). The seam's two copies cancel, so the
+  certificate over the loops is the ring's; its ends are repeated
+  vertices and triangles use a point's first index. A hole loop of either
+  winding is a hole, a seam between two loops side by side leaves two
+  parts, and a keyhole may touch other rings at points. Refused by name:
+  a "seam" running back along only part of an edge, one edge twice in one
+  direction or three times, interleaving seams, seams in a row, an edge
+  crossing, touching or running along a seam, and a loop folding back
+  where its seam left it. `profile::ring_touches` (#265) validates such a
+  ring the same way and lists its loops' touches by the ring's own edge
+  and vertex indices.
+
+### Changed
+
+- `triangulate` and `PinchPolicy::Refuse` (extrusion and loft caps)
+  refuse a ring with a seam as "profile outer ring runs along a seam both
+  ways (edges i and j), which a solid cannot extrude" instead of "profile
+  outer ring intersects itself" (#270): an extruded keyhole puts two
+  coincident wall faces on the seam. Tests for #270: the issue's keyhole
+  (hole wound either way), a thin rim with a 2^-13 m seam and one at
+  0.1 mm, a seam from inside an outer edge to a hole's corner, two
+  keyholes in one ring, a keyhole with a pinch, a seam between loops side
+  by side, each from every start vertex, either way round and under eight
+  zero-sign patterns with the exact-tiling checks (the seam's copies
+  cancelling in the edge cover), random keyhole layouts, every refusal
+  above by name, and the solid refusals.
+
 ### Fixed
 
 - **Exact extrusions whose direction points against the profile normal

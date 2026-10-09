@@ -85,10 +85,12 @@ struct Node {
 }
 
 /// Triangulate rings that touch at single points, given the canonical
-/// indices from [`canonical`] and the touches from validation.
+/// indices from [`canonical`] and the touches from validation. `source`
+/// names each ring: the input ring it is part of (#270).
 pub(super) fn triangulate(
     points: &[Point2],
     rings: &[Range<usize>],
+    source: &[usize],
     canon: &[u32],
     touches: &[Touch],
 ) -> GeomResult<Vec<[u32; 3]>> {
@@ -141,14 +143,17 @@ pub(super) fn triangulate(
                 }
                 let vertices = stack.split_off(i);
                 stack.push(v);
-                pieces.push(Piece { ring: r, vertices });
+                pieces.push(Piece {
+                    ring: source[r],
+                    vertices,
+                });
             } else {
                 position.insert(v, stack.len());
                 stack.push(v);
             }
         }
         pieces.push(Piece {
-            ring: r,
+            ring: source[r],
             vertices: stack,
         });
     }
