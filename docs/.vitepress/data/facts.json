@@ -4,10 +4,10 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.4.0",
-      "released_date": "2026-09-28",
+      "released": "0.4.1",
+      "released_date": "2026-10-10",
       "role": "facade",
-      "version": "0.4.0"
+      "version": "0.4.1"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -112,19 +112,19 @@
       "description": "Geometry data types and tolerance policy. No algorithms, no backends.",
       "layer": "foundation",
       "path": "crates/foundation/core",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-10",
       "role": "foundation.values",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-curve": {
       "description": "Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves.",
       "layer": "representations",
       "path": "crates/representations/analytic/curve",
-      "released": "0.3.6",
+      "released": "0.3.7",
       "released_date": "2026-10-10",
       "role": "representation.atomic",
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     "axiolid-curve-evaluate-contract": {
       "description": "Portable curve evaluation capability contract: point, tangent and oriented frame at a distance",
@@ -256,10 +256,10 @@
       "description": "Format-neutral line, ray, segment, and polyline representations",
       "layer": "representations",
       "path": "crates/representations/analytic/linear",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-10",
       "role": "representation.atomic",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-linear-intersection": {
       "description": "Portable, deterministic intersections for linear geometry",
@@ -283,10 +283,10 @@
       "description": "Triangle meshes: the discrete representation every backend consumes.",
       "layer": "representations",
       "path": "crates/representations/discrete/mesh",
-      "released": "0.3.2",
-      "released_date": "2026-10-02",
+      "released": "0.3.3",
+      "released_date": "2026-10-10",
       "role": "representation.discrete",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-mesh-boolean-boolmesh": {
       "description": "boolmesh-backed MeshBoolean provider",
@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.7",
-      "released_date": "2026-10-09",
+      "released": "0.3.8",
+      "released_date": "2026-10-10",
       "role": "representation.graph",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -427,19 +427,19 @@
       "description": "Exact parametric primitive solids used as CSG leaves",
       "layer": "representations",
       "path": "crates/representations/analytic/primitive",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-10",
       "role": "representation.atomic",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-profile": {
       "description": "Exact 2D profile representations for sweeps and sectioned solids",
       "layer": "representations",
       "path": "crates/representations/region/profile",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-10",
       "role": "representation.region",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-project": {
       "description": "Projection of triangle meshes onto a plane, and prism intersection",
@@ -499,10 +499,10 @@
       "description": "Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches.",
       "layer": "representations",
       "path": "crates/representations/analytic/surface",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-10",
       "role": "representation.atomic",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-tessellation-contract": {
       "description": "Curves, surfaces and B-reps to triangles under an explicit tolerance.",
@@ -526,10 +526,10 @@
       "description": "Typed-handle B-rep topology independent of curve and surface implementations",
       "layer": "representations",
       "path": "crates/representations/topology",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-10",
       "role": "representation.topology",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-triangulate": {
       "description": "Constrained Delaunay triangulation with bounded quality refinement",

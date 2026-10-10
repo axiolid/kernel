@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-10
+
 ### Added
 
 - A versioned wire format for `GeometryGraph` behind an optional `serde`

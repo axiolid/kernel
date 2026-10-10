@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-10) |
+| Latest release | 0.3.7 (2026-10-10) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -50,28 +50,15 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-10):
+Latest release, 0.3.7 (2026-10-10):
 
 ### Added
 
-- Curve paths (#290, ADR 0082 amendment): `path::CurvePath`, pieces of
-  curves laid end to end, each a `PathPiece` -- the span `[start, end]` of
-  a `PathCurve` (an owned `Curve2` or `Curve3`) in its station measure,
-  traversed forwards or backwards, optionally carried by a rigid placement
-  that is or is not exact. The neutral form of a composite, trimmed or
-  segmented curve relation, which the curve-evaluation contract can see:
-  it holds and composes (`reversed`, `placed`, `extend`, `length`,
-  `PathPiece::frame_is_exact`) and measures nothing. `PathCurve` and
-  `PathPiece` are `#[non_exhaustive]`, so a later piece kind is additive.
-- Offset pieces of a curve path (#289, ADR 0082 amendment):
-  `PathCurve::Offset(Box<PathOffset>)`, appended last; `PathOffset { base,
-  law }`, an offset of one base piece measured in its own length;
-  `OffsetLaw::Planar` (an offset curve 2D, left positive),
-  `OffsetLaw::Directed` (an offset curve 3D, along `normalise(V x T)`) and
-  `OffsetLaw::Linear` (offsets at stations, linear between the piece's
-  ends, in an `OffsetFrame`), with `PathOffsets` and `OffsetFrame`. All
-  `#[non_exhaustive]`. `PathCurve::is_line` is also true for an offset of a
-  line by a constant law, and `PathPiece::frame_is_exact` also needs the
-  offset's base placed exactly.
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Curve2`, `Curve3` and every value they hold, `SeamSide`
+  included: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)

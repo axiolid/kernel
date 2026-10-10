@@ -12,24 +12,24 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-core`](./crates/axiolid-core) | `foundation.values` | 0.3.1 | Geometry data types and tolerance policy. No algorithms, no backends. |
+| [`axiolid-core`](./crates/axiolid-core) | `foundation.values` | 0.3.2 | Geometry data types and tolerance policy. No algorithms, no backends. |
 
 ## Representations
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
 | [`axiolid-brep`](./crates/axiolid-brep) | `representation.composed` | 0.3.4 | Exact analytic B-rep result contracts over neutral topology |
-| [`axiolid-curve`](./crates/axiolid-curve) | `representation.atomic` | 0.3.6 | Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves. |
+| [`axiolid-curve`](./crates/axiolid-curve) | `representation.atomic` | 0.3.7 | Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves. |
 | [`axiolid-field`](./crates/axiolid-field) | `representation.sampled` | 0.3.1 | Frame-neutral layered spatial-field values and validated sampling configuration. |
 | [`axiolid-fixtures`](./crates/axiolid-fixtures) | `representation.fixtures` | 0.3.1 | Shared adversarial and degenerate geometry fixtures with provenance |
-| [`axiolid-linear`](./crates/axiolid-linear) | `representation.atomic` | 0.3.1 | Format-neutral line, ray, segment, and polyline representations |
-| [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.2 | Triangle meshes: the discrete representation every backend consumes. |
-| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.7 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
+| [`axiolid-linear`](./crates/axiolid-linear) | `representation.atomic` | 0.3.2 | Format-neutral line, ray, segment, and polyline representations |
+| [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.3 | Triangle meshes: the discrete representation every backend consumes. |
+| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.8 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
 | [`axiolid-pointcloud`](./crates/axiolid-pointcloud) | `representation.discrete` | 0.3.1 | Portable point-sampled geometry values with optional per-point channels. |
-| [`axiolid-primitive`](./crates/axiolid-primitive) | `representation.atomic` | 0.3.2 | Exact parametric primitive solids used as CSG leaves |
-| [`axiolid-profile`](./crates/axiolid-profile) | `representation.region` | 0.3.1 | Exact 2D profile representations for sweeps and sectioned solids |
-| [`axiolid-surface`](./crates/axiolid-surface) | `representation.atomic` | 0.3.2 | Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches. |
-| [`axiolid-topology`](./crates/axiolid-topology) | `representation.topology` | 0.3.1 | Typed-handle B-rep topology independent of curve and surface implementations |
+| [`axiolid-primitive`](./crates/axiolid-primitive) | `representation.atomic` | 0.3.3 | Exact parametric primitive solids used as CSG leaves |
+| [`axiolid-profile`](./crates/axiolid-profile) | `representation.region` | 0.3.2 | Exact 2D profile representations for sweeps and sectioned solids |
+| [`axiolid-surface`](./crates/axiolid-surface) | `representation.atomic` | 0.3.3 | Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patches. |
+| [`axiolid-topology`](./crates/axiolid-topology) | `representation.topology` | 0.3.2 | Typed-handle B-rep topology independent of curve and surface implementations |
 
 ## Contracts
 
@@ -100,5 +100,5 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.4.0 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid`](./crates/axiolid) | `facade` | 0.4.1 | Feature-gated facade for Axiolid's format-neutral geometry stack |
 | [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.3.1 | Versioned, memory-safe C ABI for the Axiolid application facade. |

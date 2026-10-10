@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-10
+
 ### Added
 
 - A `serde` feature (#267, ADR 0085) forwarding to the `serde` feature of

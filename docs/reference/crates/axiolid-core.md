@@ -8,7 +8,7 @@ Geometry data types and tolerance policy. No algorithms, no backends.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-10) |
 | crates.io | [`axiolid-core`](https://crates.io/crates/axiolid-core) |
 | Layer | foundation (`foundation.values`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_core/index.html) · [docs.rs](https://docs.rs/axiolid-core) |
@@ -39,11 +39,16 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-10):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Aabb`, `Frame2`, `Frame3`, `Interval`, `Plane3` and
+  `BooleanOperator`, with `glam`'s own `serde` support for the vector and
+  transform aliases: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 Full history: [`crates/foundation/core/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/foundation/core/CHANGELOG.md)

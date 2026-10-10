@@ -8,6 +8,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.1 - 2026-10-10
+
+### Added
+
+- A `serde` feature (#267, ADR 0085) forwarding to the `serde` feature of
+  every representation package already in the build; with `model` it
+  brings the geometry graph's versioned JSON and CBOR wire format
+  (`axiolid::model::wire`). It enables no representation by itself.
+
 ### 0.4.0 - 2026-09-28
 
 ### Changed
@@ -1163,6 +1172,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-core
 
+### 0.3.2 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Aabb`, `Frame2`, `Frame3`, `Interval`, `Plane3` and
+  `BooleanOperator`, with `glam`'s own `serde` support for the vector and
+  transform aliases: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -1172,6 +1193,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-curve
+
+### 0.3.7 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Curve2`, `Curve3` and every value they hold, `SeamSide`
+  included: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 ### 0.3.6 - 2026-10-10
 
@@ -1999,6 +2031,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-linear
 
+### 0.3.2 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Line` and `Polyline`: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -2320,6 +2362,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh
+
+### 0.3.3 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `TriMesh`, `PolygonMesh` and the values they hold: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 ### 0.3.2 - 2026-10-02
 
@@ -3432,6 +3484,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.8 - 2026-10-10
+
+### Added
+
+- A versioned wire format for `GeometryGraph` behind an optional `serde`
+  feature, off by default (#267, ADR 0085): JSON (`serde_json`) and CBOR
+  (`ciborium`) encodings of one envelope,
+  `{"format": "axiolid-geometry-graph", "version": "1.0", "graph":
+  {"nodes": [...], "roots": [...]}}`, with node references as indices and
+  enums externally tagged by their variant names. `GeometryGraph::to_json`,
+  `from_json`, `to_cbor` and `from_cbor`, and the `wire` module with
+  `FORMAT_NAME`, `FORMAT_VERSION`, `FormatVersion` and the typed
+  `WireError`. A reader checks the version before the graph and refuses a
+  newer minor, another major, an unknown kind, variant or field, a
+  non-finite number and malformed input by name; a decoded graph is
+  rebuilt through `GeometryGraphBuilder::push`, so it passes the same
+  validation as any other. A writer refuses a graph holding a non-finite
+  number. Golden payloads under `tests/wire/` pin format 1.0.
+- Both readers accept an integer where a real is expected when it is
+  exactly a double (`i as f64 as i128 == i`, so every `|i| <= 2^53`), as
+  JavaScript and Python CBOR encoders write whole-number doubles as
+  integers. A CBOR integer that is not exactly a double is refused as
+  `WireError::Malformed` naming its path, wherever it stands. Integer zero
+  has no sign and reads as `+0.0`. The CBOR reader unwraps the
+  self-describe tag and refuses other tags, byte strings, simple values,
+  non-text and repeated map keys.
+- With the `serde` feature, every node payload type derives `Serialize`
+  and `Deserialize`. A `NodeId` deserialises only inside a graph payload.
+
 ### 0.3.7 - 2026-10-09
 
 ### Changed
@@ -4258,6 +4339,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-primitive
 
+### 0.3.3 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Primitive` and `HalfSpace`: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -4279,6 +4370,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-profile
+
+### 0.3.2 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Profile` and every value it holds: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 ### 0.3.1 - 2026-09-28
 
@@ -4654,6 +4755,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-surface
 
+### 0.3.3 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Surface` and its elementary surfaces: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ### 0.3.2 - 2026-09-28
 
 ### Changed
@@ -4701,6 +4812,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-topology
+
+### 0.3.2 - 2026-10-10
+
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `BRep`, its entities and its typed handles (as
+  plain indices): the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 ### 0.3.1 - 2026-09-28
 

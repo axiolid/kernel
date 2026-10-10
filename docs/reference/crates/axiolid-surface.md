@@ -8,7 +8,7 @@ Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-28) |
+| Latest release | 0.3.3 (2026-10-10) |
 | crates.io | [`axiolid-surface`](https://crates.io/crates/axiolid-surface) |
 | Facade | [`axiolid`](./axiolid) feature `surfaces` |
 | Layer | representations (`representation.atomic`) |
@@ -44,11 +44,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-28):
+Latest release, 0.3.3 (2026-10-10):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `Surface` and its elementary surfaces: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 Full history: [`crates/representations/analytic/surface/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/surface/CHANGELOG.md)

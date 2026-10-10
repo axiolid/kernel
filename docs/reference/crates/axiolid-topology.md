@@ -8,7 +8,7 @@ Typed-handle B-rep topology independent of curve and surface implementations.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-10) |
 | crates.io | [`axiolid-topology`](https://crates.io/crates/axiolid-topology) |
 | Facade | [`axiolid`](./axiolid) feature `topology` |
 | Layer | representations (`representation.topology`) |
@@ -44,11 +44,15 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-10):
 
-### Changed
+### Added
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `BRep`, its entities and its typed handles (as
+  plain indices): the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
 
 Full history: [`crates/representations/topology/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/topology/CHANGELOG.md)

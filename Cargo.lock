@@ -88,7 +88,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "axiolid"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ahash",
  "axiolid-backend-cpu",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "glam 0.29.3",
  "serde",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axiolid-core",
  "axiolid-linear",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-linear"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "serde",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "serde",
@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-model"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-primitive"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "serde",
@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-profile"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-surface"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-topology"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "axiolid-core",
  "serde",

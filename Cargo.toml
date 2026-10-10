@@ -78,12 +78,12 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Format-agnostic Axiolid geometry kernel. Leaf crates remain independently consumable.
-axiolid = { path = "crates/facade/axiolid", version = "0.4.0", default-features = false }
-axiolid-core = { path = "crates/foundation/core", version = "0.3.1" }
-axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.2" }
+axiolid = { path = "crates/facade/axiolid", version = "0.4.1", default-features = false }
+axiolid-core = { path = "crates/foundation/core", version = "0.3.2" }
+axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.3" }
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.1" }
-axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.7" }
-axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.3.2" }
+axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.8" }
+axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.3.3" }
 axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.1" }
 axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.3.2" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.3.2" }
@@ -96,11 +96,11 @@ axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.6" }
 axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.17" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
-axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.1" }
-axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.6" }
-axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.3.1", default-features = false }
-axiolid-surface = { path = "crates/representations/analytic/surface", version = "0.3.2" }
-axiolid-topology = { path = "crates/representations/topology", version = "0.3.1" }
+axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.2" }
+axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.7" }
+axiolid-linear = { path = "crates/representations/analytic/linear", version = "0.3.2", default-features = false }
+axiolid-surface = { path = "crates/representations/analytic/surface", version = "0.3.3" }
+axiolid-topology = { path = "crates/representations/topology", version = "0.3.2" }
 axiolid-brep = { path = "crates/representations/brep", version = "0.3.4" }
 axiolid-tessellation-contract = { path = "crates/contracts/operations/tessellate", version = "0.3.1" }
 axiolid-collide = { path = "crates/algorithms/query/collide", version = "0.3.1" }
