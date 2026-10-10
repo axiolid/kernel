@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-10
+
 ### Added
 
 - Curve paths (#290, ADR 0082 amendment): `path::CurvePath`, pieces of

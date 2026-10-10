@@ -119,6 +119,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.9 - 2026-10-10
+
+### Added
+
+- Booleans cut tilted elliptical-cylinder walls, the round walls an
+  oblique exact extrusion sweeps from arcs and circles (#287), upward or
+  downward. A slab less an oblique round shaft or rounded opening was
+  refused as "a curve or surface could not be evaluated"; it is now
+  exact (an empty report, also at `Tolerance::ZERO`) with the volume
+  area x depth. A plane's cut, an ellipse or circle, gets the closed-form
+  `Sinusoid2` pcurve in the wall's angle, and a ruling a vertical line.
+  Whether a plane is parallel to such a wall's axis or touches it is
+  decided by exact predicates only, never read within tolerance.
+
 ### 0.1.8 - 2026-10-09
 
 ### Fixed
@@ -1159,6 +1173,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.6 - 2026-10-10
+
+### Added
+
+- Curve paths (#290, ADR 0082 amendment): `path::CurvePath`, pieces of
+  curves laid end to end, each a `PathPiece` -- the span `[start, end]` of
+  a `PathCurve` (an owned `Curve2` or `Curve3`) in its station measure,
+  traversed forwards or backwards, optionally carried by a rigid placement
+  that is or is not exact. The neutral form of a composite, trimmed or
+  segmented curve relation, which the curve-evaluation contract can see:
+  it holds and composes (`reversed`, `placed`, `extend`, `length`,
+  `PathPiece::frame_is_exact`) and measures nothing. `PathCurve` and
+  `PathPiece` are `#[non_exhaustive]`, so a later piece kind is additive.
+- Offset pieces of a curve path (#289, ADR 0082 amendment):
+  `PathCurve::Offset(Box<PathOffset>)`, appended last; `PathOffset { base,
+  law }`, an offset of one base piece measured in its own length;
+  `OffsetLaw::Planar` (an offset curve 2D, left positive),
+  `OffsetLaw::Directed` (an offset curve 3D, along `normalise(V x T)`) and
+  `OffsetLaw::Linear` (offsets at stations, linear between the piece's
+  ends, in an `OffsetFrame`), with `PathOffsets` and `OffsetFrame`. All
+  `#[non_exhaustive]`. `PathCurve::is_line` is also true for an offset of a
+  line by a constant law, and `PathPiece::frame_is_exact` also needs the
+  offset's base placed exactly.
+
 ### 0.3.5 - 2026-10-09
 
 ### Added
@@ -1309,6 +1347,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.4 - 2026-10-10
+
+### Added
+
+- Point, tangent and frame queries over a curve path (#290, ADR 0082
+  amendment): `CurveEvaluator::path_point_at_on`, `path_tangent_at_on`
+  and `path_frame_at_on` read a `CurvePath` (re-exported from
+  `axiolid-curve` with `PathPiece` and `PathCurve`) as a composite station
+  basis is read -- the distance end to end, every joint a seam read from
+  the piece the `SeamSide` names -- and `path_point_at`, `path_tangent_at`
+  and `path_frame_at` are their outgoing reading; `path_distance_convention`
+  and `path_frame_is_exact_at` say which distance runs through the path and
+  whether a frame on it is exact. All are defaulted, so no provider
+  breaks: the sided queries refuse by a typed `GeomError::UnsupportedInput`
+  naming the new `CURVE_PATH_UNSUPPORTED`, the plain ones delegate to them,
+  the convention is `Unsupported` and nothing is claimed exact.
+- Conformance: a line and a quarter arc meeting at a right angle, forwards
+  and reversed, on the joint and within the seam tolerance either side --
+  each side reads its own piece, the plain queries the outgoing one, a
+  distance off the path and a path with a gap are refused, the convention
+  is arc length and nothing on or after the arc is exact -- or every path
+  query refused as unsupported.
+- Re-exports `PathOffset`, `PathOffsets`, `OffsetLaw` and `OffsetFrame`
+  from `axiolid-curve` (#289): a curve path may carry offset pieces, which
+  a provider that does not read them refuses by name.
+
 ### 0.3.3 - 2026-10-09
 
 ### Added
@@ -1403,6 +1467,46 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.10 - 2026-10-10
+
+### Added
+
+- `surface::invert` (and so `locate`) and `surface::jet` take an
+  elliptical cylinder (#287): the angle is that of the section
+  coordinates over the semi-axes, the inverse of `evaluate`'s affine
+  image of the circle. They were refused as unsupported. `project` still
+  refuses it: the closest point on an ellipse has no closed form.
+
+- `ReferenceCurveEvaluator` reads curve paths (#290, ADR 0082 amendment):
+  the contract's `path_*` queries build `CompositeBasis::from_path` and
+  answer with `CompositeBasis::section_on` for the same side, so a frame
+  through the contract on a curve relation equals the same station lowered
+  as geometry, bitwise against `+Z`; against another reference up the
+  reference-up frame of the section's point and tangent (a banked piece
+  refused there by name). A native parameter along a path is refused by
+  name; the convention and exactness are the composite's.
+- `CompositeBasis::from_path` (the path's curves borrowed, each piece
+  checked against its curve, then measured as `CompositeBasis::new` does)
+  and `CompositeBasis::path`; `StationPiece::from_path_piece`,
+  `StationCurve::from_path_curve`, and `From<StationPiece>` /
+  `From<StationCurve>` for `PathPiece` / `PathCurve` (the curve copied).
+- Offsets as station bases (#289, ADR 0082 amendment): `station::offset`,
+  with `StationOffset` (an offset of one base piece by an `OffsetLaw`,
+  measured in its own length: arc length, or its own plan length beside an
+  elevated or banked curve), `StationCurve::Offset` (appended last),
+  `StationPiece::offset` and `offset_pieces` (one offset piece per span of
+  the base between seams, so every seam and joint of the base, and every
+  break of a by-distances law, is a joint of the offset). A constant offset
+  of a line is a line (frame exact), of a circle a circle of radius
+  `r - a` (length in closed form); every other offset is read numerically
+  to `OFFSET_TOLERANCE` and never claimed exact. A collapse, a cusp or
+  reversal (`CUSP_TOLERANCE`), a self-crossing in a horizontal plane, an
+  offset of an offset and a base span across a seam are refused by name,
+  as is an offset across a corner of its base, where its two sides do not
+  meet. `CompositeBasis` (and so `from_path` and the reference provider's
+  `path_*` queries) reads offset pieces, building each one's measure table
+  once.
 
 ### 0.3.9 - 2026-10-09
 
@@ -2375,6 +2479,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.19 - 2026-10-10
+
+### Changed
+
+- A difference whose tool is an oblique exact extrusion with arcs or a
+  circle (a slab less an oblique round shaft or rounded opening) compiles
+  exactly, and its mesh is certified against that result (#287). It was
+  refused as "exact boolean over a curve or surface it cannot evaluate",
+  and the mesh's report unbounded. So does an elliptical column crossed
+  by a round bore, refused before for want of inverting a point on the
+  column.
+
+### Added
+
+- `station::curve_path` (#290, ADR 0082 amendment): a graph curve a
+  distance runs along, flattened into the neutral `axiolid_curve::CurvePath`
+  a station on it is measured along, for a consumer to read through the
+  curve-evaluation contract's `path_*` queries; an atomic curve is one
+  whole piece, any relation a station refuses is refused by name. A
+  station on the relation and the path read through the contract agree
+  bitwise.
+- Offset curves as station bases (#289, ADR 0082 amendment):
+  `station::resolve`, `placement`, `seams`, `curve_path` and every run of
+  stations (spines, sectioned surfaces, offsets by stations) accept a
+  constant `CurveRelation::Offset` (2D without, 3D with a reference
+  direction) and an `OffsetByStations` as basis, nested in composites and
+  placements, measured in the offset's own length. A placement on an
+  offset of a line is exact; on any other offset it is reported unbounded
+  and refused by the exact compiler, as on any curved basis. A trim of an
+  offset relation, an offset of an offset, a planar offset of a 3D curve
+  and an offset across a corner of its basis are refused by name.
 
 ### 0.3.18 - 2026-10-09
 
@@ -3475,6 +3611,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-nurbs
 
+### 0.3.6 - 2026-10-10
+
+### Added
+
+- `exact_surface_intersection` cuts an elliptical cylinder by a plane in
+  closed form (#287): the ellipse its conjugate semi-diameters span (a
+  circle where they are exactly perpendicular and equal), or one or two
+  rulings for a plane along the axis, cased exactly
+  (`Derivation::EllipticalCylinderPlaneSection`,
+  `Derivation::EllipticalCylinderPlaneRulings`). It was a ruled section.
+- Two cylinders, circular or elliptical, at least one elliptical, on
+  exactly parallel axes meet in the rulings over the exactly isolated
+  roots of a half-angle quartic
+  (`Derivation::ParallelEllipticalCylinderRulings`, #287). The pair was
+  refused.
+
 ### 0.3.5 - 2026-10-02
 
 ### Added
@@ -3708,6 +3860,28 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.12 - 2026-10-10
+
+### Fixed
+
+- Minkowski sums and erosions of large regions use memory linear in their
+  subdivision, not quadratic in the region's corners (#292). Every piece
+  of an `ArcArrangement` kept a flag for every ring on each side, and the
+  sum reads one hull per boundary edge, so a floor's walls of 3,400
+  corners and 58 rooms summed with a 0.9 m square needed more than 12 GB.
+  A piece now keeps only the rings that hold it, as the subdivision
+  computes them, and the sums and erosions read each face from that list:
+  a polygon holds a side when its outer ring is listed and none of its
+  holes, the union when any piece or translated copy does. Results are
+  bit for bit the same. On a synthetic floor (`cargo bench -p
+  axiolid-benchmark --bench minkowski_plan`, interleaved runs against
+  0.3.11 on a shared machine), 3,370 corners: sum 0.89 s and 531 MB peak
+  before, 0.61 s and 124 MB after; with ribbed walls, 3,522 corners: sum
+  4.1 s and 2.2 GB before, 3.0 s and 469 MB after, and erosion of the
+  rooms 4.7 s and 2.5 GB before, 3.5 s and 528 MB after. Time and memory
+  now grow about linearly with the corners. `ArcArrangement::regions`
+  fills one buffer of flags per side instead of storing them.
 
 ### 0.3.11 - 2026-10-09
 

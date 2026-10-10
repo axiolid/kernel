@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.18 (2026-10-09) |
+| Latest release | 0.3.19 (2026-10-10) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -72,43 +72,36 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.18 (2026-10-09):
+Latest release, 0.3.19 (2026-10-10):
 
 ### Changed
 
-- The mesh boolean's operand snap (#276) closes only rounding residues
-  again: a coordinate moves at most `16 f64::EPSILON` of the operands'
-  largest coordinate magnitude (about `1.3e-14` for a 4 m wall, about
-  `2e-8` at georeferenced coordinates), capped by the linear tolerance,
-  instead of the whole tolerance (#291). Skins and slivers above that
-  are kept as authored: a 0.1-1 mm skin under a 1 mm tolerance stays in
-  the mesh, as it did before 0.3.16. On one model the wider snap took
-  seven hosts' whole bodies, and walls' skins at near-flush slab
-  openings. A `1e-12`-`1e-9` skin computed near the origin is now kept
-  too; placed at georeferenced coordinates it may be refused as
-  self-intersecting, as before 0.3.16.
-- The snap lands exactly or not at all: a coordinate is set onto a face
-  of the other operand only where the face's three corners share it
-  exactly (an axis-aligned plane), and every vertex with that coordinate
-  value moves with it, so an operand's own axis-aligned faces stay
-  planar (#291). Faces axis-aligned only within rounding are cut as
-  given.
+- A difference whose tool is an oblique exact extrusion with arcs or a
+  circle (a slab less an oblique round shaft or rounded opening) compiles
+  exactly, and its mesh is certified against that result (#287). It was
+  refused as "exact boolean over a curve or surface it cannot evaluate",
+  and the mesh's report unbounded. So does an elliptical column crossed
+  by a round bore, refused before for want of inverting a point on the
+  column.
 
-### Fixed
+### Added
 
-- A slab extruded downward from its top, cut through by 22 openings
-  flush with both faces, is meshed again with its closed-form volume, in
-  its frame and placed at georeferenced coordinates (#291). Since 0.3.16
-  the snap moved openings' vertices onto planes within rounding of the
-  slab's faces (a normal normalised to `0.9999999999999999`, a frame
-  turned by a rounded half turn, a profile edge's end evaluated as
-  `a + (b - a)`), some landing above a face and some below, and the
-  difference was refused as a void tangent to its host's face, or its
-  volume as self-intersecting.
-- A snap never turns a working boolean into a refusal (#291): where the
-  snapped operands' mesh boolean is refused or its result touches
-  itself, the boolean is cut from the operands as given, and that result
-  is returned with no snap reported; when both are refused, the refusal
-  of the operands as given is returned.
+- `station::curve_path` (#290, ADR 0082 amendment): a graph curve a
+  distance runs along, flattened into the neutral `axiolid_curve::CurvePath`
+  a station on it is measured along, for a consumer to read through the
+  curve-evaluation contract's `path_*` queries; an atomic curve is one
+  whole piece, any relation a station refuses is refused by name. A
+  station on the relation and the path read through the contract agree
+  bitwise.
+- Offset curves as station bases (#289, ADR 0082 amendment):
+  `station::resolve`, `placement`, `seams`, `curve_path` and every run of
+  stations (spines, sectioned surfaces, offsets by stations) accept a
+  constant `CurveRelation::Offset` (2D without, 3D with a reference
+  direction) and an `OffsetByStations` as basis, nested in composites and
+  placements, measured in the offset's own length. A placement on an
+  offset of a line is exact; on any other offset it is reported unbounded
+  and refused by the exact compiler, as on any curved basis. A trim of an
+  offset relation, an offset of an offset, a planar offset of a 3D curve
+  and an offset across a corner of its basis are refused by name.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

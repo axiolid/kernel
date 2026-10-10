@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-10
+
 ### Added
 
 - `exact_surface_intersection` cuts an elliptical cylinder by a plane in

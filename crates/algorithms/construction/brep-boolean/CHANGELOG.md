@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-10
+
 ### Added
 
 - Booleans cut tilted elliptical-cylinder walls, the round walls an

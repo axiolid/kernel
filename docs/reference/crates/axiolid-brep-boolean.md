@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.8 (2026-10-09) |
+| Latest release | 0.1.9 (2026-10-10) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,18 +51,18 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.8 (2026-10-09):
+Latest release, 0.1.9 (2026-10-10):
 
-### Fixed
+### Added
 
-- A floor-standing door `1e-6` to `5e-4` past a wall's face under a
-  millimetre tolerance is cut again, not refused as "the kept faces did
-  not sew into a valid exact B-rep" (#291). Merging a cut on an
-  imprinted edge into the edge's own end within the tolerance (#276)
-  left those faces unsewn; a boolean refused after such a merge above
-  the rounding floor is now cut again with ends merged only within the
-  rounding floor, as before #276, and its report holds only the second
-  run's decisions. The merge within the tolerance stays: the door a
-  rounding error (`1e-12`-`1e-9`) past the face still needs it.
+- Booleans cut tilted elliptical-cylinder walls, the round walls an
+  oblique exact extrusion sweeps from arcs and circles (#287), upward or
+  downward. A slab less an oblique round shaft or rounded opening was
+  refused as "a curve or surface could not be evaluated"; it is now
+  exact (an empty report, also at `Tolerance::ZERO`) with the volume
+  area x depth. A plane's cut, an ellipse or circle, gets the closed-form
+  `Sinusoid2` pcurve in the wall's angle, and a ruling a vertical line.
+  Whether a plane is parallel to such a wall's axis or touches it is
+  decided by exact predicates only, never read within tolerance.
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-09) |
+| Latest release | 0.3.10 (2026-10-10) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,33 +42,44 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-09):
+Latest release, 0.3.10 (2026-10-10):
 
 ### Added
 
-- `ReferenceCurveEvaluator` reads a seam side (#286, ADR 0082
-  amendment): `point_at_on`, `tangent_at_on` and `frame_at_on` answer a
-  measure ON a seam by the station rule (within `ARC_LENGTH_TOLERANCE *
-  max(1, s)`, for both sides) with `station_section3_on`, so a placement
-  framed through the contract agrees with the same station lowered as
-  geometry; the frame is built against the evaluator's reference up, and
-  a banked curve's against `+Z` only, as side-lessly. Off a seam both
-  sides are the side-less answer. A distance is located in the provider's
-  convention, as is an elevated or banked curve's native parameter; the
-  incoming side at a polyline's or a B-spline's native parameter is
-  refused by a typed `UnsupportedInput`.
-- Banked curves rotating about a held rail (#279, ADR 0081 amendment):
-  a pivot piece `CantForm::AboutRail` is evaluated from the cant law,
-  point, tangent and section alike. `banked_second_derivative` adds
-  `e'' = s D'' / 2`, for an angle piece
-  `s (b / 2) (cos(psi) psi'' - sin(psi) psi'^2)`.
-  `banked_derivative_bounds` and `banked_chord_bound` take half the
-  cant's bounds there, for a Viennese bend `(b / 2) P_1`,
-  `(b / 2)(P_2 + P_1^2)` and `(b / 2)(P_3 + 3 P_1 P_2 + P_1^3)` with
-  `P_k` the bend's exact derivative suprema over the span (its ends and
-  critical points), so `flatten3` and the sweep certification carry
-  over. `banked_breaks` and `grade_corners3` name the cant's seams inside
-  a held-rail piece as the point path's. A cant law with a held-rail
-  piece is refused by name.
+- `surface::invert` (and so `locate`) and `surface::jet` take an
+  elliptical cylinder (#287): the angle is that of the section
+  coordinates over the semi-axes, the inverse of `evaluate`'s affine
+  image of the circle. They were refused as unsupported. `project` still
+  refuses it: the closest point on an ellipse has no closed form.
+
+- `ReferenceCurveEvaluator` reads curve paths (#290, ADR 0082 amendment):
+  the contract's `path_*` queries build `CompositeBasis::from_path` and
+  answer with `CompositeBasis::section_on` for the same side, so a frame
+  through the contract on a curve relation equals the same station lowered
+  as geometry, bitwise against `+Z`; against another reference up the
+  reference-up frame of the section's point and tangent (a banked piece
+  refused there by name). A native parameter along a path is refused by
+  name; the convention and exactness are the composite's.
+- `CompositeBasis::from_path` (the path's curves borrowed, each piece
+  checked against its curve, then measured as `CompositeBasis::new` does)
+  and `CompositeBasis::path`; `StationPiece::from_path_piece`,
+  `StationCurve::from_path_curve`, and `From<StationPiece>` /
+  `From<StationCurve>` for `PathPiece` / `PathCurve` (the curve copied).
+- Offsets as station bases (#289, ADR 0082 amendment): `station::offset`,
+  with `StationOffset` (an offset of one base piece by an `OffsetLaw`,
+  measured in its own length: arc length, or its own plan length beside an
+  elevated or banked curve), `StationCurve::Offset` (appended last),
+  `StationPiece::offset` and `offset_pieces` (one offset piece per span of
+  the base between seams, so every seam and joint of the base, and every
+  break of a by-distances law, is a joint of the offset). A constant offset
+  of a line is a line (frame exact), of a circle a circle of radius
+  `r - a` (length in closed form); every other offset is read numerically
+  to `OFFSET_TOLERANCE` and never claimed exact. A collapse, a cusp or
+  reversal (`CUSP_TOLERANCE`), a self-crossing in a horizontal plane, an
+  offset of an offset and a base span across a seam are refused by name,
+  as is an offset across a corner of its base, where its two sides do not
+  meet. `CompositeBasis` (and so `from_path` and the reference provider's
+  `path_*` queries) reads offset pieces, building each one's measure table
+  once.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

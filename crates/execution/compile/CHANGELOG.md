@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-10-10
+
 ### Changed
 
 - A difference whose tool is an oblique exact extrusion with arcs or a

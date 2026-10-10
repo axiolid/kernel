@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-09) |
+| Latest release | 0.3.6 (2026-10-10) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -37,30 +37,28 @@ beside one (`PathOffset`), as a neutral value an evaluator measures.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-09):
+Latest release, 0.3.6 (2026-10-10):
 
 ### Added
 
-- Rotation about a held rail (#279, ADR 0081 amendment):
-  `CantForm::AboutRail { rail, elevation }`, a pivot piece whose
-  elevation is derived from the cant law at the same plan distance,
-  `e = e0 + s D / 2 = e0 + s (b / 2) sin(psi)`, `s = +1` about the right
-  rail and `-1` about the left (`RailSide`, `RailSide::pivot_sign`). A
-  Viennese bend, a polynomial in the bank angle, now rotates about its
-  low rail exactly; under `BankConvention::VerticalRise` the held rail
-  head stands `e0` above the profile at every station. Built with
-  `CantPiece::about_rail`; `CantLaw::has_rail_pieces` finds one.
-- `Banked3::cant_rate_at`: `dD/dd`, the law's own rate or
-  `b cos(psi) psi'` for an angle piece.
-- `BankError::RailInCant`: a held-rail piece in a cant law is refused by
-  name.
-
-### Changed
-
-- `Banked3::pivot_at` reads a held-rail piece from the cant law: value
-  `e0 + s D / 2` and rate `s D' / 2`, with the cant law's refusals at
-  that station. Height pieces read as before; an angle piece in the
-  pivot law is still `BankError::AngleInPivot`. `CantLaw::value_at` and
-  `rate_at` have no value on a held-rail piece.
+- Curve paths (#290, ADR 0082 amendment): `path::CurvePath`, pieces of
+  curves laid end to end, each a `PathPiece` -- the span `[start, end]` of
+  a `PathCurve` (an owned `Curve2` or `Curve3`) in its station measure,
+  traversed forwards or backwards, optionally carried by a rigid placement
+  that is or is not exact. The neutral form of a composite, trimmed or
+  segmented curve relation, which the curve-evaluation contract can see:
+  it holds and composes (`reversed`, `placed`, `extend`, `length`,
+  `PathPiece::frame_is_exact`) and measures nothing. `PathCurve` and
+  `PathPiece` are `#[non_exhaustive]`, so a later piece kind is additive.
+- Offset pieces of a curve path (#289, ADR 0082 amendment):
+  `PathCurve::Offset(Box<PathOffset>)`, appended last; `PathOffset { base,
+  law }`, an offset of one base piece measured in its own length;
+  `OffsetLaw::Planar` (an offset curve 2D, left positive),
+  `OffsetLaw::Directed` (an offset curve 3D, along `normalise(V x T)`) and
+  `OffsetLaw::Linear` (offsets at stations, linear between the piece's
+  ends, in an `OffsetFrame`), with `PathOffsets` and `OffsetFrame`. All
+  `#[non_exhaustive]`. `PathCurve::is_line` is also true for an offset of a
+  line by a constant law, and `PathPiece::frame_is_exact` also needs the
+  offset's base placed exactly.
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)

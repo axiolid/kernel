@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-09) |
+| Latest release | 0.3.12 (2026-10-10) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -39,32 +39,26 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-09):
+Latest release, 0.3.12 (2026-10-10):
 
 ### Fixed
 
-- Small rings far from the origin keep their area and orientation (#274).
-  A ring's orientation and its `ZeroArea` check came from a shoelace over
-  the coordinates as given, whose rounding at georeferenced positions
-  (6e5, 5.6e6 m) swamps the area of a small ring: a 1e-4 m² triangle was
-  refused as `ZeroArea`, and a clockwise sliver of a chorded round corner
-  read as counter-clockwise made the union of two triangles sharing an
-  edge fail with `SelfIntersection`. Both are now exact signs of the area
-  taken as a fan of triangles from the ring's first vertex, at every site
-  that decides with them: validation (`overlay`, `union_soup`,
-  `Region::new`, and `validate_arc_ring` for a ring without arcs), the
-  exact boolean's winding weights, canonical output orientation,
-  settling, the outer-or-hole decision when linking result rings, and the
-  orientation `arc_overlay` and `ArcArrangement` give their operands. A
-  ring now decides the same at any distance from the origin.
-  `arc_ring_area`, `ring_area`, `polygon_area` and `Region::area` sum from
-  the first vertex too, so their rounding scales with the ring's extent.
-- A ring whose vertices all lie exactly on one line is a valid operand
-  wherever it lies; a boolean leaves it out, as it encloses nothing (#219).
-  Before, its rounded area decided whether validation refused it as
-  `ZeroArea`, so the plan shadow of a vertical face passed at `x = 4.2`
-  and was refused at `x = 4`. A ring with arcs, or one passed to
-  `validate_arc_ring`, is still refused, as the arc path has no rule
-  leaving it out.
+- Minkowski sums and erosions of large regions use memory linear in their
+  subdivision, not quadratic in the region's corners (#292). Every piece
+  of an `ArcArrangement` kept a flag for every ring on each side, and the
+  sum reads one hull per boundary edge, so a floor's walls of 3,400
+  corners and 58 rooms summed with a 0.9 m square needed more than 12 GB.
+  A piece now keeps only the rings that hold it, as the subdivision
+  computes them, and the sums and erosions read each face from that list:
+  a polygon holds a side when its outer ring is listed and none of its
+  holes, the union when any piece or translated copy does. Results are
+  bit for bit the same. On a synthetic floor (`cargo bench -p
+  axiolid-benchmark --bench minkowski_plan`, interleaved runs against
+  0.3.11 on a shared machine), 3,370 corners: sum 0.89 s and 531 MB peak
+  before, 0.61 s and 124 MB after; with ribbed walls, 3,522 corners: sum
+  4.1 s and 2.2 GB before, 3.0 s and 469 MB after, and erosion of the
+  rooms 4.7 s and 2.5 GB before, 3.5 s and 528 MB after. Time and memory
+  now grow about linearly with the corners. `ArcArrangement::regions`
+  fills one buffer of flags per side instead of storing them.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-02) |
+| Latest release | 0.3.6 (2026-10-10) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,34 +42,20 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-02):
+Latest release, 0.3.6 (2026-10-10):
 
 ### Added
 
-- `fit_curve3` and `fit_curve3_to_tolerance`: least-squares B-spline curve
-  approximation to scattered points (#150, ledger B11), distinct from
-  `interpolate_curve3`'s exact pass-through. Uniform, chord-length and
-  centripetal parameterisation; knot placement by the Piegl and Tiller
-  averaging formula for approximation (eq. 9.68); optional equality-
-  constrained endpoint interpolation and a second-difference smoothing
-  term; optional Newton parameter-correction passes. Solves go through
-  `axiolid-numeric`'s QR-based least squares and equality-constrained
-  least squares rather than normal equations. Every fit reports the
-  achieved max and RMS deviation, computed by evaluating the result at
-  the input points' own parameters, never estimated from the solver's
-  algebraic residual. Refuses non-finite input, too few points for the
-  requested degree or control count, coincident consecutive points under
-  chord-length or centripetal parameterisation, invalid (zero) degree,
-  and rank-deficient systems (reporting the numeric rank found and the
-  rank required). `fit_curve3_to_tolerance` adds control points until the
-  max deviation meets the caller's tolerance, refusing with
-  `GeomError::BudgetExceeded` rather than returning a fit that silently
-  misses it.
-- `fit_surface_grid`: separable tensor-product B-spline surface
-  approximation to a rectangular grid of points (#150, ledger B11): fits
-  each row along `u` sharing one design matrix, then each column of the
-  result along `v`, reusing the curve fit's solver and deviation
-  reporting. Refuses ragged grids and the same input and rank failures as
-  the curve fit, on either axis.
+- `exact_surface_intersection` cuts an elliptical cylinder by a plane in
+  closed form (#287): the ellipse its conjugate semi-diameters span (a
+  circle where they are exactly perpendicular and equal), or one or two
+  rulings for a plane along the axis, cased exactly
+  (`Derivation::EllipticalCylinderPlaneSection`,
+  `Derivation::EllipticalCylinderPlaneRulings`). It was a ruled section.
+- Two cylinders, circular or elliptical, at least one elliptical, on
+  exactly parallel axes meet in the rulings over the exactly isolated
+  roots of a half-angle quartic
+  (`Derivation::ParallelEllipticalCylinderRulings`, #287). The pair was
+  refused.
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

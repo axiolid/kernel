@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-10
+
 ### Added
 
 - Point, tangent and frame queries over a curve path (#290, ADR 0082

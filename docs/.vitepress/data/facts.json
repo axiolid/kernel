@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.8",
-      "released_date": "2026-10-09",
+      "released": "0.1.9",
+      "released_date": "2026-10-10",
       "role": "algorithm.construction",
-      "version": "0.1.8"
+      "version": "0.1.9"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -121,19 +121,19 @@
       "description": "Exact, format-neutral curve values: lines, conics, B-splines, natural-equation and elevated curves.",
       "layer": "representations",
       "path": "crates/representations/analytic/curve",
-      "released": "0.3.5",
-      "released_date": "2026-10-09",
+      "released": "0.3.6",
+      "released_date": "2026-10-10",
       "role": "representation.atomic",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-curve-evaluate-contract": {
       "description": "Portable curve evaluation capability contract: point, tangent and oriented frame at a distance",
       "layer": "contracts",
       "path": "crates/contracts/operations/curve-evaluate",
-      "released": "0.3.3",
-      "released_date": "2026-10-09",
+      "released": "0.3.4",
+      "released_date": "2026-10-10",
       "role": "contract.operation",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-decimate": {
       "description": "Edge-collapse mesh decimation with a bounded, reported deviation",
@@ -166,10 +166,10 @@
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.9",
-      "released_date": "2026-10-09",
+      "released": "0.3.10",
+      "released_date": "2026-10-10",
       "role": "algorithm.parametric",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.18",
-      "released_date": "2026-10-09",
+      "released": "0.3.19",
+      "released_date": "2026-10-10",
       "role": "execution.orchestration",
-      "version": "0.3.18"
+      "version": "0.3.19"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -373,19 +373,19 @@
       "description": "General polynomial and rational B-spline analysis and transformation algorithms",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/nurbs",
-      "released": "0.3.5",
-      "released_date": "2026-10-02",
+      "released": "0.3.6",
+      "released_date": "2026-10-10",
       "role": "algorithm.parametric",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-overlay": {
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.11",
-      "released_date": "2026-10-09",
+      "released": "0.3.12",
+      "released_date": "2026-10-10",
       "role": "algorithm.planar",
-      "version": "0.3.11"
+      "version": "0.3.12"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
