@@ -49,8 +49,12 @@ MUTANTS = [
      '            SeamSide::Outgoing => self.frame_at(curve, at),',
      '            SeamSide::Outgoing => Err(side_unsupported(self)),', [SIDE]),
     ('default refusal names no provider', C,
-     '        backend: provider.descriptor().id,',
-     '        backend: axiolid_contracts::BackendId::new("unnamed"),', [SIDE]),
+     '        backend: provider.descriptor().id,\n'
+     '        operation: Operation::CurveEvaluation,\n'
+     '        input: SEAM_SIDE_UNSUPPORTED,',
+     '        backend: axiolid_contracts::BackendId::new("unnamed"),\n'
+     '        operation: Operation::CurveEvaluation,\n'
+     '        input: SEAM_SIDE_UNSUPPORTED,', [SIDE]),
     ('default refusal is untyped', C,
      '    GeomError::UnsupportedInput {\n'
      '        backend: provider.descriptor().id,\n'
@@ -85,8 +89,10 @@ MUTANTS = [
      '                if side == SeamSide::Incoming',
      '                if false', [SIDE]),
     ('a sided frame ignores the reference up', P,
-     '        if self.up == Vec3::Z {\n            return Ok(section.frame());',
-     '        if true {\n            return Ok(section.frame());', [SIDE]),
+     '        if self.up == Vec3::Z {\n            return Ok(section.frame());\n        }\n'
+     '        self.reference_frame(section.point, section.tangent)',
+     '        if true {\n            return Ok(section.frame());\n        }\n'
+     '        self.reference_frame(section.point, section.tangent)', [SIDE]),
     ('a sided banked frame under another up', P,
      '            self.banked_up()?;\n            return Ok(section.frame());',
      '            return Ok(section.frame());', [SIDE]),

@@ -120,7 +120,7 @@ MUTANTS = [
      '                    let piece = StationPiece::between_parameters(curve, lo, hi)?;',
      '                    let piece = StationPiece::whole(curve)?;', [COMP]),
     ('a composite frame always claimed exact', C,
-     '        basis.frame_is_exact(station.distance, *seam),',
+     '        basis.frame_is_exact(distance, *seam),',
      '        true,', [COMP]),
 ]
 

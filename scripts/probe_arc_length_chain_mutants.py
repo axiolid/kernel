@@ -62,9 +62,12 @@ MUTANTS = [
     ('curvature bound read at the span start', C,
      '    let reach = lo.abs().max(hi.abs());',
      '    let reach = lo.abs();', [CHAIN]),
+    # `chain_chord_bound`'s check; `chain_plan_bounds` repeats it.
     ('chord bound spans a join', C,
-     '    if local_hi > length + ARC_LENGTH_TOLERANCE * length.max(1.0) {\n        return None;\n    }',
-     '    if false {\n        return None;\n    }', [CHAIN]),
+     '    if local_hi > length + ARC_LENGTH_TOLERANCE * length.max(1.0) {\n        return None;\n    }\n'
+     '    // At (or a rounding step from) the piece end',
+     '    if false {\n        return None;\n    }\n'
+     '    // At (or a rounding step from) the piece end', [CHAIN]),
     ('a cornered piece certified', C,
      '                    && crate::bound::continuity_breaks2(curve, 1).is_empty()',
      '', [CHAIN]),

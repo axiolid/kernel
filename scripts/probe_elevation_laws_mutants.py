@@ -57,9 +57,12 @@ MUTANTS = [
     ('arc chord bound drops cos^2', E,
      'Some(1.0 / (radius.abs() * cos * cos * cos)).filter(|s| s.is_finite())',
      'Some(1.0 / (radius.abs() * cos)).filter(|s| s.is_finite())', EVAL),
+    # `second_derivative_bound`'s piece check; the profile bounds repeat it.
     ('chord bound across a seam', E,
-     '            if lo < lower || hi > upper {',
-     '            if lo.is_nan() && lower < upper {', EVAL),
+     '            if lo < lower || hi > upper {\n                return None;\n            }\n'
+     '            second_derivative_bound(',
+     '            if lo.is_nan() && lower < upper {\n                return None;\n            }\n'
+     '            second_derivative_bound(', EVAL),
     ('clothoid curvature sup from the start only', E,
      '            start.abs().max((start + rate * span).abs())',
      '            start.abs()', EVAL),

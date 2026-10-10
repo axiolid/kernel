@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 COL = "crates/algorithms/construction/construct/src/column.rs"
 BC = "crates/algorithms/construction/construct/src/boolean_column.rs"
 ARR = "crates/algorithms/planar/overlay/src/exact_arc/arrangement.rs"
+HOLD = "crates/algorithms/planar/overlay/src/arrangement.rs"
 MEAS = "crates/algorithms/query/measure/src/exact.rs"
 TESTS = [
     "-p", "axiolid-construct",
@@ -76,9 +77,11 @@ MUTANTS = [
      "                vec![(if under_bottom { flat_bottom } else { cut }, flat_top)]",
      "                vec![(if under_bottom { cut } else { flat_bottom }, flat_top)]", TESTS),
     # Arrangement labels.
-    ("shared piece on the wrong side", ARR,
-     "            out[ring] = same == left;",
-     "            out[ring] = same != left;", OT),
+    # The side a carrier holds is read in `ArrangementEdge::holding` since
+    # the sparse labels of #292 replaced `RawEdge::sides`.
+    ("shared piece on the wrong side", HOLD,
+     "            if on_left == left {",
+     "            if on_left != left {", OT),
     ("containment ignored", ARR,
      "                .filter(|&other| windings[other].winding(&piece.sample) != 0)",
      "                .filter(|&other| windings[other].winding(&piece.sample) != 0 && false)", OT),

@@ -48,9 +48,10 @@ MUTANTS = [
     ('clothoid third derivative drops k^2', EL,
      '            [stretch, stretch * k, stretch * (rate + k * k)]',
      '            [stretch, stretch * k, stretch * rate]', [EVAL]),
+    # `profile_bounds`' three-term array; `profile_bounds4` repeats the term.
     ('arc profile third derivative without its 3', EV,
-     '                3.0 * reach / (r * r * cos.powi(5)),',
-     '                reach / (r * r * cos.powi(5)),', [EVAL]),
+     '                3.0 * reach / (r * r * cos.powi(5)),\n            ]',
+     '                reach / (r * r * cos.powi(5)),\n            ]', [EVAL]),
     ('polynomial bound without the falling factorial', EV,
      '                        let falling: Scalar = (0..k).map(|j| (i - j) as Scalar).product();\n                        falling * c.abs() * m.powi((i - k) as i32)\n                    })\n                    .sum()\n            };\n            [term(1), term(2), term(3)]\n        }\n        ElevationLaw::Piecewise',
      '                        let falling: Scalar = 1.0;\n                        falling * c.abs() * m.powi((i - k) as i32)\n                    })\n                    .sum()\n            };\n            [term(1), term(2), term(3)]\n        }\n        ElevationLaw::Piecewise', [EVAL]),

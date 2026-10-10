@@ -16,7 +16,7 @@ TESTS = ["-p", "axiolid-mesh-compile", "--test", "section_mesh", "--test", "tang
 
 MUTANTS = [
     ('sections refused again', P, '        Profile::Section(section) => {\n            let contour = crate::section_lower::section_contour(section)?;\n            contour_rings(&contour, chord_error, tolerance)\n        }', '', TESTS),
-    ('rounded rectangles meshed sharp', P, '        Profile::Rectangle(r) if r.outer_radius.is_some() || r.inner_radius.is_some() => {', '        Profile::Rectangle(r) if false => {', TESTS),
+    ('rounded rectangles meshed sharp', P, '        Profile::Rectangle(r) if r.outer_radius.is_some() || r.inner_radius.is_some() => {\n            let contour = crate::section_lower::rectangle_contour(r)?;', '        Profile::Rectangle(r) if false => {\n            let contour = crate::section_lower::rectangle_contour(r)?;', TESTS),
     ('circle chords start on the axes', P, '    let mut ring = flatten(core::f64::consts::PI / steps as Scalar)?;', '    let mut ring = flatten(0.0 * steps as Scalar)?;', TESTS),
     ('pinched results returned', C, '        if let Some(pinch) = crate::pinch::find(&outcome.mesh) {', '        if let Some(pinch) = None::<crate::pinch::Pinch> {', TESTS),
     ('an edge with three faces is fine', N, '.find(|(_, faces)| faces.len() > 2)', '.find(|(_, faces)| faces.len() > 4)', TESTS),

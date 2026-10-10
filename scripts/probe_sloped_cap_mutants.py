@@ -27,7 +27,7 @@ GT = ["-p", "axiolid-model", "--test", "open_profile_atomic_trim_basis"]
 MUTANTS = [
     ('wave sine term sign', S, 'self.mean + self.cosine * c + self.sine * s', 'self.mean + self.cosine * c - self.sine * s', ET),
     ('wave derivative sign', C, 'Ok(Vec2::new(1.0, -w.cosine * sin + w.sine * cos))', 'Ok(Vec2::new(1.0, w.cosine * sin + w.sine * cos))', ET),
-    ('wave inversion unchecked', C, 'Curve2::Sinusoid(_) => verify2(curve, point.x, point, linear),', 'Curve2::Sinusoid(_) => Ok(point.x),', ET),
+    ('wave inversion unchecked', C, 'Curve2::Sinusoid(_) | Curve2::QuadraticGraph(_) => verify2(curve, point.x, point, linear),', 'Curve2::Sinusoid(_) => Ok(point.x),\n        Curve2::QuadraticGraph(_) => verify2(curve, point.x, point, linear),', ET),
     ('rim wave sine from x axis', A, 'sine: arc.radius * level.gradient.dot(y),', 'sine: arc.radius * level.gradient.dot(x),', CT),
     ('rim wave mean ignores anchor', A, 'mean: level.at(arc.centre) - anchor,', 'mean: level.at(arc.centre),', CT),
     ('cap ellipse axes unprojected', A, '                    x: vector(ellipse.frame.x),\n                    y: vector(ellipse.frame.y),', '                    x: Vec2::new(ellipse.frame.x.x, ellipse.frame.x.y),\n                    y: Vec2::new(ellipse.frame.y.x, ellipse.frame.y.y),', CT),

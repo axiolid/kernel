@@ -44,9 +44,10 @@ PROBES = [
     ),
     (
         "config-accepts-left-handed-frame",
-        VALUE_SRC / "config.rs",
-        "&& frame.x.cross(frame.y).dot(frame.z) > 0.0",
-        "&& frame.x.cross(frame.y).dot(frame.z) != 0.0",
+        # The field config delegates frame validity to the core SpaceFrame.
+        "crates/foundation/core/src/space_frame.rs",
+        "        if (x.cross(y).dot(z) - 1.0).abs() > unit {",
+        "        if (x.cross(y).dot(z).abs() - 1.0).abs() > unit {",
     ),
     (
         "morphology-radius-becomes-cell-count",

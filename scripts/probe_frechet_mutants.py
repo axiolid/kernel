@@ -26,7 +26,7 @@ MUTANTS = [
     ('invalid leash accepted', F, '    if !eps.is_finite() || eps < 0.0 {', '    if eps < 0.0 {', TESTS),
     ('answer is the discrete upper bound', F, '    candidates.get(first).copied().unwrap_or(hi)', '    hi', TESTS),
     ('bisection moves the wrong bound', F, '        if decide(a, b, mid) {\n            hi = mid;', '        if !decide(a, b, mid) {\n            hi = mid;', UNIT),
-    ('the first row need not start at the corner', F, '        left.push(if open && span.lo == 0.0 { span } else { Span::EMPTY });', '        left.push(if !span.is_empty() { span } else { Span::EMPTY });', TESTS),
+    ('the first row need not start at the corner', F, '        left.push(if open && span.lo == 0.0 {', '        left.push(if !span.is_empty() {', TESTS),
     ('the first column need not start at the corner', F, '        let mut bottom = if bottom_open && span.lo == 0.0 {', '        let mut bottom = if !span.is_empty() {', TESTS),
 ]
 

@@ -100,38 +100,38 @@ PROBES = [
     # --- conformance suite must detect defects (ADR 0017 section 6) ---
     (
         "suite-treats-failure-as-conformant",
-        "crates/contracts/common/src/conformance.rs",
+        "crates/contracts/operations/mesh-boolean/src/conformance.rs",
         "        !self\n            .checks\n            .iter()\n            .any(|check| matches!(check.outcome, Outcome::Failed { .. }))",
         "        true",
     ),
     (
         "suite-counts-skips-as-passes",
-        "crates/contracts/common/src/conformance.rs",
+        "crates/contracts/operations/mesh-boolean/src/conformance.rs",
         "            .filter(|check| check.outcome == Outcome::Passed)\n            .count()",
         "            .filter(|check| check.outcome != Outcome::Passed || true)\n            .count()",
     ),
     (
         "suite-skips-the-disjoint-algebra-check",
-        "crates/contracts/common/src/conformance.rs",
+        "crates/contracts/operations/mesh-boolean/src/conformance.rs",
         "    check_disjoint_algebra(provider, &mut report);",
         "    let _ = check_disjoint_algebra;",
     ),
     (
         "suite-ignores-a-wrong-union-volume",
-        "crates/contracts/common/src/conformance.rs",
+        "crates/contracts/operations/mesh-boolean/src/conformance.rs",
         "        if (measured - 2.0).abs() < 1e-9 {",
         "        if true {",
     ),
     (
         "suite-accepts-an-unrefused-empty-operand",
-        "crates/contracts/common/src/conformance.rs",
+        "crates/contracts/operations/mesh-boolean/src/conformance.rs",
         "            Ok(_) => Outcome::Failed {\n                detail: \"an empty mesh is not a solid and must be refused\".into(),\n            },",
         "            Ok(_) => Outcome::Passed,",
     ),
     # --- registration gate ---
     (
         "registration-admits-non-conformant-providers",
-        "crates/contracts/common/src/boolean.rs",
+        "crates/execution/dispatch/src/boolean.rs",
         "        if !report.is_conformant() {\n            return Err(Box::new(report));\n        }",
         "        if false {\n            return Err(Box::new(report));\n        }",
     ),

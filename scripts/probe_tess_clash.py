@@ -72,8 +72,8 @@ CLASH_PROBES = [
     (
         "clash-containment-never-checked",
         "crates/algorithms/reference/src/clash.rs",
-        "if report.kind != Interference::Penetrating && !a.indices.is_empty() && !b.indices.is_empty() {",
-        "if false && !a.indices.is_empty() && !b.indices.is_empty() {",
+        "    if report.kind != Interference::Penetrating\n        && !a.indices.is_empty()\n        && !b.indices.is_empty()\n        && bounds_a.intersects(&bounds_b)\n    {",
+        "    if false\n        && !a.indices.is_empty()\n        && !b.indices.is_empty()\n        && bounds_a.intersects(&bounds_b)\n    {",
     ),
     (
         "clash-boundary-counts-as-inside",

@@ -18,7 +18,7 @@ MUTANTS = [
     ('one torus cell half flipped', P, '            idx.extend([a, c, d]);', '            if i + j == 0 {\n                idx.extend([a, d, c]);\n            } else {\n                idx.extend([a, c, d]);\n            }', TESTS),
     ('torus seam not closed round the axis', P, '    let at = |i: usize, j: usize| ((i % n) * m + (j % m)) as u32;', '    let at = |i: usize, j: usize| (i.min(n - 1) * m + (j % m)) as u32;', TESTS),
     ('tube circle sized by the major radius', P, '            let rho = big + r * phi.cos();', '            let rho = big + big * phi.cos();', TESTS),
-    ('torus grid round the axis sized by the tube', P, '    let n = segments(big + r, tol);', '    let n = segments(r, tol);', TESTS),
+    ('torus grid round the axis sized by the tube', P, '    let n = segments_within(big + r, 0.5 * tol)?;', '    let n = segments_within(r, 0.5 * tol)?;', TESTS),
     ('wedge top x range reversed accepted', P, '    if x0 > x1 || y0 > y1 {', '    if y0 > y1 {', TESTS),
     ('wedge top y range reversed accepted', P, '    if x0 > x1 || y0 > y1 {', '    if x0 > x1 {', TESTS),
     ('non-finite wedge top accepted', P, '        if !value.is_finite() {', '        if false && !value.is_finite() {', TESTS),
