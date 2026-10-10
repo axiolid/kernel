@@ -34,7 +34,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/downstream-ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: 1.88.0
       - name: Cache Rust build
@@ -69,7 +69,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.os == 'macos-15-intel' && '13.0' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: 1.88.0
       - name: Cache Rust build
@@ -96,7 +96,7 @@ jobs:
         run: |
           archive=$(find dist/native -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)
           python scripts/verify-native-package.py "$archive"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'release' && matrix.build_type == 'Release' && matrix.linkage == 'SHARED'
         with:
           name: native-${{ matrix.os }}
@@ -115,7 +115,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/native-ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: 1.88.0
       - name: Cache Rust build
@@ -137,7 +137,7 @@ jobs:
         if: github.event_name == 'release' && matrix.build_type == 'Release' && matrix.linkage == 'SHARED'
         shell: bash
         run: python scripts/verify-native-package.py dist/native/axiolid-native-v*-aarch64-pc-windows-msvc.zip
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'release' && matrix.build_type == 'Release' && matrix.linkage == 'SHARED'
         with:
           name: native-windows-arm64
@@ -152,7 +152,7 @@ jobs:
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: 1.88.0
           targets: aarch64-unknown-linux-gnu
@@ -172,7 +172,7 @@ jobs:
         run: python scripts/package-native.py --target aarch64-unknown-linux-gnu --output-dir dist/native
       - name: Verify cross-target binary identities
         run: python scripts/verify-native-package.py dist/native/axiolid-native-v*-aarch64-unknown-linux-gnu.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'release'
         with:
           name: native-aarch64-linux
@@ -192,7 +192,7 @@ jobs:
         run: |
           version=$(python scripts/package-native.py --print-version)
           test "${{ github.event.release.tag_name }}" = "v${version}"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-*
           path: dist/native
