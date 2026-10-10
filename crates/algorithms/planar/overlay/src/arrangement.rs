@@ -35,8 +35,11 @@ pub struct ArrangementEdge {
     pub bulge: f64,
     /// Rings whose boundary carries this piece.
     pub sources: Vec<EdgeSource>,
-    left: Vec<bool>,
-    right: Vec<bool>,
+    /// Rings that contain both sides without carrying the piece, ascending.
+    inside: Vec<usize>,
+    /// Rings that carry the piece, ascending, each with whether it
+    /// contains the left side (else the right).
+    carriers: Vec<(usize, bool)>,
 }
 
 impl ArrangementEdge {
@@ -45,12 +48,34 @@ impl ArrangementEdge {
     /// Left and right are taken along `from -> to`. A ring whose boundary
     /// carries the piece contains exactly one side.
     pub fn inside_left(&self, ring: usize) -> bool {
-        self.left.get(ring).copied().unwrap_or(false)
+        self.contains(ring, true)
     }
 
     /// Whether ring `ring` contains the region on the right of the piece.
     pub fn inside_right(&self, ring: usize) -> bool {
-        self.right.get(ring).copied().unwrap_or(false)
+        self.contains(ring, false)
+    }
+
+    fn contains(&self, ring: usize, left: bool) -> bool {
+        match self.carriers.iter().find(|c| c.0 == ring) {
+            Some(&(_, on_left)) => on_left == left,
+            None => self.inside.binary_search(&ring).is_ok(),
+        }
+    }
+
+    /// The rings containing one side of the piece, ascending: those that
+    /// hold both sides, and the carriers whose inside is that side. Kept
+    /// sparse (#292): a piece lies in a handful of rings, and a flag for
+    /// every ring on every piece made memory grow as pieces times rings.
+    pub(crate) fn holding(&self, left: bool, out: &mut Vec<usize>) {
+        out.clear();
+        out.extend_from_slice(&self.inside);
+        for &(ring, on_left) in &self.carriers {
+            if on_left == left {
+                let at = out.partition_point(|&r| r < ring);
+                out.insert(at, ring);
+            }
+        }
     }
 }
 
@@ -131,11 +156,11 @@ impl ArcArrangement {
             });
             reversed.push(flip);
         }
-        let raw = arrangement::build(&oriented);
+        let mut raw = arrangement::build(&oriented);
         let counts: Vec<usize> = rings.iter().map(|ring| ring.vertices.len()).collect();
         let edges = raw
             .edges
-            .iter()
+            .iter_mut()
             .map(|edge| ArrangementEdge {
                 from: edge.from,
                 to: edge.to,
@@ -163,8 +188,12 @@ impl ArcArrangement {
                         }
                     })
                     .collect(),
-                left: edge.sides(counts.len(), true),
-                right: edge.sides(counts.len(), false),
+                inside: std::mem::take(&mut edge.inside),
+                carriers: edge
+                    .sources
+                    .iter()
+                    .map(|&(ring, _, same)| (ring, same))
+                    .collect(),
             })
             .collect();
         Ok(Self {
@@ -205,13 +234,40 @@ impl ArcArrangement {
         &self,
         inside: impl Fn(&[bool]) -> bool,
     ) -> Result<Vec<ArrangementRegion>, OverlayError> {
+        // One buffer of flags, set from a side's rings and cleared after.
+        let mut flags = vec![false; self.counts.len()];
+        self.regions_holding(|rings| {
+            for &ring in rings {
+                flags[ring] = true;
+            }
+            let answer = inside(&flags);
+            for &ring in rings {
+                flags[ring] = false;
+            }
+            answer
+        })
+    }
+
+    /// As [`Self::regions`], with `inside` given the rings that contain a
+    /// point, ascending, instead of a flag for every ring: deciding a
+    /// piece costs the rings it lies in, not every ring (#292).
+    pub(crate) fn regions_holding(
+        &self,
+        mut inside: impl FnMut(&[usize]) -> bool,
+    ) -> Result<Vec<ArrangementRegion>, OverlayError> {
+        let mut rings = Vec::new();
         let keep: Vec<Option<bool>> = self
             .edges
             .iter()
-            .map(|edge| match (inside(&edge.left), inside(&edge.right)) {
-                (true, false) => Some(false),
-                (false, true) => Some(true),
-                _ => None,
+            .map(|edge| {
+                edge.holding(true, &mut rings);
+                let left = inside(&rings);
+                edge.holding(false, &mut rings);
+                match (left, inside(&rings)) {
+                    (true, false) => Some(false),
+                    (false, true) => Some(true),
+                    _ => None,
+                }
             })
             .collect();
         let uses = |ring: Vec<(usize, bool)>| -> Vec<EdgeUse> {

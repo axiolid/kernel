@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Minkowski sums and erosions of large regions use memory linear in their
+  subdivision, not quadratic in the region's corners (#292). Every piece
+  of an `ArcArrangement` kept a flag for every ring on each side, and the
+  sum reads one hull per boundary edge, so a floor's walls of 3,400
+  corners and 58 rooms summed with a 0.9 m square needed more than 12 GB.
+  A piece now keeps only the rings that hold it, as the subdivision
+  computes them, and the sums and erosions read each face from that list:
+  a polygon holds a side when its outer ring is listed and none of its
+  holes, the union when any piece or translated copy does. Results are
+  bit for bit the same. On a synthetic floor (`cargo bench -p
+  axiolid-benchmark --bench minkowski_plan`, interleaved runs against
+  0.3.11 on a shared machine), 3,370 corners: sum 0.89 s and 531 MB peak
+  before, 0.61 s and 124 MB after; with ribbed walls, 3,522 corners: sum
+  4.1 s and 2.2 GB before, 3.0 s and 469 MB after, and erosion of the
+  rooms 4.7 s and 2.5 GB before, 3.5 s and 528 MB after. Time and memory
+  now grow about linearly with the corners. `ArcArrangement::regions`
+  fills one buffer of flags per side instead of storing them.
+
 ## [0.3.11] - 2026-10-09
 
 ### Fixed

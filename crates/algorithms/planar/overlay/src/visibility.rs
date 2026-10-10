@@ -102,7 +102,7 @@ impl Region {
         let arrangement = ArcArrangement::new(&[ArcRing::from_points(&ring)], tolerance)?;
         Ok(crate::minkowski::region_of(
             &arrangement,
-            |f| f[0],
+            |rings| rings.first() == Some(&0),
             true,
             tolerance,
         )?)

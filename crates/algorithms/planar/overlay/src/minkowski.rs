@@ -36,6 +36,23 @@
 //! The one rounding before that is each vertex sum `a + k`, a sum of two
 //! `f64`s, within half an ulp.
 //!
+//! # Reading the faces
+//!
+//! Each side of each piece is read from the rings that hold it, listed
+//! ascending (#292), never from a flag for every ring. The union holds a
+//! side when a convex piece does (any ring from the first piece on), or
+//! when a translated copy does; only the copies with a ring in the list
+//! are asked. A copy's polygons are consecutive rings, outer first, so a
+//! polygon holds the side exactly when its outer ring is listed and the
+//! next listed ring belongs to a later polygon. A side lies in a handful
+//! of rings, so reading every face costs about the pieces times that
+//! handful. The flags it replaces cost, in time and memory, the pieces
+//! times every ring: one hull per boundary edge made that quadratic in
+//! the region's corners, past 12 GB for a floor of 3,400 corners.
+//! `cargo bench -p axiolid-benchmark --bench minkowski_plan` measures time
+//! and peak memory against corner count; `scripts/probe_minkowski_mutants.py`
+//! lists the faults the tests must catch.
+//!
 //! # Discs: inner and outer
 //!
 //! No polygon is a disc, so [`Region::dilate`] and [`Region::erode`] are
@@ -190,18 +207,55 @@ fn rings_of(polygons: &[Polygon]) -> Vec<Vec<Point2>> {
         .collect()
 }
 
-/// Membership in a polygon set, from per-ring flags laid out as
-/// [`rings_of`] lays them out.
-fn member(polygons: &[usize], flags: &[bool]) -> bool {
-    let mut at = 0;
-    for &holes in polygons {
-        let inside = flags[at] && !flags[at + 1..at + 1 + holes].iter().any(|&f| f);
-        if inside {
-            return true;
+/// Polygons with holes laid out as [`rings_of`] lays them out: each
+/// polygon's outer ring, then its holes.
+#[derive(Debug, Clone)]
+struct Layout {
+    /// The index of each polygon's outer ring, ascending.
+    starts: Vec<usize>,
+    /// The number of rings.
+    len: usize,
+}
+
+impl Layout {
+    fn new(polygons: &[Polygon]) -> Self {
+        let mut starts = Vec::with_capacity(polygons.len());
+        let mut len = 0;
+        for polygon in polygons {
+            starts.push(len);
+            len += 1 + polygon.holes.len();
         }
-        at += 1 + holes;
+        Self { starts, len }
     }
-    false
+
+    /// One polygon with `holes` holes.
+    fn single(holes: usize) -> Self {
+        Self {
+            starts: vec![0],
+            len: 1 + holes,
+        }
+    }
+
+    /// Whether a point lies in the polygon set, given the rings that hold
+    /// it from the set's first on, ascending, each `offset` past its index
+    /// here. A polygon's rings are consecutive, outer first, so the point
+    /// lies in a polygon exactly when the polygon's outer ring holds it
+    /// and the next ring that does belongs to a later polygon. Rings past
+    /// the set may follow: none is an outer ring here, and each reads as
+    /// one of a later polygon.
+    fn member(&self, rings: &[usize], offset: usize) -> bool {
+        rings.iter().enumerate().any(|(i, &ring)| {
+            let ring = ring - offset;
+            let polygon = self.starts.partition_point(|&s| s <= ring) - 1;
+            let end = self.starts.get(polygon + 1).copied().unwrap_or(self.len);
+            ring == self.starts[polygon] && rings.get(i + 1).is_none_or(|&r| r - offset >= end)
+        })
+    }
+}
+
+/// The ascending `rings` from `first` on.
+fn from(rings: &[usize], first: usize) -> &[usize] {
+    &rings[rings.partition_point(|&r| r < first)..]
 }
 
 /// A ring's points, with neighbours closer than the tolerance merged (a
@@ -294,40 +348,106 @@ fn polygon_part(
     )
 }
 
-/// A set given by rings in the arrangement, read from the flags starting
-/// at its first ring.
+/// A set given by rings in the arrangement, starting at its first ring.
 #[derive(Debug, Clone)]
 enum Set {
-    /// Polygons with holes laid out as [`rings_of`] lays them out (the
-    /// hole count per polygon).
-    Region(Vec<usize>),
+    /// Polygons with holes.
+    Region(Layout),
     /// A frame (the first ring) minus such polygons (the rings after it).
-    Outside(Vec<usize>),
+    Outside(Layout),
 }
 
 impl Set {
-    fn holds(&self, flags: &[bool]) -> bool {
+    /// The number of rings the set takes.
+    fn span(&self) -> usize {
         match self {
-            Self::Region(shape) => member(shape, flags),
-            Self::Outside(shape) => flags[0] && !member(shape, &flags[1..]),
+            Self::Region(shape) => shape.len,
+            Self::Outside(shape) => 1 + shape.len,
+        }
+    }
+
+    /// Whether a point lies in the set, given the set's rings that hold
+    /// it, ascending, each `offset` past its index in the set.
+    fn holds(&self, rings: &[usize], offset: usize) -> bool {
+        match self {
+            Self::Region(shape) => shape.member(rings, offset),
+            Self::Outside(shape) => {
+                rings.first() == Some(&offset) && !shape.member(&rings[1..], offset + 1)
+            }
         }
     }
 }
 
 /// The rings whose union is the sum of a set with a structuring shape,
-/// and how to read it from an arrangement's ring flags.
+/// and how to read it from the rings holding a point.
 struct Terms {
     rings: Vec<ArcRing>,
-    /// Translated copies of a set: the first ring's index, and the set.
+    /// Translated copies of a set, one after the other: the first ring's
+    /// index, and the set.
     sets: Vec<(usize, Set)>,
     /// Index of the first convex piece; every ring from there on is one.
     pieces: usize,
 }
 
 impl Terms {
-    fn holds(&self, flags: &[bool]) -> bool {
-        self.sets.iter().any(|(at, set)| set.holds(&flags[*at..]))
-            || flags[self.pieces..].iter().any(|&f| f)
+    /// Whether a point lies in the union, given the rings holding it,
+    /// ascending, each `offset` past its index in [`Self::rings`].
+    ///
+    /// The union holds the point when a piece does, or when one of the
+    /// translated sets does. Only the sets with a ring holding the point
+    /// are asked, so the cost is the rings holding it, not every ring
+    /// (#292).
+    fn holds(&self, rings: &[usize], offset: usize) -> bool {
+        if rings.last().is_some_and(|&r| r - offset >= self.pieces) {
+            return true;
+        }
+        let mut i = 0;
+        while i < rings.len() {
+            let at = rings[i] - offset;
+            let (first, set) = &self.sets[self.sets.partition_point(|(s, _)| *s <= at) - 1];
+            let end = offset + first + set.span();
+            let next = i + rings[i..].partition_point(|&r| r < end);
+            if set.holds(&rings[i..next], offset + first) {
+                return true;
+            }
+            i = next;
+        }
+        false
+    }
+}
+
+/// How a Minkowski operation reads its result from the rings holding a
+/// point (#292): ascending ring indices, never a flag for every ring.
+enum Rule {
+    /// The union of the terms, whose rings are the arrangement's.
+    Sum(Terms),
+    /// The region's own rings, then the terms of the complement's sum: a
+    /// point lies in the erosion when the region moved by the anchor holds
+    /// it and that sum does not.
+    Erosion {
+        /// The number of the region's own rings.
+        own: usize,
+        /// The first ring of the region moved by the anchor: `0` for the
+        /// region itself.
+        anchor: usize,
+        shape: Layout,
+        terms: Terms,
+    },
+}
+
+impl Rule {
+    fn holds(&self, rings: &[usize]) -> bool {
+        match self {
+            Self::Sum(terms) => terms.holds(rings, 0),
+            Self::Erosion {
+                own,
+                anchor,
+                shape,
+                terms,
+            } => {
+                shape.member(from(rings, *anchor), *anchor) && !terms.holds(from(rings, *own), *own)
+            }
+        }
     }
 }
 
@@ -352,7 +472,7 @@ fn sum_terms(rings: &[Vec<Point2>], set: &Set, parts: &[Part], tolerance: Tolera
         sets.push((out.len(), set.clone()));
         out.extend(rings.iter().map(|r| moved(r, part.anchor())));
         if let Part::Rings(own) = part {
-            let shape = vec![own.len() - 1];
+            let shape = Layout::single(own.len() - 1);
             for ring in rings {
                 sets.push((out.len(), Set::Region(shape.clone())));
                 out.extend(own.iter().map(|r| moved(r, ring[0])));
@@ -403,9 +523,11 @@ fn parts_of(region: &Region, tolerance: Tolerance) -> Result<Vec<Part>, Minkowsk
 }
 
 /// The faces of `arrangement` where `inside` holds, as a region.
+///
+/// `inside` receives the rings that contain a point, ascending.
 pub(crate) fn region_of(
     arrangement: &ArcArrangement,
-    inside: impl Fn(&[bool]) -> bool,
+    inside: impl Fn(&[usize]) -> bool,
     had_input: bool,
     tolerance: Tolerance,
 ) -> Result<Region, OverlayError> {
@@ -413,7 +535,7 @@ pub(crate) fn region_of(
         points: ring.vertices.iter().map(|v| v.point).collect(),
     };
     let mut polygons = Vec::new();
-    for region in arrangement.regions(inside)? {
+    for region in arrangement.regions_holding(inside)? {
         let Some(outer) = crate::arc_overlay::presented(arrangement.ring(&region.outer), tolerance)
         else {
             continue;
@@ -539,11 +661,18 @@ impl Region {
         if self.is_empty() {
             return Ok(Self::empty());
         }
+        let (rings, rule) = self.sum_rule(parts, tolerance);
+        let arrangement = ArcArrangement::new(&rings, tolerance)?;
+        region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
+    }
+
+    /// The rings of a sum's arrangement and the rule that reads the sum
+    /// from them. The region must not be empty.
+    fn sum_rule(&self, parts: &[Part], tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
-        let shape: Vec<usize> = self.polygons().iter().map(|p| p.holes.len()).collect();
-        let terms = sum_terms(&own, &Set::Region(shape), parts, tolerance);
-        let arrangement = ArcArrangement::new(&terms.rings, tolerance)?;
-        region_of(&arrangement, |flags| terms.holds(flags), true, tolerance)
+        let shape = Layout::new(self.polygons());
+        let mut terms = sum_terms(&own, &Set::Region(shape), parts, tolerance);
+        (std::mem::take(&mut terms.rings), Rule::Sum(terms))
     }
 
     pub(crate) fn erode_parts(
@@ -554,8 +683,16 @@ impl Region {
         if self.is_empty() {
             return Ok(Self::empty());
         }
+        let (rings, rule) = self.erosion_rule(parts, tolerance);
+        let arrangement = ArcArrangement::new(&rings, tolerance)?;
+        region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
+    }
+
+    /// The rings of an erosion's arrangement and the rule that reads the
+    /// erosion from them. The region must not be empty.
+    fn erosion_rule(&self, parts: &[Part], tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
-        let shape: Vec<usize> = self.polygons().iter().map(|p| p.holes.len()).collect();
+        let shape = Layout::new(self.polygons());
         // A box holding the region: its complement within the box, summed
         // with -K, reaches every point of the region that K cannot sit
         // around (a translate of K leaving the box crosses its boundary,
@@ -580,11 +717,10 @@ impl Region {
         let mut outside = vec![frame];
         outside.extend(own.iter().cloned());
         let flipped: Vec<Part> = parts.iter().map(Part::flipped).collect();
-        let terms = sum_terms(&outside, &Set::Outside(shape.clone()), &flipped, tolerance);
+        let mut terms = sum_terms(&outside, &Set::Outside(shape.clone()), &flipped, tolerance);
         let m = own.len();
         let mut rings: Vec<ArcRing> = own.iter().map(|r| ArcRing::from_points(r)).collect();
-        rings.extend(terms.rings.iter().cloned());
-        let arrangement = ArcArrangement::new(&rings, tolerance)?;
+        rings.append(&mut terms.rings);
         // A point of the erosion moved by the anchor `k0` of the first
         // part lies in the region: when the origin is in K that is implied
         // by the region itself; otherwise it is read from the region moved
@@ -592,18 +728,14 @@ impl Region {
         // copy (frame minus region).
         let origin = parts.iter().any(Part::holds_origin);
         let first = m + terms.sets[0].0 + 1;
-        region_of(
-            &arrangement,
-            |flags| {
-                let anchored = if origin {
-                    member(&shape, &flags[..m])
-                } else {
-                    member(&shape, &flags[first..])
-                };
-                anchored && !terms.holds(&flags[m..])
+        (
+            rings,
+            Rule::Erosion {
+                anchor: if origin { 0 } else { first },
+                own: m,
+                shape,
+                terms,
             },
-            true,
-            tolerance,
         )
     }
 
@@ -782,6 +914,120 @@ mod tests {
     fn apart(a: &Region, b: &Region) -> f64 {
         let t = Tolerance::METRE;
         a.difference(b, t).unwrap().area() + b.difference(a, t).unwrap().area()
+    }
+
+    /// The rule as it was read before #292, from a flag for every ring:
+    /// a polygon holds a point when its outer ring does and none of its
+    /// holes do.
+    fn dense_member(shape: &Layout, flags: &[bool]) -> bool {
+        (0..shape.starts.len()).any(|p| {
+            let (at, end) = (
+                shape.starts[p],
+                shape.starts.get(p + 1).copied().unwrap_or(shape.len),
+            );
+            flags[at] && !flags[at + 1..end].iter().any(|&f| f)
+        })
+    }
+
+    fn dense_terms(terms: &Terms, flags: &[bool]) -> bool {
+        terms.sets.iter().any(|(at, set)| match set {
+            Set::Region(shape) => dense_member(shape, &flags[*at..]),
+            Set::Outside(shape) => flags[*at] && !dense_member(shape, &flags[at + 1..]),
+        }) || flags[terms.pieces..].iter().any(|&f| f)
+    }
+
+    fn dense_rule(rule: &Rule, flags: &[bool]) -> bool {
+        match rule {
+            Rule::Sum(terms) => dense_terms(terms, flags),
+            Rule::Erosion {
+                own,
+                anchor,
+                shape,
+                terms,
+            } => dense_member(shape, &flags[*anchor..]) && !dense_terms(terms, &flags[*own..]),
+        }
+    }
+
+    #[test]
+    fn the_sparse_rule_reads_every_piece_as_the_flags_did() {
+        // Several polygons, holes, convex and cut shapes, the edge-pair
+        // route, and erosions anchored on the region and on its copy: on
+        // both sides of every piece, the rings holding the side decide as
+        // a flag per ring did (#292).
+        let t = Tolerance::METRE;
+        let square =
+            |x: f64, y: f64, s: f64| ring(&[(x, y), (x + s, y), (x + s, y + s), (x, y + s)]);
+        let two_holes = Region::new(
+            vec![Polygon {
+                outer: square(8.0, 0.0, 4.0),
+                holes: vec![square(8.5, 0.5, 1.0), square(10.0, 2.0, 1.5)],
+            }],
+            t,
+        )
+        .unwrap();
+        let region = u_with_hole()
+            .union(&two_holes, t)
+            .unwrap()
+            .union(
+                &Region::new(
+                    vec![Polygon {
+                        outer: square(3.0, 3.0, 0.1),
+                        holes: vec![],
+                    }],
+                    t,
+                )
+                .unwrap(),
+                t,
+            )
+            .unwrap();
+        assert_eq!(region.polygons().len(), 3);
+        let mut parts = vec![Part::Pieces(vec![vec![
+            Point2::new(-0.3, -0.3),
+            Point2::new(0.3, -0.3),
+            Point2::new(0.3, 0.3),
+            Point2::new(-0.3, 0.3),
+        ]])];
+        for (outer, holes) in shapes() {
+            parts.push(polygon_part(&outer, &holes, t).unwrap());
+            parts.push(Part::Rings(
+                std::iter::once(outer.points.clone())
+                    .chain(holes.iter().map(|h| h.points.clone()))
+                    .collect(),
+            ));
+        }
+        let mut sides = 0;
+        for part in &parts {
+            for (rings, rule) in [
+                region.sum_rule(std::slice::from_ref(part), t),
+                region.erosion_rule(std::slice::from_ref(part), t),
+            ] {
+                let arrangement = ArcArrangement::new(&rings, t).unwrap();
+                let mut held = 0;
+                for edge in arrangement.edges() {
+                    for left in [true, false] {
+                        let flags: Vec<bool> = (0..rings.len())
+                            .map(|r| {
+                                if left {
+                                    edge.inside_left(r)
+                                } else {
+                                    edge.inside_right(r)
+                                }
+                            })
+                            .collect();
+                        let holding: Vec<usize> = (0..rings.len()).filter(|&r| flags[r]).collect();
+                        let mut listed = Vec::new();
+                        edge.holding(left, &mut listed);
+                        assert_eq!(listed, holding);
+                        let dense = dense_rule(&rule, &flags);
+                        assert_eq!(rule.holds(&holding), dense, "{holding:?}");
+                        held += usize::from(dense);
+                        sides += 1;
+                    }
+                }
+                assert!(held > 0);
+            }
+        }
+        assert!(sides > 10_000, "{sides}");
     }
 
     #[test]

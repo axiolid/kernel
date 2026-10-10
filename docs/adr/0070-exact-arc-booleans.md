@@ -174,3 +174,13 @@ rules), `tests/exact_straight.rs` (bit-identical vertices, correctly
 rounded crossings; all four tests fail on the old backend), and
 `scripts/probe_exact_overlay_mutants.py`. `i_overlay` remains for
 `offset.rs` only.
+
+Note (#292): `ArcArrangement` now keeps, for each piece, the rings that
+hold both of its sides (sparse, as the subdivision computes them) and its
+carriers with the side each holds, not a flag per ring per side. Which
+faces a predicate selects is unchanged: `regions` fills one buffer of
+flags per side for its predicate, and the crate's Minkowski operations
+read each side from the ascending list of rings that hold it. The flags
+made memory, and the Minkowski face selection's time, grow as pieces
+times rings; a sum reads one ring per boundary edge, so a 3,400-corner
+floor needed more than 12 GB.

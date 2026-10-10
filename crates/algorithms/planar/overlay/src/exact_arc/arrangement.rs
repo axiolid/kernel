@@ -39,22 +39,6 @@ pub(crate) struct RawEdge {
     pub(crate) sources: Vec<(usize, usize, bool)>,
 }
 
-impl RawEdge {
-    /// For each of `count` rings, whether it contains the region left
-    /// (`left`) or right of the piece. A ring carrying the piece contains
-    /// the side its own inside faces: the left when it runs the same way.
-    pub(crate) fn sides(&self, count: usize, left: bool) -> Vec<bool> {
-        let mut out = vec![false; count];
-        for &ring in &self.inside {
-            out[ring] = true;
-        }
-        for &(ring, _, same) in &self.sources {
-            out[ring] = same == left;
-        }
-        out
-    }
-}
-
 /// The exact subdivision: vertices, pieces, and their memberships.
 pub(crate) struct Raw {
     pieces: Vec<Piece>,
