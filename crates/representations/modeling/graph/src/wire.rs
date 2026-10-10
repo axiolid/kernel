@@ -7,7 +7,7 @@
 //! ```json
 //! {
 //!   "format": "axiolid-geometry-graph",
-//!   "version": "1.1",
+//!   "version": "1.0",
 //!   "graph": { "nodes": [{ "Primitive": { "Sphere": { "radius": 1.0 } } }], "roots": [0] }
 //! }
 //! ```
@@ -25,6 +25,12 @@
 //! version; renaming or removing anything, or changing its type, meaning or
 //! units, is a major version. A reader reads its own major up to its own
 //! minor, so every older minor of [`FORMAT_VERSION`] stays readable.
+//!
+//! A writer labels each payload with the lowest version that represents
+//! it (#297), not with [`FORMAT_VERSION`]: a graph that uses nothing a
+//! minor added is written exactly as that minor's predecessor wrote it,
+//! so an older reader keeps reading every graph that does not use newer
+//! features. A graph with no seam-snapping window is a 1.0 payload.
 //!
 //! | Version | Added |
 //! | --- | --- |
@@ -63,12 +69,17 @@ use ciborium::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{GraphId, WireBrand};
-use crate::{GeometryGraph, GeometryGraphBuilder, GeometryNode, GraphError, NodeId};
+use crate::{
+    GeometryGraph, GeometryGraphBuilder, GeometryNode, GraphError, NodeId, OrientedCurveStation,
+};
 
 /// The format name every payload carries in its `format` entry.
 pub const FORMAT_NAME: &str = "axiolid-geometry-graph";
 
-/// The format version this crate writes, and the newest it reads.
+/// The newest format version this crate reads and writes. A payload is
+/// labelled with the lowest version that represents it, which is this one
+/// only when the graph uses what this version added (see the
+/// [module documentation](self#versions)).
 pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 1);
 
 /// A `MAJOR.MINOR` wire format version.
@@ -248,7 +259,7 @@ struct GraphIn {
 fn envelope(graph: &GeometryGraph) -> EnvelopeOut<'_> {
     EnvelopeOut {
         format: FORMAT_NAME,
-        version: FORMAT_VERSION.to_string(),
+        version: required_version(graph.nodes()).to_string(),
         graph: GraphOut {
             nodes: graph.nodes(),
             roots: graph.roots(),
@@ -364,19 +375,82 @@ fn json_error(error: &serde_json::Error, version: Option<FormatVersion>) -> Wire
     }
 }
 
+/// The first version of the format, which a payload using no later
+/// addition is labelled with.
+const BASE_VERSION: FormatVersion = FormatVersion::new(1, 0);
+
 /// The version that introduced the seam-snapping window (#294).
 const SEAM_WINDOW_SINCE: FormatVersion = FormatVersion::new(1, 1);
+
+/// The lowest version that represents `nodes` (#297): the version every
+/// payload is labelled with, so an older reader reads every graph that
+/// uses nothing newer than it knows.
+///
+/// Every minor version after 1.0 adds its own feature test here, the same
+/// test [`newer_field`] refuses an older payload by: a writer never labels
+/// a payload with a version whose reader would refuse it.
+fn required_version(nodes: &[GeometryNode]) -> FormatVersion {
+    let mut version = BASE_VERSION;
+    if nodes.iter().any(uses_seam_window) {
+        version = version.max(SEAM_WINDOW_SINCE);
+    }
+    version
+}
+
+/// Every oriented station `node` carries, wherever it stands in the node.
+///
+/// The match names every node kind, so a new kind cannot be added without
+/// deciding whether it carries a station; a kind that comes to carry
+/// several returns them all.
+fn oriented_stations(node: &GeometryNode) -> &[OrientedCurveStation] {
+    match node {
+        GeometryNode::OrientedCurveStation(station) => core::slice::from_ref(station),
+        GeometryNode::InstanceAtStation(placed) => core::slice::from_ref(&placed.station),
+        GeometryNode::Point2(_)
+        | GeometryNode::Point3(_)
+        | GeometryNode::Vector2(_)
+        | GeometryNode::Vector3(_)
+        | GeometryNode::Frame2(_)
+        | GeometryNode::Frame3(_)
+        | GeometryNode::Transform(_)
+        | GeometryNode::PointList2(_)
+        | GeometryNode::PointList3(_)
+        | GeometryNode::Curve2(_)
+        | GeometryNode::Curve3(_)
+        | GeometryNode::CurveRelation(_)
+        | GeometryNode::PointOnCurve(_)
+        | GeometryNode::Surface(_)
+        | GeometryNode::SurfaceRelation(_)
+        | GeometryNode::PointOnSurface(_)
+        | GeometryNode::Profile(_)
+        | GeometryNode::OpenProfile(_)
+        | GeometryNode::Primitive(_)
+        | GeometryNode::HalfSpace(_)
+        | GeometryNode::SolidOperation(_)
+        | GeometryNode::BRep(_)
+        | GeometryNode::PolygonMesh(_)
+        | GeometryNode::TriMesh(_)
+        | GeometryNode::BoundingBox(_)
+        | GeometryNode::Instance(_)
+        | GeometryNode::Collection(_)
+        | GeometryNode::CurveStation(_) => &[],
+    }
+}
+
+/// Whether `node` writes a seam-snapping window (format 1.1): a station
+/// whose window is not `+0.0`, the one value the writer omits. (`-0.0` is
+/// written, so it needs 1.1 too.)
+fn uses_seam_window(node: &GeometryNode) -> bool {
+    oriented_stations(node)
+        .iter()
+        .any(|station| station.seam_window.to_bits() != 0)
+}
 
 /// A field `node` holds that `version` does not have: a seam-snapping
 /// window in a 1.0 payload, which no 1.0 writer wrote. (A window of `+0.0`
 /// is what its absence means, so it is not told apart.)
 fn newer_field(node: &GeometryNode, version: FormatVersion) -> Option<&'static str> {
-    let station = match node {
-        GeometryNode::OrientedCurveStation(station) => station,
-        GeometryNode::InstanceAtStation(placed) => &placed.station,
-        _ => return None,
-    };
-    (version < SEAM_WINDOW_SINCE && station.seam_window.to_bits() != 0).then_some("seam_window")
+    (version < SEAM_WINDOW_SINCE && uses_seam_window(node)).then_some("seam_window")
 }
 
 /// Rebuild the decoded graph through the builder's validation.

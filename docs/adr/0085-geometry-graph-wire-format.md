@@ -119,6 +119,10 @@ later reader of that major. The committed golden payloads are the
 regression guard: each published version keeps its own, and today's
 reader must read each one to the identical graph.
 
+A writer labels each payload with the lowest version that represents it
+(#297, see the note below), so an older reader keeps reading every
+payload that does not use what a later minor added.
+
 ### Refusal rules
 
 A reader returns a typed `WireError` and no graph whenever it cannot
@@ -255,3 +259,34 @@ a window of `0`.
   `InstanceAtStation`) and is what today's writer writes.
 - **Probe.** `scripts/probe_seam_window_mutants.py` writes a zero window and
   reads a window in a 1.0 payload; both are caught.
+
+## Note 2026-10-10: the lowest version that represents a payload (#297)
+
+The 1.1 writer of 0.3.9 labelled every payload `1.1`, though a graph
+without windows is exactly a 1.0 graph, so a 0.3.8 reader refused every
+payload by its version. The version rules gain a writer rule:
+
+- **A writer labels each payload with the lowest version that represents
+  it**, not with `FORMAT_VERSION`. A payload that uses nothing a minor
+  added is written exactly as that minor's predecessor wrote it, so an
+  older reader of the same major keeps reading everything that does not
+  use newer features; only a payload that does is refused by an older
+  reader, by its version. `FORMAT_VERSION` is the newest version a
+  reader reads and a writer may write.
+- **One feature test per minor.** `wire::required_version` starts at 1.0
+  and raises the version for each feature a later minor added that the
+  graph uses; 1.1's test is a seam-snapping window that is written (any
+  window but `+0.0`, so `-0.0` too) on any oriented station, found
+  through one match naming every node kind (today an
+  `OrientedCurveStation` node and the station of an `InstanceAtStation`).
+  The reader's refusal of a 1.1 field in a 1.0 payload uses the same
+  test, so a writer never labels a payload with a version whose reader
+  would refuse it. Every future minor adds its test there.
+- **Guards.** Each published version's `every-kind.json` golden payload
+  is written back byte for byte under its own version, JSON and CBOR
+  alike (the 1.0 one is what 0.3.8 wrote), and a test gives each oriented
+  station of the every-kind fixture a window in turn, found by its fields
+  in the payload rather than by node kind, and requires 1.1 for each.
+  `scripts/probe_graph_wire_mutants.py` always writes `FORMAT_VERSION`,
+  and `scripts/probe_seam_window_mutants.py` ignores the window in one
+  carrier or the other; each is caught.

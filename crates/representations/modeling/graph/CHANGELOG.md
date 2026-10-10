@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- The wire writer labels each payload with the lowest format version that
+  represents it (#297, ADR 0085), not always with `FORMAT_VERSION`: a graph
+  with no seam-snapping window is written as `"version": "1.0"`, byte for
+  byte what 0.3.8 wrote, so a 0.3.8 reader reads it again; 0.3.9 labelled
+  every payload `1.1`, which such a reader refuses. A graph holding a
+  window anywhere (an `OrientedCurveStation` node or the station of an
+  `InstanceAtStation`, a window of `-0.0` included, since it is written)
+  is written as `1.1`, as before. JSON and CBOR alike.
+
 ## [0.3.9] - 2026-10-10
 
 ### Added

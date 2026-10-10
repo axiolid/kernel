@@ -8,8 +8,9 @@ node skipped instead of refusing the payload, roots dropped, references
 branded with a foreign graph, a node reference read outside a graph), the
 refusal of non-finite numbers on read and write, of trailing bytes and of a
 CBOR integer that is not exactly a double (and the acceptance of one that
-is, past 2^53 too), and the frozen wire names (a variant, a node kind and
-a field renamed on the wire). Each must turn `axiolid-model`'s `tests/wire.rs` red.
+is, past 2^53 too), the frozen wire names (a variant, a node kind and a
+field renamed on the wire), and the label a payload is written under, the
+lowest version that represents it (#297: always the newest, always 1.0). Each must turn `axiolid-model`'s `tests/wire.rs` red.
 
 Not probed, because no test can tell them apart: the path text inside a
 `NonFinite` refusal of a map key that is not text (the writer never writes
@@ -129,6 +130,12 @@ MUTANTS = [
     ('a node kind renamed on the wire', N,
      '    BoundingBox(Aabb),',
      '    #[cfg_attr(feature = "serde", serde(rename = "Aabb"))]\n    BoundingBox(Aabb),'),
+    ('every payload is labelled with the newest version', W,
+     '        version: required_version(graph.nodes()).to_string(),',
+     '        version: { let _ = required_version(graph.nodes()); FORMAT_VERSION }.to_string(),'),
+    ('every payload is labelled 1.0', W,
+     '    if nodes.iter().any(uses_seam_window) {',
+     '    if false && nodes.iter().any(uses_seam_window) {'),
     ('a field renamed on the wire', N,
      '    /// Reused source node.\n    pub source: NodeId,',
      '    /// Reused source node.\n    #[cfg_attr(feature = "serde", serde(rename = "src"))]\n    pub source: NodeId,'),

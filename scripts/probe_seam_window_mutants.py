@@ -11,7 +11,9 @@ certified interval a seam is snapped by; in the composite which seams
 count; in the provider and the contract the query and its default
 refusal; in the conformance suite the containment check; in the compiler
 the window applied at all; and in `axiolid-model` the window's validation
-and its wire format (omitted at zero, refused in a 1.0 payload). Each must
+and its wire format (omitted at zero, refused in a 1.0 payload, and
+lifting the payload to 1.1 from either carrier, a `-0.0` window too,
+#297). Each must
 turn `evaluate/tests/station_certify.rs`, `curve_evaluate_path.rs`,
 `compile/tests/station_window.rs` or the model's `station`/`wire` tests
 red.
@@ -108,8 +110,17 @@ MUTANTS = [
     ('a zero window is written', M,
      '    window.to_bits() == 0', '    false', [WIRE]),
     ('a window in a 1.0 payload is read', G,
-     '    (version < SEAM_WINDOW_SINCE && station.seam_window.to_bits() != 0).then_some("seam_window")',
-     '    (false && station.seam_window.to_bits() != 0).then_some("seam_window")', [WIRE]),
+     '    (version < SEAM_WINDOW_SINCE && uses_seam_window(node)).then_some("seam_window")',
+     '    (false && uses_seam_window(node)).then_some("seam_window")', [WIRE]),
+    ('the window of an oriented station node is ignored', G,
+     '        GeometryNode::OrientedCurveStation(station) => core::slice::from_ref(station),',
+     '        GeometryNode::OrientedCurveStation(_) => &[],', [WIRE]),
+    ('the window of an instance at a station is ignored', G,
+     '        GeometryNode::InstanceAtStation(placed) => core::slice::from_ref(&placed.station),',
+     '        GeometryNode::InstanceAtStation(_) => &[],', [WIRE]),
+    ('a -0.0 window is labelled 1.0', G,
+     '        .any(|station| station.seam_window.to_bits() != 0)',
+     '        .any(|station| station.seam_window != 0.0)', [WIRE]),
 ]
 
 probe_lib.main(MUTANTS, timeout=TIMEOUT, reject_uncompiled=True)

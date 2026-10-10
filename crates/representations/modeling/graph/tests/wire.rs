@@ -1417,7 +1417,34 @@ fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/wire")
 }
 
-/// A payload with one node per line, as the golden files are stored.
+/// The version entry of a JSON payload.
+fn version_of(text: &str) -> String {
+    let value: Value = serde_json::from_str(text).unwrap();
+    value["version"].as_str().unwrap().to_owned()
+}
+
+/// The version entry of a CBOR payload.
+fn cbor_version_of(bytes: &[u8]) -> String {
+    let value: ciborium::Value = ciborium::from_reader(bytes).unwrap();
+    let ciborium::Value::Map(entries) = value else {
+        panic!("a CBOR payload is a map")
+    };
+    entries
+        .iter()
+        .find(|(key, _)| key.as_text() == Some("version"))
+        .and_then(|(_, version)| version.as_text())
+        .unwrap()
+        .to_owned()
+}
+
+/// A golden payload stored one node per line, as the writer writes it: the
+/// line breaks between nodes are the only bytes the writer does not write.
+fn as_written(golden: &str) -> String {
+    golden.replace('\n', "")
+}
+
+/// A payload with one node per line, as the golden files are stored, under
+/// the version the writer labels it with.
 fn one_node_per_line(graph: &GeometryGraph) -> String {
     let nodes: Vec<String> = graph
         .iter()
@@ -1428,8 +1455,9 @@ fn one_node_per_line(graph: &GeometryGraph) -> String {
         .iter()
         .map(|root| root.index().to_string())
         .collect();
+    let version = version_of(&graph.to_json().unwrap());
     format!(
-        "{{\"format\":\"{FORMAT_NAME}\",\"version\":\"{FORMAT_VERSION}\",\"graph\":{{\"nodes\":[\n{}\n],\n\"roots\":[{}]}}}}\n",
+        "{{\"format\":\"{FORMAT_NAME}\",\"version\":\"{version}\",\"graph\":{{\"nodes\":[\n{}\n],\n\"roots\":[{}]}}}}\n",
         nodes.join(",\n"),
         roots.join(",")
     )
@@ -1483,10 +1511,41 @@ fn the_writer_writes_the_current_golden_payload() {
         "the writer's output for {}",
         path.display()
     );
+    assert_eq!(graph.to_json().unwrap(), as_written(&golden));
     assert_eq!(
-        canonical_graph(&graph.to_json().unwrap()),
-        canonical_graph(&golden)
+        cbor_version_of(&graph.to_cbor().unwrap()),
+        FORMAT_VERSION.to_string()
     );
+}
+
+/// Every published version's every-kind payload is written back byte for
+/// byte, under its own version (#297): a graph that uses nothing a later
+/// minor added is written exactly as that version's writer wrote it, so
+/// its readers keep reading it. The 1.0 payload is what 0.3.8 wrote.
+#[test]
+fn every_golden_payload_is_written_back_identically_under_its_version() {
+    let mut written = Vec::new();
+    for version in std::fs::read_dir(golden_dir()).unwrap() {
+        let version = version.unwrap().path();
+        let path = version.join("every-kind.json");
+        let golden = std::fs::read_to_string(&path).unwrap();
+        let graph = GeometryGraph::from_json(&golden).unwrap();
+        let label = version_of(&golden);
+        assert_eq!(
+            format!("v{label}"),
+            version.file_name().unwrap().to_str().unwrap()
+        );
+        assert_eq!(
+            graph.to_json().unwrap(),
+            as_written(&golden),
+            "{} is not written back byte for byte",
+            path.display()
+        );
+        assert_eq!(cbor_version_of(&graph.to_cbor().unwrap()), label, "CBOR");
+        written.push(label);
+    }
+    written.sort();
+    assert_eq!(written, ["1.0", "1.1"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1506,6 +1565,10 @@ fn small_graph() -> GeometryGraph {
         .unwrap();
     builder.finish(vec![instance]).unwrap()
 }
+
+/// The version the small graph is written under: it has no window, so the
+/// lowest version that represents it (#297).
+const ONE_ZERO: FormatVersion = FormatVersion::new(1, 0);
 
 fn small_payload() -> Value {
     serde_json::from_str(&small_graph().to_json().unwrap()).unwrap()
@@ -1533,7 +1596,7 @@ fn the_small_payload_has_the_documented_shape() {
         small_payload(),
         json!({
             "format": "axiolid-geometry-graph",
-            "version": "1.1",
+            "version": "1.0",
             "graph": {
                 "nodes": [
                     {"Primitive": {"Sphere": {"radius": 1.0}}},
@@ -1558,7 +1621,7 @@ fn an_unknown_node_kind_is_refused_by_name_and_version() {
         &payload,
         &WireError::UnknownKind {
             kind: "Hyperboloid".into(),
-            version: FORMAT_VERSION,
+            version: ONE_ZERO,
         },
     );
 }
@@ -1571,7 +1634,7 @@ fn an_unknown_variant_is_refused_by_name() {
         &payload,
         &WireError::UnknownKind {
             kind: "Ellipsoid".into(),
-            version: FORMAT_VERSION,
+            version: ONE_ZERO,
         },
     );
     // A unit variant too.
@@ -1594,7 +1657,7 @@ fn an_unknown_field_is_refused_by_name() {
     payload["graph"]["nodes"][0]["Primitive"]["Sphere"]["colour"] = json!("red");
     let expected = WireError::UnknownField {
         field: "colour".into(),
-        version: FORMAT_VERSION,
+        version: ONE_ZERO,
     };
     refused(&payload, &expected);
     let mut payload = small_payload();
@@ -2002,7 +2065,9 @@ fn the_format_version_is_named_in_every_payload() {
     assert_eq!(FORMAT_VERSION.to_string(), "1.1");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
-    assert_eq!(payload["version"], "1.1");
+    // A graph without windows is labelled 1.0, the lowest version that
+    // represents it (#297).
+    assert_eq!(payload["version"], "1.0");
     let value: ciborium::Value =
         ciborium::from_reader(&small_graph().to_cbor().unwrap()[..]).unwrap();
     let ciborium::Value::Map(entries) = value else {
@@ -2147,5 +2212,130 @@ fn a_window_round_trips_and_a_zero_window_is_not_written() {
             ))),
             Err(GraphError::InvalidStation { .. })
         ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The lowest version that represents a graph (#297)
+// ---------------------------------------------------------------------------
+
+/// Whether a JSON object is an oriented curve station, recognised by its
+/// fields wherever it stands, so that a station a new node kind (or a new
+/// field of an old one) comes to carry is found without naming it here.
+fn is_oriented_station(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        ["station", "orientation", "seam"]
+            .iter()
+            .all(|field| object.contains_key(*field))
+            && object.keys().all(|key| {
+                ["station", "orientation", "seam", "seam_window"].contains(&key.as_str())
+            })
+    })
+}
+
+/// The JSON pointer of every oriented station inside `value`, depth first.
+fn station_pointers(value: &Value, at: &str, found: &mut Vec<String>) {
+    if is_oriented_station(value) {
+        found.push(at.to_owned());
+    }
+    match value {
+        Value::Object(object) => {
+            for (key, item) in object {
+                station_pointers(item, &format!("{at}/{key}"), found);
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                station_pointers(item, &format!("{at}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `value` without any `seam_window` entry.
+fn without_windows(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("seam_window");
+            object.values_mut().for_each(without_windows);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_windows),
+        _ => {}
+    }
+}
+
+/// A graph is labelled with the lowest version that represents it: 1.0
+/// unless a station anywhere in it carries a window, then 1.1. Every
+/// oriented station in the every-kind fixture, which holds every node kind
+/// (see `the_fixture_covers_every_variant_of_every_enum`), is given a
+/// window in turn, alone; each one must lift the payload to 1.1, and a 1.0
+/// reader must refuse that payload, so the writer never labels a payload
+/// with a version whose reader would refuse it.
+#[test]
+fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
+    let (graph, _) = fixture();
+    let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    without_windows(&mut payload);
+    payload["version"] = json!("1.0");
+
+    let plain = read_json(&payload).unwrap();
+    let text = plain.to_json().unwrap();
+    assert_eq!(version_of(&text), "1.0");
+    assert!(!text.contains("seam_window"));
+    assert_eq!(cbor_version_of(&plain.to_cbor().unwrap()), "1.0");
+    let zero_windows = graph.iter().filter(|(_, node)| {
+        matches!(
+            node,
+            GeometryNode::OrientedCurveStation(station) if station.seam_window == 0.0
+        )
+    });
+    assert!(
+        zero_windows.count() > 0,
+        "the fixture has window-free stations"
+    );
+
+    let mut pointers = Vec::new();
+    station_pointers(&payload["graph"]["nodes"], "", &mut pointers);
+    let carriers: BTreeSet<String> = pointers
+        .iter()
+        .map(|pointer| {
+            let index: usize = pointer.split('/').nth(1).unwrap().parse().unwrap();
+            tag(&payload["graph"]["nodes"][index])
+        })
+        .collect();
+    assert_eq!(
+        carriers,
+        BTreeSet::from(["InstanceAtStation".into(), "OrientedCurveStation".into()]),
+        "every node kind that carries an oriented station"
+    );
+
+    for pointer in &pointers {
+        for window in [json!(0.25), json!(-0.0)] {
+            let mut windowed = payload.clone();
+            windowed["version"] = json!("1.1");
+            windowed["graph"]["nodes"]
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert("seam_window".into(), window.clone());
+            let graph = read_json(&windowed).unwrap();
+            let text = graph.to_json().unwrap();
+            assert_eq!(version_of(&text), "1.1", "a window {window} at {pointer}");
+            assert_eq!(
+                cbor_version_of(&graph.to_cbor().unwrap()),
+                "1.1",
+                "CBOR: a window {window} at {pointer}"
+            );
+            windowed["version"] = json!("1.0");
+            refused(
+                &windowed,
+                &WireError::UnknownField {
+                    field: "seam_window".into(),
+                    version: FormatVersion::new(1, 0),
+                },
+            );
+        }
     }
 }
