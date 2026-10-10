@@ -8,7 +8,7 @@ Portable curve evaluation capability contract: point, tangent and oriented frame
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-10) |
+| Latest release | 0.3.5 (2026-10-10) |
 | crates.io | [`axiolid-curve-evaluate-contract`](https://crates.io/crates/axiolid-curve-evaluate-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_curve_evaluate_contract/index.html) · [docs.rs](https://docs.rs/axiolid-curve-evaluate-contract) |
@@ -40,30 +40,25 @@ scalar implementation. See ADR 0063.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-10):
+Latest release, 0.3.5 (2026-10-10):
 
 ### Added
 
-- Point, tangent and frame queries over a curve path (#290, ADR 0082
-  amendment): `CurveEvaluator::path_point_at_on`, `path_tangent_at_on`
-  and `path_frame_at_on` read a `CurvePath` (re-exported from
-  `axiolid-curve` with `PathPiece` and `PathCurve`) as a composite station
-  basis is read -- the distance end to end, every joint a seam read from
-  the piece the `SeamSide` names -- and `path_point_at`, `path_tangent_at`
-  and `path_frame_at` are their outgoing reading; `path_distance_convention`
-  and `path_frame_is_exact_at` say which distance runs through the path and
-  whether a frame on it is exact. All are defaulted, so no provider
-  breaks: the sided queries refuse by a typed `GeomError::UnsupportedInput`
-  naming the new `CURVE_PATH_UNSUPPORTED`, the plain ones delegate to them,
-  the convention is `Unsupported` and nothing is claimed exact.
-- Conformance: a line and a quarter arc meeting at a right angle, forwards
-  and reversed, on the joint and within the seam tolerance either side --
-  each side reads its own piece, the plain queries the outgoing one, a
-  distance off the path and a path with a gap are refused, the convention
-  is arc length and nothing on or after the arc is exact -- or every path
-  query refused as unsupported.
-- Re-exports `PathOffset`, `PathOffsets`, `OffsetLaw` and `OffsetFrame`
-  from `axiolid-curve` (#289): a curve path may carry offset pieces, which
-  a provider that does not read them refuses by name.
+- Certified joint distances of a curve path (#294, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances(path, tolerance)`, one
+  `DistanceInterval` per interior joint that contains the joint's true
+  distance (the sum of the true lengths of the pieces before it) and is no
+  wider than `tolerance`; lengths read from stored data sum to point
+  intervals. A defaulted trait method, so no provider breaks: the default
+  refuses by a typed `UnsupportedInput` naming the new
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`, never an estimate handed out as a
+  certificate. `DistanceInterval` (`lower`, `upper`, `#[non_exhaustive]`,
+  built by `new` and `point`) is new.
+- The conformance suite checks the query: a provider either refuses it as
+  unsupported, or answers one interval containing the joint of a line and
+  a quarter arc (exactly at 10) and of an offset of a line whose lateral
+  offset widens from 0 to 1 over 10 (`sqrt(101)`, a quadrature for a
+  provider), no wider than the tolerance, and refuses a non-positive or
+  non-finite tolerance and a path whose pieces do not meet.
 
 Full history: [`crates/contracts/operations/curve-evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/curve-evaluate/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-10
+
 ### Added
 
 - Certified joint distances of a curve path (#294, ADR 0082 amendment):

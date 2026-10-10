@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-10
+
 ### Added
 
 - A seam-snapping window on an oriented station (#294, ADR 0082

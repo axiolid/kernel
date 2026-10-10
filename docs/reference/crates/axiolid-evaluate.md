@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-10) |
+| Latest release | 0.3.11 (2026-10-10) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,44 +42,45 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-10):
+Latest release, 0.3.11 (2026-10-10):
 
 ### Added
 
-- `surface::invert` (and so `locate`) and `surface::jet` take an
-  elliptical cylinder (#287): the angle is that of the section
-  coordinates over the semi-axes, the inverse of `evaluate`'s affine
-  image of the circle. They were refused as unsupported. `project` still
-  refuses it: the closest point on an ellipse has no closed form.
-
-- `ReferenceCurveEvaluator` reads curve paths (#290, ADR 0082 amendment):
-  the contract's `path_*` queries build `CompositeBasis::from_path` and
-  answer with `CompositeBasis::section_on` for the same side, so a frame
-  through the contract on a curve relation equals the same station lowered
-  as geometry, bitwise against `+Z`; against another reference up the
-  reference-up frame of the section's point and tangent (a banked piece
-  refused there by name). A native parameter along a path is refused by
-  name; the convention and exactness are the composite's.
-- `CompositeBasis::from_path` (the path's curves borrowed, each piece
-  checked against its curve, then measured as `CompositeBasis::new` does)
-  and `CompositeBasis::path`; `StationPiece::from_path_piece`,
-  `StationCurve::from_path_curve`, and `From<StationPiece>` /
-  `From<StationCurve>` for `PathPiece` / `PathCurve` (the curve copied).
-- Offsets as station bases (#289, ADR 0082 amendment): `station::offset`,
-  with `StationOffset` (an offset of one base piece by an `OffsetLaw`,
-  measured in its own length: arc length, or its own plan length beside an
-  elevated or banked curve), `StationCurve::Offset` (appended last),
-  `StationPiece::offset` and `offset_pieces` (one offset piece per span of
-  the base between seams, so every seam and joint of the base, and every
-  break of a by-distances law, is a joint of the offset). A constant offset
-  of a line is a line (frame exact), of a circle a circle of radius
-  `r - a` (length in closed form); every other offset is read numerically
-  to `OFFSET_TOLERANCE` and never claimed exact. A collapse, a cusp or
-  reversal (`CUSP_TOLERANCE`), a self-crossing in a horizontal plane, an
-  offset of an offset and a base span across a seam are refused by name,
-  as is an offset across a corner of its base, where its two sides do not
-  meet. `CompositeBasis` (and so `from_path` and the reference provider's
-  `path_*` queries) reads offset pieces, building each one's measure table
-  once.
+- Certified piece lengths and joint distances (#294, ADR 0082
+  amendment): `station::certify`, and `CompositeBasis::joint_intervals`,
+  one `DistanceInterval` per interior joint containing its true distance,
+  no wider than the tolerance asked. A length read from stored data is a
+  point; an ellipse's, a B-spline's and every numerical offset's is
+  bounded from both sides. Where the measured curve is evaluated in closed
+  form at its native parameter (a line, a circle, an ellipse or a
+  B-spline, and any offset of one), by chords and turning: a chord is a
+  lower bound, and with `M` a certified bound on `|P''|` (from
+  `bound::curve_derivative_bounds*` and the frame's unit-vector
+  derivatives) every tangent on a panel lies within `h M / (2 m)` of the
+  midpoint's, `m = |P'(mid)| - h M / 2`, so the arc is at most the chord
+  over the cosine of that; the points' rounding is bounded once for the
+  whole chain of chords. Beside a base parameterised by its plan arc
+  length with a curvature law (an intrinsic curve or a chain, the plan of
+  an elevated curve), by the midpoint rule on the offset's speed in
+  closed form, within `h^3 / 24 sup |f''|` from suprema of the curvature
+  law's and the profile's derivatives. Uncertifiable lengths are refused
+  by a typed `UnsupportedInput` naming `UNCERTIFIED_LENGTH` (an offset of
+  a banked or 3D intrinsic curve, of a chain's parametric piece or beside
+  an intrinsic profile in a leaning frame; an offset by distances along an
+  ellipse or a B-spline; a 3D offset direction that is not vertical beside
+  a plan-measured or intrinsic base; a base placed in a tilted frame; a
+  skewed frame), a tolerance the rounding already exceeds likewise, and a
+  panel budget (`MAX_CERTIFIED_PANELS`) as `BudgetExceeded`.
+- `ReferenceCurveEvaluator::path_joint_distances` answers with
+  `CompositeBasis::joint_intervals`.
+- Seam-snapping windows (#294): `station::window`, with
+  `snapped_distance2`, `snapped_distance3` and
+  `CompositeBasis::snapped_distance`: the distance a station within its
+  window of exactly one seam whose frame may jump is read at (that seam's
+  own), using certified intervals where a seam's distance is numerical
+  (to `WINDOW_CERTIFICATION` of the window); a window holding two seams is
+  refused naming `SEAM_WINDOW_AMBIGUOUS`, one with a seam straddling its
+  edge naming `SEAM_WINDOW_STRADDLED`, a negative or non-finite window as
+  invalid input. A window of `0` reads the distance as it is.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

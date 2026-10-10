@@ -1379,6 +1379,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.5 - 2026-10-10
+
+### Added
+
+- Certified joint distances of a curve path (#294, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances(path, tolerance)`, one
+  `DistanceInterval` per interior joint that contains the joint's true
+  distance (the sum of the true lengths of the pieces before it) and is no
+  wider than `tolerance`; lengths read from stored data sum to point
+  intervals. A defaulted trait method, so no provider breaks: the default
+  refuses by a typed `UnsupportedInput` naming the new
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`, never an estimate handed out as a
+  certificate. `DistanceInterval` (`lower`, `upper`, `#[non_exhaustive]`,
+  built by `new` and `point`) is new.
+- The conformance suite checks the query: a provider either refuses it as
+  unsupported, or answers one interval containing the joint of a line and
+  a quarter arc (exactly at 10) and of an offset of a line whose lateral
+  offset widens from 0 to 1 over 10 (`sqrt(101)`, a quadrature for a
+  provider), no wider than the tolerance, and refuses a non-positive or
+  non-finite tolerance and a path whose pieces do not meet.
+
 ### 0.3.4 - 2026-10-10
 
 ### Added
@@ -1499,6 +1520,47 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.11 - 2026-10-10
+
+### Added
+
+- Certified piece lengths and joint distances (#294, ADR 0082
+  amendment): `station::certify`, and `CompositeBasis::joint_intervals`,
+  one `DistanceInterval` per interior joint containing its true distance,
+  no wider than the tolerance asked. A length read from stored data is a
+  point; an ellipse's, a B-spline's and every numerical offset's is
+  bounded from both sides. Where the measured curve is evaluated in closed
+  form at its native parameter (a line, a circle, an ellipse or a
+  B-spline, and any offset of one), by chords and turning: a chord is a
+  lower bound, and with `M` a certified bound on `|P''|` (from
+  `bound::curve_derivative_bounds*` and the frame's unit-vector
+  derivatives) every tangent on a panel lies within `h M / (2 m)` of the
+  midpoint's, `m = |P'(mid)| - h M / 2`, so the arc is at most the chord
+  over the cosine of that; the points' rounding is bounded once for the
+  whole chain of chords. Beside a base parameterised by its plan arc
+  length with a curvature law (an intrinsic curve or a chain, the plan of
+  an elevated curve), by the midpoint rule on the offset's speed in
+  closed form, within `h^3 / 24 sup |f''|` from suprema of the curvature
+  law's and the profile's derivatives. Uncertifiable lengths are refused
+  by a typed `UnsupportedInput` naming `UNCERTIFIED_LENGTH` (an offset of
+  a banked or 3D intrinsic curve, of a chain's parametric piece or beside
+  an intrinsic profile in a leaning frame; an offset by distances along an
+  ellipse or a B-spline; a 3D offset direction that is not vertical beside
+  a plan-measured or intrinsic base; a base placed in a tilted frame; a
+  skewed frame), a tolerance the rounding already exceeds likewise, and a
+  panel budget (`MAX_CERTIFIED_PANELS`) as `BudgetExceeded`.
+- `ReferenceCurveEvaluator::path_joint_distances` answers with
+  `CompositeBasis::joint_intervals`.
+- Seam-snapping windows (#294): `station::window`, with
+  `snapped_distance2`, `snapped_distance3` and
+  `CompositeBasis::snapped_distance`: the distance a station within its
+  window of exactly one seam whose frame may jump is read at (that seam's
+  own), using certified intervals where a seam's distance is numerical
+  (to `WINDOW_CERTIFICATION` of the window); a window holding two seams is
+  refused naming `SEAM_WINDOW_AMBIGUOUS`, one with a seam straddling its
+  edge naming `SEAM_WINDOW_STRADDLED`, a negative or non-finite window as
+  invalid input. A window of `0` reads the distance as it is.
 
 ### 0.3.10 - 2026-10-10
 
@@ -2532,6 +2594,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.20 - 2026-10-10
+
+### Added
+
+- An oriented station's seam-snapping window (#294, ADR 0082
+  amendment): `station::resolve` and `station::placement`, and so every
+  `InstanceAtStation` compiled or used as a station basis, read a station
+  within its window of exactly one seam of its basis on that seam, from
+  its `SeamSide` (its point the seam's), through
+  `axiolid_reference::station`'s snapping: exact seam positions where
+  they are exact, certified intervals where a joint follows an offset, an
+  ellipse or a B-spline piece. A window holding two seams, a seam
+  straddling its edge and a seam whose distance cannot be certified are
+  refused by name. A window of `0`, every existing station's, reads as
+  before.
+
 ### 0.3.19 - 2026-10-10
 
 ### Changed
@@ -3483,6 +3561,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.9 - 2026-10-10
+
+### Added
+
+- A seam-snapping window on an oriented station (#294, ADR 0082
+  amendment): `OrientedCurveStation::seam_window`, set by
+  `with_seam_window`, a non-negative distance in the basis's station
+  measure (default `0`, the arc-length tolerance alone, so every existing
+  station reads as before). A resolver reads a station within the window
+  of one seam whose frame may jump on that seam, from its `SeamSide`, and
+  refuses a window holding two seams or a seam whose certified position
+  straddles its edge. It also applies to the station of an
+  `InstanceAtStation`. A negative or non-finite window is refused as
+  `GraphError::InvalidStation` when the node is pushed.
+- Wire format 1.1 (ADR 0085): the window is written as `seam_window` and
+  omitted at `+0.0`, so a graph without windows writes the 1.0 graph; an
+  absent window reads as `0`, so every 1.0 payload still reads to the same
+  graph. A payload claiming 1.0 that holds a window is refused as
+  `WireError::UnknownField`. `FORMAT_VERSION` is `1.1`; the 1.0 golden
+  payloads stay and a 1.1 one is added.
 
 ### 0.3.8 - 2026-10-10
 

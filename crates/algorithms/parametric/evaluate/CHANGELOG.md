@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-10
+
 ### Added
 
 - Certified piece lengths and joint distances (#294, ADR 0082

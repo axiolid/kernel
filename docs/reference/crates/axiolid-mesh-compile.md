@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.19 (2026-10-10) |
+| Latest release | 0.3.20 (2026-10-10) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -72,36 +72,20 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.19 (2026-10-10):
-
-### Changed
-
-- A difference whose tool is an oblique exact extrusion with arcs or a
-  circle (a slab less an oblique round shaft or rounded opening) compiles
-  exactly, and its mesh is certified against that result (#287). It was
-  refused as "exact boolean over a curve or surface it cannot evaluate",
-  and the mesh's report unbounded. So does an elliptical column crossed
-  by a round bore, refused before for want of inverting a point on the
-  column.
+Latest release, 0.3.20 (2026-10-10):
 
 ### Added
 
-- `station::curve_path` (#290, ADR 0082 amendment): a graph curve a
-  distance runs along, flattened into the neutral `axiolid_curve::CurvePath`
-  a station on it is measured along, for a consumer to read through the
-  curve-evaluation contract's `path_*` queries; an atomic curve is one
-  whole piece, any relation a station refuses is refused by name. A
-  station on the relation and the path read through the contract agree
-  bitwise.
-- Offset curves as station bases (#289, ADR 0082 amendment):
-  `station::resolve`, `placement`, `seams`, `curve_path` and every run of
-  stations (spines, sectioned surfaces, offsets by stations) accept a
-  constant `CurveRelation::Offset` (2D without, 3D with a reference
-  direction) and an `OffsetByStations` as basis, nested in composites and
-  placements, measured in the offset's own length. A placement on an
-  offset of a line is exact; on any other offset it is reported unbounded
-  and refused by the exact compiler, as on any curved basis. A trim of an
-  offset relation, an offset of an offset, a planar offset of a 3D curve
-  and an offset across a corner of its basis are refused by name.
+- An oriented station's seam-snapping window (#294, ADR 0082
+  amendment): `station::resolve` and `station::placement`, and so every
+  `InstanceAtStation` compiled or used as a station basis, read a station
+  within its window of exactly one seam of its basis on that seam, from
+  its `SeamSide` (its point the seam's), through
+  `axiolid_reference::station`'s snapping: exact seam positions where
+  they are exact, certified intervals where a joint follows an offset, an
+  ellipse or a B-spline piece. A window holding two seams, a seam
+  straddling its edge and a seam whose distance cannot be certified are
+  refused by name. A window of `0`, every existing station's, reads as
+  before.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

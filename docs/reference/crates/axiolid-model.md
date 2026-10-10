@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-10) |
+| Latest release | 0.3.9 (2026-10-10) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,33 +54,25 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-10):
+Latest release, 0.3.9 (2026-10-10):
 
 ### Added
 
-- A versioned wire format for `GeometryGraph` behind an optional `serde`
-  feature, off by default (#267, ADR 0085): JSON (`serde_json`) and CBOR
-  (`ciborium`) encodings of one envelope,
-  `{"format": "axiolid-geometry-graph", "version": "1.0", "graph":
-  {"nodes": [...], "roots": [...]}}`, with node references as indices and
-  enums externally tagged by their variant names. `GeometryGraph::to_json`,
-  `from_json`, `to_cbor` and `from_cbor`, and the `wire` module with
-  `FORMAT_NAME`, `FORMAT_VERSION`, `FormatVersion` and the typed
-  `WireError`. A reader checks the version before the graph and refuses a
-  newer minor, another major, an unknown kind, variant or field, a
-  non-finite number and malformed input by name; a decoded graph is
-  rebuilt through `GeometryGraphBuilder::push`, so it passes the same
-  validation as any other. A writer refuses a graph holding a non-finite
-  number. Golden payloads under `tests/wire/` pin format 1.0.
-- Both readers accept an integer where a real is expected when it is
-  exactly a double (`i as f64 as i128 == i`, so every `|i| <= 2^53`), as
-  JavaScript and Python CBOR encoders write whole-number doubles as
-  integers. A CBOR integer that is not exactly a double is refused as
-  `WireError::Malformed` naming its path, wherever it stands. Integer zero
-  has no sign and reads as `+0.0`. The CBOR reader unwraps the
-  self-describe tag and refuses other tags, byte strings, simple values,
-  non-text and repeated map keys.
-- With the `serde` feature, every node payload type derives `Serialize`
-  and `Deserialize`. A `NodeId` deserialises only inside a graph payload.
+- A seam-snapping window on an oriented station (#294, ADR 0082
+  amendment): `OrientedCurveStation::seam_window`, set by
+  `with_seam_window`, a non-negative distance in the basis's station
+  measure (default `0`, the arc-length tolerance alone, so every existing
+  station reads as before). A resolver reads a station within the window
+  of one seam whose frame may jump on that seam, from its `SeamSide`, and
+  refuses a window holding two seams or a seam whose certified position
+  straddles its edge. It also applies to the station of an
+  `InstanceAtStation`. A negative or non-finite window is refused as
+  `GraphError::InvalidStation` when the node is pushed.
+- Wire format 1.1 (ADR 0085): the window is written as `seam_window` and
+  omitted at `+0.0`, so a graph without windows writes the 1.0 graph; an
+  absent window reads as `0`, so every 1.0 payload still reads to the same
+  graph. A payload claiming 1.0 that holds a window is refused as
+  `WireError::UnknownField`. `FORMAT_VERSION` is `1.1`; the 1.0 golden
+  payloads stay and a 1.1 one is added.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)
