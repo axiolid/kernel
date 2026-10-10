@@ -40,7 +40,9 @@ use axiolid_core::Point2;
 use axiolid_guarantees::{Certified, Sign};
 use axiolid_predicates::{incircle, orient2d};
 
+mod adjacency;
 mod build;
+mod hint;
 mod mesh;
 mod recover;
 mod refine;

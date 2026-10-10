@@ -14,32 +14,17 @@
 
 use axiolid_core::Point2;
 
+use crate::adjacency::{debug_check, link, note_update, twins};
 use crate::mesh::{Triangulation, TriangulationError, NO_HALFEDGE};
 use crate::{in_circumcircle, turns_left, Constraint};
 
 impl Triangulation {
     /// Rebuild the halfedge twin array from the triangle list.
     ///
-    /// Recovery rewrites triangles directly, so adjacency is recomputed
-    /// rather than patched: an incrementally maintained twin array is easy to
-    /// corrupt in a way that only shows up several flips later.
+    /// Run once, when the build hands over a triangulation with the super
+    /// triangle removed. Recovery's flips then keep it current locally.
     pub(crate) fn rebuild_halfedges(&mut self) {
-        use std::collections::HashMap;
-        let count = self.triangles.len();
-        self.halfedges = vec![NO_HALFEDGE; count];
-        let mut seen: HashMap<(u32, u32), u32> = HashMap::with_capacity(count);
-        for e in 0..count {
-            let t = e / 3;
-            let i = e % 3;
-            let from = self.triangles[3 * t + i];
-            let to = self.triangles[3 * t + (i + 1) % 3];
-            if let Some(&twin) = seen.get(&(to, from)) {
-                self.halfedges[e] = twin;
-                self.halfedges[twin as usize] = e as u32;
-            } else {
-                seen.insert((from, to), e as u32);
-            }
-        }
+        self.halfedges = twins(&self.triangles);
     }
 
     /// Whether some triangle already carries the edge `(a, b)`.
@@ -59,7 +44,6 @@ pub(crate) fn recover_constraints(tri: &mut Triangulation) -> Result<(), Triangu
         }
         recover_one(tri, c)?;
     }
-    tri.rebuild_halfedges();
     restore_delaunay(tri);
     Ok(())
 }
@@ -231,12 +215,27 @@ fn flip(tri: &mut Triangulation, t: usize, i: usize) -> bool {
         return false;
     }
 
+    // Both triangles are rewritten from slot 0, so every outside edge
+    // moves to a new slot: read all four outside twins before writing.
+    let across_b_apex = tri.halfedges[3 * t + (i + 1) % 3];
+    let across_apex_a = tri.halfedges[3 * t + (i + 2) % 3];
+    let across_a_other = tri.halfedges[3 * ot + (oi + 1) % 3];
+    let across_other_b = tri.halfedges[3 * ot + (oi + 2) % 3];
+
     tri.triangles[3 * t] = apex;
     tri.triangles[3 * t + 1] = other;
     tri.triangles[3 * t + 2] = b;
     tri.triangles[3 * ot] = other;
     tri.triangles[3 * ot + 1] = apex;
     tri.triangles[3 * ot + 2] = a;
-    tri.rebuild_halfedges();
+
+    let h = &mut tri.halfedges;
+    link(h, 3 * t, (3 * ot) as u32); // apex -> other | other -> apex
+    link(h, 3 * t + 1, across_other_b);
+    link(h, 3 * t + 2, across_b_apex);
+    link(h, 3 * ot + 1, across_apex_a);
+    link(h, 3 * ot + 2, across_a_other);
+    note_update();
+    debug_check(&tri.triangles, &tri.halfedges);
     true
 }

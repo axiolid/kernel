@@ -8,8 +8,10 @@
 //! standard "triangle + halfedge" layout: halfedge `3t + i` belongs to
 //! triangle `t`, runs from vertex `i` to vertex `i + 1 mod 3`, and its twin
 //! is `halfedge[3t + i]`. A half-edge structure with explicit records would
-//! carry a pointer per edge and buy nothing here -- the triangulation is
-//! rebuilt rather than edited, so compactness and cache locality win.
+//! carry a pointer per edge and buy nothing here: compactness and cache
+//! locality win. Insertion and flips keep the twin array current locally;
+//! the `adjacency` module holds the rules and the debug check against a
+//! full recomputation.
 //!
 //! Vertices 0..n are the caller's points. Three extra vertices form a super
 //! triangle large enough to contain them all; they are removed at the end,

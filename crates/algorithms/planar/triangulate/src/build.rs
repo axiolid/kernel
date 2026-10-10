@@ -1,11 +1,24 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Incremental constrained Delaunay construction.
+//!
+//! Points are inserted one at a time into a super triangle: located by a
+//! walk, split one into three (or, on an edge, two into four), then
+//! legalised by Lawson flips. Each split and flip re-links only the twin
+//! pointers of the triangles it rewrites and of their outside neighbours,
+//! so a step costs O(1) beyond the walk; recomputing the whole twin array
+//! after each one, as 0.3.2 did, made n points cost O(n^2) or worse
+//! (#268). Debug builds compare the result with a full recomputation
+//! after every step (see the `adjacency` module). The walk starts next
+//! to a grid hint (see the `hint` module), so it crosses a few triangles
+//! rather than O(sqrt n).
 
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
 use axiolid_predicates::orient2d;
 
+use crate::adjacency::{debug_check, link, note_update};
+use crate::hint::CellHints;
 use crate::mesh::{Triangulation, TriangulationError, NO_HALFEDGE};
 use crate::recover::recover_constraints;
 use crate::{decided, in_circumcircle, turns_left, Constraint};
@@ -72,6 +85,10 @@ struct Builder {
     triangles: Vec<u32>,
     halfedges: Vec<u32>,
     real_count: usize,
+    /// A triangle at each vertex, kept current by every split and flip,
+    /// so a walk can start next to a hinted vertex.
+    corner: Vec<u32>,
+    hints: CellHints,
 }
 
 impl Builder {
@@ -94,11 +111,15 @@ impl Builder {
         all.push(Point2::new(cx, cy + far));
 
         let n = points.len() as u32;
+        let mut corner = vec![NO_HALFEDGE; all.len()];
+        corner[points.len()..].fill(0);
         Self {
             points: all,
             triangles: vec![n, n + 1, n + 2],
             halfedges: vec![NO_HALFEDGE, NO_HALFEDGE, NO_HALFEDGE],
             real_count: points.len(),
+            corner,
+            hints: CellHints::new(min, max, points.len()),
         }
     }
 
@@ -119,6 +140,7 @@ impl Builder {
         let Some(t) = self.locate(self.points[v as usize]) else {
             return Err(TriangulationError::VertexUnplaceable { index: v });
         };
+        self.hints.set(self.points[v as usize], v);
         let (a, b, c) = (
             self.triangles[3 * t],
             self.triangles[3 * t + 1],
@@ -142,36 +164,37 @@ impl Builder {
             {
                 continue;
             }
-            let twin = self.halfedges[3 * t + i];
-            if twin == NO_HALFEDGE {
+            if self.halfedges[3 * t + i] == NO_HALFEDGE {
                 return Err(TriangulationError::VertexUnplaceable { index: v });
             }
-            let x = self.triangles[3 * t + (i + 2) % 3];
-            let ot = twin as usize / 3;
-            let oi = twin as usize % 3;
-            let y = self.triangles[3 * ot + (oi + 2) % 3];
-            // (u, w, x) and (w, u, y) become (u, v, x), (v, w, x),
-            // (w, v, y), (v, u, y).
-            let t1 = self.triangles.len() / 3;
-            let t2 = t1 + 1;
-            self.triangles[3 * t] = x;
-            self.triangles[3 * t + 1] = u;
-            self.triangles[3 * t + 2] = v;
-            self.triangles[3 * ot] = y;
-            self.triangles[3 * ot + 1] = w;
-            self.triangles[3 * ot + 2] = v;
-            self.triangles.extend_from_slice(&[w, x, v]);
-            self.triangles.extend_from_slice(&[u, y, v]);
-            self.halfedges.extend_from_slice(&[NO_HALFEDGE; 6]);
-            self.rebuild_adjacency();
+            let [t, ot, t1, t2] = self.split_edge(t, i, v);
             for tri in [t, ot, t1, t2] {
                 self.legalize(3 * tri);
             }
             return Ok(());
         }
 
-        // Reuse slot `t` for the first sub-triangle and append the other two,
-        // so existing neighbour indices into `t` stay valid where possible.
+        let (t1, t2) = self.split_triangle(t, (a, b, c), v);
+        self.legalize(3 * t);
+        self.legalize(3 * t1);
+        self.legalize(3 * t2);
+        Ok(())
+    }
+
+    /// Split triangle `t` = `(a, b, c)` into three around `v`, keeping the
+    /// twin pointers current, and return the two appended triangles.
+    ///
+    /// Slot `t` is reused for `(a, b, v)`, and `(b, c, v)` and `(c, a, v)`
+    /// are appended, so existing neighbour indices into `t` stay valid
+    /// where they can. Where they cannot is the trap: the old neighbours across
+    /// `b -> c` and `c -> a` still point at halfedges `3t + 1` and `3t + 2`,
+    /// which now run `b -> v` and `v -> a`. Those two neighbours are
+    /// re-pointed at the appended triangles here; missing it corrupts the
+    /// mesh in a way that only shows several insertions later, as a walk
+    /// that leaves it.
+    fn split_triangle(&mut self, t: usize, (a, b, c): (u32, u32, u32), v: u32) -> (usize, usize) {
+        let across_bc = self.halfedges[3 * t + 1];
+        let across_ca = self.halfedges[3 * t + 2];
         let t1 = self.triangles.len() / 3;
         let t2 = t1 + 1;
         self.triangles[3 * t] = a;
@@ -181,51 +204,118 @@ impl Builder {
         self.triangles.extend_from_slice(&[c, a, v]);
         self.halfedges.extend_from_slice(&[NO_HALFEDGE; 6]);
 
-        // Rebuild adjacency from the triangle list rather than patching the
-        // six affected twin pointers by hand. Hand-patching was wrong here:
-        // reusing slot `t` for one sub-triangle leaves the OLD neighbours of
-        // `t` pointing at halfedges that now belong to a different triangle,
-        // and the corruption only surfaces later as a walk that leaves the
-        // mesh. The rebuild is O(n) per insertion, which is the price of a
-        // provably consistent structure; `locate` stays correct, and the
-        // refinement loop above is what dominates runtime anyway.
-        self.rebuild_adjacency();
-
-        self.legalize(3 * t);
-        self.legalize(3 * t1);
-        self.legalize(3 * t2);
-        Ok(())
+        // `a -> b` keeps its twin in slot `3t`.
+        let h = &mut self.halfedges;
+        link(h, 3 * t1, across_bc);
+        link(h, 3 * t2, across_ca);
+        link(h, 3 * t + 1, (3 * t1 + 2) as u32); // b -> v | v -> b
+        link(h, 3 * t1 + 1, (3 * t2 + 2) as u32); // c -> v | v -> c
+        link(h, 3 * t2 + 1, (3 * t + 2) as u32); // a -> v | v -> a
+        self.corner[c as usize] = t1 as u32;
+        self.corner[v as usize] = t as u32;
+        note_update();
+        debug_check(&self.triangles, &self.halfedges);
+        (t1, t2)
     }
 
-    /// Recompute every twin pointer from the triangle list.
-    fn rebuild_adjacency(&mut self) {
-        use std::collections::HashMap;
-        let count = self.triangles.len();
-        self.halfedges.clear();
-        self.halfedges.resize(count, NO_HALFEDGE);
-        let mut seen: HashMap<(u32, u32), u32> = HashMap::with_capacity(count);
-        for e in 0..count {
-            let t = e / 3;
-            let i = e % 3;
-            let from = self.triangles[3 * t + i];
-            let to = self.triangles[3 * t + (i + 1) % 3];
-            if let Some(&twin) = seen.get(&(to, from)) {
-                self.halfedges[e] = twin;
-                self.halfedges[twin as usize] = e as u32;
-            } else {
-                seen.insert((from, to), e as u32);
+    /// Split edge `i` of triangle `t`, and the triangles either side of it,
+    /// at `v`, keeping the twin pointers current. Returns the four
+    /// triangles: the two reused slots, then the two appended.
+    ///
+    /// `(u, w, x)` and `(w, u, y)` become `(x, u, v)`, `(y, w, v)`,
+    /// `(w, x, v)` and `(u, y, v)`. Every outside edge moves to a new slot,
+    /// so all four outside neighbours are re-pointed.
+    fn split_edge(&mut self, t: usize, i: usize, v: u32) -> [usize; 4] {
+        let twin = self.halfedges[3 * t + i] as usize;
+        let u = self.triangles[3 * t + i];
+        let w = self.triangles[3 * t + (i + 1) % 3];
+        let x = self.triangles[3 * t + (i + 2) % 3];
+        let ot = twin / 3;
+        let oi = twin % 3;
+        let y = self.triangles[3 * ot + (oi + 2) % 3];
+        let across_wx = self.halfedges[3 * t + (i + 1) % 3];
+        let across_xu = self.halfedges[3 * t + (i + 2) % 3];
+        let across_uy = self.halfedges[3 * ot + (oi + 1) % 3];
+        let across_yw = self.halfedges[3 * ot + (oi + 2) % 3];
+
+        let t1 = self.triangles.len() / 3;
+        let t2 = t1 + 1;
+        self.triangles[3 * t] = x;
+        self.triangles[3 * t + 1] = u;
+        self.triangles[3 * t + 2] = v;
+        self.triangles[3 * ot] = y;
+        self.triangles[3 * ot + 1] = w;
+        self.triangles[3 * ot + 2] = v;
+        self.triangles.extend_from_slice(&[w, x, v]);
+        self.triangles.extend_from_slice(&[u, y, v]);
+        self.halfedges.extend_from_slice(&[NO_HALFEDGE; 6]);
+
+        let h = &mut self.halfedges;
+        link(h, 3 * t, across_xu);
+        link(h, 3 * ot, across_yw);
+        link(h, 3 * t1, across_wx);
+        link(h, 3 * t2, across_uy);
+        link(h, 3 * t + 1, (3 * t2 + 2) as u32); // u -> v | v -> u
+        link(h, 3 * t + 2, (3 * t1 + 1) as u32); // v -> x | x -> v
+        link(h, 3 * ot + 1, (3 * t1 + 2) as u32); // w -> v | v -> w
+        link(h, 3 * ot + 2, (3 * t2 + 1) as u32); // v -> y | y -> v
+        for (vertex, tri) in [(u, t), (w, ot), (v, t)] {
+            self.corner[vertex as usize] = tri as u32;
+        }
+        note_update();
+        debug_check(&self.triangles, &self.halfedges);
+        [t, ot, t1, t2]
+    }
+
+    /// Find a triangle containing `p`.
+    ///
+    /// The walk starts next to the last vertex inserted in `p`'s grid cell
+    /// (see the `hint` module). A point strictly inside the triangle found
+    /// has no other; a point on an edge or vertex, or a hinted walk that
+    /// fails, is located again by the walk from the last triangle, the one
+    /// the build always made, so the choice between neighbouring triangles,
+    /// and with it the output, is unchanged.
+    fn locate(&self, p: Point2) -> Option<usize> {
+        let last = self.triangles.len() / 3 - 1;
+        let start = self.hints.get(p).map_or(last, |v| {
+            let t = self.corner[v as usize] as usize;
+            // A stale entry would still be a valid start, only a slower
+            // one; holding it exact keeps the bookkeeping honest.
+            debug_assert!(
+                self.triangles[3 * t..3 * t + 3].contains(&v),
+                "vertex {v} is not a corner of its recorded triangle {t}"
+            );
+            t
+        });
+        if start != last {
+            if let Some(t) = self.walk(start, p) {
+                if self.strictly_inside(t, p) {
+                    return Some(t);
+                }
             }
         }
+        self.walk(last, p)
     }
 
-    /// Find a triangle containing `p` by walking from the last triangle.
+    /// Whether `p` lies strictly inside triangle `t`, off its edges.
+    fn strictly_inside(&self, t: usize, p: Point2) -> bool {
+        (0..3).all(|i| {
+            let u = self.points[self.triangles[3 * t + i] as usize];
+            let w = self.points[self.triangles[3 * t + (i + 1) % 3] as usize];
+            decided(orient2d(u, w, p)) == Sign::Positive
+        })
+    }
+
+    /// Walk from triangle `start` to one whose closure holds `p`.
     ///
-    /// A straight walk is O(sqrt n) on well-distributed input and needs no
-    /// auxiliary structure. Returns `None` only if the walk leaves the mesh,
-    /// which the super triangle makes impossible for in-range points.
-    fn locate(&self, p: Point2) -> Option<usize> {
-        let mut t = self.triangles.len() / 3 - 1;
+    /// A straight walk needs no auxiliary structure. Returns `None` only if
+    /// the walk leaves the mesh, which the super triangle makes impossible
+    /// for in-range points.
+    fn walk(&self, start: usize, p: Point2) -> Option<usize> {
+        let mut t = start;
         for _ in 0..self.triangles.len() {
+            #[cfg(test)]
+            crate::hint::tests::STEPS.with(|c| c.set(c.get() + 1));
             let (a, b, c) = (
                 self.points[self.triangles[3 * t] as usize],
                 self.points[self.triangles[3 * t + 1] as usize],
@@ -300,13 +390,24 @@ impl Builder {
             }
 
             // Flip the shared edge to the other diagonal: (p0, other, apex)
-            // and (p1, apex, other).
+            // and (p1, apex, other). Slot `ti` of `t` now runs p0 -> other,
+            // whose outside twin was across `ot`'s p0 -> other; slot `oi` of
+            // `ot` runs p1 -> apex, whose twin was across `t`'s p1 -> apex.
+            // The new diagonal pairs the two `+ 1` slots, and the remaining
+            // edges keep both their slot and their twin.
+            let across_p0_other = self.halfedges[3 * ot + (oi + 1) % 3];
+            let across_p1_apex = self.halfedges[3 * t + (ti + 1) % 3];
             self.triangles[3 * t + (ti + 1) % 3] = other;
             self.triangles[3 * ot + (oi + 1) % 3] = apex;
-
-            // Same reasoning as insertion: recompute adjacency rather than
-            // re-point twins by hand.
-            self.rebuild_adjacency();
+            let h = &mut self.halfedges;
+            link(h, 3 * t + ti, across_p0_other);
+            link(h, 3 * ot + oi, across_p1_apex);
+            link(h, 3 * t + (ti + 1) % 3, (3 * ot + (oi + 1) % 3) as u32);
+            // p1 left `t` and p0 left `ot`.
+            self.corner[p0 as usize] = t as u32;
+            self.corner[p1 as usize] = ot as u32;
+            note_update();
+            debug_check(&self.triangles, &self.halfedges);
 
             // The two edges now across from the inserted vertex: p0 -> other
             // and other -> p1. (Pushing the new diagonal instead, as this
