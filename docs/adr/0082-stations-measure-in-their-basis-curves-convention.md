@@ -126,6 +126,9 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/execution/compile/src/station/basis.rs` (`curve_path`) and
   `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs`
   (#290).
+- `crates/algorithms/parametric/evaluate/src/station/offset.rs`,
+  `crates/execution/compile/src/station/basis.rs` (`offset_by_stations`)
+  and `crates/execution/compile/tests/station_offset.rs` (#289).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -604,3 +607,109 @@ Still open: an offset piece (#289), a native parameter along a path, a
 point or tangent on a joint whose side's piece is vertical (refused, as
 the station frame refuses it), and 2D paths as such (a 2D piece lies in
 `z = 0` and is answered in 3D).
+
+## Amendment 2026-10-10: offset curves as station bases (#289)
+
+The consumer (openbimrs/ifc#414) lowers `IfcOffsetCurve2D`,
+`IfcOffsetCurve3D` and `IfcOffsetCurveByDistances` as station bases: a
+kerb or rail line beside an alignment, a placement on it. Offset relations
+were refused as a basis (#241, #285), and a curve path could not carry one
+(#290).
+
+- **The graph is unchanged.** `CurveRelation::Offset { basis, distance,
+  reference_direction }` and `CurveRelation::OffsetByStations` are station
+  bases wherever a basis may be, nested in composites and placements. The
+  neutral path gains `PathCurve::Offset(Box<PathOffset>)`, appended last:
+  `PathOffset { base, law }` is the offset of ONE base piece (a span of an
+  atomic curve, reversed or placed, not itself an offset, with no seam of
+  its curve inside it) by an `OffsetLaw`: `Planar { distance }`,
+  `Directed { distance, reference_direction }` or `Linear { start, end,
+  frame }`, all `#[non_exhaustive]`. `axiolid-evaluate` reads it as
+  `StationCurve::Offset(StationOffset)`, also appended; `offset_pieces`
+  builds them and the compiler flattens a graph offset with it.
+- **What an offset is.** `C(v) = B(v) + D(v)`, `v` the base's station
+  measure. A planar offset is `distance` along the base's left lateral:
+  the offset curve 2D's "anti-clockwise rotation through 90 degrees from
+  the tangent" (IFC4 ADD2, `IfcOffsetCurve2D.Distance`); a 3D one is
+  `distance` along `normalise(V x T)` ("in the direction V x T where V is
+  the fixed reference direction and T is the unit tangent",
+  `IfcOffsetCurve3D`), normalised so the distance is constant; a tangent
+  parallel to `V` is refused by name, as is a planar offset of a 3D curve
+  (no reference direction). An offset by stations is ADR 0082's own:
+  offsets linear in distance between consecutive stations, in the run's
+  `StationFrame`, from its first station to its last.
+- **Which distance: the offset's own length, from its start** (the base
+  piece's start, the first station). That is its arc length, or, where the
+  base is plan-measured (an elevated or banked curve), its own PLAN length,
+  the arc length of its plan projection. An alignment is authored in plan
+  distance and so is everything staked out beside it; an offset keeps its
+  base's convention (`StationCurve::convention`), so an offset of an
+  alignment joins plan-measured pieces and its own neighbours under #285's
+  rule, and its 3D arc length (which depends on the grade) is not used. It
+  is NOT the base's distance: beside a curve of curvature `k` the offset
+  runs `1 - d k` times as fast, and the issue asks for its own measure.
+  The frame is the offset's own section frame: the planar frame of its own
+  tangent where it runs level at one height, else the reference-up frame
+  of its own point and tangent; beside a banked curve, the base's rolled
+  lateral made perpendicular to its own tangent.
+- **Seams.** The flattening splits the base at every seam of every piece
+  (a joint, a polyline vertex, a corner knot, a grade or cant seam, a chain
+  join) and at every station of a by-distances law, and offsets each span
+  as one piece; the pieces must meet as composite pieces must (#285). So
+  every seam of the base and every break of the distance law is a joint of
+  the offset, a seam under #263, never smooth. Where the base turns a
+  corner or its roll jumps and the two sides' offsets do not meet, the
+  offset is refused by name ("an offset across a corner"): an offset curve's
+  basis must have "a well-defined tangent direction at every point"
+  (`IfcOffsetCurve2D/3D`), and the mitre a run of sections uses there is a
+  plane for sections, not a curve a distance runs along. Where they meet
+  (the offset vanishes at the corner, or a lateral offset across a grade
+  break, whose lateral is level on both sides) the corner is a seam of the
+  offset. An untrimmed atomic line inside an offset is its parameter
+  domain `[0, 1]`, as inside a composite.
+- **Exactness.** A constant offset of a line is a line beside it: its
+  frame is exact where the base is exactly placed (`frame_is_exact_at`,
+  `PathCurve::is_line`), and a placement there is exact. A constant offset
+  without a longitudinal part of a circle whose offset stays in planes
+  normal to its axis (a 2D or level circle under a planar, section or plan
+  law; any circle with `V` along its axis) is a circle of radius `r - a`,
+  `a` the displacement towards the centre: its length is `(r - a) / r`
+  times the base's, a closed form, so seams after it are exact; its frame
+  is read through the base's arc-length inverse, as any circle's, and not
+  claimed exact. Every other offset is read numerically: its velocity is
+  the base's tangent (times `1 / |T_xy|` in plan distance) plus a
+  five-point difference of the displacement (step `min(L / 8, 0.01)`,
+  one-sided at the piece's ends), its length an adaptive 8-point
+  Gauss-Legendre quadrature to `OFFSET_TOLERANCE = 1e-9` relative, inverted
+  by a safeguarded Newton step inside a panel. That is an estimate, the
+  difference quotient keeping the base's `1e-12` out of reach: a frame on
+  it is never exact, a placement on it is `Unbounded` by name and refused
+  by the exact compiler, and a seam after it is refused typed by the exact
+  reading (`station::seams`).
+- **Degenerate offsets are refused by name**: a circle whose offset radius
+  `r - a` falls to `CUSP_TOLERANCE * r` or below ("collapses"); an offset
+  whose speed in its base's direction falls to `CUSP_TOLERANCE` of the
+  base's or below at a quadrature node ("cusp or turning back"; the
+  adaptive quadrature concentrates nodes at the kink `|1 - d k|` has
+  there); an offset lying in one horizontal plane whose polyline through
+  its panel quarter points crosses itself within the piece ("crosses
+  itself"). A trim of an offset relation is refused by name too: an
+  offset curve takes its basis's parameter, which is not its own length,
+  and a trim of a relation reads its parameter as that length (#285).
+- **Curve paths.** `station::curve_path` hands an offset's pieces out as
+  `PathCurve::Offset`, and the contract's `path_*` queries answer them
+  through `CompositeBasis::from_path`, bitwise as a resolved station.
+
+| Option | Why not |
+| --- | --- |
+| Measure an offset in its base's distance | Not the offset's own measure: beside a curve it runs at `1 - d k` of the base's rate, so a station would not lie at its own distance along the offset it names. |
+| 3D arc length beside an elevated or banked curve | Contradicts the plan convention the alignment and everything beside it are authored in, depends on the grade, and would make an offset unjoinable with plan-measured pieces. |
+| Refuse offsets of plan-measured bases | Leaves the consumer's main case (a line beside an alignment) unmeasurable, although its plan length is well defined. |
+| Mitre an offset across a corner, as runs of sections do | The mitre is a plane sections stand in; on a curved piece the trimmed side has no closed form, and offset curves require a tangent-continuous basis. |
+| Hand out a closed form as a plain line or circle piece | The path would lose the offset the consumer lowered, and a piece borrowing its curve cannot hold a curve computed on the fly; the closed form is read inside the offset piece instead. |
+| Differentiate the displacement analytically | Needs every family's curvature and frame derivative (banked roll, elevated grade, chains); a difference of the small displacement is family-blind and accurate to about `1e-10`. |
+
+Still open: an offset across a corner (mitred), an offset of an offset, a
+trim of an offset by its basis's parameter, a self-crossing out of a
+horizontal plane or across pieces, exact frames on an offset circle, and a
+certified bound for anything placed on a numerical offset.
