@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Curve paths (#290, ADR 0082 amendment): `path::CurvePath`, pieces of
+  curves laid end to end, each a `PathPiece` -- the span `[start, end]` of
+  a `PathCurve` (an owned `Curve2` or `Curve3`) in its station measure,
+  traversed forwards or backwards, optionally carried by a rigid placement
+  that is or is not exact. The neutral form of a composite, trimmed or
+  segmented curve relation, which the curve-evaluation contract can see:
+  it holds and composes (`reversed`, `placed`, `extend`, `length`,
+  `PathPiece::frame_is_exact`) and measures nothing. `PathCurve` and
+  `PathPiece` are `#[non_exhaustive]`, so a later piece kind is additive.
+
 ## [0.3.5] - 2026-10-09
 
 ### Added

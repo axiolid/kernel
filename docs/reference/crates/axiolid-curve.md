@@ -26,7 +26,9 @@ curves where surfaces meet. Knots, multiplicities, weights and domains are
 kept as authored. It declares the `CurveEvaluator` seam but evaluates
 nothing; `axiolid-evaluate` does that. Composite, trimmed, offset and
 surface-bound curves are relations in `axiolid-model`, which keeps curves
-and surfaces free of a dependency cycle.
+and surfaces free of a dependency cycle; `CurvePath` carries the pieces of
+atomic curves such a relation runs along, reversed or placed, as a neutral
+value an evaluator measures.
 
 ## Depends on
 

@@ -4,6 +4,8 @@
 //!
 //! Composite, trimmed, offset, and surface-bound curves are graph relations in
 //! `axiolid-model`; keeping them there avoids a curve/surface dependency cycle.
+//! The pieces of atomic curves such a relation runs along are a neutral value
+//! here, [`CurvePath`], which an evaluator measures (#290).
 
 pub mod banked;
 pub mod chain;
@@ -15,6 +17,7 @@ mod intrinsic;
 mod intrinsic3;
 pub mod linear;
 pub mod pair_section;
+pub mod path;
 pub mod quadric_section;
 pub mod seam;
 pub mod sinusoid;
@@ -38,6 +41,7 @@ pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use pair_section::{PairNode, PairSection3};
+pub use path::{CurvePath, PathCurve, PathPiece};
 pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use seam::SeamSide;
 pub use sinusoid::Sinusoid2;
