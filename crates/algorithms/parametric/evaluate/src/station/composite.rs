@@ -4,10 +4,22 @@
 //! A [`CompositeBasis`] is a run of [`StationPiece`]s. Each piece is a span
 //! of an atomic 2D or 3D curve ([`StationCurve`]) between two distances in
 //! that curve's own station measure, traversed forwards or backwards, and
-//! optionally carried by a rigid placement. This is the neutral form of a
-//! composite curve relation: a format adapter or a graph compiler flattens
-//! its trims, sense flags, nested composites and curves placed at stations
-//! into pieces, and this module measures stations along them.
+//! optionally carried by a rigid placement. This is the form of a composite
+//! curve relation this module measures: a format adapter or a graph
+//! compiler flattens its trims, sense flags, nested composites and curves
+//! placed at stations into pieces, and this module measures stations along
+//! them.
+//!
+//! The same pieces as an owned, neutral value are `axiolid-curve`'s
+//! [`CurvePath`] (#290), which the curve-evaluation contract can see:
+//! [`CompositeBasis::from_path`] measures a path with its pieces borrowed
+//! from it, [`CompositeBasis::path`] hands the pieces out as one, and a
+//! [`StationPiece`] converts to a [`PathPiece`] and back
+//! ([`StationPiece::from_path_piece`]). The contract's `path_*` queries
+//! read a path through the same [`CompositeBasis::section_on`] in the
+//! reference provider. A [`StationPiece`] borrows its curve so that a
+//! station on a graph relation, resolved again for every station of a run,
+//! copies none.
 //!
 //! # Distance convention
 //!
@@ -91,7 +103,7 @@
 
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Point3, Scalar, Transform3};
-use axiolid_curve::{Curve2, Curve3, SeamSide};
+use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathPiece, SeamSide};
 use axiolid_curve_evaluate_contract::DistanceConvention;
 
 use super::seam::tidy;
@@ -132,6 +144,33 @@ pub enum StationCurve<'c> {
     Two(&'c Curve2),
     /// A 3D curve.
     Three(&'c Curve3),
+}
+
+impl From<StationCurve<'_>> for PathCurve {
+    /// The curve, copied.
+    fn from(curve: StationCurve<'_>) -> Self {
+        match curve {
+            StationCurve::Two(curve) => PathCurve::Two(curve.clone()),
+            StationCurve::Three(curve) => PathCurve::Three(curve.clone()),
+        }
+    }
+}
+
+impl<'c> StationCurve<'c> {
+    /// The station curve of a path piece's curve, borrowed from it.
+    ///
+    /// # Errors
+    ///
+    /// A piece kind this evaluator does not know, by name.
+    pub fn from_path_curve(curve: &'c PathCurve) -> GeomResult<Self> {
+        match curve {
+            PathCurve::Two(curve) => Ok(Self::Two(curve)),
+            PathCurve::Three(curve) => Ok(Self::Three(curve)),
+            _ => Err(unsupported(
+                "a curve path piece of a kind this evaluator does not know",
+            )),
+        }
+    }
 }
 
 impl StationCurve<'_> {
@@ -397,7 +436,8 @@ impl<'c> StationPiece<'c> {
     }
 
     /// The same piece carried further by the rigid motion `rigid` (applied
-    /// after any placement it already has), `exact` when that motion is.
+    /// after any placement it already has), `exact` when that motion is
+    /// (as [`PathPiece::placed`]).
     #[must_use]
     pub fn placed(mut self, rigid: Transform3, exact: bool) -> Self {
         self.placement = Some(match self.placement {
@@ -406,6 +446,24 @@ impl<'c> StationPiece<'c> {
         });
         self.placement_exact &= exact;
         self
+    }
+
+    /// The station piece of a path piece: its span checked against its
+    /// curve as [`Self::between`] checks it, then reversed and placed as
+    /// the path piece is.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::between`], and a piece kind this evaluator does not
+    /// know, by name.
+    pub fn from_path_piece(piece: &'c PathPiece) -> GeomResult<Self> {
+        let curve = StationCurve::from_path_curve(&piece.curve)?;
+        Ok(Self {
+            reversed: piece.reversed,
+            placement: piece.placement,
+            placement_exact: piece.placement_exact,
+            ..Self::between(curve, piece.start, piece.end)?
+        })
     }
 
     /// The piece's length in its station measure.
@@ -421,7 +479,7 @@ impl<'c> StationPiece<'c> {
     }
 
     /// Whether a frame read on this piece is exact, rounding aside: a line,
-    /// placed, if at all, exactly.
+    /// placed, if at all, exactly (as [`PathPiece::frame_is_exact`]).
     #[must_use]
     pub fn frame_is_exact(&self) -> bool {
         self.curve.is_line() && self.placement_exact
@@ -506,6 +564,17 @@ impl<'c> StationPiece<'c> {
     }
 }
 
+impl From<StationPiece<'_>> for PathPiece {
+    /// The piece, its curve copied.
+    fn from(piece: StationPiece<'_>) -> Self {
+        let mut out = PathPiece::new(piece.curve.into(), piece.start, piece.end);
+        out.reversed = piece.reversed;
+        out.placement = piece.placement;
+        out.placement_exact = piece.placement_exact;
+        out
+    }
+}
+
 /// Pieces of curves laid end to end as one station basis; see the
 /// [module documentation](self).
 #[derive(Debug, Clone, PartialEq)]
@@ -562,6 +631,33 @@ impl<'c> CompositeBasis<'c> {
         })
     }
 
+    /// The composite along `path` (#290), its curves borrowed from it: each
+    /// piece checked against its curve ([`StationPiece::from_path_piece`]),
+    /// then measured as [`Self::new`] measures them.
+    ///
+    /// # Errors
+    ///
+    /// As [`StationPiece::from_path_piece`] for each piece, naming its
+    /// index, and as [`Self::new`].
+    pub fn from_path(path: &'c CurvePath) -> GeomResult<Self> {
+        let pieces = path
+            .pieces()
+            .iter()
+            .map(StationPiece::from_path_piece)
+            .collect::<GeomResult<Vec<_>>>()?;
+        Self::new(pieces)
+    }
+
+    /// The composite's pieces as a neutral [`CurvePath`] (#290), their
+    /// curves copied.
+    #[must_use]
+    pub fn path(&self) -> CurvePath {
+        self.pieces
+            .iter()
+            .map(|piece| PathPiece::from(*piece))
+            .collect()
+    }
+
     /// The pieces, in order.
     #[must_use]
     pub fn pieces(&self) -> &[StationPiece<'c>] {
@@ -595,6 +691,21 @@ impl<'c> CompositeBasis<'c> {
         }
         let k = self.starts[1..count].partition_point(|start| *start <= distance);
         (k, distance - self.starts[k])
+    }
+
+    /// The piece a station at `distance` reads on `side` (the one
+    /// [`Self::section_on`] reads).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::section_on`] for the distance.
+    pub(crate) fn piece_read(
+        &self,
+        distance: Scalar,
+        side: SeamSide,
+    ) -> GeomResult<&StationPiece<'c>> {
+        let distance = admitted(distance, Some(self.length()))?;
+        Ok(&self.pieces[self.locate(distance, side).0])
     }
 
     /// The section frame at `distance` along the composite, read from

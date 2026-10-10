@@ -17,6 +17,19 @@ caret rule for `0.x` versions.
   image of the circle. They were refused as unsupported. `project` still
   refuses it: the closest point on an ellipse has no closed form.
 
+- `ReferenceCurveEvaluator` reads curve paths (#290, ADR 0082 amendment):
+  the contract's `path_*` queries build `CompositeBasis::from_path` and
+  answer with `CompositeBasis::section_on` for the same side, so a frame
+  through the contract on a curve relation equals the same station lowered
+  as geometry, bitwise against `+Z`; against another reference up the
+  reference-up frame of the section's point and tangent (a banked piece
+  refused there by name). A native parameter along a path is refused by
+  name; the convention and exactness are the composite's.
+- `CompositeBasis::from_path` (the path's curves borrowed, each piece
+  checked against its curve, then measured as `CompositeBasis::new` does)
+  and `CompositeBasis::path`; `StationPiece::from_path_piece`,
+  `StationCurve::from_path_curve`, and `From<StationPiece>` /
+  `From<StationCurve>` for `PathPiece` / `PathCurve` (the curve copied).
 
 ## [0.3.9] - 2026-10-09
 

@@ -9,19 +9,29 @@
 //! ([`crate::station::station_section3_on`]), whose seam rule and
 //! tolerance they reuse rather than restate; every other measure is
 //! answered side-lessly. See the ADR 0082 amendment for #286.
+//!
+//! The curve-path queries (`path_point_at_on`, `path_tangent_at_on`,
+//! `path_frame_at_on`, #290) read a path through
+//! [`CompositeBasis::from_path`] and [`CompositeBasis::section_on`], the
+//! reading a composite station basis gets (#285), so a placement framed
+//! through the contract on a curve relation agrees with the same station
+//! lowered as geometry, bitwise against `+Z`. See the ADR 0082 amendment
+//! for #290.
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, Determinism, ExecutionTarget, GeomError, GeomResult,
 };
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
-use axiolid_curve::{Curve3, SeamSide};
+use axiolid_curve::{Curve3, CurvePath, SeamSide};
 use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConvention};
 
 use crate::arc_length::{elevated_point, elevated_tangent};
 use crate::banked::{banked_point, banked_section, banked_tangent};
 use crate::frenet::{frenet_point, frenet_tangent};
 use crate::polyline_length::polyline_parameter;
-use crate::station::{station_on_seam3, station_section3_on, SectionFrame};
+use crate::station::{
+    station_on_seam3, station_section3_on, CompositeBasis, SectionFrame, StationCurve,
+};
 
 /// Reference curve evaluator.
 ///
@@ -175,6 +185,46 @@ impl ReferenceCurveEvaluator {
         station_section3_on(curve, distance, side).map(Some)
     }
 }
+
+impl ReferenceCurveEvaluator {
+    /// The distance a path query locates: a [`CurveMeasure::Distance`],
+    /// finite. A path has no native parameter (its pieces' parameters do
+    /// not run end to end), so a [`CurveMeasure::Parameter`] is refused by
+    /// name; an unknown side or measure as unsupported.
+    fn path_distance(at: CurveMeasure, side: SeamSide) -> GeomResult<Scalar> {
+        if !matches!(side, SeamSide::Outgoing | SeamSide::Incoming) {
+            return Err(unsupported());
+        }
+        match at {
+            CurveMeasure::Distance(distance) if distance.is_finite() => Ok(distance),
+            CurveMeasure::Distance(_) => Err(invalid("distance along a curve path must be finite")),
+            CurveMeasure::Parameter(_) => Err(GeomError::UnsupportedInput {
+                backend: Self::ID,
+                operation: axiolid_contracts::Operation::CurveEvaluation,
+                input: PATH_PARAMETER,
+            }),
+            _ => Err(unsupported()),
+        }
+    }
+
+    /// The composite basis of `path` and the station section `side` reads
+    /// at `at` along it (#290).
+    fn path_section<'c>(
+        path: &'c CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<(CompositeBasis<'c>, Scalar, SectionFrame)> {
+        let distance = Self::path_distance(at, side)?;
+        let basis = CompositeBasis::from_path(path)?;
+        let section = basis.section_on(distance, side)?;
+        Ok((basis, distance, section))
+    }
+}
+
+/// The input a path query by native parameter is refused for.
+const PATH_PARAMETER: &str =
+    "a native parameter along a curve path: its pieces' parameters do not run end to end, so a \
+     path is located by station distance";
 
 /// The input a sided query on a polyline's or a B-spline's native
 /// parameter is refused for.
@@ -388,5 +438,63 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             return Ok(section.frame());
         }
         self.reference_frame(section.point, section.tangent)
+    }
+
+    /// The composite's convention ([`CompositeBasis::convention`]), or
+    /// [`DistanceConvention::Unsupported`] for a path
+    /// [`CompositeBasis::from_path`] refuses.
+    fn path_distance_convention(&self, path: &CurvePath) -> DistanceConvention {
+        CompositeBasis::from_path(path)
+            .map_or(DistanceConvention::Unsupported, |basis| basis.convention())
+    }
+
+    /// The point of [`CompositeBasis::section_on`] with `side`.
+    fn path_point_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Point3> {
+        Ok(Self::path_section(path, at, side)?.2.point)
+    }
+
+    /// The tangent of [`CompositeBasis::section_on`] with `side`.
+    fn path_tangent_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Vec3> {
+        Ok(Self::path_section(path, at, side)?.2.tangent)
+    }
+
+    /// [`CompositeBasis::section_on`]'s frame with `side`, in this layout:
+    /// the station section itself against `+Z`; against another reference
+    /// up, the reference-up frame of the section's point and tangent,
+    /// except on a banked piece, whose cant is measured against `+Z` and
+    /// which is refused, as by [`frame_at`](CurveEvaluator::frame_at).
+    fn path_frame_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Frame3> {
+        let (basis, distance, section) = Self::path_section(path, at, side)?;
+        if self.up == Vec3::Z {
+            return Ok(section.frame());
+        }
+        if let StationCurve::Three(Curve3::Banked(_)) = basis.piece_read(distance, side)?.curve {
+            self.banked_up()?;
+        }
+        self.reference_frame(section.point, section.tangent)
+    }
+
+    /// [`CompositeBasis::frame_is_exact_at`] for a distance along a path
+    /// [`CompositeBasis::from_path`] accepts; `false` otherwise.
+    fn path_frame_is_exact_at(&self, path: &CurvePath, at: CurveMeasure, side: SeamSide) -> bool {
+        let Ok(distance) = Self::path_distance(at, side) else {
+            return false;
+        };
+        CompositeBasis::from_path(path).is_ok_and(|basis| basis.frame_is_exact_at(distance, side))
     }
 }
