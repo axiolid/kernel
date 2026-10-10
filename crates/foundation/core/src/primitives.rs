@@ -38,6 +38,11 @@ pub type Mat4 = glam::DMat4;
 
 /// Right-handed 2D local frame. Algorithms validate orthonormality explicitly.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Frame2 {
     /// Local origin.
     pub origin: Point2,
@@ -49,6 +54,11 @@ pub struct Frame2 {
 
 /// Right-handed 3D local frame. Dirty imported frames remain representable.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Frame3 {
     /// Local origin.
     pub origin: Point3,
@@ -62,6 +72,11 @@ pub struct Frame3 {
 
 /// A finite parameter interval. The endpoint order carries orientation.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Interval {
     /// Start parameter.
     pub start: Scalar,
@@ -92,6 +107,11 @@ impl Interval {
 /// Adapters may construct dirty input. Algorithms validate normalization using
 /// the operation's tolerance instead of hiding a global epsilon here.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Plane3 {
     /// Point on the plane.
     pub origin: Point3,

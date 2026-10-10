@@ -13,6 +13,11 @@ use crate::spline::KnotSpec;
 
 /// Tensor-product B-spline surface preserving exact knot and weight data.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct BSplineSurface {
     /// Degree along the first parameter axis.
     pub u_degree: u16,

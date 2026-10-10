@@ -6,6 +6,11 @@ no tessellation or boolean work, and the finite margin used when a
 half-space has to be clipped for meshing is an explicit parameter. It has no
 mesh or kernel dependency.
 
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
 ```bash
 cargo add axiolid-primitive
 ```

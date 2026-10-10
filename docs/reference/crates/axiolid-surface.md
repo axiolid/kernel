@@ -24,6 +24,19 @@ surfaces with their knot grids and weights kept as authored. It declares the
 curve-on-surface relationships are nodes in `axiolid-model`, not types
 here.
 
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the surface values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
+## Features
+
+Default: none.
+
+| Feature | Enables |
+| --- | --- |
+| `serde` | `serde`, `axiolid-core/serde`, `axiolid-curve/serde` |
+
 ## Depends on
 
 - [`axiolid-core`](./axiolid-core)

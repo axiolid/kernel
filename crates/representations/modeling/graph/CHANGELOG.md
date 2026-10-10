@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A versioned wire format for `GeometryGraph` behind an optional `serde`
+  feature, off by default (#267, ADR 0085): JSON (`serde_json`) and CBOR
+  (`ciborium`) encodings of one envelope,
+  `{"format": "axiolid-geometry-graph", "version": "1.0", "graph":
+  {"nodes": [...], "roots": [...]}}`, with node references as indices and
+  enums externally tagged by their variant names. `GeometryGraph::to_json`,
+  `from_json`, `to_cbor` and `from_cbor`, and the `wire` module with
+  `FORMAT_NAME`, `FORMAT_VERSION`, `FormatVersion` and the typed
+  `WireError`. A reader checks the version before the graph and refuses a
+  newer minor, another major, an unknown kind, variant or field, a
+  non-finite number and malformed input by name; a decoded graph is
+  rebuilt through `GeometryGraphBuilder::push`, so it passes the same
+  validation as any other. A writer refuses a graph holding a non-finite
+  number. Golden payloads under `tests/wire/` pin format 1.0.
+- With the `serde` feature, every node payload type derives `Serialize`
+  and `Deserialize`. A `NodeId` deserialises only inside a graph payload.
+
 ## [0.3.7] - 2026-10-09
 
 ### Changed

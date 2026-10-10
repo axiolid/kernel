@@ -20,6 +20,11 @@ pub use validate::ValidateProfile;
 /// Format-neutral profile representation.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Profile {
     /// Rectangle or rounded rectangle.
     Rectangle(RectangleProfile),

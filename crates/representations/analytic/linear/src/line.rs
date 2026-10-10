@@ -8,6 +8,11 @@ use axiolid_core::{Point2, Point3, Vec2, Vec3};
 /// adapters preserve authored vectors, and normalising here would silently
 /// change the parameterisation a caller reasons about.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Line<P, V> {
     /// Point at parameter zero.
     pub origin: P,

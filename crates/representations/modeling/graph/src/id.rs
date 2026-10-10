@@ -55,3 +55,63 @@ impl fmt::Display for NodeId {
         write!(f, "geometry#{}", self.index)
     }
 }
+
+#[cfg(feature = "serde")]
+std::thread_local! {
+    static WIRE_BRAND: core::cell::Cell<Option<GraphId>> = const { core::cell::Cell::new(None) };
+}
+
+/// The brand node references take while a wire payload is read (ADR 0085).
+///
+/// A [`NodeId`] on the wire is only an index; its brand is the graph being
+/// rebuilt from the payload, set for the duration of the read by
+/// [`WireBrand::enter`]. Outside that scope there is no graph to brand a
+/// reference with, so deserialising a `NodeId` refuses rather than inventing
+/// one.
+#[cfg(feature = "serde")]
+pub(crate) struct WireBrand {
+    previous: Option<GraphId>,
+}
+
+#[cfg(feature = "serde")]
+impl WireBrand {
+    /// Brand every `NodeId` read on this thread with `graph` until the
+    /// returned guard drops.
+    pub(crate) fn enter(graph: GraphId) -> Self {
+        Self {
+            previous: WIRE_BRAND.with(|brand| brand.replace(Some(graph))),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Drop for WireBrand {
+    fn drop(&mut self) {
+        WIRE_BRAND.with(|brand| brand.set(self.previous));
+    }
+}
+
+/// A node reference is written as its zero-based index (ADR 0085).
+#[cfg(feature = "serde")]
+impl serde::Serialize for NodeId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(self.index)
+    }
+}
+
+/// A node reference reads as an index into the graph payload being read.
+///
+/// It is refused outside a graph payload: a handle carries the brand of the
+/// graph that owns it, and only the graph reader knows that graph.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for NodeId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let index = <u32 as serde::Deserialize>::deserialize(deserializer)?;
+        match WIRE_BRAND.with(core::cell::Cell::get) {
+            Some(graph) => Ok(Self { graph, index }),
+            None => Err(serde::de::Error::custom(
+                "a node reference is only meaningful inside a geometry graph payload",
+            )),
+        }
+    }
+}

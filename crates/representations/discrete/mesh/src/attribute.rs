@@ -23,6 +23,11 @@ use axiolid_core::Scalar;
 /// the channel what is permissible; it does not decide on the channel's
 /// behalf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Blend {
     /// Values are continuous and may be linearly interpolated.
     ///
@@ -52,6 +57,11 @@ pub enum Blend {
 /// than enforced at construction, matching how this crate treats dirty
 /// imported data: representable, then validated at a trust boundary.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct AttributeChannel {
     /// Caller-chosen identifier, unique within a mesh.
     pub name: String,

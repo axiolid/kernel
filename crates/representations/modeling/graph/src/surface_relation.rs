@@ -7,6 +7,11 @@ use crate::{NodeId, SectionAtStation, StationFrame, StationedOpenSection};
 /// Relationship between surface nodes.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum SurfaceRelation {
     /// Surface bounded by oriented curve nodes.
     CurveBounded {

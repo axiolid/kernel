@@ -15,6 +15,11 @@ use crate::{
 
 /// Point constrained to a curve parameter.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct PointOnCurve {
     /// Basis curve.
     pub curve: NodeId,
@@ -24,6 +29,11 @@ pub struct PointOnCurve {
 
 /// Point constrained to surface parameters.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct PointOnSurface {
     /// Basis surface.
     pub surface: NodeId,
@@ -43,6 +53,11 @@ pub struct PointOnSurface {
 /// Endpoint inequality across arbitrary relations still requires geometric
 /// evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct OpenProfile {
     /// Exact two-dimensional curve or curve relation authored as the path.
     pub path: NodeId,
@@ -57,6 +72,11 @@ impl OpenProfile {
 
 /// Reuse one graph node under a transform, preserving instancing.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Instance {
     /// Reused source node.
     pub source: NodeId,
@@ -71,6 +91,11 @@ pub struct Instance {
 /// `Unsupported` result rather than a wildcard no-op.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum GeometryNode {
     /// Two-dimensional position.
     Point2(Point2),

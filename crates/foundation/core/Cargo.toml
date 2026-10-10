@@ -11,8 +11,14 @@ authors.workspace = true
 description = "Geometry data types and tolerance policy. No algorithms, no backends."
 
 # ROOT OF THE GRAPH — no internal dependencies, ever.
+[features]
+default = []
+# Serialize/Deserialize for the geometry graph wire format (ADR 0085).
+serde = ["dep:serde", "glam/serde"]
+
 [dependencies]
 glam.workspace = true
+serde = { workspace = true, optional = true }
 
 [package.metadata.axiolid]
 architecture-version = 1

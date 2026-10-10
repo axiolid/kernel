@@ -5,6 +5,11 @@ use axiolid_core::Scalar;
 /// Exact primitive solid; tessellation is a separate operation.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Primitive {
     /// Axis-aligned box in local coordinates.
     Block {

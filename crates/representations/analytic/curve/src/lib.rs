@@ -59,6 +59,11 @@ pub mod linear_vocabulary {
 /// Atomic two-dimensional curve values.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Curve2 {
     /// Infinite line.
     Line(Line2),
@@ -105,6 +110,11 @@ pub enum Curve2 {
 /// Atomic three-dimensional curve values.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Curve3 {
     /// Infinite line.
     Line(Line3),

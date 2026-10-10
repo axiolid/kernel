@@ -46,6 +46,11 @@ use crate::{CurvatureLaw, Curve2};
 /// Mismatched piece lists report `None` rather than guessing.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum ElevationLaw {
     /// `z(d) = coefficients[0] + coefficients[1] * d + coefficients[2] * d^2 + ...`
     ///
@@ -390,6 +395,11 @@ fn piece_at<'a>(
 /// reinterpret the law (ADR 0060); a B-spline read by arc length is a
 /// chain piece.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Elevated3 {
     /// Horizontal layout. Boxed to keep [`Curve3`](crate::Curve3) small.
     pub plan: Box<Curve2>,

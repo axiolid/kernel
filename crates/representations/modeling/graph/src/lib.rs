@@ -20,6 +20,8 @@ pub mod station;
 pub mod surface_relation;
 mod validation;
 pub mod value;
+#[cfg(feature = "serde")]
+pub mod wire;
 
 pub use axiolid_core::BooleanOperator;
 pub use curve_relation::{

@@ -7,6 +7,11 @@ use crate::{
 /// Owned B-rep. Generic geometry handles avoid a dependency cycle with the
 /// model graph that stores exact curves and surfaces.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct BRep<Curve3, Curve2 = Curve3, Surface = Curve3> {
     vertices: Vec<Vertex>,
     edges: Vec<Edge<Curve3>>,

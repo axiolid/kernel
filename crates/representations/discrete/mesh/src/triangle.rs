@@ -7,6 +7,11 @@ use crate::MeshValidationError;
 
 /// Optional independently indexed vertex normals.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct NormalAttribute {
     /// Normal values.
     pub values: Vec<Vec3>,
@@ -19,6 +24,11 @@ pub struct NormalAttribute {
 /// Dirty source geometry is representable. Call [`TriMesh::validate_structure`]
 /// at trust boundaries; manifold validation is a separate, more expensive pass.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct TriMesh {
     /// Vertex positions.
     pub positions: Vec<Point3>,

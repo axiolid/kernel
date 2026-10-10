@@ -28,6 +28,11 @@ use crate::quadric_section::{Branch, Trig2};
 /// `branch`, as a graph over its second coordinate: the point at `t` is
 /// `(u(t), t)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct AngleGraph2 {
     /// Coefficient of `cos u`.
     pub a: Trig2,
@@ -101,6 +106,11 @@ impl AngleGraph2 {
 /// A torus, as the curve needs it, in `axiolid_surface::Torus`'s
 /// parameterisation: `O + (R + r cos v)(cos u X + sin u Y) + r sin v Z`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct TorusCarrier {
     /// Local frame; `z` is the axis.
     pub frame: Frame3,
@@ -140,6 +150,11 @@ impl TorusCarrier {
 /// A plane's or sphere's section of a torus, in space: the torus point at
 /// `(graph.angle(t), t)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct TorusSection3 {
     /// The torus the curve lies on.
     pub torus: TorusCarrier,

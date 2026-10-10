@@ -26,6 +26,11 @@ fi
 # `standard` is the migration target the diagnostic names, so it has to work.
 step "axiolid facade: standard bundle" cargo check -q -p axiolid --no-default-features --features standard
 
+# `serde` adds a capability to representations already in the build; with
+# `model` it is the geometry graph wire format (ADR 0085).
+step "axiolid facade: mesh + serde" cargo check -q -p axiolid --no-default-features --features mesh,serde
+step "axiolid facade: model + serde" cargo check -q -p axiolid --no-default-features --features model,serde
+
 features=(
     mesh profiles curves surfaces topology primitives model
     evaluate nurbs tessellation spatial ray-mesh measure overlay field field-ops field-navigation heal

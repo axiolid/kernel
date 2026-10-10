@@ -29,6 +29,11 @@ use crate::torus_section::TorusCarrier;
 
 /// How a [`SeriesField2`] varies along one parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Basis {
     /// Powers: term `k` is `x^k`.
     Power,
@@ -113,6 +118,11 @@ impl Basis {
 /// bases of [`Basis`] along each parameter. The form a plane's, quadric's or
 /// torus's equation takes on an analytic surface.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct SeriesField2 {
     /// The basis along `u`.
     pub u: Basis,
@@ -125,6 +135,11 @@ pub struct SeriesField2 {
 /// A field over a surface's parameters whose zero set is a section curve:
 /// another surface's equation read in this surface's parameters.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Field2 {
     /// Powers and harmonics, on an analytic surface.
     Series(SeriesField2),
@@ -202,6 +217,11 @@ impl Field2 {
 /// `[0, 1]`. Its coefficients bound it (the convex hull property), which is
 /// what makes a trace on it certified.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct PatchField2 {
     /// Cell boundaries along `u`, increasing.
     pub u_breaks: Vec<Scalar>,
@@ -897,6 +917,11 @@ pub fn grow(c: &mut Vec<Vec<Scalar>>, i: usize, j: usize) {
 
 /// Which parameter a cell runs along; the other is solved for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Axis {
     /// `u` runs freely; `v` is the field's zero.
     U,
@@ -917,6 +942,11 @@ pub enum Axis {
 /// the branch's tangent there. It leaves the branch by about its length to
 /// the fourth power (ADR 0077).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct ImplicitCell {
     /// The free parameter.
     pub axis: Axis,
@@ -1104,6 +1134,11 @@ impl ImplicitCell {
 /// covers `[i, i + 1]`, its free parameter moving linearly from `from` to
 /// `to`.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct ImplicitCurve2 {
     /// The field whose zero the curve is.
     pub field: Field2,
@@ -1601,6 +1636,11 @@ impl ImplicitCurve2 {
 /// The surface a traced curve lies on, as the curve needs it, in the same
 /// parameterisation as the matching `axiolid_surface` family.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Carrier {
     /// `O + u X + v Y`.
     Plane(Frame3),
@@ -1774,6 +1814,11 @@ impl Carrier {
 /// An [`ImplicitCurve2`] on its carrier, in space: the point at `t` is the
 /// carrier's point at `curve.point(t)`.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct ImplicitSection3 {
     /// The surface the curve lies on.
     pub carrier: Carrier,
@@ -1833,6 +1878,11 @@ impl ImplicitSection3 {
 /// point is read at the turn nearest the guide there. Evaluation lives in
 /// `axiolid-evaluate`, which evaluates the space curve.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct LiftedCurve2 {
     /// The curve in space.
     pub curve: Box<crate::Curve3>,

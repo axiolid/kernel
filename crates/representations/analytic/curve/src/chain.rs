@@ -47,6 +47,11 @@ use crate::{CurvatureLaw, Curve2};
 /// piece start, `+x` along the start tangent.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum ChainPiece2 {
     /// A natural-equation piece: curvature as a function of arc length from
     /// the piece start, over `length`.
@@ -89,6 +94,11 @@ impl ChainPiece2 {
 /// crate: [`Self::is_well_formed`] names what an evaluator refuses
 /// structurally.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Chain2 {
     /// Start frame: origin at the chain start, `x` along the start tangent.
     pub start: Frame2,

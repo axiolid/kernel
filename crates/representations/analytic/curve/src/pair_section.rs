@@ -16,6 +16,11 @@ use crate::implicit::{Carrier, SurfaceJet};
 
 /// A point on both surfaces, with its parameters on each.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct PairNode {
     /// The point.
     pub point: Point3,
@@ -28,6 +33,11 @@ pub struct PairNode {
 /// A stretch of the curve where two surfaces meet. The parameter runs over
 /// `[0, nodes.len() - 1]`, one unit per chord.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct PairSection3 {
     /// The first surface.
     pub first: Carrier,

@@ -10,6 +10,22 @@ readme = "README.md"
 authors.workspace = true
 description = "Format-neutral geometry item tree. The currency between a format reader and a kernel."
 
+[features]
+default = []
+# The versioned JSON and CBOR wire format of `GeometryGraph` (ADR 0085).
+serde = [
+    "dep:serde",
+    "dep:serde_json",
+    "dep:ciborium",
+    "axiolid-core/serde",
+    "axiolid-mesh/serde",
+    "axiolid-profile/serde",
+    "axiolid-primitive/serde",
+    "axiolid-curve/serde",
+    "axiolid-surface/serde",
+    "axiolid-topology/serde",
+]
+
 [dependencies]
 axiolid-core.workspace = true
 axiolid-mesh.workspace = true
@@ -18,6 +34,9 @@ axiolid-primitive.workspace = true
 axiolid-curve.workspace = true
 axiolid-surface.workspace = true
 axiolid-topology.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+ciborium = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The native-backend readiness gate parses the data-plane crates' own sources.

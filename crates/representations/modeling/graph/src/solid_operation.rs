@@ -6,6 +6,11 @@ use crate::{NodeId, SectionAtStation, StationFrame, StationedSection};
 
 /// Position of one section along a sectioned sweep.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Section {
     /// Profile node.
     pub profile: NodeId,
@@ -16,6 +21,11 @@ pub struct Section {
 /// Relationship that constructs a solid from lower-level geometry.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum SolidOperation {
     /// Linear extrusion of a profile.
     Extrusion {

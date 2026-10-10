@@ -12,6 +12,11 @@ oriented 2-manifold; non-manifold input is refused by name. `MeshView` and
 `TriangleMeshView` let a foreign mesh be read without copying it. Mesh
 operations such as booleans, sections and repair live in other crates.
 
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the mesh values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
 ```bash
 cargo add axiolid-mesh
 ```

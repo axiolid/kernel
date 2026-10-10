@@ -9,9 +9,15 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 
+[features]
+default = []
+# Serialize/Deserialize for the geometry graph wire format (ADR 0085).
+serde = ["dep:serde", "axiolid-core/serde", "axiolid-curve/serde"]
+
 [dependencies]
 axiolid-core.workspace = true
 axiolid-curve.workspace = true
+serde = { workspace = true, optional = true }
 
 [package.metadata.axiolid]
 architecture-version = 1

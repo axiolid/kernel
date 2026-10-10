@@ -166,6 +166,11 @@ use crate::NodeId;
 
 /// Offsets of a station from its basis curve, in the curve's section frame.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct StationOffsets {
     /// Along the lateral axis, positive to the left of the tangent.
     pub lateral: Scalar,
@@ -198,6 +203,11 @@ impl StationOffsets {
 
 /// A distance along a basis curve with offsets in its section frame.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Station {
     /// Distance from the basis curve's start, in its convention (see the
     /// [module documentation](self)).
@@ -230,6 +240,11 @@ impl Station {
 /// Which frame a station's offsets and orientation are read in.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum StationFrame {
     /// The basis curve's section frame: rolled on a banked curve, leaning
     /// with the grade on any 3D curve.
@@ -246,6 +261,11 @@ pub enum StationFrame {
 /// Resolving it is curve evaluation, which a kernel does; see the
 /// [module documentation](self) for the conventions.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CurveStation {
     /// Basis curve, 2D or 3D.
     pub basis: NodeId,
@@ -281,6 +301,11 @@ impl CurveStation {
 /// A closed profile standing at a station along a sectioned spine's
 /// directrix.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct StationedSection {
     /// Area profile node.
     pub profile: NodeId,
@@ -297,6 +322,11 @@ pub struct StationedSection {
 /// order or in reverse, or none (then the vertices are joined by index);
 /// see the [module documentation](self).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct StationedOpenSection {
     /// Open profile node.
     pub profile: NodeId,
@@ -318,6 +348,11 @@ pub const ORIENTATION_TOLERANCE: Scalar = 1e-9;
 /// the [`Default`].
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct StationOrientation {
     /// The oriented frame's up (local `Z`), exact; `None` for `(0, 0, 1)`.
     pub axis: Option<Vec3>,
@@ -384,6 +419,11 @@ impl StationOrientation {
 /// frame is the one of the piece `seam` names.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct OrientedCurveStation {
     /// The basis curve, distance, offsets and base frame.
     pub station: CurveStation,
@@ -430,6 +470,11 @@ impl From<CurveStation> for OrientedCurveStation {
 /// fields can be added without breaking callers.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct SectionAtStation {
     /// The profile node: an area profile in a sectioned spine, an open
     /// profile in a sectioned surface.
@@ -500,6 +545,11 @@ impl From<StationedOpenSection> for SectionAtStation {
 /// added without breaking callers.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct InstanceAtStation {
     /// The reused node, in its own local coordinates.
     pub source: NodeId,

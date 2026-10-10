@@ -19,6 +19,11 @@
 /// The piece a position exactly on a seam is read from.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum SeamSide {
     /// The piece that starts at the seam: the frame the curve is about to
     /// take. What every evaluator reads by default.

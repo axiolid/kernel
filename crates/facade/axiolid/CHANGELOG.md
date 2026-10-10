@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A `serde` feature (#267, ADR 0085) forwarding to the `serde` feature of
+  every representation package already in the build; with `model` it
+  brings the geometry graph's versioned JSON and CBOR wire format
+  (`axiolid::model::wire`). It enables no representation by itself.
+
 ## [0.4.0] - 2026-09-28
 
 ### Changed

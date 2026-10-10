@@ -21,6 +21,11 @@ use crate::contour::Contour;
 /// bounded curve segments exactly like a boundary is; the difference is that
 /// this one is not closed and does not enclose anything on its own.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CenterLineProfile {
     /// Open path the width is measured from.
     pub path: Contour,

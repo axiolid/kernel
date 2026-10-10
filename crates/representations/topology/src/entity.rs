@@ -6,6 +6,11 @@ use crate::{EdgeId, FaceId, LoopId, ShellId, VertexId};
 
 /// Topological orientation relative to the underlying geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Orientation {
     /// Same parameter direction/normal.
     Forward,
@@ -15,6 +20,11 @@ pub enum Orientation {
 
 /// Vertex with an explicit model-space position.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Vertex {
     /// Position.
     pub position: Point3,
@@ -22,6 +32,11 @@ pub struct Vertex {
 
 /// Edge bounded by two vertices and optionally supported by exact curve data.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Edge<G> {
     /// Start vertex.
     pub start: VertexId,
@@ -45,6 +60,11 @@ pub struct Edge<G> {
 /// with different support surfaces, so it has a different parameter image
 /// in each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct EdgeUse<G> {
     /// Referenced edge.
     pub edge: EdgeId,
@@ -56,6 +76,11 @@ pub struct EdgeUse<G> {
 
 /// Closed boundary wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Loop<G> {
     /// Consecutive oriented edges.
     pub edges: Vec<EdgeUse<G>>,
@@ -63,6 +88,11 @@ pub struct Loop<G> {
 
 /// One oriented loop use on a face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct FaceBound {
     /// Referenced loop.
     pub loop_id: LoopId,
@@ -74,6 +104,11 @@ pub struct FaceBound {
 
 /// Face supported by an exact surface and bounded by loops.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Face<G> {
     /// Exact support surface handle. Planar polygonal faces may omit it.
     pub surface: Option<G>,
@@ -85,6 +120,11 @@ pub struct Face<G> {
 
 /// Connected collection of oriented faces.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Shell {
     /// Face handles.
     pub faces: Vec<(FaceId, Orientation)>,
@@ -94,6 +134,11 @@ pub struct Shell {
 
 /// Solid with one outer shell and optional void shells.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Solid {
     /// Outer shell.
     pub outer: ShellId,

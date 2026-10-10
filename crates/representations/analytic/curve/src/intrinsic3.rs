@@ -46,6 +46,11 @@ use axiolid_core::{Frame3, Scalar};
 /// second near-identical enum for torsion would be duplication with a
 /// different name.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Intrinsic3 {
     /// Start frame: origin at the curve start, `x` along the start tangent,
     /// `y` along the start normal, `z` along the start binormal.

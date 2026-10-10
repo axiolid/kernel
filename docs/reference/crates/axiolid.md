@@ -76,6 +76,7 @@ Default: none.
 | `project` | `mesh`, `overlay`, [`axiolid-project`](./axiolid-project) |
 | `ray-mesh` | `mesh`, `predicates`, [`axiolid-ray-mesh`](./axiolid-ray-mesh) |
 | `route` | `overlay`, `predicates`, [`axiolid-route`](./axiolid-route) |
+| `serde` | `axiolid-core/serde`, `axiolid-linear?/serde`, `axiolid-curve?/serde`, `axiolid-surface?/serde`, `axiolid-profile?/serde`, `axiolid-primitive?/serde`, `axiolid-mesh?/serde`, `axiolid-topology?/serde`, `axiolid-model?/serde` |
 | `simd` | `cpu`, `axiolid-backend-cpu/simd` |
 | `spatial` | `mesh`, [`axiolid-spatial`](./axiolid-spatial), `ahash` |
 | `standard` | `mesh`, `cpu`, `integration` |

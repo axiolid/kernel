@@ -4,6 +4,11 @@ use crate::{Point3, Scalar, Vec3};
 
 /// Axis-aligned three-dimensional bounding box.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Aabb {
     /// Minimum corner.
     pub min: Point3,

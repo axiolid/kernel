@@ -85,6 +85,11 @@ use crate::Elevated3;
 /// length units; the angle form gives the bank angle `psi` in radians.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum CantForm {
     /// `D(xi) = coefficients[0] + coefficients[1] xi + coefficients[2] xi^2 + ...`
     ///
@@ -140,6 +145,11 @@ pub enum CantForm {
 /// A rail head of a canted track, left or right of the direction of
 /// travel along the plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum RailSide {
     /// The rail head to the left, raised by a positive cant.
     Left,
@@ -174,6 +184,11 @@ pub enum CantValue {
 
 /// One piece of a [`CantLaw`]: a form over a plan length.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CantPiece {
     /// Plan length the piece covers. Positive and finite when well formed.
     pub length: Scalar,
@@ -380,6 +395,11 @@ impl CantPiece {
 /// not extrapolated, because an extrapolated transition is not a cant
 /// anyone authored.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CantLaw {
     /// Pieces in order of plan distance.
     pub pieces: Vec<CantPiece>,
@@ -484,6 +504,11 @@ impl CantLaw {
 /// a [`Banked3`] names one.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum BankConvention {
     /// The level-track section turned about the 3D tangent by
     /// `psi = asin(D / b)`. The rail heads differ in height by
@@ -671,6 +696,11 @@ impl std::error::Error for BankError {}
 /// own unit tangent by the angle [`convention`](Self::convention) gives.
 /// The curve's span is the cant law's: no station outside it has a section.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Banked3 {
     /// Centreline: plan and vertical profile.
     pub base: Elevated3,

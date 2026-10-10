@@ -6,6 +6,11 @@ macro_rules! topology_id {
     ($name:ident, $label:literal) => {
         #[doc = concat!("Stable handle into a B-rep ", $label, " arena.")]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[cfg_attr(
+            feature = "serde",
+            derive(serde::Serialize, serde::Deserialize),
+            serde(transparent)
+        )]
         pub struct $name(u32);
 
         impl $name {

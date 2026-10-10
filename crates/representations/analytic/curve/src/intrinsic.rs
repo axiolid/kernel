@@ -30,6 +30,11 @@ use axiolid_core::{Frame2, Scalar};
 /// a composite law lives in its polynomial, so a given function has one
 /// representation instead of many that differ only in where the mean was put.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Harmonic {
     /// Peak deviation contributed by this term.
     pub amplitude: Scalar,
@@ -46,6 +51,11 @@ pub struct Harmonic {
 /// so a law is meaningful on `[0, length]` of the curve that carries it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum CurvatureLaw {
     /// `k(s) = curvature`.
     ///
@@ -721,6 +731,11 @@ fn harmonic_turning(harmonic: &Harmonic, s: Scalar) -> Scalar {
 /// representable -- a non-positive length is storable, and naming it is the
 /// job of a validator, not of the type.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Intrinsic2 {
     /// Start frame: origin at the curve start, `x` along the start tangent.
     pub start: Frame2,

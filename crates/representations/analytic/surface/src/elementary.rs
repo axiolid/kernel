@@ -4,6 +4,11 @@ use axiolid_core::{Frame3, Scalar};
 
 /// Infinite plane.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Plane {
     /// Local frame; `z` is the normal.
     pub frame: Frame3,
@@ -11,6 +16,11 @@ pub struct Plane {
 
 /// Infinite circular cylinder.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Cylinder {
     /// Local frame; `z` is the axis.
     pub frame: Frame3,
@@ -26,6 +36,11 @@ pub struct Cylinder {
 /// 53 degrees for a 3:1 ellipse. Anything that assumes radial normals is wrong
 /// here, so the type is separate and forces the question.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct EllipticalCylinder {
     /// Local frame; `z` is the axis, `x` and `y` the semi-axis directions.
     pub frame: Frame3,
@@ -37,6 +52,11 @@ pub struct EllipticalCylinder {
 
 /// Infinite right circular cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Cone {
     /// Local frame; `z` is the axis.
     pub frame: Frame3,
@@ -48,6 +68,11 @@ pub struct Cone {
 
 /// Sphere.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Sphere {
     /// Local frame.
     pub frame: Frame3,
@@ -57,6 +82,11 @@ pub struct Sphere {
 
 /// Torus.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Torus {
     /// Local frame; `z` is the revolution axis.
     pub frame: Frame3,

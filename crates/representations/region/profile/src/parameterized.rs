@@ -4,6 +4,11 @@ use axiolid_core::Scalar;
 
 /// Rectangle, optionally rounded at the corners.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct RectangleProfile {
     /// Extent along local x.
     pub x: Scalar,
@@ -19,6 +24,11 @@ pub struct RectangleProfile {
 
 /// Circle or annulus.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CircleProfile {
     /// Outer radius.
     pub radius: Scalar,
@@ -28,6 +38,11 @@ pub struct CircleProfile {
 
 /// Ellipse.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct EllipseProfile {
     /// Semi-axis along local x.
     pub semi_axis_x: Scalar,
@@ -48,6 +63,11 @@ pub struct EllipseProfile {
 /// not state the value, which is distinct from stating zero.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum SectionProfile {
     /// Symmetric I section: equal top and bottom flanges.
     I {

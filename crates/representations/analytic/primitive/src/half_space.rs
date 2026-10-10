@@ -4,6 +4,11 @@ use axiolid_core::{Plane3, Scalar};
 
 /// One side of an infinite plane.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct HalfSpace {
     /// Boundary plane.
     pub boundary: Plane3,

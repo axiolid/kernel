@@ -42,6 +42,20 @@ model = [
     "primitives",
     "dep:axiolid-model",
 ]
+# Serialize/Deserialize for the representation values already in the build,
+# and with `model` the versioned JSON/CBOR wire format of the geometry graph
+# (ADR 0085). It enables no representation by itself.
+serde = [
+    "axiolid-core/serde",
+    "axiolid-linear?/serde",
+    "axiolid-curve?/serde",
+    "axiolid-surface?/serde",
+    "axiolid-profile?/serde",
+    "axiolid-primitive?/serde",
+    "axiolid-mesh?/serde",
+    "axiolid-topology?/serde",
+    "axiolid-model?/serde",
+]
 
 # Algorithms. Heavy implementations remain optional.
 evaluate = ["curves", "surfaces", "dep:axiolid-evaluate"]

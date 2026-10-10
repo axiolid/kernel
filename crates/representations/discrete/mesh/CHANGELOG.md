@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `TriMesh`, `PolygonMesh` and the values they hold: the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ## [0.3.2] - 2026-10-02
 
 ### Added

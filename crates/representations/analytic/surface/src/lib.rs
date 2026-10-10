@@ -16,6 +16,11 @@ pub use spline::BSplineSurface;
 /// Atomic three-dimensional surface values.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Surface {
     /// Plane.
     Plane(Plane),

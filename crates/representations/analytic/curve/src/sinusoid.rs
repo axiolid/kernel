@@ -30,6 +30,11 @@ use axiolid_core::Scalar;
 /// Dirty imported data stays representable, as everywhere else in this crate:
 /// validation rejects non-finite coefficients, construction does not.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Sinusoid2 {
     /// Mean height: the constant term.
     pub mean: Scalar,

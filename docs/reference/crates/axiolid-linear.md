@@ -24,6 +24,19 @@ does not compile curves, surfaces, meshes or topology. `axiolid-curve`
 re-exports these types unchanged; use this crate when lines are all you
 need.
 
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
+## Features
+
+Default: none.
+
+| Feature | Enables |
+| --- | --- |
+| `serde` | `serde`, `axiolid-core/serde` |
+
 ## Depends on
 
 - [`axiolid-core`](./axiolid-core)

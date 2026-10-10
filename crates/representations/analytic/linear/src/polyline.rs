@@ -11,6 +11,11 @@ use axiolid_core::{Point2, Point3};
 /// flattener in `axiolid-evaluate` refuses that rather than silently dropping
 /// the remaining vertices.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Polyline<P> {
     /// Ordered control points.
     pub points: Vec<P>,

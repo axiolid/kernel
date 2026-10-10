@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- An optional `serde` feature, off by default, deriving `Serialize` and
+  `Deserialize` for `BRep`, its entities and its typed handles (as
+  plain indices): the values the geometry graph's versioned
+  wire format carries (#267, ADR 0085). Enums are externally tagged by
+  their variant names and unknown fields are refused. No default-build
+  change.
+
 ## [0.3.1] - 2026-09-28
 
 ### Changed

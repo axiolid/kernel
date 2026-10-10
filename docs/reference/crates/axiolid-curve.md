@@ -30,6 +30,19 @@ and surfaces free of a dependency cycle; `CurvePath` carries the pieces of
 atomic curves such a relation runs along, reversed or placed, or offset
 beside one (`PathOffset`), as a neutral value an evaluator measures.
 
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the curve values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
+## Features
+
+Default: none.
+
+| Feature | Enables |
+| --- | --- |
+| `serde` | `serde`, `axiolid-core/serde`, `axiolid-linear/serde` |
+
 ## Depends on
 
 - [`axiolid-core`](./axiolid-core)

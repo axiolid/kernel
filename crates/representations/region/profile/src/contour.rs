@@ -5,6 +5,11 @@ use axiolid_curve::Curve2;
 
 /// One bounded oriented curve segment.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct ProfileSegment {
     /// Exact supporting curve.
     pub curve: Curve2,
@@ -19,6 +24,11 @@ pub struct ProfileSegment {
 
 /// One oriented closed contour assembled from bounded exact curve segments.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Contour {
     /// Consecutive bounded segments; closure is validated separately.
     pub segments: Vec<ProfileSegment>,
@@ -43,6 +53,11 @@ impl Contour {
 
 /// Closed outer contour and zero or more closed holes.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct ContourProfile {
     /// Outer boundary.
     pub outer: Contour,

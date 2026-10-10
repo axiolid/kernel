@@ -106,6 +106,12 @@ impl GeometryGraph {
         &self.roots
     }
 
+    /// The node payloads in insertion order, for the wire writer.
+    #[cfg(feature = "serde")]
+    pub(crate) fn nodes(&self) -> &[GeometryNode] {
+        &self.nodes
+    }
+
     /// All nodes in stable topological insertion order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (NodeId, &GeometryNode)> {
         self.nodes
@@ -133,6 +139,16 @@ impl GeometryGraphBuilder {
     pub const fn new() -> Self {
         Self {
             owner: None,
+            nodes: Vec::new(),
+        }
+    }
+
+    /// An empty builder owning `owner`'s brand: the graph reader brands
+    /// every decoded reference with it before pushing.
+    #[cfg(feature = "serde")]
+    pub(crate) const fn with_owner(owner: GraphId) -> Self {
+        Self {
+            owner: Some(owner),
             nodes: Vec::new(),
         }
     }

@@ -5,6 +5,11 @@ use axiolid_core::{Point2, Point3, Scalar};
 /// How the knot vector was specified by the source representation.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum KnotSpec {
     /// Uniform spacing, not necessarily clamped.
     Uniform,
@@ -18,6 +23,11 @@ pub enum KnotSpec {
 
 /// Exact B-spline data. Rational curves carry one weight per control point.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct BSplineCurve<P> {
     /// Polynomial degree.
     pub degree: u16,

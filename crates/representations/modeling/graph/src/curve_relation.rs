@@ -7,6 +7,11 @@ use crate::{NodeId, Station, StationFrame};
 /// One trim selector preserved from a source representation.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum TrimSelector {
     /// Curve parameter.
     Parameter(Scalar),
@@ -33,6 +38,11 @@ pub enum TrimSelector {
 
 /// Preference when both parameter and Cartesian trim selectors exist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum TrimmingPreference {
     /// Prefer parameter values.
     Parameter,
@@ -45,6 +55,11 @@ pub enum TrimmingPreference {
 /// Continuity declared between consecutive composite segments.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Transition {
     /// Discontinuous.
     Discontinuous,
@@ -58,6 +73,11 @@ pub enum Transition {
 
 /// One oriented curve in a composite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct CurveSegment {
     /// Child curve.
     pub curve: NodeId,
@@ -70,6 +90,11 @@ pub struct CurveSegment {
 /// Relationship between curve nodes.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum CurveRelation {
     /// Ordered composite curve.
     Composite { segments: Vec<CurveSegment> },
@@ -118,6 +143,11 @@ pub enum CurveRelation {
 /// Which representation governs a redundant surface-curve definition.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum MasterRepresentation {
     /// Three-dimensional curve.
     Curve3d,
@@ -144,6 +174,11 @@ pub enum MasterRepresentation {
 ///
 /// A single side is legitimate: not every edge has two parametric images.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct SurfaceSides {
     first: (NodeId, NodeId),
     second: Option<(NodeId, NodeId)>,

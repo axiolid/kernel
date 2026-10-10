@@ -9,6 +9,14 @@ right family, so cycles, dangling references and cross-graph handles cannot
 be built. It evaluates, tessellates and compiles nothing, and keeps source
 identifiers outside the graph.
 
+The optional `serde` feature (off by default) adds the graph's versioned
+wire format (ADR 0085): `GeometryGraph::to_json`, `from_json`, `to_cbor`
+and `from_cbor`, and the `wire` module. Every payload names its format and
+`MAJOR.MINOR` version; additions are minor versions and anything else is
+major. A reader refuses by name a version it does not read, a kind,
+variant or field it does not know, a non-finite number and a graph that
+fails the builder's validation, and never returns part of a payload.
+
 ```bash
 cargo add axiolid-model
 ```

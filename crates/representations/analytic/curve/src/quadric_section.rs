@@ -28,6 +28,11 @@ use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 
 /// `constant + cos cos(t) + sin sin(t) + cos2 cos(2t) + sin2 sin(2t)`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct Trig2 {
     /// Constant term.
     pub constant: Scalar,
@@ -79,6 +84,11 @@ impl Trig2 {
 
 /// Which root of the quadratic a graph follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub enum Branch {
     /// `v = (-b + sqrt(b^2 - 4ac)) / 2a`.
     Plus,
@@ -110,6 +120,11 @@ impl Branch {
 /// operands' own numbers) and carried by the edge interval that uses it;
 /// evaluating outside them is refused, not extrapolated.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct QuadraticGraph2 {
     /// Coefficient of `v^2`.
     pub a: Trig2,
@@ -199,6 +214,11 @@ impl QuadraticGraph2 {
 /// (`rx = ry`, `slope = tan(semi-angle)`), in the same parameterisation as
 /// the matching `axiolid_surface` family.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct RuledCarrier {
     /// Local frame; `z` is the axis.
     pub frame: Frame3,
@@ -248,6 +268,11 @@ impl RuledCarrier {
 /// A quadric's section of a ruled carrier, in space: the point at `t` is the
 /// carrier's point at `(t, graph.height(t))`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
 pub struct RuledSection3 {
     /// The ruled surface the curve lies on.
     pub carrier: RuledCarrier,

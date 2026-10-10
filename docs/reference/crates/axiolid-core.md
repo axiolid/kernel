@@ -19,10 +19,23 @@ Geometry data types and tolerance policy. No algorithms, no backends.
 The dependency root of Axiolid: points, vectors, frames, transforms,
 intervals, bounding boxes, simple 2D and 3D primitives, and the explicit
 `Tolerance` policy every tolerance-sensitive operation takes. It holds data
-only. There are no algorithms, no serialization, no source-format
+only. There are no algorithms, no serialization format, no source-format
 identifiers, and no hardware backends here, and it depends on no other
 Axiolid package. Coordinates are `f64` in whatever length unit the caller's
 model uses.
+
+The optional `serde` feature (off by default) derives `Serialize` and
+`Deserialize` for the values the geometry graph's wire format carries
+(ADR 0085). The format, its version and its refusal rules belong to
+`axiolid-model`; this crate only supplies the derives.
+
+## Features
+
+Default: none.
+
+| Feature | Enables |
+| --- | --- |
+| `serde` | `serde`, `glam/serde` |
 
 ## Changes
 
