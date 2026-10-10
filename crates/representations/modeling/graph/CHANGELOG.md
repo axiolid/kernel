@@ -25,6 +25,14 @@ caret rule for `0.x` versions.
   rebuilt through `GeometryGraphBuilder::push`, so it passes the same
   validation as any other. A writer refuses a graph holding a non-finite
   number. Golden payloads under `tests/wire/` pin format 1.0.
+- Both readers accept an integer where a real is expected when it is
+  exactly a double (`i as f64 as i128 == i`, so every `|i| <= 2^53`), as
+  JavaScript and Python CBOR encoders write whole-number doubles as
+  integers. A CBOR integer that is not exactly a double is refused as
+  `WireError::Malformed` naming its path, wherever it stands. Integer zero
+  has no sign and reads as `+0.0`. The CBOR reader unwraps the
+  self-describe tag and refuses other tags, byte strings, simple values,
+  non-text and repeated map keys.
 - With the `serde` feature, every node payload type derives `Serialize`
   and `Deserialize`. A `NodeId` deserialises only inside a graph payload.
 

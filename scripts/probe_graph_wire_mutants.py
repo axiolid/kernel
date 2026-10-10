@@ -6,9 +6,10 @@ format name, all checked before the graph), the refusal of an unknown kind
 or field by name, the rebuild through the builder's validation (a refused
 node skipped instead of refusing the payload, roots dropped, references
 branded with a foreign graph, a node reference read outside a graph), the
-refusal of non-finite numbers on read and write and of trailing bytes, and
-the frozen wire names (a variant, a node kind and a field renamed on the
-wire). Each must turn `axiolid-model`'s `tests/wire.rs` red.
+refusal of non-finite numbers on read and write, of trailing bytes and of a
+CBOR integer that is not exactly a double (and the acceptance of one that
+is, past 2^53 too), and the frozen wire names (a variant, a node kind and
+a field renamed on the wire). Each must turn `axiolid-model`'s `tests/wire.rs` red.
 
 Not probed, because no test can tell them apart: the path text inside a
 `NonFinite` refusal of a map key that is not text (the writer never writes
@@ -99,9 +100,18 @@ MUTANTS = [
      '                graph: GraphId::fresh(),\n'
      '                index,\n'
      '            }),'),
-    ('a CBOR NaN is read', W,
-     '    check_finite(&value, &mut String::new())?;\n    let owner',
-     '    let owner'),
+    ('a CBOR NaN is read as null', W,
+     '        Value::Float(number) => serde_json::Number::from_f64(*number)\n'
+     '            .map(serde_json::Value::Number)\n'
+     '            .ok_or_else(|| WireError::NonFinite { path: here(path) }),',
+     '        Value::Float(number) => Ok(serde_json::Number::from_f64(*number)\n'
+     '            .map_or(serde_json::Value::Null, serde_json::Value::Number)),'),
+    ('an inexact CBOR integer is rounded', W,
+     '    integer as f64 as i128 == integer',
+     '    let _ = integer;\n    true'),
+    ('a CBOR integer past 2^53 is refused though exact', W,
+     '    integer as f64 as i128 == integer',
+     '    integer.unsigned_abs() <= 1 << 53'),
     ('a NaN is written', W,
      '    checked_value(graph)?;\n    serde_json::to_string',
      '    serde_json::to_string'),

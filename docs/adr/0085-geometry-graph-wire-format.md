@@ -83,11 +83,23 @@ Every payload is one map with exactly three entries, in this order:
   round-trip bit-exactly: JSON writes the shortest decimal that reads
   back to the same double, `-0.0` included, and CBOR writes the
   shortest IEEE float (half, single or double) that holds the value
-  exactly. In CBOR a real number must be a float item: an integer item
-  where a real is expected is refused, not converted, so a host encoder
-  that writes integral doubles as integers has to be told to keep
-  floats. JSON has one number type and reads an integer literal as the
-  same double.
+  exactly.
+- **An integer reads as a real when it is exactly a double.** JavaScript
+  and Python CBOR encoders routinely write whole-number doubles as
+  integer items, and JSON has one number type, so where a real is
+  expected both readers accept an integer `i` with
+  `i as f64 as i128 == i` (every `|i| <= 2^53`, and larger integers that
+  are doubles); a lossless conversion cannot produce wrong geometry. A
+  CBOR integer that is not exactly a double is refused as `Malformed`,
+  naming its path, wherever it stands: no index or count of the format
+  reaches `2^53`, and rounding one would change the geometry silently.
+  Integer zero has no sign and reads as `+0.0`; a payload that needs
+  `-0.0` writes it as a float, as this writer does. The CBOR reader
+  maps the decoded item tree onto the JSON data model before
+  deserialising, so the two encodings are read by one deserialiser; it
+  unwraps the self-describe tag (55799) and refuses every other tag, byte
+  strings, simple values, non-text map keys and repeated keys as
+  `Malformed`.
 - **Numbers are finite.** JSON cannot carry a NaN or an infinity, so
   neither encoding does: a writer refuses a graph holding one, naming
   where it is, and a reader refuses a payload holding one. Lengths and
@@ -171,6 +183,8 @@ build.
 | Explicit `#[serde(rename)]` on every variant and field now | Hundreds of attributes repeating the Rust names. The golden payloads catch a rename that changes the wire, and the rename attribute is added then. |
 | Hand-written wire mirror types | A second copy of every representation type to keep in step; the derive plus golden files gives the same guarantee. |
 | Serialise non-finite numbers in CBOR only | The two encodings would no longer carry the same set of graphs. |
+| Require float items for reals in CBOR | Refuses what common JavaScript and Python encoders write for whole numbers, though the conversion is lossless; JSON already accepts integers. |
+| Round any CBOR integer to the nearest double | Changes the geometry silently past `2^53`. |
 
 ## Consequences
 
@@ -187,8 +201,11 @@ build.
 - A wire name is now frozen beside each Rust name; renaming a variant
   costs a `serde(rename)` attribute.
 - Reading parses the envelope header before the graph, and the CBOR
-  reader decodes to a value tree first to check finiteness, so reading
-  costs more than one pass.
+  reader decodes to a value tree and maps it onto the JSON data model
+  first (checking finiteness and integer exactness), so reading costs
+  more than one pass.
+- An integer `-0` does not exist, so a host that writes `-0.0` as an
+  integer zero reads back `+0.0`.
 - A graph holding a non-finite number, which the builder accepts, cannot
   be written.
 

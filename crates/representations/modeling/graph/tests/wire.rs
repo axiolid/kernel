@@ -1818,18 +1818,144 @@ fn malformed_payloads_are_refused() {
     ));
 }
 
-/// In CBOR a real number is a float item: an integer item where a real is
-/// expected is refused, not converted. JSON has one number type and reads
-/// an integer literal as the same double.
+/// The small payload as CBOR with the sphere's radius written as `radius`,
+/// any CBOR item.
+fn cbor_with_radius(radius: ciborium::Value) -> Vec<u8> {
+    fn replace(value: &mut ciborium::Value, radius: &ciborium::Value) {
+        match value {
+            ciborium::Value::Float(number) if *number == 12345.5 => *value = radius.clone(),
+            ciborium::Value::Array(items) => {
+                items.iter_mut().for_each(|item| replace(item, radius));
+            }
+            ciborium::Value::Map(entries) => entries
+                .iter_mut()
+                .for_each(|(_, item)| replace(item, radius)),
+            _ => {}
+        }
+    }
+    let mut payload = small_payload();
+    payload["graph"]["nodes"][0]["Primitive"]["Sphere"]["radius"] = json!(12345.5);
+    let mut value = ciborium::Value::serialized(&payload).unwrap();
+    replace(&mut value, &radius);
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&value, &mut bytes).unwrap();
+    bytes
+}
+
+fn sphere_radius(graph: &GeometryGraph) -> f64 {
+    let (_, GeometryNode::Primitive(Primitive::Sphere { radius })) = graph.iter().next().unwrap()
+    else {
+        panic!("not a sphere");
+    };
+    *radius
+}
+
+/// An integer where a real is expected reads as that real when it is
+/// exactly a double, in both encodings: host encoders write whole-number
+/// doubles as integers.
 #[test]
-fn cbor_reals_are_float_items() {
+fn an_exact_integer_reads_as_a_real() {
     let mut payload = small_payload();
     payload["graph"]["nodes"][0]["Primitive"]["Sphere"]["radius"] = json!(1);
-    assert!(read_json(&payload).is_ok());
+    assert_eq!(sphere_radius(&read_json(&payload).unwrap()), 1.0);
+
+    let two_53 = 1_i128 << 53;
+    for (integer, expected) in [
+        (1_i128, 1.0),
+        (-3, -3.0),
+        (two_53, 9_007_199_254_740_992.0),
+        (-two_53, -9_007_199_254_740_992.0),
+        // Past 2^53 an integer still reads when it is a double.
+        (1 << 60, 1_152_921_504_606_846_976.0),
+        // CBOR's most negative integer, -2^64, is a double too.
+        (-i128::from(u64::MAX) - 1, -18_446_744_073_709_551_616.0),
+    ] {
+        let bytes = cbor_with_radius(ciborium::Value::Integer(integer.try_into().unwrap()));
+        let radius = sphere_radius(&GeometryGraph::from_cbor(&bytes).unwrap());
+        assert_eq!(radius.to_bits(), f64::to_bits(expected), "{integer}");
+    }
+}
+
+/// Integer zero has no sign: CBOR has no integer `-0`, so a host that
+/// writes `-0.0` as an integer zero reads back `+0.0`. A float `-0.0` keeps
+/// its sign.
+#[test]
+fn integer_zero_reads_as_positive_zero() {
+    let bytes = cbor_with_radius(ciborium::Value::Integer(0.into()));
+    let radius = sphere_radius(&GeometryGraph::from_cbor(&bytes).unwrap());
+    assert_eq!(radius.to_bits(), 0.0_f64.to_bits());
+    let bytes = cbor_with_radius(ciborium::Value::Float(-0.0));
+    let radius = sphere_radius(&GeometryGraph::from_cbor(&bytes).unwrap());
+    assert_eq!(radius.to_bits(), (-0.0_f64).to_bits());
+}
+
+/// An integer that is not exactly a double is refused by name and path,
+/// never rounded, wherever it stands.
+#[test]
+fn an_inexact_integer_is_refused_with_its_path() {
+    let two_53 = 1_i128 << 53;
+    for integer in [
+        two_53 + 1,
+        -(two_53 + 1),
+        i128::from(u64::MAX),
+        -i128::from(u64::MAX),
+    ] {
+        let bytes = cbor_with_radius(ciborium::Value::Integer(integer.try_into().unwrap()));
+        let error = GeometryGraph::from_cbor(&bytes).unwrap_err();
+        let WireError::Malformed { detail } = &error else {
+            panic!("{integer}: {error:?}");
+        };
+        assert!(
+            detail.contains("not exactly a double")
+                && detail.contains("graph.nodes[0].Primitive.Sphere.radius"),
+            "{integer}: {detail}"
+        );
+    }
+    // An index is no exception.
+    let mut value = ciborium::Value::serialized(&small_payload()).unwrap();
+    let ciborium::Value::Map(entries) = &mut value else {
+        panic!("a payload is a map")
+    };
+    for (_, item) in entries.iter_mut() {
+        if let ciborium::Value::Map(graph) = item {
+            for (key, roots) in graph.iter_mut() {
+                if key.as_text() == Some("roots") {
+                    *roots = ciborium::Value::Array(vec![ciborium::Value::Integer(
+                        u64::try_from(two_53 + 1).unwrap().into(),
+                    )]);
+                }
+            }
+        }
+    }
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&value, &mut bytes).unwrap();
     assert!(matches!(
-        read_cbor(&payload).unwrap_err(),
-        WireError::Malformed { .. }
+        GeometryGraph::from_cbor(&bytes).unwrap_err(),
+        WireError::Malformed { detail } if detail.contains("graph.roots[0]")
     ));
+}
+
+/// Only the self-describe tag is unwrapped; byte strings and other tags
+/// are not part of the format.
+#[test]
+fn cbor_items_outside_the_data_model_are_refused() {
+    let tagged = cbor_with_radius(ciborium::Value::Tag(
+        55799,
+        Box::new(ciborium::Value::Float(2.0)),
+    ));
+    assert_eq!(
+        sphere_radius(&GeometryGraph::from_cbor(&tagged).unwrap()),
+        2.0
+    );
+    for item in [
+        ciborium::Value::Tag(1, Box::new(ciborium::Value::Float(2.0))),
+        ciborium::Value::Bytes(vec![1, 2]),
+    ] {
+        assert!(matches!(
+            GeometryGraph::from_cbor(&cbor_with_radius(item)).unwrap_err(),
+            WireError::Malformed { .. }
+        ));
+    }
 }
 
 /// An absent optional field reads as absent: what lets a minor version add

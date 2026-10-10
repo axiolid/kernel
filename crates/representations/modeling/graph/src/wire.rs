@@ -40,6 +40,17 @@
 //!
 //! A writer refuses a graph holding a non-finite number, which JSON cannot
 //! carry, rather than write a payload that would read back differently.
+//!
+//! # Integers where reals are expected
+//!
+//! Both readers accept an integer where a real is expected when it is
+//! exactly a double, as host encoders write whole-number doubles as
+//! integers: a JSON integer literal, or a CBOR integer item `i` with
+//! `i as f64 as i128 == i` (every `|i| <= 2^53`, and larger ones that are
+//! doubles). Integer zero has no sign, so it reads as `+0.0`; a writer
+//! keeps `-0.0` a float. A CBOR integer that is not exactly a double is
+//! refused as [`WireError::Malformed`], naming its path, wherever it
+//! stands: no index or count of the format reaches `2^53`.
 
 use core::fmt;
 
@@ -419,15 +430,106 @@ pub fn from_cbor(bytes: &[u8]) -> Result<GeometryGraph, WireError> {
     }
     let header: Header = value.deserialized().map_err(malformed)?;
     let version = check_header(header)?;
-    check_finite(&value, &mut String::new())?;
+    let value = data_model(&value, &mut String::new())?;
     let owner = GraphId::fresh();
     let envelope: EnvelopeIn = {
         let _brand = WireBrand::enter(owner);
-        value
-            .deserialized()
-            .map_err(|error| decode_error(error.to_string(), version))?
+        EnvelopeIn::deserialize(value).map_err(|error| decode_error(error.to_string(), version))?
     };
     build(owner, envelope.graph)
+}
+
+/// The CBOR self-describe tag (RFC 8949 §3.4.6), the one tag a reader
+/// unwraps.
+const SELF_DESCRIBE: u64 = 55799;
+
+/// Whether a CBOR integer is exactly a double, so reading it as a real
+/// loses nothing. Integer zero has no sign and reads as `+0.0`.
+fn integer_is_exact(integer: i128) -> bool {
+    integer as f64 as i128 == integer
+}
+
+/// A CBOR value tree as the JSON data model, so that both encodings are
+/// read by one deserialiser and an integer item reads as a real the way a
+/// JSON integer literal does.
+///
+/// Refused, with the path: a non-finite float ([`WireError::NonFinite`]);
+/// an integer that is not exactly a double, wherever it stands (no index
+/// or count of the format reaches `2^53`), a map key that is not text, a
+/// repeated key, a byte string, a simple value, and any tag but the
+/// self-describe tag ([`WireError::Malformed`]).
+fn data_model(value: &Value, path: &mut String) -> Result<serde_json::Value, WireError> {
+    let at = path.len();
+    let here = |path: &String| {
+        if path.is_empty() {
+            "the payload root".to_owned()
+        } else {
+            path.clone()
+        }
+    };
+    let refuse = |path: &String, what: &str| WireError::Malformed {
+        detail: format!("{what} at {}", here(path)),
+    };
+    let result = match value {
+        Value::Null => Ok(serde_json::Value::Null),
+        Value::Bool(flag) => Ok(serde_json::Value::Bool(*flag)),
+        Value::Text(text) => Ok(serde_json::Value::String(text.clone())),
+        Value::Float(number) => serde_json::Number::from_f64(*number)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| WireError::NonFinite { path: here(path) }),
+        Value::Integer(integer) => {
+            let integer = i128::from(*integer);
+            if !integer_is_exact(integer) {
+                return Err(refuse(
+                    path,
+                    &format!("integer {integer} is not exactly a double"),
+                ));
+            }
+            // Past the 64-bit range only a real can hold it (exactly).
+            let number = match (u64::try_from(integer), i64::try_from(integer)) {
+                (Ok(unsigned), _) => Some(serde_json::Number::from(unsigned)),
+                (_, Ok(signed)) => Some(serde_json::Number::from(signed)),
+                _ => serde_json::Number::from_f64(integer as f64),
+            };
+            number
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| refuse(path, "integer out of range"))
+        }
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                path.truncate(at);
+                path.push_str(&format!("[{index}]"));
+                data_model(item, path)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(serde_json::Value::Array),
+        Value::Map(entries) => {
+            let mut map = serde_json::Map::new();
+            for (key, item) in entries {
+                path.truncate(at);
+                let Value::Text(name) = key else {
+                    return Err(refuse(path, "a map key that is not text"));
+                };
+                if at != 0 {
+                    path.push('.');
+                }
+                path.push_str(name);
+                let item = data_model(item, path)?;
+                if map.insert(name.clone(), item).is_some() {
+                    return Err(refuse(path, "a repeated key"));
+                }
+            }
+            Ok(serde_json::Value::Object(map))
+        }
+        Value::Tag(SELF_DESCRIBE, inner) => data_model(inner, path),
+        Value::Tag(tag, _) => Err(refuse(path, &format!("tag {tag}"))),
+        Value::Bytes(_) => Err(refuse(path, "a byte string")),
+        _ => Err(refuse(path, "a simple value")),
+    };
+    path.truncate(at);
+    result
 }
 
 impl GeometryGraph {
