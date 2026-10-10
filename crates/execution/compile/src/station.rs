@@ -55,6 +55,18 @@
 //! name. A seam whose tangents agree (a chain join, a jump in a banked
 //! curve's roll alone) is sampled as before.
 //!
+//! An [`OrientedCurveStation`] may carry a seam-snapping window (#294),
+//! a distance in its basis's measure: within it of exactly one seam whose
+//! frame may jump, the station is read ON that seam from its side, its
+//! point the seam's (`axiolid_reference::station::window` states the
+//! rule); a window holding two seams, or with one whose certified position
+//! straddles its edge, is refused by name. Every resolution of an oriented
+//! station applies it: [`resolve`], [`placement`] and so an
+//! [`InstanceAtStation`] wherever it is compiled or used as a basis. A
+//! numerical joint (after an offset, an ellipse or a B-spline piece) is
+//! located by its certified interval
+//! (`axiolid_reference::station::CompositeBasis::joint_intervals`).
+//!
 //! [`seams`] reads where a graph curve's seams are without evaluating it:
 //! an atomic curve's from its stored data, a composite basis's joints at
 //! the running sum of its pieces' lengths with each piece's own seams
@@ -199,7 +211,8 @@ pub struct ResolvedStation {
 /// oriented station's frame is turned by its orientation; its point, and
 /// [`ResolvedStation::section`], are not. On a seam of the basis curve an
 /// oriented station reads the piece its `seam` names, a plain one the
-/// outgoing piece (#263).
+/// outgoing piece (#263); within its seam-snapping window of one seam, an
+/// oriented station is read on that seam (#294).
 ///
 /// # Errors
 ///
@@ -209,7 +222,9 @@ pub struct ResolvedStation {
 /// p-curve, a composite with a gap, an undeclared reversed piece or pieces
 /// measured differently, a tilted plan-measured placement, a degenerate
 /// offset), a distance beyond the basis curve's length, a degenerate
-/// orientation, and every refusal of the curve evaluators, by name.
+/// orientation, a seam-snapping window holding two seams or with a seam on
+/// its edge, a seam whose distance cannot be certified, and every refusal
+/// of the curve evaluators, by name.
 pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation> {
     let station = match graph.get(id) {
         Some(GeometryNode::CurveStation(station)) => OrientedCurveStation::from(*station),
@@ -238,10 +253,14 @@ fn resolve_oriented(
         },
         orientation,
         seam,
+        seam_window,
         ..
     } = station;
     let basis = Basis::of_depth(graph, *basis, depth)?;
-    let section = basis.section_on(station.distance, *frame, *seam)?;
+    // Within its window of one seam, the station is read on that seam
+    // (#294); with no window, where it stands.
+    let distance = basis.snapped_distance(station.distance, *seam_window)?;
+    let section = basis.section_on(distance, *frame, *seam)?;
     let point = place(&section, &station.offsets, Point2::ZERO);
     let turned = oriented(&section, orientation, orientation, 0.0)?;
     let mut placed = turned.frame();
@@ -253,7 +272,7 @@ fn resolve_oriented(
             section,
         },
         turned,
-        basis.frame_is_exact(station.distance, *seam),
+        basis.frame_is_exact(distance, *seam),
     ))
 }
 

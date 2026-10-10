@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- An oriented station's seam-snapping window (#294, ADR 0082
+  amendment): `station::resolve` and `station::placement`, and so every
+  `InstanceAtStation` compiled or used as a station basis, read a station
+  within its window of exactly one seam of its basis on that seam, from
+  its `SeamSide` (its point the seam's), through
+  `axiolid_reference::station`'s snapping: exact seam positions where
+  they are exact, certified intervals where a joint follows an offset, an
+  ellipse or a B-spline piece. A window holding two seams, a seam
+  straddling its edge and a seam whose distance cannot be certified are
+  refused by name. A window of `0`, every existing station's, reads as
+  before.
+
 ## [0.3.19] - 2026-10-10
 
 ### Changed

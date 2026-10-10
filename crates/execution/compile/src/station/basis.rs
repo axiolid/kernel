@@ -37,10 +37,10 @@ use axiolid_model::{
     StationFrame, TrimSelector, TrimmingPreference,
 };
 use axiolid_reference::station::{
-    exact_station_seams2, exact_station_seams3, offset_pieces, station_frame_is_exact2,
-    station_frame_is_exact3, station_seams2, station_seams3, station_section2_on,
-    station_section3_on, CompositeBasis, DistanceConvention, SectionFrame, StationCurve,
-    StationPiece, StationSeam, JOINT_TOLERANCE,
+    exact_station_seams2, exact_station_seams3, offset_pieces, snapped_distance2,
+    snapped_distance3, station_frame_is_exact2, station_frame_is_exact3, station_seams2,
+    station_seams3, station_section2_on, station_section3_on, CompositeBasis, DistanceConvention,
+    SectionFrame, StationCurve, StationPiece, StationSeam, JOINT_TOLERANCE,
 };
 
 /// Most relations and placements a station basis may be nested through.
@@ -204,6 +204,23 @@ impl<'g> Basis<'g> {
             StationFrame::Section => Ok(section),
             StationFrame::Plan => section.plan(),
             _ => Err(unsupported("a station frame this compiler does not know")),
+        }
+    }
+
+    /// The distance a station at `distance` with the seam-snapping
+    /// `window` (#294) is read at: a seam's own distance when exactly one
+    /// lies within the window (located exactly, or by a certified
+    /// interval), else `distance`. A placement moves no seam.
+    pub(crate) fn snapped_distance(&self, distance: Scalar, window: Scalar) -> GeomResult<Scalar> {
+        match self {
+            Self::Atomic { curve, .. } => match curve {
+                StationCurve::Two(curve) => snapped_distance2(curve, distance, window),
+                StationCurve::Three(curve) => snapped_distance3(curve, distance, window),
+                _ => Err(unsupported(
+                    "a station basis curve this compiler does not know",
+                )),
+            },
+            Self::Composite(composite) => composite.snapped_distance(distance, window),
         }
     }
 
