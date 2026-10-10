@@ -17,7 +17,9 @@ pub use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, Determinism, ExecutionTarget, GeomError, GeomResult,
     Operation,
 };
-pub use axiolid_curve::{CurvePath, PathCurve, PathPiece, SeamSide};
+pub use axiolid_curve::{
+    CurvePath, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, SeamSide,
+};
 pub use contract::{CurveEvaluator, CURVE_PATH_UNSUPPORTED, SEAM_SIDE_UNSUPPORTED};
 pub use convention::DistanceConvention;
 pub use measure::CurveMeasure;

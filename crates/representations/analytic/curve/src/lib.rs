@@ -41,7 +41,7 @@ pub use intrinsic::{CurvatureLaw, Harmonic, Intrinsic2};
 pub use intrinsic3::Intrinsic3;
 pub use linear::{Line, Line2, Line3, Polyline, Polyline2, Polyline3};
 pub use pair_section::{PairNode, PairSection3};
-pub use path::{CurvePath, PathCurve, PathPiece};
+pub use path::{CurvePath, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece};
 pub use quadric_section::{Branch, QuadraticGraph2, RuledCarrier, RuledSection3, Trig2};
 pub use seam::SeamSide;
 pub use sinusoid::Sinusoid2;

@@ -20,6 +20,16 @@ caret rule for `0.x` versions.
   it holds and composes (`reversed`, `placed`, `extend`, `length`,
   `PathPiece::frame_is_exact`) and measures nothing. `PathCurve` and
   `PathPiece` are `#[non_exhaustive]`, so a later piece kind is additive.
+- Offset pieces of a curve path (#289, ADR 0082 amendment):
+  `PathCurve::Offset(Box<PathOffset>)`, appended last; `PathOffset { base,
+  law }`, an offset of one base piece measured in its own length;
+  `OffsetLaw::Planar` (an offset curve 2D, left positive),
+  `OffsetLaw::Directed` (an offset curve 3D, along `normalise(V x T)`) and
+  `OffsetLaw::Linear` (offsets at stations, linear between the piece's
+  ends, in an `OffsetFrame`), with `PathOffsets` and `OffsetFrame`. All
+  `#[non_exhaustive]`. `PathCurve::is_line` is also true for an offset of a
+  line by a constant law, and `PathPiece::frame_is_exact` also needs the
+  offset's base placed exactly.
 
 ## [0.3.5] - 2026-10-09
 

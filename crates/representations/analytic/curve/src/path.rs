@@ -38,13 +38,26 @@
 //! if at all, exactly ([`PathPiece::frame_is_exact`]); on a path, only
 //! where every piece up to and including the one read is.
 //!
+//! # Offsets (#289)
+//!
+//! A piece may be an offset of another piece ([`PathCurve::Offset`]): the
+//! curve beside a base piece at the displacement its [`OffsetLaw`] gives
+//! in the base's frame, measured in its OWN length from the base piece's
+//! start (its own plan length where the base is plan-measured). The base
+//! is one span of an atomic curve, not itself an offset, with no seam of
+//! its curve inside it: an offset of a curve with seams is several offset
+//! pieces, one per span between seams, which an evaluator joins as it
+//! joins any pieces (and refuses where they do not meet). An offset of a
+//! line by a constant law is a line ([`PathCurve::is_line`]); the other
+//! rules (closed forms, collapse and cusp refusals) are ADR 0082's.
+//!
 //! # Growth
 //!
-//! [`PathCurve`] and [`PathPiece`] are `#[non_exhaustive]`: a later piece
-//! kind (an offset of a curve, #289) is a new variant an evaluator that
-//! does not know it refuses by name.
+//! [`PathCurve`], [`PathPiece`], [`PathOffset`] and [`OffsetLaw`] are
+//! `#[non_exhaustive]`: a later piece kind is a new variant an evaluator
+//! that does not know it refuses by name.
 
-use axiolid_core::{Scalar, Transform3};
+use axiolid_core::{Scalar, Transform3, Vec3};
 
 use crate::{Curve2, Curve3};
 
@@ -56,17 +69,146 @@ pub enum PathCurve {
     Two(Curve2),
     /// An atomic 3D curve.
     Three(Curve3),
+    /// An offset of a base piece (#289), measured in its own length; see
+    /// the [module documentation](self#offsets-289).
+    Offset(Box<PathOffset>),
 }
 
 impl PathCurve {
     /// Whether the curve is a line, the one family whose frame is exact
-    /// at a distance, rounding aside.
+    /// at a distance, rounding aside: an atomic line, or an offset of a
+    /// line by a constant law (a line beside it).
     #[must_use]
     pub fn is_line(&self) -> bool {
-        matches!(
-            self,
-            Self::Two(Curve2::Line(_)) | Self::Three(Curve3::Line(_))
+        match self {
+            Self::Two(Curve2::Line(_)) | Self::Three(Curve3::Line(_)) => true,
+            Self::Offset(offset) => offset.law.is_constant() && offset.base.curve.is_line(),
+            _ => false,
+        }
+    }
+
+    /// Whether every placement inside the curve (an offset's base
+    /// piece's) is exact; `true` for an atomic curve.
+    fn inner_placement_exact(&self) -> bool {
+        match self {
+            Self::Offset(offset) => {
+                offset.base.placement_exact && offset.base.curve.inner_placement_exact()
+            }
+            _ => true,
+        }
+    }
+}
+
+/// The displacement of an offset at one place, in its base's frame:
+/// `lateral` to the left, `vertical` along up, `longitudinal` along the
+/// tangent (ADR 0082's station offsets).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PathOffsets {
+    /// Along the lateral axis, positive to the left.
+    pub lateral: Scalar,
+    /// Along the section's up.
+    pub vertical: Scalar,
+    /// Along the tangent.
+    pub longitudinal: Scalar,
+}
+
+impl PathOffsets {
+    /// The displacement `(lateral, vertical, longitudinal)`.
+    #[must_use]
+    pub const fn new(lateral: Scalar, vertical: Scalar, longitudinal: Scalar) -> Self {
+        Self {
+            lateral,
+            vertical,
+            longitudinal,
+        }
+    }
+
+    /// The displacement a fraction `u` of the way from `self` to `other`.
+    #[must_use]
+    pub fn lerp(self, other: Self, u: Scalar) -> Self {
+        let mix = |a: Scalar, b: Scalar| a + (b - a) * u;
+        Self::new(
+            mix(self.lateral, other.lateral),
+            mix(self.vertical, other.vertical),
+            mix(self.longitudinal, other.longitudinal),
         )
+    }
+}
+
+/// Which frame of the base an [`OffsetLaw::Linear`] displacement is read
+/// in: ADR 0082's station frames.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OffsetFrame {
+    /// The base's section frame (planar, reference-up or banked).
+    #[default]
+    Section,
+    /// The upright frame: horizontal tangent, horizontal left normal, `+Z`.
+    Plan,
+}
+
+/// How far, and which way, an offset lies from its base piece.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OffsetLaw {
+    /// A constant offset in the plane of a 2D base: `distance` along its
+    /// left normal (an offset curve 2D, positive to the left).
+    Planar {
+        /// The offset distance, positive to the left.
+        distance: Scalar,
+    },
+    /// A constant 3D offset: `distance` along `normalise(V x T)`, `V` the
+    /// fixed `reference_direction` and `T` the base's unit tangent (an
+    /// offset curve 3D). `T` must nowhere be parallel to `V`.
+    Directed {
+        /// The offset distance.
+        distance: Scalar,
+        /// The fixed reference direction `V`.
+        reference_direction: Vec3,
+    },
+    /// A displacement in the base's `frame`, linear in the base's measure
+    /// from `start` at the base piece's start to `end` at its end: one
+    /// interval of an offset by distances at stations.
+    Linear {
+        /// The displacement at the base piece's start.
+        start: PathOffsets,
+        /// The displacement at the base piece's end.
+        end: PathOffsets,
+        /// The frame it is read in.
+        frame: OffsetFrame,
+    },
+}
+
+impl OffsetLaw {
+    /// Whether the displacement is the same all along the base.
+    #[must_use]
+    pub fn is_constant(&self) -> bool {
+        match self {
+            Self::Planar { .. } | Self::Directed { .. } => true,
+            Self::Linear { start, end, .. } => start == end,
+        }
+    }
+}
+
+/// An offset of a base piece (#289); see the
+/// [module documentation](self#offsets-289).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathOffset {
+    /// The base piece: a span of an atomic curve, reversed or placed, not
+    /// itself an offset, with no seam of its curve inside it.
+    pub base: PathPiece,
+    /// The displacement from it.
+    pub law: OffsetLaw,
+}
+
+impl PathOffset {
+    /// The offset of `base` by `law`. Nothing is checked here: an
+    /// evaluator refuses a base it cannot offset when it reads the path.
+    #[must_use]
+    pub fn new(base: PathPiece, law: OffsetLaw) -> Self {
+        Self { base, law }
     }
 }
 
@@ -134,11 +276,12 @@ impl PathPiece {
         self.end - self.start
     }
 
-    /// Whether a frame read on this piece is exact, rounding aside: a line,
-    /// placed, if at all, exactly.
+    /// Whether a frame read on this piece is exact, rounding aside: a line
+    /// (an offset of a line by a constant law included), placed, if at
+    /// all, exactly.
     #[must_use]
     pub fn frame_is_exact(&self) -> bool {
-        self.curve.is_line() && self.placement_exact
+        self.curve.is_line() && self.placement_exact && self.curve.inner_placement_exact()
     }
 }
 
@@ -261,5 +404,39 @@ mod tests {
         assert!(!piece.placement_exact && !piece.frame_is_exact());
         let exact = PathPiece::new(PathCurve::Three(line), 0.0, 1.0).placed(inner, true);
         assert!(exact.frame_is_exact());
+    }
+
+    #[test]
+    fn an_offset_of_a_line_by_a_constant_law_is_a_line() {
+        let line = Curve3::Line(Line3 {
+            origin: Point3::ZERO,
+            direction: Vec3::X,
+        });
+        let directed = OffsetLaw::Directed {
+            distance: 1.0,
+            reference_direction: Vec3::Z,
+        };
+        let base = PathPiece::new(PathCurve::Three(line), 0.0, 4.0);
+        let constant = PathCurve::Offset(Box::new(PathOffset::new(base.clone(), directed)));
+        assert!(constant.is_line());
+        let widening = PathCurve::Offset(Box::new(PathOffset::new(
+            base.clone(),
+            OffsetLaw::Linear {
+                start: PathOffsets::new(1.0, 0.0, 0.0),
+                end: PathOffsets::new(2.0, 0.0, 0.0),
+                frame: OffsetFrame::Section,
+            },
+        )));
+        assert!(!widening.is_line());
+        // An inexactly placed base makes the offset's frame inexact.
+        let placed = base.placed(Transform3::from_rotation_z(0.5), false);
+        let offset = PathPiece::new(
+            PathCurve::Offset(Box::new(PathOffset::new(placed, directed))),
+            0.0,
+            4.0,
+        );
+        assert!(offset.curve.is_line() && !offset.frame_is_exact());
+        let half = PathOffsets::new(0.0, 0.0, 2.0).lerp(PathOffsets::new(2.0, 4.0, 0.0), 0.5);
+        assert_eq!(half, PathOffsets::new(1.0, 2.0, 1.0));
     }
 }

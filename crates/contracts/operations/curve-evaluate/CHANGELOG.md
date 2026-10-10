@@ -29,6 +29,9 @@ caret rule for `0.x` versions.
   distance off the path and a path with a gap are refused, the convention
   is arc length and nothing on or after the arc is exact -- or every path
   query refused as unsupported.
+- Re-exports `PathOffset`, `PathOffsets`, `OffsetLaw` and `OffsetFrame`
+  from `axiolid-curve` (#289): a curve path may carry offset pieces, which
+  a provider that does not read them refuses by name.
 
 ## [0.3.3] - 2026-10-09
 
