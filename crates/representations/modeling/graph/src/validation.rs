@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use axiolid_curve::{BSplineCurve2, Curve2};
 
 use crate::{
-    CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, SolidOperation, Station,
-    StationOrientation, SurfaceRelation, TrimSelector, TrimmingPreference,
+    CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, OrientedCurveStation,
+    SolidOperation, Station, StationOrientation, SurfaceRelation, TrimSelector, TrimmingPreference,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -510,18 +510,31 @@ pub(crate) fn validate_reference_types(
             expect_reference(nodes, value.basis, ExpectedReference::Curve)?;
             validate_station(&value.station)
         }
-        GeometryNode::OrientedCurveStation(value) => {
-            expect_reference(nodes, value.station.basis, ExpectedReference::Curve)?;
-            validate_station(&value.station.station)?;
-            validate_orientation(&value.orientation)
-        }
-        GeometryNode::InstanceAtStation(value) => {
-            let station = &value.station;
-            expect_reference(nodes, station.station.basis, ExpectedReference::Curve)?;
-            validate_station(&station.station.station)?;
-            validate_orientation(&station.orientation)
-        }
+        GeometryNode::OrientedCurveStation(value) => validate_oriented(nodes, value),
+        GeometryNode::InstanceAtStation(value) => validate_oriented(nodes, &value.station),
     }
+}
+
+/// An oriented station: its basis a curve, its station, orientation and
+/// seam-snapping window (#294) well formed.
+fn validate_oriented(
+    nodes: &[GeometryNode],
+    station: &OrientedCurveStation,
+) -> Result<(), GraphError> {
+    expect_reference(nodes, station.station.basis, ExpectedReference::Curve)?;
+    validate_station(&station.station.station)?;
+    validate_orientation(&station.orientation)?;
+    if !station.seam_window.is_finite() {
+        return Err(GraphError::InvalidStation {
+            detail: "the seam-snapping window is not finite",
+        });
+    }
+    if station.seam_window < 0.0 {
+        return Err(GraphError::InvalidStation {
+            detail: "the seam-snapping window is negative",
+        });
+    }
+    Ok(())
 }
 
 /// A station's distance is finite and not negative and its offsets finite.

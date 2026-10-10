@@ -7,7 +7,7 @@
 //! ```json
 //! {
 //!   "format": "axiolid-geometry-graph",
-//!   "version": "1.0",
+//!   "version": "1.1",
 //!   "graph": { "nodes": [{ "Primitive": { "Sphere": { "radius": 1.0 } } }], "roots": [0] }
 //! }
 //! ```
@@ -25,6 +25,11 @@
 //! version; renaming or removing anything, or changing its type, meaning or
 //! units, is a major version. A reader reads its own major up to its own
 //! minor, so every older minor of [`FORMAT_VERSION`] stays readable.
+//!
+//! | Version | Added |
+//! | --- | --- |
+//! | 1.0 | The format (#267). |
+//! | 1.1 | `OrientedCurveStation.seam_window` (#294), a real omitted at its default `+0.0`; absent, as in every 1.0 payload, it reads as `0`, which is what a 1.0 station meant. |
 //!
 //! # Refusals
 //!
@@ -64,7 +69,7 @@ use crate::{GeometryGraph, GeometryGraphBuilder, GeometryNode, GraphError, NodeI
 pub const FORMAT_NAME: &str = "axiolid-geometry-graph";
 
 /// The format version this crate writes, and the newest it reads.
-pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 0);
+pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 1);
 
 /// A `MAJOR.MINOR` wire format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -359,10 +364,35 @@ fn json_error(error: &serde_json::Error, version: Option<FormatVersion>) -> Wire
     }
 }
 
+/// The version that introduced the seam-snapping window (#294).
+const SEAM_WINDOW_SINCE: FormatVersion = FormatVersion::new(1, 1);
+
+/// A field `node` holds that `version` does not have: a seam-snapping
+/// window in a 1.0 payload, which no 1.0 writer wrote. (A window of `+0.0`
+/// is what its absence means, so it is not told apart.)
+fn newer_field(node: &GeometryNode, version: FormatVersion) -> Option<&'static str> {
+    let station = match node {
+        GeometryNode::OrientedCurveStation(station) => station,
+        GeometryNode::InstanceAtStation(placed) => &placed.station,
+        _ => return None,
+    };
+    (version < SEAM_WINDOW_SINCE && station.seam_window.to_bits() != 0).then_some("seam_window")
+}
+
 /// Rebuild the decoded graph through the builder's validation.
-fn build(owner: GraphId, graph: GraphIn) -> Result<GeometryGraph, WireError> {
+fn build(
+    owner: GraphId,
+    graph: GraphIn,
+    version: FormatVersion,
+) -> Result<GeometryGraph, WireError> {
     let mut builder = GeometryGraphBuilder::with_owner(owner);
     for (index, node) in graph.nodes.into_iter().enumerate() {
+        if let Some(field) = newer_field(&node, version) {
+            return Err(WireError::UnknownField {
+                field: field.to_owned(),
+                version,
+            });
+        }
         builder
             .push(node)
             .map_err(|error| WireError::InvalidGraph {
@@ -399,7 +429,7 @@ pub fn from_json(text: &str) -> Result<GeometryGraph, WireError> {
         let _brand = WireBrand::enter(owner);
         serde_json::from_str(text).map_err(|error| json_error(&error, Some(version)))?
     };
-    build(owner, envelope.graph)
+    build(owner, envelope.graph, version)
 }
 
 /// Write `graph` as a CBOR payload.
@@ -436,7 +466,7 @@ pub fn from_cbor(bytes: &[u8]) -> Result<GeometryGraph, WireError> {
         let _brand = WireBrand::enter(owner);
         EnvelopeIn::deserialize(value).map_err(|error| decode_error(error.to_string(), version))?
     };
-    build(owner, envelope.graph)
+    build(owner, envelope.graph, version)
 }
 
 /// The CBOR self-describe tag (RFC 8949 §3.4.6), the one tag a reader

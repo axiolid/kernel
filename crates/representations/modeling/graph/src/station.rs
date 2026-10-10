@@ -99,6 +99,29 @@
 //! outgoing piece and its last the incoming one, the pieces the run lies
 //! on. A seam where the tangent does not turn keeps the outgoing frame.
 //!
+//! # Seam-snapping window (#294)
+//!
+//! An authoring rule may put a station ON a seam when it lies within the
+//! model's precision of one -- IFC 4.3 ADD2 8.9.3.48.3 lets the previous
+//! segment's tangent govern a station "within precision limits" of a
+//! tangent discontinuity -- and that precision (up to a millimetre) is far
+//! wider than the arc-length tolerance. An [`OrientedCurveStation`]
+//! carries it as [`OrientedCurveStation::seam_window`], a non-negative
+//! distance in the basis's station measure, set by
+//! [`OrientedCurveStation::with_seam_window`]; `0`, the default, is the
+//! arc-length tolerance alone.
+//!
+//! A resolver snaps a station whose distance lies within the window of a
+//! seam of its basis whose frame may jump (a joint of a composite, a
+//! polyline vertex, a corner knot, a grade or cant seam) onto that seam,
+//! and reads it from the station's [`SeamSide`]; the station's point is
+//! then the seam's. Where a seam's distance is numerical (after an offset
+//! piece, an ellipse or a B-spline), the resolver uses a certified
+//! interval of it. It refuses by name a window holding two seams, and a
+//! seam whose certified interval straddles the window's edge (inside or
+//! outside cannot be told). The graph refuses a negative or non-finite
+//! window when the node is pushed. A plain [`CurveStation`] has no window.
+//!
 //! # Placing a node at a station (#264)
 //!
 //! [`InstanceAtStation`] reuses a node -- a curve, a solid, a surface --
@@ -432,6 +455,26 @@ pub struct OrientedCurveStation {
     /// The piece read when the station lies on a seam of its basis curve;
     /// [`SeamSide::Outgoing`] unless set by [`Self::with_seam_side`].
     pub seam: SeamSide,
+    /// The seam-snapping window (#294): a station within this distance of
+    /// a seam of its basis is read ON that seam, from the side `seam`
+    /// names. `0` unless set by [`Self::with_seam_window`], which is the
+    /// arc-length tolerance alone (see the
+    /// [module documentation](self#seam-snapping-window-294)).
+    ///
+    /// Format 1.1 of the graph's wire format (ADR 0085): omitted when it
+    /// is `+0.0`, and an absent window reads as `0`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "no_window"))]
+    pub seam_window: Scalar,
+}
+
+/// Whether a seam window is the default `+0.0`, which the wire format
+/// omits (ADR 0085, format 1.1): a graph without windows writes the 1.0
+/// graph.
+#[cfg(feature = "serde")]
+// serde's `skip_serializing_if` passes the field by reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn no_window(window: &Scalar) -> bool {
+    window.to_bits() == 0
 }
 
 impl OrientedCurveStation {
@@ -443,6 +486,7 @@ impl OrientedCurveStation {
             station,
             orientation,
             seam: SeamSide::Outgoing,
+            seam_window: 0.0,
         }
     }
 
@@ -450,6 +494,18 @@ impl OrientedCurveStation {
     #[must_use]
     pub const fn with_seam_side(mut self, side: SeamSide) -> Self {
         self.seam = side;
+        self
+    }
+
+    /// The same station snapping onto a seam of its basis within `window`
+    /// (#294), in the basis's station measure: a station that close to
+    /// one seam is read on it, from its [`SeamSide`]. `0` is no window
+    /// beyond the arc-length tolerance. A negative or non-finite window is
+    /// refused when the node is pushed (see the
+    /// [module documentation](self#seam-snapping-window-294)).
+    #[must_use]
+    pub const fn with_seam_window(mut self, window: Scalar) -> Self {
+        self.seam_window = window;
         self
     }
 }

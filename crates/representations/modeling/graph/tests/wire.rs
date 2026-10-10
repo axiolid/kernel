@@ -1215,10 +1215,18 @@ fn fixture() -> (GeometryGraph, Coverage) {
             oriented.with_seam_side(side),
         ));
     }
+    // Format 1.1: a seam-snapping window (#294).
+    push(GeometryNode::OrientedCurveStation(
+        oriented
+            .with_seam_side(SeamSide::Incoming)
+            .with_seam_window(0.001),
+    ));
     roots.push(push(GeometryNode::InstanceAtStation(
         InstanceAtStation::new(
             line_2d,
-            CurveStation::new(curves3[3], Station::at(0.5)).with_seam_side(SeamSide::Incoming),
+            CurveStation::new(curves3[3], Station::at(0.5))
+                .with_seam_side(SeamSide::Incoming)
+                .with_seam_window(0.000_5),
         ),
     )));
     roots.push(push(GeometryNode::Collection(vec![
@@ -1525,7 +1533,7 @@ fn the_small_payload_has_the_documented_shape() {
         small_payload(),
         json!({
             "format": "axiolid-geometry-graph",
-            "version": "1.0",
+            "version": "1.1",
             "graph": {
                 "nodes": [
                     {"Primitive": {"Sphere": {"radius": 1.0}}},
@@ -1599,7 +1607,7 @@ fn an_unknown_field_is_refused_by_name() {
 
 #[test]
 fn a_version_this_reader_does_not_read_is_refused_before_the_graph() {
-    for found in ["2.0", "1.1", "0.9", "1", "one", "1.0.0", ""] {
+    for found in ["2.0", "1.2", "0.9", "1", "one", "1.0.0", ""] {
         let mut payload = small_payload();
         payload["version"] = json!(found);
         // Even with content this reader does not know: the version is
@@ -1990,11 +1998,11 @@ fn a_node_reference_does_not_deserialise_outside_a_graph_payload() {
 
 #[test]
 fn the_format_version_is_named_in_every_payload() {
-    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 0));
-    assert_eq!(FORMAT_VERSION.to_string(), "1.0");
+    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 1));
+    assert_eq!(FORMAT_VERSION.to_string(), "1.1");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
-    assert_eq!(payload["version"], "1.0");
+    assert_eq!(payload["version"], "1.1");
     let value: ciborium::Value =
         ciborium::from_reader(&small_graph().to_cbor().unwrap()[..]).unwrap();
     let ciborium::Value::Map(entries) = value else {
@@ -2010,4 +2018,134 @@ fn the_format_version_is_named_in_every_payload() {
         wire::to_json(&small_graph()).unwrap(),
         small_graph().to_json().unwrap()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Format 1.1: the seam-snapping window (#294)
+// ---------------------------------------------------------------------------
+
+/// A payload holding one line and one oriented station along it, the
+/// station's JSON object given.
+fn station_payload(version: &str, station: &Value) -> Value {
+    json!({
+        "format": FORMAT_NAME,
+        "version": version,
+        "graph": {
+            "nodes": [
+                {"Curve3": {"Line": {"origin": [0.0, 0.0, 0.0], "direction": [1.0, 0.0, 0.0]}}},
+                {"OrientedCurveStation": station},
+            ],
+            "roots": [1],
+        }
+    })
+}
+
+fn oriented_station(graph: &GeometryGraph) -> OrientedCurveStation {
+    match graph.iter().nth(1) {
+        Some((_, GeometryNode::OrientedCurveStation(station))) => *station,
+        other => panic!("not an oriented station: {other:?}"),
+    }
+}
+
+fn station_object(window: Option<Value>) -> Value {
+    let mut station = json!({
+        "station": {
+            "basis": 0,
+            "station": {
+                "distance": 2.0,
+                "offsets": {"lateral": 0.0, "vertical": 0.0, "longitudinal": 0.0}
+            },
+            "frame": "Section",
+        },
+        "orientation": {"axis": null, "ref_direction": null},
+        "seam": "Incoming",
+    });
+    if let Some(window) = window {
+        station["seam_window"] = window;
+    }
+    station
+}
+
+/// A 1.0 payload has no window and reads as a station without one, which
+/// is what it meant; today's reader still reads it.
+#[test]
+fn a_one_zero_station_reads_with_no_window() {
+    for version in ["1.0", "1.1"] {
+        let payload = station_payload(version, &station_object(None));
+        for graph in [read_json(&payload).unwrap(), read_cbor(&payload).unwrap()] {
+            let station = oriented_station(&graph);
+            assert_eq!(station.seam_window.to_bits(), 0.0_f64.to_bits());
+            assert_eq!(station.seam, SeamSide::Incoming);
+        }
+    }
+}
+
+/// A window is a 1.1 field: a payload claiming 1.0 that holds one is
+/// refused by name, as any field its version does not have.
+#[test]
+fn a_window_in_a_one_zero_payload_is_refused_by_name() {
+    let payload = station_payload("1.0", &station_object(Some(json!(0.001))));
+    refused(
+        &payload,
+        &WireError::UnknownField {
+            field: "seam_window".into(),
+            version: FormatVersion::new(1, 0),
+        },
+    );
+    let graph = read_json(&station_payload("1.1", &station_object(Some(json!(0.001))))).unwrap();
+    assert_eq!(oriented_station(&graph).seam_window, 0.001);
+}
+
+/// A window round-trips bit-exactly through both encodings, a zero window
+/// is not written (so a graph without windows writes the 1.0 graph), and a
+/// negative or non-finite one is refused by validation.
+#[test]
+fn a_window_round_trips_and_a_zero_window_is_not_written() {
+    let windows = [0.0, -0.0, 1e-3, 0.1 + 0.2];
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let plain = OrientedCurveStation::from(CurveStation::new(line, Station::at(2.0)));
+    let mut ids = Vec::new();
+    for window in windows {
+        ids.push(
+            builder
+                .push(GeometryNode::OrientedCurveStation(
+                    plain.with_seam_window(window),
+                ))
+                .unwrap(),
+        );
+    }
+    let graph = builder.finish(ids).unwrap();
+    let text = graph.to_json().unwrap();
+    assert_eq!(text.matches("seam_window").count(), 3, "{text}");
+    let want: Vec<u64> = windows.iter().map(|w| w.to_bits()).collect();
+    for read in [
+        GeometryGraph::from_json(&text).unwrap(),
+        GeometryGraph::from_cbor(&graph.to_cbor().unwrap()).unwrap(),
+    ] {
+        let got: Vec<u64> = read
+            .iter()
+            .filter_map(|(_, node)| match node {
+                GeometryNode::OrientedCurveStation(s) => Some(s.seam_window.to_bits()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got, want);
+    }
+    for bad in [-1e-3, f64::NAN, f64::INFINITY] {
+        let mut builder = GeometryGraphBuilder::new();
+        let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+        let station = OrientedCurveStation::from(CurveStation::new(line, Station::at(2.0)))
+            .with_seam_window(bad);
+        assert!(matches!(
+            builder.push(GeometryNode::OrientedCurveStation(station)),
+            Err(GraphError::InvalidStation { .. })
+        ));
+        assert!(matches!(
+            builder.push(GeometryNode::InstanceAtStation(InstanceAtStation::new(
+                line, station
+            ))),
+            Err(GraphError::InvalidStation { .. })
+        ));
+    }
 }

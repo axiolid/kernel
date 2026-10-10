@@ -403,6 +403,49 @@ fn a_station_names_the_side_of_a_seam_it_reads() {
 }
 
 #[test]
+fn a_seam_window_defaults_to_zero_and_a_malformed_one_is_refused_by_name() {
+    use axiolid_model::{InstanceAtStation, OrientedCurveStation, SeamSide};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let plain = CurveStation::new(basis, Station::at(2.0));
+    // No window unless one is set: the arc-length tolerance alone.
+    assert_eq!(OrientedCurveStation::from(plain).seam_window, 0.0);
+    assert_eq!(plain.with_seam_side(SeamSide::Incoming).seam_window, 0.0);
+    let windowed = plain
+        .with_seam_side(SeamSide::Incoming)
+        .with_seam_window(1e-3);
+    assert_eq!(windowed.seam_window, 1e-3);
+    assert_eq!(windowed.seam, SeamSide::Incoming);
+    let id = b.push_value(windowed).unwrap();
+    assert_eq!(
+        b.push_value(windowed.with_seam_window(0.0)).map(|_| ()),
+        Ok(())
+    );
+    let graph = b.finish(vec![id]).unwrap();
+    assert_eq!(
+        graph.get(id),
+        Some(&GeometryNode::OrientedCurveStation(windowed))
+    );
+    for (window, needle) in [
+        (-1e-9, "negative"),
+        (Scalar::NAN, "not finite"),
+        (Scalar::INFINITY, "not finite"),
+    ] {
+        let mut b = GeometryGraphBuilder::new();
+        let basis = line(&mut b);
+        let station = OrientedCurveStation::from(CurveStation::new(basis, Station::at(2.0)))
+            .with_seam_window(window);
+        invalid(b.push_value(station), needle);
+        invalid(
+            b.push(GeometryNode::InstanceAtStation(InstanceAtStation::new(
+                basis, station,
+            ))),
+            needle,
+        );
+    }
+}
+
+#[test]
 fn an_instance_at_a_station_round_trips_and_references_source_and_basis() {
     use axiolid_core::Vec3;
     use axiolid_model::{InstanceAtStation, OrientedCurveStation, SeamSide, StationOrientation};

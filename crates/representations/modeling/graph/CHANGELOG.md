@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A seam-snapping window on an oriented station (#294, ADR 0082
+  amendment): `OrientedCurveStation::seam_window`, set by
+  `with_seam_window`, a non-negative distance in the basis's station
+  measure (default `0`, the arc-length tolerance alone, so every existing
+  station reads as before). A resolver reads a station within the window
+  of one seam whose frame may jump on that seam, from its `SeamSide`, and
+  refuses a window holding two seams or a seam whose certified position
+  straddles its edge. It also applies to the station of an
+  `InstanceAtStation`. A negative or non-finite window is refused as
+  `GraphError::InvalidStation` when the node is pushed.
+- Wire format 1.1 (ADR 0085): the window is written as `seam_window` and
+  omitted at `+0.0`, so a graph without windows writes the 1.0 graph; an
+  absent window reads as `0`, so every 1.0 payload still reads to the same
+  graph. A payload claiming 1.0 that holds a window is refused as
+  `WireError::UnknownField`. `FORMAT_VERSION` is `1.1`; the 1.0 golden
+  payloads stay and a 1.1 one is added.
+
 ## [0.3.8] - 2026-10-10
 
 ### Added
