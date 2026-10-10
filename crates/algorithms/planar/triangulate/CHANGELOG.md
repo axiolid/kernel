@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-10
+
 ### Changed
 
 - `triangulate` keeps its adjacency current locally (#268): a split of a

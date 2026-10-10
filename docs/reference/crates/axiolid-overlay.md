@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.12 (2026-10-10) |
+| Latest release | 0.3.13 (2026-10-10) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -43,26 +43,29 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.12 (2026-10-10):
+Latest release, 0.3.13 (2026-10-10):
 
 ### Fixed
 
-- Minkowski sums and erosions of large regions use memory linear in their
-  subdivision, not quadratic in the region's corners (#292). Every piece
-  of an `ArcArrangement` kept a flag for every ring on each side, and the
-  sum reads one hull per boundary edge, so a floor's walls of 3,400
-  corners and 58 rooms summed with a 0.9 m square needed more than 12 GB.
-  A piece now keeps only the rings that hold it, as the subdivision
-  computes them, and the sums and erosions read each face from that list:
-  a polygon holds a side when its outer ring is listed and none of its
-  holes, the union when any piece or translated copy does. Results are
-  bit for bit the same. On a synthetic floor (`cargo bench -p
-  axiolid-benchmark --bench minkowski_plan`, interleaved runs against
-  0.3.11 on a shared machine), 3,370 corners: sum 0.89 s and 531 MB peak
-  before, 0.61 s and 124 MB after; with ribbed walls, 3,522 corners: sum
-  4.1 s and 2.2 GB before, 3.0 s and 469 MB after, and erosion of the
-  rooms 4.7 s and 2.5 GB before, 3.5 s and 528 MB after. Time and memory
-  now grow about linearly with the corners. `ArcArrangement::regions`
-  fills one buffer of flags per side instead of storing them.
+- `overlay` accepts its own settled output as an operand when that output
+  holds two collinear edges that do not touch (#272). Operand validation
+  asks whether non-adjacent edges meet, and its crossing test read the
+  side of a rounded cross product with `0.0` counted as a side: two
+  disjoint edges on one line whose cross products rounded to `0.0` and to
+  a tiny positive residue counted as crossing, and the union of a turned
+  U fed back was refused as `SelfIntersection` (6 of 20,000 turned copies
+  in the report). Every contact decision is now exact, in the new
+  `contact` module that validation and settling share: a proper crossing
+  needs each segment's ends strictly on both sides of the other's line,
+  an end touches another edge when its cross product is within the
+  tolerance and it lies in the edge's box widened by the tolerance, both
+  decided exactly, and collinear edges therefore meet only when their
+  extents do. The test whether a hole's corner lies inside its outer ring
+  is an exact orientation sign too, and settling puts a proper crossing at
+  the double nearest the exact one instead of at a point interpolated from
+  rounded cross products, which edges crossing at a hair's angle put
+  anywhere along the edge. A ring decides the same at any distance from
+  the origin. `scripts/probe_edge_contact_mutants.py` lists the faults the
+  tests must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

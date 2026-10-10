@@ -2594,6 +2594,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.21 - 2026-10-10
+
+### Fixed
+
+- An instance of a body meshed to exactly its budget (a torus, a
+  proven or certified pipe, a curve-bounded plane) no longer reports one
+  ulp over the requested budget, which made `meets_requested` false (#258).
+  The source was meshed to the budget divided by the transform's stretch
+  bound, and that quotient multiplied back rounds above the budget at some
+  factors (a scale of 0.33 or 1.19 at `1e-4`). It is now shrunk to the
+  largest value whose rounded product with the stretch fits, as #255
+  shrinks a curve-bounded plane's, so rigid, scaled and nested instances
+  report at most the request. The stretch bound itself is unchanged: a
+  rigid transform keeps its `1 + 96 eps` margin, since an `f64` rotation
+  is orthonormal only to rounding, and scaled or sheared instances still
+  grow the bound by their full stretch.
+
 ### 0.3.20 - 2026-10-10
 
 ### Added
@@ -3562,6 +3579,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.10 - 2026-10-10
+
+### Fixed
+
+- The wire writer labels each payload with the lowest format version that
+  represents it (#297, ADR 0085), not always with `FORMAT_VERSION`: a graph
+  with no seam-snapping window is written as `"version": "1.0"`, byte for
+  byte what 0.3.8 wrote, so a 0.3.8 reader reads it again; 0.3.9 labelled
+  every payload `1.1`, which such a reader refuses. A graph holding a
+  window anywhere (an `OrientedCurveStation` node or the station of an
+  `InstanceAtStation`, a window of `-0.0` included, since it is written)
+  is written as `1.1`, as before. JSON and CBOR alike.
+
 ### 0.3.9 - 2026-10-10
 
 ### Added
@@ -4040,6 +4070,31 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.13 - 2026-10-10
+
+### Fixed
+
+- `overlay` accepts its own settled output as an operand when that output
+  holds two collinear edges that do not touch (#272). Operand validation
+  asks whether non-adjacent edges meet, and its crossing test read the
+  side of a rounded cross product with `0.0` counted as a side: two
+  disjoint edges on one line whose cross products rounded to `0.0` and to
+  a tiny positive residue counted as crossing, and the union of a turned
+  U fed back was refused as `SelfIntersection` (6 of 20,000 turned copies
+  in the report). Every contact decision is now exact, in the new
+  `contact` module that validation and settling share: a proper crossing
+  needs each segment's ends strictly on both sides of the other's line,
+  an end touches another edge when its cross product is within the
+  tolerance and it lies in the edge's box widened by the tolerance, both
+  decided exactly, and collinear edges therefore meet only when their
+  extents do. The test whether a hole's corner lies inside its outer ring
+  is an exact orientation sign too, and settling puts a proper crossing at
+  the double nearest the exact one instead of at a point interpolated from
+  rounded cross products, which edges crossing at a hair's angle put
+  anywhere along the edge. A ring decides the same at any distance from
+  the origin. `scripts/probe_edge_contact_mutants.py` lists the faults the
+  tests must catch.
 
 ### 0.3.12 - 2026-10-10
 
@@ -4932,6 +4987,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-triangulate
+
+### 0.3.3 - 2026-10-10
+
+### Changed
+
+- `triangulate` keeps its adjacency current locally (#268): a split of a
+  triangle into three, of an edge and its two triangles into four, and
+  each Lawson flip -- after insertion, in constraint recovery and in the
+  pass that restores Delaunay -- re-link only the twin pointers of the
+  triangles they rewrite and of those triangles' outside neighbours,
+  including the old neighbours of a reused triangle slot. The build used
+  to recompute every twin pointer after each insertion and flip, so n
+  points cost O(n^2) or worse. Debug builds compare the maintained
+  adjacency with a full recomputation after every step (up to 1024
+  triangles outside the crate's own tests) and panic on the first
+  difference.
+- Point location starts its walk next to the last vertex inserted in the
+  point's cell of a coarse grid, instead of from the last triangle, whose
+  walk crossed O(sqrt n) triangles per point. A point on an edge or a
+  vertex is located by the old walk, so the output is unchanged: the same
+  triangles in the same order.
+- Together: 16,000 uniform random points took 72 s and take 18 ms; from
+  1,000 to 16,000 points the time grows 29x (n log n: 22x, the old build:
+  over 300x). Measured by `tools/benchmark`'s `triangulate_points`.
 
 ### 0.3.2 - 2026-09-28
 

@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.20"
+version = "0.3.21"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-model"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-triangulate"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",

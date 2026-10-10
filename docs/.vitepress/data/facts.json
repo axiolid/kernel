@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.20",
+      "released": "0.3.21",
       "released_date": "2026-10-10",
       "role": "execution.orchestration",
-      "version": "0.3.20"
+      "version": "0.3.21"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.9",
+      "released": "0.3.10",
       "released_date": "2026-10-10",
       "role": "representation.graph",
-      "version": "0.3.9"
+      "version": "0.3.10"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.12",
+      "released": "0.3.13",
       "released_date": "2026-10-10",
       "role": "algorithm.planar",
-      "version": "0.3.12"
+      "version": "0.3.13"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",
@@ -535,10 +535,10 @@
       "description": "Constrained Delaunay triangulation with bounded quality refinement",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/triangulate",
-      "released": "0.3.2",
-      "released_date": "2026-09-28",
+      "released": "0.3.3",
+      "released_date": "2026-10-10",
       "role": "algorithm.planar",
-      "version": "0.3.2"
+      "version": "0.3.3"
     }
   },
   "crates": {

@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-10) |
+| Latest release | 0.3.10 (2026-10-10) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,25 +54,17 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-10):
+Latest release, 0.3.10 (2026-10-10):
 
-### Added
+### Fixed
 
-- A seam-snapping window on an oriented station (#294, ADR 0082
-  amendment): `OrientedCurveStation::seam_window`, set by
-  `with_seam_window`, a non-negative distance in the basis's station
-  measure (default `0`, the arc-length tolerance alone, so every existing
-  station reads as before). A resolver reads a station within the window
-  of one seam whose frame may jump on that seam, from its `SeamSide`, and
-  refuses a window holding two seams or a seam whose certified position
-  straddles its edge. It also applies to the station of an
-  `InstanceAtStation`. A negative or non-finite window is refused as
-  `GraphError::InvalidStation` when the node is pushed.
-- Wire format 1.1 (ADR 0085): the window is written as `seam_window` and
-  omitted at `+0.0`, so a graph without windows writes the 1.0 graph; an
-  absent window reads as `0`, so every 1.0 payload still reads to the same
-  graph. A payload claiming 1.0 that holds a window is refused as
-  `WireError::UnknownField`. `FORMAT_VERSION` is `1.1`; the 1.0 golden
-  payloads stay and a 1.1 one is added.
+- The wire writer labels each payload with the lowest format version that
+  represents it (#297, ADR 0085), not always with `FORMAT_VERSION`: a graph
+  with no seam-snapping window is written as `"version": "1.0"`, byte for
+  byte what 0.3.8 wrote, so a 0.3.8 reader reads it again; 0.3.9 labelled
+  every payload `1.1`, which such a reader refuses. A graph holding a
+  window anywhere (an `OrientedCurveStation` node or the station of an
+  `InstanceAtStation`, a window of `-0.0` included, since it is written)
+  is written as `1.1`, as before. JSON and CBOR alike.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

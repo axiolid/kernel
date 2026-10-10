@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-10-10
+
 ### Fixed
 
 - The wire writer labels each payload with the lowest format version that

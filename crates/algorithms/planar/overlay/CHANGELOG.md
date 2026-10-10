@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-10
+
 ### Fixed
 
 - `overlay` accepts its own settled output as an operand when that output

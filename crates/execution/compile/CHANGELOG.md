@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.21] - 2026-10-10
+
 ### Fixed
 
 - An instance of a body meshed to exactly its budget (a torus, a
