@@ -102,6 +102,15 @@
 //! read by the rule above, and a frame is exact only where every piece up
 //! to the one read is; see [`composite`].
 //!
+//! # Offset bases (#289)
+//!
+//! A piece may be an offset of a base piece ([`StationOffset`]), measured
+//! in its OWN length from its start: arc length, or its own plan length
+//! beside an elevated or banked curve. [`offset_pieces`] offsets pieces
+//! laid end to end, one offset piece per span between seams; see
+//! [`offset`] for the closed forms, the numerical reading and the
+//! refusals.
+//!
 //! # Accuracy contract
 //!
 //! The point and frame are the exact curve's at a measure within
@@ -121,9 +130,11 @@ use axiolid_curve::{Curve2, Curve3, SeamSide};
 pub use axiolid_curve_evaluate_contract::DistanceConvention;
 
 pub mod composite;
+pub mod offset;
 pub mod seam;
 
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
+pub use offset::{offset_pieces, StationOffset, CUSP_TOLERANCE, OFFSET_TOLERANCE};
 pub use seam::{
     exact_station_seams2, exact_station_seams3, station_seams2, station_seams3, Mitre, StationSeam,
     MITRE_TOLERANCE, SEAM_TANGENT_TOLERANCE,

@@ -4,7 +4,9 @@
 //! A [`CompositeBasis`] is a run of [`StationPiece`]s. Each piece is a span
 //! of an atomic 2D or 3D curve ([`StationCurve`]) between two distances in
 //! that curve's own station measure, traversed forwards or backwards, and
-//! optionally carried by a rigid placement. This is the form of a composite
+//! optionally carried by a rigid placement; or of an offset of such a span
+//! ([`StationCurve::Offset`], #289), in the offset's own length (see
+//! [the offset module](super::offset)). This is the form of a composite
 //! curve relation this module measures: a format adapter or a graph
 //! compiler flattens its trims, sense flags, nested composites and curves
 //! placed at stations into pieces, and this module measures stations along
@@ -103,9 +105,10 @@
 
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Point3, Scalar, Transform3};
-use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathPiece, SeamSide};
+use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathOffset, PathPiece, SeamSide};
 use axiolid_curve_evaluate_contract::DistanceConvention;
 
+use super::offset::{OffsetTable, StationOffset};
 use super::seam::tidy;
 use super::{
     admitted, invalid, start2, start3, station_length2, station_length3, station_seams2,
@@ -144,6 +147,9 @@ pub enum StationCurve<'c> {
     Two(&'c Curve2),
     /// A 3D curve.
     Three(&'c Curve3),
+    /// An offset of a base piece, measured in its own length (#289; see
+    /// [the offset module](super::offset)).
+    Offset(StationOffset<'c>),
 }
 
 impl From<StationCurve<'_>> for PathCurve {
@@ -152,6 +158,10 @@ impl From<StationCurve<'_>> for PathCurve {
         match curve {
             StationCurve::Two(curve) => PathCurve::Two(curve.clone()),
             StationCurve::Three(curve) => PathCurve::Three(curve.clone()),
+            StationCurve::Offset(offset) => PathCurve::Offset(Box::new(PathOffset::new(
+                PathPiece::from(offset.base()),
+                offset.law(),
+            ))),
         }
     }
 }
@@ -166,6 +176,10 @@ impl<'c> StationCurve<'c> {
         match curve {
             PathCurve::Two(curve) => Ok(Self::Two(curve)),
             PathCurve::Three(curve) => Ok(Self::Three(curve)),
+            PathCurve::Offset(offset) => Ok(Self::Offset(StationOffset::new(
+                StationPiece::from_path_piece(&offset.base)?,
+                offset.law,
+            )?)),
             _ => Err(unsupported(
                 "a curve path piece of a kind this evaluator does not know",
             )),
@@ -177,12 +191,14 @@ impl StationCurve<'_> {
     /// The distance convention a station on this curve is measured in:
     /// plan distance on an elevated or banked curve, arc length on every
     /// other (a 2D curve's arc length is its plan length).
+    /// An offset is measured as its base is (#289).
     #[must_use]
     pub fn convention(self) -> DistanceConvention {
         match self {
             Self::Three(Curve3::Elevated(_) | Curve3::Banked(_)) => {
                 DistanceConvention::PlanDistance
             }
+            Self::Offset(offset) => offset.convention(),
             _ => DistanceConvention::ArcLength3d,
         }
     }
@@ -192,6 +208,16 @@ impl StationCurve<'_> {
         match self {
             Self::Two(curve) => station_length2(curve),
             Self::Three(curve) => station_length3(curve),
+            Self::Offset(offset) => offset.length().map(Some),
+        }
+    }
+
+    /// Whether a frame read on it is exact: a line, or an offset of a line
+    /// by a constant law.
+    fn frame_is_exact(self) -> bool {
+        match self {
+            Self::Offset(offset) => offset.frame_is_exact(),
+            _ => self.is_line(),
         }
     }
 
@@ -213,13 +239,17 @@ impl StationCurve<'_> {
     }
 
     /// Whether a distance on it is read from stored data alone: false for
-    /// an ellipse and a B-spline, whose arc length is a quadrature.
+    /// an ellipse and a B-spline, whose arc length is a quadrature, and an
+    /// offset other than a line or a circle.
     fn measure_is_exact(self) -> bool {
-        !matches!(
-            self,
-            Self::Two(Curve2::Ellipse(_) | Curve2::BSpline(_))
-                | Self::Three(Curve3::Ellipse(_) | Curve3::BSpline(_))
-        )
+        match self {
+            Self::Offset(offset) => offset.measure_is_exact(),
+            _ => !matches!(
+                self,
+                Self::Two(Curve2::Ellipse(_) | Curve2::BSpline(_))
+                    | Self::Three(Curve3::Ellipse(_) | Curve3::BSpline(_))
+            ),
+        }
     }
 
     /// A line's direction length, `None` for any other family.
@@ -256,14 +286,22 @@ impl StationCurve<'_> {
             Self::Three(
                 curve @ (Curve3::Polyline(_) | Curve3::BSpline(_) | Curve3::Ellipse(_)),
             ) => arc_length3(curve, start3(curve), t)?,
+            Self::Offset(_) => {
+                return Err(unsupported(
+                    "the native parameter of an offset piece: an offset takes its basis's \
+                     parameter, not its own length",
+                ))
+            }
             _ => t,
         })
     }
 
-    /// The point at measure `m` from the curve's start.
-    fn point_at(self, m: Scalar) -> GeomResult<Point3> {
+    /// The point at measure `m` from the curve's start; an offset's
+    /// through `table`.
+    fn point_at(self, m: Scalar, table: Option<&OffsetTable>) -> GeomResult<Point3> {
         let m = self.folded(m)?;
         match self {
+            Self::Offset(offset) => offset.point_at(m, table),
             Self::Two(curve) => {
                 let t = match curve {
                     Curve2::Line(line) => m / line.direction.length(),
@@ -281,10 +319,17 @@ impl StationCurve<'_> {
         }
     }
 
-    /// The section frame at measure `m`, read from `side` on a seam.
-    fn section_at(self, m: Scalar, side: SeamSide) -> GeomResult<SectionFrame> {
+    /// The section frame at measure `m`, read from `side` on a seam; an
+    /// offset's through `table`.
+    fn section_at(
+        self,
+        m: Scalar,
+        side: SeamSide,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<SectionFrame> {
         let m = self.folded(m)?;
         match self {
+            Self::Offset(offset) => offset.section_at(m, table),
             // A line inside a composite may be trimmed before its origin, so
             // its measure may be negative: read it directly.
             Self::Two(Curve2::Line(line)) => {
@@ -307,6 +352,8 @@ impl StationCurve<'_> {
         match self {
             Self::Two(curve) => station_seams2(curve),
             Self::Three(curve) => station_seams3(curve),
+            // Its base spans no seam of its curve.
+            Self::Offset(_) => Ok(Vec::new()),
         }
     }
 }
@@ -448,6 +495,37 @@ impl<'c> StationPiece<'c> {
         self
     }
 
+    /// The whole of an offset (#289): `[0, L]`, `L` its own length.
+    ///
+    /// # Errors
+    ///
+    /// The offset's refusals (a collapse, a cusp, a self-crossing), by
+    /// name.
+    pub fn offset(offset: StationOffset<'c>) -> GeomResult<Self> {
+        let end = offset.length()?;
+        if !(end.is_finite() && end > 0.0) {
+            return Err(GeomError::Degenerate(
+                "station: an offset piece has no length".into(),
+            ));
+        }
+        Ok(Self {
+            curve: StationCurve::Offset(offset),
+            start: 0.0,
+            end,
+            reversed: false,
+            placement: None,
+            placement_exact: true,
+        })
+    }
+
+    /// The offset's measure table, for an offset piece.
+    fn table(&self) -> GeomResult<Option<OffsetTable>> {
+        match self.curve {
+            StationCurve::Offset(offset) => offset.table().map(Some),
+            _ => Ok(None),
+        }
+    }
+
     /// The station piece of a path piece: its span checked against its
     /// curve as [`Self::between`] checks it, then reversed and placed as
     /// the path piece is.
@@ -478,11 +556,12 @@ impl<'c> StationPiece<'c> {
         self.curve.convention()
     }
 
-    /// Whether a frame read on this piece is exact, rounding aside: a line,
-    /// placed, if at all, exactly (as [`PathPiece::frame_is_exact`]).
+    /// Whether a frame read on this piece is exact, rounding aside: a line
+    /// (an offset of a line by a constant law included), placed, if at
+    /// all, exactly (as [`PathPiece::frame_is_exact`]).
     #[must_use]
     pub fn frame_is_exact(&self) -> bool {
-        self.curve.is_line() && self.placement_exact
+        self.curve.frame_is_exact() && self.placement_exact
     }
 
     /// The curve's measure at distance `u` into the piece, and the side of
@@ -499,10 +578,11 @@ impl<'c> StationPiece<'c> {
         }
     }
 
-    /// The point at distance `u` into the piece.
-    fn point_at(&self, u: Scalar) -> GeomResult<Point3> {
+    /// The point at distance `u` into the piece; an offset's through
+    /// `table`.
+    fn point_at(&self, u: Scalar, table: Option<&OffsetTable>) -> GeomResult<Point3> {
         let (m, _) = self.measure(u, SeamSide::Outgoing);
-        let point = self.curve.point_at(m)?;
+        let point = self.curve.point_at(m, table)?;
         Ok(match self.placement {
             Some(rigid) => rigid.transform_point3(point),
             None => point,
@@ -518,6 +598,16 @@ impl<'c> StationPiece<'c> {
     /// The curve evaluators' refusals, and a plan-measured curve placed by
     /// a motion that tilts `+Z`, by name.
     pub fn section_on(&self, u: Scalar, side: SeamSide) -> GeomResult<SectionFrame> {
+        self.section_with(u, side, None)
+    }
+
+    /// [`Self::section_on`], an offset read through `table`.
+    fn section_with(
+        &self,
+        u: Scalar,
+        side: SeamSide,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<SectionFrame> {
         let length = self.length();
         let u = u.clamp(0.0, length);
         let side = if u <= slack(u) {
@@ -528,7 +618,7 @@ impl<'c> StationPiece<'c> {
             side
         };
         let (m, curve_side) = self.measure(u, side);
-        let mut section = self.curve.section_at(m, curve_side)?;
+        let mut section = self.curve.section_at(m, curve_side, table)?;
         if self.reversed {
             section.tangent = -section.tangent;
             section.lateral = -section.lateral;
@@ -541,7 +631,7 @@ impl<'c> StationPiece<'c> {
 
     /// The seams of the curve strictly inside the piece, at their distance
     /// into the piece in the composite's direction.
-    fn seams(&self) -> GeomResult<Vec<StationSeam>> {
+    pub(super) fn seams(&self) -> GeomResult<Vec<StationSeam>> {
         let mut out: Vec<StationSeam> = self
             .curve
             .seams()?
@@ -580,6 +670,8 @@ impl From<StationPiece<'_>> for PathPiece {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompositeBasis<'c> {
     pieces: Vec<StationPiece<'c>>,
+    /// Each offset piece's measure table, built once (#289).
+    tables: Vec<Option<OffsetTable>>,
     /// Each piece's start distance, and the total length last.
     starts: Vec<Scalar>,
     convention: DistanceConvention,
@@ -614,8 +706,16 @@ impl<'c> CompositeBasis<'c> {
                 ));
             }
         }
+        let tables = pieces
+            .iter()
+            .map(StationPiece::table)
+            .collect::<GeomResult<Vec<_>>>()?;
         for index in 1..pieces.len() {
-            check_joint(&pieces[index - 1], &pieces[index], index)?;
+            check_joint(
+                (&pieces[index - 1], tables[index - 1].as_ref()),
+                (&pieces[index], tables[index].as_ref()),
+                index,
+            )?;
         }
         let mut starts = Vec::with_capacity(pieces.len() + 1);
         let mut run = 0.0;
@@ -626,6 +726,7 @@ impl<'c> CompositeBasis<'c> {
         starts.push(run);
         Ok(Self {
             pieces,
+            tables,
             starts,
             convention,
         })
@@ -720,7 +821,7 @@ impl<'c> CompositeBasis<'c> {
     pub fn section_on(&self, distance: Scalar, side: SeamSide) -> GeomResult<SectionFrame> {
         let distance = admitted(distance, Some(self.length()))?;
         let (piece, into) = self.locate(distance, side);
-        self.pieces[piece].section_on(into, side)
+        self.pieces[piece].section_with(into, side, self.tables[piece].as_ref())
     }
 
     /// Whether the frame at `distance`, read from `side`, is exact: every
@@ -831,24 +932,38 @@ impl<'c> CompositeBasis<'c> {
     }
 }
 
-/// Refuse a joint whose pieces do not meet, naming a reversed piece or the
-/// gap.
+/// A piece with its offset table, if any.
+type Read<'a, 'c> = (&'a StationPiece<'c>, Option<&'a OffsetTable>);
+
+/// Refuse a joint whose pieces do not meet, naming an offset across a
+/// corner, a reversed piece or the gap.
 fn check_joint(
-    before: &StationPiece<'_>,
-    after: &StationPiece<'_>,
+    (before, before_table): Read<'_, '_>,
+    (after, after_table): Read<'_, '_>,
     index: usize,
 ) -> GeomResult<()> {
-    let end = before.point_at(before.length())?;
-    let start = after.point_at(0.0)?;
+    let end = before.point_at(before.length(), before_table)?;
+    let start = after.point_at(0.0, after_table)?;
     let tolerance = |p: Point3| JOINT_TOLERANCE * p.abs().max_element().max(1.0);
     let meets = |a: Point3, b: Point3| (a - b).length() <= tolerance(a);
     if meets(end, start) {
         return Ok(());
     }
-    let after_end = after.point_at(after.length())?;
+    if [before, after]
+        .iter()
+        .any(|piece| matches!(piece.curve, StationCurve::Offset(_)))
+    {
+        return Err(invalid(format!(
+            "station: an offset across a corner of its basis at joint {index}: the offsets of \
+             the two sides do not meet (a gap of {}), so no distance runs across it (the \
+             basis's tangent or roll jumps there)",
+            (end - start).length()
+        )));
+    }
+    let after_end = after.point_at(after.length(), after_table)?;
     let reversed = meets(end, after_end)
         || (index == 1 && {
-            let before_start = before.point_at(0.0)?;
+            let before_start = before.point_at(0.0, before_table)?;
             meets(before_start, start) || meets(before_start, after_end)
         });
     if reversed {

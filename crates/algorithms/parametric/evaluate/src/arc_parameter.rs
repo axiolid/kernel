@@ -46,7 +46,7 @@ pub const MAX_PANELS: usize = 1 << 14;
 const MAX_ITERATIONS: usize = 200;
 
 /// Nodes of the 8-point Gauss-Legendre rule on `[-1, 1]`.
-const NODES: [Scalar; 8] = [
+pub(crate) const NODES: [Scalar; 8] = [
     -0.960_289_856_497_536_2,
     -0.796_666_477_413_626_7,
     -0.525_532_409_916_328_9,
@@ -58,7 +58,7 @@ const NODES: [Scalar; 8] = [
 ];
 
 /// Weights matching [`NODES`].
-const WEIGHTS: [Scalar; 8] = [
+pub(crate) const WEIGHTS: [Scalar; 8] = [
     0.101_228_536_290_376_3,
     0.222_381_034_453_374_5,
     0.313_706_645_877_887_3,

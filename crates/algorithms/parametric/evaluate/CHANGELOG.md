@@ -30,6 +30,22 @@ caret rule for `0.x` versions.
   and `CompositeBasis::path`; `StationPiece::from_path_piece`,
   `StationCurve::from_path_curve`, and `From<StationPiece>` /
   `From<StationCurve>` for `PathPiece` / `PathCurve` (the curve copied).
+- Offsets as station bases (#289, ADR 0082 amendment): `station::offset`,
+  with `StationOffset` (an offset of one base piece by an `OffsetLaw`,
+  measured in its own length: arc length, or its own plan length beside an
+  elevated or banked curve), `StationCurve::Offset` (appended last),
+  `StationPiece::offset` and `offset_pieces` (one offset piece per span of
+  the base between seams, so every seam and joint of the base, and every
+  break of a by-distances law, is a joint of the offset). A constant offset
+  of a line is a line (frame exact), of a circle a circle of radius
+  `r - a` (length in closed form); every other offset is read numerically
+  to `OFFSET_TOLERANCE` and never claimed exact. A collapse, a cusp or
+  reversal (`CUSP_TOLERANCE`), a self-crossing in a horizontal plane, an
+  offset of an offset and a base span across a seam are refused by name,
+  as is an offset across a corner of its base, where its two sides do not
+  meet. `CompositeBasis` (and so `from_path` and the reference provider's
+  `path_*` queries) reads offset pieces, building each one's measure table
+  once.
 
 ## [0.3.9] - 2026-10-09
 
