@@ -11,6 +11,9 @@ step() { local name="$1"; shift; printf '%-46s' "$name"; if "$@" >"$gate_out" 2>
 # local step and fails the release job's `cargo package --locked`.
 step "Cargo.lock current" cargo metadata --locked --offline --format-version 1
 step "fmt --check" cargo fmt --all -- --check
+# Seconds, no tests: a refactor that moves code under a mutation probe must
+# re-anchor the probe, not leave it quietly weaker (#282).
+step "mutation probe anchors" scripts/check-probe-anchors.sh
 step "architecture" cargo xtask architecture check
 step "architecture mutation probe" scripts/probe_layering_gate.sh
 step "naming mutation probe" scripts/probe_naming_gate.sh

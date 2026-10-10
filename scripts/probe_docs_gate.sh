@@ -31,6 +31,9 @@ check() {
   mkdir -p "$BAK"
 }
 save() { local key; key=$(echo "$1" | tr '/' '_'); cp "$1" "$BAK/$key"; echo "$1" >"$BAK/$key.path"; }
+# A sed whose pattern no longer matches edits nothing; say so rather than
+# let the untouched file stand in for the mutation (#282).
+landed() { local key; key=$(echo "$1" | tr '/' '_'); if cmp -s "$1" "$BAK/$key"; then echo "  MUTATION DID NOT APPLY to $1 (stale anchor)"; fail=1; fi; }
 new() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" >"$1"; created+=("$1"); }
 
 CRATE=crates/foundation/core
@@ -55,14 +58,14 @@ save "$CRATE/CHANGELOG.md"; printf '\n## [9.9.9] - 2099-01-01\n\n- probe\n' >>"$
 check "release not regenerated (page)" 1 "$PAGE is stale"
 save "$CRATE/CHANGELOG.md"; printf '\n## [9.9.9] - 2099-01-01\n\n- probe\n' >>"$CRATE/CHANGELOG.md"
 check "release not regenerated (changelog page)" 1 "docs/reference/changelog.md is stale"
-save "$CRATE/CHANGELOG.md"; sed -i 's/^## \[Unreleased\]$/&\n\n### Added\n\n- pending/' "$CRATE/CHANGELOG.md"
+save "$CRATE/CHANGELOG.md"; sed -i 's/^## \[Unreleased\]$/&\n\n### Added\n\n- pending/' "$CRATE/CHANGELOG.md"; landed "$CRATE/CHANGELOG.md"
 check "an [Unreleased] entry needs no regeneration" 0
 echo "=== READMEs ==="
 save "$CRATE/README.md"; grep -vF -- "$REF" "$CRATE/README.md" >"$BAK/r" && cp "$BAK/r" "$CRATE/README.md"
 check "README without its reference link" 1 "missing the line \`$REF\`"
-save "$CRATE/README.md"; sed -i 's#reference/crates/axiolid-core)#reference/crates/axiolid-mesh)#' "$CRATE/README.md"
+save "$CRATE/README.md"; sed -i 's#reference/crates/axiolid-core)#reference/crates/axiolid-mesh)#' "$CRATE/README.md"; landed "$CRATE/README.md"
 check "README linking another crate's page" 1 "missing the line \`$REF\`"
-save "$CRATE/README.md"; sed -i 's#docs.rs/axiolid-core)#docs.rs/axiolid)#' "$CRATE/README.md"
+save "$CRATE/README.md"; sed -i 's#docs.rs/axiolid-core)#docs.rs/axiolid)#' "$CRATE/README.md"; landed "$CRATE/README.md"
 check "README without its docs.rs link" 1 "docs.rs/axiolid-core"
 save "$CRATE/README.md"; printf 'This crate is not yet published.\n' >>"$CRATE/README.md"
 check "README publication claim" 1 "publication claim"

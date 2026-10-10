@@ -19,12 +19,14 @@ check "every row resolves" 0 $?
 
 echo "=== mutation 1: cite a crate that does not exist ==="
 sed -i '0,/axiolid-inspect/s//axiolid-nonexistent-xyz/' "$PAGE"
+# A stale anchor edits nothing; say so rather than report on the clean page (#282).
+cmp -s "$PAGE" "$BAK" && { echo "  MUTATION DID NOT APPLY (anchor axiolid-inspect not in $PAGE)"; fail=1; }
 python3 scripts/check-capabilities.py >/dev/null 2>&1
 check "gate rejects an unresolvable crate" 1 $?
 cp "$BAK" "$PAGE"
 
 echo "=== mutation 2: strip a row of all evidence ==="
-python3 scripts/_strip_capability_evidence.py
+python3 scripts/_strip_capability_evidence.py || { echo "  MUTATION DID NOT APPLY (Genus row anchor not in $PAGE)"; fail=1; }
 python3 scripts/check-capabilities.py >/dev/null 2>&1
 check "gate rejects a row with no evidence" 1 $?
 restore; trap - EXIT

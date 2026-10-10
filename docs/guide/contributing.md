@@ -22,6 +22,8 @@ scripts/probe_layering_gate.sh
 
 The feature matrix protects minimal builds. The probe mutates the declared layering boundary and proves the gate fails, then verifies byte-accurate restoration.
 
+The `scripts/probe_*_mutants.py` mutation probes share one runner, `scripts/probe_lib.py`: each takes `--list`, `--only NAME`, `--timeout SECS` and `--check-anchors`. A mutant whose anchor text is missing or not unique stops the probe before any test runs, and `scripts/check-probe-anchors.sh` checks every probe's anchors in the gate, so a refactor that moves probed code must re-anchor the probe (or remove the mutant with a stated reason) in the same change.
+
 ## Design rules
 
 - Keep Axiolid format-agnostic: source semantics belong in adapter projects.

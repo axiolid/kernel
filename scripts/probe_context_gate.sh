@@ -30,6 +30,9 @@ check() {
   mkdir -p "$BAK"
 }
 save() { local key; key=$(echo "$1" | tr '/' '_'); cp "$1" "$BAK/$key"; echo "$1" >"$BAK/$key.path"; }
+# A sed whose pattern no longer matches edits nothing; say so rather than
+# let the untouched file stand in for the mutation (#282).
+landed() { local key; key=$(echo "$1" | tr '/' '_'); if cmp -s "$1" "$BAK/$key"; then echo "  MUTATION DID NOT APPLY to $1 (stale anchor)"; fail=1; fi; }
 new() { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" >"$1"; created+=("$1"); }
 
 CRATE=crates/foundation/core
@@ -54,7 +57,7 @@ save "$CRATE/README.md"; seq 200 >>"$CRATE/README.md"
 check "oversized README" 1 "limit 150"
 save "AGENTS.md"; seq 200 >>AGENTS.md
 check "oversized root AGENTS.md" 1 "limit 120"
-save "$CRATE/Cargo.toml"; sed -i 's/^readme = "README.md"/readme.workspace = true/' "$CRATE/Cargo.toml"
+save "$CRATE/Cargo.toml"; sed -i 's/^readme = "README.md"/readme.workspace = true/' "$CRATE/Cargo.toml"; landed "$CRATE/Cargo.toml"
 check "publishable crate without its readme" 1 'declare `readme = "README.md"`'
 save "$CRATE/src/lib.rs"; printf '// TODO: later\n' >>"$CRATE/src/lib.rs"
 check "TODO without an issue" 1 "without an issue"
