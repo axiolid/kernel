@@ -521,16 +521,29 @@ fn proper_crossing(s: &Seg, t: &Seg) -> bool {
 /// The crossing of the lines through `s` and `t`, which are not parallel:
 /// `s.lo + (num / den) * (s.hi - s.lo)` with the denominator cleared.
 fn crossing_point(s: &Seg, t: &Seg) -> ExactPoint2 {
-    let (ax, ay) = (dy(s.lo.x), dy(s.lo.y));
-    let (ux, uy) = (dy(s.hi.x).sub(&ax), dy(s.hi.y).sub(&ay));
-    let (cx, cy) = (dy(t.lo.x), dy(t.lo.y));
-    let (vx, vy) = (dy(t.hi.x).sub(&cx), dy(t.hi.y).sub(&cy));
+    line_crossing(s.lo, s.hi, t.lo, t.hi).expect("proper crossings are not parallel")
+}
+
+/// The crossing of the lines through `a`-`b` and `c`-`d`, exactly, or
+/// `None` when they are parallel.
+fn line_crossing(a: Point2, b: Point2, c: Point2, d: Point2) -> Option<ExactPoint2> {
+    let (ax, ay) = (dy(a.x), dy(a.y));
+    let (ux, uy) = (dy(b.x).sub(&ax), dy(b.y).sub(&ay));
+    let (cx, cy) = (dy(c.x), dy(c.y));
+    let (vx, vy) = (dy(d.x).sub(&cx), dy(d.y).sub(&cy));
     let den = ux.mul(&vy).sub(&uy.mul(&vx));
     let (acx, acy) = (cx.sub(&ax), cy.sub(&ay));
     let num = acx.mul(&vy).sub(&acy.mul(&vx));
     let x = ax.mul(&den).add(&num.mul(&ux));
     let y = ay.mul(&den).add(&num.mul(&uy));
-    ExactPoint2::from_homogeneous(x, y, den).expect("proper crossings are not parallel")
+    ExactPoint2::from_homogeneous(x, y, den)
+}
+
+/// The double nearest to where the lines through `a`-`b` and `c`-`d`
+/// cross, or `None` when they are parallel. Settling puts a proper
+/// crossing of two edges here (#272).
+pub(crate) fn rounded_crossing(a: Point2, b: Point2, c: Point2, d: Point2) -> Option<Point2> {
+    line_crossing(a, b, c, d).map(|p| p.rounded())
 }
 
 // ---------------------------------------------------------------- status

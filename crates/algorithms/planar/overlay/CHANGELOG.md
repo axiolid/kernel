@@ -9,6 +9,29 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `overlay` accepts its own settled output as an operand when that output
+  holds two collinear edges that do not touch (#272). Operand validation
+  asks whether non-adjacent edges meet, and its crossing test read the
+  side of a rounded cross product with `0.0` counted as a side: two
+  disjoint edges on one line whose cross products rounded to `0.0` and to
+  a tiny positive residue counted as crossing, and the union of a turned
+  U fed back was refused as `SelfIntersection` (6 of 20,000 turned copies
+  in the report). Every contact decision is now exact, in the new
+  `contact` module that validation and settling share: a proper crossing
+  needs each segment's ends strictly on both sides of the other's line,
+  an end touches another edge when its cross product is within the
+  tolerance and it lies in the edge's box widened by the tolerance, both
+  decided exactly, and collinear edges therefore meet only when their
+  extents do. The test whether a hole's corner lies inside its outer ring
+  is an exact orientation sign too, and settling puts a proper crossing at
+  the double nearest the exact one instead of at a point interpolated from
+  rounded cross products, which edges crossing at a hair's angle put
+  anywhere along the edge. A ring decides the same at any distance from
+  the origin. `scripts/probe_edge_contact_mutants.py` lists the faults the
+  tests must catch.
+
 ## [0.3.12] - 2026-10-10
 
 ### Fixed

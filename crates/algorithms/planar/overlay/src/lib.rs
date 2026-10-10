@@ -9,10 +9,17 @@
 //! so their rounding scales with the ring's extent, not its position.
 //! `scripts/probe_ring_orientation_mutants.py` lists the faults the tests
 //! in `tests/far_from_origin.rs` must catch.
+//!
+//! Whether two boundary edges meet, the `SelfIntersection` rule, is exact
+//! too, and validation and settling share it (`contact`, #272): an end on
+//! the other edge within the tolerance, or a proper crossing with each
+//! segment's ends strictly on both sides of the other's line. So an
+//! operation's settled output is a valid operand wherever it lies.
 mod arc;
 mod arc_overlay;
 mod arrangement;
 mod circle;
+mod contact;
 mod convex_parts;
 mod exact_arc;
 mod exact_overlay;
@@ -52,6 +59,7 @@ pub use visibility::VisibilityError;
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
 use axiolid_exact::{certify, Arith, SignExpr};
 use axiolid_guarantees::Sign;
+use contact::{on_segment, segments_intersect, side};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillRule {
@@ -231,35 +239,6 @@ pub(crate) fn zero_area(points: &[Point2], linear: f64) -> bool {
     let bound = 2.0 * linear * linear;
     area_sign(points, bound) != Sign::Positive && area_sign(points, -bound) != Sign::Negative
 }
-fn cross(a: Point2, b: Point2, c: Point2) -> f64 {
-    (b - a).perp_dot(c - a)
-}
-
-fn segments_intersect(a: Point2, b: Point2, c: Point2, d: Point2, epsilon: f64) -> bool {
-    let ac = cross(a, b, c);
-    let ad = cross(a, b, d);
-    let ca = cross(c, d, a);
-    let cb = cross(c, d, b);
-    // Boundary contact is topology, not a repairable numerical nuisance. A
-    // touching endpoint must lie ON the other segment, not merely on the
-    // infinite line through it: two collinear edges of a U-shape or a comb
-    // share a line without touching.
-    (ac.abs() <= epsilon && within_extent(a, b, c, epsilon))
-        || (ad.abs() <= epsilon && within_extent(a, b, d, epsilon))
-        || (ca.abs() <= epsilon && within_extent(c, d, a, epsilon))
-        || (cb.abs() <= epsilon && within_extent(c, d, b, epsilon))
-        || ((ac > 0.0) != (ad > 0.0) && (ca > 0.0) != (cb > 0.0))
-}
-
-/// Whether `p` lies inside the axis-aligned box of segment `a`-`b`, widened
-/// by `epsilon`. Combined with collinearity this puts `p` on the segment.
-fn within_extent(a: Point2, b: Point2, p: Point2, epsilon: f64) -> bool {
-    p.x >= a.x.min(b.x) - epsilon
-        && p.x <= a.x.max(b.x) + epsilon
-        && p.y >= a.y.min(b.y) - epsilon
-        && p.y <= a.y.max(b.y) + epsilon
-}
-
 fn self_intersects(r: &Ring, t: Tolerance) -> bool {
     let n = r.points.len();
     for i in 0..n {
@@ -351,7 +330,7 @@ fn hole_outside(outer: &Ring, hole: &Ring, t: Tolerance) -> bool {
     let on_boundary = |q: Point2| {
         (0..n).any(|i| {
             let (a, b) = (outer.points[i], outer.points[(i + 1) % n]);
-            cross(a, b, q).abs() <= t.linear() && within_extent(a, b, q, t.linear())
+            on_segment(a, b, q, t.linear())
         })
     };
     hole.points
@@ -366,8 +345,19 @@ fn contains(r: &Ring, p: Point2) -> bool {
         .zip(r.points.iter().cycle().skip(1))
         .take(r.points.len())
     {
-        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
-            inside = !inside
+        // The edge spans the ray's height and `p` lies strictly left of
+        // where it crosses: left of an upward edge, right of a downward
+        // one, decided exactly (#272). A point on the edge counts no
+        // crossing, as the rounded comparison did.
+        if (a.y > p.y) != (b.y > p.y) {
+            let towards = if b.y > a.y {
+                Sign::Positive
+            } else {
+                Sign::Negative
+            };
+            if side(*a, *b, p) == towards {
+                inside = !inside
+            }
         }
     }
     inside
