@@ -2,7 +2,7 @@
 
 use axiolid_contracts::{Backend, Determinism, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame3, Point3, Vec3};
-use axiolid_curve::{Curve3, SeamSide};
+use axiolid_curve::{Curve3, CurvePath, SeamSide};
 
 use crate::{CurveMeasure, DistanceConvention};
 
@@ -58,6 +58,45 @@ use crate::{CurveMeasure, DistanceConvention};
 /// refused by a typed [`GeomError::UnsupportedInput`] naming
 /// [`SEAM_SIDE_UNSUPPORTED`]. A provider that does not implement sides
 /// never answers `Incoming` with the outgoing frame.
+///
+/// # Curve paths (#290)
+///
+/// A curve relation a distance runs along -- a composite curve, a trim of
+/// one, segments placed at stations of another curve -- reaches a provider
+/// as a [`CurvePath`]: spans of atomic curves laid end to end, each read
+/// forwards or backwards and carried by a rigid placement
+/// (`axiolid-curve`'s neutral value; a graph compiler flattens a relation
+/// into one). The `path_*` queries read it as ADR 0082 reads a composite
+/// station basis (#285):
+///
+/// - The distance runs end to end, each piece in its own station measure
+///   (plan distance on an elevated or banked curve, arc length on every
+///   other); every piece must measure alike
+///   ([`path_distance_convention`](Self::path_distance_convention)).
+///   Consecutive pieces must meet; a path that does not is refused by
+///   name.
+/// - Every interior joint is a seam, never smooth: a distance within the
+///   arc-length tolerance `1e-12 * max(1, s)` of a joint is ON it and is
+///   read at the joint from the piece [`SeamSide`] names, the incoming one
+///   at its end, the outgoing one at its start, each at its own point. A
+///   piece's own seams strictly inside it are read by its curve's rule; at
+///   a piece's ends it is read from inside. The plain queries read
+///   [`SeamSide::Outgoing`].
+/// - A reversed piece reads its curve at `end - u`, seam sides swapped,
+///   tangent and left lateral negated, up kept; a placed piece's frame is
+///   its curve's carried by the placement.
+/// - The frame is the station section in this trait's layout (`x`
+///   tangent, `y` up, `z` right); a frame is exact, rounding aside, only
+///   where every piece up to and including the one read is a line placed,
+///   if at all, exactly
+///   ([`path_frame_is_exact_at`](Self::path_frame_is_exact_at)).
+///
+/// They have defaults so that adding them broke no provider: a provider
+/// that does not implement paths refuses every path query by a typed
+/// [`GeomError::UnsupportedInput`] naming [`CURVE_PATH_UNSUPPORTED`],
+/// reports [`DistanceConvention::Unsupported`] and claims no frame exact.
+/// It never reads a path as its first piece, or a joint from the wrong
+/// side.
 pub trait CurveEvaluator: Backend {
     /// Which distance this provider measures for `curve`.
     ///
@@ -170,6 +209,132 @@ pub trait CurveEvaluator: Backend {
             SeamSide::Outgoing => self.frame_at(curve, at),
             _ => Err(side_unsupported(self)),
         }
+    }
+
+    /// Which distance this provider measures along `path` (see the
+    /// [trait documentation](Self#curve-paths-290)): the convention every
+    /// piece measures in, or [`DistanceConvention::Unsupported`] where the
+    /// provider cannot measure the path (pieces measured differently, a
+    /// joint whose pieces do not meet, a piece it does not know).
+    ///
+    /// Defaults to [`DistanceConvention::Unsupported`].
+    fn path_distance_convention(&self, path: &CurvePath) -> DistanceConvention {
+        let _ = path;
+        DistanceConvention::Unsupported
+    }
+
+    /// Position at `at` along `path`, reading a joint from its outgoing
+    /// piece: [`path_point_at_on`](Self::path_point_at_on) with
+    /// [`SeamSide::Outgoing`].
+    ///
+    /// # Errors
+    ///
+    /// As [`path_point_at_on`](Self::path_point_at_on).
+    fn path_point_at(&self, path: &CurvePath, at: CurveMeasure) -> GeomResult<Point3> {
+        self.path_point_at_on(path, at, SeamSide::Outgoing)
+    }
+
+    /// Unit tangent at `at` along `path`, reading a joint from its outgoing
+    /// piece: [`path_tangent_at_on`](Self::path_tangent_at_on) with
+    /// [`SeamSide::Outgoing`].
+    ///
+    /// # Errors
+    ///
+    /// As [`path_tangent_at_on`](Self::path_tangent_at_on).
+    fn path_tangent_at(&self, path: &CurvePath, at: CurveMeasure) -> GeomResult<Vec3> {
+        self.path_tangent_at_on(path, at, SeamSide::Outgoing)
+    }
+
+    /// Oriented frame at `at` along `path`, reading a joint from its
+    /// outgoing piece: [`path_frame_at_on`](Self::path_frame_at_on) with
+    /// [`SeamSide::Outgoing`].
+    ///
+    /// # Errors
+    ///
+    /// As [`path_frame_at_on`](Self::path_frame_at_on).
+    fn path_frame_at(&self, path: &CurvePath, at: CurveMeasure) -> GeomResult<Frame3> {
+        self.path_frame_at_on(path, at, SeamSide::Outgoing)
+    }
+
+    /// Position at `at` along `path`, reading `side` of a joint or a seam
+    /// it lies on (see the [trait documentation](Self#curve-paths-290)).
+    ///
+    /// # Errors
+    ///
+    /// A measure that is not a distance in the path's convention, not
+    /// finite, or outside `[0, L]`; a path the provider cannot measure; the
+    /// pieces' own refusals. By default, everything by
+    /// [`GeomError::UnsupportedInput`] naming [`CURVE_PATH_UNSUPPORTED`].
+    fn path_point_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Point3> {
+        let _ = (path, at, side);
+        Err(path_unsupported(self))
+    }
+
+    /// Unit tangent at `at` along `path`, reading `side` of a joint or a
+    /// seam it lies on (see the [trait documentation](Self#curve-paths-290)).
+    ///
+    /// # Errors
+    ///
+    /// As [`path_point_at_on`](Self::path_point_at_on).
+    fn path_tangent_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Vec3> {
+        let _ = (path, at, side);
+        Err(path_unsupported(self))
+    }
+
+    /// Oriented frame at `at` along `path`, reading `side` of a joint or a
+    /// seam it lies on (see the [trait documentation](Self#curve-paths-290)),
+    /// in [`frame_at`](Self::frame_at)'s layout: `x` the side's tangent,
+    /// `y` up, `z` to the right; on a banked piece, its rolled section.
+    ///
+    /// # Errors
+    ///
+    /// As [`path_point_at_on`](Self::path_point_at_on), and a tangent
+    /// parallel to the reference up.
+    fn path_frame_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Frame3> {
+        let _ = (path, at, side);
+        Err(path_unsupported(self))
+    }
+
+    /// Whether the frame at `at` along `path`, read from `side`, is exact,
+    /// rounding aside: only where every piece up to and including the one
+    /// read is a line placed, if at all, exactly (see the
+    /// [trait documentation](Self#curve-paths-290)). `false` wherever the
+    /// provider would refuse the query.
+    ///
+    /// Defaults to `false`: a provider that does not implement paths
+    /// claims nothing exact.
+    fn path_frame_is_exact_at(&self, path: &CurvePath, at: CurveMeasure, side: SeamSide) -> bool {
+        let _ = (path, at, side);
+        false
+    }
+}
+
+/// The input a provider that does not implement curve paths refuses, in
+/// the [`GeomError::UnsupportedInput`] its default `path_*` queries return.
+pub const CURVE_PATH_UNSUPPORTED: &str =
+    "a curve path (pieces of curves laid end to end): this provider evaluates single curves only";
+
+/// The default refusal of a curve path, naming `provider`.
+fn path_unsupported<E: Backend + ?Sized>(provider: &E) -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: provider.descriptor().id,
+        operation: Operation::CurveEvaluation,
+        input: CURVE_PATH_UNSUPPORTED,
     }
 }
 

@@ -7,7 +7,10 @@ pass. A caller says whether its number is a distance or a native parameter
 curve (`DistanceConvention`) or that it cannot. Frames are reference-up, not
 Frenet: `x` tangent, `y` up, `z` right. The `*_on` queries read a seam side
 (`SeamSide`) by the station seam rule of ADR 0082; a provider that does not
-implement them refuses `Incoming` by name. This crate evaluates nothing itself; `axiolid-evaluate` provides the
+implement them refuses `Incoming` by name. The `path_*` queries read a
+`CurvePath`, pieces of curves laid end to end (a composite, a trim,
+segments placed at stations), as a composite station basis is read; a
+provider that does not implement them refuses them by name. This crate evaluates nothing itself; `axiolid-evaluate` provides the
 scalar implementation. See ADR 0063.
 
 ```bash

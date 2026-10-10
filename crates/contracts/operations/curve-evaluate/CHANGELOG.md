@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Point, tangent and frame queries over a curve path (#290, ADR 0082
+  amendment): `CurveEvaluator::path_point_at_on`, `path_tangent_at_on`
+  and `path_frame_at_on` read a `CurvePath` (re-exported from
+  `axiolid-curve` with `PathPiece` and `PathCurve`) as a composite station
+  basis is read -- the distance end to end, every joint a seam read from
+  the piece the `SeamSide` names -- and `path_point_at`, `path_tangent_at`
+  and `path_frame_at` are their outgoing reading; `path_distance_convention`
+  and `path_frame_is_exact_at` say which distance runs through the path and
+  whether a frame on it is exact. All are defaulted, so no provider
+  breaks: the sided queries refuse by a typed `GeomError::UnsupportedInput`
+  naming the new `CURVE_PATH_UNSUPPORTED`, the plain ones delegate to them,
+  the convention is `Unsupported` and nothing is claimed exact.
+- Conformance: a line and a quarter arc meeting at a right angle, forwards
+  and reversed, on the joint and within the seam tolerance either side --
+  each side reads its own piece, the plain queries the outgoing one, a
+  distance off the path and a path with a gap are refused, the convention
+  is arc length and nothing on or after the arc is exact -- or every path
+  query refused as unsupported.
+
 ## [0.3.3] - 2026-10-09
 
 ### Added

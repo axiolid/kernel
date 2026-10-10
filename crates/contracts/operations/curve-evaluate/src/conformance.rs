@@ -7,11 +7,11 @@
 use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    Circle3, CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic3, Line2, Line3,
-    Polyline3, SeamSide,
+    Circle3, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3, ElevationLaw, Intrinsic3, Line2,
+    Line3, PathCurve, PathPiece, Polyline3, SeamSide,
 };
 
-use crate::{CurveEvaluator, CurveMeasure};
+use crate::{CurveEvaluator, CurveMeasure, DistanceConvention};
 
 /// One failed conformance expectation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +43,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_measure_routes_differ(provider));
     out.extend(check_sides_agree_off_a_seam(provider));
     out.extend(check_sides_at_seams(provider));
+    out.extend(check_paths(provider));
     out
 }
 
@@ -566,6 +567,285 @@ fn check_sides_at_seams<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailu
                 }
             }
         }
+    }
+    out
+}
+
+// --- curve paths (#290) -------------------------------------------------------
+
+/// A place along a path and what each side reads there, from closed forms.
+struct PathPlace {
+    distance: Scalar,
+    point: Point3,
+    incoming: Vec3,
+    outgoing: Vec3,
+    /// Whether each side's frame is read on or after the arc, so never
+    /// exact: `(incoming, outgoing)`.
+    past_arc: (bool, bool),
+}
+
+/// Every path answer at `at` from `side`, or `None` when the provider
+/// refused all of them as unsupported (it does not read paths).
+type PathAnswers = Option<(Point3, Vec3, Frame3)>;
+
+fn path_answers<E: CurveEvaluator>(
+    provider: &E,
+    path: &CurvePath,
+    at: CurveMeasure,
+    side: SeamSide,
+) -> Result<PathAnswers, String> {
+    match (
+        provider.path_point_at_on(path, at, side),
+        provider.path_tangent_at_on(path, at, side),
+        provider.path_frame_at_on(path, at, side),
+    ) {
+        (Ok(p), Ok(t), Ok(f)) => Ok(Some((p, t, f))),
+        (Err(a), Err(b), Err(c)) if side_refused(&a) && side_refused(&b) && side_refused(&c) => {
+            Ok(None)
+        }
+        (p, t, f) => Err(format!(
+            "point {:?}, tangent {:?}, frame {:?}",
+            p.err(),
+            t.err(),
+            f.err()
+        )),
+    }
+}
+
+/// The places [`check_paths`] reads its path at, forwards and reversed.
+fn path_places(radius: Scalar) -> [[PathPlace; 3]; 2] {
+    let quarter = core::f64::consts::FRAC_PI_2 * radius;
+    let length = 10.0 + quarter;
+    let (sin, cos) = core::f64::consts::FRAC_PI_4.sin_cos();
+    let mid = Point3::new(15.0 - radius * cos, radius * sin, 0.0);
+    let mid_tangent = Vec3::new(sin, cos, 0.0);
+    let joint = Point3::new(10.0, 0.0, 0.0);
+    let four = Point3::new(4.0, 0.0, 0.0);
+    [
+        [
+            PathPlace {
+                distance: 4.0,
+                point: four,
+                incoming: Vec3::X,
+                outgoing: Vec3::X,
+                past_arc: (false, false),
+            },
+            PathPlace {
+                distance: 10.0,
+                point: joint,
+                incoming: Vec3::X,
+                outgoing: Vec3::Y,
+                past_arc: (false, true),
+            },
+            PathPlace {
+                distance: 10.0 + quarter / 2.0,
+                point: mid,
+                incoming: mid_tangent,
+                outgoing: mid_tangent,
+                past_arc: (true, true),
+            },
+        ],
+        // Reversed: the arc from its end, then the line back to the origin.
+        [
+            PathPlace {
+                distance: quarter / 2.0,
+                point: mid,
+                incoming: -mid_tangent,
+                outgoing: -mid_tangent,
+                past_arc: (true, true),
+            },
+            PathPlace {
+                distance: quarter,
+                point: joint,
+                incoming: -Vec3::Y,
+                outgoing: -Vec3::X,
+                past_arc: (true, true),
+            },
+            PathPlace {
+                distance: length - 4.0,
+                point: four,
+                incoming: -Vec3::X,
+                outgoing: -Vec3::X,
+                past_arc: (true, true),
+            },
+        ],
+    ]
+}
+
+/// The failures of one path answer against its closed form.
+fn path_answer_failures(
+    what: &str,
+    side: SeamSide,
+    distance: Scalar,
+    (point, tangent, frame): (Point3, Vec3, Frame3),
+    place: &PathPlace,
+    want: Vec3,
+) -> Vec<ConformanceFailure> {
+    let checks = [
+        ("point", (point - place.point).length()),
+        ("tangent", (tangent - want).length()),
+        ("frame x", (frame.x - want).length()),
+        ("frame origin", (frame.origin - place.point).length()),
+        ("frame x.y", frame.x.dot(frame.y)),
+        ("frame x.z", frame.x.dot(frame.z)),
+        ("frame y.z", frame.y.dot(frame.z)),
+        ("frame y unit", frame.y.length() - 1.0),
+        (
+            "frame handedness",
+            frame.x.cross(frame.y).dot(frame.z) - 1.0,
+        ),
+    ];
+    checks
+        .into_iter()
+        .filter(|(_, value)| value.abs() > 1e-9)
+        .map(|(name, value)| {
+            fail(
+                "a path reads each side of a joint from its own piece",
+                format!("{what} path, {side:?} at {distance}: {name} off by {value:e}"),
+            )
+        })
+        .collect()
+}
+
+/// A path is read end to end as ADR 0082 reads a composite station basis:
+/// a line along `+x` over `[0, 10]` (a non-unit direction, so its measure
+/// is not its parameter), then a quarter of a circle of radius 5 about
+/// `(15, 0, 0)` turning left to `(15, 5, 0)` -- a right-angle corner at
+/// distance 10, incoming `+x`, outgoing `+y` -- read forwards and
+/// reversed, on the joint and within the seam tolerance either side of
+/// it. A provider that does not read paths must refuse every path query
+/// as unsupported and report no convention; one that reads them must read
+/// each side of the joint from its own piece, answer the plain queries as
+/// the outgoing side, refuse a distance off the path and a path whose
+/// pieces do not meet, measure it by arc length, and claim no frame on or
+/// after the arc exact.
+fn check_paths<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let line = Curve3::Line(Line3 {
+        origin: Point3::ZERO,
+        direction: Vec3::new(2.0, 0.0, 0.0),
+    });
+    let radius = 5.0;
+    let circle = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::new(15.0, 0.0, 0.0),
+            x: -Vec3::X,
+            y: Vec3::Y,
+            z: -Vec3::Z,
+        },
+        radius,
+    });
+    let quarter = core::f64::consts::FRAC_PI_2 * radius;
+    let length = 10.0 + quarter;
+    let forwards = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Three(line.clone()), 0.0, 10.0),
+        PathPiece::new(PathCurve::Three(circle.clone()), 0.0, quarter),
+    ]);
+    let [forwards_places, reversed_places] = path_places(radius);
+    let paths = [
+        ("forwards", forwards.clone(), forwards_places),
+        ("reversed", forwards.clone().reversed(), reversed_places),
+    ];
+    let mut reads_paths = false;
+    for (what, path, places) in &paths {
+        for place in places {
+            let hair = 0.25e-12 * place.distance;
+            for distance in [place.distance - hair, place.distance, place.distance + hair] {
+                let at = CurveMeasure::Distance(distance);
+                for (side, want, past_arc) in [
+                    (SeamSide::Outgoing, place.outgoing, place.past_arc.1),
+                    (SeamSide::Incoming, place.incoming, place.past_arc.0),
+                ] {
+                    let answers = match path_answers(provider, path, at, side) {
+                        Ok(Some(answers)) => answers,
+                        Ok(None) => continue,
+                        Err(detail) => {
+                            out.push(fail(
+                                "a path is answered or refused as unsupported",
+                                format!("{what} path, {side:?} at {distance}: {detail}"),
+                            ));
+                            continue;
+                        }
+                    };
+                    reads_paths = true;
+                    out.extend(path_answer_failures(
+                        what, side, distance, answers, place, want,
+                    ));
+                    if past_arc && provider.path_frame_is_exact_at(path, at, side) {
+                        out.push(fail(
+                            "a path frame is exact only on exactly placed lines",
+                            format!("{what} path, {side:?} at {distance}: claimed exact"),
+                        ));
+                    }
+                    if side != SeamSide::Outgoing {
+                        continue;
+                    }
+                    // The plain queries are the outgoing reading.
+                    let (point, tangent, frame) = answers;
+                    let off = match (
+                        provider.path_point_at(path, at),
+                        provider.path_tangent_at(path, at),
+                        provider.path_frame_at(path, at),
+                    ) {
+                        (Ok(p), Ok(t), Ok(f)) => (p - point)
+                            .length()
+                            .max((t - tangent).length())
+                            .max(frame_off(&f, &frame)),
+                        _ => Scalar::INFINITY,
+                    };
+                    if off > 1e-9 {
+                        out.push(fail(
+                            "a plain path query is the outgoing reading",
+                            format!("{what} path at {distance}: {off:e} off"),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    let convention = provider.path_distance_convention(&forwards);
+    if !reads_paths {
+        if convention.is_supported() {
+            out.push(fail(
+                "a provider that refuses paths reports them unsupported",
+                format!("every path query was refused, but {convention:?} was reported"),
+            ));
+        }
+        return out;
+    }
+    if convention != DistanceConvention::ArcLength3d {
+        out.push(fail(
+            "a path of lines and arcs is measured by arc length",
+            format!("{convention:?}"),
+        ));
+    }
+    for bad in [Scalar::NAN, Scalar::INFINITY, -1.0, length + 1e-3] {
+        let at = CurveMeasure::Distance(bad);
+        for side in [SeamSide::Outgoing, SeamSide::Incoming] {
+            if provider.path_point_at_on(&forwards, at, side).is_ok()
+                || provider.path_tangent_at_on(&forwards, at, side).is_ok()
+                || provider.path_frame_at_on(&forwards, at, side).is_ok()
+            {
+                out.push(fail(
+                    "a distance off the path is refused",
+                    format!("a {side:?} path query accepted {bad}"),
+                ));
+            }
+        }
+    }
+    // Pieces that do not meet: no distance runs across the gap.
+    let gapped = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Three(line.clone()), 0.0, 9.0),
+        PathPiece::new(PathCurve::Three(circle.clone()), 0.0, quarter),
+    ]);
+    if provider
+        .path_point_at(&gapped, CurveMeasure::Distance(1.0))
+        .is_ok()
+    {
+        out.push(fail(
+            "a path whose pieces do not meet is refused",
+            "a path with a 1 m gap was evaluated",
+        ));
     }
     out
 }
