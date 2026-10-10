@@ -8,10 +8,11 @@ use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     Circle3, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3, ElevationLaw, Intrinsic3, Line2,
-    Line3, PathCurve, PathPiece, Polyline3, SeamSide,
+    Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, Polyline3,
+    SeamSide,
 };
 
-use crate::{CurveEvaluator, CurveMeasure, DistanceConvention};
+use crate::{CurveEvaluator, CurveMeasure, DistanceConvention, DistanceInterval};
 
 /// One failed conformance expectation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_sides_agree_off_a_seam(provider));
     out.extend(check_sides_at_seams(provider));
     out.extend(check_paths(provider));
+    out.extend(check_path_joints(provider));
     out
 }
 
@@ -845,6 +847,133 @@ fn check_paths<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
         out.push(fail(
             "a path whose pieces do not meet is refused",
             "a path with a 1 m gap was evaluated",
+        ));
+    }
+    out
+}
+
+// --- joint distances (#294) ---------------------------------------------------
+
+/// The tolerance [`check_path_joints`] asks for.
+const JOINT_TOLERANCE: Scalar = 1e-6;
+
+/// Whether `interval` is a certificate for `truth` at `tolerance`: finite,
+/// ordered, no wider than asked, and containing it (up to the rounding of
+/// `truth` itself, a few units in its last place).
+fn certifies(interval: DistanceInterval, truth: Scalar, tolerance: Scalar) -> Result<(), String> {
+    let rounding = 8.0 * Scalar::EPSILON * truth.abs().max(1.0);
+    if !(interval.lower.is_finite() && interval.upper.is_finite()) {
+        return Err(format!("{interval:?} is not finite"));
+    }
+    if interval.lower > interval.upper {
+        return Err(format!("{interval:?} is empty"));
+    }
+    if interval.width() > tolerance {
+        return Err(format!("{interval:?} is wider than {tolerance:e}"));
+    }
+    if interval.lower > truth + rounding || interval.upper < truth - rounding {
+        return Err(format!("{interval:?} does not contain {truth}"));
+    }
+    Ok(())
+}
+
+/// Joint distances are certified (#294): a provider either refuses
+/// [`CurveEvaluator::path_joint_distances`] as unsupported, typed, or
+/// answers one interval per interior joint that contains the joint's true
+/// distance and is no wider than the tolerance. Two paths: the line and
+/// quarter arc of [`check_paths`] (every length stored, the joint at 10),
+/// and a numerical piece first -- an offset of a line whose lateral offset
+/// widens linearly from 0 to 1 over 10, a straight segment of true length
+/// `sqrt(101)` that a provider measures by quadrature -- then a line. A
+/// non-positive or non-finite tolerance and a path whose pieces do not
+/// meet must be refused.
+fn check_path_joints<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let line = Curve3::Line(Line3 {
+        origin: Point3::ZERO,
+        direction: Vec3::new(2.0, 0.0, 0.0),
+    });
+    let radius = 5.0;
+    let circle = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::new(15.0, 0.0, 0.0),
+            x: -Vec3::X,
+            y: Vec3::Y,
+            z: -Vec3::Z,
+        },
+        radius,
+    });
+    let quarter = core::f64::consts::FRAC_PI_2 * radius;
+    let exact = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Three(line.clone()), 0.0, 10.0),
+        PathPiece::new(PathCurve::Three(circle.clone()), 0.0, quarter),
+    ]);
+    let widening = PathOffset::new(
+        PathPiece::new(PathCurve::Three(line.clone()), 0.0, 10.0),
+        OffsetLaw::Linear {
+            start: PathOffsets::new(0.0, 0.0, 0.0),
+            end: PathOffsets::new(1.0, 0.0, 0.0),
+            frame: OffsetFrame::Section,
+        },
+    );
+    let slant = 101.0_f64.sqrt();
+    let numeric = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Offset(Box::new(widening)), 0.0, slant),
+        PathPiece::new(
+            PathCurve::Three(Curve3::Line(Line3 {
+                origin: Point3::new(10.0, 1.0, 0.0),
+                direction: Vec3::X,
+            })),
+            0.0,
+            5.0,
+        ),
+    ]);
+    let mut answered = false;
+    for (what, path, truth) in [("line and arc", &exact, 10.0), ("offset", &numeric, slant)] {
+        match provider.path_joint_distances(path, JOINT_TOLERANCE) {
+            Ok(intervals) => {
+                answered = true;
+                if intervals.len() != 1 {
+                    out.push(fail(
+                        "joint distances are certified",
+                        format!("{what} path: {} intervals for one joint", intervals.len()),
+                    ));
+                } else if let Err(detail) = certifies(intervals[0], truth, JOINT_TOLERANCE) {
+                    out.push(fail(
+                        "joint distances are certified",
+                        format!("{what} path: {detail}"),
+                    ));
+                }
+            }
+            Err(error) if side_refused(&error) => {}
+            Err(error) => out.push(fail(
+                "joint distances are certified or refused as unsupported",
+                format!("{what} path: {error}"),
+            )),
+        }
+    }
+    if !answered {
+        return out;
+    }
+    for bad in [0.0, -1.0, Scalar::NAN, Scalar::INFINITY] {
+        if provider.path_joint_distances(&exact, bad).is_ok() {
+            out.push(fail(
+                "a tolerance that is not finite and positive is refused",
+                format!("joint distances were answered at tolerance {bad}"),
+            ));
+        }
+    }
+    let gapped = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Three(line), 0.0, 9.0),
+        PathPiece::new(PathCurve::Three(circle), 0.0, quarter),
+    ]);
+    if provider
+        .path_joint_distances(&gapped, JOINT_TOLERANCE)
+        .is_ok()
+    {
+        out.push(fail(
+            "a path whose pieces do not meet is refused",
+            "the joint distances of a path with a 1 m gap were answered",
         ));
     }
     out

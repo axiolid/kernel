@@ -1,10 +1,10 @@
 //! Portable curve-evaluation provider contract.
 
 use axiolid_contracts::{Backend, Determinism, GeomError, GeomResult, Operation};
-use axiolid_core::{Frame3, Point3, Vec3};
+use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::{Curve3, CurvePath, SeamSide};
 
-use crate::{CurveMeasure, DistanceConvention};
+use crate::{CurveMeasure, DistanceConvention, DistanceInterval};
 
 /// Curve evaluation provider.
 ///
@@ -97,6 +97,28 @@ use crate::{CurveMeasure, DistanceConvention};
 /// reports [`DistanceConvention::Unsupported`] and claims no frame exact.
 /// It never reads a path as its first piece, or a joint from the wrong
 /// side.
+///
+/// # Joint distances (#294)
+///
+/// A caller that holds a distance authored against the true geometry --
+/// a station a model's precision puts on a joint -- needs to know where
+/// the joints lie, and a provider's own joint distances are partly
+/// numerical: the length of an ellipse or a B-spline piece, and of an
+/// offset other than a line beside a line or a circle beside a circle, is
+/// a quadrature. [`path_joint_distances`](Self::path_joint_distances)
+/// answers each interior joint with a [`DistanceInterval`] that CONTAINS
+/// its true distance and is no wider than the requested tolerance: the
+/// sum of the true lengths of the pieces before it, each in the path's
+/// convention (its own plan length for an offset beside a plan-measured
+/// curve), between the points the provider reads as the piece's ends. A
+/// piece whose length is read from stored data (a line, a circle, a
+/// polyline, an intrinsic curve or a chain, an elevated or banked curve,
+/// a constant offset of a line, or of a circle in planes normal to its
+/// axis) contributes exactly, so a path of them has point intervals.
+///
+/// The default refuses by a typed [`GeomError::UnsupportedInput`] naming
+/// [`PATH_JOINT_DISTANCES_UNSUPPORTED`]: a provider that does not bound its
+/// pieces' lengths never hands out an estimate as a certificate.
 pub trait CurveEvaluator: Backend {
     /// Which distance this provider measures for `curve`.
     ///
@@ -322,7 +344,39 @@ pub trait CurveEvaluator: Backend {
         let _ = (path, at, side);
         false
     }
+
+    /// Where the interior joints of `path` lie, each certified to a
+    /// [`DistanceInterval`] no wider than `tolerance` (see the
+    /// [trait documentation](Self#joint-distances-294)): one interval per
+    /// joint, in order, `pieces - 1` in all.
+    ///
+    /// # Errors
+    ///
+    /// A `tolerance` that is not finite and positive, a path the provider
+    /// cannot measure (as [`path_point_at_on`](Self::path_point_at_on)),
+    /// and a piece whose length it cannot certify to `tolerance`, by name.
+    /// By default, everything by [`GeomError::UnsupportedInput`] naming
+    /// [`PATH_JOINT_DISTANCES_UNSUPPORTED`].
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<DistanceInterval>> {
+        let _ = (path, tolerance);
+        Err(GeomError::UnsupportedInput {
+            backend: self.descriptor().id,
+            operation: Operation::CurveEvaluation,
+            input: PATH_JOINT_DISTANCES_UNSUPPORTED,
+        })
+    }
 }
+
+/// The input a provider that does not certify joint distances refuses, in
+/// the [`GeomError::UnsupportedInput`] its default
+/// [`path_joint_distances`](CurveEvaluator::path_joint_distances) returns.
+pub const PATH_JOINT_DISTANCES_UNSUPPORTED: &str =
+    "certified joint distances of a curve path: this provider does not bound the lengths of a \
+     path's pieces";
 
 /// The input a provider that does not implement curve paths refuses, in
 /// the [`GeomError::UnsupportedInput`] its default `path_*` queries return.

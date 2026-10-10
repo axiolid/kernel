@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Certified joint distances of a curve path (#294, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances(path, tolerance)`, one
+  `DistanceInterval` per interior joint that contains the joint's true
+  distance (the sum of the true lengths of the pieces before it) and is no
+  wider than `tolerance`; lengths read from stored data sum to point
+  intervals. A defaulted trait method, so no provider breaks: the default
+  refuses by a typed `UnsupportedInput` naming the new
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`, never an estimate handed out as a
+  certificate. `DistanceInterval` (`lower`, `upper`, `#[non_exhaustive]`,
+  built by `new` and `point`) is new.
+- The conformance suite checks the query: a provider either refuses it as
+  unsupported, or answers one interval containing the joint of a line and
+  a quarter arc (exactly at 10) and of an offset of a line whose lateral
+  offset widens from 0 to 1 over 10 (`sqrt(101)`, a quadrature for a
+  provider), no wider than the tolerance, and refuses a non-positive or
+  non-finite tolerance and a path whose pieces do not meet.
+
 ## [0.3.4] - 2026-10-10
 
 ### Added

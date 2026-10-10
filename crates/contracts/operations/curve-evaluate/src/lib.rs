@@ -11,6 +11,7 @@
 pub mod conformance;
 mod contract;
 mod convention;
+mod interval;
 mod measure;
 
 pub use axiolid_contracts::{
@@ -20,8 +21,11 @@ pub use axiolid_contracts::{
 pub use axiolid_curve::{
     CurvePath, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, SeamSide,
 };
-pub use contract::{CurveEvaluator, CURVE_PATH_UNSUPPORTED, SEAM_SIDE_UNSUPPORTED};
+pub use contract::{
+    CurveEvaluator, CURVE_PATH_UNSUPPORTED, PATH_JOINT_DISTANCES_UNSUPPORTED, SEAM_SIDE_UNSUPPORTED,
+};
 pub use convention::DistanceConvention;
+pub use interval::DistanceInterval;
 pub use measure::CurveMeasure;
 
 /// Capability this contract names.
