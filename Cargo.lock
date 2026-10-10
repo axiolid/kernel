@@ -177,6 +177,7 @@ dependencies = [
  "axiolid-predicates",
  "axiolid-profile",
  "axiolid-spatial",
+ "axiolid-triangulate",
  "criterion",
  "iai-callgrind",
 ]

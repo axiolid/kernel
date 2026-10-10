@@ -134,6 +134,7 @@ graph TD
     axiolid_benchmark --> axiolid_predicates
     axiolid_benchmark --> axiolid_profile
     axiolid_benchmark --> axiolid_spatial
+    axiolid_benchmark --> axiolid_triangulate
     axiolid_brep --> axiolid_core
     axiolid_brep --> axiolid_curve
     axiolid_brep --> axiolid_surface
