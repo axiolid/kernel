@@ -130,6 +130,7 @@ graph TD
     axiolid_benchmark --> axiolid_mesh
     axiolid_benchmark --> axiolid_mesh_compile
     axiolid_benchmark --> axiolid_model
+    axiolid_benchmark --> axiolid_overlay
     axiolid_benchmark --> axiolid_predicates
     axiolid_benchmark --> axiolid_profile
     axiolid_benchmark --> axiolid_spatial

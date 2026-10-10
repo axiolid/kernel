@@ -173,6 +173,7 @@ dependencies = [
  "axiolid-mesh",
  "axiolid-mesh-compile",
  "axiolid-model",
+ "axiolid-overlay",
  "axiolid-predicates",
  "axiolid-profile",
  "axiolid-spatial",

@@ -35,6 +35,8 @@ axiolid-exact-compile-contract.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-compile.workspace = true
 axiolid-model.workspace = true
+# The plan Minkowski benchmark (#292) sums and erodes a floor's walls.
+axiolid-overlay.workspace = true
 axiolid-profile.workspace = true
 iai-callgrind = "0.16.1"
 
@@ -59,6 +61,7 @@ allowed-internal-dependencies = [
     "axiolid-exact-compile-contract",
     "axiolid-mesh-compile",
     "axiolid-model",
+    "axiolid-overlay",
     "axiolid-profile",
 ]
 
@@ -84,4 +87,8 @@ harness = false
 
 [[bench]]
 name = "boundary_distance"
+harness = false
+
+[[bench]]
+name = "minkowski_plan"
 harness = false

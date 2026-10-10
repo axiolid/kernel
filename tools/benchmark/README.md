@@ -22,6 +22,7 @@ so it stays out of the release.
 | `benches/audit.rs` | How the mesh audit scales with triangle count |
 | `benches/exact_openings.rs` | Cost per placed opening cut exactly from a placed wall, by openings already cut (#228) |
 | `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273) |
+| `benches/minkowski_plan.rs` | Time and peak memory of the exact Minkowski sum and erosion of a floor's walls by a 0.9 m square, against corner count (#292) |
 | `tests/scaling.rs` | Growth rate asserted from operation counts, run by `cargo test` |
 | `examples/filter_probe.rs` | Which `orient3d` inputs actually escalate past the floating-point filter |
 | `examples/grouping_probe.rs` | How much independent work the grouped wall subtraction exposes |
@@ -33,6 +34,7 @@ cargo bench -p axiolid-benchmark --bench micro      # wall clock
 cargo bench -p axiolid-benchmark --bench scenario   # end to end
 cargo bench -p axiolid-benchmark --bench exact_openings  # exact placed openings
 cargo bench -p axiolid-benchmark --bench boundary_distance  # touching elements
+cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time and peak memory
 scripts/bench-regression.sh                         # instruction counts
 cargo test -p axiolid-benchmark                     # scaling assertions
 ```
