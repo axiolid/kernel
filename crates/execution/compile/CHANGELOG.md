@@ -19,6 +19,15 @@ caret rule for `0.x` versions.
   by a round bore, refused before for want of inverting a point on the
   column.
 
+### Added
+
+- `station::curve_path` (#290, ADR 0082 amendment): a graph curve a
+  distance runs along, flattened into the neutral `axiolid_curve::CurvePath`
+  a station on it is measured along, for a consumer to read through the
+  curve-evaluation contract's `path_*` queries; an atomic curve is one
+  whole piece, any relation a station refuses is refused by name. A
+  station on the relation and the path read through the contract agree
+  bitwise.
 
 ## [0.3.18] - 2026-10-09
 

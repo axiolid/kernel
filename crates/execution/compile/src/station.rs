@@ -114,6 +114,15 @@
 //!   including the one read is a line placed, if at all, exactly
 //!   ([`ResolvedPlacement::exact`]).
 //!
+//! # Curve paths (#290)
+//!
+//! [`curve_path`] hands out the flattening itself: the relation as an
+//! owned `axiolid_curve::CurvePath`, the neutral pieces a consumer reads through
+//! the curve-evaluation contract's `path_point_at_on`, `path_tangent_at_on`
+//! and `path_frame_at_on`. The reference provider measures it with the same
+//! `CompositeBasis` a station here is resolved by, so a placement framed
+//! through the contract agrees with the station lowered as geometry.
+//!
 //! [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
 //! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
@@ -138,6 +147,7 @@ use axiolid_reference::station::{Mitre, SectionFrame, StationSeam};
 
 mod basis;
 
+pub use basis::curve_path;
 pub(crate) use basis::Basis;
 
 /// Most sections one interval between two stations is bisected into.

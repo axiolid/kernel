@@ -9,7 +9,11 @@
 //! it runs along, and measured as one
 //! `axiolid_reference::station::CompositeBasis`, whose module
 //! documentation states the distance convention, the joint rule and the
-//! exactness a composite carries.
+//! exactness a composite carries. [`curve_path`] hands the same pieces out
+//! as the owned, neutral [`CurvePath`] (#290), which a caller reads through
+//! the curve-evaluation contract's `path_*` queries exactly as a station on
+//! the relation is read here; the pieces resolved for a station borrow the
+//! graph's curves, so resolving one copies none.
 //!
 //! The flattening reads a relation as a composite directrix does
 //! (`crate::directrix`): a composite's segments in order, a segment whose
@@ -25,7 +29,7 @@
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Scalar, Tolerance, Transform3};
-use axiolid_curve::{Curve2, Curve3};
+use axiolid_curve::{Curve2, Curve3, CurvePath, PathPiece};
 use axiolid_model::{
     CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, SeamSide,
     StationFrame, TrimSelector, TrimmingPreference,
@@ -82,6 +86,34 @@ impl<'g> Flat<'g> {
             Self::Pieces(pieces) => Ok(pieces),
         }
     }
+}
+
+/// The curve `id` a distance runs along, flattened into the neutral
+/// [`CurvePath`] (#290): the pieces a station on it is measured along, its
+/// curves copied, to be read through the curve-evaluation contract's
+/// `path_*` queries.
+///
+/// A relation (a composite, a trim, a surface curve whose 3D curve
+/// governs, a curve placed at a station, nested in any combination) is
+/// flattened as a station basis is (see the module documentation); an
+/// atomic curve is one piece, whole, an untrimmed line its parameter domain
+/// `[0, 1]` as inside a composite (a station along the atomic curve itself
+/// reads a line unbounded, so query an atomic basis through the per-curve
+/// methods). Placements at stations are resolved here, each exact only on
+/// an exactly read frame. The path is not measured: the contract's
+/// provider refuses one whose pieces do not meet or measure alike, by name.
+///
+/// # Errors
+///
+/// A node that is not a curve, an instanced curve or a relation no
+/// distance runs along, and a trim or a placement that does not resolve,
+/// each by name.
+pub fn curve_path(graph: &GeometryGraph, id: NodeId) -> GeomResult<CurvePath> {
+    Ok(flatten(graph, id, 0)?
+        .into_pieces()?
+        .into_iter()
+        .map(PathPiece::from)
+        .collect())
 }
 
 /// Pieces traversed the other way: in reverse order, each reversed.
