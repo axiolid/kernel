@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- An instance of a body meshed to exactly its budget (a torus, a
+  proven or certified pipe, a curve-bounded plane) no longer reports one
+  ulp over the requested budget, which made `meets_requested` false (#258).
+  The source was meshed to the budget divided by the transform's stretch
+  bound, and that quotient multiplied back rounds above the budget at some
+  factors (a scale of 0.33 or 1.19 at `1e-4`). It is now shrunk to the
+  largest value whose rounded product with the stretch fits, as #255
+  shrinks a curve-bounded plane's, so rigid, scaled and nested instances
+  report at most the request. The stretch bound itself is unchanged: a
+  rigid transform keeps its `1 + 96 eps` margin, since an `f64` rotation
+  is orthonormal only to rounding, and scaled or sheared instances still
+  grow the bound by their full stretch.
+
 ## [0.3.20] - 2026-10-10
 
 ### Added

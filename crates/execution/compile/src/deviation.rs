@@ -86,8 +86,22 @@
 //! bound), and cuts each cell the way that lowers its halves more, so a
 //! long tube's long, thin quads do not force every cell down to the width
 //! of their diagonals.
-//! - Instances scale the bound by their transform's largest stretch;
-//!   collections take the worst member.
+//! - Instances scale the bound by an upper bound on their transform's
+//!   largest stretch (`stretch`): the largest column length grown by
+//!   `1 + 96 eps` when the columns are orthogonal, else the Frobenius
+//!   norm. The margin keeps it above one even for an identity or a
+//!   rotation, since an `f64` rotation is orthonormal only to rounding;
+//!   the source is meshed to the budget shrunk by that factor, down to the
+//!   largest value whose rounded product with it is within the budget
+//!   (`shrunk_budget`, as #255 shrinks a curve-bounded plane's), so a
+//!   rigid or scaled instance of a body meshed to exactly its budget
+//!   reports at most the requested budget, nested instances included
+//!   (#258). Uniform, non-uniform and sheared instances grow the bound by
+//!   their full stretch and stay sound. The rounding of moving each vertex
+//!   (a few ulps of its coordinates, so of the placement's distance from
+//!   the origin) is not part of the bound, as the rounding of computing a
+//!   construction's own vertices is not.
+//!   Collections take the worst member.
 //! - Instances at stations (#264) move their source rigidly: on a line
 //!   basis the frame is exact and the source's bound stands; on any other
 //!   the frame is the exact curve's at a distance read by an estimate (the
@@ -400,8 +414,18 @@ impl Deviation {
 
 /// An upper bound on the largest factor a transform's linear part stretches
 /// a length by: the largest column length when the columns are orthogonal,
-/// else the Frobenius norm. The same rule the compiler uses to shrink a
-/// chord budget into an instance's local space.
+/// else the Frobenius norm. The same factor the compiler shrinks a chord
+/// budget by into an instance's local space ([`shrunk_budget`]).
+///
+/// The `1 + 96 eps` margin on the orthogonal branch covers what the column
+/// lengths do not: columns orthogonal only to `32 eps` (an `f64` rotation
+/// matrix is never exactly orthonormal) raise the largest singular value
+/// above the largest column length by at most about `32 eps` of it, and
+/// each computed length is itself rounded. It is why a rigid transform's
+/// factor is a hair above one, never exactly one: no `f64` rotation can be
+/// shown to stretch nothing, so none is read as stretch 1 (#258). The
+/// instance's source is instead meshed to a budget shrunk by this factor,
+/// so the grown bound still fits the request.
 pub(crate) fn stretch(transform: Transform3) -> Scalar {
     let m = transform.matrix3;
     let (sx, sy, sz) = (m.x_axis.length(), m.y_axis.length(), m.z_axis.length());
@@ -413,5 +437,75 @@ pub(crate) fn stretch(transform: Transform3) -> Scalar {
         sx.max(sy).max(sz) * (1.0 + 3.0 * eps)
     } else {
         (sx * sx + sy * sy + sz * sz).sqrt()
+    }
+}
+
+/// The largest budget `b` from `budget / stretch` down whose product with
+/// `stretch`, rounded as [`Deviation::transformed`] rounds it, is within
+/// `budget` (#255, #258).
+///
+/// `budget / stretch` alone is not enough: at some factors (a scale of
+/// 0.33 or 1.19 at a budget of `1e-4`) the quotient multiplied back
+/// rounds one ulp above `budget`, and a source meshed to exactly its local
+/// budget would report just over the request. Rounded multiplication is
+/// monotone, so any source bound `d <= b` then reports `d * stretch <=
+/// budget`, and nested instances keep that through every level.
+/// `budget` itself when `stretch` is not a positive finite factor (the
+/// callers refuse those first), and the plain quotient when no positive
+/// value fits (a quotient in the subnormal range, which no mesh reaches).
+pub(crate) fn shrunk_budget(budget: Scalar, stretch: Scalar) -> Scalar {
+    if !(stretch.is_finite() && stretch > 0.0) {
+        return budget;
+    }
+    let mut shrunk = budget / stretch;
+    while shrunk > 0.0 && shrunk * stretch > budget {
+        shrunk = shrunk.next_down();
+    }
+    if shrunk > 0.0 {
+        shrunk
+    } else {
+        budget / stretch
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axiolid_core::{Mat3, Vec3};
+
+    use super::*;
+
+    /// Columns orthogonal only to `30 eps` pass as orthogonal, and the
+    /// largest singular value then exceeds the largest column length: the
+    /// margin must cover it (#258).
+    #[test]
+    fn the_stretch_covers_columns_orthogonal_only_to_rounding() {
+        let skew = 30.0 * f64::EPSILON;
+        let m = Mat3::from_cols(Vec3::X, Vec3::new(skew, 1.0, 0.0), Vec3::Z);
+        // Both columns have length one in f64; the largest singular value
+        // of [[1, skew], [0, 1]] is above 1 + skew / 2.
+        assert_eq!(m.y_axis.length(), 1.0);
+        let factor = stretch(Transform3::from_mat3(m));
+        assert!(factor >= 1.0 + 0.5 * skew, "{factor}");
+        assert!(factor < 1.0 + 200.0 * f64::EPSILON, "{factor}");
+        assert!(stretch(Transform3::IDENTITY) > 1.0);
+    }
+
+    /// The shrunk budget times the stretch is within the budget, and the
+    /// next value up would not be (unless the quotient already fit).
+    #[test]
+    fn the_shrunk_budget_fits_after_rounding() {
+        for budget in [1e-4, 1e-3, 3.7e-5, 0.125] {
+            for factor in [0.33, 1.0, 1.19, 2.38, 2.510_038_280_268_978, 1e6] {
+                let s = factor * (1.0 + 96.0 * f64::EPSILON);
+                let b = shrunk_budget(budget, s);
+                assert!(b * s <= budget, "{budget} {factor}");
+                assert!(b <= budget / s);
+                assert!(b == budget / s || b.next_up() * s > budget);
+            }
+        }
+        // The quotient alone rounds over at this factor.
+        let s = 0.33 * (1.0 + 96.0 * f64::EPSILON);
+        assert!((1e-4 / s) * s > 1e-4);
+        assert!(shrunk_budget(1e-4, s) < 1e-4 / s);
     }
 }

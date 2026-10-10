@@ -1073,17 +1073,20 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     }
 }
 
-/// Convert a world-space tolerance into conservative instance-local space.
 /// Convert world-space budgets into conservative instance-local space.
 ///
 /// The tolerance and the chord budget are both lengths, so both shrink by
-/// the transform's largest stretch: a chord within `c` of the curve in local
-/// space is within `stretch * c` of it in world space.
+/// the transform's stretch bound ([`crate::deviation::stretch`], the same
+/// factor the instance's deviation report grows by): a chord within `c` of
+/// the curve in local space is within `stretch * c` of it in world space.
+/// The chord budget is shrunk until that product, rounded, is within the
+/// world budget ([`crate::deviation::shrunk_budget`]), so a source meshed
+/// to its local budget reports at most the world one (#258).
 fn instance_local_budget(transform: Transform3, budget: Budget) -> GeomResult<Budget> {
     let (tolerance, stretch) = instance_local_tolerance(transform, budget.tolerance)?;
     Ok(Budget {
         tolerance,
-        chord: budget.chord / stretch,
+        chord: crate::deviation::shrunk_budget(budget.chord, stretch),
     })
 }
 
@@ -1092,24 +1095,17 @@ fn instance_local_tolerance(
     tolerance: Tolerance,
 ) -> GeomResult<(Tolerance, Scalar)> {
     let m = transform.matrix3;
-    let sx = m.x_axis.length();
-    let sy = m.y_axis.length();
-    let sz = m.z_axis.length();
-    let max_scale = sx.max(sy).max(sz);
+    let max_scale = m
+        .x_axis
+        .length()
+        .max(m.y_axis.length())
+        .max(m.z_axis.length());
     if !max_scale.is_finite() || max_scale == 0.0 {
         return Err(GeomError::InvalidInput(
             "instance transform has no finite scale".into(),
         ));
     }
-    let eps = 32.0 * f64::EPSILON;
-    let orthogonal = m.x_axis.dot(m.y_axis).abs() <= eps * sx * sy
-        && m.x_axis.dot(m.z_axis).abs() <= eps * sx * sz
-        && m.y_axis.dot(m.z_axis).abs() <= eps * sy * sz;
-    let stretch = if orthogonal {
-        max_scale * (1.0 + 3.0 * eps)
-    } else {
-        (sx * sx + sy * sy + sz * sz).sqrt()
-    };
+    let stretch = crate::deviation::stretch(transform);
     if !stretch.is_finite() {
         return Err(GeomError::InvalidInput(
             "instance transform scale overflow".into(),

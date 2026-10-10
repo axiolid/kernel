@@ -134,13 +134,9 @@ pub(crate) fn boundary_options(frame: &Frame3, options: &ExecutionOptions) -> Ex
     if !(stretch.is_finite() && stretch >= 1.0) {
         return options.clone();
     }
-    let mut budget = chord / stretch;
-    while budget > 0.0 && budget * stretch > chord {
-        budget = budget.next_down();
-    }
     options
         .clone()
-        .with_chord_error(budget)
+        .with_chord_error(crate::deviation::shrunk_budget(chord, stretch))
         .unwrap_or_else(|| options.clone())
 }
 
