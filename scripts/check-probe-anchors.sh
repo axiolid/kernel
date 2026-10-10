@@ -16,6 +16,13 @@ count=0
 for probe in scripts/probe_*.py scripts/probe_gaps_gate.sh; do
   [ "$probe" = scripts/probe_lib.py ] && continue
   count=$((count + 1))
+  # A probe with its own loop would ignore --check-anchors and run its tests.
+  if [ "${probe%.py}" != "$probe" ] && ! grep -q '^probe_lib\.main(' "$probe"; then
+    echo "FAIL $probe"
+    echo "    does not hand its mutants to probe_lib.main (scripts/probe_lib.py)"
+    fail=1
+    continue
+  fi
   case "$probe" in
     *.py) out=$(python3 "$probe" --check-anchors 2>&1) ;;
     *.sh) out=$(bash "$probe" --check-anchors 2>&1) ;;

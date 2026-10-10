@@ -12,7 +12,9 @@ Each mutant runs in its own process group under a timeout that kills the
 whole group; the mutated file is always restored. A missing or ambiguous
 anchor aborts the probe.
 """
-import os, pathlib, signal, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/execution/compile/src/compiler.rs"
@@ -49,52 +51,4 @@ MUTANTS = [
      '        .with_chord_error(chord)', TESTS),
 ]
 
-
-def run(target):
-    """The test run's exit code; -1 when it timed out (its group killed)."""
-    proc = subprocess.Popen(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
-        return proc.wait(timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-        return -1
-    except BaseException:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-        raise
-
-
-def main():
-    for name, rel, old, _, _ in MUTANTS:
-        count = (ROOT / rel).read_text().count(old)
-        if count != 1:
-            sys.exit(f"anchor for '{name}' found {count} times in {rel}")
-    survivors = []
-    for name, rel, old, new, target in MUTANTS:
-        path = ROOT / rel
-        original = path.read_text()
-        if original.count(old) != 1:
-            sys.exit(f"anchor for '{name}' not unique/found in {rel}")
-        try:
-            path.write_text(original.replace(old, new))
-            code = run(target)
-        finally:
-            path.write_text(original)
-        status = "killed" if code != 0 else "SURVIVED"
-        suffix = " (timeout)" if code == -1 else ""
-        print(f"{status:8} {name}{suffix}", flush=True)
-        if code == 0:
-            survivors.append(name)
-    print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-    sys.exit(1 if survivors else 0)
-
-
-if __name__ == "__main__":
-    main()
+probe_lib.main(MUTANTS, timeout=TIMEOUT)
