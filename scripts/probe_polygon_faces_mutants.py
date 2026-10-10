@@ -46,7 +46,9 @@ a dropped corner, pinches refused). 26 / 26 killed on the first run.
 `clip_projected` and on the face's rings after the weld; the weld itself
 is probed by `probe_shared_edge_weld_mutants.py`.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 P = "crates/execution/compile/src/planar.rs"
@@ -140,33 +142,4 @@ MUTANTS = [
      "        _ => GeomError::InvalidInput(format!(\n            \"authored polygon face {} cannot be triangulated: {refusal}\", face + 1\n        )),"),
 ]
 
-
-def run():
-    for target in TARGETS:
-        code = subprocess.run(["cargo", "test", "-q", *target], cwd=ROOT,
-                              capture_output=True, text=True, timeout=900).returncode
-        if code != 0:
-            return code
-    return 0
-
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found ({original.count(old)})"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run()
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-
-print(f"{len(MUTANTS) - len(survivors)} / {len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TARGETS, timeout=900)

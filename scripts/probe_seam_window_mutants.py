@@ -25,7 +25,9 @@ bound by a few units in the last place), and the panel budget.
 Every mutant runs in its own process group with a timeout that kills the
 whole group, and the file is restored whatever happens.
 """
-import os, pathlib, signal, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TIMEOUT = 1800
@@ -110,49 +112,4 @@ MUTANTS = [
      '    (false && station.seam_window.to_bits() != 0).then_some("seam_window")', [WIRE]),
 ]
 
-
-def run(target):
-    """Run the tests; a timeout kills the whole process group. Returns the
-    exit code and whether the mutant failed to compile."""
-    process = subprocess.Popen(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
-    try:
-        output, _ = process.communicate(timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
-        return -1, False
-    return process.returncode, "could not compile" in output
-
-
-survivors = []
-broken = []
-for name, rel, old, new, targets in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    code, uncompiled = 0, False
-    try:
-        for target in targets:
-            code, uncompiled = run(target)
-            if code != 0:
-                break
-    finally:
-        path.write_text(original)
-    # A mutant that does not compile proves nothing about the tests.
-    status = "BROKEN" if uncompiled else "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if uncompiled:
-        broken.append(name)
-    elif code == 0:
-        survivors.append(name)
-killed = len(MUTANTS) - len(survivors) - len(broken)
-print(f"{killed}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors or broken else 0)
+probe_lib.main(MUTANTS, timeout=TIMEOUT, reject_uncompiled=True)

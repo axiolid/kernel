@@ -13,7 +13,9 @@ Equivalent or insensitive mutants, deliberately not listed:
   the two. At ZERO they agree; above it the rounding is ~1e-15 of a
   tolerance of 1e-6.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/algorithms/construction/construct/src/contour_lower.rs"
@@ -33,28 +35,4 @@ MUTANTS = [
     ('line runs to the corner, not the shared tangent point', S, '            Some((_, start, _, _)) => start,', '            Some(_) => corners[next].point,', TESTS),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=2400,
-    ).returncode
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=2400)

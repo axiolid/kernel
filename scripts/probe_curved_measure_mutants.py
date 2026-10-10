@@ -12,7 +12,9 @@ along a pole by less than half a turn takes the same straight segment with or
 without it; the branch only matters for a jump of half a turn or more, which
 no fixture here has.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 F = "crates/algorithms/query/measure/src/exact_face.rs"
@@ -45,35 +47,4 @@ MUTANTS = [
     ('revolution frame left-handed again', R, '        y: Vec3::NEG_Z,', '        y: Vec3::Z,', SOLIDS),
 ]
 
-def run(targets):
-    """Non-zero when any target fails; a tuple names several."""
-    if not isinstance(targets, tuple):
-        targets = (targets,)
-    for target in targets:
-        code = subprocess.run(
-            ["cargo", "test", "-q", *target],
-            cwd=ROOT, capture_output=True, text=True, timeout=900,
-        ).returncode
-        if code != 0:
-            return code
-    return 0
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=900)

@@ -3,7 +3,9 @@
 Each mutant weights the wrong corner, drops a refusal, or breaks the
 mean-value formula or its boundary cases, and must turn a test red.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 B = "crates/algorithms/query/spatial/src/barycentric.rs"
@@ -29,28 +31,4 @@ MUTANTS = [
     ('non-finite points accepted', B, '    if !point.is_finite() || !v.iter().all(|p| p.is_finite()) {', '    if !point.is_finite() {', TESTS),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1200,
-    ).returncode
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1200)

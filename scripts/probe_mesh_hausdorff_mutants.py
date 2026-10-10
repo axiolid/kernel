@@ -11,7 +11,9 @@ closed form here resolves; box pruning weakened (only slower); and a
 patch's members bounded by their largest rather than smallest distance
 (only looser).
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 H = "crates/algorithms/query/measure/src/mesh_hausdorff.rs"
@@ -63,28 +65,4 @@ MUTANTS = [
      "    distance.upper = forward.upper.min(backward.upper);"),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = max(run(t) for t in TESTS)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TESTS, timeout=1800)

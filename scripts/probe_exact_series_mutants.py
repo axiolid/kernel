@@ -21,7 +21,9 @@ Equivalent mutants, deliberately not listed:
   Bernstein coefficients are then wider, but every box the tests certify
   clears its remainder by far more.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/parametric/nurbs/src/exact_series.rs"
@@ -42,28 +44,4 @@ MUTANTS = [
     ('Bernstein remainder left out', S, '                    remainder = (remainder + b * weight(i, j).hi).next_up();', '                    let _ = (b, remainder);', SERIES),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1800)

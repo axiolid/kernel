@@ -13,7 +13,9 @@ the empty triangle away in every case the tests reach; splitting the edge
 and both triangles beside it is kept so that correctness does not rest on
 that.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/planar/route/src/skeleton.rs"
@@ -36,28 +38,4 @@ MUTANTS = [
     ('incircle differences rounded', P, '    let (d, err) = two_diff(p, q);', '    let (d, err) = (p - q, 0.0 * two_diff(p, q).1);', PR),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=300,
-    ).returncode
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=300)

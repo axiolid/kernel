@@ -7,7 +7,9 @@ Equivalent mutant, deliberately not listed: advancing a caliper only on a
 strict increase instead of a non-decrease. On a tie the two vertices are
 equally extreme, so the spans, and the area, are the same.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 R = "crates/algorithms/planar/overlay/src/rectangle.rs"
@@ -28,28 +30,4 @@ MUTANTS = [
     ('corners left out of the measured error', R, '        (c0.x, exact(x0)),\n        (c0.y, exact(y0)),\n        (c1.x, exact(x1)),\n        (c1.y, exact(y0)),\n        (c2.x, exact(x1)),\n        (c2.y, exact(y1)),\n        (c3.x, exact(x0)),\n        (c3.y, exact(y1)),\n', '', TESTS),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1200,
-    ).returncode
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1200)

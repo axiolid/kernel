@@ -31,7 +31,9 @@ in `exact_bodies.rs`: a rigid motion makes some uncut face tie every cut
 face's farthest point, so the closed forms cannot see the cut faces'
 bound go wrong.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 B = "crates/algorithms/query/measure/src/exact_bodies.rs"
@@ -125,32 +127,4 @@ MUTANTS = [
      "                        state.witness = Some((w, found.nearest, found.on, element.shape));"),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        code = 0
-        for target in TESTS:
-            try:
-                code = run(target)
-            except subprocess.TimeoutExpired:
-                code = -1
-            if code != 0:
-                break
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TESTS, timeout=1800)

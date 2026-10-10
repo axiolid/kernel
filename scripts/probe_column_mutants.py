@@ -12,7 +12,9 @@ subject's opposite-cap naming branch, which no boolean can reach (see the
 comment on `cap_name` in boolean_column.rs); the branch was removed rather
 than kept untested.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 COL = "crates/algorithms/construction/construct/src/column.rs"
@@ -86,34 +88,4 @@ MUTANTS = [
      "            ^ false;", TESTS),
 ]
 
-
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1200,
-    ).returncode
-
-
-only = set(sys.argv[1:])
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    if only and name not in only:
-        continue
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-
-print(f"{len(MUTANTS) - len(survivors) if not only else '-'} / {len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1200)

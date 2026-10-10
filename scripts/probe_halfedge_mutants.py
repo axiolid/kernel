@@ -13,7 +13,9 @@ satisfies it, so weakening one of its rules changes no outcome. The random
 edit tests do not rely on it alone: after every step they also convert to a
 `TriMesh` and rebuild, which refuses non-manifold results independently.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 M = "crates/representations/discrete/mesh/src/halfedge.rs"
@@ -186,30 +188,4 @@ MUTANTS = [
     ),
 ]
 
-
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1200,
-    ).returncode
-
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(T)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=T, timeout=1200)

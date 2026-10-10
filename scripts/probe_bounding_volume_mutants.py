@@ -4,7 +4,9 @@ Each mutant decides containment wrongly, drops a support level, stops
 rounding outward, understates the error bound, or skips the candidate
 orientations that make an oriented box tight, and must turn a test red.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/algorithms/planar/overlay/src/circle.rs"
@@ -44,33 +46,4 @@ MUTANTS = [
      [('            } else if is_less(&high[k], &s) {', '            } else if false && is_less(&high[k], &s) {')], BOUNDS),
 ]
 
-
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1200,
-    ).returncode
-
-
-survivors = []
-for name, rel, edits, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    mutated = original
-    for old, new in edits:
-        assert mutated.count(old) == 1, f"anchor for '{name}' not unique/found: {old!r}"
-        mutated = mutated.replace(old, new)
-    path.write_text(mutated)
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1200)

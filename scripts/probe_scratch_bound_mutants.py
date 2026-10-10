@@ -9,7 +9,9 @@ old purely per-triangle declaration -- and must turn a test red.
 pools of 1 to 64 workers) and without rayon (the base term alone carries
 small inputs).
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 X = "crates/contracts/common/base/src/execution.rs"
@@ -65,39 +67,4 @@ MUTANTS = [
      "        }"),
 ]
 
-
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-
-def killed_by(name):
-    # Stop at the first red test: a mutant only has to be killed once.
-    for target in TESTS:
-        try:
-            if run(target) != 0:
-                return " ".join(target)
-        except subprocess.TimeoutExpired:
-            return "timeout: " + " ".join(target)
-    return None
-
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        killer = killed_by(name)
-    finally:
-        path.write_text(original)
-    if killer:
-        print(f"killed   {name}  [{killer}]", flush=True)
-    else:
-        print(f"SURVIVED {name}", flush=True)
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TESTS, timeout=1800)

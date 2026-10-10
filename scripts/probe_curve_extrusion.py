@@ -9,9 +9,9 @@ Each probe injects one semantic defect and asserts the suites FAIL.
 A surviving probe means the gate is blind to that defect.
 """
 
-import subprocess
-import sys
 from pathlib import Path
+
+import probe_lib
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -155,60 +155,4 @@ PROBES = [
     ),
 ]
 
-
-def run(cmd):
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True).returncode
-
-
-def suites_pass():
-    return all(run(c) == 0 for c in SUITES)
-
-
-def main():
-    originals = {}
-    for _, rel, _, _ in PROBES:
-        p = ROOT / rel
-        originals[rel] = p.read_text()
-
-    if not suites_pass():
-        print("baseline: FAIL -- fix the suites before probing")
-        return 1
-    print("baseline: PASS\n")
-
-    killed, leaked = 0, []
-    try:
-        for name, rel, find, replace in PROBES:
-            p = ROOT / rel
-            src = originals[rel]
-            if find not in src:
-                print(f"  ERROR   {name}: anchor not found in {rel}")
-                leaked.append(name)
-                continue
-            p.write_text(src.replace(find, replace, 1))
-            try:
-                if suites_pass():
-                    print(f"  LEAK    {name}")
-                    leaked.append(name)
-                else:
-                    print(f"  killed  {name}")
-                    killed += 1
-            finally:
-                p.write_text(src)
-    finally:
-        for rel, text in originals.items():
-            (ROOT / rel).write_text(text)
-
-    restored = all((ROOT / rel).read_text() == text for rel, text in originals.items())
-    print(f"\nrestored byte-identical: {restored}")
-    print(f"killed {killed}/{len(PROBES)}")
-    if leaked:
-        print("LEAKED PROBES (gate is blind to these defects):")
-        for name in leaked:
-            print(f"  - {name}")
-        return 1
-    print("all probes killed")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+probe_lib.main(PROBES, tests=SUITES, command=(), timeout=1800, baseline=True)

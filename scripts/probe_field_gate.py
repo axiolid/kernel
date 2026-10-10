@@ -7,12 +7,10 @@ detect that defect, so the gate is decorative. Sources are restored verbatim
 from an in-memory snapshot, and the restoration is verified by hash.
 """
 
-from __future__ import annotations
-
-import hashlib
-import subprocess
-import sys
 from pathlib import Path
+
+import probe_lib
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS_SRC = Path("crates/algorithms/sampled/field/src")
@@ -88,68 +86,4 @@ TEST_CMD = [
     "--all-features", "--quiet",
 ]
 
-
-def digest(paths: dict[str, str]) -> str:
-    h = hashlib.sha256()
-    for name in sorted(paths):
-        h.update(name.encode())
-        h.update(paths[name].encode())
-    return h.hexdigest()
-
-
-def main() -> int:
-    probe_paths = {ROOT / relative for _, relative, _, _ in PROBES}
-    files = {path: path.read_text() for path in probe_paths}
-    baseline = digest({str(path.relative_to(ROOT)): text for path, text in files.items()})
-
-    # A mutation probe is only meaningful if the unmutated suite passes.
-    clean = subprocess.run(TEST_CMD, cwd=ROOT, capture_output=True, text=True)
-    if clean.returncode != 0:
-        print("BASELINE FAILED - fix the suite before probing")
-        print(clean.stdout[-3000:])
-        print(clean.stderr[-3000:])
-        return 2
-    print("baseline: PASS\n")
-
-    killed, leaked = [], []
-    try:
-        for name, relative, old, new in PROBES:
-            target = ROOT / relative
-            original = files[target]
-            if old not in original:
-                print(f"  !! {name}: anchor not found in {relative}")
-                leaked.append(name)
-                continue
-            if original.count(old) != 1:
-                print(f"  !! {name}: anchor is not unique in {relative}")
-                leaked.append(name)
-                continue
-
-            target.write_text(original.replace(old, new, 1))
-            result = subprocess.run(TEST_CMD, cwd=ROOT, capture_output=True, text=True)
-            target.write_text(original)
-
-            if result.returncode != 0:
-                print(f"  killed  {name}")
-                killed.append(name)
-            else:
-                print(f"  LEAKED  {name}")
-                leaked.append(name)
-    finally:
-        for path, text in files.items():
-            path.write_text(text)
-
-    restored = digest({str(path.relative_to(ROOT)): path.read_text() for path in probe_paths})
-    print(f"\nrestored byte-identical: {restored == baseline}")
-    print(f"killed {len(killed)}/{len(PROBES)}")
-    if leaked:
-        print("LEAKED PROBES (gate is blind to these defects):")
-        for name in leaked:
-            print(f"  - {name}")
-        return 1
-    print("all probes killed")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+probe_lib.main(PROBES, tests=[TEST_CMD], command=(), timeout=1800, baseline=True)

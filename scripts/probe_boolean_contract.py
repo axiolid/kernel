@@ -5,10 +5,9 @@ Each probe injects one semantic defect and asserts the contract suites FAIL.
 A surviving probe means the gate is blind to that defect and the tests are
 decorative. Sources are restored byte-identically afterwards.
 """
-import hashlib
-import subprocess
-import sys
 from pathlib import Path
+
+import probe_lib
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,63 +89,4 @@ PROBES = [
     ),
 ]
 
-
-def run(cmd):
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True).returncode
-
-
-def suites_pass():
-    return all(run(cmd) == 0 for cmd in SUITES)
-
-
-def digest():
-    files = sorted({ROOT / path for _, path, _, _ in PROBES})
-    hasher = hashlib.sha256()
-    for path in files:
-        hasher.update(path.read_bytes())
-    return hasher.hexdigest()
-
-
-def main():
-    before = digest()
-    if not suites_pass():
-        print("baseline: FAIL -- fix the suites before probing")
-        return 1
-    print("baseline: PASS\n")
-
-    killed, leaked = [], []
-    for name, rel, find, repl in PROBES:
-        path = ROOT / rel
-        original = path.read_text()
-        if find not in original:
-            print(f"  !! {name}: anchor not found in {rel}")
-            leaked.append(name)
-            continue
-        if original.count(find) != 1:
-            print(f"  !! {name}: anchor not unique in {rel}")
-            leaked.append(name)
-            continue
-        try:
-            path.write_text(original.replace(find, repl))
-            if suites_pass():
-                print(f"  LEAK    {name}")
-                leaked.append(name)
-            else:
-                print(f"  killed  {name}")
-                killed.append(name)
-        finally:
-            path.write_text(original)
-
-    print(f"\nrestored byte-identical: {digest() == before}")
-    print(f"killed {len(killed)}/{len(PROBES)}")
-    if leaked:
-        print("LEAKED PROBES (gate is blind to these defects):")
-        for name in leaked:
-            print(f"  - {name}")
-        return 1
-    print("all probes killed")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+probe_lib.main(PROBES, tests=SUITES, command=(), timeout=1800, baseline=True)

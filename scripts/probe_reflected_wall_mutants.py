@@ -15,7 +15,9 @@ pcurve parameter in another order (at most one lands inside the span),
 and comparing the landing against the cut point instead of the edge's
 point there (they agree within the incidence tolerance).
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/construction/brep-boolean/src/split.rs"
@@ -38,32 +40,4 @@ MUTANTS = [
      "                    Ok((back - on).length() <= 0.0)"),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", "--all-features", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        code = 0
-        for t in TESTS:
-            try:
-                code = run(t)
-            except subprocess.TimeoutExpired:
-                code = -1
-            if code != 0:
-                break
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TESTS, command=probe_lib.CARGO_TEST + ("--all-features",), timeout=1800)

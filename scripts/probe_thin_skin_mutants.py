@@ -37,7 +37,9 @@ Equivalent mutants, deliberately not listed:
   the same way, so a pinch is a refusal on either path (the pinch itself
   is pinned by `tests/tangent_void.rs`).
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SNAP = "crates/execution/compile/src/snap.rs"
@@ -137,37 +139,5 @@ MUTANTS = [
 ]
 
 
-def run(targets):
-    for target in targets:
-        code = subprocess.run(
-            ["cargo", "test", "-q", *target],
-            cwd=ROOT, capture_output=True, text=True, timeout=3600,
-        ).returncode
-        if code != 0:
-            return code
-    return 0
 
-
-# Optional substrings select mutants by name.
-if sys.argv[1:]:
-    MUTANTS = [m for m in MUTANTS if any(a in m[0] for a in sys.argv[1:])]
-
-survivors = []
-for name, rel, old, new, targets in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(targets)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=3600)

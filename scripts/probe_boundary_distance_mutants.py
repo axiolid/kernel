@@ -5,7 +5,9 @@ true distance, a witness that is not on the boundary, a pruning rule that
 drops the nearest pair -- or the refinement that closes the interval, and
 must turn a test red.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 D = "crates/algorithms/query/measure/src/exact_distance.rs"
@@ -33,34 +35,4 @@ MUTANTS = [
     ('clearance rounds to a verdict', D, '        } else if self.lower > limit {', '        } else if self.upper >= limit {', SOLIDS),
 ]
 
-def run(targets):
-    if not isinstance(targets, tuple):
-        targets = (targets,)
-    for target in targets:
-        code = subprocess.run(
-            ["cargo", "test", "-q", *target],
-            cwd=ROOT, capture_output=True, text=True, timeout=1200,
-        ).returncode
-        if code != 0:
-            return code
-    return 0
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=1200)

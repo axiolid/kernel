@@ -19,7 +19,9 @@ clause (serde always writes one).
 Every mutant runs in its own process group with a timeout that kills the
 whole group, and the file is restored whatever happens.
 """
-import os, pathlib, signal, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 W = "crates/representations/modeling/graph/src/wire.rs"
@@ -132,45 +134,4 @@ MUTANTS = [
      '    /// Reused source node.\n    #[cfg_attr(feature = "serde", serde(rename = "src"))]\n    pub source: NodeId,'),
 ]
 
-
-def run(target):
-    """Run the tests; a timeout kills the whole process group. Returns the
-    exit code and whether the mutant failed to compile."""
-    process = subprocess.Popen(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
-    try:
-        output, _ = process.communicate(timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
-        return -1, False
-    return process.returncode, "could not compile" in output
-
-
-survivors = []
-broken = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        code, uncompiled = run(TARGET)
-    finally:
-        path.write_text(original)
-    # A mutant that does not compile proves nothing about the tests.
-    status = "BROKEN" if uncompiled else "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if uncompiled:
-        broken.append(name)
-    elif code == 0:
-        survivors.append(name)
-killed = len(MUTANTS) - len(survivors) - len(broken)
-print(f"{killed}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors or broken else 0)
+probe_lib.main(MUTANTS, tests=TARGET, timeout=TIMEOUT, reject_uncompiled=True)

@@ -12,7 +12,9 @@ coordinates as given instead of relative to the first vertex. Exact
 arithmetic is translation-invariant, so only how often the interval filter
 falls back to the exact tier changes, never a sign.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 D = "crates/algorithms/planar/overlay/src/"
@@ -87,33 +89,4 @@ MUTANTS = [
      '    let r = ring;\n    (' + RAW.strip() + ').abs()', TESTS),
 ]
 
-
-def run(target):
-    """The test exit code; a mutant that does not compile kills nothing."""
-    done = subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    )
-    assert "error[E" not in done.stderr, done.stderr[-2000:]
-    return done.returncode
-
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run(target)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, reject_uncompiled=True, timeout=1800)

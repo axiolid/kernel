@@ -8,8 +8,7 @@ configuration read within tolerance, a reading or the rounding floor left
 out of the report, a plane/cylinder contact read by one face pair and not
 the others, a hole touching a root fillet's double point not traced, cut
 or placed on the contact, its traced pcurves not bounded -- and must turn
-a test red. Arguments, if any, run only the mutants whose names contain
-one of them.
+a test red. `--only NAME` runs only the mutants whose names contain NAME.
 
 Equivalent mutants, deliberately not listed: dropping the periodic wrap
 merge in `merge_close` (no opening here puts cuts either side of a
@@ -36,10 +35,10 @@ regions narrower than that. An entry point (`boolean_with_report`,
 reading asks for a decision beyond the tolerance, and in a debug build the
 session's assertion fires first, so only a future bug in a release build
 reaches it (the session's own tests check the refusal).
-
-Arguments, when given, run only the mutants whose names contain one of them.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 S = "crates/algorithms/construction/brep-boolean/src/section.rs"
@@ -260,30 +259,4 @@ MUTANTS = [
      ""),
 ]
 
-def run(target):
-    return subprocess.run(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, capture_output=True, text=True, timeout=1800,
-    ).returncode
-
-SELECTED = [m for m in MUTANTS if not sys.argv[1:] or any(a in m[0] for a in sys.argv[1:])]
-
-survivors = []
-for name, rel, old, new in SELECTED:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = max(run(t) for t in TESTS)
-        except subprocess.TimeoutExpired:
-            code = -1
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(SELECTED) - len(survivors)}/{len(SELECTED)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TESTS, timeout=1800)

@@ -34,7 +34,9 @@ Equivalent mutants, deliberately not listed:
   of its rings holds the point, and the frame holds every ring of its
   copy.
 """
-import os, pathlib, signal, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 M = "crates/algorithms/planar/overlay/src/minkowski.rs"
@@ -81,37 +83,4 @@ MUTANTS = [
 # timeout, and its whole process group is stopped.
 TIMEOUT = 600
 
-
-def run(target):
-    """The test run's exit code, or `None` when it timed out."""
-    process = subprocess.Popen(
-        ["cargo", "test", "-q", *target],
-        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
-        return process.wait(timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
-        return None
-
-survivors = []
-for name, rel, old, new, target in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        code = run(target)
-    finally:
-        path.write_text(original)
-    if code is None:
-        status = "killed (timeout)"
-    else:
-        status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, timeout=TIMEOUT)

@@ -26,7 +26,9 @@ planar tests now also check that the split took effect (no sliver left
 on the stringer, a sliver beside a thin triangle on an authored edge,
 two corners in order on one shared diagonal): 11 / 11.
 """
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 P = "crates/execution/compile/src/planar.rs"
@@ -73,28 +75,4 @@ MUTANTS = [
      "    adjacency.edge_count() > 0 && adjacency.boundary_edges().next().is_none() && adjacency.non_manifold_edges().next().is_none()"),
 ]
 
-
-def killed(target):
-    try:
-        return subprocess.run(["cargo", "test", "-q", *target], cwd=ROOT,
-                              capture_output=True, text=True, timeout=900).returncode != 0
-    except subprocess.TimeoutExpired:
-        return True
-
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = ROOT / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found ({original.count(old)})"
-    path.write_text(original.replace(old, new))
-    try:
-        dead = any(killed(t) for t in TARGETS)
-    finally:
-        path.write_text(original)
-    print(f"{'killed' if dead else 'SURVIVED':8} {name}", flush=True)
-    if not dead:
-        survivors.append(name)
-
-print(f"{len(MUTANTS) - len(survivors)} / {len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=TARGETS, timeout=900)

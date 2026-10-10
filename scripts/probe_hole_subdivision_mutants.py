@@ -9,7 +9,10 @@ pin that property; add a test, never delete the mutant. Anchors must match
 exactly once, so a refactor that moves code fails loudly here instead of
 silently skipping a mutant.
 """
-import pathlib, subprocess, sys, os
+import os
+import pathlib
+
+import probe_lib
 
 K = pathlib.Path(__file__).resolve().parents[1]
 SRC = K / "crates/algorithms/discrete/refine/src"
@@ -131,30 +134,5 @@ env = {k: v for k, v in os.environ.items()
        if k not in ("CARGO_HOME", "GIT_DIR", "GIT_WORK_TREE")}
 env["PATH"] = str(pathlib.Path.home() / ".cargo/bin") + ":" + env["PATH"]
 
-def tests_pass():
-    try:
-        r = subprocess.run(["cargo", "test", "-q", "-p", "axiolid-refine",
-                            "--test", "hole", "--test", "subdivide"],
-                           cwd=K, env=env, capture_output=True, text=True, timeout=900)
-    except subprocess.TimeoutExpired:
-        # A mutant that makes a test hang is detected, not survived.
-        return False
-    return r.returncode == 0
-
-assert tests_pass(), "baseline must pass"
-survivors = []
-for name, fname, old, new in MUTANTS:
-    path = SRC / fname
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor not unique/missing: {name}"
-    path.write_text(original.replace(old, new, 1))
-    try:
-        killed = not tests_pass()
-    finally:
-        path.write_text(original)
-    print(f"{'killed  ' if killed else 'SURVIVED'}  {name}", flush=True)
-    if not killed:
-        survivors.append(name)
-assert tests_pass(), "tree restored and passing"
-print(f"\n{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+probe_lib.main(MUTANTS, tests=[["-p", "axiolid-refine",
+                            "--test", "hole", "--test", "subdivide"]], root=SRC, cwd=K, env=env, baseline=True, timeout=900)

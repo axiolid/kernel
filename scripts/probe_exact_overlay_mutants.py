@@ -1,5 +1,7 @@
 """Mutation probe for the exact straight-edge overlay (#173): each mutant must be caught."""
-import pathlib, subprocess, sys
+import pathlib
+
+import probe_lib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "crates/algorithms/planar/overlay/src"
@@ -76,31 +78,7 @@ MUTANTS = [
      "                tree.query(|b| b.may_hold((f64::NEG_INFINITY, sx.1), sy))"),
 ]
 
-def run():
-    return subprocess.run(
-        ["cargo", "test", "-q", "--release", "-p", "axiolid-overlay",
+probe_lib.main(MUTANTS, tests=[["--release", "-p", "axiolid-overlay",
          "--lib", "--test", "exact_straight", "--test", "region",
          "--test", "roundtrip", "--test", "collinear", "--test", "contract",
-         "--test", "arc_overlay", "--test", "arrangement"],
-        cwd=ROOT, capture_output=True, text=True, timeout=900,
-    ).returncode
-
-survivors = []
-for name, rel, old, new in MUTANTS:
-    path = SRC / rel
-    original = path.read_text()
-    assert original.count(old) == 1, f"anchor for '{name}' not unique/found"
-    path.write_text(original.replace(old, new))
-    try:
-        try:
-            code = run()
-        except subprocess.TimeoutExpired:
-            code = -1  # a hang is a detection
-    finally:
-        path.write_text(original)
-    status = "killed" if code != 0 else "SURVIVED"
-    print(f"{status:8} {name}", flush=True)
-    if code == 0:
-        survivors.append(name)
-print(f"{len(MUTANTS) - len(survivors)}/{len(MUTANTS)} killed")
-sys.exit(1 if survivors else 0)
+         "--test", "arc_overlay", "--test", "arrangement"]], root=SRC, timeout=900)
