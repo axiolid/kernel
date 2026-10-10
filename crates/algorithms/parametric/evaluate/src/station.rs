@@ -111,6 +111,24 @@
 //! [`offset`] for the closed forms, the numerical reading and the
 //! refusals.
 //!
+//! # Certified joint distances and seam-snapping windows (#294)
+//!
+//! A composite's joints lie at the running sum of its pieces' lengths, and
+//! some of those lengths are quadratures (an offset other than a line or a
+//! circle beside one, an ellipse, a B-spline). [`certify`] bounds each from
+//! both sides, so [`CompositeBasis::joint_intervals`] answers every joint
+//! with a [`DistanceInterval`] that contains its true distance, no wider
+//! than a requested tolerance; a sum of stored lengths is a point. The
+//! curve-evaluation provider hands them out as `path_joint_distances`.
+//!
+//! A station may carry a seam-snapping window, wider than the arc-length
+//! tolerance: [`snapped_distance2`], [`snapped_distance3`] and
+//! [`CompositeBasis::snapped_distance`] read a station within its window
+//! of exactly one seam whose frame may jump at that seam, using the
+//! certified intervals where a seam's distance is numerical, and refuse a
+//! window holding two seams or with one on its edge by name; see
+//! [`window`].
+//!
 //! # Accuracy contract
 //!
 //! The point and frame are the exact curve's at a measure within
@@ -129,15 +147,22 @@ use axiolid_curve::{Curve2, Curve3, SeamSide};
 /// curve-evaluation contract's, re-exported so a caller can name it.
 pub use axiolid_curve_evaluate_contract::DistanceConvention;
 
+pub mod certify;
 pub mod composite;
 pub mod offset;
 pub mod seam;
+pub mod window;
 
+pub use certify::{DistanceInterval, MAX_CERTIFIED_PANELS, POINT_ROUNDING, UNCERTIFIED_LENGTH};
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
 pub use offset::{offset_pieces, StationOffset, CUSP_TOLERANCE, OFFSET_TOLERANCE};
 pub use seam::{
     exact_station_seams2, exact_station_seams3, station_seams2, station_seams3, Mitre, StationSeam,
     MITRE_TOLERANCE, SEAM_TANGENT_TOLERANCE,
+};
+pub use window::{
+    snapped_distance2, snapped_distance3, SEAM_WINDOW_AMBIGUOUS, SEAM_WINDOW_STRADDLED,
+    WINDOW_CERTIFICATION,
 };
 
 use crate::arc_parameter::{

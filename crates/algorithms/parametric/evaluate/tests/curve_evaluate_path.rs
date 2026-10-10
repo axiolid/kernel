@@ -19,6 +19,7 @@ use axiolid_curve::{
 };
 use axiolid_curve_evaluate_contract::{
     conformance, CurveEvaluator, CurveMeasure, DistanceConvention, CURVE_PATH_UNSUPPORTED,
+    PATH_JOINT_DISTANCES_UNSUPPORTED,
 };
 use axiolid_evaluate::station::{CompositeBasis, StationCurve, StationPiece};
 use axiolid_evaluate::ReferenceCurveEvaluator;
@@ -532,6 +533,29 @@ fn a_provider_without_paths_refuses_them_by_name() {
         p.path_distance_convention(&path),
         DistanceConvention::Unsupported
     );
+    // Nor does it certify joint distances (#294): refused by name, never an
+    // estimate handed out as a certificate.
+    match p.path_joint_distances(&path, 1e-6) {
+        Err(GeomError::UnsupportedInput {
+            backend,
+            operation,
+            input,
+        }) => {
+            assert_eq!(backend, BackendId::new("single-curves"));
+            assert_eq!(operation, Operation::CurveEvaluation);
+            assert_eq!(input, PATH_JOINT_DISTANCES_UNSUPPORTED);
+        }
+        other => panic!("expected a refusal naming joint distances, got {other:?}"),
+    }
+    // The reference provider certifies them: the joint at 10, exactly.
+    assert_eq!(
+        ReferenceCurveEvaluator::new()
+            .path_joint_distances(&path, 1e-6)
+            .unwrap(),
+        vec![axiolid_curve_evaluate_contract::DistanceInterval::point(
+            10.0
+        )]
+    );
     // Refusing paths is conformant; so is reading them right.
     assert_eq!(conformance::check(&p), Vec::new());
     assert_eq!(
@@ -689,4 +713,76 @@ fn the_conformance_suite_rejects_a_path_refused_as_bad_input() {
             .any(|f| f.check == "a path is answered or refused as unsupported"),
         "{failures:?}"
     );
+}
+
+/// A provider whose joint distances are wrong (#294): `How::Estimate`
+/// answers each joint with the kernel's own estimate widened by nothing
+/// but shifted by a millimetre, `How::Wide` with an interval wider than
+/// asked, `How::Invalid` refuses as bad input.
+#[derive(Debug)]
+struct Joints(ReferenceCurveEvaluator, How);
+
+#[derive(Debug, Clone, Copy)]
+enum How {
+    Estimate,
+    Wide,
+    Invalid,
+}
+
+impl Backend for Joints {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor::new(BackendId::new("joints"), ExecutionTarget::PortableCpu)
+    }
+}
+
+impl CurveEvaluator for Joints {
+    fn distance_convention(&self, curve: &Curve3) -> DistanceConvention {
+        self.0.distance_convention(curve)
+    }
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3> {
+        self.0.point_at(curve, at)
+    }
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3> {
+        self.0.tangent_at(curve, at)
+    }
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        self.0.frame_at(curve, at)
+    }
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<axiolid_curve_evaluate_contract::DistanceInterval>> {
+        use axiolid_curve_evaluate_contract::DistanceInterval;
+        let joints = self.0.path_joint_distances(path, tolerance)?;
+        match self.1 {
+            How::Estimate => Ok(joints
+                .iter()
+                .map(|j| DistanceInterval::point(j.midpoint() + 1e-3))
+                .collect()),
+            How::Wide => Ok(joints
+                .iter()
+                .map(|j| DistanceInterval::new(j.lower - tolerance, j.upper + tolerance))
+                .collect()),
+            How::Invalid => Err(GeomError::InvalidInput("no joints".into())),
+        }
+    }
+}
+
+#[test]
+fn the_conformance_suite_rejects_uncertified_joint_distances() {
+    for (how, check) in [
+        (How::Estimate, "joint distances are certified"),
+        (How::Wide, "joint distances are certified"),
+        (
+            How::Invalid,
+            "joint distances are certified or refused as unsupported",
+        ),
+    ] {
+        let failures = conformance::check(&Joints(ReferenceCurveEvaluator::new(), how));
+        assert!(
+            failures.iter().any(|f| f.check == check),
+            "{how:?}: {failures:?}"
+        );
+    }
 }

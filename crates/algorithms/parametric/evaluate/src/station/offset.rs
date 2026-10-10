@@ -246,7 +246,7 @@ impl<'c> StationOffset<'c> {
         Ok(self.table()?.length(self.base_length()))
     }
 
-    fn base_length(&self) -> Scalar {
+    pub(super) fn base_length(&self) -> Scalar {
         self.end - self.start
     }
 
@@ -279,7 +279,7 @@ impl<'c> StationOffset<'c> {
     }
 
     /// The displacement at `v` from the base's section there.
-    fn displacement(&self, section: &SectionFrame, v: Scalar) -> GeomResult<Vec3> {
+    pub(super) fn displacement(&self, section: &SectionFrame, v: Scalar) -> GeomResult<Vec3> {
         match self.law {
             OffsetLaw::Planar { distance } => Ok(distance * section.lateral),
             OffsetLaw::Directed {
@@ -536,7 +536,7 @@ impl<'c> StationOffset<'c> {
 
     /// The base's measure `v` into the piece at the offset's own measure
     /// `m`.
-    fn base_measure(&self, m: Scalar, table: &OffsetTable) -> GeomResult<Scalar> {
+    pub(super) fn base_measure(&self, m: Scalar, table: &OffsetTable) -> GeomResult<Scalar> {
         let length = self.base_length();
         if let Some(scale) = table.closed {
             return Ok((m / scale).clamp(0.0, length));

@@ -108,8 +108,12 @@ use axiolid_core::{Point3, Scalar, Transform3};
 use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathOffset, PathPiece, SeamSide};
 use axiolid_curve_evaluate_contract::DistanceConvention;
 
+use super::certify::{
+    checked_tolerance, curve_span, piece_length, CertifiedSeam, DistanceInterval, Running,
+};
 use super::offset::{OffsetTable, StationOffset};
 use super::seam::tidy;
+use super::window::{certification, checked_window, snap};
 use super::{
     admitted, invalid, start2, start3, station_length2, station_length3, station_seams2,
     station_seams3, station_section2_on, station_section3_on, SectionFrame, StationSeam,
@@ -241,7 +245,7 @@ impl StationCurve<'_> {
     /// Whether a distance on it is read from stored data alone: false for
     /// an ellipse and a B-spline, whose arc length is a quadrature, and an
     /// offset other than a line or a circle.
-    fn measure_is_exact(self) -> bool {
+    pub(super) fn measure_is_exact(self) -> bool {
         match self {
             Self::Offset(offset) => offset.measure_is_exact(),
             _ => !matches!(
@@ -519,7 +523,7 @@ impl<'c> StationPiece<'c> {
     }
 
     /// The offset's measure table, for an offset piece.
-    fn table(&self) -> GeomResult<Option<OffsetTable>> {
+    pub(super) fn table(&self) -> GeomResult<Option<OffsetTable>> {
         match self.curve {
             StationCurve::Offset(offset) => offset.table().map(Some),
             _ => Ok(None),
@@ -887,6 +891,130 @@ impl<'c> CompositeBasis<'c> {
             ));
         }
         Ok(seams)
+    }
+
+    /// Each piece's share of a `tolerance` on a sum of their lengths: a
+    /// numerical piece's in proportion to its length, kept a little under
+    /// the whole so the rounding of the sum fits.
+    fn shares(&self, tolerance: Scalar) -> Vec<Scalar> {
+        let numeric: Scalar = self
+            .pieces
+            .iter()
+            .filter(|piece| !piece.curve.measure_is_exact())
+            .map(StationPiece::length)
+            .sum();
+        self.pieces
+            .iter()
+            .map(|piece| {
+                if numeric > 0.0 {
+                    0.9 * tolerance * piece.length() / numeric
+                } else {
+                    tolerance
+                }
+            })
+            .collect()
+    }
+
+    /// Where the composite's interior joints truly lie (#294): for each
+    /// joint, in order, a [`DistanceInterval`] containing the sum of the
+    /// true lengths of the pieces before it, each between the points read
+    /// as its ends, no wider than `tolerance`. A sum of lengths read from
+    /// stored data is a point interval; see [`super::certify`] for how a
+    /// numerical length is bounded.
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive, a piece whose length
+    /// cannot be certified ([`super::certify::UNCERTIFIED_LENGTH`]) or not
+    /// within the panel budget, and the evaluators' refusals, by name.
+    pub fn joint_intervals(&self, tolerance: Scalar) -> GeomResult<Vec<DistanceInterval>> {
+        let tolerance = checked_tolerance(tolerance)?;
+        let shares = self.shares(tolerance);
+        let joints = self.pieces.len().saturating_sub(1);
+        let mut run = Running::ZERO;
+        let mut out = Vec::with_capacity(joints);
+        for ((piece, table), share) in self
+            .pieces
+            .iter()
+            .zip(&self.tables)
+            .zip(shares)
+            .take(joints)
+        {
+            run = run.plus(piece_length(piece, table.as_ref(), share)?);
+            let interval = run.interval();
+            if interval.width().is_nan() || interval.width() > tolerance {
+                return Err(unsupported(super::certify::UNCERTIFIED_LENGTH));
+            }
+            out.push(interval);
+        }
+        Ok(out)
+    }
+
+    /// The composite's seams whose frame may jump, each with its certified
+    /// distance, up to the first whose interval starts past `until`: every
+    /// interior joint, and each piece's own seams inside it.
+    pub(crate) fn certified_seams(
+        &self,
+        tolerance: Scalar,
+        until: Scalar,
+    ) -> GeomResult<Vec<CertifiedSeam>> {
+        let shares = self.shares(tolerance);
+        let mut run = Running::ZERO;
+        let mut out = Vec::new();
+        for (k, piece) in self.pieces.iter().enumerate() {
+            if k > 0 {
+                out.push(CertifiedSeam {
+                    distance: self.starts[k],
+                    interval: run.interval(),
+                });
+            }
+            if run.interval().lower > until {
+                break;
+            }
+            for seam in piece.seams()? {
+                if seam.smooth {
+                    continue;
+                }
+                let part = if seam.exact {
+                    DistanceInterval::point(seam.distance)
+                } else {
+                    let u = seam.distance;
+                    let (m0, m1) = if piece.reversed {
+                        (piece.end - u, piece.end)
+                    } else {
+                        (piece.start, piece.start + u)
+                    };
+                    curve_span(piece.curve, m0, m1, shares[k])?
+                };
+                out.push(CertifiedSeam {
+                    distance: self.starts[k] + seam.distance,
+                    interval: run.plus(part).interval(),
+                });
+            }
+            if k + 1 < self.pieces.len() {
+                run = run.plus(piece_length(piece, self.tables[k].as_ref(), shares[k])?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The distance a station at `distance` with the seam-snapping
+    /// `window` is read at along the composite (#294): the joint's or
+    /// seam's own distance when exactly one lies within the window, else
+    /// `distance`; see [`super::window`].
+    ///
+    /// # Errors
+    ///
+    /// A negative or non-finite window, two seams within it
+    /// ([`super::window::SEAM_WINDOW_AMBIGUOUS`]), a seam straddling its
+    /// edge ([`super::window::SEAM_WINDOW_STRADDLED`]), and a seam whose
+    /// distance cannot be certified, by name.
+    pub fn snapped_distance(&self, distance: Scalar, window: Scalar) -> GeomResult<Scalar> {
+        if checked_window(window)? == 0.0 || !distance.is_finite() {
+            return Ok(distance);
+        }
+        let seams = self.certified_seams(certification(window), distance + window)?;
+        snap(&seams, distance, window)
     }
 
     /// The pieces between distances `start < end` along the composite,

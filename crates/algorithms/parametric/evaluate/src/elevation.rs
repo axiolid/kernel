@@ -672,6 +672,76 @@ pub(crate) fn profile_bounds(law: &ElevationLaw, lo: Scalar, hi: Scalar) -> Opti
     out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
+/// Certified `(sup |z'|, sup |z''|, sup |z'''|, sup |z''''|)` over the
+/// plan-distance span `[lo, hi]` (#294), or `None` -- unbounded, never a
+/// guess -- across a seam, and for an intrinsic profile, whose fourth
+/// derivative is not bounded here.
+///
+/// As [`profile_bounds`], one order further: a polynomial's
+/// `sum i!/(i-4)! |c_i| m^(i-4)`, and a circular arc's `z'''' = 3 (1 + 4
+/// sin^2 t) / (R^3 cos^7 t)`, largest where `|sin t|` is, at an end.
+pub(crate) fn profile_bounds4(law: &ElevationLaw, lo: Scalar, hi: Scalar) -> Option<[Scalar; 4]> {
+    if !(lo.is_finite() && hi.is_finite()) || lo > hi {
+        return None;
+    }
+    let out = match law {
+        ElevationLaw::Polynomial { coefficients } => {
+            let m = lo.abs().max(hi.abs());
+            let term = |k: usize| -> Scalar {
+                coefficients
+                    .iter()
+                    .enumerate()
+                    .skip(k)
+                    .map(|(i, c)| {
+                        let falling: Scalar = (0..k).map(|j| (i - j) as Scalar).product();
+                        falling * c.abs() * m.powi((i - k) as i32)
+                    })
+                    .sum()
+            };
+            [term(1), term(2), term(3), term(4)]
+        }
+        ElevationLaw::Piecewise { breaks, laws } => {
+            if laws.len() != breaks.len() + 1 {
+                return None;
+            }
+            let mid = 0.5 * (lo + hi);
+            let index = breaks.partition_point(|b| *b <= mid);
+            let start = if index == 0 { 0.0 } else { breaks[index - 1] };
+            let lower = if index == 0 {
+                Scalar::NEG_INFINITY
+            } else {
+                start
+            };
+            let upper = breaks.get(index).copied().unwrap_or(Scalar::INFINITY);
+            if lo < lower || hi > upper {
+                return None;
+            }
+            return profile_bounds4(laws.get(index)?, lo - start, hi - start);
+        }
+        ElevationLaw::CircularArc { grade, radius, .. } => {
+            if !(grade.is_finite() && radius.is_finite() && *radius != 0.0) {
+                return None;
+            }
+            let sin0 = grade / grade.hypot(1.0);
+            let reach = (sin0 + lo / radius).abs().max((sin0 + hi / radius).abs());
+            if reach.is_nan() || reach >= 1.0 {
+                return None;
+            }
+            let cos = ((1.0 - reach) * (1.0 + reach)).sqrt();
+            let r = radius.abs();
+            [
+                reach / cos,
+                1.0 / (r * cos.powi(3)),
+                3.0 * reach / (r * r * cos.powi(5)),
+                3.0 * (1.0 + 4.0 * reach * reach) / (r * r * r * cos.powi(7)),
+            ]
+        }
+        _ => return None,
+    };
+    let out = out.map(|v| v * (1.0 + 1e-12));
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
 /// Every seam of a law in plan distance, nested piecewise laws included,
 /// ascending: where its grade may jump.
 pub(crate) fn elevation_seams(law: &ElevationLaw) -> Vec<Scalar> {

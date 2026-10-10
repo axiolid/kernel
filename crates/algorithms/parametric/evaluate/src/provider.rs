@@ -23,7 +23,9 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Frame3, Point3, Scalar, Vec3};
 use axiolid_curve::{Curve3, CurvePath, SeamSide};
-use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceConvention};
+use axiolid_curve_evaluate_contract::{
+    CurveEvaluator, CurveMeasure, DistanceConvention, DistanceInterval,
+};
 
 use crate::arc_length::{elevated_point, elevated_tangent};
 use crate::banked::{banked_point, banked_section, banked_tangent};
@@ -496,5 +498,16 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
             return false;
         };
         CompositeBasis::from_path(path).is_ok_and(|basis| basis.frame_is_exact_at(distance, side))
+    }
+
+    /// [`CompositeBasis::joint_intervals`] of the path (#294): exact
+    /// lengths summed as points, numerical ones bounded by chords and
+    /// turning or by a certified midpoint rule (`crate::station::certify`).
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<DistanceInterval>> {
+        CompositeBasis::from_path(path)?.joint_intervals(tolerance)
     }
 }
