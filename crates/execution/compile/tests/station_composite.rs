@@ -557,12 +557,11 @@ fn a_gap_or_an_undeclared_reversed_piece_is_refused_by_name() {
     let on_gapped = station(&mut b, gapped, 1.0, SeamSide::Outgoing);
     let on_undeclared = station(&mut b, undeclared, 1.0, SeamSide::Outgoing);
     let on_declared = station(&mut b, declared, 10.0, SeamSide::Outgoing);
-    // An offset relation is no station basis.
+    // An instanced curve is no station basis (an offset is, since #289).
     let offset = b
-        .push(GeometryNode::CurveRelation(CurveRelation::Offset {
-            basis: base.line,
-            distance: 1.0,
-            reference_direction: None,
+        .push(GeometryNode::Instance(axiolid_model::Instance {
+            source: base.line,
+            transform: axiolid_core::Transform3::IDENTITY,
         }))
         .unwrap();
     let on_offset = station(&mut b, offset, 1.0, SeamSide::Outgoing);

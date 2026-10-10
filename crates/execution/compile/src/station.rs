@@ -9,12 +9,12 @@
 //! measure is numerical).
 //!
 //! The basis is an atomic 2D or 3D curve node, a curve placed at a station
-//! (#264), or a curve relation a distance runs along (#285): a composite,
-//! a trim, a surface curve whose 3D curve governs, nested and placed in any
-//! combination, measured as one composite (see
-//! [Composite bases](#composite-bases-285)). An instance and any other
-//! relation (an offset, a p-curve, an offset curve by stations) are
-//! refused by name.
+//! (#264), or a curve relation a distance runs along (#285, #289): a
+//! composite, a trim, a surface curve whose 3D curve governs, an offset or
+//! an offset curve by stations, nested and placed in any combination,
+//! measured as one composite (see [Composite bases](#composite-bases-285)
+//! and [Offset bases](#offset-bases-289)). An instance and any other
+//! relation (a p-curve) are refused by name.
 //!
 //! # Meshing between stations
 //!
@@ -123,6 +123,25 @@
 //! `CompositeBasis` a station here is resolved by, so a placement framed
 //! through the contract agrees with the station lowered as geometry.
 //!
+//! # Offset bases (#289)
+//!
+//! A constant offset (2D: along the left normal; 3D: along `V x T`) and an
+//! offset curve by stations are flattened into offset pieces
+//! (`axiolid_reference::station::offset_pieces`): the basis split at every
+//! seam of its pieces and, for an offset by stations, at every station, so
+//! each seam of the basis and each break of the distance law is a joint of
+//! the offset. A station along it is measured in the offset's OWN length
+//! from its start (its own plan length beside an elevated or banked curve)
+//! and framed by its own section frame; the
+//! `axiolid_reference::station::offset` module documentation states the
+//! closed forms (a line beside a line, exact; a circle beside a circle),
+//! the numerical reading of every other offset (never exact, so a placement
+//! on it is unbounded) and the refusals: a collapse, a cusp, a planar
+//! self-crossing, an offset across a corner of its basis where its two
+//! sides do not meet, an offset of an offset. A trim of an offset relation
+//! is refused by name: an offset takes its basis's parameter, not its own
+//! length.
+//!
 //! [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
 //! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
@@ -186,12 +205,11 @@ pub struct ResolvedStation {
 ///
 /// A node that is not a [`GeometryNode::CurveStation`] or a
 /// [`GeometryNode::OrientedCurveStation`], a basis no station can be
-/// measured along (see the [module documentation](self): an instance, an
-/// offset relation, a composite with a gap, an undeclared reversed piece
-/// or pieces measured differently, a tilted plan-measured placement), a
-/// distance
-/// beyond the basis curve's length, a degenerate orientation, and every
-/// refusal of the curve evaluators, by name.
+/// measured along (see the [module documentation](self): an instance, a
+/// p-curve, a composite with a gap, an undeclared reversed piece or pieces
+/// measured differently, a tilted plan-measured placement, a degenerate
+/// offset), a distance beyond the basis curve's length, a degenerate
+/// orientation, and every refusal of the curve evaluators, by name.
 pub fn resolve(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedStation> {
     let station = match graph.get(id) {
         Some(GeometryNode::CurveStation(station)) => OrientedCurveStation::from(*station),
@@ -272,9 +290,9 @@ pub struct ResolvedPlacement {
 /// A node that is not an [`InstanceAtStation`], and every refusal of
 /// [`resolve`]: a distance beyond the basis curve's length, a zero or
 /// vertical tangent where the frame needs a plan, a degenerate
-/// orientation, a basis no station can be measured along (an instance, an
-/// offset relation, a composite whose pieces do not meet or are measured
-/// differently), each by name.
+/// orientation, a basis no station can be measured along (an instance, a
+/// p-curve, a composite whose pieces do not meet or are measured
+/// differently, a degenerate offset), each by name.
 ///
 /// [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 pub fn placement(graph: &GeometryGraph, id: NodeId) -> GeomResult<ResolvedPlacement> {

@@ -249,11 +249,11 @@ fn an_atomic_curve_is_one_whole_piece_and_other_relations_are_refused() {
 
     let mut b = GeometryGraphBuilder::new();
     let line = line2(&mut b);
+    // An instanced curve is no station basis (an offset is, since #289).
     let offset = b
-        .push(GeometryNode::CurveRelation(CurveRelation::Offset {
-            basis: line,
-            distance: 1.0,
-            reference_direction: None,
+        .push(GeometryNode::Instance(axiolid_model::Instance {
+            source: line,
+            transform: axiolid_core::Transform3::IDENTITY,
         }))
         .unwrap();
     let graph = b.finish(vec![offset]).unwrap();

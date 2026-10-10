@@ -28,6 +28,16 @@ caret rule for `0.x` versions.
   whole piece, any relation a station refuses is refused by name. A
   station on the relation and the path read through the contract agree
   bitwise.
+- Offset curves as station bases (#289, ADR 0082 amendment):
+  `station::resolve`, `placement`, `seams`, `curve_path` and every run of
+  stations (spines, sectioned surfaces, offsets by stations) accept a
+  constant `CurveRelation::Offset` (2D without, 3D with a reference
+  direction) and an `OffsetByStations` as basis, nested in composites and
+  placements, measured in the offset's own length. A placement on an
+  offset of a line is exact; on any other offset it is reported unbounded
+  and refused by the exact compiler, as on any curved basis. A trim of an
+  offset relation, an offset of an offset, a planar offset of a 3D curve
+  and an offset across a corner of its basis are refused by name.
 
 ## [0.3.18] - 2026-10-09
 

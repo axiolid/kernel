@@ -208,11 +208,11 @@ fn a_station_beyond_the_curve_or_on_a_relation_is_refused_by_name() {
     let beyond = b
         .push_value(CurveStation::new(clothoid, Station::at(61.0)))
         .unwrap();
+    // An instanced curve is no station basis (an offset is, since #289).
     let relation = b
-        .push(GeometryNode::CurveRelation(CurveRelation::Offset {
-            basis: clothoid,
-            distance: 1.0,
-            reference_direction: None,
+        .push(GeometryNode::Instance(axiolid_model::Instance {
+            source: clothoid,
+            transform: axiolid_core::Transform3::IDENTITY,
         }))
         .unwrap();
     let on_relation = b

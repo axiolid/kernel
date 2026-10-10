@@ -1,5 +1,5 @@
 //! The curve a station is measured along, read from the graph (#241,
-//! #264, #285).
+//! #264, #285, #289).
 //!
 //! An atomic 2D or 3D curve is read as it is, unbounded on a line. A curve
 //! placed at a station is its source carried by the placement. A curve
@@ -25,19 +25,22 @@
 //! parameter selectors read as distances along it, which needs the
 //! relation measured in arc length (its parameter); a curve placed at a
 //! station carried by its placement, a trim of it in its source's
-//! parameter.
+//! parameter; an offset (#289) as offset pieces beside its basis's pieces,
+//! one per span between seams (an offset by stations also split at its
+//! stations), measured in its own length.
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Scalar, Tolerance, Transform3};
-use axiolid_curve::{Curve2, Curve3, CurvePath, PathPiece};
+use axiolid_curve::{Curve2, Curve3, CurvePath, OffsetFrame, OffsetLaw, PathOffsets, PathPiece};
 use axiolid_model::{
-    CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, SeamSide,
+    CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, SeamSide, Station,
     StationFrame, TrimSelector, TrimmingPreference,
 };
 use axiolid_reference::station::{
-    exact_station_seams2, exact_station_seams3, station_frame_is_exact2, station_frame_is_exact3,
-    station_seams2, station_seams3, station_section2_on, station_section3_on, CompositeBasis,
-    DistanceConvention, SectionFrame, StationCurve, StationPiece, StationSeam, JOINT_TOLERANCE,
+    exact_station_seams2, exact_station_seams3, offset_pieces, station_frame_is_exact2,
+    station_frame_is_exact3, station_seams2, station_seams3, station_section2_on,
+    station_section3_on, CompositeBasis, DistanceConvention, SectionFrame, StationCurve,
+    StationPiece, StationSeam, JOINT_TOLERANCE,
 };
 
 /// Most relations and placements a station basis may be nested through.
@@ -46,7 +49,7 @@ const MAX_BASIS_DEPTH: usize = 64;
 /// The refusal of a basis no station can be measured along.
 pub(crate) const UNSUPPORTED_BASIS: &str =
     "a station along an instanced curve, or along a curve relation other than a composite, a \
-     trim, a surface curve whose 3D curve governs, or a curve placed at a station";
+     trim, a surface curve whose 3D curve governs, a curve placed at a station, or an offset";
 
 fn unsupported(input: &'static str) -> GeomError {
     GeomError::UnsupportedInput {
@@ -58,6 +61,9 @@ fn unsupported(input: &'static str) -> GeomError {
 
 /// A graph curve flattened: one atomic curve whole (possibly placed), or
 /// spans of atomic curves end to end.
+// Large only by `StationCurve`'s offset variant, which an atomic curve
+// never is (#289); one value lives for one flattening step.
+#[allow(clippy::large_enum_variant)]
 enum Flat<'g> {
     Atomic {
         curve: StationCurve<'g>,
@@ -127,6 +133,9 @@ fn reversed(pieces: Vec<StationPiece<'_>>) -> Vec<StationPiece<'_>> {
 
 /// A station's basis: an atomic curve, possibly placed at stations (#264),
 /// or a curve relation measured as a composite (#285).
+// Large only by `StationCurve`'s offset variant, which an atomic basis
+// never is (#289); one value lives for one resolution or run.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum Basis<'g> {
     Atomic {
@@ -300,6 +309,17 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
             sense_agreement,
             preference,
         })) => {
+            if matches!(
+                graph.get(*basis),
+                Some(GeometryNode::CurveRelation(
+                    CurveRelation::Offset { .. } | CurveRelation::OffsetByStations { .. }
+                ))
+            ) {
+                return Err(unsupported(
+                    "a trim of an offset curve as a station basis: an offset takes its basis's \
+                     parameter, not its own length, and that parameter is not read along it",
+                ));
+            }
             let pieces = match flatten(graph, *basis, depth + 1)? {
                 Flat::Atomic {
                     curve,
@@ -339,6 +359,32 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
             master: MasterRepresentation::Curve3d,
             ..
         })) => flatten(graph, *curve_3d, depth + 1),
+        // A constant offset (#289): one offset piece per span of its basis
+        // between seams, measured in its own length.
+        Some(GeometryNode::CurveRelation(CurveRelation::Offset {
+            basis,
+            distance,
+            reference_direction,
+        })) => {
+            let law = match reference_direction {
+                None => OffsetLaw::Planar {
+                    distance: *distance,
+                },
+                Some(direction) => OffsetLaw::Directed {
+                    distance: *distance,
+                    reference_direction: *direction,
+                },
+            };
+            let base = flatten(graph, *basis, depth + 1)?.into_pieces()?;
+            Ok(Flat::Pieces(offset_pieces(&base, law)?))
+        }
+        // An offset by distances at stations (#289): from its first
+        // station to its last, one law per interval between stations.
+        Some(GeometryNode::CurveRelation(CurveRelation::OffsetByStations {
+            basis,
+            stations,
+            frame,
+        })) => offset_by_stations(graph, *basis, stations, *frame, depth),
         Some(GeometryNode::Instance(_) | GeometryNode::CurveRelation(_)) => {
             Err(unsupported(UNSUPPORTED_BASIS))
         }
@@ -349,6 +395,77 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
             "station basis {id:?} is outside the graph"
         ))),
     }
+}
+
+/// What an offset by stations runs along: an atomic curve, measured from
+/// its own start (a line unbounded), or a relation's composite.
+// Large only by `StationCurve`'s offset variant, which an atomic curve
+// never is; one value lives for one flattening.
+#[allow(clippy::large_enum_variant)]
+enum Along<'g> {
+    Atomic(StationCurve<'g>, Option<Transform3>, bool),
+    Composite(CompositeBasis<'g>),
+}
+
+/// An offset by distances at stations along `basis`, flattened (#289):
+/// the basis between each pair of consecutive stations (in its station
+/// measure), offset by the offsets interpolated linearly between them in
+/// `frame`.
+fn offset_by_stations<'g>(
+    graph: &'g GeometryGraph,
+    basis: NodeId,
+    stations: &[Station],
+    frame: StationFrame,
+    depth: usize,
+) -> GeomResult<Flat<'g>> {
+    if stations.len() < 2 {
+        return Err(GeomError::InvalidInput(
+            "an offset curve by stations needs at least two stations".into(),
+        ));
+    }
+    let frame = match frame {
+        StationFrame::Section => OffsetFrame::Section,
+        StationFrame::Plan => OffsetFrame::Plan,
+        _ => return Err(unsupported("a station frame this compiler does not know")),
+    };
+    let offsets = |station: &Station| {
+        PathOffsets::new(
+            station.offsets.lateral,
+            station.offsets.vertical,
+            station.offsets.longitudinal,
+        )
+    };
+    let base = match flatten(graph, basis, depth + 1)? {
+        Flat::Pieces(pieces) => Along::Composite(CompositeBasis::new(pieces)?),
+        Flat::Atomic {
+            curve,
+            placed,
+            exact,
+        } => Along::Atomic(curve, placed, exact),
+    };
+    let mut out = Vec::new();
+    for pair in stations.windows(2) {
+        let (a, b) = (pair[0].distance, pair[1].distance);
+        // An atomic basis is measured from its own start, unbounded on a
+        // line; a relation along its composite.
+        let span = match &base {
+            Along::Atomic(curve, placed, exact) => {
+                let piece = StationPiece::between(*curve, a, b)?;
+                vec![match placed {
+                    Some(rigid) => piece.placed(*rigid, *exact),
+                    None => piece,
+                }]
+            }
+            Along::Composite(composite) => composite.pieces_between(a, b)?,
+        };
+        let law = OffsetLaw::Linear {
+            start: offsets(&pair[0]),
+            end: offsets(&pair[1]),
+            frame,
+        };
+        out.extend(offset_pieces(&span, law)?);
+    }
+    Ok(Flat::Pieces(out))
 }
 
 /// The tolerance a point selector is inverted to: the joint tolerance at
