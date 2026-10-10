@@ -42,6 +42,11 @@ ciborium = { workspace = true, optional = true }
 # The native-backend readiness gate parses the data-plane crates' own sources.
 syn = { version = "2", features = ["full", "parsing", "visit"] }
 
+# The wire tests use `serde_json` and `ciborium` from the `serde` feature.
+[[test]]
+name = "wire"
+required-features = ["serde"]
+
 [package.metadata.axiolid]
 architecture-version = 1
 layer = "representations"

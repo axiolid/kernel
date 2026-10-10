@@ -1,0 +1,35 @@
+{
+  "format": "axiolid-geometry-graph",
+  "version": "1.0",
+  "graph": {
+    "nodes": [
+      {
+        "Profile": {
+          "Rectangle": {
+            "x": 0.3,
+            "y": 0.2,
+            "thickness": null,
+            "outer_radius": null,
+            "inner_radius": null
+          }
+        }
+      },
+      {
+        "SolidOperation": {
+          "Extrusion": {
+            "profile": 0,
+            "direction": [0.0, 0.0, 1.0],
+            "depth": 2.75
+          }
+        }
+      },
+      {
+        "Instance": {
+          "source": 1,
+          "transform": [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 4.0, -0.0, 0.5]
+        }
+      }
+    ],
+    "roots": [2]
+  }
+}
