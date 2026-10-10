@@ -228,3 +228,30 @@ build.
   `tests/wire/`: round trips over every node kind and variant, golden
   payloads, refusals.
 - The `serde` features of the representation crates listed above.
+
+## Note 2026-10-10: format 1.1 (#294)
+
+Format 1.1 adds one optional field, `OrientedCurveStation.seam_window`
+(ADR 0082's #294 amendment), so `FORMAT_VERSION` is `1.1`, a minor change
+under the version rules above: its absence means what a 1.0 payload meant,
+a window of `0`.
+
+- **Written only when it says something.** The field is a real, not an
+  `Option`, and the writer omits it at `+0.0` instead of writing `null`: a
+  graph without windows writes exactly the 1.0 graph (only the envelope's
+  version differs), so the 1.0 golden payloads read and write back
+  unchanged, which is this record's regression guard. `-0.0` is written,
+  so reals still round-trip bit-exactly. This is the rule for an optional
+  field whose absence means a default value rather than "absent".
+- **Read in every 1.x payload.** A missing window reads as `0`; a 1.0
+  payload that nevertheless holds a non-zero window is refused as
+  `UnknownField { field: "seam_window", version: 1.0 }`, since no 1.0
+  writer wrote one (a window of `+0.0` written into a 1.0 payload means its
+  absence and is not told apart). A negative or non-finite window is
+  refused by validation (`InvalidGraph`), as when the node is pushed.
+- **Golden payloads.** `tests/wire/v1.0/` stays as published and is read by
+  today's reader to the identical graph; `tests/wire/v1.1/every-kind.json`
+  adds two windowed stations (an oriented station and the station of an
+  `InstanceAtStation`) and is what today's writer writes.
+- **Probe.** `scripts/probe_seam_window_mutants.py` writes a zero window and
+  reads a window in a 1.0 payload; both are caught.

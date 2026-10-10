@@ -129,6 +129,12 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
 - `crates/algorithms/parametric/evaluate/src/station/offset.rs`,
   `crates/execution/compile/src/station/basis.rs` (`offset_by_stations`)
   and `crates/execution/compile/tests/station_offset.rs` (#289).
+- `crates/algorithms/parametric/evaluate/src/station/certify.rs`,
+  `crates/algorithms/parametric/evaluate/src/station/window.rs`,
+  `crates/contracts/operations/curve-evaluate/src/interval.rs`,
+  `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
+  `crates/execution/compile/tests/station_window.rs` and
+  `scripts/probe_seam_window_mutants.py` (#294).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -713,3 +719,105 @@ Still open: an offset across a corner (mitred), an offset of an offset, a
 trim of an offset by its basis's parameter, a self-crossing out of a
 horizontal plane or across pieces, exact frames on an offset circle, and a
 certified bound for anything placed on a numerical offset.
+
+## Amendment 2026-10-10: certified joint distances and seam-snapping windows (#294)
+
+The consumer (openbimrs/ifc#423) lowers stations without linking a
+provider (its ADR 0004), and IFC 4.3 ADD2 8.9.3.48.3 lets the previous
+segment's tangent govern a station "within precision limits" of a tangent
+discontinuity: the model's `Precision`, up to a millimetre, far wider than
+`ARC_LENGTH_TOLERANCE * max(1, s)`. So it snapped stations onto joints
+itself, which needs the joints' distances; since #289 those follow offset
+pieces whose length is a quadrature (beside an elevated or gradient curve,
+a spiral, a B-spline), an estimate the consumer cannot reproduce. Derived
+placements (openbimrs/ifc#353, #409, #418) go through a caller's
+`CurveEvaluator` and need the joints there. Option (b) of the issue, a path
+built from piece descriptions, was not taken: (c) covers the lowering
+without it.
+
+- **(a) Certified joint distances.** `CurveEvaluator::path_joint_distances(
+  path, tolerance)`, a defaulted trait method (a minor change; the default
+  refuses by a typed `UnsupportedInput` naming
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`, never handing out an estimate), answers
+  each interior joint with a `DistanceInterval { lower, upper }` that
+  CONTAINS its true distance and is no wider than `tolerance`: the sum of
+  the true lengths of the pieces before it, each in the path's convention
+  (an offset's own plan length beside a plan-measured base), between the
+  points the provider reads as each piece's ends. A length read from stored
+  data is exact (a line, a circle, a polyline, an intrinsic curve, a chain,
+  an elevated or banked curve, a constant offset of a line or of a circle in
+  planes normal to its axis), and a path of them has point intervals. The
+  reference provider answers with `CompositeBasis::joint_intervals`, so a
+  joint certified through the contract is the one a station is resolved
+  against. The conformance suite checks a line and quarter arc (the joint
+  at 10 exactly) and a widening offset of a line (`sqrt(101)`, a quadrature
+  for a provider), the tolerance refusals and a path with a gap; a provider
+  may refuse the query as unsupported.
+- **How a numerical length is bounded** (`axiolid-evaluate`'s
+  `station::certify`). Where the measured curve `P` is evaluated in closed
+  form at its native parameter -- a line, a circle, an ellipse, a B-spline,
+  and any offset of one, measured by arc length -- by chords and turning:
+  on a panel of width `h` the chord `c` is a lower bound of the arc; with
+  `M` a certified bound on `|P''|` there, every tangent lies within `beta =
+  h M / (2 m)` of the midpoint's, `m = |P'(mid)| - h M / 2`, so the chord's
+  projection on the midpoint tangent, and so `c`, is at least `cos(beta)` of
+  the arc. `M` is the base's certified `|B''|` (`bound::curve_derivative_
+  bounds*`, #232) plus the displacement's, from the unit-vector bounds
+  `|u'| <= |w'| / r`, `|u''| <= |w''| / r + 3 |w'|^2 / r^2` (`r` a lower
+  bound of `|w|`) for the tangent, the reference-up lateral, its up and a 3D
+  offset's `V x T`. Points carry `POINT_ROUNDING = 1e-14` of the largest
+  coordinate of the data; the rounding of a whole chain of chords is bounded
+  once, since the first-order parts telescope along it (a few `e`, not one
+  per chord). Where the base is parameterised by its plan arc length with a
+  curvature law -- an intrinsic curve or a chain (2D), the plan of an
+  elevated curve (measured by plan length) -- by the midpoint rule on the
+  offset's speed in closed form, `f = sqrt((1 + b' - a k)^2 + (a' + b k)^2 +
+  c'^2)` (`a` lateral, `b` along the plan tangent, `c` vertical, `c'` only
+  beside a 2D base measured in 3D; in a section frame beside an elevated
+  curve `b = longitudinal cos g - vertical sin g`, `tan g` the grade), within
+  `h^3 / 24 sup |f''|`, the supremum assembled from suprema of `k, k', k''`
+  and of `z'` to `z''''` by the Leibniz and chain rules, with `inf (1 + b' -
+  a k) > 0` (a cusp is refused). Panels are halved until each is within its
+  share of the tolerance; a budget of `MAX_CERTIFIED_PANELS` is
+  `BudgetExceeded`. Uncertifiable lengths are refused by a typed
+  `UnsupportedInput` naming `UNCERTIFIED_LENGTH`: an offset of a banked or a
+  3D intrinsic curve, of a chain's parametric piece, beside an intrinsic
+  profile in a leaning frame; an offset by distances along an ellipse or a
+  B-spline (its law runs in the base's numerical arc length, so its points
+  carry the inverse's estimate); a 3D offset direction that is not vertical
+  beside a plan-parameterised base; a base placed in a frame that tilts
+  `+Z`; a skewed frame; a tolerance the points' rounding already exceeds.
+- **(c) The seam-snapping window.** `OrientedCurveStation` gains
+  `seam_window` (`#[non_exhaustive]`, so additively), a distance in the
+  basis's station measure set by `with_seam_window`, default `0`; the graph
+  refuses a negative or non-finite one when the node is pushed. Wherever an
+  oriented station is resolved -- `station::resolve`, `station::placement`
+  and so every `InstanceAtStation`, compiled or used as a basis -- a station
+  whose window `[d - w, d + w]` contains exactly one seam whose frame may
+  jump (a composite's joint, a polyline's vertex, a B-spline's corner knot,
+  a grade, cant or pivot seam; not a smooth one) is read at that seam's own
+  distance, so the #263 rule takes over and its `SeamSide` names the piece;
+  its point is the seam's. The seam's distance is exact where it is read
+  from stored data, else a certified interval no wider than
+  `WINDOW_CERTIFICATION = 1e-3` of the window (`CompositeBasis::
+  snapped_distance`, `snapped_distance2`/`3`). An interval inside the window
+  is within it, one wholly outside is not; two seams within one window are
+  refused naming `SEAM_WINDOW_AMBIGUOUS`, a seam whose interval straddles the
+  window's edge naming `SEAM_WINDOW_STRADDLED`. A window of `0` is the
+  arc-length tolerance alone, every existing station's reading. The window
+  is a 1.1 field of the graph's wire format (ADR 0085 note).
+
+| Option | Why not |
+| --- | --- |
+| (b) A path built from piece descriptions, the kernel computing every distance | The consumer's lowering needs no joint distance once the station carries its window; the contract query covers derived placements. |
+| Snap with the kernel's estimated joint distances | The estimate is what the consumer could not trust; a station a hair outside the window would read the wrong side silently. |
+| A certified quadrature from derivative bounds of the speed (Gauss-Legendre with a remainder) | Needs bounds on the speed's higher derivatives, which for an offset involve the base's fourth and fifth; the chord bound needs only `|B''|`, `|B'''|`, already certified. |
+| Snap to the nearest seam when two lie in the window | The side would not say which seam the station means: a guessed piece. |
+| A window on `Station` or `CurveStation` | Both have public fields (#263's reasoning); a run decides its own sides. |
+
+Still open: certified lengths of offsets beside banked and 3D intrinsic
+curves, of offsets by distances along ellipses and B-splines, and of bases
+placed in tilted frames (refused by name); tolerances below about `1e-7` of
+the length on B-spline offsets (the chord bound's panel budget); a window on
+the curve-evaluation contract's `path_*` queries themselves (a caller with
+a provider snaps with `path_joint_distances`).

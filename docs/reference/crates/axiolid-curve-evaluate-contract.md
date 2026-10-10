@@ -26,7 +26,10 @@ Frenet: `x` tangent, `y` up, `z` right. The `*_on` queries read a seam side
 implement them refuses `Incoming` by name. The `path_*` queries read a
 `CurvePath`, pieces of curves laid end to end (a composite, a trim,
 segments placed at stations), as a composite station basis is read; a
-provider that does not implement them refuses them by name. This crate evaluates nothing itself; `axiolid-evaluate` provides the
+provider that does not implement them refuses them by name.
+`path_joint_distances` certifies where a path's joints lie, each a
+`DistanceInterval` containing its true distance, or is refused by name.
+This crate evaluates nothing itself; `axiolid-evaluate` provides the
 scalar implementation. See ADR 0063.
 
 ## Depends on
