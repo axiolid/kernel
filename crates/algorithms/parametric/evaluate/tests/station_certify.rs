@@ -566,6 +566,13 @@ fn an_atomic_curve_snaps_onto_its_vertex_or_corner_knot() {
         closed: false,
     });
     assert_eq!(snapped_distance2(&corner, 5.0 + 6e-4, 1e-3).unwrap(), 5.0);
+    // A smooth seam (the clothoid meeting its arc) has one frame: no
+    // snapping onto it.
+    let spiral = clothoid_then_arc();
+    assert_eq!(
+        snapped_distance2(&spiral, 100.0 - 6e-4, 1e-3).unwrap(),
+        100.0 - 6e-4
+    );
     assert_eq!(
         snapped_distance2(&corner, 5.0 + 2e-3, 1e-3).unwrap(),
         5.0 + 2e-3
