@@ -897,9 +897,19 @@ impl<'c> CompositeBasis<'c> {
     /// numerical piece's in proportion to its length, kept a little under
     /// the whole so the rounding of the sum fits.
     fn shares(&self, tolerance: Scalar) -> Vec<Scalar> {
+        self.shares_until(tolerance, Scalar::INFINITY)
+    }
+
+    /// [`Self::shares`] among the pieces starting by `until` (where the
+    /// kernel reads them), the only ones a sum up to there holds; a piece
+    /// past it keeps the share it would have had.
+    fn shares_until(&self, tolerance: Scalar, until: Scalar) -> Vec<Scalar> {
         let numeric: Scalar = self
             .pieces
             .iter()
+            .zip(&self.starts)
+            .filter(|(_, start)| **start <= until)
+            .map(|(piece, _)| piece)
             .filter(|piece| !piece.curve.measure_is_exact())
             .map(StationPiece::length)
             .sum();
@@ -958,7 +968,7 @@ impl<'c> CompositeBasis<'c> {
         tolerance: Scalar,
         until: Scalar,
     ) -> GeomResult<Vec<CertifiedSeam>> {
-        let shares = self.shares(tolerance);
+        let shares = self.shares_until(tolerance, until);
         let mut run = Running::ZERO;
         let mut out = Vec::new();
         for (k, piece) in self.pieces.iter().enumerate() {

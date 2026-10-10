@@ -1201,9 +1201,9 @@ impl<'a> PlanModel<'a> {
         Ok((forward, speed))
     }
 
-    /// Suprema over the panel `[va, vb]` of the forward speed's first
-    /// derivative and of `|f''|` given a lower bound `floor` of the forward
-    /// speed; `None` for `|f''|` while `floor` is not positive.
+    /// Suprema over the panel `[va, vb]` of the forward speed `A = 1 + b' -
+    /// a k` and the cross speed `B = a' + b k` and their first two
+    /// derivatives, and `sup |A'|` first, for the floor of `A`.
     fn bounds(&self, va: Scalar, vb: Scalar) -> GeomResult<(Scalar, Jet<3>, Jet<3>)> {
         let length = self.length_of_base();
         let (sa, sb) = (self.measure(va), self.measure(vb));
