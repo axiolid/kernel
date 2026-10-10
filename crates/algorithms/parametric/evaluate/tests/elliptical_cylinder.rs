@@ -133,3 +133,66 @@ fn a_non_positive_semi_axis_is_refused() {
         );
     }
 }
+
+/// A tilted frame, so no axis of the surface is a world axis.
+fn tilted(a: f64, b: f64) -> Surface {
+    let z = Vec3::new(0.3, -0.2, 1.0).normalize();
+    let x = Vec3::new(1.0, 0.0, -0.3).normalize();
+    Surface::EllipticalCylinder(EllipticalCylinder {
+        frame: Frame3 {
+            origin: Point3::new(1.0, -2.0, 0.5),
+            x,
+            y: z.cross(x),
+            z,
+        },
+        semi_axis_x: a,
+        semi_axis_y: b,
+    })
+}
+
+#[test]
+fn inversion_names_the_parameters_evaluation_took() {
+    // The angle is the affine image's (#287): the section coordinates over
+    // the semi-axes, not the point's polar angle, which differs off the
+    // axes of a 3:1 ellipse.
+    let value = tilted(3.0, 1.0);
+    let tolerance = axiolid_core::Tolerance::METRE;
+    let pi = core::f64::consts::PI;
+    for step in 0..36 {
+        let u = -pi + 0.1 + core::f64::consts::TAU * f64::from(step) / 36.0;
+        for v in [-1.5, 0.0, 2.25] {
+            let point = surface::evaluate(&value, u, v).expect("evaluate");
+            let (iu, iv) = surface::invert(&value, point, tolerance).expect("on the surface");
+            let wrapped = (iu - u + pi).rem_euclid(core::f64::consts::TAU) - pi;
+            assert!(wrapped.abs() < 1e-12, "u {u} read as {iu}");
+            assert!((iv - v).abs() < 1e-12, "v {v} read as {iv}");
+            let (lu, lv) = surface::locate(&value, point, tolerance).expect("located");
+            assert!((lu - iu).abs() < 1e-15 && (lv - iv).abs() < 1e-15);
+        }
+    }
+    // Inside the surface it is refused, not projected.
+    let centre = Point3::new(1.0, -2.0, 0.5);
+    let on = surface::evaluate(&value, 0.4, 0.0).expect("evaluate");
+    let inside = centre + (on - centre) * 0.5;
+    assert!(surface::invert(&value, inside, tolerance).is_err());
+}
+
+#[test]
+fn the_jet_matches_the_partials_and_differences() {
+    let value = tilted(3.0, 1.0);
+    let h = 1e-5;
+    for u in [0.0, 0.7, 2.0, -2.5] {
+        let v = 0.3;
+        let jet = surface::jet(&value, u, v).expect("a jet");
+        let (du, dv) = surface::partials(&value, u, v).expect("partials");
+        assert!((jet.du - du).length() < 1e-15 && (jet.dv - dv).length() < 1e-15);
+        let point = surface::evaluate(&value, u, v).expect("evaluate");
+        assert!((jet.point - point).length() < 1e-15);
+        let (ahead, _) = surface::partials(&value, u + h, v).expect("partials");
+        let (behind, _) = surface::partials(&value, u - h, v).expect("partials");
+        let duu = (ahead - behind) / (2.0 * h);
+        assert!((jet.duu - duu).length() < 1e-8, "{:?} vs {duu:?}", jet.duu);
+        assert_eq!(jet.duv, Vec3::ZERO);
+        assert_eq!(jet.dvv, Vec3::ZERO);
+    }
+}

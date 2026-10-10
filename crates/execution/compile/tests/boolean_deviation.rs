@@ -12,8 +12,8 @@
 //! (the search stops once it is within the budget).
 //!
 //! Cases: a placed wall with a round window, an I-beam with root fillets
-//! and round holes through its web, a slab with a round shaft, and a gable
-//! wall clipped by two roof half-spaces (#234) with a round window. A union
+//! and round holes through its web, a slab with a round shaft, a slab with
+//! oblique round openings (#287), and a gable wall clipped by two roof half-spaces (#234) with a round window. A union
 //! of placed operands, which the exact compiler refuses, stays unbounded
 //! with the refusal's name.
 
@@ -418,17 +418,20 @@ fn a_slab_with_a_round_shaft_is_certified_against_its_exact_result() {
 }
 
 /// A slab less an oblique round shaft and an oblique rounded opening,
-/// both extruded along directions leaning off the normal (#280).
+/// both extruded along directions leaning off the normal (#280), one up and
+/// one down (a reflected prism).
 ///
 /// Each operand is exact on its own: its arc walls are oblique circular
 /// cylinders, audited clean, of the sheared prism's closed-form volume.
-/// The exact boolean does not yet cut such a wall and refuses by name, so
-/// the mesh's report stays unbounded with that name: it is never certified
-/// against a solid that is not the operands' boolean. Before #280 the
-/// rounded operand stood its corner walls upright on the profile plane, a
-/// shear away from the mesh's.
+/// Since #287 the exact boolean cuts such a wall (a slab face meets it in
+/// an ellipse, closed form), so the mesh is certified against the exact
+/// difference, whose volume is the slab's less each opening's plan area
+/// times the slab's depth: a horizontal section of an oblique prism is its
+/// profile, moved. Before #287 the report stayed unbounded under the
+/// refusal's name; before #280 the rounded operand stood its corner walls
+/// upright on the profile plane, a shear away from the mesh's.
 #[test]
-fn a_slab_with_oblique_round_openings_is_never_certified_against_a_wrong_solid() {
+fn a_slab_with_oblique_round_openings_is_certified_against_its_exact_result() {
     let budget = 1e-3;
     let options = options(budget);
     let mut operands = Vec::new();
@@ -458,19 +461,9 @@ fn a_slab_with_oblique_round_openings_is_never_certified_against_a_wrong_solid()
         },
         &options,
     );
-    let (graph, root, _, report, _) = case;
-    let refusal = "exact boolean over a curve or surface it cannot evaluate";
-    assert_eq!(report.bound, None, "{report:?}");
-    assert!(
-        report
-            .contributions
-            .iter()
-            .all(|c| c.bound == DeviationBound::Unbounded(refusal)),
-        "{report:?}"
-    );
-    assert!(ReferenceExactCompiler::new()
-        .compile_exact(&graph, root, &options)
-        .is_err());
+    let (graph, root) = (case.0.clone(), case.1);
+    assert_measured("slab, oblique round openings", case, &options, 2.0);
+    let mut removed = 0.0;
     for (operand, area, lean) in operands {
         let exact = ReferenceExactCompiler::new()
             .compile_exact(&graph, operand, &options)
@@ -486,7 +479,21 @@ fn a_slab_with_oblique_round_openings_is_never_certified_against_a_wrong_solid()
             (volume - expected).abs() <= 1e-9 * expected,
             "volume {volume}, expected {expected}"
         );
+        removed += area * 0.25;
     }
+    let exact = ReferenceExactCompiler::new()
+        .compile_exact(&graph, root, &options)
+        .expect("the exact difference");
+    let health = axiolid_brep_audit::geometric_audit(&exact, options.tolerance());
+    assert!(health.is_consistent(), "{:?}", health.defects());
+    let volume = axiolid_measure::exact_properties(&exact, options.tolerance())
+        .expect("measurable")
+        .signed_volume;
+    let expected = 3.0 - removed;
+    assert!(
+        (volume - expected).abs() <= 1e-9 * expected,
+        "volume {volume}, expected {expected}"
+    );
 }
 
 /// A gable wall under two roof planes `z = 2.4 -+ 0.3 x` (world

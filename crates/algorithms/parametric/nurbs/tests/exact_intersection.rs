@@ -8,7 +8,7 @@
 use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_curve::Curve3;
 use axiolid_nurbs::{exact_surface_intersection, Derivation, ExactIntersectionRefusal};
-use axiolid_surface::{Cone, Cylinder, Plane, Sphere, Surface, Torus};
+use axiolid_surface::{Cone, Cylinder, EllipticalCylinder, Plane, Sphere, Surface, Torus};
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -102,6 +102,15 @@ fn residual(surface: &Surface, point: Point3) -> f64 {
             let radial = (offset - axis * height).length();
             let planar = radial - torus.major_radius;
             planar * planar + height * height - torus.minor_radius * torus.minor_radius
+        }
+        Surface::EllipticalCylinder(c) => {
+            // (x / a)^2 + (y / b)^2 = 1 in the frame, scaled to a length.
+            let offset = point - c.frame.origin;
+            let (x, y) = (
+                offset.dot(c.frame.x) / c.semi_axis_x,
+                offset.dot(c.frame.y) / c.semi_axis_y,
+            );
+            ((x * x + y * y).sqrt() - 1.0) * c.semi_axis_x.min(c.semi_axis_y)
         }
         other => panic!("no residual for {other:?}"),
     }
@@ -1053,5 +1062,227 @@ fn a_plane_perpendicular_to_an_oblique_cone_axis_cuts_a_circle() {
         matches!(result.single(), Curve3::Circle(_)),
         "got {:?}",
         result.single()
+    );
+}
+
+// --- elliptical cylinders (#287) ---------------------------------------------
+
+/// The oblique wall a circle of radius `r` about the origin in `z = 0`
+/// sweeps along `d` (#280): axis `d`, semi-axes `r` across the lean and
+/// `r d_z` along it.
+fn oblique_wall(r: f64, d: Vec3) -> Surface {
+    let z = d.normalize();
+    let plan = Vec3::new(d.x, d.y, 0.0).normalize();
+    let across = Vec3::new(-plan.y, plan.x, 0.0);
+    Surface::EllipticalCylinder(EllipticalCylinder {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: across,
+            y: z.cross(across),
+            z,
+        },
+        semi_axis_x: r,
+        semi_axis_y: r * z.z,
+    })
+}
+
+fn plane_through(origin: Point3, normal: Vec3) -> Surface {
+    Surface::Plane(Plane {
+        frame: frame(origin, normal),
+    })
+}
+
+#[test]
+fn a_level_plane_cuts_an_oblique_wall_in_its_circle() {
+    // `z = c` cuts the wall back in the swept circle, moved along `d`: up
+    // to the rounding of `d`, an ellipse of semi-axes `r` and `r`.
+    let r = 0.3;
+    let d = Vec3::new(0.3, -0.2, 1.0);
+    let wall = oblique_wall(r, d);
+    for c in [0.0, 0.7, -2.5] {
+        let plane = plane_through(Point3::new(0.0, 0.0, c), Vec3::Z);
+        let result = exact_surface_intersection(&wall, &plane).expect("derivable");
+        assert_eq!(
+            result.derivation,
+            Derivation::EllipticalCylinderPlaneSection
+        );
+        let curve = result.single();
+        assert_on_both(&wall, &plane, curve);
+        let (centre, sizes) = match curve {
+            Curve3::Ellipse(e) => (e.frame.origin, [e.semi_axis_x, e.semi_axis_y]),
+            Curve3::Circle(c) => (c.frame.origin, [c.radius, c.radius]),
+            other => panic!("expected a conic, got {other:?}"),
+        };
+        let moved = d * (c / d.z);
+        assert!(
+            (centre - Point3::ZERO - moved).length() < 1e-12,
+            "{centre:?}"
+        );
+        for size in sizes {
+            assert!((size - r).abs() < 1e-12 * r, "{sizes:?}");
+        }
+        // Either argument order.
+        let swapped = exact_surface_intersection(&plane, &wall).expect("derivable");
+        assert_on_both(&wall, &plane, swapped.single());
+    }
+}
+
+#[test]
+fn a_tilted_plane_cuts_an_elliptical_cylinder_in_an_ellipse() {
+    // A normal with parts along both semi-axes: the conjugate semi-diameters
+    // are not perpendicular, so the principal axes are turned.
+    let wall = oblique_wall(0.5, Vec3::new(0.2, 0.4, 1.0));
+    let plane = plane_through(Point3::new(0.1, -0.3, 0.4), Vec3::new(0.7, -0.5, 1.0));
+    let result = exact_surface_intersection(&plane, &wall).expect("derivable");
+    assert_eq!(
+        result.derivation,
+        Derivation::EllipticalCylinderPlaneSection
+    );
+    let Curve3::Ellipse(ellipse) = result.single() else {
+        panic!("expected an ellipse, got {:?}", result.single());
+    };
+    assert!(ellipse.frame.x.dot(ellipse.frame.y).abs() < 1e-12);
+    assert_on_both(&wall, &plane, result.single());
+}
+
+#[test]
+fn an_elliptical_cylinder_is_cut_in_an_exact_circle() {
+    // Semi-axes 5 and 3 and the normal (0, 4, 3): the conjugate
+    // semi-diameters (5, 0, 0) and (0, 3, -4) are perpendicular and both 5
+    // long, exactly.
+    let cylinder = Surface::EllipticalCylinder(EllipticalCylinder {
+        frame: Frame3 {
+            origin: Point3::new(1.0, 2.0, 3.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        semi_axis_x: 5.0,
+        semi_axis_y: 3.0,
+    });
+    let plane = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::new(1.0, 2.0, 5.0), Vec3::new(0.0, 4.0, 3.0)),
+    });
+    let result = exact_surface_intersection(&cylinder, &plane).expect("derivable");
+    let Curve3::Circle(circle) = result.single() else {
+        panic!("expected a circle, got {:?}", result.single());
+    };
+    assert_eq!(circle.radius, 5.0);
+    assert_on_both(&cylinder, &plane, result.single());
+}
+
+#[test]
+fn a_plane_along_an_elliptical_cylinder_cuts_rulings_or_touches() {
+    let wall = oblique_wall(0.5, Vec3::new(0.5, 0.0, 1.0));
+    // Planes `y = c` contain the axis direction `(0.5, 0, 1)`; the
+    // cross-section's half-width across the lean is `0.5`.
+    let along = |c: f64| plane_through(Point3::new(0.0, c, 0.0), Vec3::Y);
+    let result = exact_surface_intersection(&wall, &along(0.2)).expect("two rulings");
+    assert_eq!(
+        result.derivation,
+        Derivation::EllipticalCylinderPlaneRulings
+    );
+    assert_eq!(result.branches.len(), 2);
+    for branch in &result.branches {
+        assert!(matches!(branch, Curve3::Line(_)));
+        assert_on_both(&wall, &along(0.2), branch);
+    }
+    let origins: Vec<Point3> = result
+        .branches
+        .iter()
+        .map(|b| match b {
+            Curve3::Line(l) => l.origin,
+            _ => unreachable!(),
+        })
+        .collect();
+    assert!((origins[0] - origins[1]).length() > 0.1);
+    // Exactly tangent: one ruling.
+    let touching = exact_surface_intersection(&wall, &along(0.5)).expect("one ruling");
+    assert_eq!(touching.branches.len(), 1);
+    assert_on_both(&wall, &along(0.5), &touching.branches[0]);
+    assert_eq!(
+        exact_surface_intersection(&wall, &along(0.75)),
+        Err(ExactIntersectionRefusal::Disjoint)
+    );
+    // A plane along the axis whose normal has parts on both semi-axes.
+    let oval = Surface::EllipticalCylinder(EllipticalCylinder {
+        frame: Frame3 {
+            origin: Point3::new(0.5, -1.0, 2.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        semi_axis_x: 2.0,
+        semi_axis_y: 1.0,
+    });
+    let slanted = Surface::Plane(Plane {
+        frame: frame_keeping_axis_length(Point3::new(1.0, -1.0, 0.0), Vec3::new(1.0, 2.0, 0.0)),
+    });
+    let result = exact_surface_intersection(&slanted, &oval).expect("two rulings");
+    assert_eq!(
+        result.derivation,
+        Derivation::EllipticalCylinderPlaneRulings
+    );
+    assert_eq!(result.branches.len(), 2);
+    for branch in &result.branches {
+        assert_on_both(&oval, &slanted, branch);
+    }
+}
+
+#[test]
+fn elliptical_cylinders_along_one_axis_meet_in_rulings() {
+    let ellipse = |origin: Point3, a: f64, b: f64| {
+        Surface::EllipticalCylinder(EllipticalCylinder {
+            frame: Frame3 {
+                origin,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
+            },
+            semi_axis_x: a,
+            semi_axis_y: b,
+        })
+    };
+    let first = ellipse(Point3::ZERO, 2.0, 1.0);
+    // The circle of radius 1 about (-2, 1) passes through the ellipse's
+    // vertex (-2, 0), at `u = pi`, and crosses it once more.
+    let round = Surface::Cylinder(Cylinder {
+        frame: Frame3 {
+            origin: Point3::new(-2.0, 1.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius: 1.0,
+    });
+    let result = exact_surface_intersection(&first, &round).expect("rulings");
+    assert_eq!(
+        result.derivation,
+        Derivation::ParallelEllipticalCylinderRulings
+    );
+    assert_eq!(result.branches.len(), 2, "{:?}", result.branches);
+    for branch in &result.branches {
+        assert_on_both(&first, &round, branch);
+    }
+    assert!(result.branches.iter().any(|b| match b {
+        Curve3::Line(l) => (l.origin - Point3::new(-2.0, 0.0, 0.0)).length() < 1e-12,
+        _ => false,
+    }));
+    // Two equal ellipses shifted across: the two crossings of the
+    // cross-sections, each lifted to a ruling.
+    let second = ellipse(Point3::new(0.0, 0.5, 0.0), 2.0, 1.0);
+    let result = exact_surface_intersection(&first, &second).expect("rulings");
+    assert_eq!(result.branches.len(), 2, "{:?}", result.branches);
+    for branch in &result.branches {
+        assert_on_both(&first, &second, branch);
+    }
+    // One surface twice is not a curve; nested ones miss.
+    assert_eq!(
+        exact_surface_intersection(&first, &first.clone()),
+        Err(ExactIntersectionRefusal::NotRegularCurve)
+    );
+    assert_eq!(
+        exact_surface_intersection(&first, &ellipse(Point3::ZERO, 1.0, 0.5)),
+        Err(ExactIntersectionRefusal::Disjoint)
     );
 }

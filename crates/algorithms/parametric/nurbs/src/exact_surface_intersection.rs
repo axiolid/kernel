@@ -14,7 +14,7 @@ use axiolid_core::{Frame3, Interval, Point3, Scalar, Vec3};
 use axiolid_curve::{Circle3, Curve3, Ellipse3};
 use axiolid_exact::{Arith, Dyadic};
 use axiolid_guarantees::Sign;
-use axiolid_surface::{Cylinder, Plane, Sphere, Surface};
+use axiolid_surface::{Cylinder, EllipticalCylinder, Plane, Sphere, Surface};
 
 // --- exact decisions ---------------------------------------------------------
 //
@@ -232,6 +232,21 @@ pub enum Derivation {
     /// sub-patch pairs until no closed loop can hide in one, seeded where
     /// sub-patch edges cross, and followed on both surfaces (ADR 0077).
     PairTrace,
+    /// A plane not parallel to an elliptical cylinder's axis cuts the
+    /// conjugate semi-diameters `a (X - Z n.X / n.Z)` and
+    /// `b (Y - Z n.Y / n.Z)` about the point where the axis pierces it: an
+    /// ellipse, or a circle where they are perpendicular and equally long
+    /// (#287).
+    EllipticalCylinderPlaneSection,
+    /// A plane parallel to an elliptical cylinder's axis cuts one or two
+    /// rulings, where its trace on the cross-section meets the ellipse
+    /// (#287).
+    EllipticalCylinderPlaneRulings,
+    /// Two cylinders, circular or elliptical, with parallel axes meet in
+    /// the rulings over the angles where their cross-sections meet: the
+    /// real roots of the other's equation along the carrier's ellipse, a
+    /// quartic in the half-angle, isolated exactly (#287).
+    ParallelEllipticalCylinderRulings,
 }
 
 /// Derive the exact intersection curve of two elementary surfaces.
@@ -316,6 +331,8 @@ fn closed_form(
         (Surface::Cone(c), Surface::Plane(p)) | (Surface::Plane(p), Surface::Cone(c)) => {
             cone_plane(c, p)
         }
+        (Surface::EllipticalCylinder(c), Surface::Plane(p))
+        | (Surface::Plane(p), Surface::EllipticalCylinder(c)) => elliptical_cylinder_plane(c, p),
         (Surface::Sphere(a), Surface::Sphere(b)) => sphere_sphere(a, b),
         (Surface::Cylinder(a), Surface::Cylinder(b)) => cylinder_cylinder(a, b),
         // Every remaining elementary pair is covered by the shared
@@ -891,5 +908,183 @@ fn cylinder_plane_parallel(
     Ok(ExactIntersectionCurve::whole(
         branches,
         Derivation::CylinderPlaneParallelRulings,
+    ))
+}
+
+/// A plane cuts an elliptical cylinder in an ellipse, a circle, rulings or
+/// nothing (#287).
+///
+/// Identity: the surface is `P(u, v) = O + a cos(u) X + b sin(u) Y + v Z`
+/// in its frame, the plane `n . (p - Q) = 0`. With `n_X = n . X`,
+/// `n_Y = n . Y`, `n_Z = n . Z` and `k = n . (O - Q)`, the section is
+/// `a n_X cos(u) + b n_Y sin(u) + n_Z v + k = 0`.
+///
+/// - `n_Z != 0` (decided exactly): `v` is a function of `u`, and the
+///   section is `C + cos(u) A + sin(u) B` with `C = O - Z k / n_Z`,
+///   `A = a (X - Z n_X / n_Z)`, `B = b (Y - Z n_Y / n_Z)`: an ellipse with
+///   conjugate semi-diameters `A`, `B`, turned to its principal axes. Its
+///   parameter is not the surface's `u`; a pcurve reads it by the plane.
+///   With `A . B = 0` and `|A| = |B|` exactly (in the frame's axes as
+///   given, read as orthonormal), it is a circle; a plane `z = c` across
+///   a wall swept obliquely from a circle in `z = 0` cuts the circle back
+///   only up to the rounding of the sweep direction, and is then the
+///   ellipse its numbers define.
+/// - `n_Z = 0`: the plane is parallel to the axis, and its trace on the
+///   cross-section is the line `a n_X s + b n_Y t = -k` in
+///   `(s, t) = (cos u, sin u)`, which meets the unit circle where
+///   `R^2 = a^2 n_X^2 + b^2 n_Y^2` exceeds `k^2` (two rulings), equals it
+///   (one, touching) or falls short (none). The comparison is exact.
+fn elliptical_cylinder_plane(
+    cylinder: &EllipticalCylinder,
+    plane: &Plane,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    let bad = ExactIntersectionRefusal::DegenerateFrame;
+    let (a, b) = (cylinder.semi_axis_x, cylinder.semi_axis_y);
+    if !(a > 0.0 && b > 0.0 && a.is_finite() && b.is_finite()) {
+        return Err(bad);
+    }
+    let frame = cylinder.frame;
+    let ex = exact3(frame.x).ok_or(bad.clone())?;
+    let ey = exact3(frame.y).ok_or(bad.clone())?;
+    let ez = exact3(frame.z).ok_or(bad.clone())?;
+    let en = exact3(plane.frame.z).ok_or(bad.clone())?;
+    let eo = exact3(frame.origin).ok_or(bad.clone())?;
+    let eq = exact3(plane.frame.origin).ok_or(bad.clone())?;
+    let (ea, eb) = (
+        Dyadic::try_from_f64(a).ok_or(bad.clone())?,
+        Dyadic::try_from_f64(b).ok_or(bad.clone())?,
+    );
+    let (nx, ny, nz) = (edot(&en, &ex), edot(&en, &ey), edot(&en, &ez));
+    let k = edot(&en, &esub(&eo, &eq));
+    if esign(&nz) == Sign::Zero {
+        return elliptical_cylinder_plane_rulings(cylinder, &ea.mul(&nx), &eb.mul(&ny), &k);
+    }
+    // Exactly a circle: `A . B = 0` and `|A|^2 = |B|^2`, each times `n_Z^2`.
+    let nz2 = nz.square();
+    let along = ea.mul(&eb).mul(&nx).mul(&ny);
+    let across_a = ea.square().mul(&nz2.add(&nx.square()));
+    let across_b = eb.square().mul(&nz2.add(&ny.square()));
+    let circle = esign(&along) == Sign::Zero && esign(&across_a.sub(&across_b)) == Sign::Zero;
+    let (fx, fy, fz) = (nx.to_f64(), ny.to_f64(), nz.to_f64());
+    let z = frame.z;
+    let centre = frame.origin - z * (k.to_f64() / fz);
+    let first = (frame.x - z * (fx / fz)) * a;
+    let second = (frame.y - z * (fy / fz)) * b;
+    let normal = {
+        let n = plane.frame.z;
+        let length = n.length();
+        if length == 0.0 || !length.is_finite() {
+            return Err(bad);
+        }
+        n / length
+    };
+    if !centre.is_finite() || !first.is_finite() || !second.is_finite() {
+        return Err(bad);
+    }
+    let curve = if circle {
+        let radius = first.length();
+        let x = first / radius;
+        let y = normal.cross(x);
+        if !(radius > 0.0 && x.is_finite() && y.is_finite()) {
+            return Err(bad);
+        }
+        Curve3::Circle(Circle3 {
+            frame: Frame3 {
+                origin: centre,
+                x,
+                y,
+                z: normal,
+            },
+            radius,
+        })
+    } else {
+        // Principal axes of the conjugate pair: `t0` with
+        // `tan(2 t0) = 2 A.B / (A.A - B.B)`; `A.B = 0` exactly keeps them.
+        let t0 = if esign(&along) == Sign::Zero {
+            0.0
+        } else {
+            0.5 * (2.0 * first.dot(second)).atan2(first.dot(first) - second.dot(second))
+        };
+        let (s0, c0) = t0.sin_cos();
+        let major = first * c0 + second * s0;
+        let minor = second * c0 - first * s0;
+        let (semi_x, semi_y) = (major.length(), minor.length());
+        if !(semi_x > 0.0 && semi_y > 0.0 && semi_x.is_finite() && semi_y.is_finite()) {
+            return Err(bad);
+        }
+        let x = major / semi_x;
+        // The plane's own normal orients the frame; the second axis is
+        // the principal direction perpendicular to the first within it.
+        let y = normal.cross(x);
+        if !x.is_finite() || !y.is_finite() {
+            return Err(bad);
+        }
+        Curve3::Ellipse(Ellipse3 {
+            frame: Frame3 {
+                origin: centre,
+                x,
+                y,
+                z: normal,
+            },
+            semi_axis_x: semi_x,
+            semi_axis_y: semi_y,
+        })
+    };
+    Ok(ExactIntersectionCurve::whole(
+        vec![curve],
+        Derivation::EllipticalCylinderPlaneSection,
+    ))
+}
+
+/// The rulings a plane parallel to an elliptical cylinder's axis cuts:
+/// where the line `ma s + mb t = -k` meets the unit circle in
+/// `(s, t) = (cos u, sin u)`, lifted to the surface (#287).
+fn elliptical_cylinder_plane_rulings(
+    cylinder: &EllipticalCylinder,
+    ma: &Dyadic,
+    mb: &Dyadic,
+    k: &Dyadic,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    let bad = ExactIntersectionRefusal::DegenerateFrame;
+    let reach = ma.square().add(&mb.square());
+    if esign(&reach) == Sign::Zero {
+        return Err(bad);
+    }
+    let gap = reach.sub(&k.square());
+    let touching = match esign(&gap) {
+        Sign::Positive => false,
+        Sign::Zero => true,
+        _ => return Err(ExactIntersectionRefusal::Disjoint),
+    };
+    let (mx, my, kf) = (ma.to_f64(), mb.to_f64(), k.to_f64());
+    let r2 = reach.to_f64();
+    let r = r2.sqrt();
+    // The foot of the trace nearest the centre, and its direction.
+    let (fs, ft) = (-kf * mx / r2, -kf * my / r2);
+    let (ws, wt) = (-my / r, mx / r);
+    let half = if touching {
+        0.0
+    } else {
+        (gap.to_f64() / r2).sqrt()
+    };
+    let offsets: &[Scalar] = if touching { &[0.0] } else { &[1.0, -1.0] };
+    let frame = cylinder.frame;
+    let mut branches = Vec::with_capacity(offsets.len());
+    for sign in offsets {
+        let (s, t) = (fs + sign * half * ws, ft + sign * half * wt);
+        let origin = frame.origin
+            + frame.x * (cylinder.semi_axis_x * s)
+            + frame.y * (cylinder.semi_axis_y * t);
+        if !origin.is_finite() || !frame.z.is_finite() {
+            return Err(bad);
+        }
+        branches.push(Curve3::Line(axiolid_curve::Line3 {
+            origin,
+            direction: frame.z,
+        }));
+    }
+    Ok(ExactIntersectionCurve::whole(
+        branches,
+        Derivation::EllipticalCylinderPlaneRulings,
     ))
 }

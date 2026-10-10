@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Booleans cut tilted elliptical-cylinder walls, the round walls an
+  oblique exact extrusion sweeps from arcs and circles (#287), upward or
+  downward. A slab less an oblique round shaft or rounded opening was
+  refused as "a curve or surface could not be evaluated"; it is now
+  exact (an empty report, also at `Tolerance::ZERO`) with the volume
+  area x depth. A plane's cut, an ellipse or circle, gets the closed-form
+  `Sinusoid2` pcurve in the wall's angle, and a ruling a vertical line.
+  Whether a plane is parallel to such a wall's axis or touches it is
+  decided by exact predicates only, never read within tolerance.
+
+
 ## [0.1.8] - 2026-10-09
 
 ### Fixed

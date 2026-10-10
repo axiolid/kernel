@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `surface::invert` (and so `locate`) and `surface::jet` take an
+  elliptical cylinder (#287): the angle is that of the section
+  coordinates over the semi-axes, the inverse of `evaluate`'s affine
+  image of the circle. They were refused as unsupported. `project` still
+  refuses it: the closest point on an ellipse has no closed form.
+
+
 ## [0.3.9] - 2026-10-09
 
 ### Added

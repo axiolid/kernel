@@ -71,6 +71,19 @@
 //! placed is refused ([`BooleanError::UnsupportedContact`]). An exactly
 //! tangent pair is decided by the exact predicates instead.
 //!
+//! **Oblique round walls (#287).** An exact extrusion along a leaning
+//! direction sweeps each arc of its profile into a tilted
+//! [`EllipticalCylinder`](axiolid_surface::EllipticalCylinder) whose axis
+//! is the direction. Such a face is evaluated, inverted (the angle of the
+//! section coordinates over the semi-axes) and classified like any other.
+//! A plane meets it in an ellipse, or a circle where it is exactly one, and
+//! a plane along its axis in rulings; a cylinder or another such wall on an
+//! exactly parallel axis meets it in rulings: all closed forms, cased by
+//! exact predicates, with closed-form pcurves. Other pairs take the ruled
+//! and traced sections as before. The within-tolerance plane/cylinder
+//! readings above are for right cylinders only: whether a plane is
+//! parallel to such a wall's axis or touches it is always decided exactly.
+//!
 //! **A hole touching a fillet (#249).** A round hole touching a flange
 //! with root fillets touches each fillet too, and the perpendicular
 //! cylinders meet in two loops crossing at the fillet/flange edge. The

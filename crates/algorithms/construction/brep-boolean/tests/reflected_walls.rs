@@ -317,7 +317,6 @@ fn bite_area_in_unit_box(cy: f64) -> f64 {
 }
 
 #[test]
-#[ignore = "TODO(#287): a tilted elliptical-cylinder wall is not cut yet, either way up"]
 fn a_box_minus_an_oblique_downward_arc_prism_has_the_closed_form_volume() {
     // Swept down from `z = 5` along `(a, 0, -1)`: at height `z` the profile
     // is moved `s = a (5 - z)` along `x`, so the arc's cut over the wall's
@@ -505,7 +504,6 @@ fn oblique_disk(r: f64) -> (ExactBRep, Vec3) {
 }
 
 #[test]
-#[ignore = "TODO(#287): the boolean takes no elliptical-cylinder face yet, either way up"]
 fn a_reflected_elliptical_cylinder_cut_by_a_box() {
     let r = 0.5;
     let (prism, direction) = oblique_disk(r);

@@ -29,7 +29,10 @@
 //! # Scope
 //!
 //! Carriers: cylinder, elliptical cylinder, and a cone cut by a plane.
-//! Quadrics: plane, sphere, cylinder, elliptical cylinder. A cone cut by a
+//! Quadrics: plane, sphere, cylinder, elliptical cylinder. A cylinder
+//! carrier and a cylinder, circular or elliptical, on an exactly parallel
+//! axis leave `a = b = 0`: the section is then the rulings over the exact
+//! roots of `c(u)` (#287). A cone cut by a
 //! curved quadric needs its nappe decided along a square-root branch and is
 //! refused by name, as are tori and B-spline surfaces.
 
@@ -559,6 +562,15 @@ pub(crate) fn ruled_section(
         // Linear in v (a plane): v = -c / b wherever b != 0, and on a cone
         // only on the modelled nappe, r + s v >= 0, i.e. (r b - s c) b >= 0.
         if is_zero(&b) {
+            // A cylinder, circular or elliptical, whose axis is exactly
+            // parallel to the carrier's: the equation `c(u) = 0` no longer
+            // depends on `v`, so the section is the rulings over its roots
+            // (#287).
+            if curve_carrier.slope == 0.0
+                && matches!(other, Surface::Cylinder(_) | Surface::EllipticalCylinder(_))
+            {
+                return parallel_rulings(&c, curve_carrier).map(Some);
+            }
             // The plane contains every ruling direction: parallel to a
             // cylinder's axis, handled by the dedicated rulings path.
             return Ok(None);
@@ -734,6 +746,53 @@ pub(crate) fn ruled_section(
         spans_out,
         Derivation::RuledQuadricSection,
     )))
+}
+
+/// The rulings of a cylinder carrier, circular or elliptical, over the
+/// angles where `c(u) = 0`: the other cylinder's equation at the carrier's
+/// cross-section, which no longer depends on `v` when the axes are exactly
+/// parallel (#287). Under `t = tan(u/2)`, `c (1 + t^2)^2` is an integer
+/// quartic whose real roots are isolated exactly; `u = pi` is a root where
+/// `c(pi)` is exactly zero. Each angle is rounded once and lifted to the
+/// line `A0(u) + v Z`. A `c` that vanishes everywhere is one surface
+/// twice, not a curve; one with no root misses.
+fn parallel_rulings(
+    c: &ETrig,
+    carrier: RuledCarrier,
+) -> Result<ExactIntersectionCurve, ExactIntersectionRefusal> {
+    if is_zero(c) {
+        return Err(ExactIntersectionRefusal::NotRegularCurve);
+    }
+    let mut angles: Vec<Scalar> = angle_roots(&in_half_angle(c))
+        .into_iter()
+        .map(|(_, _, u)| u)
+        .collect();
+    if at_pi(c).sign() == Some(Sign::Zero) {
+        angles.push(core::f64::consts::PI);
+    }
+    angles.sort_by(Scalar::total_cmp);
+    angles.dedup();
+    if angles.is_empty() {
+        return Err(ExactIntersectionRefusal::Disjoint);
+    }
+    let frame = carrier.frame;
+    let mut branches = Vec::with_capacity(angles.len());
+    for u in angles {
+        let (s, co) = u.sin_cos();
+        let origin =
+            frame.origin + frame.x * (carrier.x_radius * co) + frame.y * (carrier.y_radius * s);
+        if !origin.is_finite() || !frame.z.is_finite() {
+            return Err(refuse());
+        }
+        branches.push(Curve3::Line(axiolid_curve::Line3 {
+            origin,
+            direction: frame.z,
+        }));
+    }
+    Ok(ExactIntersectionCurve::whole(
+        branches,
+        Derivation::ParallelEllipticalCylinderRulings,
+    ))
 }
 
 /// Exact value of a dyadic-coefficient polynomial at `t`.

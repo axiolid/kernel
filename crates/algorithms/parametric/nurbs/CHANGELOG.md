@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `exact_surface_intersection` cuts an elliptical cylinder by a plane in
+  closed form (#287): the ellipse its conjugate semi-diameters span (a
+  circle where they are exactly perpendicular and equal), or one or two
+  rulings for a plane along the axis, cased exactly
+  (`Derivation::EllipticalCylinderPlaneSection`,
+  `Derivation::EllipticalCylinderPlaneRulings`). It was a ruled section.
+- Two cylinders, circular or elliptical, at least one elliptical, on
+  exactly parallel axes meet in the rulings over the exactly isolated
+  roots of a half-angle quartic
+  (`Derivation::ParallelEllipticalCylinderRulings`, #287). The pair was
+  refused.
+
+
 ## [0.3.5] - 2026-10-02
 
 ### Added

@@ -7,7 +7,11 @@
 //!    two surfaces: on a plane a line, circle or ellipse maps to its own
 //!    family in the plane's coordinates; on a cylinder a ruling is a vertical
 //!    line, a circle about the axis a horizontal one, and a plane's oblique
-//!    cut a `Sinusoid2` (ADR 0071). Every other section on every analytic
+//!    cut a `Sinusoid2` (ADR 0071). A tilted elliptical cylinder (an oblique
+//!    extrusion's round wall, #287) is the same in its own angle: a ruling
+//!    is a vertical line, and a plane's cut, circle or ellipse, the
+//!    `Sinusoid2` `v = mean + cosine cos u + sine sin u` read off the
+//!    plane. Every other section on every analytic
 //!    face -- a sphere, cone or torus, or a curved section on a plane or
 //!    cylinder -- gets the implicit pcurve of ADR 0077: the other surface's
 //!    equation read in the face's parameters, traced once per surface over
@@ -445,7 +449,7 @@ fn section_piece(
                 Surface::Plane(_),
                 Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
             ) | (
-                Surface::Cylinder(_),
+                Surface::Cylinder(_) | Surface::EllipticalCylinder(_),
                 Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
             )
         );
@@ -911,6 +915,41 @@ fn section_piece_from(
             let pcurve = Curve2::Sinusoid(wave);
             let span = angle_span(surface, section, start_uv.x, tolerance)?;
             (pcurve, span)
+        }
+        (Surface::EllipticalCylinder(c), Curve3::Line(l)) => {
+            // A ruling (#287): constant angle, `v` linear in the parameter.
+            let rise = l.direction.dot(c.frame.z);
+            let pcurve = Curve2::Line(Line2 {
+                origin: start_uv - Vec2::new(0.0, rise) * section.span.start,
+                direction: Vec2::new(0.0, rise),
+            });
+            (pcurve, section.span)
+        }
+        (Surface::EllipticalCylinder(c), Curve3::Circle(_) | Curve3::Ellipse(_)) => {
+            // A plane's cut (#287), circle or ellipse alike: the plane
+            // `n . (p - q) = 0` through `S(u, v) = O + a cos u X +
+            // b sin u Y + v Z` gives `v = mean + cosine cos u + sine sin u`
+            // with the angle itself as parameter, as on a right cylinder.
+            let (origin, n) = match &section.curve {
+                Curve3::Circle(circle) => {
+                    (circle.frame.origin, circle.frame.x.cross(circle.frame.y))
+                }
+                Curve3::Ellipse(ellipse) => {
+                    (ellipse.frame.origin, ellipse.frame.x.cross(ellipse.frame.y))
+                }
+                _ => return Err(BooleanError::UnsupportedSplit),
+            };
+            let nz = n.dot(c.frame.z);
+            if nz == 0.0 {
+                return Err(BooleanError::UnsupportedSplit);
+            }
+            let wave = Sinusoid2 {
+                mean: n.dot(origin - c.frame.origin) / nz,
+                cosine: -c.semi_axis_x * n.dot(c.frame.x) / nz,
+                sine: -c.semi_axis_y * n.dot(c.frame.y) / nz,
+            };
+            let span = angle_span(surface, section, start_uv.x, tolerance)?;
+            (Curve2::Sinusoid(wave), span)
         }
         _ => return Err(BooleanError::UnsupportedSplit),
     };

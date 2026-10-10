@@ -372,6 +372,20 @@ pub fn jet(surface: &Surface, u: Scalar, v: Scalar) -> GeomResult<SurfaceJet> {
                 dvv: direct(&torus.frame, Vec3::new(-r * cv * cu, -r * cv * su, -r * sv)),
             }
         }
+        Surface::EllipticalCylinder(c) => {
+            positive(c.semi_axis_x, "elliptical cylinder semi-axis x")?;
+            positive(c.semi_axis_y, "elliptical cylinder semi-axis y")?;
+            let (a, b) = (c.semi_axis_x, c.semi_axis_y);
+            let (s, co) = u.sin_cos();
+            SurfaceJet {
+                point: elliptical_cylinder_point(c, u, v)?,
+                du: direct(&c.frame, Vec3::new(-a * s, b * co, 0.0)),
+                dv: c.frame.z,
+                duu: direct(&c.frame, Vec3::new(-a * co, -b * s, 0.0)),
+                duv: Vec3::ZERO,
+                dvv: Vec3::ZERO,
+            }
+        }
         Surface::BSpline(b) => bspline_jet(b, u, v)?,
         _ => {
             return Err(GeomError::Unsupported {
@@ -1071,6 +1085,16 @@ pub fn invert(
             positive(c.radius, "cylinder radius")?;
             let local = to_local(&c.frame, point, tolerance)?;
             (angle_about_axis(local, "cylinder")?, local.z)
+        }
+        // The affine image of the unit circle's angle (#287): the point's
+        // section coordinates divided by the semi-axes lie on the unit
+        // circle, and `u` is their angle, exactly as `evaluate` reads it.
+        Surface::EllipticalCylinder(c) => {
+            positive(c.semi_axis_x, "elliptical cylinder semi-axis x")?;
+            positive(c.semi_axis_y, "elliptical cylinder semi-axis y")?;
+            let local = to_local(&c.frame, point, tolerance)?;
+            let scaled = Vec3::new(local.x / c.semi_axis_x, local.y / c.semi_axis_y, local.z);
+            (angle_about_axis(scaled, "elliptical cylinder")?, local.z)
         }
         Surface::Cone(c) => {
             finite(c.radius, "cone radius")?;

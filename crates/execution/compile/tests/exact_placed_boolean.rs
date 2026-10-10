@@ -590,22 +590,27 @@ fn an_opening_that_misses_the_wall_leaves_it_whole() {
 }
 
 #[test]
-fn a_configuration_the_general_boolean_refuses_is_refused_by_name() {
-    // An elliptical column crossed by a round bore: the general boolean
-    // does not build this section, so the compiler names the refusal
-    // instead of meshing.
+fn an_elliptical_column_crossed_by_a_round_bore_is_exact() {
+    // An elliptical column crossed by a round bore along its long
+    // semi-axis. The general boolean refused it, unable to invert a point
+    // on the column; since #287 it evaluates the wall and traces the
+    // section. Each line of the bore at height `y` across it removes the
+    // column's chord `2 a sqrt(1 - y^2 / b^2)`, so with `y = r sin(t)` the
+    // bore removes `4 a r^2 int cos^2(t) sqrt(1 - r^2 sin^2(t) / b^2) dt`
+    // over `|t| <= pi / 2`, by Simpson's rule.
+    let (a, b, r) = (0.5_f64, 0.3_f64, 0.2_f64);
     let mut g = Graph::new();
     let column = g.extrusion(
         Profile::Ellipse(axiolid_profile::EllipseProfile {
-            semi_axis_x: 0.5,
-            semi_axis_y: 0.3,
+            semi_axis_x: a,
+            semi_axis_y: b,
         }),
         2.0,
     );
     let column = g.instance(column, building());
     let bore = g.extrusion(
         Profile::Circle(CircleProfile {
-            radius: 0.2,
+            radius: r,
             thickness: None,
         }),
         2.0,
@@ -617,7 +622,28 @@ fn a_configuration_the_general_boolean_refuses_is_refused_by_name() {
             * Transform3::from_rotation_y(FRAC_PI_2),
     );
     let cut = g.minus(column, bore);
-    named(&refusal(g, cut), "exact boolean");
+    let f = |t: f64| {
+        let s = r * t.sin() / b;
+        t.cos().powi(2) * (1.0 - s * s).sqrt()
+    };
+    let n = 4000;
+    let h = PI / f64::from(n);
+    let simpson: f64 = (0..=n)
+        .map(|i| {
+            let weight = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            weight * f(-FRAC_PI_2 + h * f64::from(i))
+        })
+        .sum::<f64>()
+        * h
+        / 3.0;
+    let removed = 4.0 * a * r * r * simpson;
+    check(g, cut, PI * a * b * 2.0 - removed, &[]);
 }
 
 /// The linear tolerance every test here runs at.

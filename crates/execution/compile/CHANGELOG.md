@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A difference whose tool is an oblique exact extrusion with arcs or a
+  circle (a slab less an oblique round shaft or rounded opening) compiles
+  exactly, and its mesh is certified against that result (#287). It was
+  refused as "exact boolean over a curve or surface it cannot evaluate",
+  and the mesh's report unbounded. So does an elliptical column crossed
+  by a round bore, refused before for want of inverting a point on the
+  column.
+
+
 ## [0.3.18] - 2026-10-09
 
 ### Changed
