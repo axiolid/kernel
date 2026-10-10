@@ -122,6 +122,10 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/execution/compile/src/station/basis.rs` (#285).
 - `crates/contracts/operations/curve-evaluate/src/contract.rs` and
   `crates/algorithms/parametric/evaluate/src/provider.rs` (#286).
+- `crates/representations/analytic/curve/src/path.rs`,
+  `crates/execution/compile/src/station/basis.rs` (`curve_path`) and
+  `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs`
+  (#290).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -514,3 +518,89 @@ where the consumer cares.
 Still open: a point or tangent on a seam whose side's piece is vertical
 (the station frame refuses it, so the sided point and tangent do too), and
 sides on 2D curves, which the contract does not evaluate.
+
+## Amendment 2026-10-10: curve paths on the curve-evaluation contract (#290)
+
+A consumer that frames a placement through `CurveEvaluator` (openbimrs/ifc#418:
+a linear placement on a plain composite curve, a trim, or a segmented
+reference curve) could only ask about one `Curve3`. Since #285 the same
+station lowered as geometry is measured along the curve relation, so the
+consumer had to refuse every relation basis the kernel could already lower.
+The contract cannot see the graph (`axiolid-model`) or the evaluator
+(`axiolid-evaluate`), which is what reads a relation.
+
+- **A neutral value one layer down.** `axiolid-curve` gains `path`:
+  `CurvePath` (pieces in order), `PathPiece` (the span `[start, end]` of a
+  curve in its station measure, `reversed`, an optional rigid `placement`
+  and whether it is exact) and `PathCurve` (`Two(Curve2)`,
+  `Three(Curve3)`). It is #285's `StationPiece` as an owned value: it holds
+  and composes (reverse a path, place it, join paths), it measures nothing.
+  It owns its curves because `axiolid-curve` is a geometry data-plane
+  crate, whose values carry no borrowed references so that a native backend
+  can copy them across FFI (`axiolid-model`'s `native_backend_readiness`
+  test enforces it).
+  `axiolid-curve` is already a dependency of the contract, of
+  `axiolid-evaluate` and of `axiolid-mesh-compile`, so no crate edge is
+  added and no allowlist changes. `PathCurve` and `PathPiece` are
+  `#[non_exhaustive]`: an offset piece (#289) is a new variant, refused by
+  name by an evaluator that does not know it.
+- **One reading.** `CompositeBasis::from_path` borrows the path's curves,
+  checks each piece against its curve as `StationPiece::between` does, and
+  measures the pieces as `CompositeBasis::new` does; `CompositeBasis::path`
+  hands them back. `StationPiece` keeps its public shape (it is published)
+  and converts to and from `PathPiece`; it keeps borrowing its curve, so a
+  station on a graph relation, resolved again for every station of a run,
+  copies no curve. The compiler's flattening is handed out as
+  `axiolid_mesh_compile::station::curve_path`, its pieces converted, so a
+  consumer's path is the one a station on the relation is resolved along
+  (checked bitwise).
+- **The contract reads a path additively.** `path_point_at_on`,
+  `path_tangent_at_on` and `path_frame_at_on(path, at, SeamSide)`, the
+  plain `path_point_at`, `path_tangent_at` and `path_frame_at` (the
+  outgoing side), `path_distance_convention` and `path_frame_is_exact_at`
+  are trait methods with defaults: the sided ones refuse by a typed
+  `UnsupportedInput` naming `CURVE_PATH_UNSUPPORTED`, the plain ones
+  delegate to them with `Outgoing`, the convention is `Unsupported` and no
+  frame is claimed exact. A provider that does not implement paths
+  therefore refuses them all by name and never reads a path as its first
+  piece or a joint from the wrong side. The conformance suite reads a line
+  and a quarter arc meeting at a right angle, forwards and reversed, on the
+  joint and within the seam tolerance either side: each side must read its
+  own piece, the plain queries the outgoing one, a distance off the path
+  and a path with a gap must be refused, the convention must be arc length
+  and nothing on or after the arc exact; or every path query refused as
+  unsupported, with no convention reported.
+- **What a path means is the composite station rule.** The distance runs
+  end to end in the pieces' common convention, every interior joint is a
+  seam read from the piece `SeamSide` names at its own point, a reversed
+  piece is read from its end with tangent and lateral negated, a placed
+  piece's frame is carried, and a frame is exact only where every piece up
+  to and including the one read is an exactly placed line: all as the
+  #285 amendment states, because the reference provider does not restate
+  it. It builds `CompositeBasis::from_path` and answers with
+  `CompositeBasis::section_on` (point, tangent, and against `+Z` the
+  station section in the provider layout), so the contract and a resolved
+  station agree bitwise; against another reference up the frame is the
+  reference-up frame of the section's point and tangent, and a banked piece
+  is refused there, as `frame_at` refuses a banked curve. A path has no
+  native parameter (its pieces' parameters do not run end to end): a
+  `CurveMeasure::Parameter` is refused by name.
+- **Which distance.** A path is measured in the station measure, numerical
+  arc length on an ellipse or a B-spline piece included, to the accuracy
+  this ADR states; the per-curve `distance_convention`, which refuses a
+  distance on those families, is unchanged.
+
+| Option | Why not |
+| --- | --- |
+| Keep the contract per curve; a reference-side helper resolves a relation for the caller | The consumer would depend on `axiolid-evaluate` (or the compiler) to place along a relation, the dependency the contract exists to avoid, and a second provider could not take part. |
+| Move `CompositeBasis` itself down to `axiolid-curve` | Its reading needs arc-length inversion, the evaluators and the seam rule, all in `axiolid-evaluate`; the representation crate would become an evaluator. |
+| Turn `StationPiece` into a re-export of `PathPiece` | `StationPiece`, `StationCurve` and their inherent constructors (which measure) are published; a foreign type cannot carry them, so the change breaks semver. They convert instead. |
+| Borrow the curves in the path (`&Curve3`), as `StationPiece` does | Saves a copy per path, but `axiolid-curve` is a data-plane crate whose values must cross FFI without borrowed references. |
+| Resolve stations internally through an owned `CurvePath` | Each station of a run would copy the relation's curves, or rebuild and recheck the composite per query; the internal pieces keep borrowing the graph. |
+| A `CurveMeasure` or `Curve3` variant for a path | `Curve3` is an atomic value and a relation is not one; a provider unaware of a new measure would refuse it anyway, and the side is a separate argument as #286 decided. |
+| Plain path queries that default to refusing | A provider that implements the sided queries would also have to implement three plain ones that can only mean `Outgoing`; delegating cannot be wrong where the sided query is right. |
+
+Still open: an offset piece (#289), a native parameter along a path, a
+point or tangent on a joint whose side's piece is vertical (refused, as
+the station frame refuses it), and 2D paths as such (a 2D piece lies in
+`z = 0` and is answered in 3D).
