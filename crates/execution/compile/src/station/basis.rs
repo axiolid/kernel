@@ -109,6 +109,11 @@ impl<'g> Flat<'g> {
 /// an exactly read frame. The path is not measured: the contract's
 /// provider refuses one whose pieces do not meet or measure alike, by name.
 ///
+/// Every piece is stated, its span ending where the kernel measures its
+/// curve to end (an offset's own length, a B-spline's arc length): a
+/// caller without the graph that builds the same pieces with their ends
+/// left open (`PathPiece::whole`, #298) reads the same path.
+///
 /// # Errors
 ///
 /// A node that is not a curve, an instanced curve or a relation no

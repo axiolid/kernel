@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `station::curve_path` documents that its pieces stay stated, each with
+  the length the kernel measures, and that a caller without the graph who
+  leaves the same pieces' ends open (#298) reads the same path (checked
+  bitwise for an offset of a B-spline). Its output is unchanged.
+
 ## [0.3.21] - 2026-10-10
 
 ### Fixed

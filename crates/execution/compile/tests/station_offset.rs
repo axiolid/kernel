@@ -7,7 +7,10 @@
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
-use axiolid_curve::{Circle2, Curve2, Curve3, Line2, Line3, PathCurve};
+use axiolid_curve::{
+    BSplineCurve, Circle2, Curve2, Curve3, CurvePath, KnotSpec, Line2, Line3, OffsetLaw, PathCurve,
+    PathOffset, PathPiece,
+};
 use axiolid_measure::volume_properties;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::station::{curve_path, placement, resolve, seams, ResolvedStation};
@@ -559,4 +562,53 @@ fn a_station_along_an_offset_round_trips_through_the_graph() {
         1e-12,
         "resolved after the round trip",
     );
+}
+
+#[test]
+fn an_open_path_a_caller_builds_is_the_relation_s_own_path() {
+    // A constant offset of a 2D B-spline, whose length (and its offset's)
+    // has no closed form: a caller without a provider leaves both open
+    // (#298), and reads the same pieces, so the same stations, as the
+    // relation lowered to the graph.
+    let spline = Curve2::BSpline(BSplineCurve {
+        degree: 3,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(30.0, 0.0),
+            Point2::new(60.0, 20.0),
+            Point2::new(90.0, 20.0),
+        ],
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![4, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let basis = b.push_value(spline.clone()).unwrap();
+    let left = offset(&mut b, basis, 2.0);
+    let ids: Vec<(Scalar, SeamSide, NodeId)> = [0.0, 37.5, 90.0]
+        .into_iter()
+        .flat_map(|d| SIDES.map(|side| (d, side)))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|(d, side)| (d, side, station(&mut b, left, d, side)))
+        .collect();
+    let graph = b.finish(vec![left]).unwrap();
+    let open = CurvePath::from(PathPiece::whole(PathCurve::Offset(Box::new(
+        PathOffset::new(
+            PathPiece::whole(PathCurve::Two(spline)),
+            OffsetLaw::Planar { distance: 2.0 },
+        ),
+    ))));
+    let composite = CompositeBasis::from_path(&open).unwrap();
+    assert_eq!(composite.path(), curve_path(&graph, left).unwrap());
+    for (d, side, id) in ids {
+        assert_eq!(
+            composite.section_on(d, side).unwrap(),
+            resolve(&graph, id).unwrap().section,
+            "{d} {side:?}: bitwise"
+        );
+    }
 }
