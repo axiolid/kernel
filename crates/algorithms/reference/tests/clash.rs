@@ -182,6 +182,23 @@ fn a_degenerate_triangle_is_counted_not_silently_ignored() {
 }
 
 #[test]
+fn well_formed_triangles_that_do_not_meet_are_not_degenerate_skips() {
+    // A wide tolerance sends every pair of these well-formed boxes to the
+    // narrow phase, where each pair is decided exactly as disjoint. That is a
+    // verdict, so nothing may be reported as untestable.
+    let a = box_mesh(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+    let b = box_mesh(Point3::new(6.0, 2.0, 2.0), Point3::new(7.0, 3.0, 3.0));
+    let report =
+        interference(&a, &b, Tolerance::new(10.0, 1e-9).expect("tolerance")).expect("interference");
+    assert_eq!(report.narrow_phase_tests, 144, "every pair must be tested");
+    assert_eq!(report.kind, Interference::Clear);
+    assert_eq!(
+        report.degenerate_skips, 0,
+        "disjoint pairs were tested, not skipped"
+    );
+}
+
+#[test]
 fn a_non_finite_tolerance_is_refused() {
     let a = unit_box_at(0.0);
     let b = unit_box_at(0.5);

@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `clash::interference` counted every narrow-phase pair of well-formed
+  triangles that do not meet (`TriangleTriangleRelation::Disjoint`) as a
+  `degenerate_skips`, through a catch-all arm, so a clash report over-stated
+  how much of its input was untestable (two unit boxes 5 apart at a 10 m
+  tolerance reported 120 of 144 pairs skipped). Disjoint pairs are now a
+  verdict, and the match is exhaustive so a new relation cannot fall
+  through again.
+
 ## [0.3.7] - 2026-10-04
 
 ### Added

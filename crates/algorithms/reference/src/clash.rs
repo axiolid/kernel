@@ -165,11 +165,10 @@ pub fn interference(
                 TriangleTriangleRelation::DegenerateTriangle => {
                     report.degenerate_skips += 1;
                 }
-                // The relation is non-exhaustive; an unknown variant is not a
-                // verdict and must not silently read as "clear".
-                _ => {
-                    report.degenerate_skips += 1;
-                }
+                // The triangles were tested and share no point: a verdict,
+                // not a skip. The match is exhaustive on purpose, so a new
+                // relation must be decided here rather than fall through.
+                TriangleTriangleRelation::Disjoint => {}
             }
         }
     }
