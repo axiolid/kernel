@@ -2,7 +2,7 @@
 
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 
-use crate::{NodeId, Station, StationFrame};
+use crate::{NodeId, RunStation, Station, StationFrame};
 
 /// One trim selector preserved from a source representation.
 #[non_exhaustive]
@@ -138,6 +138,20 @@ pub enum CurveRelation {
         stations: Vec<Station>,
         frame: StationFrame,
     },
+    /// A curve through offsets given at stations along a basis curve, each
+    /// station with the side of a seam it reads and a seam-snapping window
+    /// (#301): the general form of [`CurveRelation::OffsetByStations`].
+    ///
+    /// The curve is the one `OffsetByStations` names for the stations at
+    /// their snapped distances: a windowed station within its window of
+    /// one seam of the basis stands on that seam, and the side is read
+    /// where the run does not decide it (see [`crate::station`]). At least
+    /// two stations, strictly increasing in distance, are required.
+    OffsetsAtStations {
+        basis: NodeId,
+        stations: Vec<RunStation>,
+        frame: StationFrame,
+    },
 }
 
 /// Which representation governs a redundant surface-curve definition.
@@ -246,7 +260,8 @@ impl CurveRelation {
             Self::Composite { segments } => out.extend(segments.iter().map(|item| item.curve)),
             Self::Trimmed { basis, .. }
             | Self::Offset { basis, .. }
-            | Self::OffsetByStations { basis, .. } => out.push(*basis),
+            | Self::OffsetByStations { basis, .. }
+            | Self::OffsetsAtStations { basis, .. } => out.push(*basis),
             Self::SurfaceCurve {
                 curve_3d, sides, ..
             } => {

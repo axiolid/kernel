@@ -445,6 +445,153 @@ fn a_seam_window_defaults_to_zero_and_a_malformed_one_is_refused_by_name() {
     }
 }
 
+/// Run stations carry a seam side and window (#301): `Outgoing` and `0`
+/// unless set, stored exactly, and a malformed window refused by name in
+/// every run that carries one.
+#[test]
+fn run_stations_carry_a_side_and_a_window_refused_by_name_when_malformed() {
+    use axiolid_model::{RunStation, SeamSide, SectionAtStation};
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let profile = rectangle(&mut b);
+    let section = SectionAtStation::new(profile, Station::at(1.0));
+    assert_eq!(
+        (section.seam, section.seam_window),
+        (SeamSide::Outgoing, 0.0)
+    );
+    let plain = RunStation::from(Station::at(1.0));
+    assert_eq!((plain.seam, plain.seam_window), (SeamSide::Outgoing, 0.0));
+    assert_eq!(plain, RunStation::new(Station::at(1.0)));
+    let windowed = SectionAtStation::new(profile, Station::at(2.0))
+        .with_seam_side(SeamSide::Incoming)
+        .with_seam_window(1e-3);
+    assert_eq!(
+        (windowed.seam, windowed.seam_window),
+        (SeamSide::Incoming, 1e-3)
+    );
+    let run = plain
+        .with_seam_side(SeamSide::Incoming)
+        .with_seam_window(1e-3);
+    assert_eq!((run.seam, run.seam_window), (SeamSide::Incoming, 1e-3));
+
+    let offsets = CurveRelation::OffsetsAtStations {
+        basis,
+        stations: vec![
+            plain,
+            RunStation::new(Station::at(3.0)).with_seam_window(1e-3),
+        ],
+        frame: StationFrame::Section,
+    };
+    let id = b
+        .push(GeometryNode::CurveRelation(offsets.clone()))
+        .unwrap();
+    let solid = b
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: basis,
+                sections: vec![section.clone(), windowed.clone()],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = b.finish(vec![id, solid]).unwrap();
+    assert_eq!(graph.get(id), Some(&GeometryNode::CurveRelation(offsets)));
+    assert_eq!(graph.get(id).unwrap().references(), vec![basis]);
+    // An offset by stations is a 3D curve: a placement or a sweep may take
+    // it as one.
+    let mut b = GeometryGraphBuilder::new();
+    let basis = line(&mut b);
+    let offset = b
+        .push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis,
+                stations: vec![plain, RunStation::new(Station::at(3.0))],
+                frame: StationFrame::Plan,
+            },
+        ))
+        .unwrap();
+    assert!(b
+        .push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+            directrix: offset,
+            radius: 0.1,
+            inner_radius: None,
+            parameter_range: None,
+            fillet_radius: None,
+        }))
+        .is_ok());
+    // The run's own rules hold for its stations.
+    invalid(
+        b.push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis,
+                stations: vec![RunStation::new(Station::at(3.0)), plain],
+                frame: StationFrame::Section,
+            },
+        )),
+        "increase strictly",
+    );
+    invalid(
+        b.push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis,
+                stations: vec![plain],
+                frame: StationFrame::Section,
+            },
+        )),
+        "at least two",
+    );
+
+    for (window, needle) in [
+        (-1e-9, "negative"),
+        (Scalar::NAN, "not finite"),
+        (Scalar::INFINITY, "not finite"),
+    ] {
+        let mut b = GeometryGraphBuilder::new();
+        let basis = line(&mut b);
+        let profile = rectangle(&mut b);
+        let deck = open(&mut b);
+        invalid(
+            b.push(GeometryNode::CurveRelation(
+                CurveRelation::OffsetsAtStations {
+                    basis,
+                    stations: vec![
+                        RunStation::new(Station::at(1.0)),
+                        RunStation::new(Station::at(2.0)).with_seam_window(window),
+                    ],
+                    frame: StationFrame::Section,
+                },
+            )),
+            needle,
+        );
+        invalid(
+            b.push(GeometryNode::SolidOperation(
+                SolidOperation::SectionsAtStations {
+                    directrix: basis,
+                    sections: vec![
+                        SectionAtStation::new(profile, Station::at(1.0)).with_seam_window(window),
+                        SectionAtStation::new(profile, Station::at(2.0)),
+                    ],
+                    frame: StationFrame::Section,
+                },
+            )),
+            needle,
+        );
+        invalid(
+            b.push(GeometryNode::SurfaceRelation(
+                SurfaceRelation::OpenSectionsAtStations {
+                    directrix: basis,
+                    sections: vec![
+                        SectionAtStation::new(deck, Station::at(1.0)),
+                        SectionAtStation::new(deck, Station::at(2.0)).with_seam_window(window),
+                    ],
+                    frame: StationFrame::Section,
+                },
+            )),
+            needle,
+        );
+    }
+}
+
 #[test]
 fn an_instance_at_a_station_round_trips_and_references_source_and_basis() {
     use axiolid_core::Vec3;

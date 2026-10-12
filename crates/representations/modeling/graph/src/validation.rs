@@ -86,7 +86,9 @@ fn curve_has_dimension(root: NodeId, nodes: &[GeometryNode], dimension: CurveDim
             }
             // A 3D curve whatever its basis: a 2D basis lies in `z = 0` and
             // the vertical offsets lift it.
-            GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {
+            GeometryNode::CurveRelation(
+                CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. },
+            ) => {
                 if dimension != CurveDimension::Three {
                     return false;
                 }
@@ -524,12 +526,17 @@ fn validate_oriented(
     expect_reference(nodes, station.station.basis, ExpectedReference::Curve)?;
     validate_station(&station.station.station)?;
     validate_orientation(&station.orientation)?;
-    if !station.seam_window.is_finite() {
+    validate_seam_window(station.seam_window)
+}
+
+/// A seam-snapping window (#294, #301) is finite and not negative.
+fn validate_seam_window(window: f64) -> Result<(), GraphError> {
+    if !window.is_finite() {
         return Err(GraphError::InvalidStation {
             detail: "the seam-snapping window is not finite",
         });
     }
-    if station.seam_window < 0.0 {
+    if window < 0.0 {
         return Err(GraphError::InvalidStation {
             detail: "the seam-snapping window is negative",
         });
@@ -743,6 +750,15 @@ fn validate_curve_relation(
             expect_reference(nodes, *basis, ExpectedReference::Curve)?;
             validate_station_run(stations.iter())
         }
+        CurveRelation::OffsetsAtStations {
+            basis, stations, ..
+        } => {
+            expect_reference(nodes, *basis, ExpectedReference::Curve)?;
+            for station in stations {
+                validate_seam_window(station.seam_window)?;
+            }
+            validate_station_run(stations.iter().map(|station| &station.station))
+        }
     }
 }
 
@@ -789,6 +805,7 @@ fn validate_surface_relation(
             for section in sections {
                 expect_reference(nodes, section.profile, ExpectedReference::OpenProfile)?;
                 validate_orientation(&section.orientation)?;
+                validate_seam_window(section.seam_window)?;
             }
             validate_station_run(sections.iter().map(|section| &section.station))?;
             validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)
@@ -863,6 +880,7 @@ fn validate_solid_operation(
             for section in sections {
                 expect_reference(nodes, section.profile, ExpectedReference::Profile)?;
                 validate_orientation(&section.orientation)?;
+                validate_seam_window(section.seam_window)?;
             }
             validate_station_run(sections.iter().map(|section| &section.station))?;
             validate_section_tags(

@@ -30,12 +30,14 @@
 //! it (#297), not with [`FORMAT_VERSION`]: a graph that uses nothing a
 //! minor added is written exactly as that minor's predecessor wrote it,
 //! so an older reader keeps reading every graph that does not use newer
-//! features. A graph with no seam-snapping window is a 1.0 payload.
+//! features. A graph with no seam-snapping window is a 1.0 payload, one
+//! whose run stations carry no seam side or window a 1.0 or 1.1 payload.
 //!
 //! | Version | Added |
 //! | --- | --- |
 //! | 1.0 | The format (#267). |
 //! | 1.1 | `OrientedCurveStation.seam_window` (#294), a real omitted at its default `+0.0`; absent, as in every 1.0 payload, it reads as `0`, which is what a 1.0 station meant. |
+//! | 1.2 | Seam sides and windows on run stations (#301): `SectionAtStation.seam` and `.seam_window`, omitted at `Outgoing` and `+0.0` and read so when absent; the variant `CurveRelation::OffsetsAtStations`, whose `RunStation`s carry the same two fields. |
 //!
 //! # Refusals
 //!
@@ -70,7 +72,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{GraphId, WireBrand};
 use crate::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, GraphError, NodeId, OrientedCurveStation,
+    CurveRelation, GeometryGraph, GeometryGraphBuilder, GeometryNode, GraphError, NodeId,
+    OrientedCurveStation, SeamSide, SectionAtStation, SolidOperation, SurfaceRelation,
 };
 
 /// The format name every payload carries in its `format` entry.
@@ -80,7 +83,7 @@ pub const FORMAT_NAME: &str = "axiolid-geometry-graph";
 /// labelled with the lowest version that represents it, which is this one
 /// only when the graph uses what this version added (see the
 /// [module documentation](self#versions)).
-pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 1);
+pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 2);
 
 /// A `MAJOR.MINOR` wire format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -382,17 +385,24 @@ const BASE_VERSION: FormatVersion = FormatVersion::new(1, 0);
 /// The version that introduced the seam-snapping window (#294).
 const SEAM_WINDOW_SINCE: FormatVersion = FormatVersion::new(1, 1);
 
+/// The version that introduced seam sides and windows on run stations and
+/// `CurveRelation::OffsetsAtStations` (#301).
+const RUN_SEAMS_SINCE: FormatVersion = FormatVersion::new(1, 2);
+
 /// The lowest version that represents `nodes` (#297): the version every
 /// payload is labelled with, so an older reader reads every graph that
 /// uses nothing newer than it knows.
 ///
 /// Every minor version after 1.0 adds its own feature test here, the same
-/// test [`newer_field`] refuses an older payload by: a writer never labels
-/// a payload with a version whose reader would refuse it.
+/// test [`newer_feature`] refuses an older payload by: a writer never
+/// labels a payload with a version whose reader would refuse it.
 fn required_version(nodes: &[GeometryNode]) -> FormatVersion {
     let mut version = BASE_VERSION;
     if nodes.iter().any(uses_seam_window) {
         version = version.max(SEAM_WINDOW_SINCE);
+    }
+    if nodes.iter().any(|node| run_seams(node).is_some()) {
+        version = version.max(RUN_SEAMS_SINCE);
     }
     version
 }
@@ -446,11 +456,131 @@ fn uses_seam_window(node: &GeometryNode) -> bool {
         .any(|station| station.seam_window.to_bits() != 0)
 }
 
-/// A field `node` holds that `version` does not have: a seam-snapping
-/// window in a 1.0 payload, which no 1.0 writer wrote. (A window of `+0.0`
-/// is what its absence means, so it is not told apart.)
-fn newer_field(node: &GeometryNode, version: FormatVersion) -> Option<&'static str> {
-    (version < SEAM_WINDOW_SINCE && uses_seam_window(node)).then_some("seam_window")
+/// What format 1.2 added that a node uses (#301), named as an older
+/// reader would refuse it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunSeams {
+    /// A node kind or variant 1.2 added.
+    Kind(&'static str),
+    /// A field 1.2 added.
+    Field(&'static str),
+}
+
+/// Every section at a station `node` carries, wherever it stands in the
+/// node.
+///
+/// The matches name every node kind and every variant of the relations
+/// and operations, so a new one cannot be added without deciding whether
+/// it carries run stations.
+fn run_sections(node: &GeometryNode) -> &[SectionAtStation] {
+    match node {
+        GeometryNode::SolidOperation(operation) => match operation {
+            SolidOperation::SectionsAtStations { sections, .. } => sections,
+            SolidOperation::Extrusion { .. }
+            | SolidOperation::TaperedExtrusion { .. }
+            | SolidOperation::Revolution { .. }
+            | SolidOperation::TaperedRevolution { .. }
+            | SolidOperation::SweptDisk { .. }
+            | SolidOperation::FixedReferenceSweep { .. }
+            | SolidOperation::SurfaceCurveSweep { .. }
+            | SolidOperation::SectionedSpine { .. }
+            | SolidOperation::Boolean { .. }
+            | SolidOperation::BoundedHalfSpace { .. }
+            | SolidOperation::StationedSpine { .. } => &[],
+        },
+        GeometryNode::SurfaceRelation(relation) => match relation {
+            SurfaceRelation::OpenSectionsAtStations { sections, .. } => sections,
+            SurfaceRelation::CurveBounded { .. }
+            | SurfaceRelation::RectangularTrimmed { .. }
+            | SurfaceRelation::Offset { .. }
+            | SurfaceRelation::LinearExtrusion { .. }
+            | SurfaceRelation::Revolution { .. }
+            | SurfaceRelation::SectionedSurface { .. } => &[],
+        },
+        GeometryNode::Point2(_)
+        | GeometryNode::Point3(_)
+        | GeometryNode::Vector2(_)
+        | GeometryNode::Vector3(_)
+        | GeometryNode::Frame2(_)
+        | GeometryNode::Frame3(_)
+        | GeometryNode::Transform(_)
+        | GeometryNode::PointList2(_)
+        | GeometryNode::PointList3(_)
+        | GeometryNode::Curve2(_)
+        | GeometryNode::Curve3(_)
+        | GeometryNode::CurveRelation(_)
+        | GeometryNode::PointOnCurve(_)
+        | GeometryNode::Surface(_)
+        | GeometryNode::PointOnSurface(_)
+        | GeometryNode::Profile(_)
+        | GeometryNode::OpenProfile(_)
+        | GeometryNode::Primitive(_)
+        | GeometryNode::HalfSpace(_)
+        | GeometryNode::BRep(_)
+        | GeometryNode::PolygonMesh(_)
+        | GeometryNode::TriMesh(_)
+        | GeometryNode::BoundingBox(_)
+        | GeometryNode::Instance(_)
+        | GeometryNode::Collection(_)
+        | GeometryNode::CurveStation(_)
+        | GeometryNode::OrientedCurveStation(_)
+        | GeometryNode::InstanceAtStation(_) => &[],
+    }
+}
+
+/// Whether `node` uses what format 1.2 added (#301), and what: a
+/// `CurveRelation::OffsetsAtStations`, whose stations carry sides and
+/// windows; or a section at a station whose seam side is written (any but
+/// `Outgoing`) or whose window is (any but `+0.0`, so `-0.0` too).
+fn run_seams(node: &GeometryNode) -> Option<RunSeams> {
+    if let GeometryNode::CurveRelation(relation) = node {
+        return match relation {
+            CurveRelation::OffsetsAtStations { .. } => Some(RunSeams::Kind("OffsetsAtStations")),
+            CurveRelation::Composite { .. }
+            | CurveRelation::Trimmed { .. }
+            | CurveRelation::Offset { .. }
+            | CurveRelation::SurfaceCurve { .. }
+            | CurveRelation::ParameterCurve { .. }
+            | CurveRelation::OffsetByStations { .. } => None,
+        };
+    }
+    run_sections(node).iter().find_map(|section| {
+        if section.seam != SeamSide::Outgoing {
+            Some(RunSeams::Field("seam"))
+        } else if section.seam_window.to_bits() != 0 {
+            Some(RunSeams::Field("seam_window"))
+        } else {
+            None
+        }
+    })
+}
+
+/// What `node` holds that `version` does not have, refused as an older
+/// reader would refuse it: a seam-snapping window on an oriented station
+/// in a 1.0 payload, a seam side or window on a run station, or an
+/// `OffsetsAtStations`, in a payload older than 1.2. No writer of those
+/// versions wrote them. (A default is what its absence means, so it is not
+/// told apart.)
+fn newer_feature(node: &GeometryNode, version: FormatVersion) -> Option<WireError> {
+    if version < SEAM_WINDOW_SINCE && uses_seam_window(node) {
+        return Some(WireError::UnknownField {
+            field: "seam_window".to_owned(),
+            version,
+        });
+    }
+    if version < RUN_SEAMS_SINCE {
+        return run_seams(node).map(|feature| match feature {
+            RunSeams::Kind(kind) => WireError::UnknownKind {
+                kind: kind.to_owned(),
+                version,
+            },
+            RunSeams::Field(field) => WireError::UnknownField {
+                field: field.to_owned(),
+                version,
+            },
+        });
+    }
+    None
 }
 
 /// Rebuild the decoded graph through the builder's validation.
@@ -461,11 +591,8 @@ fn build(
 ) -> Result<GeometryGraph, WireError> {
     let mut builder = GeometryGraphBuilder::with_owner(owner);
     for (index, node) in graph.nodes.into_iter().enumerate() {
-        if let Some(field) = newer_field(&node, version) {
-            return Err(WireError::UnknownField {
-                field: field.to_owned(),
-                version,
-            });
+        if let Some(refusal) = newer_feature(&node, version) {
+            return Err(refusal);
         }
         builder
             .push(node)

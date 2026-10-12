@@ -22,8 +22,8 @@ use axiolid_model::wire::{self, FormatVersion, WireError, FORMAT_NAME, FORMAT_VE
 use axiolid_model::{
     CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
     GraphError, Instance, InstanceAtStation, MasterRepresentation, NodeId, OpenProfile,
-    OrientedCurveStation, PointOnCurve, PointOnSurface, SeamSide, Section, SectionAtStation,
-    SolidOperation, Station, StationFrame, StationOffsets, StationOrientation,
+    OrientedCurveStation, PointOnCurve, PointOnSurface, RunStation, SeamSide, Section,
+    SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets, StationOrientation,
     StationedOpenSection, StationedSection, SurfaceRelation, SurfaceSides, Transition,
     TrimSelector, TrimmingPreference,
 };
@@ -922,6 +922,28 @@ fn fixture() -> (GeometryGraph, Coverage) {
         ],
         frame,
     }));
+    // Format 1.2: an offset whose stations carry sides and windows (#301),
+    // and one whose stations write neither.
+    relations.extend(
+        frames
+            .iter()
+            .map(|&frame| CurveRelation::OffsetsAtStations {
+                basis: line_3d,
+                stations: match frame {
+                    StationFrame::Plan => vec![
+                        RunStation::new(Station::at(0.0)),
+                        RunStation::new(Station::new(2.0, StationOffsets::new(0.5, -0.25, 0.0)))
+                            .with_seam_side(SeamSide::Incoming)
+                            .with_seam_window(0.001),
+                    ],
+                    _ => vec![
+                        RunStation::new(Station::at(0.5)),
+                        RunStation::new(Station::at(1.5)),
+                    ],
+                },
+                frame,
+            }),
+    );
     coverage.all("CurveRelation", &relations);
     let relations: Vec<NodeId> = relations
         .into_iter()
@@ -988,6 +1010,8 @@ fn fixture() -> (GeometryGraph, Coverage) {
             sections: vec![
                 SectionAtStation::new(open_profile, Station::at(0.0)),
                 SectionAtStation::new(open_profile, Station::at(4.0)).with_orientation(orientation),
+                // Format 1.2: a window alone (#301).
+                SectionAtStation::new(open_profile, Station::at(5.0)).with_seam_window(0.002),
             ],
             frame: StationFrame::Section,
         },
@@ -1100,6 +1124,14 @@ fn fixture() -> (GeometryGraph, Coverage) {
                 SectionAtStation::new(rectangle, Station::at(2.0))
                     .with_tags(["q", "p"])
                     .with_orientation(orientation),
+                // Format 1.2: a side alone, and a side with a window (#301).
+                SectionAtStation::new(rectangle, Station::at(3.0))
+                    .with_tags(["p", "q"])
+                    .with_seam_side(SeamSide::Incoming),
+                SectionAtStation::new(rectangle, Station::at(4.0))
+                    .with_tags(["q", "p"])
+                    .with_seam_side(SeamSide::Incoming)
+                    .with_seam_window(0.000_25),
             ],
             frame: StationFrame::Section,
         },
@@ -1545,7 +1577,7 @@ fn every_golden_payload_is_written_back_identically_under_its_version() {
         written.push(label);
     }
     written.sort();
-    assert_eq!(written, ["1.0", "1.1"]);
+    assert_eq!(written, ["1.0", "1.1", "1.2"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1670,7 +1702,7 @@ fn an_unknown_field_is_refused_by_name() {
 
 #[test]
 fn a_version_this_reader_does_not_read_is_refused_before_the_graph() {
-    for found in ["2.0", "1.2", "0.9", "1", "one", "1.0.0", ""] {
+    for found in ["2.0", "1.3", "0.9", "1", "one", "1.0.0", ""] {
         let mut payload = small_payload();
         payload["version"] = json!(found);
         // Even with content this reader does not know: the version is
@@ -2061,8 +2093,8 @@ fn a_node_reference_does_not_deserialise_outside_a_graph_payload() {
 
 #[test]
 fn the_format_version_is_named_in_every_payload() {
-    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 1));
-    assert_eq!(FORMAT_VERSION.to_string(), "1.1");
+    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 2));
+    assert_eq!(FORMAT_VERSION.to_string(), "1.2");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
     // A graph without windows is labelled 1.0, the lowest version that
@@ -2271,11 +2303,13 @@ fn without_windows(value: &mut Value) {
 /// (see `the_fixture_covers_every_variant_of_every_enum`), is given a
 /// window in turn, alone; each one must lift the payload to 1.1, and a 1.0
 /// reader must refuse that payload, so the writer never labels a payload
-/// with a version whose reader would refuse it.
+/// with a version whose reader would refuse it. What format 1.2 added is
+/// taken out of the fixture first (`without_run_seams`).
 #[test]
 fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    without_run_seams(&mut payload);
     without_windows(&mut payload);
     payload["version"] = json!("1.0");
 
@@ -2337,5 +2371,365 @@ fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
                 },
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Format 1.2: seam sides and windows on run stations (#301)
+// ---------------------------------------------------------------------------
+
+/// `value` with what format 1.2 added taken out: every
+/// `OffsetsAtStations` written as the `OffsetByStations` of its plain
+/// stations, and every section at a station without its side and window.
+/// The fixture's 1.1 content stays as it is.
+fn without_run_seams(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(mut offsets) = object.remove("OffsetsAtStations") {
+                let stations: Vec<Value> = offsets["stations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|station| station["station"].clone())
+                    .collect();
+                offsets["stations"] = Value::Array(stations);
+                object.insert("OffsetByStations".into(), offsets);
+            }
+            if object.contains_key("profile") && object.contains_key("orientation") {
+                object.remove("seam");
+                object.remove("seam_window");
+            }
+            object.values_mut().for_each(without_run_seams);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_run_seams),
+        _ => {}
+    }
+}
+
+/// A node's kind as the wire names it, with the variant of a relation or
+/// an operation: `SolidOperation::SectionsAtStations`, `CurveStation`.
+fn kind_of(node: &Value) -> String {
+    let outer = tag(node);
+    match node[&outer].as_object() {
+        Some(inner) if inner.len() == 1 => {
+            let variant = inner.keys().next().unwrap();
+            if variant.starts_with(char::is_uppercase) {
+                format!("{outer}::{variant}")
+            } else {
+                outer
+            }
+        }
+        _ => outer,
+    }
+}
+
+/// The JSON pointer of every object inside `value` that is a plain station
+/// (a distance and offsets) or holds one as its `station`, depth first:
+/// every place a run station's side and window could be written.
+fn plain_station_pointers(value: &Value, at: &str, found: &mut Vec<String>) {
+    if let Some(object) = value.as_object() {
+        let is_station = object.contains_key("distance") && object.contains_key("offsets");
+        let holds_station = object
+            .get("station")
+            .and_then(Value::as_object)
+            .is_some_and(|station| station.contains_key("distance"));
+        if is_station || holds_station {
+            found.push(at.to_owned());
+        }
+    }
+    match value {
+        Value::Object(object) => {
+            for (key, item) in object {
+                plain_station_pointers(item, &format!("{at}/{key}"), found);
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                plain_station_pointers(item, &format!("{at}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A graph whose run stations write no side and no window is labelled as
+/// before 1.2; one side or window on any run station lifts it to 1.2, and
+/// a 1.1 reader refuses that payload by the field's name. Every plain
+/// station of the every-kind fixture, and every object holding one, is
+/// given a window (`0.25` and `-0.0`) and a side in turn, alone: exactly
+/// the sections of `SectionsAtStations` and `OpenSectionsAtStations` carry
+/// them, and every other station refuses them as unknown fields.
+#[test]
+fn a_side_or_window_on_any_run_station_and_only_that_selects_one_two() {
+    let (graph, _) = fixture();
+    let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    assert_eq!(payload["version"], "1.2", "the fixture uses 1.2");
+    without_run_seams(&mut payload);
+    payload["version"] = json!("1.1");
+
+    let plain = read_json(&payload).unwrap();
+    assert_eq!(
+        version_of(&plain.to_json().unwrap()),
+        "1.1",
+        "the fixture's oriented windows"
+    );
+    assert_eq!(cbor_version_of(&plain.to_cbor().unwrap()), "1.1");
+
+    let mut pointers = Vec::new();
+    plain_station_pointers(&payload["graph"]["nodes"], "", &mut pointers);
+    let mut carriers = BTreeSet::new();
+    let mut others = BTreeSet::new();
+    for pointer in &pointers {
+        let index: usize = pointer.split('/').nth(1).unwrap().parse().unwrap();
+        let kind = kind_of(&payload["graph"]["nodes"][index]);
+        for (field, value) in [
+            ("seam_window", json!(0.25)),
+            ("seam_window", json!(-0.0)),
+            ("seam", json!("Incoming")),
+        ] {
+            let mut lifted = payload.clone();
+            lifted["version"] = json!("1.2");
+            lifted["graph"]["nodes"]
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert(field.into(), value.clone());
+            match read_json(&lifted) {
+                Ok(graph) => {
+                    carriers.insert(kind.clone());
+                    let what = format!("{field} {value} at {pointer}");
+                    assert_eq!(version_of(&graph.to_json().unwrap()), "1.2", "{what}");
+                    assert_eq!(
+                        cbor_version_of(&graph.to_cbor().unwrap()),
+                        "1.2",
+                        "CBOR: {what}"
+                    );
+                    lifted["version"] = json!("1.1");
+                    refused(
+                        &lifted,
+                        &WireError::UnknownField {
+                            field: field.into(),
+                            version: FormatVersion::new(1, 1),
+                        },
+                    );
+                }
+                Err(WireError::UnknownField { field: found, .. }) => {
+                    assert_eq!(found, field, "{kind} at {pointer}");
+                    others.insert(kind.clone());
+                }
+                Err(other) => panic!("{field} at {pointer}: {other}"),
+            }
+        }
+    }
+    assert_eq!(
+        carriers,
+        BTreeSet::from([
+            "SolidOperation::SectionsAtStations".to_owned(),
+            "SurfaceRelation::OpenSectionsAtStations".to_owned(),
+        ]),
+        "every node kind whose run stations carry a side and a window"
+    );
+    assert_eq!(
+        others,
+        BTreeSet::from([
+            "CurveRelation::OffsetByStations".to_owned(),
+            "CurveStation".to_owned(),
+            "InstanceAtStation".to_owned(),
+            "OrientedCurveStation".to_owned(),
+            "SolidOperation::SectionsAtStations".to_owned(),
+            "SolidOperation::StationedSpine".to_owned(),
+            "SurfaceRelation::OpenSectionsAtStations".to_owned(),
+            "SurfaceRelation::SectionedSurface".to_owned(),
+        ]),
+        "every node kind holding a plain station (a section's own station \
+         refuses the fields too: they belong to the section)"
+    );
+}
+
+/// A one-relation payload along a line under `version`, the relation's
+/// node JSON given.
+fn relation_payload(version: &str, relation: &Value) -> Value {
+    json!({
+        "format": FORMAT_NAME,
+        "version": version,
+        "graph": {
+            "nodes": [
+                {"Curve3": {"Line": {"origin": [0.0, 0.0, 0.0], "direction": [1.0, 0.0, 0.0]}}},
+                relation,
+            ],
+            "roots": [1],
+        }
+    })
+}
+
+/// `OffsetsAtStations` is a 1.2 variant: written under 1.2 even when its
+/// stations write no side or window (which are then omitted), and refused
+/// by name in an older payload, as an older reader would refuse it.
+#[test]
+fn an_offset_at_run_stations_is_a_one_two_variant() {
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let offset = builder
+        .push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis: line,
+                stations: vec![
+                    RunStation::new(Station::at(0.0)),
+                    RunStation::from(Station::at(2.0)),
+                ],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = builder.finish(vec![offset]).unwrap();
+    let text = graph.to_json().unwrap();
+    assert_eq!(version_of(&text), "1.2");
+    assert!(!text.contains("seam"), "{text}");
+    let payload: Value = serde_json::from_str(&text).unwrap();
+    let relation = payload["graph"]["nodes"][1].clone();
+    assert_eq!(
+        relation["CurveRelation"]["OffsetsAtStations"]["stations"][0],
+        json!({"station": {
+            "distance": 0.0,
+            "offsets": {"lateral": 0.0, "vertical": 0.0, "longitudinal": 0.0}
+        }})
+    );
+    for version in ["1.0", "1.1"] {
+        refused(
+            &relation_payload(version, &relation),
+            &WireError::UnknownKind {
+                kind: "OffsetsAtStations".into(),
+                version: FormatVersion::parse(version).unwrap(),
+            },
+        );
+    }
+    let read = read_json(&relation_payload("1.2", &relation)).unwrap();
+    assert_eq!(read.to_json().unwrap(), text);
+}
+
+/// Sides and windows on run stations round-trip bit-exactly through both
+/// encodings; `Outgoing` and a `+0.0` window are not written, `-0.0` is;
+/// a negative window is refused by validation on read.
+#[test]
+fn run_station_sides_and_windows_round_trip_and_defaults_are_not_written() {
+    let windows = [0.0, -0.0, 1e-3, 0.1 + 0.2];
+    let sides = [
+        SeamSide::Outgoing,
+        SeamSide::Incoming,
+        SeamSide::Outgoing,
+        SeamSide::Incoming,
+    ];
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let profile = builder.push(GeometryNode::Profile(rectangle())).unwrap();
+    let stations: Vec<RunStation> = (0..4)
+        .map(|k| {
+            RunStation::new(Station::at(k as f64))
+                .with_seam_side(sides[k])
+                .with_seam_window(windows[k])
+        })
+        .collect();
+    let sections: Vec<SectionAtStation> = stations
+        .iter()
+        .map(|station| {
+            SectionAtStation::new(profile, station.station)
+                .with_seam_side(station.seam)
+                .with_seam_window(station.seam_window)
+        })
+        .collect();
+    let offset = builder
+        .push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis: line,
+                stations,
+                frame: StationFrame::Plan,
+            },
+        ))
+        .unwrap();
+    let solid = builder
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: line,
+                sections,
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = builder.finish(vec![offset, solid]).unwrap();
+    let text = graph.to_json().unwrap();
+    // Three windows of four written in each run, two sides of four.
+    assert_eq!(text.matches("seam_window").count(), 6, "{text}");
+    assert_eq!(text.matches("\"seam\":").count(), 4, "{text}");
+    let want: Vec<(SeamSide, u64)> = (0..4).map(|k| (sides[k], windows[k].to_bits())).collect();
+    for read in [
+        GeometryGraph::from_json(&text).unwrap(),
+        GeometryGraph::from_cbor(&graph.to_cbor().unwrap()).unwrap(),
+    ] {
+        let mut runs = 0;
+        for (_, node) in read.iter() {
+            let got: Vec<(SeamSide, u64)> = match node {
+                GeometryNode::CurveRelation(CurveRelation::OffsetsAtStations {
+                    stations, ..
+                }) => stations
+                    .iter()
+                    .map(|s| (s.seam, s.seam_window.to_bits()))
+                    .collect(),
+                GeometryNode::SolidOperation(SolidOperation::SectionsAtStations {
+                    sections,
+                    ..
+                }) => sections
+                    .iter()
+                    .map(|s| (s.seam, s.seam_window.to_bits()))
+                    .collect(),
+                _ => continue,
+            };
+            assert_eq!(got, want);
+            runs += 1;
+        }
+        assert_eq!(runs, 2);
+    }
+    // A window-free, side-free run writes the graph it wrote before 1.2.
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let profile = builder.push(GeometryNode::Profile(rectangle())).unwrap();
+    let solid = builder
+        .push(GeometryNode::SolidOperation(
+            SolidOperation::SectionsAtStations {
+                directrix: line,
+                sections: vec![
+                    SectionAtStation::new(profile, Station::at(0.0)),
+                    SectionAtStation::new(profile, Station::at(1.0))
+                        .with_seam_side(SeamSide::Outgoing)
+                        .with_seam_window(0.0),
+                ],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let plain = builder.finish(vec![solid]).unwrap().to_json().unwrap();
+    assert_eq!(version_of(&plain), "1.0");
+    assert!(!plain.contains("seam"), "{plain}");
+    // A malformed window is refused by validation, in either carrier.
+    let payload: Value = serde_json::from_str(&text).unwrap();
+    for (node, path) in [
+        (2, "/CurveRelation/OffsetsAtStations/stations/1/seam_window"),
+        (
+            3,
+            "/SolidOperation/SectionsAtStations/sections/1/seam_window",
+        ),
+    ] {
+        let mut bad = payload.clone();
+        *bad["graph"]["nodes"][node].pointer_mut(path).unwrap() = json!(-1e-3);
+        assert!(
+            matches!(
+                read_json(&bad),
+                Err(WireError::InvalidGraph {
+                    node: Some(n),
+                    error: GraphError::InvalidStation { .. },
+                }) if n == node
+            ),
+            "{path}"
+        );
     }
 }

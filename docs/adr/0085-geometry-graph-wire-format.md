@@ -290,3 +290,40 @@ payload by its version. The version rules gain a writer rule:
   `scripts/probe_graph_wire_mutants.py` always writes `FORMAT_VERSION`,
   and `scripts/probe_seam_window_mutants.py` ignores the window in one
   carrier or the other; each is caught.
+
+## Note 2026-10-12: format 1.2 (#301)
+
+Format 1.2 adds seam sides and windows on run stations (ADR 0082's #301
+amendment), so `FORMAT_VERSION` is `1.2`, a minor change under the version
+rules above.
+
+- **What it adds.** Two optional fields on `SectionAtStation` (the sections
+  of `SectionsAtStations` and `OpenSectionsAtStations`), `seam` and
+  `seam_window`, omitted when they are `Outgoing` and `+0.0` and read so
+  when absent; and one variant, `CurveRelation::OffsetsAtStations`, whose
+  `RunStation { station, seam, seam_window }` omit the same two fields at
+  the same defaults. `-0.0` is written, so it needs 1.2 too.
+- **Its feature test** (#297's rule). `wire::required_version` raises the
+  version to 1.2 when a node is an `OffsetsAtStations` (the variant itself,
+  even with default stations, since a 1.1 reader does not know it) or holds
+  a section at a station whose side or window is written. The sections are
+  found by one match naming every node kind and every variant of the
+  relations and operations, so a new carrier cannot be added without
+  deciding. The reader refuses the same test in a 1.0 or 1.1 payload, as
+  such a reader would: `UnknownKind { kind: "OffsetsAtStations" }`, or
+  `UnknownField { field: "seam" | "seam_window" }`. A graph that uses
+  nothing 1.2 added is written exactly as before, labelled 1.0 or 1.1.
+- **Golden payloads.** `tests/wire/v1.0/` and `v1.1/` are read and written
+  back byte for byte under their own versions; `tests/wire/v1.2/every-kind.json`
+  adds two `OffsetsAtStations` (one with a side and a window, one with
+  neither) and sections with a window alone, a side alone and both, and is
+  what today's writer writes.
+- **Guards.** A test gives every plain station of the every-kind fixture,
+  and every object holding one, a window (`0.25`, `-0.0`) and a side in
+  turn, found by shape in the payload rather than by node kind: exactly the
+  sections of `SectionsAtStations` and `OpenSectionsAtStations` accept
+  them, each lifting the payload to 1.2 (JSON and CBOR) and each refused in
+  a 1.1 payload; every other station refuses them as unknown fields.
+  `scripts/probe_seam_window_mutants.py` breaks the 1.2 refusal, the label,
+  the variant's test, a section's side, a `-0.0` window and each carrier;
+  each is caught.

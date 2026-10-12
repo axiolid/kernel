@@ -91,13 +91,14 @@
 //! [`CurveStation::with_seam_side`] turns it into an oriented station in
 //! its base frame that reads the other one.
 //!
-//! A run of sections or offsets ([`Station`]s along one directrix) needs
-//! no side: a section standing exactly on an interior seam where the
-//! tangent turns is cut in the mitre plane, the bisector of the incoming
-//! and outgoing tangents, and so is the run where it crosses such a seam
-//! between two of its stations. The run's first station reads the
+//! A run of sections or offsets ([`Station`]s along one directrix) decides
+//! most sides itself: a section standing exactly on an interior seam where
+//! the tangent turns is cut in the mitre plane, the bisector of the
+//! incoming and outgoing tangents, and so is the run where it crosses such
+//! a seam between two of its stations. The run's first station reads the
 //! outgoing piece and its last the incoming one, the pieces the run lies
-//! on. A seam where the tangent does not turn keeps the outgoing frame.
+//! on. A seam where the tangent does not turn keeps the outgoing frame,
+//! unless the station standing on it names the other side (#301, below).
 //!
 //! # Seam-snapping window (#294)
 //!
@@ -121,6 +122,47 @@
 //! seam whose certified interval straddles the window's edge (inside or
 //! outside cannot be told). The graph refuses a negative or non-finite
 //! window when the node is pushed. A plain [`CurveStation`] has no window.
+//!
+//! # Seam windows on run stations (#301)
+//!
+//! The stations of a run carry the same window and a [`SeamSide`]: a
+//! [`SectionAtStation`] (in [`SolidOperation::SectionsAtStations`] and
+//! [`SurfaceRelation::OpenSectionsAtStations`]) through
+//! [`SectionAtStation::with_seam_window`] and
+//! [`SectionAtStation::with_seam_side`], an offset's [`RunStation`] (in
+//! [`CurveRelation::OffsetsAtStations`]) likewise. Defaults are a window
+//! of `0` and `Outgoing`, today's reading. [`Station`],
+//! [`StationedSection`] and [`StationedOpenSection`] have public fields
+//! and stay window-free, so [`SolidOperation::StationedSpine`],
+//! [`SurfaceRelation::SectionedSurface`] and
+//! [`CurveRelation::OffsetByStations`] read as before; their general forms
+//! above carry windows.
+//!
+//! - **Snapping.** Each windowed station is snapped by the #294 rule
+//!   against the run's directrix: onto the one seam whose frame may jump
+//!   within its window, at the seam's own (certified) distance; a window
+//!   holding two seams, or a seam whose certified position straddles its
+//!   edge, is refused by name. The run then uses the snapped distance
+//!   everywhere: the section's place, the linear interpolation between
+//!   stations, the run's span. Snapped distances must still increase
+//!   strictly; two stations snapped onto one seam, or one snapped past its
+//!   neighbour, are refused by name.
+//! - **Side.** The run's first station reads the outgoing piece and its
+//!   last the incoming one, whatever side they name: the run lies on those
+//!   pieces, as a curve's start and end have one piece. An interior
+//!   station on a seam where the tangent turns stands in the mitre plane,
+//!   so its section (or offset point) is the mitre section, placed in BOTH
+//!   pieces' frames and projected: its side is not read. An interior
+//!   station on a seam where the tangent does not turn but the frame may
+//!   jump (a banked curve's roll) is placed in the frame of the piece its
+//!   side names.
+//!
+//! [`SolidOperation::SectionsAtStations`]: crate::SolidOperation::SectionsAtStations
+//! [`SolidOperation::StationedSpine`]: crate::SolidOperation::StationedSpine
+//! [`SurfaceRelation::OpenSectionsAtStations`]: crate::SurfaceRelation::OpenSectionsAtStations
+//! [`SurfaceRelation::SectionedSurface`]: crate::SurfaceRelation::SectionedSurface
+//! [`CurveRelation::OffsetsAtStations`]: crate::CurveRelation::OffsetsAtStations
+//! [`CurveRelation::OffsetByStations`]: crate::CurveRelation::OffsetByStations
 //!
 //! # Placing a node at a station (#264)
 //!
@@ -477,6 +519,16 @@ fn no_window(window: &Scalar) -> bool {
     window.to_bits() == 0
 }
 
+/// Whether a run station's seam side is the default `Outgoing`, which the
+/// wire format omits (ADR 0085, format 1.2): a run without sides writes
+/// the 1.1 graph.
+#[cfg(feature = "serde")]
+// serde's `skip_serializing_if` passes the field by reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn outgoing(side: &SeamSide) -> bool {
+    *side == SeamSide::Outgoing
+}
+
 impl OrientedCurveStation {
     /// `station` turned by `orientation`, reading the outgoing piece on a
     /// seam.
@@ -544,6 +596,25 @@ pub struct SectionAtStation {
     /// The section's orientation in the base frame; the default is the
     /// base frame.
     pub orientation: StationOrientation,
+    /// The piece read where the section stands on a seam its run does not
+    /// decide (#301): [`SeamSide::Outgoing`] unless set by
+    /// [`Self::with_seam_side`]. See the
+    /// [module documentation](self#seam-windows-on-run-stations-301) for
+    /// where a run reads it.
+    ///
+    /// Format 1.2 of the graph's wire format (ADR 0085): omitted when it
+    /// is `Outgoing`, and an absent side reads as `Outgoing`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "outgoing"))]
+    pub seam: SeamSide,
+    /// The seam-snapping window (#294, #301): a section within this
+    /// distance of one seam of the directrix stands ON that seam. `0`
+    /// unless set by [`Self::with_seam_window`], which is the arc-length
+    /// tolerance alone.
+    ///
+    /// Format 1.2 of the graph's wire format (ADR 0085): omitted when it
+    /// is `+0.0`, and an absent window reads as `0`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "no_window"))]
+    pub seam_window: Scalar,
 }
 
 impl SectionAtStation {
@@ -555,6 +626,8 @@ impl SectionAtStation {
             station,
             tags: Vec::new(),
             orientation: StationOrientation::new(None, None),
+            seam: SeamSide::Outgoing,
+            seam_window: 0.0,
         }
     }
 
@@ -575,6 +648,25 @@ impl SectionAtStation {
         self.orientation = orientation;
         self
     }
+
+    /// The same section reading `side` of a seam it stands on, where its
+    /// run does not decide the side (#301; see the
+    /// [module documentation](self#seam-windows-on-run-stations-301)).
+    #[must_use]
+    pub const fn with_seam_side(mut self, side: SeamSide) -> Self {
+        self.seam = side;
+        self
+    }
+
+    /// The same section snapping onto a seam of the directrix within
+    /// `window` (#301), in the directrix's station measure, by the #294
+    /// rule. `0` is no window beyond the arc-length tolerance; a negative
+    /// or non-finite window is refused when the node is pushed.
+    #[must_use]
+    pub const fn with_seam_window(mut self, window: Scalar) -> Self {
+        self.seam_window = window;
+        self
+    }
 }
 
 impl From<StationedSection> for SectionAtStation {
@@ -586,6 +678,80 @@ impl From<StationedSection> for SectionAtStation {
 impl From<StationedOpenSection> for SectionAtStation {
     fn from(section: StationedOpenSection) -> Self {
         Self::new(section.profile, section.station).with_tags(section.tags)
+    }
+}
+
+/// A station of an offset run with the side of a seam it reads and its
+/// seam-snapping window (#301): the general form of the plain [`Station`]
+/// a [`CurveRelation::OffsetByStations`] takes, used by
+/// [`CurveRelation::OffsetsAtStations`].
+///
+/// Built with [`RunStation::new`] and the `with_` methods, so that fields
+/// can be added without breaking callers. See the
+/// [module documentation](self#seam-windows-on-run-stations-301) for how a
+/// run reads the side and the window.
+///
+/// [`CurveRelation::OffsetByStations`]: crate::CurveRelation::OffsetByStations
+/// [`CurveRelation::OffsetsAtStations`]: crate::CurveRelation::OffsetsAtStations
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub struct RunStation {
+    /// Distance along the basis and offsets in its frame there.
+    pub station: Station,
+    /// The piece read where the station stands on a seam its run does not
+    /// decide: [`SeamSide::Outgoing`] unless set by
+    /// [`Self::with_seam_side`]. Omitted from the wire format when it is
+    /// `Outgoing`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "outgoing"))]
+    pub seam: SeamSide,
+    /// The seam-snapping window (#294): a station within this distance of
+    /// one seam of the basis stands ON it. `0` unless set by
+    /// [`Self::with_seam_window`]. Omitted from the wire format when it is
+    /// `+0.0`.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "no_window"))]
+    pub seam_window: Scalar,
+}
+
+impl RunStation {
+    /// `station`, reading the outgoing piece on a seam, with no window.
+    #[must_use]
+    pub const fn new(station: Station) -> Self {
+        Self {
+            station,
+            seam: SeamSide::Outgoing,
+            seam_window: 0.0,
+        }
+    }
+
+    /// The same station reading `side` of a seam it stands on, where its
+    /// run does not decide the side.
+    #[must_use]
+    pub const fn with_seam_side(mut self, side: SeamSide) -> Self {
+        self.seam = side;
+        self
+    }
+
+    /// The same station snapping onto a seam of its basis within `window`,
+    /// in the basis's station measure, by the #294 rule. A negative or
+    /// non-finite window is refused when the node is pushed.
+    #[must_use]
+    pub const fn with_seam_window(mut self, window: Scalar) -> Self {
+        self.seam_window = window;
+        self
+    }
+}
+
+impl From<Station> for RunStation {
+    /// The plain station: the outgoing piece, no window, what a station of
+    /// an [`OffsetByStations`](crate::CurveRelation::OffsetByStations)
+    /// means.
+    fn from(station: Station) -> Self {
+        Self::new(station)
     }
 }
 

@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Seam-snapping windows and seam sides on run stations (#301, ADR 0082
+  amendment): `SectionAtStation` gains `seam` and `seam_window`, set by
+  `with_seam_side` and `with_seam_window`, for `SectionsAtStations` and
+  `OpenSectionsAtStations`; a new `RunStation` (`#[non_exhaustive]`, built by
+  `new` or `From<Station>` and the same two methods) carries them in a new
+  variant, `CurveRelation::OffsetsAtStations`, the general form of
+  `OffsetByStations`. Defaults are `Outgoing` and `0`, today's reading;
+  `Station`, `StationedSection`, `StationedOpenSection` and the #241
+  variants are unchanged. A negative or non-finite window on any run
+  station is refused as `GraphError::InvalidStation` when the node is
+  pushed.
+- Wire format 1.2 (ADR 0085 note): the two fields are written only when
+  they are not `Outgoing` and `+0.0`, and `OffsetsAtStations` is a 1.2
+  variant. A graph using either is labelled 1.2; one using neither is
+  written exactly as before, as 1.0 or 1.1. A 1.0 or 1.1 payload holding
+  them is refused by name (`UnknownField` `seam` or `seam_window`,
+  `UnknownKind` `OffsetsAtStations`), by the same test the writer labels
+  by. Golden payload `tests/wire/v1.2/every-kind.json`.
+
 ## [0.3.10] - 2026-10-10
 
 ### Fixed
