@@ -33,7 +33,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Scalar, Tolerance, Transform3};
 use axiolid_curve::{Curve2, Curve3, CurvePath, OffsetFrame, OffsetLaw, PathOffsets, PathPiece};
 use axiolid_model::{
-    CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, SeamSide, Station,
+    CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, RunStation, SeamSide,
     StationFrame, TrimSelector, TrimmingPreference,
 };
 use axiolid_reference::station::{
@@ -334,7 +334,9 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
             if matches!(
                 graph.get(*basis),
                 Some(GeometryNode::CurveRelation(
-                    CurveRelation::Offset { .. } | CurveRelation::OffsetByStations { .. }
+                    CurveRelation::Offset { .. }
+                        | CurveRelation::OffsetByStations { .. }
+                        | CurveRelation::OffsetsAtStations { .. }
                 ))
             ) {
                 return Err(unsupported(
@@ -401,12 +403,15 @@ fn flatten<'g>(graph: &'g GeometryGraph, id: NodeId, depth: usize) -> GeomResult
             Ok(Flat::Pieces(offset_pieces(&base, law)?))
         }
         // An offset by distances at stations (#289): from its first
-        // station to its last, one law per interval between stations.
-        Some(GeometryNode::CurveRelation(CurveRelation::OffsetByStations {
-            basis,
-            stations,
-            frame,
-        })) => offset_by_stations(graph, *basis, stations, *frame, depth),
+        // station to its last, one law per interval between stations, the
+        // stations at their snapped distances (#301).
+        Some(GeometryNode::CurveRelation(
+            relation @ (CurveRelation::OffsetByStations { .. }
+            | CurveRelation::OffsetsAtStations { .. }),
+        )) => {
+            let (basis, stations, frame) = super::offset_run(relation)?;
+            offset_by_stations(graph, basis, &stations, frame, depth)
+        }
         Some(GeometryNode::Instance(_) | GeometryNode::CurveRelation(_)) => {
             Err(unsupported(UNSUPPORTED_BASIS))
         }
@@ -429,14 +434,35 @@ enum Along<'g> {
     Composite(CompositeBasis<'g>),
 }
 
+impl Along<'_> {
+    /// The distance a station with the seam-snapping `window` is read at
+    /// (#294, #301); a placement moves no seam.
+    fn snapped_distance(&self, distance: Scalar, window: Scalar) -> GeomResult<Scalar> {
+        match self {
+            Self::Atomic(StationCurve::Two(curve), ..) => {
+                snapped_distance2(curve, distance, window)
+            }
+            Self::Atomic(StationCurve::Three(curve), ..) => {
+                snapped_distance3(curve, distance, window)
+            }
+            Self::Atomic(..) => Err(unsupported(
+                "a station basis curve this compiler does not know",
+            )),
+            Self::Composite(composite) => composite.snapped_distance(distance, window),
+        }
+    }
+}
+
 /// An offset by distances at stations along `basis`, flattened (#289):
 /// the basis between each pair of consecutive stations (in its station
 /// measure), offset by the offsets interpolated linearly between them in
-/// `frame`.
+/// `frame`. The stations stand at their snapped distances (#301); the
+/// side a station names is not read here, since every station is a joint
+/// of the offset, read by whatever station is measured along it.
 fn offset_by_stations<'g>(
     graph: &'g GeometryGraph,
     basis: NodeId,
-    stations: &[Station],
+    stations: &[RunStation],
     frame: StationFrame,
     depth: usize,
 ) -> GeomResult<Flat<'g>> {
@@ -450,12 +476,9 @@ fn offset_by_stations<'g>(
         StationFrame::Plan => OffsetFrame::Plan,
         _ => return Err(unsupported("a station frame this compiler does not know")),
     };
-    let offsets = |station: &Station| {
-        PathOffsets::new(
-            station.offsets.lateral,
-            station.offsets.vertical,
-            station.offsets.longitudinal,
-        )
+    let offsets = |station: &RunStation| {
+        let offsets = &station.station.offsets;
+        PathOffsets::new(offsets.lateral, offsets.vertical, offsets.longitudinal)
     };
     let base = match flatten(graph, basis, depth + 1)? {
         Flat::Pieces(pieces) => Along::Composite(CompositeBasis::new(pieces)?),
@@ -465,9 +488,15 @@ fn offset_by_stations<'g>(
             exact,
         } => Along::Atomic(curve, placed, exact),
     };
+    let distances = super::snapped_run(
+        |distance, window| base.snapped_distance(distance, window),
+        stations
+            .iter()
+            .map(|station| (station.station.distance, station.seam_window)),
+    )?;
     let mut out = Vec::new();
-    for pair in stations.windows(2) {
-        let (a, b) = (pair[0].distance, pair[1].distance);
+    for (pair, at) in stations.windows(2).zip(distances.windows(2)) {
+        let (a, b) = (at[0], at[1]);
         // An atomic basis is measured from its own start, unbounded on a
         // line; a relation along its composite.
         let span = match &base {

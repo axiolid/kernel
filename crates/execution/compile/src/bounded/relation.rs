@@ -318,7 +318,7 @@ fn relation_name(relation: &CurveRelation) -> &'static str {
         CurveRelation::ParameterCurve { .. } => {
             "curve-bounded plane boundary: a parameter curve relation"
         }
-        CurveRelation::OffsetByStations { .. } => {
+        CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. } => {
             "curve-bounded plane boundary: a curve offset at stations"
         }
         _ => "curve-bounded plane boundary: this curve relation kind",

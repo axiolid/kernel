@@ -67,6 +67,19 @@
 //! located by its certified interval
 //! (`axiolid_reference::station::CompositeBasis::joint_intervals`).
 //!
+//! The stations of a run carry a window and a side too (#301): the
+//! sections of a [`SectionsAtStations`] spine or an
+//! [`OpenSectionsAtStations`] surface, and the stations of an
+//! [`OffsetsAtStations`] curve. Each is snapped by the same rule before the
+//! run is read, and the run then stands on the snapped distances; snapped
+//! distances that no longer increase strictly are refused by name. An
+//! interior station snapped onto a seam whose tangents differ is the
+//! mitre's knot, so its section is the mitre section whatever side it
+//! names; the run's first station reads the outgoing piece and its last
+//! the incoming one, as before; an interior station on a seam whose
+//! tangents agree is placed in the frame of the side it names. An offset
+//! by stations used as a basis breaks its law at the snapped distances.
+//!
 //! [`seams`] reads where a graph curve's seams are without evaluating it:
 //! an atomic curve's from its stored data, a composite basis's joints at
 //! the running sum of its pieces' lengths with each piece's own seams
@@ -156,6 +169,7 @@
 //!
 //! [`InstanceAtStation`]: axiolid_model::InstanceAtStation
 //! [`OffsetByStations`]: axiolid_model::CurveRelation::OffsetByStations
+//! [`OffsetsAtStations`]: axiolid_model::CurveRelation::OffsetsAtStations
 //! [`SectionsAtStations`]: axiolid_model::SolidOperation::SectionsAtStations
 //! [`OpenSectionsAtStations`]: axiolid_model::SurfaceRelation::OpenSectionsAtStations
 //! [`StationedSpine`]: axiolid_model::SolidOperation::StationedSpine
@@ -170,7 +184,7 @@ use axiolid_curve::Curve2;
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
     CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, OrientedCurveStation,
-    SeamSide, SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
+    RunStation, SeamSide, SectionAtStation, StationFrame, StationOffsets, StationOrientation,
 };
 use axiolid_profile::{Contour, Profile};
 use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
@@ -394,6 +408,77 @@ fn seam_slack(distance: Scalar) -> Scalar {
     ARC_LENGTH_TOLERANCE * distance.abs().max(1.0)
 }
 
+/// Why a run's snapped stations cannot be read (#301).
+const SNAPPED_NOT_INCREASING: &str =
+    "station: the run's stations, snapped onto seams within their windows, no longer increase \
+     strictly in distance: two snapped onto one seam, or one snapped past its neighbour";
+
+/// The distances a run's stations are read at (#301): each `(distance,
+/// window)` snapped by `snap`, a basis's own snapping by the #294 rule
+/// (`axiolid_reference::station::window`; a window of `0` keeps the
+/// distance). The snapped distances must still increase strictly.
+fn snapped_run(
+    snap: impl Fn(Scalar, Scalar) -> GeomResult<Scalar>,
+    stations: impl IntoIterator<Item = (Scalar, Scalar)>,
+) -> GeomResult<Vec<Scalar>> {
+    let distances = stations
+        .into_iter()
+        .map(|(distance, window)| snap(distance, window))
+        .collect::<GeomResult<Vec<_>>>()?;
+    if distances.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(GeomError::InvalidInput(SNAPPED_NOT_INCREASING.into()));
+    }
+    Ok(distances)
+}
+
+/// The side each station of a run names, at its snapped distance (#301).
+type RunSides = Vec<(Scalar, SeamSide)>;
+
+/// A run of sections' snapped distances (#301, [`snapped_run`]) and the
+/// side each names there.
+fn snapped_sections(
+    basis: &Basis<'_>,
+    sections: &[SectionAtStation],
+) -> GeomResult<(Vec<Scalar>, RunSides)> {
+    let distances = snapped_run(
+        |distance, window| basis.snapped_distance(distance, window),
+        sections
+            .iter()
+            .map(|section| (section.station.distance, section.seam_window)),
+    )?;
+    let sides = distances
+        .iter()
+        .zip(sections)
+        .map(|(at, section)| (*at, section.seam))
+        .collect();
+    Ok((distances, sides))
+}
+
+/// An offset curve by stations, read in its general form (#301): its
+/// basis, its stations (a plain station reads the outgoing piece, with no
+/// window) and its frame.
+fn offset_run(relation: &CurveRelation) -> GeomResult<(NodeId, Vec<RunStation>, StationFrame)> {
+    match relation {
+        CurveRelation::OffsetByStations {
+            basis,
+            stations,
+            frame,
+        } => Ok((
+            *basis,
+            stations.iter().copied().map(RunStation::from).collect(),
+            *frame,
+        )),
+        CurveRelation::OffsetsAtStations {
+            basis,
+            stations,
+            frame,
+        } => Ok((*basis, stations.clone(), *frame)),
+        _ => Err(GeomError::InvalidInput(
+            "not an offset curve by stations".into(),
+        )),
+    }
+}
+
 /// A run of stations along one basis curve, with the seams it meets.
 struct Run<'g> {
     basis: Basis<'g>,
@@ -404,6 +489,10 @@ struct Run<'g> {
     /// The run's last distance, when it lies on a seam: read from the
     /// incoming piece there.
     end: Option<Scalar>,
+    /// The sides the stations after the first name (#301), at their
+    /// snapped distances: read where such a station stands on a seam that
+    /// is not mitred and is not the run's end, which `end` decides.
+    sides: RunSides,
 }
 
 /// How a run reads a distance.
@@ -490,19 +579,25 @@ impl<'g> Run<'g> {
     /// The run over `knots` (ascending): the seams strictly between its
     /// first and last knot whose tangents differ get a mitre and a knot of
     /// their own (an existing knot within tolerance is reused); a seam on
-    /// the last knot is read from its incoming side. Returns the run and
-    /// its knots.
+    /// the last knot is read from its incoming side. `sides` are the sides
+    /// the run's stations name at their distances (#301); the first
+    /// knot's is dropped, since the run reads the outgoing piece there (a
+    /// seam on the last knot is read from its incoming side whatever side
+    /// a station there names). Returns the run and its knots.
     fn new(
         basis: Basis<'g>,
         frame: StationFrame,
         mut knots: Vec<Scalar>,
+        mut sides: RunSides,
     ) -> GeomResult<(Self, Vec<Scalar>)> {
         let (first, last) = (knots[0], knots[knots.len() - 1]);
+        sides.retain(|(at, _)| *at > first);
         let mut run = Self {
             basis,
             frame,
             mitres: Vec::new(),
             end: None,
+            sides,
         };
         for seam in run.basis.seams()? {
             let at = seam.distance;
@@ -560,10 +655,15 @@ impl<'g> Run<'g> {
                 }),
             };
         }
+        // The run's end reads the piece it lies on; an interior station on
+        // a seam that is not mitred, the side it names (#301).
         let side = if self.end == Some(s) {
             SeamSide::Incoming
         } else {
-            SeamSide::Outgoing
+            self.sides
+                .iter()
+                .find(|(at, _)| *at == s)
+                .map_or(SeamSide::Outgoing, |(_, side)| *side)
         };
         let base = self.basis.section_on(s, self.frame, side)?;
         let plane = |(_, mitre): &(Scalar, Mitre)| (mitre.outgoing.point, mitre.normal);
@@ -759,45 +859,51 @@ fn interval(distances: &[Scalar], s: Scalar) -> (usize, Scalar) {
 /// `reading`; `None` where a mitre would cut it.
 fn offset_point(
     run: &Run<'_>,
-    stations: &[Station],
+    stations: &[RunStation],
     distances: &[Scalar],
     s: Scalar,
     reading: Reading,
 ) -> GeomResult<Option<Point3>> {
     let (i, u) = interval(distances, s);
-    let offsets = lerp_offsets(&stations[i].offsets, &stations[i + 1].offsets, u);
+    let offsets = lerp_offsets(
+        &stations[i].station.offsets,
+        &stations[i + 1].station.offsets,
+        u,
+    );
     let base = StationOrientation::default();
     Ok(run
         .at(s, reading, &base, &base, u)?
         .place(&offsets, Point2::ZERO))
 }
 
-/// An [`CurveRelation::OffsetByStations`] sampled as a sweep directrix:
-/// its parameter is the basis distance, so `range` narrows the run of
-/// stations.
+/// An [`CurveRelation::OffsetByStations`] or
+/// [`CurveRelation::OffsetsAtStations`] sampled as a sweep directrix: its
+/// parameter is the basis distance, so `range` narrows the run of
+/// stations, at their snapped distances (#301).
 pub(crate) fn offset_curve_points(
     graph: &GeometryGraph,
     relation: &CurveRelation,
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<Point3>> {
-    let CurveRelation::OffsetByStations {
-        basis,
-        stations,
-        frame,
-    } = relation
-    else {
-        return Err(GeomError::InvalidInput(
-            "not an offset curve by stations".into(),
-        ));
-    };
+    let (basis, stations, frame) = offset_run(relation)?;
     if stations.len() < 2 {
         return Err(GeomError::InvalidInput(
             "an offset curve by stations needs at least two stations".into(),
         ));
     }
-    let basis = Basis::of(graph, *basis)?;
-    let distances: Vec<Scalar> = stations.iter().map(|station| station.distance).collect();
+    let basis = Basis::of(graph, basis)?;
+    let distances = snapped_run(
+        |distance, window| basis.snapped_distance(distance, window),
+        stations
+            .iter()
+            .map(|station| (station.station.distance, station.seam_window)),
+    )?;
+    let sides: RunSides = distances
+        .iter()
+        .zip(stations.iter())
+        .map(|(at, station)| (*at, station.seam))
+        .collect();
     let (first, last) = (distances[0], distances[distances.len() - 1]);
     let mut knots = distances.clone();
     if let Some((a, b)) = range {
@@ -811,9 +917,9 @@ pub(crate) fn offset_curve_points(
         knots.insert(0, lo);
         knots.push(hi);
     }
-    let (run, knots) = Run::new(basis, *frame, knots)?;
+    let (run, knots) = Run::new(basis, frame, knots, sides)?;
     let chord = crate::compiler::chord_error(options);
-    let at = |s, reading| offset_point(&run, stations, &distances, s, reading);
+    let at = |s, reading| offset_point(&run, &stations, &distances, s, reading);
     let samples = sample_run(&knots, chord, &[], |s, reading| {
         at(s, reading).map(|p| p.map(|p| vec![p]))
     })?;
@@ -922,7 +1028,8 @@ pub(crate) fn stationed_spine(
             "station-placed spine distances must increase strictly".into(),
         ));
     }
-    let (run, knots) = Run::new(basis, frame, distances.clone())?;
+    let (distances, sides) = snapped_sections(&basis, sections)?;
+    let (run, knots) = Run::new(basis, frame, distances.clone(), sides)?;
     let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<(Rings, Vec<Point3>)>> {
         let (i, u) = interval(&distances, s);
         let local = lerp_rings(&rings[i], &rings[i + 1], u);
@@ -1215,7 +1322,8 @@ pub(crate) fn sectioned_surface(
             "sectioned surface distances must increase strictly".into(),
         ));
     }
-    let (run, knots) = Run::new(basis, frame, distances.clone())?;
+    let (distances, sides) = snapped_sections(&basis, sections)?;
+    let (run, knots) = Run::new(basis, frame, distances.clone(), sides)?;
     let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<Vec<Point3>>> {
         let (i, u) = interval(&distances, s);
         let offsets = lerp_offsets(

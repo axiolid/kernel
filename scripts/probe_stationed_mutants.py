@@ -190,9 +190,11 @@ MUTANTS = [
      '        if section.tags.iter().eq(first.iter().rev()) {\n            points.reverse();',
      '        if section.tags.iter().eq(first.iter().rev()) {', [ORIENTED]),
     ('offset curve read as 2D', V,
-     '            GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {\n'
+     '                CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. },\n'
+     '            ) => {\n'
      '                if dimension != CurveDimension::Three {',
-     '            GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. }) => {\n'
+     '                CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. },\n'
+     '            ) => {\n'
      '                if dimension != CurveDimension::Two {', [MODEL]),
     # --- #263: seams ---
     ('incoming polyline side reads the outgoing segment', S,
@@ -250,8 +252,8 @@ MUTANTS = [
      '    let end = eval(b, Reading::Incoming)?.ok_or_else(cut_by_mitre)?;',
      '    let end = eval(b, Reading::Placed)?.ok_or_else(cut_by_mitre)?;', [SEAMED]),
     ('oriented station defaults to the incoming side', G,
-     '            seam: SeamSide::Outgoing,',
-     '            seam: SeamSide::Incoming,', [MODEL, SEAMED]),
+     '            orientation,\n            seam: SeamSide::Outgoing,',
+     '            orientation,\n            seam: SeamSide::Incoming,', [MODEL, SEAMED]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)

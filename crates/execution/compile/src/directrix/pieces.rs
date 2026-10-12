@@ -149,7 +149,9 @@ fn resolve(
             }
         }
         // No exact pieces: swept as sampled (#241).
-        Some(GeometryNode::CurveRelation(CurveRelation::OffsetByStations { .. })) => Ok(None),
+        Some(GeometryNode::CurveRelation(
+            CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. },
+        )) => Ok(None),
         // A curve placed at a station (#264): swept as sampled.
         Some(GeometryNode::InstanceAtStation(_)) => Ok(None),
         Some(GeometryNode::CurveRelation(_)) => Err(unsupported_curve_evaluation()),

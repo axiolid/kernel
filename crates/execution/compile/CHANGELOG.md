@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Run stations snap onto seams within their windows (#301, ADR 0082
+  amendment): `SectionsAtStations` and `OpenSectionsAtStations` sections
+  and the stations of the new `CurveRelation::OffsetsAtStations` (compiled
+  as a sweep directrix and as a station basis, like `OffsetByStations`)
+  are each snapped by the #294 rule (`station::window`, the oriented
+  station's own) before the run is read, and the run stands on the snapped
+  distances; a window holding two seams or straddled by one is refused by
+  name, and snapped stations that no longer increase strictly are refused
+  as `InvalidInput`. An interior station snapped onto a joint where the
+  tangent turns is the mitre's knot, its section the mitre section whatever
+  side it names; the run's first and last stations keep their outgoing and
+  incoming readings; an interior station on a seam whose tangents agree (a
+  roll jump) is placed in the frame of the side it names. Window `0` and
+  `Outgoing`, the defaults, are today's reading.
+
 ### Changed
 
 - `station::curve_path` documents that its pieces stay stated, each with

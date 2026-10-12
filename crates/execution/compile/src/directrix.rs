@@ -205,10 +205,11 @@ fn resolve(
             }
         }
         // Offsets at stations along a basis curve, sampled (#241).
-        Some(GeometryNode::CurveRelation(relation @ CurveRelation::OffsetByStations { .. })) => {
-            crate::station::offset_curve_points(graph, relation, range, options)
-                .map(|points| (points, None))
-        }
+        Some(GeometryNode::CurveRelation(
+            relation @ (CurveRelation::OffsetByStations { .. }
+            | CurveRelation::OffsetsAtStations { .. }),
+        )) => crate::station::offset_curve_points(graph, relation, range, options)
+            .map(|points| (points, None)),
         // A curve placed at a station (#264): its source sampled in its own
         // coordinates (a 2D one in `z = 0`), then moved rigidly.
         Some(GeometryNode::InstanceAtStation(placed)) => {

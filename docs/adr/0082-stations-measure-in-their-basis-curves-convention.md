@@ -905,3 +905,74 @@ Still open: a path's total length on the contract (with an open last piece
 a caller without the evaluator learns it from no query; `CompositeBasis::
 length` has it), and an open end on a closed conic, which runs from `start`
 to the end of the turn, never across its parameter seam.
+
+## Amendment 2026-10-12: seam-snapping windows and sides on run stations (#301)
+
+The consumer (openbimrs/ifc#429) lowers sectioned solids and surfaces
+(`IfcSectionedSolidHorizontal`, `IfcSectionedSurface`) and offsets by
+distances along bases whose joints need quadrature (offsets beside gradient
+curves, spirals, B-splines). Without a provider it cannot compute where
+those joints fall, and #294 gave the snapping to the kernel only for single
+oriented stations; run stations had no window and no side, so such runs had
+to be refused.
+
+- **Representation, additively.** `Station`, `StationedSection` and
+  `StationedOpenSection` have public fields and `OffsetByStations` public
+  struct fields, so none of them can gain a field (#263's reasoning). The
+  #246 pattern is used instead: `SectionAtStation` is `#[non_exhaustive]`
+  and gains `seam: SeamSide` and `seam_window`, set by `with_seam_side` and
+  `with_seam_window`; a new `#[non_exhaustive]` `RunStation { station,
+  seam, seam_window }` (`new`, the same two `with_` methods, `From<Station>`)
+  is the station of a new variant appended to `CurveRelation`,
+  `OffsetsAtStations { basis, stations: Vec<RunStation>, frame }`, the
+  general form of `OffsetByStations`. Defaults are `Outgoing` and `0`, so
+  `SectionsAtStations` and `OpenSectionsAtStations` without them read as
+  before, and `StationedSpine`, `SectionedSurface` and `OffsetByStations`
+  stay window-free. The graph refuses a negative or non-finite window on any
+  run station when the node is pushed, by the #294 detail.
+- **Snapping.** Before a run is read, each station is snapped by the #294
+  rule against the run's directrix, through the same
+  `axiolid_reference::station::window` the oriented station uses (no second
+  copy of the rule): within its window `[d - w, d + w]` of exactly one seam
+  whose frame may jump, it moves to that seam's own distance, exact or
+  located by its certified interval; two such seams refuse naming
+  `SEAM_WINDOW_AMBIGUOUS`, a seam straddling the edge `SEAM_WINDOW_STRADDLED`;
+  a window of `0` keeps the distance. The run then uses the snapped distance
+  everywhere: where the section stands, the linear interpolation of
+  offsets, profiles and orientations between stations, the run's span, and,
+  for an offset by stations used as a basis (#289), where its law breaks.
+  Snapped distances must still increase strictly: two stations snapped onto
+  one seam, or one snapped past its neighbour, are refused by name ("no
+  longer increase strictly").
+- **Mitre interaction (#263).** A station snapped onto a seam strictly
+  inside the run whose tangents differ stands on the mitre's knot: its
+  section (an offset's one point) IS the mitre section, each point placed
+  in both pieces' frames with its offsets and orientation and projected
+  onto the bisector plane. Both frames are used, so the station's side is
+  NOT read there; a section authored 0.6 mm before such a joint without a
+  window is cut by the mitre plane and refused, with a window it is the
+  mitre section, whatever its side. The run's first station reads the
+  outgoing piece and its last the incoming one, the pieces the run lies on,
+  whatever side they name, as a curve's own start and end have one piece.
+  An interior station on a seam whose tangents agree but whose frame may
+  jump (a banked curve's roll) is not mitred: its section or offset point
+  is placed in the frame of the piece its side names (`Outgoing`, the
+  default, being today's reading). So the side matters exactly where the
+  run itself does not decide the frame. An offset by stations used as a
+  basis does not read the side: each of its stations is a joint of the
+  offset, read by whatever station is measured along it.
+- **Wire format 1.2** (ADR 0085 note): the new fields are omitted at their
+  defaults, and `OffsetsAtStations` is a new variant; a graph that uses
+  neither keeps writing 1.0 or 1.1.
+
+| Option | Why not |
+| --- | --- |
+| Fields on `Station` | Public fields: every struct literal breaks, and `StationedSection`, `CurveStation` and `OffsetByStations` would carry a window they cannot honour consistently. |
+| One window per run instead of per station | A run's stations stand beside different joints, and the consumer's precision applies per station; a side per station is needed where the roll jumps. |
+| Read an interior station's side at a mitre (one piece's plain section) | A section standing on a joint where the tangent turns would cross the next piece's sections; the mitre is the only section both neighbours meet. |
+| Honour a side on the run's first or last station | The run lies on one piece there; the other piece's frame would place the end section on a piece the run does not cover. |
+| Snap with the kernel's estimate of a numerical joint | As in #294: the estimate is what the consumer could not trust. |
+
+Still open: windows on `StationedSpine`, `SectionedSurface` and
+`OffsetByStations` themselves (their general forms carry them); a side at a
+run's ends that disagrees with the run's reading is ignored, not refused.

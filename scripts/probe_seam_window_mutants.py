@@ -13,10 +13,16 @@ refusal; in the conformance suite the containment check; in the compiler
 the window applied at all; and in `axiolid-model` the window's validation
 and its wire format (omitted at zero, refused in a 1.0 payload, and
 lifting the payload to 1.1 from either carrier, a `-0.0` window too,
-#297). Each must
-turn `evaluate/tests/station_certify.rs`, `curve_evaluate_path.rs`,
-`compile/tests/station_window.rs` or the model's `station`/`wire` tests
-red.
+#297). For run stations (#301): the window ignored by a section run, an
+offset curve or an offset used as a basis, snapped stations out of order
+read, an interior station's side not read, the first station's side read,
+a station's side overriding the mitre at its knot, each carrier's window
+validation, a default side written, and format 1.2's feature test (the
+1.1 refusal, the label, the variant, a section's side, a `-0.0` window,
+each carrier). Each must turn `evaluate/tests/station_certify.rs`,
+`curve_evaluate_path.rs`, `compile/tests/station_window.rs`,
+`compile/tests/station_run_window.rs` or the model's `station`/`wire`
+tests red.
 
 Not probed, because no test can tell them apart: halving a bound the
 certificate holds with room to spare (the derivative suprema are loose by
@@ -40,13 +46,15 @@ P = "crates/algorithms/parametric/evaluate/src/provider.rs"
 T = "crates/contracts/operations/curve-evaluate/src/contract.rs"
 F = "crates/contracts/operations/curve-evaluate/src/conformance.rs"
 S = "crates/execution/compile/src/station.rs"
-V = "crates/representations/modeling/graph/src/validation.rs"
+B = "crates/execution/compile/src/station/basis.rs"
+V ="crates/representations/modeling/graph/src/validation.rs"
 G = "crates/representations/modeling/graph/src/wire.rs"
 M = "crates/representations/modeling/graph/src/station.rs"
 
 CERT = ["-p", "axiolid-evaluate", "--all-features", "--test", "station_certify"]
 PATH = ["-p", "axiolid-evaluate", "--all-features", "--test", "curve_evaluate_path"]
 COMP = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_window"]
+RUN = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "station_run_window"]
 STATION = ["-p", "axiolid-model", "--test", "station"]
 WIRE = ["-p", "axiolid-model", "--all-features", "--test", "wire"]
 
@@ -106,12 +114,12 @@ MUTANTS = [
      '    if false {', [PATH]),
     # The graph.
     ('a negative window is accepted', V,
-     '    if station.seam_window < 0.0 {', '    if false {', [STATION, WIRE]),
+     '    if window < 0.0 {', '    if false {', [STATION, WIRE]),
     ('a zero window is written', M,
      '    window.to_bits() == 0', '    false', [WIRE]),
     ('a window in a 1.0 payload is read', G,
-     '    (version < SEAM_WINDOW_SINCE && uses_seam_window(node)).then_some("seam_window")',
-     '    (false && uses_seam_window(node)).then_some("seam_window")', [WIRE]),
+     '    if version < SEAM_WINDOW_SINCE && uses_seam_window(node) {',
+     '    if false && uses_seam_window(node) {', [WIRE]),
     ('the window of an oriented station node is ignored', G,
      '        GeometryNode::OrientedCurveStation(station) => core::slice::from_ref(station),',
      '        GeometryNode::OrientedCurveStation(_) => &[],', [WIRE]),
@@ -121,6 +129,76 @@ MUTANTS = [
     ('a -0.0 window is labelled 1.0', G,
      '        .any(|station| station.seam_window.to_bits() != 0)',
      '        .any(|station| station.seam_window != 0.0)', [WIRE]),
+    # Run stations (#301): snapping, the order after it, the side, the
+    # mitre, validation and format 1.2.
+    ('a section run ignores its windows', S,
+     '            .map(|section| (section.station.distance, section.seam_window)),',
+     '            .map(|section| (section.station.distance, 0.0 * section.seam_window)),',
+     [RUN]),
+    ('an offset curve ignores its stations\' windows', S,
+     '            .map(|station| (station.station.distance, station.seam_window)),',
+     '            .map(|station| (station.station.distance, 0.0 * station.seam_window)),',
+     [RUN]),
+    ('an offset basis ignores its stations\' windows', B,
+     '            .map(|station| (station.station.distance, station.seam_window)),',
+     '            .map(|station| (station.station.distance, 0.0 * station.seam_window)),',
+     [RUN]),
+    ('snapped stations out of order are read', S,
+     '    if distances.windows(2).any(|pair| pair[1] <= pair[0]) {\n'
+     '        return Err(GeomError::InvalidInput(SNAPPED_NOT_INCREASING.into()));',
+     '    if false {\n'
+     '        return Err(GeomError::InvalidInput(SNAPPED_NOT_INCREASING.into()));', [RUN]),
+    ('an interior station\'s side is not read', S,
+     '                .map_or(SeamSide::Outgoing, |(_, side)| *side)',
+     '                .map_or(SeamSide::Outgoing, |_| SeamSide::Outgoing)', [RUN]),
+    ('the run\'s first station reads its own side', S,
+     '        sides.retain(|(at, _)| *at > first);', '', [RUN]),
+    ('a station\'s side overrides the mitre at its knot', S,
+     '        if let Some((_, mitre)) = self.mitres.iter().find(|(knot, _)| *knot == s) {',
+     '        if let Some((_, mitre)) = self\n'
+     '            .mitres\n'
+     '            .iter()\n'
+     '            .find(|(knot, _)| *knot == s && !self.sides.iter().any(|(at, _)| *at == s))\n'
+     '        {', [RUN]),
+    ('an offset run\'s window is not validated', V,
+     '                validate_seam_window(station.seam_window)?;\n', '', [STATION]),
+    ('an open section\'s window is not validated', V,
+     '                validate_seam_window(section.seam_window)?;\n'
+     '            }\n'
+     '            validate_station_run(sections.iter().map(|section| &section.station))?;\n'
+     '            validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)',
+     '            }\n'
+     '            validate_station_run(sections.iter().map(|section| &section.station))?;\n'
+     '            validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)',
+     [STATION]),
+    ('a closed section\'s window is not validated', V,
+     '                validate_seam_window(section.seam_window)?;\n'
+     '            }\n'
+     '            validate_station_run(sections.iter().map(|section| &section.station))?;\n'
+     '            validate_section_tags(\n',
+     '            }\n'
+     '            validate_station_run(sections.iter().map(|section| &section.station))?;\n'
+     '            validate_section_tags(\n', [STATION]),
+    ('a default run side is written', M,
+     '    *side == SeamSide::Outgoing', '    false', [WIRE]),
+    ('a 1.2 feature in a 1.1 payload is read', G,
+     '    if version < RUN_SEAMS_SINCE {', '    if false {', [WIRE]),
+    ('a payload is never labelled 1.2', G,
+     '    if nodes.iter().any(|node| run_seams(node).is_some()) {', '    if false {', [WIRE]),
+    ('an offset at run stations is not a 1.2 variant', G,
+     '            CurveRelation::OffsetsAtStations { .. } => Some(RunSeams::Kind("OffsetsAtStations")),',
+     '            CurveRelation::OffsetsAtStations { .. } => None,', [WIRE]),
+    ('a section\'s side does not select 1.2', G,
+     '        if section.seam != SeamSide::Outgoing {', '        if false {', [WIRE]),
+    ('a -0.0 section window is labelled 1.1', G,
+     '        } else if section.seam_window.to_bits() != 0 {',
+     '        } else if section.seam_window != 0.0 {', [WIRE]),
+    ('the sections of a solid carry nothing', G,
+     '            SolidOperation::SectionsAtStations { sections, .. } => sections,',
+     '            SolidOperation::SectionsAtStations { .. } => &[],', [WIRE]),
+    ('the sections of a surface carry nothing', G,
+     '            SurfaceRelation::OpenSectionsAtStations { sections, .. } => sections,',
+     '            SurfaceRelation::OpenSectionsAtStations { .. } => &[],', [WIRE]),
 ]
 
 probe_lib.main(MUTANTS, timeout=TIMEOUT, reject_uncompiled=True)

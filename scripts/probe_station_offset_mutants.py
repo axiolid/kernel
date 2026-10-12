@@ -128,8 +128,10 @@ MUTANTS = [
      '        StationFrame::Plan => OffsetFrame::Plan,',
      '        StationFrame::Plan => OffsetFrame::Section,', [COMP]),
     ('a trim of an offset read by its own length', B,
-     '                    CurveRelation::Offset { .. } | CurveRelation::OffsetByStations { .. }',
-     '                    CurveRelation::ParameterCurve { .. }', [COMP]),
+     '                    CurveRelation::Offset { .. }\n'
+     '                        | CurveRelation::OffsetByStations { .. }\n'
+     '                        | CurveRelation::OffsetsAtStations { .. }\n',
+     '                    CurveRelation::ParameterCurve { .. }\n', [COMP]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)
