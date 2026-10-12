@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment): `PathPiece::open_end`,
+  set by `PathPiece::to_end(curve, start)` and `PathPiece::whole(curve)`,
+  leaves a span's end to the evaluator, which resolves it with its own
+  length of the curve; so a caller without a provider can build a path
+  over an offset beside a gradient curve, a clothoid or a B-spline (or a
+  B-spline itself), whose lengths have no closed form.
+  `PathPiece::from_start(curve, end)` is the span `[0, end]`, and
+  `PathPiece::is_stated` says whether every length a piece spans (its
+  offset's base included) is stated. An open piece's `end` holds
+  `Scalar::INFINITY`, unread, so `PathPiece::length` and
+  `CurvePath::length` are infinite until an evaluator resolves it. Stated
+  pieces are unchanged.
+
 ## [0.3.7] - 2026-10-10
 
 ### Added

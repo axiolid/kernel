@@ -28,7 +28,9 @@ nothing; `axiolid-evaluate` does that. Composite, trimmed, offset and
 surface-bound curves are relations in `axiolid-model`, which keeps curves
 and surfaces free of a dependency cycle; `CurvePath` carries the pieces of
 atomic curves such a relation runs along, reversed or placed, or offset
-beside one (`PathOffset`), as a neutral value an evaluator measures.
+beside one (`PathOffset`), as a neutral value an evaluator measures; a
+piece may leave its end open (`PathPiece::whole`) for the evaluator to
+resolve with its own length.
 
 The optional `serde` feature (off by default) derives `Serialize` and
 `Deserialize` for the curve values the geometry graph's wire format carries

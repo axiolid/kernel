@@ -32,6 +32,24 @@
 //! [`SeamSide`](crate::SeamSide), the common convention, exactness) are
 //! ADR 0082's.
 //!
+//! # Open ends (#298)
+//!
+//! A caller cannot always state where a span ends: the length of an offset
+//! beside a gradient curve, a clothoid or a B-spline, and of a B-spline
+//! itself, has no closed form. A piece may therefore run to its curve's
+//! end without stating it ([`PathPiece::to_end`], [`PathPiece::whole`]):
+//! its [`open_end`](PathPiece::open_end) is set and its `end` holds
+//! `Scalar::INFINITY`, which nothing reads. The evaluator resolves the end
+//! with its own length of the curve, the number it would measure the
+//! whole curve by: exact where the length is read from stored data, its
+//! numerical estimate otherwise, so the joints after it fall where its
+//! certified joint distances say. On an unbounded line the end is its
+//! parameter domain's, `origin + direction`, as inside a composite. A
+//! span from the curve's start needs no open start, since the station
+//! measure starts there at `0` ([`PathPiece::from_start`]). Until an
+//! evaluator has resolved it, an open piece has no length here:
+//! [`PathPiece::length`] and [`CurvePath::length`] are infinite.
+//!
 //! # Exactness
 //!
 //! A frame read on a piece is exact, rounding aside, only on a line placed,
@@ -223,7 +241,8 @@ pub struct PathPiece {
     /// Where the span starts, in the curve's station measure from its
     /// start (negative only on a line).
     pub start: Scalar,
-    /// Where the span ends; a measurable piece has `end > start`.
+    /// Where the span ends; a measurable piece has `end > start`. Not read
+    /// where the end is open ([`Self::open_end`]).
     pub end: Scalar,
     /// Whether the path runs from `end` to `start`.
     pub reversed: bool,
@@ -232,6 +251,10 @@ pub struct PathPiece {
     /// Whether that placement is exact, rounding aside (`true` with no
     /// placement).
     pub placement_exact: bool,
+    /// Whether the span runs to the curve's end, which the evaluator
+    /// resolves with its own length (#298; see the
+    /// [module documentation](self#open-ends-298)); `end` is then not read.
+    pub open_end: bool,
 }
 
 impl PathPiece {
@@ -248,7 +271,37 @@ impl PathPiece {
             reversed: false,
             placement: None,
             placement_exact: true,
+            open_end: false,
         }
+    }
+
+    /// The span of `curve` from `start` to its end, forwards and unplaced,
+    /// the end left to the evaluator (#298; see the
+    /// [module documentation](self#open-ends-298)).
+    ///
+    /// Nothing is checked here: an evaluator refuses a start that is not
+    /// finite, or not before the curve's end, when it reads the path.
+    #[must_use]
+    pub fn to_end(curve: PathCurve, start: Scalar) -> Self {
+        Self {
+            open_end: true,
+            ..Self::new(curve, start, Scalar::INFINITY)
+        }
+    }
+
+    /// The span of `curve` from its start to `end`: `[0, end]`, the station
+    /// measure starting at `0` on every curve.
+    #[must_use]
+    pub fn from_start(curve: PathCurve, end: Scalar) -> Self {
+        Self::new(curve, 0.0, end)
+    }
+
+    /// The whole of `curve`, from its start to its end, no length stated
+    /// (#298): [`Self::to_end`] from `0`. An unbounded line is its parameter
+    /// domain, from its origin to `origin + direction`.
+    #[must_use]
+    pub fn whole(curve: PathCurve) -> Self {
+        Self::to_end(curve, 0.0)
     }
 
     /// The same span traversed the other way.
@@ -270,10 +323,25 @@ impl PathPiece {
         self
     }
 
-    /// The span's length in its curve's station measure, `end - start`.
+    /// The span's length in its curve's station measure, `end - start`;
+    /// infinite where the end is open, which only an evaluator resolves.
     #[must_use]
     pub fn length(&self) -> Scalar {
+        if self.open_end {
+            return Scalar::INFINITY;
+        }
         self.end - self.start
+    }
+
+    /// Whether every length the piece spans is stated: its own end, and its
+    /// offset's base piece's (#298).
+    #[must_use]
+    pub fn is_stated(&self) -> bool {
+        !self.open_end
+            && match &self.curve {
+                PathCurve::Offset(offset) => offset.base.is_stated(),
+                _ => true,
+            }
     }
 
     /// Whether a frame read on this piece is exact, rounding aside: a line
@@ -340,7 +408,8 @@ impl CurvePath {
     }
 
     /// The sum of the pieces' lengths, in their station measure: the
-    /// path's length once an evaluator has accepted it.
+    /// path's length once an evaluator has accepted it; infinite where a
+    /// piece's end is open (#298), which only an evaluator resolves.
     #[must_use]
     pub fn length(&self) -> Scalar {
         self.pieces.iter().map(PathPiece::length).sum()
@@ -438,5 +507,38 @@ mod tests {
         assert!(offset.curve.is_line() && !offset.frame_is_exact());
         let half = PathOffsets::new(0.0, 0.0, 2.0).lerp(PathOffsets::new(2.0, 4.0, 0.0), 0.5);
         assert_eq!(half, PathOffsets::new(1.0, 2.0, 1.0));
+    }
+
+    #[test]
+    fn an_open_end_is_left_to_the_evaluator_and_survives_composition() {
+        let line = PathCurve::Three(Curve3::Line(Line3 {
+            origin: Point3::ZERO,
+            direction: Vec3::X,
+        }));
+        let open = PathPiece::to_end(line.clone(), 2.0);
+        assert!(open.open_end && !open.is_stated());
+        assert_eq!((open.start, open.end), (2.0, Scalar::INFINITY));
+        assert_eq!(open.length(), Scalar::INFINITY);
+        // An open piece equals itself (no NaN sentinel).
+        assert_eq!(open, open.clone());
+        let whole = PathPiece::whole(line.clone());
+        assert!(whole.open_end && whole.start == 0.0);
+        let from_start = PathPiece::from_start(line.clone(), 3.0);
+        assert!(!from_start.open_end && from_start.is_stated());
+        assert_eq!((from_start.start, from_start.length()), (0.0, 3.0));
+        // Reversing and placing keep the open end.
+        let path = CurvePath::new(vec![from_start, open])
+            .reversed()
+            .placed(Transform3::from_rotation_z(0.5), true);
+        assert!(path.pieces()[0].open_end && path.pieces()[0].reversed);
+        assert!(!path.pieces()[1].open_end);
+        assert_eq!(path.length(), Scalar::INFINITY);
+        // A stated offset over an open base is not stated.
+        let offset = PathCurve::Offset(Box::new(PathOffset::new(
+            whole,
+            OffsetLaw::Planar { distance: 1.0 },
+        )));
+        let piece = PathPiece::new(offset, 0.0, 1.0);
+        assert!(!piece.open_end && !piece.is_stated());
     }
 }
