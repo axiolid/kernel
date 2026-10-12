@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment): the trait documentation
+  states that a provider reading paths resolves a piece's open end with
+  its own length of the curve, and `OPEN_PATH_END_UNSUPPORTED` names the
+  typed refusal of a provider that reads stated spans only. The
+  conformance suite reads an open path (the whole of a widening offset of
+  the whole of a line, then a line to its end) forwards and reversed,
+  refuses a distance past its end and certifies its joint at `sqrt(101)`;
+  a provider may refuse it as unsupported, typed.
+
 ## [0.3.5] - 2026-10-10
 
 ### Added

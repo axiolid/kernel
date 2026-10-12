@@ -91,6 +91,20 @@ use crate::{CurveMeasure, DistanceConvention, DistanceInterval};
 ///   if at all, exactly
 ///   ([`path_frame_is_exact_at`](Self::path_frame_is_exact_at)).
 ///
+/// A piece may leave its end open ([`PathPiece::to_end`](axiolid_curve::PathPiece::to_end),
+/// [`PathPiece::whole`](axiolid_curve::PathPiece::whole), #298): a caller
+/// with no provider cannot state the length of an offset beside a gradient
+/// curve, a clothoid or a B-spline. A provider that reads paths resolves
+/// the end to where the curve ends by its own length of it (exact where
+/// that is read from stored data, its numerical estimate otherwise), so
+/// the distance runs through the pieces as it would through the stated
+/// path holding those lengths, and
+/// [`path_joint_distances`](Self::path_joint_distances) certifies where
+/// the joints after it truly fall. A provider that reads stated paths but
+/// not open ends refuses a path with one by a typed
+/// [`GeomError::UnsupportedInput`] naming [`OPEN_PATH_END_UNSUPPORTED`],
+/// never reading the `end` the piece leaves unset.
+///
 /// They have defaults so that adding them broke no provider: a provider
 /// that does not implement paths refuses every path query by a typed
 /// [`GeomError::UnsupportedInput`] naming [`CURVE_PATH_UNSUPPORTED`],
@@ -377,6 +391,12 @@ pub trait CurveEvaluator: Backend {
 pub const PATH_JOINT_DISTANCES_UNSUPPORTED: &str =
     "certified joint distances of a curve path: this provider does not bound the lengths of a \
      path's pieces";
+
+/// The input a provider that reads curve paths but not open piece ends
+/// (#298) refuses a path with one for.
+pub const OPEN_PATH_END_UNSUPPORTED: &str =
+    "a curve path piece whose end is open (runs to its curve's end): this provider reads stated \
+     spans only";
 
 /// The input a provider that does not implement curve paths refuses, in
 /// the [`GeomError::UnsupportedInput`] its default `path_*` queries return.

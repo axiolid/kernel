@@ -10,10 +10,10 @@ use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve, Circle2, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3, ElevationLaw,
-    Intrinsic2, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffsets, PathPiece,
-    Polyline2, SeamSide,
+    Intrinsic2, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets,
+    PathPiece, Polyline2, SeamSide,
 };
-use axiolid_curve_evaluate_contract::{CurveEvaluator, DistanceInterval};
+use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceInterval};
 use axiolid_evaluate::station::{
     offset_pieces, snapped_distance2, CompositeBasis, StationCurve, StationPiece,
     SEAM_WINDOW_AMBIGUOUS, SEAM_WINDOW_STRADDLED, UNCERTIFIED_LENGTH, WINDOW_CERTIFICATION,
@@ -623,4 +623,192 @@ fn a_curve_path_answers_its_joints_through_the_contract() {
     assert!(ReferenceCurveEvaluator::new()
         .path_joint_distances(&gapped, 1e-8)
         .is_err());
+}
+
+// --- open ends (#298) -----------------------------------------------------------
+
+/// Every reading of `open` through the contract equals, bitwise, the
+/// station reading of `stated` (the composite a compiler would build) at
+/// each of `distances`, on both sides; and `open` resolves to `stated`'s
+/// own pieces.
+fn reads_as_stated(open: &CurvePath, stated: &CompositeBasis<'_>, distances: &[Scalar]) {
+    let resolved = CompositeBasis::from_path(open).unwrap();
+    assert_eq!(resolved.path(), stated.path());
+    assert_eq!(resolved.length().to_bits(), stated.length().to_bits());
+    let provider = ReferenceCurveEvaluator::new();
+    assert_eq!(provider.path_distance_convention(open), stated.convention());
+    for &d in distances {
+        let at = CurveMeasure::Distance(d);
+        for side in [SeamSide::Outgoing, SeamSide::Incoming] {
+            let want = stated.section_on(d, side).unwrap();
+            let point = provider.path_point_at_on(open, at, side).unwrap();
+            let tangent = provider.path_tangent_at_on(open, at, side).unwrap();
+            assert_eq!(point, want.point, "point at {d} {side:?}");
+            assert_eq!(tangent, want.tangent, "tangent at {d} {side:?}");
+        }
+    }
+    let past = stated.length() * (1.0 + 1e-9) + 1e-9;
+    assert!(provider
+        .path_point_at(open, CurveMeasure::Distance(past))
+        .is_err());
+}
+
+#[test]
+fn an_open_offset_by_distances_beside_an_elevated_arc_needs_no_length() {
+    let r = 200.0;
+    let plan = Curve2::Circle(Circle2 {
+        frame: frame(Point2::new(0.0, r), Vec2::new(0.0, -1.0), Vec2::X),
+        radius: r,
+    });
+    let elevated = Curve3::Elevated(Elevated3::new(plan, crest()));
+    // Dyadic offsets, so the compiler's interpolated laws are these exactly.
+    let stations = [(0.0, -2.0, 0.25), (40.0, -2.5, -0.125), (100.0, -1.5, 0.5)];
+    let stated =
+        CompositeBasis::new(by_stations(StationCurve::Three(&elevated), &stations)).unwrap();
+    // The caller states the stations along the alignment, which it authored,
+    // and leaves every offset's own length to the kernel.
+    let open: CurvePath = stations
+        .windows(2)
+        .map(|pair| {
+            let ((a, la, va), (b, lb, vb)) = (pair[0], pair[1]);
+            let base = PathPiece::new(PathCurve::Three(elevated.clone()), a, b);
+            let law = OffsetLaw::Linear {
+                start: PathOffsets::new(la, va, 0.0),
+                end: PathOffsets::new(lb, vb, 0.0),
+                frame: OffsetFrame::Section,
+            };
+            PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(base, law))))
+        })
+        .collect();
+    assert!(open.pieces().iter().all(|piece| !piece.is_stated()));
+    let joint = stated.pieces()[0].length();
+    reads_as_stated(
+        &open,
+        &stated,
+        &[
+            0.0,
+            17.0,
+            joint,
+            joint + 1e-13 * joint,
+            70.0,
+            stated.length(),
+        ],
+    );
+    // Where the joint truly lies, against the offset written out.
+    let velocity = move |v: Scalar, a: Scalar, da: Scalar, b: Scalar, db: Scalar| {
+        let t = v / r;
+        let (sin, cos) = t.sin_cos();
+        let dt = 1.0 / r;
+        Vec2::new(
+            r * cos * dt - da * sin - a * cos * dt + db * cos - b * sin * dt,
+            r * sin * dt + da * cos - a * sin * dt + db * sin + b * cos * dt,
+        )
+    };
+    let speed = plan_speed_beside(&velocity, [stations[0], stations[1]]);
+    let truth = simpson(&speed, 0.0, 40.0, 1e-13);
+    let provider = ReferenceCurveEvaluator::new();
+    for tolerance in [1e-6, 1e-9] {
+        let joints = provider.path_joint_distances(&open, tolerance).unwrap();
+        assert_eq!(joints.len(), 1);
+        certifies(joints[0], truth, tolerance, "open elevated arc");
+    }
+    // The kernel's own end, an estimate, is within the offset tolerance.
+    assert!((joint - truth).abs() <= 1e-9 * truth);
+}
+
+#[test]
+fn an_open_constant_offset_of_a_clothoid_needs_no_length() {
+    let spiral = clothoid_then_arc();
+    let whole = StationPiece::whole(StationCurve::Two(&spiral)).unwrap();
+    let distance = 5.0;
+    let law = OffsetLaw::Planar { distance };
+    let stated = CompositeBasis::new(offset_pieces(&[whole], law).unwrap()).unwrap();
+    // The spiral's seam at 100 splits it, as the compiler splits it; the
+    // arc after it runs to the curve's end, unstated.
+    let offset =
+        |base: PathPiece| PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(base, law))));
+    let open = CurvePath::new(vec![
+        offset(PathPiece::from_start(PathCurve::Two(spiral.clone()), 100.0)),
+        offset(PathPiece::to_end(PathCurve::Two(spiral.clone()), 100.0)),
+    ]);
+    let truth = 100.0 - distance / 6.0;
+    reads_as_stated(&open, &stated, &[0.0, 50.0, truth, 120.0, stated.length()]);
+    // Beside the arc of radius 300 the offset runs `(300 - 5) / 300` as fast.
+    let total = truth + 50.0 * (300.0 - distance) / 300.0;
+    assert!((stated.length() - total).abs() <= 1e-9 * total);
+    for tolerance in [1e-6, 1e-10] {
+        let joints = ReferenceCurveEvaluator::new()
+            .path_joint_distances(&open, tolerance)
+            .unwrap();
+        certifies(joints[0], truth, tolerance, "open clothoid");
+    }
+    // An open end still checks the start it states.
+    for start in [151.0, Scalar::NAN] {
+        let past = CurvePath::from(PathPiece::to_end(PathCurve::Two(spiral.clone()), start));
+        assert!(CompositeBasis::from_path(&past).is_err(), "start {start}");
+    }
+}
+
+#[test]
+fn an_open_offset_of_a_b_spline_needs_no_length() {
+    let (p, spline) = bezier();
+    let tail = line2(Point2::new(90.0, 20.0), Vec2::X);
+    let distance = 2.0;
+    let law = OffsetLaw::Planar { distance };
+    let base = [
+        StationPiece::whole(StationCurve::Two(&spline)).unwrap(),
+        StationPiece::between(StationCurve::Two(&tail), 0.0, 10.0).unwrap(),
+    ];
+    let stated = CompositeBasis::new(offset_pieces(&base, law).unwrap()).unwrap();
+    // Neither the spline's arc length nor its offset's is stated.
+    let offset =
+        |base: PathPiece| PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(base, law))));
+    let open = CurvePath::new(vec![
+        offset(PathPiece::whole(PathCurve::Two(spline.clone()))),
+        offset(PathPiece::from_start(PathCurve::Two(tail.clone()), 10.0)),
+    ]);
+    let joint = stated.pieces()[0].length();
+    reads_as_stated(
+        &open,
+        &stated,
+        &[0.0, 33.3, joint, joint - 1e-13 * joint, joint + 4.0],
+    );
+    let first = |t: Scalar| {
+        let u = 1.0 - t;
+        3.0 * (u * u * (p[1] - p[0]) + 2.0 * u * t * (p[2] - p[1]) + t * t * (p[3] - p[2]))
+    };
+    let second =
+        |t: Scalar| 6.0 * ((1.0 - t) * (p[2] - 2.0 * p[1] + p[0]) + t * (p[3] - 2.0 * p[2] + p[1]));
+    let speed = |t: Scalar| {
+        let (d1, d2) = (first(t), second(t));
+        let n = d1.length();
+        let unit_rate = (d2 * (n * n) - d1 * d1.dot(d2)) / (n * n * n);
+        (d1 + distance * unit_rate.perp()).length()
+    };
+    let truth = simpson(&speed, 0.0, 1.0, 1e-13);
+    for tolerance in [1e-4, 1e-7] {
+        let joints = ReferenceCurveEvaluator::new()
+            .path_joint_distances(&open, tolerance)
+            .unwrap();
+        certifies(joints[0], truth, tolerance, "open B-spline offset");
+    }
+    assert!((joint - truth).abs() <= 1e-9 * truth);
+    // The plain spline left open: its own arc length, certified.
+    let plain = CurvePath::new(vec![
+        PathPiece::whole(PathCurve::Two(spline.clone())),
+        PathPiece::from_start(PathCurve::Two(tail.clone()), 10.0),
+    ]);
+    let length = simpson(&|t| first(t).length(), 0.0, 1.0, 1e-13);
+    certifies(
+        ReferenceCurveEvaluator::new()
+            .path_joint_distances(&plain, 1e-7)
+            .unwrap()[0],
+        length,
+        1e-7,
+        "open B-spline",
+    );
+    assert_eq!(
+        CompositeBasis::from_path(&plain).unwrap().pieces()[0].end,
+        base[0].end
+    );
 }

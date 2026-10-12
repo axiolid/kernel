@@ -93,6 +93,26 @@
 //! curve's own section frame. A plan-measured curve placed tilted is
 //! refused by name.
 //!
+//! # Open ends (#298)
+//!
+//! A [`PathPiece`] may leave its end open ([`PathPiece::to_end`],
+//! [`PathPiece::whole`]): a caller with no provider cannot state the length
+//! of an offset beside a gradient curve, a clothoid or a B-spline. Its end
+//! is resolved, when the path is read, to where the curve ends by THIS
+//! evaluator's length, the number [`StationPiece::whole`] and so a graph
+//! compiler's flattening measure the whole curve by: a line's parameter
+//! domain end, a length read from stored data exactly, and otherwise the
+//! numerical estimate (an ellipse's or a B-spline's arc-length quadrature,
+//! an offset's own table, to [`super::OFFSET_TOLERANCE`]). An open path is
+//! therefore read exactly as the stated path holding those numbers,
+//! which [`CompositeBasis::path`] hands back: bitwise as a station resolved
+//! on the same pieces. The distance arithmetic, which joint a station is
+//! on and how far into its piece, runs through those numbers; where a
+//! joint truly lies is [`CompositeBasis::joint_intervals`]' certified
+//! interval, whose piece ends are the curve's own (no station is refused
+//! for falling within it: a caller who must know a side certifies the
+//! joint, or snaps by a window).
+//!
 //! # Exactness
 //!
 //! A station frame on a composite is exact, rounding aside, only where
@@ -222,6 +242,20 @@ impl StationCurve<'_> {
         match self {
             Self::Offset(offset) => offset.frame_is_exact(),
             _ => self.is_line(),
+        }
+    }
+
+    /// Where the curve ends in its station measure, by this evaluator's own
+    /// length (what an open end resolves to, #298): an unbounded line's
+    /// parameter domain end `|d|`, else its station length, exact where it
+    /// is read from stored data and the numerical estimate otherwise (an
+    /// ellipse's or a B-spline's quadrature, an offset's table).
+    fn end(self) -> GeomResult<Scalar> {
+        match self.line_speed() {
+            Some(speed) => Ok(speed),
+            None => self
+                .length()?
+                .ok_or_else(|| invalid("station: a composite piece has no bounded length".into())),
         }
     }
 
@@ -394,13 +428,7 @@ impl<'c> StationPiece<'c> {
     ///
     /// A curve whose length a station cannot be measured against, by name.
     pub fn whole(curve: StationCurve<'c>) -> GeomResult<Self> {
-        let end = match curve.line_speed() {
-            Some(speed) => speed,
-            None => curve.length()?.ok_or_else(|| {
-                invalid("station: a composite piece has no bounded length".into())
-            })?,
-        };
-        Self::between(curve, 0.0, end)
+        Self::between(curve, 0.0, curve.end()?)
     }
 
     /// The span `[start, end]` of `curve`, in its station measure.
@@ -532,19 +560,27 @@ impl<'c> StationPiece<'c> {
 
     /// The station piece of a path piece: its span checked against its
     /// curve as [`Self::between`] checks it, then reversed and placed as
-    /// the path piece is.
+    /// the path piece is. An open end ([`PathPiece::open_end`], #298) is
+    /// resolved first to where the curve ends by this evaluator's own
+    /// length, the end [`Self::whole`] reads (see the
+    /// [module documentation](self#open-ends-298)).
     ///
     /// # Errors
     ///
-    /// As [`Self::between`], and a piece kind this evaluator does not
-    /// know, by name.
+    /// As [`Self::between`], an open end on a curve with no bounded length,
+    /// and a piece kind this evaluator does not know, by name.
     pub fn from_path_piece(piece: &'c PathPiece) -> GeomResult<Self> {
         let curve = StationCurve::from_path_curve(&piece.curve)?;
+        let end = if piece.open_end {
+            curve.end()?
+        } else {
+            piece.end
+        };
         Ok(Self {
             reversed: piece.reversed,
             placement: piece.placement,
             placement_exact: piece.placement_exact,
-            ..Self::between(curve, piece.start, piece.end)?
+            ..Self::between(curve, piece.start, end)?
         })
     }
 

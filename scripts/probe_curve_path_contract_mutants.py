@@ -117,11 +117,11 @@ MUTANTS = [
      '            placement_exact: piece.placement_exact,\n            ..Self::between',
      '            placement_exact: true,\n            ..Self::between', [PATH]),
     ('a path piece\'s span not checked', E,
-     '            ..Self::between(curve, piece.start, piece.end)?',
+     '            ..Self::between(curve, piece.start, end)?',
      '            ..Self {\n'
      '                curve,\n'
      '                start: piece.start,\n'
-     '                end: piece.end,\n'
+     '                end,\n'
      '                reversed: false,\n'
      '                placement: None,\n'
      '                placement_exact: true,\n'

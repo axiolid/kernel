@@ -46,6 +46,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_sides_at_seams(provider));
     out.extend(check_paths(provider));
     out.extend(check_path_joints(provider));
+    out.extend(check_open_paths(provider));
     out
 }
 
@@ -975,6 +976,113 @@ fn check_path_joints<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure>
             "a path whose pieces do not meet is refused",
             "the joint distances of a path with a 1 m gap were answered",
         ));
+    }
+    out
+}
+
+// --- open ends (#298) ---------------------------------------------------------
+
+/// A piece may leave its end open (#298), and a provider that reads it
+/// resolves the end with its own length of the curve. The path: the whole
+/// of an offset whose lateral offset widens linearly from 0 to 1 beside
+/// the whole of a line along `+x` of direction `(10, 0, 0)` (an unbounded
+/// line's whole is its parameter domain, `[0, 10]`), a straight segment of
+/// true length `sqrt(101)` no length of which is stated, then a line from
+/// `(10, 1, 0)` along `+x` to its end at `(15, 1, 0)`. Read forwards and
+/// reversed, its points must lie where the closed forms put them, a
+/// distance past its end must be refused, and its joint, if certified,
+/// must contain `sqrt(101)`. A provider may refuse an open end as
+/// unsupported, typed, as it may refuse paths.
+fn check_open_paths<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let base = PathPiece::whole(PathCurve::Three(Curve3::Line(Line3 {
+        origin: Point3::ZERO,
+        direction: Vec3::new(10.0, 0.0, 0.0),
+    })));
+    let widening = PathOffset::new(
+        base,
+        OffsetLaw::Linear {
+            start: PathOffsets::new(0.0, 0.0, 0.0),
+            end: PathOffsets::new(1.0, 0.0, 0.0),
+            frame: OffsetFrame::Section,
+        },
+    );
+    let tail = Curve3::Line(Line3 {
+        origin: Point3::new(10.0, 1.0, 0.0),
+        direction: Vec3::new(5.0, 0.0, 0.0),
+    });
+    let forwards = CurvePath::new(vec![
+        PathPiece::whole(PathCurve::Offset(Box::new(widening))),
+        PathPiece::to_end(PathCurve::Three(tail), 0.0),
+    ]);
+    let slant = 101.0_f64.sqrt();
+    let length = slant + 5.0;
+    let half = Point3::new(5.0, 0.5, 0.0);
+    let reversed = forwards.clone().reversed();
+    let places = [
+        ("forwards", &forwards, slant / 2.0, half),
+        (
+            "forwards",
+            &forwards,
+            slant + 2.0,
+            Point3::new(12.0, 1.0, 0.0),
+        ),
+        ("forwards", &forwards, length, Point3::new(15.0, 1.0, 0.0)),
+        ("reversed", &reversed, 2.0, Point3::new(13.0, 1.0, 0.0)),
+        ("reversed", &reversed, 5.0 + slant / 2.0, half),
+        ("reversed", &reversed, length, Point3::ZERO),
+    ];
+    let mut reads = false;
+    for (what, path, distance, want) in places {
+        match provider.path_point_at(path, CurveMeasure::Distance(distance)) {
+            Ok(point) => {
+                reads = true;
+                let off = (point - want).length();
+                if off > 1e-9 {
+                    out.push(fail(
+                        "an open end resolves to the curve's end",
+                        format!("{what} open path at {distance}: {off:e} off"),
+                    ));
+                }
+            }
+            Err(error) if side_refused(&error) => {}
+            Err(error) => out.push(fail(
+                "an open path is answered or refused as unsupported",
+                format!("{what} open path at {distance}: {error}"),
+            )),
+        }
+    }
+    if reads {
+        let past = CurveMeasure::Distance(length + 1e-3);
+        if provider.path_point_at(&forwards, past).is_ok() {
+            out.push(fail(
+                "a distance past an open end is refused",
+                format!(
+                    "an open path of length {length} was read at {}",
+                    length + 1e-3
+                ),
+            ));
+        }
+    }
+    match provider.path_joint_distances(&forwards, JOINT_TOLERANCE) {
+        Ok(intervals) => {
+            if intervals.len() != 1 {
+                out.push(fail(
+                    "joint distances of an open path are certified",
+                    format!("{} intervals for one joint", intervals.len()),
+                ));
+            } else if let Err(detail) = certifies(intervals[0], slant, JOINT_TOLERANCE) {
+                out.push(fail(
+                    "joint distances of an open path are certified",
+                    detail,
+                ));
+            }
+        }
+        Err(error) if side_refused(&error) => {}
+        Err(error) => out.push(fail(
+            "joint distances of an open path are certified or refused as unsupported",
+            error.to_string(),
+        )),
     }
     out
 }

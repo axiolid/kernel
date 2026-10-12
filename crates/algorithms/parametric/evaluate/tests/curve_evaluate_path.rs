@@ -19,7 +19,7 @@ use axiolid_curve::{
 };
 use axiolid_curve_evaluate_contract::{
     conformance, CurveEvaluator, CurveMeasure, DistanceConvention, CURVE_PATH_UNSUPPORTED,
-    PATH_JOINT_DISTANCES_UNSUPPORTED,
+    OPEN_PATH_END_UNSUPPORTED, PATH_JOINT_DISTANCES_UNSUPPORTED,
 };
 use axiolid_evaluate::station::{CompositeBasis, StationCurve, StationPiece};
 use axiolid_evaluate::ReferenceCurveEvaluator;
@@ -785,4 +785,166 @@ fn the_conformance_suite_rejects_uncertified_joint_distances() {
             "{how:?}: {failures:?}"
         );
     }
+}
+
+// --- open ends (#298) -----------------------------------------------------------
+
+/// A provider that mishandles open piece ends (#298): `Open::BaseLength`
+/// ends an open offset at its base's length instead of its own (so it
+/// no longer meets the next piece), `Open::Shifted` reads an open path a
+/// millimetre further along (its joints too), `Open::Invalid` refuses an open end as bad
+/// input, `Open::Unsupported` refuses it typed, by name (which is
+/// conformant).
+#[derive(Debug)]
+struct OpenEnds(ReferenceCurveEvaluator, Open);
+
+#[derive(Debug, Clone, Copy)]
+enum Open {
+    BaseLength,
+    Shifted,
+    Invalid,
+    Unsupported,
+}
+
+impl OpenEnds {
+    /// The path this provider actually reads.
+    fn restated(&self, path: &CurvePath) -> GeomResult<CurvePath> {
+        if path.pieces().iter().all(PathPiece::is_stated) {
+            return Ok(path.clone());
+        }
+        match self.1 {
+            Open::Invalid => Err(GeomError::InvalidInput("open end".into())),
+            Open::Unsupported => Err(GeomError::UnsupportedInput {
+                backend: self.descriptor().id,
+                operation: Operation::CurveEvaluation,
+                input: OPEN_PATH_END_UNSUPPORTED,
+            }),
+            Open::Shifted => Ok(path.clone()),
+            Open::BaseLength => {
+                let mut out = path.clone().into_pieces();
+                for piece in &mut out {
+                    if let (true, PathCurve::Offset(offset)) = (piece.open_end, &piece.curve) {
+                        let base = CurvePath::from(offset.base.clone());
+                        piece.end = CompositeBasis::from_path(&base)?.length();
+                        piece.open_end = false;
+                    }
+                }
+                Ok(CurvePath::new(out))
+            }
+        }
+    }
+}
+
+impl Backend for OpenEnds {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor::new(BackendId::new("open-ends"), ExecutionTarget::PortableCpu)
+    }
+}
+
+impl CurveEvaluator for OpenEnds {
+    fn distance_convention(&self, curve: &Curve3) -> DistanceConvention {
+        self.0.distance_convention(curve)
+    }
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3> {
+        self.0.point_at(curve, at)
+    }
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3> {
+        self.0.tangent_at(curve, at)
+    }
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        self.0.frame_at(curve, at)
+    }
+    fn path_distance_convention(&self, path: &CurvePath) -> DistanceConvention {
+        self.restated(path)
+            .map_or(DistanceConvention::Unsupported, |path| {
+                self.0.path_distance_convention(&path)
+            })
+    }
+    fn path_point_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Point3> {
+        let at = match (self.1, at) {
+            (Open::Shifted, CurveMeasure::Distance(d))
+                if !path.pieces().iter().all(PathPiece::is_stated) =>
+            {
+                CurveMeasure::Distance(d + 1e-3)
+            }
+            _ => at,
+        };
+        self.0.path_point_at_on(&self.restated(path)?, at, side)
+    }
+    fn path_tangent_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Vec3> {
+        self.0.path_tangent_at_on(&self.restated(path)?, at, side)
+    }
+    fn path_frame_at_on(
+        &self,
+        path: &CurvePath,
+        at: CurveMeasure,
+        side: SeamSide,
+    ) -> GeomResult<Frame3> {
+        self.0.path_frame_at_on(&self.restated(path)?, at, side)
+    }
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<axiolid_curve_evaluate_contract::DistanceInterval>> {
+        use axiolid_curve_evaluate_contract::DistanceInterval;
+        let joints = self
+            .0
+            .path_joint_distances(&self.restated(path)?, tolerance)?;
+        let open = !path.pieces().iter().all(PathPiece::is_stated);
+        Ok(match self.1 {
+            Open::Shifted if open => joints
+                .iter()
+                .map(|j| DistanceInterval::new(j.lower + 1e-3, j.upper + 1e-3))
+                .collect(),
+            _ => joints,
+        })
+    }
+}
+
+#[test]
+fn the_conformance_suite_reads_open_ends() {
+    for (how, checks) in [
+        (
+            Open::BaseLength,
+            &[
+                "an open path is answered or refused as unsupported",
+                "joint distances of an open path are certified or refused as unsupported",
+            ][..],
+        ),
+        (
+            Open::Shifted,
+            &[
+                "an open end resolves to the curve's end",
+                "joint distances of an open path are certified",
+            ][..],
+        ),
+        (
+            Open::Invalid,
+            &["an open path is answered or refused as unsupported"][..],
+        ),
+    ] {
+        let failures = conformance::check(&OpenEnds(ReferenceCurveEvaluator::new(), how));
+        for check in checks {
+            assert!(
+                failures.iter().any(|f| f.check == *check),
+                "{how:?}, {check}: {failures:?}"
+            );
+        }
+    }
+    // Refusing an open end typed, by name, is conformant.
+    assert_eq!(
+        conformance::check(&OpenEnds(ReferenceCurveEvaluator::new(), Open::Unsupported)),
+        Vec::new()
+    );
 }

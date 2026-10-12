@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment):
+  `StationPiece::from_path_piece`, and so `CompositeBasis::from_path` and
+  every `path_*` query of `ReferenceCurveEvaluator`, resolves a piece
+  whose `open_end` is set to the curve's end by this evaluator's own
+  length, the end `StationPiece::whole` reads: a line's parameter domain,
+  a length read from stored data exactly, otherwise the numerical
+  estimate (a B-spline's or an ellipse's arc length, an offset's own
+  table). An open path therefore reads bitwise as the stated path holding
+  those lengths (`CompositeBasis::path` hands it back), which is the path
+  a graph compiler flattens; `path_joint_distances` certifies where its
+  joints truly fall. Stated spans are checked as before.
+
 ## [0.3.11] - 2026-10-10
 
 ### Added
