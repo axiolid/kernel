@@ -135,6 +135,12 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
   `crates/execution/compile/tests/station_window.rs` and
   `scripts/probe_seam_window_mutants.py` (#294).
+- `crates/representations/analytic/curve/src/path.rs` (`PathPiece::open_end`),
+  `crates/algorithms/parametric/evaluate/src/station/composite.rs`
+  (`StationPiece::from_path_piece`),
+  `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
+  `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs` and
+  `scripts/probe_curve_path_open_end_mutants.py` (#298).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -821,3 +827,81 @@ placed in tilted frames (refused by name); tolerances below about `1e-7` of
 the length on B-spline offsets (the chord bound's panel budget); a window on
 the curve-evaluation contract's `path_*` queries themselves (a caller with
 a provider snaps with `path_joint_distances`).
+
+## Amendment 2026-10-12: open curve-path ends (#298)
+
+A consumer with no provider (openbimrs/ifc#427) builds a `CurvePath` over an
+offset beside a gradient curve, a clothoid or a B-spline. A piece is a span
+`[start, end]` in its curve's station measure, for an offset its own
+length, which has no closed form there; so it could not state the end, and
+`path_joint_distances` (#294 (a)), which takes the path, could not tell it.
+#294's option (b), a path built from piece descriptions, is not taken: an
+open end is the smaller, additive change.
+
+- **The representation.** `PathPiece` is `#[non_exhaustive]` with public
+  fields, so it gains one, `open_end: bool`, set by `PathPiece::to_end(curve,
+  start)` and `PathPiece::whole(curve)` (`to_end` from `0`). Its `end` then
+  holds `Scalar::INFINITY` and is not read: infinite rather than NaN so that
+  an open piece still equals itself, and `PathPiece::length` and
+  `CurvePath::length` are infinite, not a wrong finite number, until an
+  evaluator resolves it. No open start is needed: the station measure starts
+  at `0` on every curve, so "from the curve's start" is the stated `start =
+  0` (`PathPiece::from_start(curve, end)`). An offset's base piece may itself
+  be open (the whole of a B-spline); `PathPiece::is_stated` says whether a
+  piece, its base included, states every length. `CurvePath` is not in the
+  graph's wire format (ADR 0085), so no format version changes.
+- **Resolution: the evaluator's own length.** An open end is resolved, when
+  the path is read (`StationPiece::from_path_piece`, so
+  `CompositeBasis::from_path` and every `path_*` query), to where the curve
+  ends by the evaluator's own length of it -- the end `StationPiece::whole`
+  reads and a graph compiler's flattening states: an unbounded line's
+  parameter domain end, `|d|`, as inside a composite; a length read from
+  stored data exactly (a circle's turn, a polyline, an intrinsic curve or a
+  chain, an elevated or banked curve's plan length, a constant offset of a
+  line or of a circle); otherwise its numerical estimate, an ellipse's or a
+  B-spline's arc-length quadrature to the arc-length tolerance, an offset's
+  own table to `OFFSET_TOLERANCE`. The resolved piece is then checked as a
+  stated one, so a start past the end or not finite is refused by name; a
+  stated end keeps every check it had.
+- **Distance arithmetic runs through those numbers.** Which joint a
+  distance is on (within the arc-length tolerance of the nominal joint, the
+  #285 rule) and how far into its piece are read against the resolved
+  lengths. So an open path reads BITWISE as the stated path holding them
+  (`CompositeBasis::path` hands that path back), which is the path
+  `station::curve_path` hands out for the same relation and the composite a
+  resolved station is read on: the consumer's provider-free path and the
+  lowered graph agree exactly. Where a joint TRULY lies is
+  `path_joint_distances`' certified interval: an open end's piece ends at the
+  curve's own end (a B-spline's read at its last domain parameter exactly,
+  an offset's at its base's end up to the rounding of its inverse), so the interval contains the true length
+  of the whole curve, and the nominal joint lies within the estimate's
+  tolerance of it, not necessarily inside the interval. No query is refused
+  for falling within that uncertainty: a caller holding a distance authored
+  against the true geometry, and needing a side, certifies the joint with
+  `path_joint_distances` or, lowering, snaps by the station's seam window
+  (#294 (c)).
+- **The contract** says so in the path queries' documentation, and names
+  `OPEN_PATH_END_UNSUPPORTED` for a provider that reads stated spans only;
+  it refuses an open end by a typed `UnsupportedInput`, never reading the
+  unset `end`. The conformance suite reads the whole of a widening offset of
+  the whole of a line (true length `sqrt(101)`, no length stated) and a line
+  to its end, forwards and reversed, against closed forms, refuses a distance
+  past its end, and certifies its joint; a provider may refuse it as
+  unsupported. `station::curve_path` keeps handing out stated pieces: its
+  consumers may read `PathPiece::length`, which an open end would make
+  infinite.
+
+| Option | Why not |
+| --- | --- |
+| (b) A path built from piece descriptions, every length left to the kernel | A second, parallel description of what `CurvePath` already carries; an open end on the existing piece covers the consumer additively. |
+| Fix an open end at the certified interval's midpoint | Needs a certification (and a tolerance, and a panel budget) on every path read; refuses the offsets whose length cannot be certified (an offset by distances along a B-spline) that read today; and the path would no longer read as the composite a station on the lowered relation is resolved on. |
+| Refuse a distance within the certified uncertainty of a joint | The same costs, and a refusal near every numerical joint for every caller; the uncertainty (about `1e-9` of the length) is the accuracy this ADR states for numerical offsets, and a caller who needs a side has the certified interval and the window. |
+| A `SpanEnd { At(Scalar), CurveEnd }` field replacing `end` | Changing the type of a public field breaks semver; a second field holding the stated end would be two sources of truth. |
+| An open start as well | The measure starts at `0` on every curve; a flag for it would state nothing a number does not. |
+| A NaN `end` as the marker | A stated non-finite end is refused today and must stay refused; and an open piece would not equal itself. |
+| Hand out open pieces from `station::curve_path` | Changes its output for consumers that read piece lengths, for no reading gained: its stated ends are exactly what an open end resolves to. |
+
+Still open: a path's total length on the contract (with an open last piece
+a caller without the evaluator learns it from no query; `CompositeBasis::
+length` has it), and an open end on a closed conic, which runs from `start`
+to the end of the turn, never across its parameter seam.
