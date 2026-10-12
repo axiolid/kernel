@@ -522,6 +522,29 @@ fn skips_are_reported_separately_from_passes() {
          {exercised_by_work:?}\n{report}"
     );
     assert!(report.skipped() > 0, "{report}");
+    // The counter itself must not absorb the skips (#296): `exercised` counts
+    // passes only, so with every worked check skipped it is at most the one
+    // structural pass, and passes plus skips account for every check.
+    let passed = report
+        .checks
+        .iter()
+        .filter(|check| check.outcome == Outcome::Passed)
+        .count();
+    assert_eq!(
+        report.exercised(),
+        passed,
+        "exercised must count passes, not skips:\n{report}"
+    );
+    assert!(
+        report.exercised() <= 1,
+        "a provider that refuses everything exercised {} obligations:\n{report}",
+        report.exercised()
+    );
+    assert_eq!(
+        report.exercised() + report.skipped(),
+        report.checks.len(),
+        "{report}"
+    );
     // It is not "failing", but the exercised count is what stops it being
     // mistaken for a working provider -- which is why the suite's own tests
     // assert a minimum exercised count.

@@ -483,6 +483,41 @@ fn a_degenerate_bspline_is_refused_not_guessed() {
     assert!(evaluate2(&c, 0.5).is_err(), "must refuse, not extrapolate");
 }
 
+#[test]
+fn a_spline_with_an_empty_domain_is_refused_as_degenerate() {
+    // Every count check passes: degree 2 with 3 control points needs 6 knot
+    // entries, and 1 + 3 + 2 is 6 with no multiplicity above degree + 1. But
+    // the expansion is [0, 1, 1, 1, 2, 2], so the domain runs from knot[2] = 1
+    // to knot[3] = 1 and is empty. The test above no longer reaches this
+    // guard, because the control-count check refuses it first (#296).
+    let c = Curve2::BSpline(BSplineCurve2 {
+        degree: 2,
+        control_points: vec![Point2::ZERO, Point2::new(1.0, 0.0), Point2::new(1.0, 1.0)],
+        knots: vec![0.0, 1.0, 2.0],
+        multiplicities: vec![1, 3, 2],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    });
+    match evaluate2(&c, 1.0) {
+        Err(GeomError::Degenerate(message)) => assert!(
+            message.contains("domain is empty"),
+            "refused for the wrong reason: {message}"
+        ),
+        other => panic!("an empty domain must be refused as degenerate, got {other:?}"),
+    }
+    // The infallible domain reports the refusal as the empty interval at 0,
+    // not as the collapsed span [1, 1] of the expanded knots.
+    assert_eq!(
+        domain2(&c),
+        Interval {
+            start: 0.0,
+            end: 0.0
+        }
+    );
+}
+
 // --- 3D ---------------------------------------------------------------------
 
 #[test]

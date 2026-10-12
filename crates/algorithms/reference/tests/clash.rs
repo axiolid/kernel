@@ -9,6 +9,7 @@
 use axiolid_core::{Point3, Tolerance};
 use axiolid_mesh::TriMesh;
 use axiolid_reference::clash::{interference, point_inside, Interference};
+use axiolid_reference::{triangle_triangle_relation, TriangleTriangleRelation};
 
 /// Axis-aligned box as a closed, outward-oriented triangle mesh.
 fn box_mesh(min: Point3, max: Point3) -> TriMesh {
@@ -366,19 +367,26 @@ fn a_partial_face_overlap_is_contact_not_clearance() {
 // turns this clear case into contact, so it is what pins that direction.
 #[test]
 fn coplanar_faces_that_share_no_area_stay_clear() {
-    // Offset in EVERY axis. Sharing even one coordinate plane makes the side
-    // faces coplanar, and coplanar faces of boxes at the same height really
-    // do meet along their shared planes -- that is contact, not a bug. Only a
-    // fully offset pair isolates "coplanar but sharing no area".
+    // Same z range, offset in x and y. The bottoms share z = 0 and the tops
+    // share z = 1, so those face pairs are coplanar; no x or y plane is
+    // shared, so no side faces are. A fixture offset in z as well would
+    // never reach the coplanar branch at all (#296).
     let left = box_mesh(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
-    let right = box_mesh(Point3::new(3.0, 0.5, 0.25), Point3::new(4.0, 1.5, 1.25));
+    let right = box_mesh(Point3::new(3.0, 0.5, 0.0), Point3::new(4.0, 1.5, 1.0));
+    // The bottom faces really are coplanar, as the exact predicate sees them.
+    let tri = |m: &TriMesh, i: usize| [0, 1, 2].map(|k| m.positions[m.indices[3 * i + k] as usize]);
+    assert_eq!(
+        triangle_triangle_relation(tri(&left, 0), tri(&right, 0)),
+        TriangleTriangleRelation::Coplanar,
+        "the fixture must exercise the coplanar branch"
+    );
     // A tolerance wide enough that the padded boxes overlap, so the pairs
     // genuinely reach the narrow phase and the coplanar branch is consulted.
     let t = Tolerance::new(3.0, 1e-9).expect("tolerance");
     let report = interference(&left, &right, t).expect("interference");
-    assert!(
-        report.narrow_phase_tests > 0,
-        "the pairs must actually reach the narrow phase"
+    assert_eq!(
+        report.narrow_phase_tests, 144,
+        "every pair, the coplanar ones included, must reach the narrow phase"
     );
     assert_eq!(
         report.kind,
@@ -386,6 +394,41 @@ fn coplanar_faces_that_share_no_area_stay_clear() {
         "coplanar faces 2m apart share no area and are not contact"
     );
     assert!(report.touching_pairs.is_empty(), "nothing touches");
+}
+
+// A touching pair that is not coplanar. Every box-on-box contact also has
+// coplanar face pairs, which set `Touching` through the coplanar branch and
+// mask the promotion for a plain `Touching` relation. A tetrahedron standing
+// on its apex on a box's top face meets the box only at that vertex, through
+// faces that are all oblique to the box's: contact, reported by the exact
+// predicate as `Touching` and by nothing else (#296).
+#[test]
+fn a_vertex_resting_on_a_face_is_touching_not_clear() {
+    let block = box_mesh(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+    // Apex at (0.7, 0.9, 2) is inside the top-face triangle (4, 6, 7), off
+    // its diagonal; the base floats at z = 3. Outward-oriented.
+    let apex = Point3::new(0.7, 0.9, 2.0);
+    let tet = TriMesh::new(
+        vec![
+            apex,
+            Point3::new(0.0, 0.0, 3.0),
+            Point3::new(1.5, 0.0, 3.0),
+            Point3::new(0.5, 1.5, 3.0),
+        ],
+        vec![1, 2, 3, 0, 2, 1, 0, 3, 2, 0, 1, 3],
+    );
+    let report = interference(&block, &tet, Tolerance::ZERO).expect("interference");
+    assert_eq!(
+        report.kind,
+        Interference::Touching,
+        "a vertex resting on a face is contact, not clearance: {report:?}"
+    );
+    assert!(!report.is_clear());
+    assert!(report.penetrating_pairs.is_empty(), "no volume is shared");
+    assert!(!report.containment, "neither solid is inside the other");
+    // The three tetrahedron faces through the apex each meet the one top
+    // triangle containing it.
+    assert_eq!(report.touching_pairs.len(), 3, "{report:?}");
 }
 
 /// The broad phase must prune, not merely count.
