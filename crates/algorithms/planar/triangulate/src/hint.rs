@@ -137,7 +137,16 @@ pub(crate) mod tests {
             reversed.reverse();
             let mut doubled = grid.clone();
             doubled.extend_from_slice(&grid[..side]);
-            cases.extend([grid, reversed, doubled].map(|g| (g, Vec::new())));
+            // In row order most points land on the hull, whose edges have
+            // one finite triangle; shuffled, they land on interior edges,
+            // where the two triangles beside them differ (#299).
+            let mut shuffled = grid.clone();
+            let order = random(grid.len(), 1.0, 0x2686 + side as u64);
+            for k in (1..shuffled.len()).rev() {
+                let j = (order[k].x * (k + 1) as f64) as usize;
+                shuffled.swap(k, j);
+            }
+            cases.extend([grid, reversed, doubled, shuffled].map(|g| (g, Vec::new())));
         }
         let mut points = random(800, 10.0, 0x2685);
         cases.push((points.clone(), Vec::new()));

@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `triangulate` covers the exact convex hull of its input (#299). The
+  build bracketed the points with a finite super triangle (32 times their
+  span) and dropped every triangle touching it, which lost the thin hull
+  triangles whose circumcircles reached its corners -- 3,977 instead of
+  3,979 triangles for 2,000 random points, with nothing reported. The hull
+  is now closed by one symbolic vertex at infinity, decided by the
+  predicates without coordinates, so the output always has `2n - 2 - h`
+  triangles for `n` points with `h` on the hull boundary, collinear ones
+  included, and its boundary is the exact hull. Constrained triangulations
+  recover their constraints in that complete triangulation.
+- Where the Delaunay triangulation is unique (no four points cocircular)
+  and the old build kept every hull triangle, the output is the same set of
+  triangles as before; their order in the list changes, because the build
+  starts from the first three points that span a triangle instead of from
+  the super triangle. With cocircular points either build may choose a
+  different, equally Delaunay triangulation.
+
 ## [0.3.3] - 2026-10-10
 
 ### Changed

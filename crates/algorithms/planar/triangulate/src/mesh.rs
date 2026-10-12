@@ -13,9 +13,10 @@
 //! the `adjacency` module holds the rules and the debug check against a
 //! full recomputation.
 //!
-//! Vertices 0..n are the caller's points. Three extra vertices form a super
-//! triangle large enough to contain them all; they are removed at the end,
-//! together with every triangle that touches them.
+//! Vertices 0..n are the caller's points. During the build one more
+//! vertex, at infinity and without coordinates, closes the convex hull
+//! (see the `build` module); it is removed at the end, together with
+//! every triangle that touches it, and the rest covers the convex hull.
 
 use axiolid_core::Point2;
 

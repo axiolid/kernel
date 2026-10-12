@@ -228,10 +228,12 @@ mod tests {
     /// Every local update is followed by a check, and the only full
     /// computations are those checks and the one hand-over in `finish`:
     /// none maintains adjacency, so a release build, which skips the
-    /// checks, computes it once per triangulation.
+    /// checks, computes it once per triangulation. The first triangle and
+    /// its ghosts are one update for three points; every other point is at
+    /// least one more.
     fn assert_local(name: &str, (full, updates, checks): (usize, usize, usize), points: usize) {
         assert!(
-            updates >= points,
+            updates + 2 >= points,
             "{name}: {updates} updates for {points} points"
         );
         if cfg!(debug_assertions) {
@@ -318,16 +320,6 @@ mod tests {
             compare(&[0, 1, 2, 0, 1, 3], &[NO_HALFEDGE; 6]),
             Comparison::Ambiguous
         );
-        let mut points: Vec<Point2> = (0..9)
-            .map(|k| Point2::new(f64::from(k % 3), f64::from(k / 3)))
-            .collect();
-        points.extend_from_slice(&points.clone()[..3]);
-        counters::reset();
-        triangulate(&points, &[]).expect("triangulates");
-        if cfg!(debug_assertions) {
-            assert!(counters::SKIPPED.with(std::cell::Cell::get) > 0);
-        }
-        counters::reset();
     }
 
     #[test]

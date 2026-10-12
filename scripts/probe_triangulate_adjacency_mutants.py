@@ -1,4 +1,5 @@
-"""Mutation probe for the locally maintained triangulation adjacency (#268).
+"""Mutation probe for the locally maintained triangulation adjacency (#268)
+and the vertex at infinity that closes its hull (#299).
 
 `axiolid-triangulate` keeps its twin pointers current by re-linking only the
 halfedges a split or flip rewrites and their outside neighbours. Each
@@ -12,6 +13,14 @@ recomputation maintains the mesh. The grid hint that starts point
 location is probed too: ignored, trusted for a point on an edge, or
 admitting the edge as inside. Each must turn the crate's unit tests
 (`src/adjacency.rs`, `src/hint.rs`) or `tests/cdt.rs` red.
+
+The vertex at infinity (#299) is probed in its symbolic predicates -- an
+edge to it never flips, flips on the hull edge's line too, or a hull edge
+flips toward it -- in the walk through ghost triangles, which must not
+stop in a ghost whose hull edge it does not see strictly, in the first
+triangle's orientation and ghost links, and in `finish`, which must drop
+the ghosts. Each must turn `tests/hull.rs`, which holds every output
+to `2n - 2 - h` triangles and the exact convex hull, or the unit tests red.
 
 Not probed: the order of independent `link` calls within one update (any
 order of disjoint writes gives the same array) and the size limit's value
@@ -43,6 +52,7 @@ def drop(line):
 
 
 H = "crates/algorithms/planar/triangulate/src/hint.rs"
+HULL = ["-p", "axiolid-triangulate", "--test", "hull"]
 
 
 MUTANTS = [
@@ -150,6 +160,40 @@ MUTANTS = [
      *drop("        self.corner[c as usize] = t1 as u32;\n"), [UNIT]),
     ("a flip leaves p1's triangle stale", B,
      *drop("            self.corner[p1 as usize] = ot as u32;\n"), [UNIT]),
+    # The vertex at infinity (#299).
+    ("an edge to infinity never flips after ∞ (the hull is not wrapped)", B,
+     "            return turns_left(q(apex), q(p0), q(other));",
+     "            return false;", [HULL]),
+    ("an edge to infinity never flips before ∞", B,
+     "            return turns_left(q(p1), q(apex), q(other));",
+     "            return false;", [HULL]),
+    ("an edge to infinity flips on the hull edge's line too", B,
+     "            return turns_left(q(apex), q(p0), q(other));",
+     "            return !turns_left(q(p0), q(apex), q(other));", [HULL]),
+    ("an edge to infinity flips on the line too, before ∞", B,
+     "            return turns_left(q(p1), q(apex), q(other));",
+     "            return !turns_left(q(apex), q(p1), q(other));", [HULL]),
+    ("a hull edge flips toward infinity", B,
+     "        if other == g || apex == g {",
+     "        if apex == g {", [HULL]),
+    ("a walk stops in a ghost on its hull edge's line", B,
+     "        if decided(orient2d(a, b, p)) == Sign::Positive {\n            None",
+     "        if decided(orient2d(a, b, p)) != Sign::Negative {\n            None", [HULL]),
+    ("a walk stops in any ghost", B,
+     "        if decided(orient2d(a, b, p)) == Sign::Positive {\n            None",
+     "        if true {\n            None", [HULL]),
+    ("a hinted walk that ends in a ghost is trusted", B,
+     "        self.ghost_slot(t).is_none()\n            && (0..3).all(|i| {",
+     "        self.ghost_slot(t).is_some()\n            || (0..3).all(|i| {", [UNIT, HULL]),
+    ("the first triangle may be clockwise", B,
+     "        [a as u32, c as u32, b as u32]",
+     "        [a as u32, b as u32, c as u32]", [HULL]),
+    ("the first triangle's ghosts are linked crosswise", B,
+     "        link(h, 4, 11); // a -> g | g -> a",
+     "        link(h, 4, 8); // a -> g | g -> a", [UNIT, HULL]),
+    ("finish keeps the ghosts", B,
+     "            if !t.contains(&g) {",
+     "            if t.contains(&g) || !t.contains(&g) {", [HULL]),
 ]
 
 

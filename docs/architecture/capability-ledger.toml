@@ -915,8 +915,8 @@ id = "E1"
 area = "triangulation"
 name = "2D Delaunay / constrained Delaunay"
 level = "implemented"
-summary = "Constrained Delaunay triangulation with certified incircle/orient2d predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints."
-evidence = ["crates/algorithms/planar/triangulate/src/build.rs::triangulate", "crates/algorithms/planar/triangulate/src/recover.rs"]
+summary = "Constrained Delaunay triangulation with certified incircle/orient2d predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints. A symbolic vertex at infinity closes the hull during the build, so the output covers the exact convex hull (2n - 2 - h triangles, collinear hull points kept, #299)."
+evidence = ["crates/algorithms/planar/triangulate/src/build.rs::triangulate", "crates/algorithms/planar/triangulate/src/recover.rs", "crates/algorithms/planar/triangulate/tests/hull.rs", "scripts/probe_triangulate_adjacency_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKMesh/BRepMesh"]
 cgal = ["Triangulation_2"]
 

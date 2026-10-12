@@ -12,16 +12,26 @@ fn p(x: f64, y: f64) -> Point2 {
     Point2::new(x, y)
 }
 
-/// Every triangle must be counter-clockwise and non-degenerate.
+/// Every triangle must be counter-clockwise and non-degenerate, decided
+/// exactly.
+///
+/// A floating-point cross product reads zero for the thin, exactly
+/// counter-clockwise triangles along a hull of nearly collinear points,
+/// which the build lost before #299 and now keeps.
 fn assert_all_ccw(tri: &axiolid_triangulate::Triangulation) {
     for t in 0..tri.triangle_count() {
         let a = tri.points()[tri.triangles()[3 * t] as usize];
         let b = tri.points()[tri.triangles()[3 * t + 1] as usize];
         let c = tri.points()[tri.triangles()[3 * t + 2] as usize];
-        let cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
         assert!(
-            cross > 0.0,
-            "triangle {t} is not counter-clockwise: {cross}"
+            matches!(
+                axiolid_predicates::orient2d(a, b, c),
+                axiolid_guarantees::Certified::Certain {
+                    sign: axiolid_guarantees::Sign::Positive,
+                    ..
+                }
+            ),
+            "triangle {t} is not counter-clockwise: {a:?} {b:?} {c:?}"
         );
     }
 }

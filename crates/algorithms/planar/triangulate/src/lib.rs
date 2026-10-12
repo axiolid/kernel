@@ -17,6 +17,9 @@
 //! This crate replaces "some valid triangulation" with a triangulation whose
 //! quality is *stated and checked*:
 //!
+//! - the triangles cover the exact convex hull of the input, collinear
+//!   hull points included (a symbolic vertex at infinity closes the hull
+//!   during the build, so no thin hull triangle is lost),
 //! - every constraint edge survives as a union of output edges,
 //! - the result is Delaunay away from the constraints (empty-circumcircle,
 //!   decided by the certified `incircle` predicate rather than by a

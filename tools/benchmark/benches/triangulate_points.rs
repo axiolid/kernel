@@ -12,16 +12,15 @@
 //! The points are seeded and identical on every machine. Each case is
 //! validated before it is timed: every point is a corner of some triangle,
 //! every triangle is counter-clockwise, no directed edge occurs twice, the
-//! boundary is closed and has at least the `h` hull vertices, the triangle
-//! count is `2n - 2 - b` for the `b` boundary vertices (Euler's formula for
-//! a triangulated disc, so no triangle is missing inside or doubled), and
-//! every interior edge is locally Delaunay, decided by the certified
-//! predicates.
+//! boundary is one closed walk through exactly the points on the exact
+//! convex hull, the triangle count is `2n - 2 - h` for those `h` points
+//! (Euler's formula for a triangulated disc, so no triangle is missing
+//! inside or along the hull, or doubled), and every interior edge is
+//! locally Delaunay, decided by the certified predicates.
 //!
-//! The boundary is not required to be the hull: the build's super triangle
-//! is finite, and a few thin triangles along the hull can be lost with it
-//! (2 of 3979 at 2000 points). That is the build's behaviour before and
-//! after #268 alike.
+//! Until #299 the boundary could not be held to the hull: the build's
+//! finite super triangle lost a few thin hull triangles (2 of 3979 at 2000
+//! points). The vertex at infinity that replaced it keeps them.
 
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -52,8 +51,9 @@ fn sign(certified: Certified) -> Sign {
     }
 }
 
-/// Number of vertices on the convex hull, strictly convex corners only.
-fn hull_vertices(points: &[Point2]) -> usize {
+/// Indices of the points on the boundary of the exact convex hull,
+/// collinear ones included.
+fn hull_points(points: &[Point2]) -> Vec<bool> {
     let mut sorted = points.to_vec();
     sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
     sorted.dedup();
@@ -67,9 +67,23 @@ fn hull_vertices(points: &[Point2]) -> usize {
             }
             hull.push(p);
         }
-        hull.len() - 1
+        hull.pop();
+        hull
     };
-    chain(&mut sorted.iter().copied()) + chain(&mut sorted.iter().rev().copied())
+    let mut corners = chain(&mut sorted.iter().copied());
+    corners.extend(chain(&mut sorted.iter().rev().copied()));
+    let within = |a: f64, b: f64, x: f64| a.min(b) <= x && x <= a.max(b);
+    points
+        .iter()
+        .map(|&p| {
+            (0..corners.len()).any(|k| {
+                let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+                sign(orient2d(a, b, p)) == Sign::Zero
+                    && within(a.x, b.x, p.x)
+                    && within(a.y, b.y, p.y)
+            })
+        })
+        .collect()
 }
 
 /// Fail unless `tri` is a complete Delaunay triangulation of `points`.
@@ -93,7 +107,7 @@ fn validate(points: &[Point2], tri: &Triangulation) {
     assert!(used.iter().all(|&u| u), "{n} points: a point was dropped");
     let mut leaving = vec![0u32; n];
     let mut entering = vec![0u32; n];
-    let mut boundary = 0;
+    let mut next = HashMap::new();
     for (&(a, b), &apex) in &edges {
         match edges.get(&(b, a)) {
             Some(&other) => assert_ne!(
@@ -102,7 +116,7 @@ fn validate(points: &[Point2], tri: &Triangulation) {
                 "{n} points: edge ({a}, {b}) is not locally Delaunay"
             ),
             None => {
-                boundary += 1;
+                next.insert(a, b);
                 leaving[a as usize] += 1;
                 entering[b as usize] += 1;
             }
@@ -115,14 +129,27 @@ fn validate(points: &[Point2], tri: &Triangulation) {
             .all(|(l, e)| l == e && *l <= 1),
         "{n} points: the boundary is not one simple closed walk per vertex"
     );
-    assert!(
-        boundary >= hull_vertices(points),
-        "{n} points: fewer boundary vertices than hull vertices"
+    let first = *next.keys().next().expect("a boundary");
+    let (mut v, mut steps) = (first, 1);
+    while next[&v] != first {
+        v = next[&v];
+        steps += 1;
+    }
+    assert_eq!(
+        steps,
+        next.len(),
+        "{n} points: the boundary is not one loop"
     );
+    let hull = hull_points(points);
+    assert!(
+        (0..n).all(|k| hull[k] == (leaving[k] == 1)),
+        "{n} points: the boundary is not the exact convex hull"
+    );
+    let h = hull.iter().filter(|&&on| on).count();
     assert_eq!(
         tri.triangle_count(),
-        2 * n - 2 - boundary,
-        "{n} points: triangle count does not match the boundary"
+        2 * n - 2 - h,
+        "{n} points: triangle count does not match the hull"
     );
 }
 

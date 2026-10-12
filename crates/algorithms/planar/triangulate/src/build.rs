@@ -2,16 +2,49 @@
 
 //! Incremental constrained Delaunay construction.
 //!
-//! Points are inserted one at a time into a super triangle: located by a
-//! walk, split one into three (or, on an edge, two into four), then
-//! legalised by Lawson flips. Each split and flip re-links only the twin
-//! pointers of the triangles it rewrites and of their outside neighbours,
+//! Points are inserted one at a time: located by a walk, split one into
+//! three (or, on an edge, two into four), then legalised by Lawson flips.
+//! Each split and flip re-links only the twin pointers of the triangles it
+//! rewrites and of their outside neighbours,
 //! so a step costs O(1) beyond the walk; recomputing the whole twin array
 //! after each one, as 0.3.2 did, made n points cost O(n^2) or worse
 //! (#268). Debug builds compare the result with a full recomputation
 //! after every step (see the `adjacency` module). The walk starts next
 //! to a grid hint (see the `hint` module), so it crosses a few triangles
 //! rather than O(sqrt n).
+//!
+//! # The vertex at infinity
+//!
+//! The build starts from one triangle of input points and closes the
+//! convex hull with a single symbolic vertex at infinity, the standard
+//! construction of Shewchuk's Triangle and CGAL's `Triangulation_2`:
+//! every hull edge carries a *ghost* triangle with the infinite vertex on
+//! its outer side, so the mesh is a closed surface and every halfedge has
+//! a twin. The infinite vertex has no coordinates; the predicates decide
+//! it symbolically:
+//!
+//! - a point lies in a ghost triangle when it lies strictly on the outer
+//!   side of the ghost's hull edge: the ghost's "circumcircle" is that
+//!   open half-plane;
+//! - the infinite vertex lies in no finite triangle's circumcircle, so a
+//!   hull edge never flips;
+//! - an edge to the infinite vertex flips when the new point sees the hull
+//!   edge beyond it strictly, which wraps the hull round a point inserted
+//!   outside it; on that edge's line it does not, so collinear hull
+//!   points stay hull vertices.
+//!
+//! Removing the ghosts leaves exactly the Delaunay triangulation of the
+//! input, its convex hull covered. The finite super triangle this replaced
+//! (32 times the input's span) lost thin triangles along the hull whose
+//! circumcircles reached its corners, without a word (#299): 3,977
+//! instead of 3,979 triangles for 2,000 random points.
+//!
+//! When the Delaunay triangulation is unique (no four input points
+//! cocircular), the output is the same set of triangles as before for
+//! every input the super triangle got right; their order in the list
+//! differs, because the build starts from a different first triangle.
+//! Where four or more points are cocircular the Delaunay triangulation is
+//! not unique, and the two builds may choose differently.
 
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
@@ -57,7 +90,7 @@ pub fn triangulate(
     }
 
     let mut state = Builder::new(points);
-    state.insert_all()?;
+    state.insert_all(first_triangle(points))?;
     let mut triangulation = state.finish(points, constraints);
     recover_constraints(&mut triangulation)?;
     Ok(triangulation)
@@ -79,12 +112,39 @@ fn has_non_collinear_triple(points: &[Point2]) -> bool {
         .any(|&c| turns_left(a, b, c) || turns_left(b, a, c))
 }
 
-/// Incremental Delaunay construction over a super triangle.
+/// The first three points that span a triangle, counter-clockwise.
+///
+/// The first point, the first point distinct from it, and the first point
+/// off the line through the two; the caller has checked that one exists.
+/// For points in general position that is `(0, 1, 2)`, so the insertion
+/// order is the input order, as it was with the super triangle.
+fn first_triangle(points: &[Point2]) -> [u32; 3] {
+    let a = 0;
+    let b = points.iter().position(|p| *p != points[0]).unwrap_or(1);
+    let (c, sign) = points
+        .iter()
+        .enumerate()
+        .find_map(|(k, &q)| match decided(orient2d(points[a], points[b], q)) {
+            Sign::Zero => None,
+            sign => Some((k, sign)),
+        })
+        .unwrap_or((2, Sign::Positive));
+    if sign == Sign::Positive {
+        [a as u32, b as u32, c as u32]
+    } else {
+        [a as u32, c as u32, b as u32]
+    }
+}
+
+/// Incremental Delaunay construction closed by a vertex at infinity.
 struct Builder {
+    /// The input points. The infinite vertex has no entry, so reading its
+    /// position by mistake panics instead of computing with a stand-in.
     points: Vec<Point2>,
     triangles: Vec<u32>,
     halfedges: Vec<u32>,
-    real_count: usize,
+    /// The infinite vertex: one past the last input point.
+    infinite: u32,
     /// A triangle at each vertex, kept current by every split and flip,
     /// so a walk can start next to a hinted vertex.
     corner: Vec<u32>,
@@ -93,41 +153,52 @@ struct Builder {
 
 impl Builder {
     fn new(points: &[Point2]) -> Self {
-        let mut all = points.to_vec();
-        // A super triangle that strictly contains every input point. Scaled
-        // generously off the bounding box: a tight super triangle puts input
-        // points on its edges, and a point exactly on an edge has no
-        // containing triangle to split.
         let (min, max) = bounds(points);
-        let dx = max.x - min.x;
-        let dy = max.y - min.y;
-        let span = if dx > dy { dx } else { dy };
-        let span = if span > 0.0 { span } else { 1.0 };
-        let cx = (min.x + max.x) * 0.5;
-        let cy = (min.y + max.y) * 0.5;
-        let far = span * 32.0;
-        all.push(Point2::new(cx - far, cy - far));
-        all.push(Point2::new(cx + far, cy - far));
-        all.push(Point2::new(cx, cy + far));
-
-        let n = points.len() as u32;
-        let mut corner = vec![NO_HALFEDGE; all.len()];
-        corner[points.len()..].fill(0);
+        let n = points.len();
         Self {
-            points: all,
-            triangles: vec![n, n + 1, n + 2],
-            halfedges: vec![NO_HALFEDGE, NO_HALFEDGE, NO_HALFEDGE],
-            real_count: points.len(),
-            corner,
-            hints: CellHints::new(min, max, points.len()),
+            points: points.to_vec(),
+            triangles: Vec::new(),
+            halfedges: Vec::new(),
+            infinite: n as u32,
+            corner: vec![NO_HALFEDGE; n + 1],
+            hints: CellHints::new(min, max, n),
         }
     }
 
-    fn insert_all(&mut self) -> Result<(), TriangulationError> {
-        for v in 0..self.real_count as u32 {
-            self.insert_point(v)?;
+    /// Start from the triangle `first` and its three ghosts, then insert
+    /// every other point in input order.
+    fn insert_all(&mut self, first: [u32; 3]) -> Result<(), TriangulationError> {
+        let [a, b, c] = first;
+        let g = self.infinite;
+        // Slot 0 is the finite triangle; slots 1, 2 and 3 are the ghosts
+        // across its edges a -> b, b -> c and c -> a.
+        self.triangles = vec![a, b, c, b, a, g, c, b, g, a, c, g];
+        self.halfedges = vec![NO_HALFEDGE; 12];
+        let h = &mut self.halfedges;
+        link(h, 0, 3); // a -> b | b -> a
+        link(h, 1, 6); // b -> c | c -> b
+        link(h, 2, 9); // c -> a | a -> c
+        link(h, 4, 11); // a -> g | g -> a
+        link(h, 7, 5); // b -> g | g -> b
+        link(h, 10, 8); // c -> g | g -> c
+        for v in first {
+            self.corner[v as usize] = 0;
+            self.hints.set(self.points[v as usize], v);
+        }
+        self.corner[g as usize] = 1;
+        note_update();
+        debug_check(&self.triangles, &self.halfedges);
+        for v in 0..self.infinite {
+            if !first.contains(&v) {
+                self.insert_point(v)?;
+            }
         }
         Ok(())
+    }
+
+    /// The slot of the infinite vertex in triangle `t`, if it is a ghost.
+    fn ghost_slot(&self, t: usize) -> Option<usize> {
+        (0..3).find(|&i| self.triangles[3 * t + i] == self.infinite)
     }
 
     /// Insert one vertex, splitting its containing triangle and restoring the
@@ -147,6 +218,17 @@ impl Builder {
             self.triangles[3 * t + 2],
         );
         let p = self.points[v as usize];
+
+        // Outside the hull: the ghost's hull edge is visible from `p`. The
+        // split gives one finite triangle and two ghosts, and the flips
+        // wrap the hull round `p`.
+        if self.ghost_slot(t).is_some() {
+            let (t1, t2) = self.split_triangle(t, (a, b, c), v);
+            self.legalize(3 * t);
+            self.legalize(3 * t1);
+            self.legalize(3 * t2);
+            return Ok(());
+        }
 
         // On an edge: split the edge, and the triangles either side of it,
         // rather than the one triangle into three -- one of the three would
@@ -297,25 +379,37 @@ impl Builder {
         self.walk(last, p)
     }
 
-    /// Whether `p` lies strictly inside triangle `t`, off its edges.
+    /// Whether `p` lies strictly inside finite triangle `t`, off its edges.
+    ///
+    /// Never for a ghost: a point outside the hull can see several hull
+    /// edges, so the ghost a walk ends in need not be the only one.
     fn strictly_inside(&self, t: usize, p: Point2) -> bool {
-        (0..3).all(|i| {
-            let u = self.points[self.triangles[3 * t + i] as usize];
-            let w = self.points[self.triangles[3 * t + (i + 1) % 3] as usize];
-            decided(orient2d(u, w, p)) == Sign::Positive
-        })
+        self.ghost_slot(t).is_none()
+            && (0..3).all(|i| {
+                let u = self.points[self.triangles[3 * t + i] as usize];
+                let w = self.points[self.triangles[3 * t + (i + 1) % 3] as usize];
+                decided(orient2d(u, w, p)) == Sign::Positive
+            })
     }
 
-    /// Walk from triangle `start` to one whose closure holds `p`.
+    /// Walk from triangle `start` to a finite triangle whose closure holds
+    /// `p`, or to a ghost whose hull edge `p` sees strictly.
     ///
-    /// A straight walk needs no auxiliary structure. Returns `None` only if
-    /// the walk leaves the mesh, which the super triangle makes impossible
-    /// for in-range points.
+    /// A straight walk needs no auxiliary structure. The ghosts close the
+    /// mesh, so no halfedge lacks a twin; `None` means a corrupted mesh, or
+    /// a walk that did not settle within one step per triangle.
     fn walk(&self, start: usize, p: Point2) -> Option<usize> {
         let mut t = start;
         for _ in 0..self.triangles.len() {
             #[cfg(test)]
             crate::hint::tests::STEPS.with(|c| c.set(c.get() + 1));
+            if let Some(k) = self.ghost_slot(t) {
+                match self.ghost_step(t, k, p) {
+                    Some(next) => t = next,
+                    None => return Some(t),
+                }
+                continue;
+            }
             let (a, b, c) = (
                 self.points[self.triangles[3 * t] as usize],
                 self.points[self.triangles[3 * t + 1] as usize],
@@ -344,6 +438,59 @@ impl Builder {
             }
         }
         None
+    }
+
+    /// The next triangle of a walk standing in ghost `t`, whose infinite
+    /// vertex is in slot `k`, or `None` when `p` lies in it.
+    ///
+    /// The ghost of hull edge `a -> b` holds the points strictly on the
+    /// edge's outer side. Any other point steps across `a -> b` into the
+    /// hull, and the walk goes on from there: one on the edge stops in
+    /// the finite triangle beside it, and one on the edge's line beyond an
+    /// end lies strictly outside another hull edge, which the walk then
+    /// crosses into that edge's ghost. A walk only stands in a ghost it did
+    /// not enter that way at its start (a hint or the last triangle), since
+    /// it enters a ghost only across a hull edge `p` lies strictly outside.
+    fn ghost_step(&self, t: usize, k: usize, p: Point2) -> Option<usize> {
+        let edge = 3 * t + (k + 1) % 3;
+        let a = self.points[self.triangles[edge] as usize];
+        let b = self.points[self.triangles[3 * t + (k + 2) % 3] as usize];
+        if decided(orient2d(a, b, p)) == Sign::Positive {
+            None
+        } else {
+            Some(self.halfedges[edge] as usize / 3)
+        }
+    }
+
+    /// Whether the edge `p0 -> p1` of the triangle `(p0, p1, apex)` must
+    /// flip, with `other` the vertex across it.
+    ///
+    /// A finite quadrilateral flips when `other` lies strictly inside the
+    /// circumcircle and the quadrilateral is strictly convex. With the
+    /// infinite vertex: nothing lies beyond the hull, so a hull edge never
+    /// flips (`other` infinite); an edge to the infinite vertex flips when
+    /// `other` lies strictly on the outer side of the ghost's hull edge,
+    /// which also makes the finite triangle the flip creates
+    /// counter-clockwise. On that edge's line it does not flip, and the
+    /// collinear vertex stays on the hull.
+    fn must_flip(&self, p0: u32, p1: u32, apex: u32, other: u32) -> bool {
+        let g = self.infinite;
+        let q = |k: u32| self.points[k as usize];
+        if other == g || apex == g {
+            return false;
+        }
+        if p1 == g {
+            // (p0, ∞, apex) is the ghost of hull edge apex -> p0.
+            return turns_left(q(apex), q(p0), q(other));
+        }
+        if p0 == g {
+            // (∞, p1, apex) is the ghost of hull edge p1 -> apex.
+            return turns_left(q(p1), q(apex), q(other));
+        }
+        in_circumcircle(q(p0), q(p1), q(apex), q(other))
+            // Only a strictly convex quadrilateral flips without inverting.
+            && turns_left(q(apex), q(p0), q(other))
+            && turns_left(q(other), q(p1), q(apex))
     }
 
     /// Restore the Delaunay property across `edge`, whose triangle's third
@@ -375,17 +522,7 @@ impl Builder {
             let apex = self.triangles[3 * t + (ti + 2) % 3];
             let other = self.triangles[3 * ot + (oi + 2) % 3];
 
-            if !in_circumcircle(
-                self.points[p0 as usize],
-                self.points[p1 as usize],
-                self.points[apex as usize],
-                self.points[other as usize],
-            ) {
-                continue;
-            }
-            // Only a strictly convex quadrilateral flips without inverting.
-            let q = |k: u32| self.points[k as usize];
-            if !(turns_left(q(apex), q(p0), q(other)) && turns_left(q(other), q(p1), q(apex))) {
+            if !self.must_flip(p0, p1, apex, other) {
                 continue;
             }
 
@@ -418,12 +555,12 @@ impl Builder {
         }
     }
 
-    /// Drop the super triangle and everything touching it.
+    /// Drop the ghosts; the finite triangles cover the convex hull.
     fn finish(self, original: &[Point2], constraints: &[Constraint]) -> Triangulation {
-        let limit = self.real_count as u32;
+        let g = self.infinite;
         let mut triangles = Vec::with_capacity(self.triangles.len());
         for t in self.triangles.chunks_exact(3) {
-            if t.iter().all(|&v| v < limit) {
+            if !t.contains(&g) {
                 triangles.extend_from_slice(t);
             }
         }
