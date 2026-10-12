@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-04) |
+| Latest release | 0.3.8 (2026-10-12) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,12 +46,16 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-04):
+Latest release, 0.3.8 (2026-10-12):
 
-### Added
+### Fixed
 
-- `elevated`: `axiolid-evaluate`'s derivatives, certified chord and
-  derivative bounds and grade corners of elevated and banked curves
-  (#252), re-exported on the same footing as `curve` and `surface`.
+- `clash::interference` counted every narrow-phase pair of well-formed
+  triangles that do not meet (`TriangleTriangleRelation::Disjoint`) as a
+  `degenerate_skips`, through a catch-all arm, so a clash report over-stated
+  how much of its input was untestable (two unit boxes 5 apart at a 10 m
+  tolerance reported 120 of 144 pairs skipped). Disjoint pairs are now a
+  verdict, and the match is exhaustive so a new relation cannot fall
+  through again.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

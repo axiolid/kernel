@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-10) |
+| Latest release | 0.3.12 (2026-10-12) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,45 +42,20 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-10):
+Latest release, 0.3.12 (2026-10-12):
 
 ### Added
 
-- Certified piece lengths and joint distances (#294, ADR 0082
-  amendment): `station::certify`, and `CompositeBasis::joint_intervals`,
-  one `DistanceInterval` per interior joint containing its true distance,
-  no wider than the tolerance asked. A length read from stored data is a
-  point; an ellipse's, a B-spline's and every numerical offset's is
-  bounded from both sides. Where the measured curve is evaluated in closed
-  form at its native parameter (a line, a circle, an ellipse or a
-  B-spline, and any offset of one), by chords and turning: a chord is a
-  lower bound, and with `M` a certified bound on `|P''|` (from
-  `bound::curve_derivative_bounds*` and the frame's unit-vector
-  derivatives) every tangent on a panel lies within `h M / (2 m)` of the
-  midpoint's, `m = |P'(mid)| - h M / 2`, so the arc is at most the chord
-  over the cosine of that; the points' rounding is bounded once for the
-  whole chain of chords. Beside a base parameterised by its plan arc
-  length with a curvature law (an intrinsic curve or a chain, the plan of
-  an elevated curve), by the midpoint rule on the offset's speed in
-  closed form, within `h^3 / 24 sup |f''|` from suprema of the curvature
-  law's and the profile's derivatives. Uncertifiable lengths are refused
-  by a typed `UnsupportedInput` naming `UNCERTIFIED_LENGTH` (an offset of
-  a banked or 3D intrinsic curve, of a chain's parametric piece or beside
-  an intrinsic profile in a leaning frame; an offset by distances along an
-  ellipse or a B-spline; a 3D offset direction that is not vertical beside
-  a plan-measured or intrinsic base; a base placed in a tilted frame; a
-  skewed frame), a tolerance the rounding already exceeds likewise, and a
-  panel budget (`MAX_CERTIFIED_PANELS`) as `BudgetExceeded`.
-- `ReferenceCurveEvaluator::path_joint_distances` answers with
-  `CompositeBasis::joint_intervals`.
-- Seam-snapping windows (#294): `station::window`, with
-  `snapped_distance2`, `snapped_distance3` and
-  `CompositeBasis::snapped_distance`: the distance a station within its
-  window of exactly one seam whose frame may jump is read at (that seam's
-  own), using certified intervals where a seam's distance is numerical
-  (to `WINDOW_CERTIFICATION` of the window); a window holding two seams is
-  refused naming `SEAM_WINDOW_AMBIGUOUS`, one with a seam straddling its
-  edge naming `SEAM_WINDOW_STRADDLED`, a negative or non-finite window as
-  invalid input. A window of `0` reads the distance as it is.
+- Open curve-path ends (#298, ADR 0082 amendment):
+  `StationPiece::from_path_piece`, and so `CompositeBasis::from_path` and
+  every `path_*` query of `ReferenceCurveEvaluator`, resolves a piece
+  whose `open_end` is set to the curve's end by this evaluator's own
+  length, the end `StationPiece::whole` reads: a line's parameter domain,
+  a length read from stored data exactly, otherwise the numerical
+  estimate (a B-spline's or an ellipse's arc length, an offset's own
+  table). An open path therefore reads bitwise as the stated path holding
+  those lengths (`CompositeBasis::path` hands it back), which is the path
+  a graph compiler flattens; `path_joint_distances` certifies where its
+  joints truly fall. Stated spans are checked as before.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

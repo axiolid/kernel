@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-12
+
 ### Fixed
 
 - `clash::interference` counted every narrow-phase pair of well-formed

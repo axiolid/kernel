@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-core",
  "axiolid-linear",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-curve-evaluate-contract"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-model"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "axiolid-core",
  "axiolid-curve",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-triangulate"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "axiolid-core",
  "axiolid-guarantees",

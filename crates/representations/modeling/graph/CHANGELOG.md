@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-12
+
 ### Added
 
 - Seam-snapping windows and seam sides on run stations (#301, ADR 0082

@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-10) |
+| Latest release | 0.3.11 (2026-10-12) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,17 +54,27 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-10):
+Latest release, 0.3.11 (2026-10-12):
 
-### Fixed
+### Added
 
-- The wire writer labels each payload with the lowest format version that
-  represents it (#297, ADR 0085), not always with `FORMAT_VERSION`: a graph
-  with no seam-snapping window is written as `"version": "1.0"`, byte for
-  byte what 0.3.8 wrote, so a 0.3.8 reader reads it again; 0.3.9 labelled
-  every payload `1.1`, which such a reader refuses. A graph holding a
-  window anywhere (an `OrientedCurveStation` node or the station of an
-  `InstanceAtStation`, a window of `-0.0` included, since it is written)
-  is written as `1.1`, as before. JSON and CBOR alike.
+- Seam-snapping windows and seam sides on run stations (#301, ADR 0082
+  amendment): `SectionAtStation` gains `seam` and `seam_window`, set by
+  `with_seam_side` and `with_seam_window`, for `SectionsAtStations` and
+  `OpenSectionsAtStations`; a new `RunStation` (`#[non_exhaustive]`, built by
+  `new` or `From<Station>` and the same two methods) carries them in a new
+  variant, `CurveRelation::OffsetsAtStations`, the general form of
+  `OffsetByStations`. Defaults are `Outgoing` and `0`, today's reading;
+  `Station`, `StationedSection`, `StationedOpenSection` and the #241
+  variants are unchanged. A negative or non-finite window on any run
+  station is refused as `GraphError::InvalidStation` when the node is
+  pushed.
+- Wire format 1.2 (ADR 0085 note): the two fields are written only when
+  they are not `Outgoing` and `+0.0`, and `OffsetsAtStations` is a 1.2
+  variant. A graph using either is labelled 1.2; one using neither is
+  written exactly as before, as 1.0 or 1.1. A 1.0 or 1.1 payload holding
+  them is refused by name (`UnknownField` `seam` or `seam_window`,
+  `UnknownKind` `OffsetsAtStations`), by the same test the writer labels
+  by. Golden payload `tests/wire/v1.2/every-kind.json`.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-10-12
+
 ### Added
 
 - Open curve-path ends (#298, ADR 0082 amendment): `PathPiece::open_end`,

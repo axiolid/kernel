@@ -8,7 +8,7 @@ Portable curve evaluation capability contract: point, tangent and oriented frame
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-10) |
+| Latest release | 0.3.6 (2026-10-12) |
 | crates.io | [`axiolid-curve-evaluate-contract`](https://crates.io/crates/axiolid-curve-evaluate-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_curve_evaluate_contract/index.html) · [docs.rs](https://docs.rs/axiolid-curve-evaluate-contract) |
@@ -41,25 +41,17 @@ scalar implementation. See ADR 0063.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-10):
+Latest release, 0.3.6 (2026-10-12):
 
 ### Added
 
-- Certified joint distances of a curve path (#294, ADR 0082 amendment):
-  `CurveEvaluator::path_joint_distances(path, tolerance)`, one
-  `DistanceInterval` per interior joint that contains the joint's true
-  distance (the sum of the true lengths of the pieces before it) and is no
-  wider than `tolerance`; lengths read from stored data sum to point
-  intervals. A defaulted trait method, so no provider breaks: the default
-  refuses by a typed `UnsupportedInput` naming the new
-  `PATH_JOINT_DISTANCES_UNSUPPORTED`, never an estimate handed out as a
-  certificate. `DistanceInterval` (`lower`, `upper`, `#[non_exhaustive]`,
-  built by `new` and `point`) is new.
-- The conformance suite checks the query: a provider either refuses it as
-  unsupported, or answers one interval containing the joint of a line and
-  a quarter arc (exactly at 10) and of an offset of a line whose lateral
-  offset widens from 0 to 1 over 10 (`sqrt(101)`, a quadrature for a
-  provider), no wider than the tolerance, and refuses a non-positive or
-  non-finite tolerance and a path whose pieces do not meet.
+- Open curve-path ends (#298, ADR 0082 amendment): the trait documentation
+  states that a provider reading paths resolves a piece's open end with
+  its own length of the curve, and `OPEN_PATH_END_UNSUPPORTED` names the
+  typed refusal of a provider that reads stated spans only. The
+  conformance suite reads an open path (the whole of a widening offset of
+  the whole of a line, then a line to its end) forwards and reversed,
+  refuses a distance past its end and certifies its joint at `sqrt(101)`;
+  a provider may refuse it as unsupported, typed.
 
 Full history: [`crates/contracts/operations/curve-evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/curve-evaluate/CHANGELOG.md)

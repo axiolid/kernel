@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.21 (2026-10-10) |
+| Latest release | 0.3.22 (2026-10-12) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -72,21 +72,30 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.21 (2026-10-10):
+Latest release, 0.3.22 (2026-10-12):
 
-### Fixed
+### Added
 
-- An instance of a body meshed to exactly its budget (a torus, a
-  proven or certified pipe, a curve-bounded plane) no longer reports one
-  ulp over the requested budget, which made `meets_requested` false (#258).
-  The source was meshed to the budget divided by the transform's stretch
-  bound, and that quotient multiplied back rounds above the budget at some
-  factors (a scale of 0.33 or 1.19 at `1e-4`). It is now shrunk to the
-  largest value whose rounded product with the stretch fits, as #255
-  shrinks a curve-bounded plane's, so rigid, scaled and nested instances
-  report at most the request. The stretch bound itself is unchanged: a
-  rigid transform keeps its `1 + 96 eps` margin, since an `f64` rotation
-  is orthonormal only to rounding, and scaled or sheared instances still
-  grow the bound by their full stretch.
+- Run stations snap onto seams within their windows (#301, ADR 0082
+  amendment): `SectionsAtStations` and `OpenSectionsAtStations` sections
+  and the stations of the new `CurveRelation::OffsetsAtStations` (compiled
+  as a sweep directrix and as a station basis, like `OffsetByStations`)
+  are each snapped by the #294 rule (`station::window`, the oriented
+  station's own) before the run is read, and the run stands on the snapped
+  distances; a window holding two seams or straddled by one is refused by
+  name, and snapped stations that no longer increase strictly are refused
+  as `InvalidInput`. An interior station snapped onto a joint where the
+  tangent turns is the mitre's knot, its section the mitre section whatever
+  side it names; the run's first and last stations keep their outgoing and
+  incoming readings; an interior station on a seam whose tangents agree (a
+  roll jump) is placed in the frame of the side it names. Window `0` and
+  `Outgoing`, the defaults, are today's reading.
+
+### Changed
+
+- `station::curve_path` documents that its pieces stay stated, each with
+  the length the kernel measures, and that a caller without the graph who
+  leaves the same pieces' ends open (#298) reads the same path (checked
+  bitwise for an offset of a B-spline). Its output is unchanged.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

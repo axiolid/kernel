@@ -1194,6 +1194,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.8 - 2026-10-12
+
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment): `PathPiece::open_end`,
+  set by `PathPiece::to_end(curve, start)` and `PathPiece::whole(curve)`,
+  leaves a span's end to the evaluator, which resolves it with its own
+  length of the curve; so a caller without a provider can build a path
+  over an offset beside a gradient curve, a clothoid or a B-spline (or a
+  B-spline itself), whose lengths have no closed form.
+  `PathPiece::from_start(curve, end)` is the span `[0, end]`, and
+  `PathPiece::is_stated` says whether every length a piece spans (its
+  offset's base included) is stated. An open piece's `end` holds
+  `Scalar::INFINITY`, unread, so `PathPiece::length` and
+  `CurvePath::length` are infinite until an evaluator resolves it. Stated
+  pieces are unchanged.
+
 ### 0.3.7 - 2026-10-10
 
 ### Added
@@ -1379,6 +1396,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.6 - 2026-10-12
+
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment): the trait documentation
+  states that a provider reading paths resolves a piece's open end with
+  its own length of the curve, and `OPEN_PATH_END_UNSUPPORTED` names the
+  typed refusal of a provider that reads stated spans only. The
+  conformance suite reads an open path (the whole of a widening offset of
+  the whole of a line, then a line to its end) forwards and reversed,
+  refuses a distance past its end and certifies its joint at `sqrt(101)`;
+  a provider may refuse it as unsupported, typed.
+
 ### 0.3.5 - 2026-10-10
 
 ### Added
@@ -1520,6 +1550,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.12 - 2026-10-12
+
+### Added
+
+- Open curve-path ends (#298, ADR 0082 amendment):
+  `StationPiece::from_path_piece`, and so `CompositeBasis::from_path` and
+  every `path_*` query of `ReferenceCurveEvaluator`, resolves a piece
+  whose `open_end` is set to the curve's end by this evaluator's own
+  length, the end `StationPiece::whole` reads: a line's parameter domain,
+  a length read from stored data exactly, otherwise the numerical
+  estimate (a B-spline's or an ellipse's arc length, an offset's own
+  table). An open path therefore reads bitwise as the stated path holding
+  those lengths (`CompositeBasis::path` hands it back), which is the path
+  a graph compiler flattens; `path_joint_distances` certifies where its
+  joints truly fall. Stated spans are checked as before.
 
 ### 0.3.11 - 2026-10-10
 
@@ -2594,6 +2640,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.22 - 2026-10-12
+
+### Added
+
+- Run stations snap onto seams within their windows (#301, ADR 0082
+  amendment): `SectionsAtStations` and `OpenSectionsAtStations` sections
+  and the stations of the new `CurveRelation::OffsetsAtStations` (compiled
+  as a sweep directrix and as a station basis, like `OffsetByStations`)
+  are each snapped by the #294 rule (`station::window`, the oriented
+  station's own) before the run is read, and the run stands on the snapped
+  distances; a window holding two seams or straddled by one is refused by
+  name, and snapped stations that no longer increase strictly are refused
+  as `InvalidInput`. An interior station snapped onto a joint where the
+  tangent turns is the mitre's knot, its section the mitre section whatever
+  side it names; the run's first and last stations keep their outgoing and
+  incoming readings; an interior station on a seam whose tangents agree (a
+  roll jump) is placed in the frame of the side it names. Window `0` and
+  `Outgoing`, the defaults, are today's reading.
+
+### Changed
+
+- `station::curve_path` documents that its pieces stay stated, each with
+  the length the kernel measures, and that a caller without the graph who
+  leaves the same pieces' ends open (#298) reads the same path (checked
+  bitwise for an offset of a B-spline). Its output is unchanged.
+
 ### 0.3.21 - 2026-10-10
 
 ### Fixed
@@ -3578,6 +3650,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.11 - 2026-10-12
+
+### Added
+
+- Seam-snapping windows and seam sides on run stations (#301, ADR 0082
+  amendment): `SectionAtStation` gains `seam` and `seam_window`, set by
+  `with_seam_side` and `with_seam_window`, for `SectionsAtStations` and
+  `OpenSectionsAtStations`; a new `RunStation` (`#[non_exhaustive]`, built by
+  `new` or `From<Station>` and the same two methods) carries them in a new
+  variant, `CurveRelation::OffsetsAtStations`, the general form of
+  `OffsetByStations`. Defaults are `Outgoing` and `0`, today's reading;
+  `Station`, `StationedSection`, `StationedOpenSection` and the #241
+  variants are unchanged. A negative or non-finite window on any run
+  station is refused as `GraphError::InvalidStation` when the node is
+  pushed.
+- Wire format 1.2 (ADR 0085 note): the two fields are written only when
+  they are not `Outgoing` and `+0.0`, and `OffsetsAtStations` is a 1.2
+  variant. A graph using either is labelled 1.2; one using neither is
+  written exactly as before, as 1.0 or 1.1. A 1.0 or 1.1 payload holding
+  them is refused by name (`UnknownField` `seam` or `seam_window`,
+  `UnknownKind` `OffsetsAtStations`), by the same test the writer labels
+  by. Golden payload `tests/wire/v1.2/every-kind.json`.
 
 ### 0.3.10 - 2026-10-10
 
@@ -4572,6 +4667,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-reference
 
+### 0.3.8 - 2026-10-12
+
+### Fixed
+
+- `clash::interference` counted every narrow-phase pair of well-formed
+  triangles that do not meet (`TriangleTriangleRelation::Disjoint`) as a
+  `degenerate_skips`, through a catch-all arm, so a clash report over-stated
+  how much of its input was untestable (two unit boxes 5 apart at a 10 m
+  tolerance reported 120 of 144 pairs skipped). Disjoint pairs are now a
+  verdict, and the match is exhaustive so a new relation cannot fall
+  through again.
+
 ### 0.3.7 - 2026-10-04
 
 ### Added
@@ -4987,6 +5094,53 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-triangulate
+
+### 0.3.4 - 2026-10-12
+
+### Added
+
+- `MergedPoint` and `Triangulation::merged_points` (#300): the input
+  points merged into an exactly coincident one, each as its input index and
+  the kept index that stands for it (the lowest input index at that
+  position), in ascending input order.
+- `TriangulationError::CoincidentConstraint { a, b }` (#300): a constraint
+  whose two endpoints are distinct input points at exactly the same
+  position. Merged, they are one vertex, and the constraint would be an
+  edge from it to itself.
+
+### Fixed
+
+- `triangulate` merges exactly coincident input points instead of
+  splitting each into the mesh at its twin's position (#300), which left
+  zero-area and overlapping triangles that used one directed edge twice --
+  in a 3x3 grid with its first row repeated, edge (3, 10) twice -- and
+  reported nothing. A point found at a vertex already inserted is recorded
+  as merged into it; the triangles and `Triangulation::constraints` use the
+  kept indices, `points` still holds every input point, and
+  `merged_points` reports the merge, so it is lossless. Duplicates in free
+  points, outlines, holes and constraints triangulate validly; a constraint
+  between two coincident points is refused by name. A constraint from an
+  index to itself is unchanged.
+- The debug adjacency check no longer skips a triangle list with a
+  repeated directed edge; it panics on one (#300). Only duplicate points
+  produced such lists, and they are merged now.
+
+- `triangulate` covers the exact convex hull of its input (#299). The
+  build bracketed the points with a finite super triangle (32 times their
+  span) and dropped every triangle touching it, which lost the thin hull
+  triangles whose circumcircles reached its corners -- 3,977 instead of
+  3,979 triangles for 2,000 random points, with nothing reported. The hull
+  is now closed by one symbolic vertex at infinity, decided by the
+  predicates without coordinates, so the output always has `2n - 2 - h`
+  triangles for `n` points with `h` on the hull boundary, collinear ones
+  included, and its boundary is the exact hull. Constrained triangulations
+  recover their constraints in that complete triangulation.
+- Where the Delaunay triangulation is unique (no four points cocircular)
+  and the old build kept every hull triangle, the output is the same set of
+  triangles as before; their order in the list changes, because the build
+  starts from the first three points that span a triangle instead of from
+  the super triangle. With cocircular points either build may choose a
+  different, equally Delaunay triangulation.
 
 ### 0.3.3 - 2026-10-10
 

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.22] - 2026-10-12
+
 ### Added
 
 - Run stations snap onto seams within their windows (#301, ADR 0082

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-12
+
 ### Added
 
 - `MergedPoint` and `Triangulation::merged_points` (#300): the input

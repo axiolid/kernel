@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-10) |
+| Latest release | 0.3.8 (2026-10-12) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -52,15 +52,21 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-10):
+Latest release, 0.3.8 (2026-10-12):
 
 ### Added
 
-- An optional `serde` feature, off by default, deriving `Serialize` and
-  `Deserialize` for `Curve2`, `Curve3` and every value they hold, `SeamSide`
-  included: the values the geometry graph's versioned
-  wire format carries (#267, ADR 0085). Enums are externally tagged by
-  their variant names and unknown fields are refused. No default-build
-  change.
+- Open curve-path ends (#298, ADR 0082 amendment): `PathPiece::open_end`,
+  set by `PathPiece::to_end(curve, start)` and `PathPiece::whole(curve)`,
+  leaves a span's end to the evaluator, which resolves it with its own
+  length of the curve; so a caller without a provider can build a path
+  over an offset beside a gradient curve, a clothoid or a B-spline (or a
+  B-spline itself), whose lengths have no closed form.
+  `PathPiece::from_start(curve, end)` is the span `[0, end]`, and
+  `PathPiece::is_stated` says whether every length a piece spans (its
+  offset's base included) is stated. An open piece's `end` holds
+  `Scalar::INFINITY`, unread, so `PathPiece::length` and
+  `CurvePath::length` are infinite until an evaluator resolves it. Stated
+  pieces are unchanged.
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)
