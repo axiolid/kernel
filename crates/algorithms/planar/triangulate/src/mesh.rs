@@ -63,6 +63,19 @@ pub enum TriangulationError {
         /// Second endpoint.
         b: u32,
     },
+    /// A constraint joins two input points at exactly the same position.
+    ///
+    /// Coincident points are merged into one vertex, so the constraint
+    /// would be an edge from that vertex to itself. Reported rather than
+    /// dropped: a caller who asked for an edge between two distinct
+    /// indices has two points where they meant one, or one where they
+    /// meant two.
+    CoincidentConstraint {
+        /// First endpoint, as an input index.
+        a: u32,
+        /// Second endpoint, as an input index.
+        b: u32,
+    },
 }
 
 impl core::fmt::Display for TriangulationError {
@@ -79,11 +92,29 @@ impl core::fmt::Display for TriangulationError {
             Self::CrossingConstraints { a, b } => {
                 write!(f, "constraint ({a}, {b}) crosses another constraint")
             }
+            Self::CoincidentConstraint { a, b } => {
+                write!(f, "constraint ({a}, {b}) joins two coincident points")
+            }
         }
     }
 }
 
 impl core::error::Error for TriangulationError {}
+
+/// An input point merged into an exactly coincident one.
+///
+/// Two input points at the same position are one vertex of the
+/// triangulation: the lowest input index at that position is kept, and the
+/// others are reported here. No triangle uses a merged index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct MergedPoint {
+    /// The input index that was merged.
+    pub input: u32,
+    /// The input index that stands for it in the triangles: the lowest
+    /// index at the same position.
+    pub kept: u32,
+}
 
 /// A planar triangulation over a point set, honouring constraint edges.
 #[derive(Debug, Clone)]
@@ -95,10 +126,16 @@ pub struct Triangulation {
     pub(crate) halfedges: Vec<u32>,
     /// Constraint edges, sorted, as vertex index pairs.
     pub(crate) constraints: Vec<Constraint>,
+    /// Coincident input points merged into a kept one, by input index.
+    pub(crate) merged: Vec<MergedPoint>,
 }
 
 impl Triangulation {
     /// The triangle list, three counter-clockwise vertex indices each.
+    ///
+    /// Indices are into [`points`](Self::points); an input point merged
+    /// into a coincident one (see [`merged_points`](Self::merged_points))
+    /// appears under the kept index.
     #[must_use]
     pub fn triangles(&self) -> &[u32] {
         &self.triangles
@@ -117,10 +154,23 @@ impl Triangulation {
         self.triangles.len() / 3
     }
 
-    /// The constraint edges this triangulation was built to honour.
+    /// The constraint edges this triangulation was built to honour, between
+    /// kept vertices: an endpoint that was merged into a coincident point
+    /// is replaced by the kept index.
     #[must_use]
     pub fn constraints(&self) -> &[Constraint] {
         &self.constraints
+    }
+
+    /// The input points merged into an exactly coincident point, in
+    /// ascending input order; empty when every input point is distinct.
+    ///
+    /// Every input index not listed is its own vertex. With this list the
+    /// merge is lossless: a caller can map each of its indices to the
+    /// vertex that carries it.
+    #[must_use]
+    pub fn merged_points(&self) -> &[MergedPoint] {
+        &self.merged
     }
 
     /// Whether `edge` is a constraint.

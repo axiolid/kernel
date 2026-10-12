@@ -9,7 +9,33 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MergedPoint` and `Triangulation::merged_points` (#300): the input
+  points merged into an exactly coincident one, each as its input index and
+  the kept index that stands for it (the lowest input index at that
+  position), in ascending input order.
+- `TriangulationError::CoincidentConstraint { a, b }` (#300): a constraint
+  whose two endpoints are distinct input points at exactly the same
+  position. Merged, they are one vertex, and the constraint would be an
+  edge from it to itself.
+
 ### Fixed
+
+- `triangulate` merges exactly coincident input points instead of
+  splitting each into the mesh at its twin's position (#300), which left
+  zero-area and overlapping triangles that used one directed edge twice --
+  in a 3x3 grid with its first row repeated, edge (3, 10) twice -- and
+  reported nothing. A point found at a vertex already inserted is recorded
+  as merged into it; the triangles and `Triangulation::constraints` use the
+  kept indices, `points` still holds every input point, and
+  `merged_points` reports the merge, so it is lossless. Duplicates in free
+  points, outlines, holes and constraints triangulate validly; a constraint
+  between two coincident points is refused by name. A constraint from an
+  index to itself is unchanged.
+- The debug adjacency check no longer skips a triangle list with a
+  repeated directed edge; it panics on one (#300). Only duplicate points
+  produced such lists, and they are merged now.
 
 - `triangulate` covers the exact convex hull of its input (#299). The
   build bracketed the points with a finite super triangle (32 times their

@@ -40,9 +40,9 @@ pub(crate) fn twins(triangles: &[u32]) -> Vec<u32> {
 
 /// The twin pointers, and whether every directed edge occurs once.
 ///
-/// When one occurs twice -- duplicate input points can leave two
-/// overlapping triangles on the same edge -- the pairing is whichever the
-/// scan met last, and is not the only answer.
+/// When one occurs twice -- two overlapping triangles on the same edge, as
+/// duplicate input points left before they were merged (#300) -- the
+/// pairing is whichever the scan met last, and is not the only answer.
 fn pair(triangles: &[u32]) -> (Vec<u32>, bool) {
     #[cfg(test)]
     counters::bump(&counters::FULL);
@@ -111,10 +111,11 @@ pub(crate) fn compare(triangles: &[u32], halfedges: &[u32]) -> Comparison {
 /// In debug builds, panic unless the maintained twin array equals a full
 /// recomputation (up to [`FULL_CHECK_LIMIT`] triangles).
 ///
-/// A triangle list with a repeated directed edge is skipped: only
-/// duplicate input points produce one, the recomputation then pairs
-/// arbitrarily, and there is nothing exact to compare with. The tests
-/// count skips and require none on their inputs.
+/// A triangle list with a repeated directed edge panics too. Coincident
+/// input points are merged before they reach the mesh (#300), so no input
+/// produces one, and a build that does is broken; this check used to skip
+/// such lists, because duplicate points made them, and had nothing exact
+/// to compare with.
 #[inline]
 pub(crate) fn debug_check(triangles: &[u32], halfedges: &[u32]) {
     let too_large = FULL_CHECK_LIMIT.is_some_and(|limit| triangles.len() / 3 > limit);
@@ -125,10 +126,10 @@ pub(crate) fn debug_check(triangles: &[u32], halfedges: &[u32]) {
     counters::bump(&counters::CHECKS);
     match compare(triangles, halfedges) {
         Comparison::Equal => {}
-        Comparison::Ambiguous => {
-            #[cfg(test)]
-            counters::bump(&counters::SKIPPED);
-        }
+        Comparison::Ambiguous => panic!(
+            "triangulation has a directed edge that occurs twice, \
+             so its adjacency has no single rebuild"
+        ),
         Comparison::Differs(e) => panic!(
             "triangulation adjacency diverged from a full rebuild at halfedge {e}: \
              maintained {:?}, rebuilt {:?}",
@@ -152,8 +153,6 @@ pub(crate) mod counters {
         pub(crate) static UPDATES: Cell<usize> = const { Cell::new(0) };
         /// Debug checks run.
         pub(crate) static CHECKS: Cell<usize> = const { Cell::new(0) };
-        /// Debug checks skipped on a repeated directed edge.
-        pub(crate) static SKIPPED: Cell<usize> = const { Cell::new(0) };
     }
 
     pub(crate) fn bump(counter: &'static LocalKey<Cell<usize>>) {
@@ -162,15 +161,13 @@ pub(crate) mod counters {
 
     /// Reset every counter on this thread.
     pub(crate) fn reset() {
-        for counter in [&FULL, &UPDATES, &CHECKS, &SKIPPED] {
+        for counter in [&FULL, &UPDATES, &CHECKS] {
             counter.with(|c| c.set(0));
         }
     }
 
-    /// `(full, updates, checks)` on this thread, after asserting that no
-    /// check was skipped.
+    /// `(full, updates, checks)` on this thread.
     pub(crate) fn read() -> (usize, usize, usize) {
-        assert_eq!(SKIPPED.with(Cell::get), 0, "a debug check was skipped");
         (
             FULL.with(Cell::get),
             UPDATES.with(Cell::get),
@@ -312,14 +309,36 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_points_skip_the_check_instead_of_panicking() {
-        // A repeated point leaves overlapping triangles on one directed
-        // edge; a full recomputation then pairs arbitrarily, so there is no
-        // exact answer to hold the local one to.
+    fn duplicate_points_are_merged_and_checked_after_every_update() {
+        // Before #300 a repeated point left overlapping triangles on one
+        // directed edge, and the check skipped them. Merged, the mesh stays
+        // manifold and every update is checked: a skip would now panic.
+        let mut points: Vec<Point2> = (0..9)
+            .map(|k| Point2::new(f64::from(k % 3), f64::from(k / 3)))
+            .collect();
+        points.extend_from_slice(&points.clone()[..3]);
+        points.push(points[4]);
+        points.extend(random(200, 2.0, 0x3000));
+        points.extend_from_within(12..60);
+        let (full, updates, checks) = counted(&points, &[]);
+        if cfg!(debug_assertions) {
+            assert_eq!(checks, updates);
+        }
+        assert_eq!(full, checks + 1);
+        let tri = triangulate(&points, &[]).expect("triangulates");
+        assert_eq!(compare(&tri.triangles, &tri.halfedges), Comparison::Equal);
+        assert_eq!(tri.merged_points().len(), 3 + 1 + 48);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "occurs twice")]
+    fn the_debug_check_panics_on_a_repeated_directed_edge() {
         assert_eq!(
             compare(&[0, 1, 2, 0, 1, 3], &[NO_HALFEDGE; 6]),
             Comparison::Ambiguous
         );
+        debug_check(&[0, 1, 2, 0, 1, 3], &[NO_HALFEDGE; 6]);
     }
 
     #[test]

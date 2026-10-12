@@ -1,5 +1,6 @@
-"""Mutation probe for the locally maintained triangulation adjacency (#268)
-and the vertex at infinity that closes its hull (#299).
+"""Mutation probe for the locally maintained triangulation adjacency (#268),
+the vertex at infinity that closes its hull (#299) and the merge of
+coincident points (#300).
 
 `axiolid-triangulate` keeps its twin pointers current by re-linking only the
 halfedges a split or flip rewrites and their outside neighbours. Each
@@ -7,7 +8,7 @@ mutant drops or misdirects one of those links -- in the one-into-three
 split, the two-into-four edge split, the Lawson flip after insertion and
 the flip of constraint recovery and restoration -- or weakens the guard
 that holds the local result to a full recomputation: the debug check
-itself, its comparison, its skip on a repeated directed edge, its size
+itself, its comparison, its refusal of a repeated directed edge, its size
 limit, the check after each kind of update, and the claim that no full
 recomputation maintains the mesh. The grid hint that starts point
 location is probed too: ignored, trusted for a point on an edge, or
@@ -21,6 +22,13 @@ stop in a ghost whose hull edge it does not see strictly, in the first
 triangle's orientation and ghost links, and in `finish`, which must drop
 the ghosts. Each must turn `tests/hull.rs`, which holds every output
 to `2n - 2 - h` triangles and the exact convex hull, or the unit tests red.
+
+The merge of coincident points (#300) is probed by splitting them in
+again, merging without recording it, recording a merged point as a
+grid hint, carrying constraints over without the merge, and accepting a
+constraint between coincident points; each must turn
+`tests/duplicates.rs`, which checks the merge report against a brute
+force, or the unit tests red.
 
 Not probed: the order of independent `link` calls within one update (any
 order of disjoint writes gives the same array) and the size limit's value
@@ -53,6 +61,7 @@ def drop(line):
 
 H = "crates/algorithms/planar/triangulate/src/hint.rs"
 HULL = ["-p", "axiolid-triangulate", "--test", "hull"]
+DUP = ["-p", "axiolid-triangulate", "--test", "duplicates"]
 
 
 MUTANTS = [
@@ -194,6 +203,28 @@ MUTANTS = [
     ("finish keeps the ghosts", B,
      "            if !t.contains(&g) {",
      "            if t.contains(&g) || !t.contains(&g) {", [HULL]),
+    # Coincident points (#300).
+    ("a coincident point is split in, not merged", B,
+     "        if self.ghost_slot(t).is_none() {\n            if let Some(&at)",
+     "        if false {\n            if let Some(&at)", [DUP]),
+    ("a coincident point is dropped without a report", B,
+     *drop("                self.kept[v as usize] = at;\n"), [DUP]),
+    ("a merged point is recorded as a grid hint", B,
+     "                self.kept[v as usize] = at;\n                return Ok(());",
+     "                self.kept[v as usize] = at;\n                self.hints.set(p, v);\n"
+     "                return Ok(());", [DUP]),
+    ("constraints are not carried over to the kept vertices", B,
+     "                let (a, b) = (self.kept[c.a as usize], self.kept[c.b as usize]);",
+     "                let (a, b) = (c.a, c.b);", [DUP]),
+    ("a constraint between coincident points is accepted", B,
+     "                if a == b && c.a != c.b {",
+     "                if a == b && c.a == c.b && false {", [DUP]),
+    ("the merge report lists the kept points instead", B,
+     "                .filter(|&v| self.kept[v as usize] != v)",
+     "                .filter(|&v| self.kept[v as usize] == v)", [DUP]),
+    ("the debug check skips a repeated directed edge again", A,
+     "        Comparison::Ambiguous => panic!(",
+     "        Comparison::Ambiguous => println!(", [UNIT]),
 ]
 
 

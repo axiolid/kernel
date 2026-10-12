@@ -20,6 +20,9 @@
 //! - the triangles cover the exact convex hull of the input, collinear
 //!   hull points included (a symbolic vertex at infinity closes the hull
 //!   during the build, so no thin hull triangle is lost),
+//! - exactly coincident input points become one vertex, and the merge is
+//!   reported ([`Triangulation::merged_points`]); a constraint between two
+//!   of them is refused by name,
 //! - every constraint edge survives as a union of output edges,
 //! - the result is Delaunay away from the constraints (empty-circumcircle,
 //!   decided by the certified `incircle` predicate rather than by a
@@ -51,7 +54,7 @@ mod recover;
 mod refine;
 
 pub use build::triangulate;
-pub use mesh::{Triangulation, TriangulationError};
+pub use mesh::{MergedPoint, Triangulation, TriangulationError};
 pub use refine::{refine, triangulate_refined, Quality, RefineOutcome};
 
 /// A constraint edge, as indices into the input point slice.

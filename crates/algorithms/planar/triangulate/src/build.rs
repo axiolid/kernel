@@ -45,6 +45,21 @@
 //! differs, because the build starts from a different first triangle.
 //! Where four or more points are cocircular the Delaunay triangulation is
 //! not unique, and the two builds may choose differently.
+//!
+//! # Coincident points
+//!
+//! A point at exactly the position of one already inserted is merged into
+//! it (#300): the walk ends in a triangle with that vertex as a corner,
+//! and the point is recorded instead of split in. Splitting it in, as the
+//! build did, left zero-area and overlapping triangles that used one
+//! directed edge twice. The merge is reported through
+//! [`Triangulation::merged_points`] (input index to kept vertex), so
+//! nothing is lost. The kept vertex is the lowest input index at that
+//! position: points are inserted in input order, and the first triangle
+//! takes the first index at each of its positions. Constraints are carried
+//! over to the kept vertices; one whose two endpoints coincide asks for an
+//! edge from a vertex to itself and is refused as
+//! [`TriangulationError::CoincidentConstraint`].
 
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
@@ -52,7 +67,7 @@ use axiolid_predicates::orient2d;
 
 use crate::adjacency::{debug_check, link, note_update};
 use crate::hint::CellHints;
-use crate::mesh::{Triangulation, TriangulationError, NO_HALFEDGE};
+use crate::mesh::{MergedPoint, Triangulation, TriangulationError, NO_HALFEDGE};
 use crate::recover::recover_constraints;
 use crate::{decided, in_circumcircle, turns_left, Constraint};
 
@@ -69,8 +84,13 @@ use crate::{decided, in_circumcircle, turns_left, Constraint};
 /// # Errors
 ///
 /// Returns [`TriangulationError`] when the input has fewer than three points,
-/// is entirely collinear, references a vertex that does not exist, or
-/// contains constraints that cross one another.
+/// is entirely collinear, references a vertex that does not exist, has a
+/// constraint between two coincident points, or contains constraints that
+/// cross one another.
+///
+/// Exactly coincident points are merged into the lowest input index at
+/// their position and reported by [`Triangulation::merged_points`]; the
+/// triangles and [`Triangulation::constraints`] use the kept indices.
 pub fn triangulate(
     points: &[Point2],
     constraints: &[Constraint],
@@ -91,7 +111,8 @@ pub fn triangulate(
 
     let mut state = Builder::new(points);
     state.insert_all(first_triangle(points))?;
-    let mut triangulation = state.finish(points, constraints);
+    let constraints = state.carry_over(constraints)?;
+    let mut triangulation = state.finish(points, &constraints);
     recover_constraints(&mut triangulation)?;
     Ok(triangulation)
 }
@@ -145,6 +166,9 @@ struct Builder {
     halfedges: Vec<u32>,
     /// The infinite vertex: one past the last input point.
     infinite: u32,
+    /// The vertex each input point is: itself, or the coincident point it
+    /// was merged into.
+    kept: Vec<u32>,
     /// A triangle at each vertex, kept current by every split and flip,
     /// so a walk can start next to a hinted vertex.
     corner: Vec<u32>,
@@ -160,6 +184,7 @@ impl Builder {
             triangles: Vec::new(),
             halfedges: Vec::new(),
             infinite: n as u32,
+            kept: (0..n as u32).collect(),
             corner: vec![NO_HALFEDGE; n + 1],
             hints: CellHints::new(min, max, n),
         }
@@ -208,16 +233,28 @@ impl Builder {
         // benign skip. Dropping it silently produced a triangulation missing
         // an input point -- the caller would get a valid-looking mesh with a
         // hole where their vertex should be.
-        let Some(t) = self.locate(self.points[v as usize]) else {
+        let p = self.points[v as usize];
+        let Some(t) = self.locate(p) else {
             return Err(TriangulationError::VertexUnplaceable { index: v });
         };
-        self.hints.set(self.points[v as usize], v);
         let (a, b, c) = (
             self.triangles[3 * t],
             self.triangles[3 * t + 1],
             self.triangles[3 * t + 2],
         );
-        let p = self.points[v as usize];
+
+        // At a vertex already inserted: merge, and report it (#300). A
+        // point at a vertex lies in the closure of exactly the triangles
+        // around it, so the triangle found has that vertex as a corner. A
+        // ghost holds only points strictly outside the hull, and its
+        // infinite corner has no position to compare.
+        if self.ghost_slot(t).is_none() {
+            if let Some(&at) = [a, b, c].iter().find(|&&u| self.points[u as usize] == p) {
+                self.kept[v as usize] = at;
+                return Ok(());
+            }
+        }
+        self.hints.set(p, v);
 
         // Outside the hull: the ghost's hull edge is visible from `p`. The
         // split gives one finite triangle and two ghosts, and the flips
@@ -555,6 +592,25 @@ impl Builder {
         }
     }
 
+    /// The constraints between kept vertices, or the first one whose two
+    /// endpoints were merged into one vertex.
+    fn carry_over(
+        &self,
+        constraints: &[Constraint],
+    ) -> Result<Vec<Constraint>, TriangulationError> {
+        constraints
+            .iter()
+            .map(|c| {
+                let (a, b) = (self.kept[c.a as usize], self.kept[c.b as usize]);
+                if a == b && c.a != c.b {
+                    Err(TriangulationError::CoincidentConstraint { a: c.a, b: c.b })
+                } else {
+                    Ok(Constraint::new(a, b))
+                }
+            })
+            .collect()
+    }
+
     /// Drop the ghosts; the finite triangles cover the convex hull.
     fn finish(self, original: &[Point2], constraints: &[Constraint]) -> Triangulation {
         let g = self.infinite;
@@ -572,6 +628,13 @@ impl Builder {
             triangles,
             halfedges: Vec::new(),
             constraints: sorted,
+            merged: (0..self.kept.len() as u32)
+                .filter(|&v| self.kept[v as usize] != v)
+                .map(|v| MergedPoint {
+                    input: v,
+                    kept: self.kept[v as usize],
+                })
+                .collect(),
         };
         out.rebuild_halfedges();
         out
