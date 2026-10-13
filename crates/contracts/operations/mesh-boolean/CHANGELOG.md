@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `MeshBoolean::scratch_requirement` says what it means for the batch
+  methods (#259): the bound of each boolean on that step's operands, not of
+  the batch in its input triangles. A provider whose batch holds
+  intermediates or runs booleans concurrently charges each step when its
+  operands exist and refuses with `BudgetExceeded` before the first that
+  does not fit, so the registry's check before a batch is necessary, not
+  sufficient.
+
 ## [0.3.2] - 2026-10-04
 
 ### Changed

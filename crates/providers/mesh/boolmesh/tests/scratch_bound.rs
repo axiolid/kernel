@@ -1,4 +1,5 @@
-//! The declared scratch bound holds for every measured boolean (#110, #226).
+//! The declared scratch bound holds for every measured boolean (#110, #226),
+//! and a batch never exceeds a budget it admits (#259).
 //!
 //! `ScratchRequirement::fits_budget` admits work on the provider's word, so a
 //! declared bound below a real peak makes a memory budget look enforced when
@@ -12,9 +13,22 @@
 //! An idle machine and a loaded one therefore measure the same costs, which
 //! is what makes this deterministic.
 //!
+//! The batch paths have no bound in their input triangles, so they charge
+//! each step and refuse the first that does not fit (`src/budget.rs`). For
+//! each batch workload this finds the smallest budget it admits and checks
+//! that the run at that budget, and the refused run a byte below it, stay
+//! within it, under the same forced schedules, and that a budget below its
+//! copies and bookkeeping is refused before they are made. On 16 and 64
+//! workers every
+//! pair of every `union_many` level can run at once, which is the most
+//! booleans that can be live: stolen work can put more of them in flight
+//! than there are workers, never more than there are pairs.
+//!
 //! No test harness (`harness = false`): the counting allocator is global, and
 //! the harness's own threads would allocate while a boolean is measured.
 
+#[path = "../src/bin/scratch_probe/batch.rs"]
+mod batch;
 #[path = "../src/bin/scratch_probe/scratch.rs"]
 mod scratch;
 
@@ -62,5 +76,39 @@ fn main() {
              worker start-up is not inside the measured window"
         );
     }
-    println!("scratch_bound: {measured} booleans within {requirement:?}");
+
+    let mut batches = 0;
+    for schedule in scratch::Schedule::all() {
+        let workers = schedule.workers();
+        for sample in batch::measure(schedule) {
+            assert!(
+                sample.peak <= sample.admitted,
+                "{} ({} triangles) on {workers} workers peaked at {} bytes, above the {} it \
+                 admitted",
+                sample.name,
+                sample.elements,
+                sample.peak,
+                sample.admitted
+            );
+            assert!(
+                sample.refused_peak < sample.admitted,
+                "{} on {workers} workers was refused {} bytes only after allocating {}",
+                sample.name,
+                sample.admitted - 1,
+                sample.refused_peak
+            );
+            assert!(
+                sample.small_peak <= batch::SMALL_BUDGET,
+                "{} on {workers} workers was refused {} bytes only after allocating {}",
+                sample.name,
+                batch::SMALL_BUDGET,
+                sample.small_peak
+            );
+            batches += 1;
+        }
+    }
+    println!(
+        "scratch_bound: {measured} booleans within {requirement:?}; {batches} batches within \
+         the budgets they admit"
+    );
 }

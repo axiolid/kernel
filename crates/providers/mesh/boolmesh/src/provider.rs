@@ -12,6 +12,8 @@
 //! the same reason: the operands passed every input gate, so the solve
 //! failing on them is this provider's defect.
 
+use std::borrow::Cow;
+
 use crate::csg::{compute_boolean, OpType};
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, Determinism, ExecutionOptions,
@@ -37,20 +39,18 @@ use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
 pub struct BoolmeshBoolean;
 
 /// Fixed scratch of one boolean; see [`MeshBoolean::scratch_requirement`].
-const SCRATCH_BASE_BYTES: usize = 64 * 1024;
+pub(crate) const SCRATCH_BASE_BYTES: usize = 64 * 1024;
 /// Scratch per input triangle, all operands together.
-const SCRATCH_BYTES_PER_TRIANGLE: usize = 1536;
+pub(crate) const SCRATCH_BYTES_PER_TRIANGLE: usize = 1536;
 /// A rayon worker's bookkeeping and the work stolen onto it.
-#[cfg(feature = "parallel")]
+#[cfg(any(feature = "parallel", feature = "parallel-batch"))]
 const WORKER_BYTES: usize = 16 * 1024;
-#[cfg(not(feature = "parallel"))]
+#[cfg(not(any(feature = "parallel", feature = "parallel-batch")))]
 const WORKER_BYTES: usize = 0;
-/// Per worker thread: with `parallel-batch` a worker also runs a boolean of
-/// its own, which pays the fixed scratch.
-#[cfg(feature = "parallel-batch")]
-const SCRATCH_BYTES_PER_WORKER: usize = WORKER_BYTES + SCRATCH_BASE_BYTES;
-#[cfg(not(feature = "parallel-batch"))]
-const SCRATCH_BYTES_PER_WORKER: usize = WORKER_BYTES;
+/// Per worker thread. The booleans a batch runs concurrently are charged by
+/// the batch, per boolean (`budget.rs`), not here: stolen work can put more
+/// of them in flight than there are workers (#259).
+pub(crate) const SCRATCH_BYTES_PER_WORKER: usize = WORKER_BYTES;
 
 impl BoolmeshBoolean {
     /// Stable identifier used in errors and explicit provider selection.
@@ -231,9 +231,24 @@ impl MeshBoolean for BoolmeshBoolean {
     ///   while the worker starts, which on a loaded machine can be any of
     ///   them. Work stolen onto it adds its scratch alongside the rest. The
     ///   measured excess over one worker is at most 6.7 KB per extra
-    ///   worker, idle or loaded, so this is 2.4x it. With `parallel-batch` each worker can also run a
-    ///   boolean of its own, so it is charged the base too. Without either
-    ///   feature nothing runs off the calling thread and the term is zero.
+    ///   worker, idle or loaded, so this is 2.4x it. With `parallel-batch`
+    ///   alone the batch's pool workers pay the same bookkeeping. Without
+    ///   either feature nothing runs off the calling thread and the term is
+    ///   zero.
+    ///
+    /// # Batches
+    ///
+    /// The bound covers each boolean of [`MeshBoolean::subtract_many`] and
+    /// [`MeshBoolean::union_many`] on that step's own operands, not the batch
+    /// in its input triangles: intermediates can outgrow the inputs, and
+    /// with `parallel-batch` stolen work can put every pair of a level in
+    /// flight at once (#259). With a memory budget the batch charges each
+    /// step when its operands exist (its own copies and intermediates, plus
+    /// this bound for every boolean that can be live) and refuses with
+    /// `BudgetExceeded` before the first step that does not fit, so the
+    /// check before dispatch is a necessary condition for a batch, not a
+    /// sufficient one. `tests/scratch_bound.rs` holds the peak of both
+    /// batches under forced schedules to the smallest budget they admit.
     ///
     /// The old `PerElement { bytes_per_element: 4096 }` was 2x the large-input
     /// slope but no bound at all for small inputs on a pool: 24 triangles
@@ -247,7 +262,9 @@ impl MeshBoolean for BoolmeshBoolean {
     /// The worker count is only known where the call runs, so with a memory
     /// budget every boolean re-checks this bound against the pool it is in
     /// and refuses with `BudgetExceeded` when that pool is wider than the
-    /// budget check before dispatch assumed.
+    /// budget check before dispatch assumed. The re-check runs in every
+    /// build, so a budget given to the provider directly, without dispatch,
+    /// is enforced too.
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::Affine {
             base_bytes: SCRATCH_BASE_BYTES,
@@ -336,13 +353,12 @@ impl BoolmeshBoolean {
     /// caller's own pool). Only here is the real width known. Without a
     /// budget nothing is asked, so an unbudgeted call does not start rayon's
     /// global pool early.
-    #[cfg(any(feature = "parallel", feature = "parallel-batch"))]
     fn fits_current_pool(&self, elements: usize, options: &ExecutionOptions) -> GeomResult<()> {
         if options.memory_budget_bytes().is_some()
             && !self.scratch_requirement().fits_budget_on(
                 options,
                 elements,
-                rayon::current_num_threads(),
+                crate::budget::running_workers(),
             )
         {
             return Err(GeomError::BudgetExceeded { resource: "memory" });
@@ -358,7 +374,6 @@ impl BoolmeshBoolean {
         options: &ExecutionOptions,
         fast_winding: bool,
     ) -> GeomResult<BooleanOutcome> {
-        #[cfg(feature = "parallel")]
         self.fits_current_pool(subject.triangle_count() + tool.triangle_count(), options)?;
         // `SymmetricDifference` has no `boolmesh` counterpart. Compose it from
         // the three primitives rather than pretending the backend's operation
@@ -547,10 +562,48 @@ fn seed_fates(subject: &TriMesh) -> Fates {
 /// Union is symmetric but channel reporting is keyed on the first operand,
 /// so a tree node's left child must carry every channel the batch reports
 /// on -- whichever solid it came from. Unmapped keeps the absence honest.
+///
+/// Built by fusing the one mesh, which copies positions and indices
+/// unchanged, so no second copy is made only to take its channels.
 fn conform(mesh: &TriMesh, template: &[AttributeChannel]) -> TriMesh {
-    let mut out = mesh.clone();
-    out.attributes = crate::grouping::fuse_with_channels(&[mesh], template).attributes;
+    let mut out = crate::grouping::fuse_with_channels(&[mesh], template);
+    out.normals.clone_from(&mesh.normals);
     out
+}
+
+/// Whether [`conform`] would return `mesh` unchanged: neither it nor the
+/// template carries a channel.
+fn conforms(mesh: &TriMesh, template: &[AttributeChannel]) -> bool {
+    template.is_empty() && mesh.attributes.is_empty()
+}
+
+/// A `union_many` tree node: a solid, borrowed from the input until a union
+/// produces it, and the fates of the path that built it.
+type Node<'a> = (Cow<'a, TriMesh>, Fates);
+
+/// `union_many`'s bookkeeping per input solid, by the most it can reach:
+/// its node in the level and in the next, and its share of a level's list of
+/// pairs.
+const UNION_BOOKKEEPING_PER_SOLID: usize =
+    2 * std::mem::size_of::<Node<'static>>() + std::mem::size_of::<&[Node<'static>]>();
+
+/// `subtract_many`'s bookkeeping per tool, by the most it can reach: its
+/// bounds, twice (the list and its group's), its index in a group and in the
+/// step's member list, and the headers of a group of its own, doubled for
+/// lists that grow by pushing.
+const SUBTRACT_BOOKKEEPING_PER_TOOL: usize = 2
+    * (2 * std::mem::size_of::<axiolid_core::Aabb>()
+        + std::mem::size_of::<usize>()
+        + std::mem::size_of::<&TriMesh>()
+        + 2 * std::mem::size_of::<Vec<usize>>());
+
+/// Heap bytes a tree node holds beyond the input.
+fn node_bytes(node: &Node<'_>) -> usize {
+    let mesh = match &node.0 {
+        Cow::Borrowed(_) => 0,
+        Cow::Owned(mesh) => crate::budget::heap_bytes(mesh),
+    };
+    mesh + crate::budget::fates_bytes(&node.1)
 }
 
 /// Remove every channel whose composed fate is `Dropped`.
@@ -628,10 +681,16 @@ impl BoolmeshBoolean {
         tools: &[TriMesh],
         options: &ExecutionOptions,
     ) -> GeomResult<BooleanOutcome> {
+        // The tool bounds and the grouping are held through the batch;
+        // refused before they are built when even they do not fit.
+        let bookkeeping = tools.len() * SUBTRACT_BOOKKEEPING_PER_TOOL;
+        crate::budget::charge_step(options, bookkeeping, 0, 0)?;
         let bounds: Vec<_> = tools.iter().map(TriMesh::bounds).collect();
         let groups = crate::grouping::disjoint_groups(&bounds);
 
-        let mut current = subject.clone();
+        // Borrowed until the first group cuts it: a copy of the subject
+        // would be scratch held through the whole batch.
+        let mut current = Cow::Borrowed(subject);
         let mut sub_operations = 0;
         // Seeded Preserved: the subject enters untouched, and each step's
         // fates compose onto this (`merge_fates`).
@@ -641,18 +700,34 @@ impl BoolmeshBoolean {
             // no mesh at all rather than a partially cut one.
             options.check_cancelled()?;
             sub_operations += 1;
-            // A single-member group gains nothing from fusing, so skip the
-            // copy and subtract the tool directly.
-            let step = if let [only] = group.as_slice() {
-                self.difference(&current, &tools[*only], options)?
+            let members: Vec<&TriMesh> = group.iter().map(|&i| &tools[i]).collect();
+            // Charged now, not up front: the subject grows with every group,
+            // so this step's operands did not exist before the last one
+            // (#259). A single-member group gains nothing from fusing and
+            // holds no fused copy.
+            let fused_bytes = match members.as_slice() {
+                [_] => 0,
+                _ => crate::budget::fused_bound(&members, &subject.attributes),
+            };
+            let held = match &current {
+                Cow::Borrowed(_) => 0,
+                Cow::Owned(mesh) => crate::budget::heap_bytes(mesh),
+            } + crate::budget::fates_bytes(&fates)
+                + fused_bytes
+                + bookkeeping;
+            let elements = current.triangle_count()
+                + members.iter().map(|m| m.triangle_count()).sum::<usize>();
+            crate::budget::charge_step(options, held, 1, elements)?;
+            let step = if let [only] = members.as_slice() {
+                self.difference(&current, only, options)?
             } else {
-                let members: Vec<&TriMesh> = group.iter().map(|&i| &tools[i]).collect();
                 let fused = crate::grouping::fuse_with_channels(&members, &subject.attributes);
                 self.difference(&current, &fused, options)?
             };
             fates = merge_fates(&fates, step.evidence.attribute_fates);
-            current = step.mesh;
+            current = Cow::Owned(step.mesh);
         }
+        let current = current.into_owned();
         let borrowed: Vec<&TriMesh> = tools.iter().collect();
         let evidence =
             evidence_for(subject, &borrowed, &current, sub_operations).with_attribute_fates(fates);
@@ -708,6 +783,14 @@ impl BoolmeshBoolean {
     /// upstream Manifold, which profiling showed to be flat rather than
     /// hotspot-shaped.
     ///
+    /// # Memory budget (#259)
+    ///
+    /// Each level is charged before its pairs start, on what then exists:
+    /// the nodes it holds, and the declared bound of every pair that can be
+    /// live. With `parallel-batch` that is all of them at once, since a
+    /// worker waiting in one boolean's join can steal another pair; without
+    /// it, one pair at a time on top of the results so far. See `budget.rs`.
+    ///
     /// Union is associative and commutative, so any reduction order yields
     /// the same solid; unlike `subtract_grouped` this needs no disjointness
     /// precondition and no fusing, and therefore has no correctness cliff.
@@ -728,28 +811,63 @@ impl BoolmeshBoolean {
             return Ok(BooleanOutcome::new(empty, evidence));
         }
 
-        // The pairs of a level run concurrently on the pool, so the batch is
-        // charged for its width before any of them starts.
-        #[cfg(feature = "parallel-batch")]
-        self.fits_current_pool(solids.iter().map(TriMesh::triangle_count).sum(), options)?;
-
         // Every solid carries solids[0]'s channel set, so a channel the
         // result keeps is defined (or explicitly unmapped) on every piece.
-        // Each node carries the fates of the path that built it.
+        // Each node carries the fates of the path that built it. A solid that
+        // already has that set (none, the common case) is borrowed: a copy
+        // would be scratch held through the first level.
         let template = &solids[0].attributes;
-        let mut level: Vec<(TriMesh, Fates)> = solids
+        let seed = seed_fates(&solids[0]);
+        let copies: usize = solids
             .iter()
-            .map(|s| (conform(s, template), seed_fates(&solids[0])))
+            .filter(|s| !conforms(s, template))
+            .map(|s| crate::budget::fused_bound(&[s], template))
+            .sum();
+        // The node lists of a level and the next, held through the batch.
+        let bookkeeping = solids.len() * UNION_BOOKKEEPING_PER_SOLID;
+        crate::budget::charge_step(
+            options,
+            copies + solids.len() * crate::budget::fates_bytes(&seed) + bookkeeping,
+            0,
+            0,
+        )?;
+        let mut level: Vec<Node<'_>> = solids
+            .iter()
+            .map(|s| {
+                let mesh = if conforms(s, template) {
+                    Cow::Borrowed(s)
+                } else {
+                    Cow::Owned(conform(s, template))
+                };
+                (mesh, seed.clone())
+            })
             .collect();
         let mut sub_operations = 0;
         while level.len() > 1 {
+            // An odd trailing solid rides to the next level uncombined
+            // rather than being unioned into an already-merged neighbour,
+            // which would unbalance the tree this exists to keep balanced.
+            // Moved out, not copied, so it is held once.
+            let carried = if level.len() % 2 == 1 {
+                level.pop()
+            } else {
+                None
+            };
+            // What the level holds while its pairs run: its own copies and
+            // the previous level's results, with every node's history.
+            let held: usize = level
+                .iter()
+                .chain(carried.iter())
+                .map(node_bytes)
+                .sum::<usize>()
+                + bookkeeping;
             // Every pair at one level is independent: no pair reads another
             // pair's output, so the level is a pure map. That is the whole
             // reason this axis can be threaded while intra-solve threading
             // cannot pay for itself -- there is no coordination inside the
             // level, only a join at the end of it.
-            let mut pairs = level.chunks_exact(2);
-            let step = |pair: &[(TriMesh, Fates)]| -> GeomResult<(TriMesh, Fates)> {
+            let pairs = level.chunks_exact(2);
+            let step = |pair: &[Node<'_>]| -> GeomResult<(TriMesh, Fates)> {
                 let out = self.union(&pair[0].0, &pair[1].0, options)?;
                 // Both halves' histories, then this union.
                 let history = merge_fates(&pair[0].1, pair[1].1.clone());
@@ -758,6 +876,8 @@ impl BoolmeshBoolean {
                     merge_fates(&history, out.evidence.attribute_fates),
                 ))
             };
+            let triangles =
+                |pair: &[Node<'_>]| pair[0].0.triangle_count() + pair[1].0.triangle_count();
 
             // Cancellation is polled ONCE per level rather than per pair.
             // Under rayon the pairs are not ordered, so a per-pair poll
@@ -767,42 +887,50 @@ impl BoolmeshBoolean {
             options.check_cancelled()?;
 
             #[cfg(feature = "parallel-batch")]
-            let mut next: Vec<(TriMesh, Fates)> = {
+            let mut next: Vec<Node<'_>> = {
                 use rayon::prelude::*;
+                // Charged for every pair at once (#259): the pairs run
+                // concurrently, and a worker waiting inside one boolean's
+                // join can steal another pair and run it on top, so up to
+                // every pair of the level is in flight however few workers
+                // there are. A finished pair's result is covered by its own
+                // term.
+                let chunks: Vec<&[Node<'_>]> = pairs.collect();
+                let elements = chunks.iter().map(|pair| triangles(pair)).sum();
+                crate::budget::charge_step(options, held, chunks.len(), elements)?;
                 // `par_iter` over an indexed slice, NOT `par_bridge`: the
                 // bridge does not preserve order, which would permute the
                 // level and silently change the tree's shape from run to
                 // run. An indexed parallel iterator collects positionally,
                 // so the output is identical to the sequential path.
-                let chunks: Vec<&[(TriMesh, Fates)]> = pairs.clone().collect();
-                let merged: Result<Vec<(TriMesh, Fates)>, GeomError> =
-                    chunks.par_iter().map(|pair| step(pair)).collect();
+                let merged: Result<Vec<Node<'_>>, GeomError> = chunks
+                    .par_iter()
+                    .map(|pair| step(pair).map(|(mesh, fates)| (Cow::Owned(mesh), fates)))
+                    .collect();
                 merged?
             };
 
             #[cfg(not(feature = "parallel-batch"))]
-            let mut next: Vec<(TriMesh, Fates)> = {
-                let mut acc = Vec::with_capacity(level.len().div_ceil(2));
-                for pair in pairs.clone() {
-                    acc.push(step(pair)?);
+            let mut next: Vec<Node<'_>> = {
+                let mut acc: Vec<Node<'_>> = Vec::with_capacity(level.len() / 2 + 1);
+                for pair in pairs {
+                    // One boolean at a time, on top of the level and the
+                    // results so far.
+                    let done: usize = acc.iter().map(node_bytes).sum();
+                    crate::budget::charge_step(options, held + done, 1, triangles(pair))?;
+                    let (mesh, fates) = step(pair)?;
+                    acc.push((Cow::Owned(mesh), fates));
                 }
                 acc
             };
 
             sub_operations += next.len();
-            // `chunks_exact` was cloned for the merge above, so advance the
-            // original to reach its remainder.
-            for _ in pairs.by_ref() {}
-            // An odd trailing solid rides to the next level uncombined
-            // rather than being unioned into an already-merged neighbour,
-            // which would unbalance the tree this exists to keep balanced.
-            if let Some(last) = pairs.remainder().first() {
-                next.push(last.clone());
-            }
+            next.extend(carried);
             level = next;
         }
 
-        let (mut result, fates) = level.into_iter().next().expect("non-empty input");
+        let (result, fates) = level.into_iter().next().expect("non-empty input");
+        let mut result = result.into_owned();
         // A channel some step dropped is not on the result, or only partly:
         // strip it so the mesh never carries a channel its fate calls lost.
         strip_dropped(&mut result, &fates);

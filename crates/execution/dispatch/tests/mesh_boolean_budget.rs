@@ -254,3 +254,38 @@ fn a_per_worker_term_is_charged_for_the_configured_pool() {
         assert_eq!(calls.load(Ordering::SeqCst), usize::from(fits));
     }
 }
+
+/// A one-thread context is charged one worker, like any other width: it
+/// runs the call on a pool of one, so the width the options would allow
+/// does not apply (#259). Before, it fell through to the options' width.
+#[cfg(feature = "parallel")]
+#[test]
+fn a_one_thread_context_is_charged_one_worker() {
+    use axiolid_backend_cpu::CpuExecutionBuilder;
+    use std::num::NonZeroUsize;
+
+    let scratch = ScratchRequirement::Affine {
+        base_bytes: 1_000,
+        bytes_per_element: 0,
+        bytes_per_worker: 100,
+    };
+    let three_wide = options()
+        .with_memory_budget(1_100)
+        .with_parallelism(Parallelism::Threads(3))
+        .expect("nonzero");
+    let cube = mesh();
+    let (registry, calls) = single(scratch);
+    assert!(matches!(
+        registry.boolean(&cube, &cube, BooleanOperator::Union, &three_wide),
+        Err(GeomError::BudgetExceeded { resource: "memory" })
+    ));
+    let execution = CpuExecutionBuilder::new()
+        .threads(NonZeroUsize::MIN)
+        .build()
+        .expect("cpu execution");
+    let registry = registry.with_execution(execution);
+    registry
+        .boolean(&cube, &cube, BooleanOperator::Union, &three_wide)
+        .expect("1000 + 1 * 100 fits");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

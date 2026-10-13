@@ -9,6 +9,49 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A memory budget holds for `union_many` and `subtract_many` (#259). The
+  declared bound covers one boolean in its operands' triangles; a batch has
+  no such bound in its input, because union intermediates outgrow their
+  operands and a cut subject grows with every group, and with
+  `parallel-batch` a worker waiting inside one boolean's join steals other
+  pairs, so every pair of a level can be in flight on fewer workers (5 on
+  4 workers was observed). Each step is now charged when its operands
+  exist: the declared bound for every boolean that can be live (all pairs
+  of a `parallel-batch` level at once, one otherwise, the per-worker term
+  once), plus what the batch holds (its copies, the previous level's
+  results, the cut subject, a fused tool, its node and index lists). The
+  first step that does not fit is refused with `BudgetExceeded` before it
+  starts. Before, `union_many` was charged once for its input triangles
+  and `subtract_many` not at all beyond each boolean's own check, which
+  only ran with `parallel`.
+- A boolean given a budget directly, without dispatch, is checked in every
+  build, not only with `parallel`.
+
+### Changed
+
+- `union_many` borrows the solids that need no channel conformance and
+  moves an odd trailing solid to the next level instead of copying it, and
+  `subtract_many` borrows the subject until the first group cuts it: each
+  copy was scratch held through the batch.
+- The per-worker term no longer includes the 64 KiB base with
+  `parallel-batch`. That was the batch's concurrency charged per worker,
+  which stolen work can exceed; the batch now charges it per pair. With
+  `parallel-batch` alone the term is the 16 KiB of a worker's bookkeeping.
+- The `scratch_bound` test and the `scratch_probe` binary measure both
+  batch paths at 14 workloads that grow (overlapping boxes, a slab cut by
+  overlapping tools, at several sizes, with and without an attribute
+  channel) on 1 to 64 workers under the forced schedule: each run at the
+  smallest budget it admits stays within it (at most 73% of it), the run a
+  byte below is refused within it, and a 1 KiB budget is refused before
+  any copy is made. A window now counts only its own allocations: memory
+  of an earlier pool freed inside it (rayon retires deque buffers through
+  an epoch collector) hid up to 7 KB of a peak.
+- `tests/batch_budget.rs` pins what each step is charged, and
+  `scripts/probe_scratch_bound_mutants.py` kills a charge that drops any
+  of its terms.
+
 ## [0.3.4] - 2026-10-04
 
 ### Fixed

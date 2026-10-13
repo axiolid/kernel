@@ -153,21 +153,18 @@ impl MeshBooleanRegistry {
         let scratch = provider.scratch_requirement();
         #[cfg(feature = "parallel")]
         if let Some(execution) = &self.execution {
+            // Every width runs on a pool of exactly that width, one
+            // included (`CpuExecution::install`, #259).
             let workers = execution.thread_count().get();
-            // A one-thread context installs no pool (`CpuExecution::install`),
-            // so the call runs wherever the caller does: fall through.
-            if workers > 1 {
-                return scratch.fits_budget_on(options, elements, workers);
-            }
+            return scratch.fits_budget_on(options, elements, workers);
         }
         scratch.fits_budget(options, elements)
     }
 
     /// Run one provider call, inside the configured pool when there is one.
     ///
-    /// `CpuExecution::install` already falls through to a direct call when
-    /// the context was built single-threaded, so a configured context with
-    /// one worker costs nothing extra here.
+    /// A one-thread context has a pool of one, so the provider sees the
+    /// width the budget was charged for, not the caller's pool.
     #[cfg(feature = "parallel")]
     fn run_scoped(
         &self,
@@ -620,6 +617,37 @@ mod tests {
             vec![3],
             "provider must run inside the 3-worker pool"
         );
+    }
+
+    /// A one-thread context runs the provider on a pool of one, not on the
+    /// pool the caller happens to be in (#259). Called from inside a
+    /// 3-worker pool, so falling through to the caller would show.
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn a_one_thread_context_runs_the_provider_on_one_worker() {
+        use axiolid_backend_cpu::CpuExecutionBuilder;
+        use std::num::NonZeroUsize;
+        use std::sync::Arc;
+
+        let execution = CpuExecutionBuilder::new()
+            .threads(NonZeroUsize::MIN)
+            .build()
+            .expect("cpu execution");
+        let provider = Arc::new(PoolWidthBoolean::default());
+        let mut registry = MeshBooleanRegistry::new().with_execution(execution);
+        registry.register_arc(0, provider.clone());
+
+        let cube = admissible_cube();
+        let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .expect("caller pool")
+            .install(|| registry.boolean(&cube, &cube, BooleanOperator::Union, &options))
+            .expect("dispatch");
+
+        let widths = provider.seen.lock().expect("poisoned").clone();
+        assert_eq!(widths, vec![1], "provider must run on one worker");
     }
 
     /// Negative control: without `with_execution` the provider sees the

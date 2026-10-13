@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A one-thread context from `with_execution` is charged one worker and
+  runs the provider on a pool of one (#259). It installed no pool, so the
+  call ran on whatever pool the caller was in, and the budget fell back to
+  the options' `Parallelism`.
+
 ## [0.3.2] - 2026-10-04
 
 ### Fixed

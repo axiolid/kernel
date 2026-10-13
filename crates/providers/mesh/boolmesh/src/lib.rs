@@ -17,6 +17,7 @@
 
 mod attributes;
 mod box_detect;
+mod budget;
 mod cellular;
 mod convert;
 mod csg;

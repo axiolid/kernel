@@ -25,6 +25,19 @@ pub trait MeshBoolean: Backend {
     /// pool declares what each worker costs as well
     /// ([`ScratchRequirement::Affine`]), since that cost does not shrink with
     /// the input (#226).
+    ///
+    /// For [`Self::subtract_many`] and [`Self::union_many`] it bounds each
+    /// boolean of the batch on that step's own operands. The batch as a
+    /// whole has no bound in its input triangles: a union's result can have
+    /// more triangles than its operands, so later steps run on larger
+    /// intermediates, and a batch that runs booleans concurrently has
+    /// several live at once. A provider whose batch holds intermediates or
+    /// runs concurrently charges each step when its operands exist, and
+    /// refuses with [`GeomError::BudgetExceeded`] before the first that does
+    /// not fit (#259). The registry's check before a batch, in the input
+    /// triangles, is then a necessary condition and not a sufficient one.
+    ///
+    /// [`GeomError::BudgetExceeded`]: axiolid_contracts::GeomError::BudgetExceeded
     fn scratch_requirement(&self) -> ScratchRequirement {
         ScratchRequirement::Unbounded
     }

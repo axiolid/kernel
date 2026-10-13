@@ -32,8 +32,19 @@
 //! of whose workers have finished starting before the boolean begins, and
 //! every allocation stalls the allocating thread briefly so idle workers
 //! steal the other half of each join. The pool is retired and its threads
-//! joined before the next sample, so no thread exit frees memory inside a
-//! later window.
+//! joined before the next sample.
+//!
+//! # Only the window's own allocations count (#259)
+//!
+//! Memory allocated before a window can be freed inside it: rayon's deques
+//! retire their buffers through an epoch collector that frees them on
+//! whichever thread next pins, which can be a later sample's. Counting that
+//! free would start the window below its baseline and hide as much of its
+//! peak (7 KB at 16 workers, measured). So every allocation carries the
+//! window it was made in, in a header before the block, and a free counts
+//! only when it releases a block of the current window. Freeing older memory
+//! never lowers a peak; at worst a block allocated as a window opens is
+//! counted and never released, which only raises it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -45,8 +56,12 @@ use axiolid_mesh_boolean_contract::MeshBoolean;
 
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 
+/// Bytes allocated in the current window and not yet freed.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// High-water mark of [`LIVE`].
 static PEAK: AtomicUsize = AtomicUsize::new(0);
+/// The current window; every block records the one it was allocated in.
+static WINDOW: AtomicUsize = AtomicUsize::new(0);
 /// While set, every allocation busy-waits [`STALL_NANOS`] after it succeeds.
 static STALL: AtomicBool = AtomicBool::new(false);
 
@@ -56,35 +71,68 @@ static STALL: AtomicBool = AtomicBool::new(false);
 /// on a loaded machine instead of whatever the scheduler grants.
 const STALL_NANOS: u128 = 20_000;
 
-/// Counting allocator: tracks live bytes and the high-water mark.
+/// Room before each block for its window number, keeping the block aligned.
+const HEADER: usize = 16;
+
+/// The layout actually allocated for `layout`, and the block's offset in it.
+fn padded(layout: Layout) -> (Layout, usize) {
+    let offset = HEADER.max(layout.align());
+    let outer = Layout::from_size_align(layout.size() + offset, offset)
+        .expect("a layout the program could allocate stays valid with a header");
+    (outer, offset)
+}
+
+/// Counting allocator: tracks the current window's live bytes and their
+/// high-water mark.
 struct Counting;
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc(layout) };
-        if !pointer.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
-            if STALL.load(Ordering::Relaxed) {
-                let start = std::time::Instant::now();
-                while start.elapsed().as_nanos() < STALL_NANOS {
-                    std::hint::spin_loop();
-                }
+        let (outer, offset) = padded(layout);
+        let base = unsafe { System.alloc(outer) };
+        if base.is_null() {
+            return base;
+        }
+        let window = WINDOW.load(Ordering::Relaxed);
+        // SAFETY: `outer` has `offset >= HEADER` bytes before the block, and
+        // the word just before it is 8-aligned because `offset` is a multiple
+        // of 16.
+        let pointer = unsafe {
+            let pointer = base.add(offset);
+            pointer.cast::<usize>().sub(1).write(window);
+            pointer
+        };
+        let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
+        PEAK.fetch_max(live, Ordering::Relaxed);
+        if STALL.load(Ordering::Relaxed) {
+            let start = std::time::Instant::now();
+            while start.elapsed().as_nanos() < STALL_NANOS {
+                std::hint::spin_loop();
             }
         }
         pointer
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
-        unsafe { System.dealloc(pointer, layout) }
+        let (outer, offset) = padded(layout);
+        // SAFETY: `pointer` came from `alloc` with this layout, which wrote
+        // its window just before it, `offset` bytes into the outer block.
+        let window = unsafe { pointer.cast::<usize>().sub(1).read() };
+        if window == WINDOW.load(Ordering::Relaxed) {
+            // Saturating: a block freed while a window opens may have been
+            // counted before the reset.
+            let _ = LIVE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+                Some(live.saturating_sub(layout.size()))
+            });
+        }
+        unsafe { System.dealloc(pointer.sub(offset), outer) }
     }
 }
 
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
-fn box_at(min: [f64; 3], max: [f64; 3]) -> TriMesh {
+pub(crate) fn box_at(min: [f64; 3], max: [f64; 3]) -> TriMesh {
     let [x0, y0, z0] = min;
     let [x1, y1, z1] = max;
     let positions: Vec<Point3> = vec![
@@ -105,7 +153,7 @@ fn box_at(min: [f64; 3], max: [f64; 3]) -> TriMesh {
 }
 
 /// Subdivide each triangle four ways, `levels` times, to grow triangle count.
-fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
+pub(crate) fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
     let mut current = mesh.clone();
     for _ in 0..levels {
         let mut positions = current.positions.clone();
@@ -177,12 +225,16 @@ pub struct Sample {
     pub operation: BooleanOperator,
 }
 
-/// Peak bytes allocated by `run` above what was live when it started.
-fn peak_of<R>(run: impl FnOnce() -> R) -> (R, usize) {
-    let baseline = LIVE.load(Ordering::Relaxed);
-    PEAK.store(baseline, Ordering::Relaxed);
+/// Peak bytes allocated by `run` and live at once.
+///
+/// Opens a new window: memory allocated before it is not counted when it is
+/// freed, so nothing `run` releases from earlier hides its own peak.
+pub(crate) fn peak_of<R>(run: impl FnOnce() -> R) -> (R, usize) {
+    LIVE.store(0, Ordering::Relaxed);
+    PEAK.store(0, Ordering::Relaxed);
+    WINDOW.fetch_add(1, Ordering::Relaxed);
     let result = run();
-    (result, PEAK.load(Ordering::Relaxed) - baseline)
+    (result, PEAK.load(Ordering::Relaxed))
 }
 
 /// Run `boolean` under `schedule`, returning its result and peak scratch.
@@ -190,7 +242,10 @@ fn peak_of<R>(run: impl FnOnce() -> R) -> (R, usize) {
 /// For [`Schedule::ColdPool`] the pool's construction and its workers'
 /// start-up are inside the window: that is what a first boolean on rayon's
 /// global pool pays, and what a loaded machine can defer into any later one.
-fn scheduled<R: Send>(schedule: Schedule, boolean: impl FnOnce() -> R + Send) -> (R, usize) {
+pub(crate) fn scheduled<R: Send>(
+    schedule: Schedule,
+    boolean: impl FnOnce() -> R + Send,
+) -> (R, usize) {
     match schedule {
         Schedule::Inline => peak_of(boolean),
         #[cfg(any(feature = "parallel", feature = "parallel-batch"))]

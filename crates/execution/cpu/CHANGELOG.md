@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- With `parallel`, a one-thread `CpuExecution` runs `install` on a local
+  pool of one worker (#259). It ran the closure directly, on whatever pool
+  the caller was in, so a provider reading `rayon::current_num_threads()`
+  there saw the caller's width instead of the configured one, and sized
+  its work or its scratch for it. A context from `CpuExecutionBuilder`
+  starts the pool when it is built and reports a failure there; one from
+  `CpuExecution::portable` or `CpuExecution::detect` starts it on first
+  `install`. Clones share the pool.
+
 ## [0.3.1] - 2026-09-28
 
 ### Changed
