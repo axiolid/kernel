@@ -19,7 +19,8 @@
 //! (`crate::directrix`): a composite's segments in order, a segment whose
 //! sense disagrees reversed; an untrimmed line inside a composite is its
 //! parameter domain `[0, 1]`; a trim of an atomic curve between the
-//! basis parameters its selectors name (a point selector inverted, an arc
+//! basis parameters its selectors name (a point selector inverted, on a
+//! B-spline by the inversion a curve path's point bound takes, #306; an arc
 //! length measured, a closed conic's trim possibly across its parameter
 //! seam), reversed where its sense disagrees; a trim of a relation between
 //! parameter selectors read as distances along it, which needs the
@@ -607,7 +608,8 @@ fn trim_parameters(
 /// A trim selector of a 2D curve read as its parameter, by the rules a 3D
 /// directrix's trims are read by (`crate::directrix`): a parameter as is,
 /// an arc length measured from parameter `0` in the trim's sense, a point
-/// inverted exactly or refused.
+/// inverted exactly or refused (a B-spline's by the inversion a curve
+/// path's point bound takes, #304, #306: `crate::directrix::point_parameter`).
 fn parameter2(
     selectors: &[TrimSelector],
     preference: TrimmingPreference,
@@ -647,13 +649,18 @@ fn parameter2(
     let first_measure = || -> GeomResult<Option<Scalar>> {
         selectors.iter().find(is_measure).map_or(Ok(None), measured)
     };
-    let invert = || {
-        selectors.iter().find_map(|selector| match selector {
-            TrimSelector::Point2(point) => {
-                axiolid_reference::curve::invert2(curve, *point, tolerance).ok()
-            }
-            _ => None,
-        })
+    let mut refusal = None;
+    let mut invert = || {
+        crate::directrix::first_point(
+            selectors,
+            |selector| match selector {
+                TrimSelector::Point2(p) => Some(axiolid_core::Point3::new(p.x, p.y, 0.0)),
+                _ => None,
+            },
+            StationCurve::Two(curve),
+            tolerance,
+            &mut refusal,
+        )
     };
     let selected = match preference {
         TrimmingPreference::Parameter => first_measure()?,
@@ -666,10 +673,13 @@ fn parameter2(
             None => first_measure()?,
         },
     };
-    selected.filter(|value| value.is_finite()).ok_or_else(|| {
-        GeomError::InvalidInput(format!(
-            "trimmed station basis {label} needs a parameter selector, or a point selector \
-             that lies on the basis curve"
-        ))
-    })
+    selected
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| match refusal {
+            Some(refusal) => refusal,
+            None => GeomError::InvalidInput(format!(
+                "trimmed station basis {label} needs a parameter selector, or a point selector \
+                 that lies on the basis curve"
+            )),
+        })
 }

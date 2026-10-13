@@ -2,11 +2,13 @@
 
 use axiolid_construct::sweep::SampledPath;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
-use axiolid_core::{Point3, Scalar, Vec3};
+use axiolid_core::{Point2, Point3, Scalar, Vec3};
+use axiolid_curve::{Curve2, Curve3, PathBound};
 use axiolid_model::{
     CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, TrimSelector,
     TrimmingPreference,
 };
+use axiolid_reference::station::StationCurve;
 
 mod elevated;
 mod pieces;
@@ -266,7 +268,8 @@ pub(crate) fn parameter(
     // A Cartesian selector names a POINT. Some formats can only state a trim
     // that way -- a three-point arc knows its endpoints, not their parameters
     // -- so the point is inverted against the basis rather than refused.
-    // Inversion is exact or it refuses; it never projects an off-curve point.
+    // Inversion is exact or it refuses; it never projects an off-curve point
+    // (see `point_parameter`: a B-spline's by #304's point-bound inversion).
     // An arc length is a parameter-kind selector, resolved against the basis
     // by quadrature (`axiolid_reference::arc_parameter`); its failure is
     // reported, never replaced by another selector.
@@ -278,25 +281,41 @@ pub(crate) fn parameter(
                 parameter_kind(selector, Some(basis), sense, label)
             })
     };
+    let mut refusal = None;
+    let mut invert = || {
+        first_point(
+            selectors,
+            |selector| match selector {
+                TrimSelector::Point3(point) => Some(*point),
+                _ => None,
+            },
+            StationCurve::Three(basis),
+            tolerance,
+            &mut refusal,
+        )
+    };
     let selected = match preference {
         TrimmingPreference::Parameter => first_parameter()?,
         TrimmingPreference::Unspecified => match selectors.first() {
             Some(selector) if is_parameter_kind(selector) => {
                 parameter_kind(selector, Some(basis), sense, label)?
             }
-            _ => invert_first_point(selectors, basis, tolerance),
+            _ => invert(),
         },
-        TrimmingPreference::Cartesian => match invert_first_point(selectors, basis, tolerance) {
+        TrimmingPreference::Cartesian => match invert() {
             Some(value) => Some(value),
             None => first_parameter()?,
         },
     };
-    selected.filter(|value| value.is_finite()).ok_or_else(|| {
-        GeomError::InvalidInput(format!(
-            "trimmed directrix {label} needs a parameter selector, or a point \
-             selector that lies on the basis curve"
-        ))
-    })
+    selected
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| match refusal {
+            Some(refusal) => refusal,
+            None => GeomError::InvalidInput(format!(
+                "trimmed directrix {label} needs a parameter selector, or a point \
+                 selector that lies on the basis curve"
+            )),
+        })
 }
 
 /// Whether a selector names a position by a measure along the curve
@@ -374,18 +393,74 @@ pub(crate) fn parameter_only(
     })
 }
 
-/// First point selector inverted against the basis, if one resolves.
-fn invert_first_point(
-    selectors: &[TrimSelector],
-    basis: &axiolid_curve::Curve3,
+/// The basis parameter a trim's point selector names (#306), a 2D
+/// curve's point lifted to `z = 0`.
+///
+/// A B-spline has no closed-form inverse, so its point is resolved by the
+/// one inversion a curve path's point bound is (#304,
+/// [`StationCurve::parameter_at_bound`]): the same tolerance
+/// ([`axiolid_reference::station::point_bound_tolerance`], the point's
+/// own, not `tolerance`), the same sampling and Newton refinement, and the
+/// same refusals, naming
+/// [`axiolid_reference::station::PATH_POINT_OFF_CURVE`] and
+/// [`axiolid_reference::station::PATH_POINT_AMBIGUOUS`]. A trim of a
+/// B-spline by points therefore spans exactly the parameters a piece
+/// bounded by `PathBound::Point` does, bitwise. Every other family is
+/// inverted exactly to `tolerance` (`axiolid_reference::curve::invert2`,
+/// `invert3`) or refused.
+///
+/// # Errors
+///
+/// The inversion's refusal.
+pub(crate) fn point_parameter(
+    curve: StationCurve<'_>,
+    point: Point3,
     tolerance: axiolid_core::Tolerance,
-) -> Option<Scalar> {
-    selectors.iter().find_map(|selector| match selector {
-        TrimSelector::Point3(point) => {
-            axiolid_reference::curve::invert3(basis, *point, tolerance).ok()
+) -> GeomResult<Scalar> {
+    match curve {
+        StationCurve::Two(Curve2::BSpline(_)) | StationCurve::Three(Curve3::BSpline(_)) => {
+            curve.parameter_at_bound(PathBound::Point(point))
         }
-        _ => None,
-    })
+        StationCurve::Two(curve) => {
+            axiolid_reference::curve::invert2(curve, Point2::new(point.x, point.y), tolerance)
+        }
+        StationCurve::Three(curve) => axiolid_reference::curve::invert3(curve, point, tolerance),
+        _ => Err(GeomError::UnsupportedInput {
+            backend: crate::BACKEND_ID,
+            operation: axiolid_contracts::Operation::CurveEvaluation,
+            input: "a trim's point selector on a curve this compiler does not invert",
+        }),
+    }
+}
+
+/// The parameter of the first point selector (as `point` reads one) that
+/// [`point_parameter`] resolves on `curve`, if any. A B-spline's refusal is
+/// kept in `refusal` (the first one), so that a trim with no other
+/// selector to fall back on is refused by its name; another family's
+/// failure is not kept, and reads as no point selector resolving.
+pub(crate) fn first_point(
+    selectors: &[TrimSelector],
+    point: impl Fn(&TrimSelector) -> Option<Point3>,
+    curve: StationCurve<'_>,
+    tolerance: axiolid_core::Tolerance,
+    refusal: &mut Option<GeomError>,
+) -> Option<Scalar> {
+    let spline = matches!(
+        curve,
+        StationCurve::Two(Curve2::BSpline(_)) | StationCurve::Three(Curve3::BSpline(_))
+    );
+    selectors
+        .iter()
+        .filter_map(point)
+        .find_map(|p| match point_parameter(curve, p, tolerance) {
+            Ok(t) => Some(t),
+            Err(error) => {
+                if spline && refusal.is_none() {
+                    *refusal = Some(error);
+                }
+                None
+            }
+        })
 }
 
 /// Parameter period of a closed conic basis; `None` for anything else.

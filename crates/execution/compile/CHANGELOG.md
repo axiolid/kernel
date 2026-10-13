@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A trim of a B-spline by points compiles (#306, ADR 0082 amendment): a
+  graph trim's point selector on a 2D or 3D B-spline, which the closed-form
+  inversion refused, is resolved by the inversion a curve path's point
+  bound takes (#304, `StationCurve::parameter_at_bound`): the same
+  point-bound tolerance, sampling, Newton refinement and merging of places,
+  for station bases, sweep directrices and their pieces alike. The trim
+  therefore flattens bitwise to the piece bounded by `PathBound::Point` at
+  those points, with and against its sense. A point off the B-spline, or
+  one it passes through twice, is refused naming `PATH_POINT_OFF_CURVE` or
+  `PATH_POINT_AMBIGUOUS` unless the trim falls back to a parameter
+  selector beside it.
+
 ## [0.3.23] - 2026-10-13
 
 ### Added

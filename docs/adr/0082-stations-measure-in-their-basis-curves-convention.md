@@ -155,6 +155,9 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/algorithms/parametric/evaluate/tests/curve_path_bounds.rs`,
   `crates/execution/compile/tests/station_curve_path.rs` and
   `scripts/probe_curve_path_bound_mutants.py` (#304).
+- `crates/execution/compile/src/directrix.rs` (`point_parameter`),
+  `crates/execution/compile/tests/point_trimmed_spline.rs` and
+  `scripts/probe_point_trim_mutants.py` (#306).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -1191,3 +1194,49 @@ nor any span between stations along a relation containing one.
 
 Still open: a point bound on a curve with no inversion here (it is refused,
 not iterated), a tolerance per point, and a point on an offset.
+
+## Amendment 2026-10-13: graph trims by points on a B-spline (#306)
+
+After #304 a `CurvePath` piece bounded by a point on a B-spline resolves,
+but the reference compiler refused the same trim stated in the graph: a
+trim's point selector was inverted by `invert2`/`invert3`, which have no
+B-spline arm, so lowering and derivation disagreed (openbimrs/ifc#436).
+
+- **One inversion.** A graph trim's point selector on a 2D or 3D B-spline
+  (`TrimSelector::Point2`, lifted to `z = 0`, or `Point3`) is resolved by
+  the inversion a point bound takes, `StationCurve::parameter_at_bound`:
+  the same point-bound tolerance `1e-9 * max(1, |p|)` (the point's own,
+  not the trim's), the same sampling and Newton refinement, the same
+  merging of places. The compiler's `directrix::point_parameter` is the
+  one place that dispatches it, for every trim it reads: a station basis
+  (2D and 3D), a sweep directrix and its pieces. So a trim of a B-spline by
+  points flattens to exactly the path of the piece bounded by those
+  points, bitwise, with and against its sense.
+- **Refusals by the #304 names.** A point off the B-spline or one it
+  passes through more than once is refused naming `PATH_POINT_OFF_CURVE`
+  or `PATH_POINT_AMBIGUOUS`, when the trim has no other selector to read;
+  a trim preferring its points falls back to a parameter selector beside
+  a refused point, as it does on every other curve, and keeps the
+  generic refusal for those curves' failed inversions.
+- **`invert2`/`invert3` keep their contract.** They stay closed-form only
+  (exact or refused, no iteration, the tolerance their caller passes);
+  the B-spline arm is the compiler's, delegating to the evaluator's
+  station inversion, rather than a second iterative path inside them that
+  every caller of the closed-form inversion (surface sections, NURBS
+  operations) would inherit.
+
+| Option | Why not |
+| --- | --- |
+| A B-spline arm in `invert2`/`invert3` | Their callers rely on closed-form exactness to their own tolerance; the point-bound tolerance is fixed by the joint rule, so the arm would ignore the tolerance argument it is given. |
+| `locate2`/`locate3` (the evaluator's other B-spline point search) | A second search: no ambiguity refusal, no merging, its own sampling, so a trim and a bound could disagree. The probe's mutant replacing the shared call with it is killed. |
+| The compiler's scale-of-all-selectors tolerance for B-splines | A tolerance the bound does not use; the two paths would refuse different points. |
+
+Still open: a polyline's point selector, which the shared inversion also
+resolves, is still inverted by `invert2`/`invert3` and so refused in a
+graph trim; and a point selector on a trim of a relation.
+
+Evidence: `crates/execution/compile/src/directrix.rs`
+(`point_parameter`, `first_point`),
+`crates/execution/compile/src/station/basis.rs` (`parameter2`),
+`crates/execution/compile/tests/point_trimmed_spline.rs` and
+`scripts/probe_point_trim_mutants.py`.
