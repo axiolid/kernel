@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Offset runs continue to their basis's ends without a stated length
+  (#303, ADR 0082 amendment): a station of an `OffsetsAtStations` at its
+  basis's start (`RunStation::at_basis_start`) is read at `0`, one at its
+  end (`RunStation::at_basis_end`) at the basis's length by the kernel's
+  own measure, the length `station::curve_path` states for the basis as
+  `CompositeBasis` measures it, bitwise (a line's parameter domain
+  `|d|`), so the run reads exactly as the one stated at that number, swept
+  as a directrix and flattened as a basis or a curve path. Resolution
+  comes before the #301 snapping, so an end station's window snaps from
+  the resolved end; resolved distances that do not increase strictly (a
+  stated station at or past the basis's end) are refused by name as
+  `InvalidInput`.
+
 ## [0.3.22] - 2026-10-12
 
 ### Added

@@ -1058,3 +1058,57 @@ Still open: joints after an uncertifiable piece (certified lengths of
 offsets by distances along ellipses and B-splines, #294); a piece's own
 seams (a polyline's vertex, a B-spline's corner knot) on the contract,
 which only the seam-snapping window certifies.
+
+## Amendment 2026-10-13: run stations at the basis's ends (#303)
+
+An offset by distances continues its first and last offsets unchanged out
+to its basis's ends (IFC 4.3 ADD2 8.9.3.42.3; consumer openbimrs/ifc#433).
+A consumer whose last stated station stops short of the end must add one at
+the basis's length, and for a basis whose length needs quadrature (an offset
+beside a gradient curve, a spiral, a B-spline, an ellipse) a caller without
+a provider cannot know it. This is #298's open path end applied to run
+stations.
+
+- **Representation, additively.** `RunStation` is `#[non_exhaustive]`, so
+  it gains a field, `basis_end: Option<BasisEnd>`, with `BasisEnd { Start,
+  End }` a new `#[non_exhaustive]` enum, set by the constructors
+  `RunStation::at_basis_start(offsets)` and `RunStation::at_basis_end(
+  offsets)`. `None`, the default, is the stated `station.distance`, as
+  before. Such a station states the distance `0`, which is not read. Only
+  `OffsetsAtStations` carries it; `Station`, `OffsetByStations` and the
+  sections are unchanged.
+- **Resolution: the evaluator's own length.** The start resolves to `0`,
+  where the station measure starts on every curve. The end resolves to
+  the basis's length by the kernel's own measure, exactly as #298 resolves
+  an open path end: the length `station::curve_path` states for the basis,
+  as `CompositeBasis` measures that path (an atomic curve's
+  `StationPiece::whole`, an unbounded line's parameter domain `|d|`, a
+  composite's running sum of its pieces' lengths), bitwise. A run with an
+  end station therefore reads BITWISE as the same run stated at that
+  number: swept as a directrix, flattened as a station basis, and handed
+  out by `curve_path` (where its basis is not itself an offset, which is
+  refused as an offset of an offset as before, #289). The length is read
+  once, and only for a run that has an end station.
+- **Order and windows after resolution.** The graph refuses, when the node
+  is pushed, a start station that is not the run's first, an end station
+  that is not its last, and either stating a distance other than `0`; the
+  stated distances still increase strictly from a start station's `0`. The
+  end's place needs the length, so the resolver refuses by name resolved
+  distances that do not increase strictly ("at or past the basis's end").
+  The #301 snapping then runs on the resolved distances, so an end
+  station's window snaps from the resolved end onto the one seam within it,
+  and the snapped distances are checked again.
+- **Wire format 1.3** (ADR 0085 note): the field is omitted when `None`.
+
+| Option | Why not |
+| --- | --- |
+| A flag on `OffsetsAtStations` continuing its first and last offsets to the basis's ends | A second mechanism for what an explicit end station says; it would change a variant whose fields are public, or need yet another variant. |
+| A `RunPosition { At(Scalar), BasisStart, BasisEnd }` field | Two sources of truth beside `station.distance`, a public field; `Option<BasisEnd>` keeps the distance where it is and its default writes nothing. |
+| A NaN or infinite `station.distance` as the marker | A non-finite distance is refused today and must stay refused, and the wire format carries no non-finite number. |
+| Read an end station's stated distance as a hint, or ignore it | A number that is not read must not be stated: a distance other than `0` is refused rather than silently dropped. |
+| End stations on sections (`SectionAtStation`) as well | The consumer rule is the offset's; a section run states where each section stands (`IfcSectionedSolidHorizontal` places every section explicitly). |
+
+Still open: a run station at the basis's ends on sectioned runs
+(`SectionAtStation`), and on an `OffsetsAtStations` along an offset basis
+flattened as a path or a station basis (an offset of an offset, refused as
+before; swept as a directrix it reads).

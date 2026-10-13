@@ -136,12 +136,16 @@ MUTANTS = [
      '            .map(|section| (section.station.distance, 0.0 * section.seam_window)),',
      [RUN]),
     ('an offset curve ignores its stations\' windows', S,
-     '            .map(|station| (station.station.distance, station.seam_window)),',
-     '            .map(|station| (station.station.distance, 0.0 * station.seam_window)),',
+     '        resolved_run(|| basis.length(), &stations)?,',
+     '        resolved_run(|| basis.length(), &stations)?\n'
+     '            .into_iter()\n'
+     '            .map(|(distance, _)| (distance, 0.0)),',
      [RUN]),
     ('an offset basis ignores its stations\' windows', B,
-     '            .map(|station| (station.station.distance, station.seam_window)),',
-     '            .map(|station| (station.station.distance, 0.0 * station.seam_window)),',
+     '        super::resolved_run(|| base.length(), stations)?,',
+     '        super::resolved_run(|| base.length(), stations)?\n'
+     '            .into_iter()\n'
+     '            .map(|(distance, _)| (distance, 0.0)),',
      [RUN]),
     ('snapped stations out of order are read', S,
      '    if distances.windows(2).any(|pair| pair[1] <= pair[0]) {\n'

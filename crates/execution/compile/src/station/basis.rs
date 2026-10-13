@@ -229,6 +229,18 @@ impl<'g> Basis<'g> {
         }
     }
 
+    /// Where the basis ends in its station measure, by the kernel's own
+    /// length (#303): the length [`curve_path`] states for it, as
+    /// `CompositeBasis` measures that path, bitwise (an atomic curve's
+    /// `StationPiece::whole`, a line's parameter domain `|d|`; a
+    /// composite's running sum). A placement moves no distance.
+    pub(crate) fn length(&self) -> GeomResult<Scalar> {
+        match self {
+            Self::Atomic { curve, .. } => Ok(StationPiece::whole(*curve)?.length()),
+            Self::Composite(composite) => Ok(composite.length()),
+        }
+    }
+
     /// Whether the frame at `distance`, read from `side`, is exact,
     /// rounding aside.
     pub(super) fn frame_is_exact(&self, distance: Scalar, side: SeamSide) -> bool {
@@ -451,12 +463,22 @@ impl Along<'_> {
             Self::Composite(composite) => composite.snapped_distance(distance, window),
         }
     }
+
+    /// Where the basis ends in its station measure (#303), as
+    /// [`Basis::length`] reads it.
+    fn length(&self) -> GeomResult<Scalar> {
+        match self {
+            Self::Atomic(curve, ..) => Ok(StationPiece::whole(*curve)?.length()),
+            Self::Composite(composite) => Ok(composite.length()),
+        }
+    }
 }
 
 /// An offset by distances at stations along `basis`, flattened (#289):
 /// the basis between each pair of consecutive stations (in its station
 /// measure), offset by the offsets interpolated linearly between them in
-/// `frame`. The stations stand at their snapped distances (#301); the
+/// `frame`. The stations stand at their snapped distances (#301), a
+/// station at the basis's start or end resolved first (#303); the
 /// side a station names is not read here, since every station is a joint
 /// of the offset, read by whatever station is measured along it.
 fn offset_by_stations<'g>(
@@ -490,9 +512,7 @@ fn offset_by_stations<'g>(
     };
     let distances = super::snapped_run(
         |distance, window| base.snapped_distance(distance, window),
-        stations
-            .iter()
-            .map(|station| (station.station.distance, station.seam_window)),
+        super::resolved_run(|| base.length(), stations)?,
     )?;
     let mut out = Vec::new();
     for (pair, at) in stations.windows(2).zip(distances.windows(2)) {

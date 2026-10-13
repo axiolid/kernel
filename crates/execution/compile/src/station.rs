@@ -80,6 +80,18 @@
 //! tangents agree is placed in the frame of the side it names. An offset
 //! by stations used as a basis breaks its law at the snapped distances.
 //!
+//! A station of an [`OffsetsAtStations`] curve may stand at its basis's
+//! start or end without stating the distance (#303,
+//! `axiolid_model::RunStation::at_basis_end`). It is resolved before the
+//! run is snapped: the start to `0`, the end to the basis's length by the
+//! kernel's own measure, the length [`curve_path`] states for the basis as
+//! `axiolid_reference::station::CompositeBasis` measures it, bitwise (a
+//! line's parameter domain `|d|`, as #298 resolves an open path end). The
+//! resolved distances must increase strictly, so a stated station at or
+//! past the basis's end is refused by name; the windows then snap them as
+//! above. Every reading of the offset resolves alike: swept as a
+//! directrix, and flattened as a basis or by [`curve_path`].
+//!
 //! [`seams`] reads where a graph curve's seams are without evaluating it:
 //! an atomic curve's from its stored data, a composite basis's joints at
 //! the running sum of its pieces' lengths with each piece's own seams
@@ -183,8 +195,9 @@ use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3};
 use axiolid_curve::Curve2;
 use axiolid_mesh::TriMesh;
 use axiolid_model::{
-    CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId, OrientedCurveStation,
-    RunStation, SeamSide, SectionAtStation, StationFrame, StationOffsets, StationOrientation,
+    BasisEnd, CurveRelation, CurveStation, GeometryGraph, GeometryNode, NodeId,
+    OrientedCurveStation, RunStation, SeamSide, SectionAtStation, StationFrame, StationOffsets,
+    StationOrientation,
 };
 use axiolid_profile::{Contour, Profile};
 use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
@@ -429,6 +442,51 @@ fn snapped_run(
         return Err(GeomError::InvalidInput(SNAPPED_NOT_INCREASING.into()));
     }
     Ok(distances)
+}
+
+/// Why a run's stations, the basis's ends resolved, cannot be read (#303).
+const RESOLVED_NOT_INCREASING: &str =
+    "station: the run's stations, its stations at the basis's ends measured by the kernel, do \
+     not increase strictly in distance: a stated station at or past the basis's end";
+
+/// The `(distance, window)` each station of an offset run is snapped from
+/// (#303): a stated station at its distance, one at the basis's start at
+/// `0`, one at its end at `length()`, the basis's length by the kernel's
+/// own measure (read once, and only for a run that has such a station).
+/// The resolved distances must increase strictly.
+fn resolved_run(
+    length: impl FnOnce() -> GeomResult<Scalar>,
+    stations: &[RunStation],
+) -> GeomResult<Vec<(Scalar, Scalar)>> {
+    let end = match stations
+        .iter()
+        .any(|station| station.basis_end == Some(BasisEnd::End))
+    {
+        true => length()?,
+        false => Scalar::NAN,
+    };
+    let resolved = stations
+        .iter()
+        .map(|station| {
+            let distance = match station.basis_end {
+                None => station.station.distance,
+                Some(BasisEnd::Start) => 0.0,
+                Some(BasisEnd::End) => end,
+                Some(_) => {
+                    return Err(GeomError::UnsupportedInput {
+                        backend: crate::BACKEND_ID,
+                        operation: Operation::CurveEvaluation,
+                        input: "a run station at a basis end this compiler does not know",
+                    })
+                }
+            };
+            Ok((distance, station.seam_window))
+        })
+        .collect::<GeomResult<Vec<_>>>()?;
+    if resolved.windows(2).any(|pair| pair[1].0 <= pair[0].0) {
+        return Err(GeomError::InvalidInput(RESOLVED_NOT_INCREASING.into()));
+    }
+    Ok(resolved)
 }
 
 /// The side each station of a run names, at its snapped distance (#301).
@@ -895,9 +953,7 @@ pub(crate) fn offset_curve_points(
     let basis = Basis::of(graph, basis)?;
     let distances = snapped_run(
         |distance, window| basis.snapped_distance(distance, window),
-        stations
-            .iter()
-            .map(|station| (station.station.distance, station.seam_window)),
+        resolved_run(|| basis.length(), &stations)?,
     )?;
     let sides: RunSides = distances
         .iter()
