@@ -8,7 +8,7 @@ Portable curve evaluation capability contract: point, tangent and oriented frame
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-12) |
+| Latest release | 0.3.7 (2026-10-13) |
 | crates.io | [`axiolid-curve-evaluate-contract`](https://crates.io/crates/axiolid-curve-evaluate-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_curve_evaluate_contract/index.html) · [docs.rs](https://docs.rs/axiolid-curve-evaluate-contract) |
@@ -44,17 +44,41 @@ scalar implementation. See ADR 0063.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-12):
+Latest release, 0.3.7 (2026-10-13):
 
 ### Added
 
-- Open curve-path ends (#298, ADR 0082 amendment): the trait documentation
-  states that a provider reading paths resolves a piece's open end with
-  its own length of the curve, and `OPEN_PATH_END_UNSUPPORTED` names the
-  typed refusal of a provider that reads stated spans only. The
-  conformance suite reads an open path (the whole of a widening offset of
-  the whole of a line, then a line to its end) forwards and reversed,
-  refuses a distance past its end and certifies its joint at `sqrt(101)`;
-  a provider may refuse it as unsupported, typed.
+- Joints near a window (#305, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances_within(path, around, window,
+  tolerance)`, a defaulted trait method answering, as `(joint, interval)`
+  in order, only the interior joints whose certified interval meets
+  `[around - window, around + window]`, each certified as
+  `path_joint_distances` certifies it; a joint left out truly lies outside
+  the window. A provider certifies only the pieces before and within the
+  window: one piece whose length cannot be certified after it no longer
+  refuses every placement on the path, while one before it, or within
+  reach of it, still refuses by name. The default delegates to
+  `path_joint_distances` and keeps the joints that meet the window, so a
+  provider that does not certify joints refuses it naming
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`. `window_span` checks the window
+  (a centre that is not finite, a window negative or not finite:
+  `InvalidInput`) and `DistanceInterval::meets` tests an interval against
+  it. The conformance suite asks four lines turning at right angles and a
+  widening offset then a line for windows on, between, over and past
+  their joints: every returned joint must be certified and meet its
+  window, every joint truly within a window must be returned, each must
+  agree with the provider's whole-path answer, and a bad window or
+  tolerance must be refused; a provider may refuse it as unsupported.
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): the trait documentation states how a provider reading paths
+  resolves a `PathBound` (re-exported), and names its refusals:
+  `PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`, and
+  `PATH_PIECE_BOUND_UNSUPPORTED` for a provider that reads stated spans
+  only. The conformance suite reads a line from a parameter to a point and
+  a circle from that point round its seam to a parameter, forwards and
+  reversed, against closed forms, certifies its joint, and requires a
+  point off its curve and a closed polyline's seam to be refused; a
+  provider may refuse bounds as unsupported.
 
 Full history: [`crates/contracts/operations/curve-evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/curve-evaluate/CHANGELOG.md)

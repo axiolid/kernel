@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-12) |
+| Latest release | 0.3.12 (2026-10-13) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,27 +54,27 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-12):
+Latest release, 0.3.12 (2026-10-13):
 
 ### Added
 
-- Seam-snapping windows and seam sides on run stations (#301, ADR 0082
-  amendment): `SectionAtStation` gains `seam` and `seam_window`, set by
-  `with_seam_side` and `with_seam_window`, for `SectionsAtStations` and
-  `OpenSectionsAtStations`; a new `RunStation` (`#[non_exhaustive]`, built by
-  `new` or `From<Station>` and the same two methods) carries them in a new
-  variant, `CurveRelation::OffsetsAtStations`, the general form of
-  `OffsetByStations`. Defaults are `Outgoing` and `0`, today's reading;
-  `Station`, `StationedSection`, `StationedOpenSection` and the #241
-  variants are unchanged. A negative or non-finite window on any run
-  station is refused as `GraphError::InvalidStation` when the node is
-  pushed.
-- Wire format 1.2 (ADR 0085 note): the two fields are written only when
-  they are not `Outgoing` and `+0.0`, and `OffsetsAtStations` is a 1.2
-  variant. A graph using either is labelled 1.2; one using neither is
-  written exactly as before, as 1.0 or 1.1. A 1.0 or 1.1 payload holding
-  them is refused by name (`UnknownField` `seam` or `seam_window`,
-  `UnknownKind` `OffsetsAtStations`), by the same test the writer labels
-  by. Golden payload `tests/wire/v1.2/every-kind.json`.
+- Run stations at their basis's start or end, measured by the kernel
+  (#303, ADR 0082 amendment): `RunStation` gains `basis_end:
+  Option<BasisEnd>` (a new `#[non_exhaustive]` enum, `Start` or `End`),
+  set by the constructors `RunStation::at_basis_start(offsets)` and
+  `RunStation::at_basis_end(offsets)`; `None`, the default, is the stated
+  `station.distance` as before. Such a station states the distance `0`,
+  which is not read; a resolver reads the start as `0` and the end as the
+  basis's length by the kernel's own measure. The graph refuses, as
+  `GraphError::InvalidStation` when the node is pushed, a start station
+  that is not the run's first, an end station that is not its last, and
+  either stating a distance other than `0`; the stated distances still
+  increase strictly, and whether the end comes after them is the
+  resolver's check.
+- Wire format 1.3 (ADR 0085 note): `RunStation.basis_end`, written only
+  when it is set. A graph using it is labelled 1.3; one not using it is
+  written exactly as before, as 1.0, 1.1 or 1.2. A 1.2 payload holding it
+  is refused as `UnknownField` `basis_end`, by the same test the writer
+  labels by. Golden payload `tests/wire/v1.3/every-kind.json`.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

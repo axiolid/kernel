@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-13
+
 ### Added
 
 - Joints near a window (#305, ADR 0082 amendment):

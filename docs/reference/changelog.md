@@ -1194,6 +1194,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve
 
+### 0.3.9 - 2026-10-13
+
+### Added
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `PathBound { Parameter, Point }` and the fields
+  `PathPiece::start_bound` and `PathPiece::end_bound`, set by
+  `PathPiece::between_parameters(curve, t0, t1)`,
+  `PathPiece::bounded(curve, start, end)`, `PathPiece::with_start` and
+  `PathPiece::with_end`, leave a span's start or end distance to the
+  evaluator, which resolves a point to its parameter and a parameter to its
+  distance in the curve's station measure; so a caller without a provider
+  can build a trim of an ellipse or a B-spline at interior parameters or
+  points. The `start` or `end` beside a bound holds an infinity, which
+  nothing reads; `PathPiece::length` is infinite and `PathPiece::is_stated`
+  false for a bounded piece (an offset over a bounded base included).
+
 ### 0.3.8 - 2026-10-12
 
 ### Added
@@ -1396,6 +1413,43 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-curve-evaluate-contract
 
+### 0.3.7 - 2026-10-13
+
+### Added
+
+- Joints near a window (#305, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances_within(path, around, window,
+  tolerance)`, a defaulted trait method answering, as `(joint, interval)`
+  in order, only the interior joints whose certified interval meets
+  `[around - window, around + window]`, each certified as
+  `path_joint_distances` certifies it; a joint left out truly lies outside
+  the window. A provider certifies only the pieces before and within the
+  window: one piece whose length cannot be certified after it no longer
+  refuses every placement on the path, while one before it, or within
+  reach of it, still refuses by name. The default delegates to
+  `path_joint_distances` and keeps the joints that meet the window, so a
+  provider that does not certify joints refuses it naming
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`. `window_span` checks the window
+  (a centre that is not finite, a window negative or not finite:
+  `InvalidInput`) and `DistanceInterval::meets` tests an interval against
+  it. The conformance suite asks four lines turning at right angles and a
+  widening offset then a line for windows on, between, over and past
+  their joints: every returned joint must be certified and meet its
+  window, every joint truly within a window must be returned, each must
+  agree with the provider's whole-path answer, and a bad window or
+  tolerance must be refused; a provider may refuse it as unsupported.
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): the trait documentation states how a provider reading paths
+  resolves a `PathBound` (re-exported), and names its refusals:
+  `PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`, and
+  `PATH_PIECE_BOUND_UNSUPPORTED` for a provider that reads stated spans
+  only. The conformance suite reads a line from a parameter to a point and
+  a circle from that point round its seam to a parameter, forwards and
+  reversed, against closed forms, certifies its joint, and requires a
+  point off its curve and a closed polyline's seam to be refused; a
+  provider may refuse bounds as unsupported.
+
 ### 0.3.6 - 2026-10-12
 
 ### Added
@@ -1550,6 +1604,46 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.13 - 2026-10-13
+
+### Added
+
+- Joints near a window (#305, ADR 0082 amendment):
+  `CompositeBasis::joint_intervals_within(around, window, tolerance)`, and
+  `ReferenceCurveEvaluator::path_joint_distances_within` through it,
+  returns the joints whose certified interval meets `[around - window,
+  around + window]`, each bitwise as `joint_intervals` gives it (the same
+  tolerance shares, summed in the same order). Every piece before the
+  window is certified and its interval carried into the joints after it;
+  no piece after the window is read, a joint being known past it once the
+  certified lower end of the joint before it plus its piece's chord (the
+  plan chord on a plan-measured piece) passes the window's end. So an
+  uncertifiable piece (an offset by distances along a B-spline) after the
+  window, or across its end far enough that its chord carries its own end
+  past it, no longer refuses the query; one before the window, or within
+  reach of it, refuses it naming `UNCERTIFIED_LENGTH`. The seam-snapping
+  window's test of an interval against a window is
+  `DistanceInterval::meets`, shared with it.
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `StationPiece::from_path_piece`, and so
+  `CompositeBasis::from_path` and every `path_*` query of
+  `ReferenceCurveEvaluator`, resolves a `PathPiece::start_bound` or
+  `end_bound`. A point is resolved to the one parameter naming it
+  (`StationCurve::parameter_at_bound`, module `station::path_bound`): in
+  closed form on a line, a circle or an ellipse, by projection onto each
+  segment of a polyline, by sampling and Newton on a B-spline, within the
+  joint tolerance (`point_bound_tolerance`); a point off the curve, one
+  several parameters name (a self-crossing, a closed polyline's or
+  B-spline's seam) and one on a curve it does not invert are refused by
+  name (`PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`,
+  `POINT_BOUND_UNSUPPORTED`). A parameter is resolved to the measure
+  `StationPiece::between_parameters` reads; a piece bounded at both ends IS
+  that piece, a closed conic's span running round as a graph trim in its
+  sense does, so it reads bitwise as the path `station::curve_path`
+  flattens such a trim into, and its joints are certified by
+  `joint_intervals` as before. An end both open and bounded is refused.
 
 ### 0.3.12 - 2026-10-12
 
@@ -2640,6 +2734,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.23 - 2026-10-13
+
+### Added
+
+- Offset runs continue to their basis's ends without a stated length
+  (#303, ADR 0082 amendment): a station of an `OffsetsAtStations` at its
+  basis's start (`RunStation::at_basis_start`) is read at `0`, one at its
+  end (`RunStation::at_basis_end`) at the basis's length by the kernel's
+  own measure, the length `station::curve_path` states for the basis as
+  `CompositeBasis` measures it, bitwise (a line's parameter domain
+  `|d|`), so the run reads exactly as the one stated at that number, swept
+  as a directrix and flattened as a basis or a curve path. Resolution
+  comes before the #301 snapping, so an end station's window snaps from
+  the resolved end; resolved distances that do not increase strictly (a
+  stated station at or past the basis's end) are refused by name as
+  `InvalidInput`.
+
 ### 0.3.22 - 2026-10-12
 
 ### Added
@@ -3650,6 +3761,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.12 - 2026-10-13
+
+### Added
+
+- Run stations at their basis's start or end, measured by the kernel
+  (#303, ADR 0082 amendment): `RunStation` gains `basis_end:
+  Option<BasisEnd>` (a new `#[non_exhaustive]` enum, `Start` or `End`),
+  set by the constructors `RunStation::at_basis_start(offsets)` and
+  `RunStation::at_basis_end(offsets)`; `None`, the default, is the stated
+  `station.distance` as before. Such a station states the distance `0`,
+  which is not read; a resolver reads the start as `0` and the end as the
+  basis's length by the kernel's own measure. The graph refuses, as
+  `GraphError::InvalidStation` when the node is pushed, a start station
+  that is not the run's first, an end station that is not its last, and
+  either stating a distance other than `0`; the stated distances still
+  increase strictly, and whether the end comes after them is the
+  resolver's check.
+- Wire format 1.3 (ADR 0085 note): `RunStation.basis_end`, written only
+  when it is set. A graph using it is labelled 1.3; one not using it is
+  written exactly as before, as 1.0, 1.1 or 1.2. A 1.2 payload holding it
+  is refused as `UnknownField` `basis_end`, by the same test the writer
+  labels by. Golden payload `tests/wire/v1.3/every-kind.json`.
 
 ### 0.3.11 - 2026-10-12
 

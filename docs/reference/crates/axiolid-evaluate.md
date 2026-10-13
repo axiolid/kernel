@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.12 (2026-10-12) |
+| Latest release | 0.3.13 (2026-10-13) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,20 +42,44 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.12 (2026-10-12):
+Latest release, 0.3.13 (2026-10-13):
 
 ### Added
 
-- Open curve-path ends (#298, ADR 0082 amendment):
-  `StationPiece::from_path_piece`, and so `CompositeBasis::from_path` and
-  every `path_*` query of `ReferenceCurveEvaluator`, resolves a piece
-  whose `open_end` is set to the curve's end by this evaluator's own
-  length, the end `StationPiece::whole` reads: a line's parameter domain,
-  a length read from stored data exactly, otherwise the numerical
-  estimate (a B-spline's or an ellipse's arc length, an offset's own
-  table). An open path therefore reads bitwise as the stated path holding
-  those lengths (`CompositeBasis::path` hands it back), which is the path
-  a graph compiler flattens; `path_joint_distances` certifies where its
-  joints truly fall. Stated spans are checked as before.
+- Joints near a window (#305, ADR 0082 amendment):
+  `CompositeBasis::joint_intervals_within(around, window, tolerance)`, and
+  `ReferenceCurveEvaluator::path_joint_distances_within` through it,
+  returns the joints whose certified interval meets `[around - window,
+  around + window]`, each bitwise as `joint_intervals` gives it (the same
+  tolerance shares, summed in the same order). Every piece before the
+  window is certified and its interval carried into the joints after it;
+  no piece after the window is read, a joint being known past it once the
+  certified lower end of the joint before it plus its piece's chord (the
+  plan chord on a plan-measured piece) passes the window's end. So an
+  uncertifiable piece (an offset by distances along a B-spline) after the
+  window, or across its end far enough that its chord carries its own end
+  past it, no longer refuses the query; one before the window, or within
+  reach of it, refuses it naming `UNCERTIFIED_LENGTH`. The seam-snapping
+  window's test of an interval against a window is
+  `DistanceInterval::meets`, shared with it.
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `StationPiece::from_path_piece`, and so
+  `CompositeBasis::from_path` and every `path_*` query of
+  `ReferenceCurveEvaluator`, resolves a `PathPiece::start_bound` or
+  `end_bound`. A point is resolved to the one parameter naming it
+  (`StationCurve::parameter_at_bound`, module `station::path_bound`): in
+  closed form on a line, a circle or an ellipse, by projection onto each
+  segment of a polyline, by sampling and Newton on a B-spline, within the
+  joint tolerance (`point_bound_tolerance`); a point off the curve, one
+  several parameters name (a self-crossing, a closed polyline's or
+  B-spline's seam) and one on a curve it does not invert are refused by
+  name (`PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`,
+  `POINT_BOUND_UNSUPPORTED`). A parameter is resolved to the measure
+  `StationPiece::between_parameters` reads; a piece bounded at both ends IS
+  that piece, a closed conic's span running round as a graph trim in its
+  sense does, so it reads bitwise as the path `station::curve_path`
+  flattens such a trim into, and its joints are certified by
+  `joint_intervals` as before. An end both open and bounded is refused.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.23] - 2026-10-13
+
 ### Added
 
 - Offset runs continue to their basis's ends without a stated length

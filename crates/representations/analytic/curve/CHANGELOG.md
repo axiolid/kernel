@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-13
+
 ### Added
 
 - Curve-path piece bounds at a parameter or a point (#304, ADR 0082

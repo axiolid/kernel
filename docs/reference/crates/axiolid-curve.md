@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-12) |
+| Latest release | 0.3.9 (2026-10-13) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -52,21 +52,21 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-12):
+Latest release, 0.3.9 (2026-10-13):
 
 ### Added
 
-- Open curve-path ends (#298, ADR 0082 amendment): `PathPiece::open_end`,
-  set by `PathPiece::to_end(curve, start)` and `PathPiece::whole(curve)`,
-  leaves a span's end to the evaluator, which resolves it with its own
-  length of the curve; so a caller without a provider can build a path
-  over an offset beside a gradient curve, a clothoid or a B-spline (or a
-  B-spline itself), whose lengths have no closed form.
-  `PathPiece::from_start(curve, end)` is the span `[0, end]`, and
-  `PathPiece::is_stated` says whether every length a piece spans (its
-  offset's base included) is stated. An open piece's `end` holds
-  `Scalar::INFINITY`, unread, so `PathPiece::length` and
-  `CurvePath::length` are infinite until an evaluator resolves it. Stated
-  pieces are unchanged.
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `PathBound { Parameter, Point }` and the fields
+  `PathPiece::start_bound` and `PathPiece::end_bound`, set by
+  `PathPiece::between_parameters(curve, t0, t1)`,
+  `PathPiece::bounded(curve, start, end)`, `PathPiece::with_start` and
+  `PathPiece::with_end`, leave a span's start or end distance to the
+  evaluator, which resolves a point to its parameter and a parameter to its
+  distance in the curve's station measure; so a caller without a provider
+  can build a trim of an ellipse or a B-spline at interior parameters or
+  points. The `start` or `end` beside a bound holds an infinity, which
+  nothing reads; `PathPiece::length` is infinite and `PathPiece::is_stated`
+  false for a bounded piece (an offset over a bounded base included).
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)
