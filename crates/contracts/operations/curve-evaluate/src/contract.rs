@@ -133,6 +133,39 @@ use crate::{CurveMeasure, DistanceConvention, DistanceInterval};
 /// The default refuses by a typed [`GeomError::UnsupportedInput`] naming
 /// [`PATH_JOINT_DISTANCES_UNSUPPORTED`]: a provider that does not bound its
 /// pieces' lengths never hands out an estimate as a certificate.
+///
+/// # Joints near a window (#305)
+///
+/// A caller placing something at a distance `around` needs only the joints
+/// that can fall within its precision `window` of it, and one piece whose
+/// length cannot be certified anywhere on the path (an offset by distances
+/// along a B-spline) refuses
+/// [`path_joint_distances`](Self::path_joint_distances) for all of them.
+/// [`path_joint_distances_within`](Self::path_joint_distances_within)
+/// answers only the joints whose certified interval meets `[around -
+/// window, around + window]`, each with the interval
+/// [`path_joint_distances`](Self::path_joint_distances) would give it, so
+/// it certifies only the pieces those joints lie after:
+///
+/// - **Before the window,** every piece is certified, since its length
+///   moves every later joint; the intervals of the sum may widen with
+///   each numerical piece, but stay within the tolerance. A piece before
+///   the window whose length cannot be certified refuses the query by
+///   name: the window's position against the joints after it is unknown.
+///   No coarser bound is substituted; one loose enough to reach every
+///   such piece would be far wider than any tolerance a placement asks.
+/// - **Within the window,** each joint that can fall in it is certified
+///   or the query refused by name: the uncertainty reaches the window.
+/// - **After the window,** no piece is read: a joint is known to lie past
+///   it once the joint before it does, or once a certified lower bound of
+///   its piece's length (its chord) carries it past.
+///
+/// A joint left out therefore truly lies outside the window, and a joint
+/// whose certified interval lies inside it is always returned. The
+/// default delegates to [`path_joint_distances`](Self::path_joint_distances)
+/// and keeps the joints whose intervals meet the window, which cannot be
+/// wrong where that query is right, so a provider that does not certify
+/// joints refuses it by the same name.
 pub trait CurveEvaluator: Backend {
     /// Which distance this provider measures for `curve`.
     ///
@@ -383,6 +416,64 @@ pub trait CurveEvaluator: Backend {
             input: PATH_JOINT_DISTANCES_UNSUPPORTED,
         })
     }
+
+    /// The interior joints of `path` that can fall within `window` of
+    /// `around` (see the [trait documentation](Self#joints-near-a-window-305)):
+    /// each as `(joint, interval)`, `joint` its index among the path's
+    /// joints (the joint where piece `joint` ends and piece `joint + 1`
+    /// starts, its position in
+    /// [`path_joint_distances`](Self::path_joint_distances)' answer), in
+    /// order, `interval` certified as that query certifies it, no wider
+    /// than `tolerance`. Returned: every joint whose interval meets
+    /// `[around - window, around + window]` (the edges included). Left
+    /// out: only joints certified to lie outside it. Empty when no joint
+    /// can fall within it.
+    ///
+    /// # Errors
+    ///
+    /// An `around` that is not finite or a `window` that is negative or not
+    /// finite ([`GeomError::InvalidInput`]); as
+    /// [`path_joint_distances`](Self::path_joint_distances) otherwise, but
+    /// only for the pieces before and within the window. By default,
+    /// whatever [`path_joint_distances`](Self::path_joint_distances)
+    /// refuses, so [`PATH_JOINT_DISTANCES_UNSUPPORTED`] where that is not
+    /// implemented.
+    fn path_joint_distances_within(
+        &self,
+        path: &CurvePath,
+        around: Scalar,
+        window: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<(usize, DistanceInterval)>> {
+        let span = window_span(around, window)?;
+        Ok(self
+            .path_joint_distances(path, tolerance)?
+            .into_iter()
+            .enumerate()
+            .filter(|(_, interval)| interval.meets(&span))
+            .collect())
+    }
+}
+
+/// The window `[around - window, around + window]` of
+/// [`path_joint_distances_within`](CurveEvaluator::path_joint_distances_within),
+/// checked: `around` finite, `window` finite and not negative.
+///
+/// # Errors
+///
+/// Any other, by [`GeomError::InvalidInput`].
+pub fn window_span(around: Scalar, window: Scalar) -> GeomResult<DistanceInterval> {
+    if !around.is_finite() {
+        return Err(GeomError::InvalidInput(format!(
+            "joints near a window: the window's centre {around} is not finite"
+        )));
+    }
+    if !(window.is_finite() && window >= 0.0) {
+        return Err(GeomError::InvalidInput(format!(
+            "joints near a window: the window {window} is negative or not finite"
+        )));
+    }
+    Ok(DistanceInterval::new(around - window, around + window))
 }
 
 /// The input a provider that does not certify joint distances refuses, in

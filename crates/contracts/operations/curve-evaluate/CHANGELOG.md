@@ -9,6 +9,30 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Joints near a window (#305, ADR 0082 amendment):
+  `CurveEvaluator::path_joint_distances_within(path, around, window,
+  tolerance)`, a defaulted trait method answering, as `(joint, interval)`
+  in order, only the interior joints whose certified interval meets
+  `[around - window, around + window]`, each certified as
+  `path_joint_distances` certifies it; a joint left out truly lies outside
+  the window. A provider certifies only the pieces before and within the
+  window: one piece whose length cannot be certified after it no longer
+  refuses every placement on the path, while one before it, or within
+  reach of it, still refuses by name. The default delegates to
+  `path_joint_distances` and keeps the joints that meet the window, so a
+  provider that does not certify joints refuses it naming
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`. `window_span` checks the window
+  (a centre that is not finite, a window negative or not finite:
+  `InvalidInput`) and `DistanceInterval::meets` tests an interval against
+  it. The conformance suite asks four lines turning at right angles and a
+  widening offset then a line for windows on, between, over and past
+  their joints: every returned joint must be certified and meet its
+  window, every joint truly within a window must be returned, each must
+  agree with the provider's whole-path answer, and a bad window or
+  tolerance must be refused; a provider may refuse it as unsupported.
+
 ## [0.3.6] - 2026-10-12
 
 ### Added

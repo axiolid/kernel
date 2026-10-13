@@ -22,7 +22,7 @@ pub use axiolid_curve::{
     CurvePath, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, SeamSide,
 };
 pub use contract::{
-    CurveEvaluator, CURVE_PATH_UNSUPPORTED, OPEN_PATH_END_UNSUPPORTED,
+    window_span, CurveEvaluator, CURVE_PATH_UNSUPPORTED, OPEN_PATH_END_UNSUPPORTED,
     PATH_JOINT_DISTANCES_UNSUPPORTED, SEAM_SIDE_UNSUPPORTED,
 };
 pub use convention::DistanceConvention;

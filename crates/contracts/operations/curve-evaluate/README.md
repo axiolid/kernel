@@ -13,7 +13,10 @@ segments placed at stations), as a composite station basis is read; a
 provider that does not implement them refuses them by name. A piece's open
 end is resolved by the provider with its own length of the curve.
 `path_joint_distances` certifies where a path's joints lie, each a
-`DistanceInterval` containing its true distance, or is refused by name.
+`DistanceInterval` containing its true distance, or is refused by name;
+`path_joint_distances_within` certifies only the joints that can fall
+within a window, so a piece whose length cannot be certified after the
+window does not refuse them.
 This crate evaluates nothing itself; `axiolid-evaluate` provides the
 scalar implementation. See ADR 0063.
 

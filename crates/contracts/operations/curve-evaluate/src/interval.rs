@@ -50,6 +50,13 @@ impl DistanceInterval {
         self.lower <= value && value <= self.upper
     }
 
+    /// Whether the two intervals share a point, their ends included:
+    /// whether a distance certified to `self` can lie in `other` (#305).
+    #[must_use]
+    pub fn meets(&self, other: &Self) -> bool {
+        self.lower <= other.upper && other.lower <= self.upper
+    }
+
     /// Whether it is a point interval.
     #[must_use]
     pub fn is_point(&self) -> bool {

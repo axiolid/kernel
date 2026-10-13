@@ -46,6 +46,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_sides_at_seams(provider));
     out.extend(check_paths(provider));
     out.extend(check_path_joints(provider));
+    out.extend(check_path_joints_within(provider));
     out.extend(check_open_paths(provider));
     out
 }
@@ -976,6 +977,179 @@ fn check_path_joints<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure>
             "a path whose pieces do not meet is refused",
             "the joint distances of a path with a 1 m gap were answered",
         ));
+    }
+    out
+}
+
+// --- joints near a window (#305) ---------------------------------------------
+
+/// A line from `from` along `direction` (unit), `length` long, as a piece.
+fn segment(from: Point3, direction: Vec3, length: Scalar) -> PathPiece {
+    PathPiece::new(
+        PathCurve::Three(Curve3::Line(Line3 {
+            origin: from,
+            direction,
+        })),
+        0.0,
+        length,
+    )
+}
+
+/// Whether `found`, the answer to a window `[around - window, around +
+/// window]` over joints whose true distances are `truths`, is right: joint
+/// indices in increasing order and in range, each interval a certificate
+/// of its joint at `tolerance` that meets the window, and every joint whose
+/// true distance lies in the window present. Fails with the check's name.
+fn window_answer(
+    found: &[(usize, DistanceInterval)],
+    truths: &[Scalar],
+    around: Scalar,
+    window: Scalar,
+    tolerance: Scalar,
+) -> Result<(), (&'static str, String)> {
+    let span = DistanceInterval::new(around - window, around + window);
+    if found.windows(2).any(|pair| pair[1].0 <= pair[0].0) {
+        return Err((
+            "joints near a window are certified",
+            format!("joints out of order: {found:?}"),
+        ));
+    }
+    for (joint, interval) in found {
+        let Some(truth) = truths.get(*joint) else {
+            return Err((
+                "joints near a window are certified",
+                format!("joint {joint} of {}", truths.len()),
+            ));
+        };
+        certifies(*interval, *truth, tolerance).map_err(|detail| {
+            (
+                "joints near a window are certified",
+                format!("joint {joint}: {detail}"),
+            )
+        })?;
+        if !interval.meets(&span) {
+            return Err((
+                "joints near a window meet it",
+                format!("joint {joint} at {interval:?} is outside {span:?}"),
+            ));
+        }
+    }
+    for (joint, truth) in truths.iter().enumerate() {
+        if span.contains(*truth) && !found.iter().any(|(j, _)| *j == joint) {
+            return Err((
+                "every joint within a window is returned",
+                format!("joint {joint} at {truth} is missing from {span:?}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Joints near a window (#305): a provider either refuses
+/// [`CurveEvaluator::path_joint_distances_within`] as unsupported, typed,
+/// or answers, for each window, the joints whose certified interval meets
+/// it: in order, each with its index and a certificate of its true
+/// distance no wider than the tolerance, and none whose true distance lies
+/// in the window left out. Two paths: four lines turning at right angles
+/// (every length stored, the joints at 10, 20 and 30), windows on a joint,
+/// spanning two with their ends on them, between joints, past the end and
+/// over the whole path; and the widening offset then line of
+/// [`check_path_joints`] (the joint at `sqrt(101)`, a quadrature), a window
+/// on its joint and one after it. Where the provider also certifies the
+/// whole path, each joint it returns must agree with that answer (their
+/// intervals meet). A window centre that is not finite, a window that is
+/// negative or not finite, and a non-positive tolerance must be refused.
+fn check_path_joints_within<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let turns = CurvePath::new(vec![
+        segment(Point3::ZERO, Vec3::X, 10.0),
+        segment(Point3::new(10.0, 0.0, 0.0), Vec3::Y, 10.0),
+        segment(Point3::new(10.0, 10.0, 0.0), Vec3::X, 10.0),
+        segment(Point3::new(20.0, 10.0, 0.0), Vec3::Y, 10.0),
+    ]);
+    let widening = PathOffset::new(
+        segment(Point3::ZERO, Vec3::X, 10.0),
+        OffsetLaw::Linear {
+            start: PathOffsets::new(0.0, 0.0, 0.0),
+            end: PathOffsets::new(1.0, 0.0, 0.0),
+            frame: OffsetFrame::Section,
+        },
+    );
+    let slant = 101.0_f64.sqrt();
+    let numeric = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Offset(Box::new(widening)), 0.0, slant),
+        segment(Point3::new(10.0, 1.0, 0.0), Vec3::X, 5.0),
+    ]);
+    let turn_truths = [10.0, 20.0, 30.0];
+    let cases: [(&str, &CurvePath, &[Scalar], Scalar, Scalar); 9] = [
+        ("turns", &turns, &turn_truths, 20.0, 1.0),
+        ("turns", &turns, &turn_truths, 25.0, 5.0),
+        ("turns", &turns, &turn_truths, 5.0, 1.0),
+        ("turns", &turns, &turn_truths, 15.0, 4.5),
+        ("turns", &turns, &turn_truths, 35.0, 10.0),
+        ("turns", &turns, &turn_truths, 20.0, 100.0),
+        ("turns", &turns, &turn_truths, 30.0, 0.0),
+        ("offset", &numeric, &[slant], slant, 1e-2),
+        ("offset", &numeric, &[slant], slant + 2.0, 1.0),
+    ];
+    let mut answered = false;
+    for (what, path, truths, around, window) in cases {
+        match provider.path_joint_distances_within(path, around, window, JOINT_TOLERANCE) {
+            Ok(found) => {
+                answered = true;
+                if let Err((check, detail)) =
+                    window_answer(&found, truths, around, window, JOINT_TOLERANCE)
+                {
+                    out.push(fail(
+                        check,
+                        format!("{what} path, window {window} around {around}: {detail}"),
+                    ));
+                }
+                if let Ok(all) = provider.path_joint_distances(path, JOINT_TOLERANCE) {
+                    for (joint, interval) in &found {
+                        if all.get(*joint).is_some_and(|whole| !whole.meets(interval)) {
+                            out.push(fail(
+                                "joints near a window agree with every joint's",
+                                format!(
+                                    "{what} path, joint {joint}: {interval:?} against {:?}",
+                                    all[*joint]
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(error) if side_refused(&error) => {}
+            Err(error) => out.push(fail(
+                "joints near a window are certified or refused as unsupported",
+                format!("{what} path, window {window} around {around}: {error}"),
+            )),
+        }
+    }
+    if !answered {
+        return out;
+    }
+    let bad = [
+        (Scalar::NAN, 1.0, JOINT_TOLERANCE),
+        (Scalar::INFINITY, 1.0, JOINT_TOLERANCE),
+        (20.0, -1.0, JOINT_TOLERANCE),
+        (20.0, Scalar::NAN, JOINT_TOLERANCE),
+        (20.0, Scalar::INFINITY, JOINT_TOLERANCE),
+        (20.0, 1.0, 0.0),
+        (20.0, 1.0, Scalar::NAN),
+    ];
+    for (around, window, tolerance) in bad {
+        if provider
+            .path_joint_distances_within(&turns, around, window, tolerance)
+            .is_ok()
+        {
+            out.push(fail(
+                "a window or tolerance that is not finite, or negative, is refused",
+                format!(
+                    "joints within {window} of {around} were answered at tolerance {tolerance}"
+                ),
+            ));
+        }
     }
     out
 }
