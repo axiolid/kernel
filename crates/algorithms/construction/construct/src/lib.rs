@@ -67,6 +67,7 @@ pub mod fillet_variable;
 pub mod half_space;
 pub mod hull;
 pub mod loft;
+pub mod loft_exact;
 pub mod offset;
 pub mod pipe;
 pub mod polyhedron;

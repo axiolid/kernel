@@ -9,6 +9,18 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `station::piece_frame_bounds`, `FrameLawBounds` and `FrameReading`
+  (#247, ADR 0082 amendment): certified suprema of the first two
+  derivatives, in station distance, of a station piece's basis point and
+  section (or plan) frame over a span crossing no seam, for lines,
+  polylines, orthonormal circles, and elevated and banked curves with a
+  line or circle plan and a closed-form profile (a banked curve's roll
+  bounded through its cant law), reversed and placed pieces included; with
+  the slack of the arc-length inverse where the measure is read by it.
+  `None` for every numerically framed family.
+
 ## [0.3.13] - 2026-10-13
 
 ### Added

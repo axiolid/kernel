@@ -32,6 +32,34 @@ caret rule for `0.x` versions.
   These booleans were unbounded before ("exact boolean operand that is
   not an extrusion"); `ReferenceExactCompiler` itself still refuses mesh
   operands by name.
+- Certified deviation for runs of sections at stations (#247, ADR 0082
+  amendment): `StationedSpine`, `SectionsAtStations`, `SectionedSurface`
+  and `OpenSectionsAtStations` report `DeviationBound::Certified` instead
+  of `Unbounded` wherever the frame law along the basis has certified
+  derivative bounds (lines, polylines, circles, elevated and banked curves
+  with line or circle plans and closed-form profiles; section and plan
+  frames; placed and reversed composite pieces). Each mesh cell is bounded
+  by its vertex paths' chord bound `h^2 / 8 sup |A''|`, breakpoints at the
+  seams inside it, the wall quad's `loft::quad_deviation` and the
+  arc-length inverse's slack; the stations are refined until the bound
+  fits the budget. A constant section on straight legs is bounded through
+  its mitres. Unbounded by name: a numerically framed basis, a cell beside
+  a mitre on a curved piece or with a changing section, and different
+  curved profiles.
+- `ReferenceExactCompiler` compiles a `StationedSpine` or
+  `SectionsAtStations` exactly where it has a closed form (#247): a
+  constant section along a line or a straight polyline (an extrusion,
+  oblique under a tilted orientation), along a horizontal circle (a
+  revolution), and a linear taper of straight-edged sections along a line
+  (a planar polyhedron); every other run is refused by name.
+
+### Changed
+
+- The stations of such a run are refined until the certified bound fits
+  as well as the sampling test, so a curved run may mesh finer (#247). The
+  exact compiler now reads a stationed spine's stations before refusing
+  it, so a station beyond the basis is refused as the mesh compiler
+  refuses it.
 
 ### Fixed
 

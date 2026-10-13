@@ -398,12 +398,14 @@ fn a_constant_section_along_an_arc_follows_pappus() {
     // The centroid rides the arc, so the exact volume is A * L.
     close(volume(&outcome.mesh), 2.0 * length, 1e-4, "Pappus");
     assert_eq!(outcome.closure, MeshClosure::Solid);
-    assert!(report.bound.is_none());
+    // The run is certified within the budget (#247): along a circle the
+    // frame law has closed-form derivative bounds.
+    assert!(report.meets_requested(), "{report:?}");
     assert!(report
         .contributions
         .iter()
         .any(|c| c.path == DeviationPath::StationedSpine
-            && matches!(c.bound, DeviationBound::Unbounded(reason) if reason.contains("sampled"))));
+            && matches!(c.bound, DeviationBound::Certified(_))));
     // Every vertex keeps its section's radius band: [24, 26].
     for p in &outcome.mesh.positions {
         let r = p.x.hypot(p.y);
@@ -563,19 +565,14 @@ fn malformed_spines_are_refused_by_name() {
         error.to_string().contains("beyond the curve's length"),
         "{error}"
     );
-    // The exact compiler refuses the family by name.
+    // The exact compiler reads the stations as the mesh compiler does
+    // (#247): the same refusal.
     let error = ReferenceExactCompiler::new()
         .compile_exact(&graph, beyond, &options())
         .unwrap_err();
     assert!(
-        matches!(
-            error,
-            GeomError::UnsupportedInput {
-                input: "station-placed spine",
-                ..
-            }
-        ),
-        "{error:?}"
+        error.to_string().contains("beyond the curve's length"),
+        "{error}"
     );
 }
 

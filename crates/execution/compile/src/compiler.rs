@@ -502,12 +502,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             }) => {
                 let sections: Vec<_> = sections.iter().cloned().map(Into::into).collect();
                 crate::station::sectioned_surface(graph, *directrix, &sections, *frame, options)
-                    .map(|mesh| {
+                    .map(|(mesh, bound)| {
                         Built::with_closure(
                             mesh,
                             axiolid_mesh_compile_contract::MeshClosure::Surface,
                         )
-                        .with_deviation(crate::deviation::of_sectioned_surface())
+                        .with_deviation(crate::deviation::of_sectioned_surface(bound))
                     })
             }
             // The general form: oriented sections, joined by tag (#246).
@@ -518,9 +518,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     frame,
                 },
             ) => crate::station::sectioned_surface(graph, *directrix, sections, *frame, options)
-                .map(|mesh| {
+                .map(|(mesh, bound)| {
                     Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
-                        .with_deviation(crate::deviation::of_sectioned_surface())
+                        .with_deviation(crate::deviation::of_sectioned_surface(bound))
                 }),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
@@ -662,6 +662,10 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         operation: &SolidOperation,
         options: &ExecutionOptions,
     ) -> GeomResult<(TriMesh, crate::deviation::Deviation)> {
+        // A run of sections at stations is bounded as it is sampled (#247).
+        if let Some(run) = crate::deviation::stationed_spine(graph, operation, options) {
+            return run;
+        }
         let mut mesh = self.build_solid(graph, operation, options)?;
         let mut deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
         if !matches!(operation, SolidOperation::SweptDisk { .. }) {

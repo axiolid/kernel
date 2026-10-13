@@ -192,11 +192,12 @@ pub(crate) fn of_solid(
                 "sectioned spine: the surface between sections is not defined exactly",
             ),
         ),
-        SolidOperation::StationedSpine { .. } | SolidOperation::SectionsAtStations { .. } => (
-            DeviationPath::StationedSpine,
-            "",
-            DeviationBound::Unbounded(STATIONED_SAMPLING),
-        ),
+        SolidOperation::StationedSpine { .. } | SolidOperation::SectionsAtStations { .. } => {
+            return match stationed_spine(graph, operation, options) {
+                Some(run) => run.map(|(_, deviation)| deviation),
+                None => Ok(Deviation::default()),
+            };
+        }
         SolidOperation::BoundedHalfSpace { .. } => (
             DeviationPath::BoundedHalfSpace,
             "",
@@ -213,19 +214,42 @@ pub(crate) fn of_solid(
     Ok(Deviation::one(path, detail, bound))
 }
 
-/// Why station-placed sweeps are unbounded (#241): the sections between
-/// stations are bisected until each placed point's midpoint test passes,
-/// which samples the surface rather than bounding it.
-const STATIONED_SAMPLING: &str =
-    "stationed sections: the surface between stations is sampled, not bounded";
+/// A run of sections at stations meshed with its deviation (#247): the
+/// mesh `crate::station` samples and the bound it certifies for it, or
+/// `None` for any other solid.
+pub(crate) fn stationed_spine(
+    graph: &GeometryGraph,
+    operation: &SolidOperation,
+    options: &ExecutionOptions,
+) -> Option<GeomResult<(TriMesh, Deviation)>> {
+    let run = match operation {
+        SolidOperation::StationedSpine {
+            directrix,
+            sections,
+            frame,
+        } => {
+            let sections: Vec<_> = sections.iter().copied().map(Into::into).collect();
+            crate::station::stationed_spine_bounded(graph, *directrix, &sections, *frame, options)
+        }
+        SolidOperation::SectionsAtStations {
+            directrix,
+            sections,
+            frame,
+        } => crate::station::stationed_spine_bounded(graph, *directrix, sections, *frame, options),
+        _ => return None,
+    };
+    Some(run.map(|(mesh, bound)| {
+        (
+            mesh,
+            Deviation::one(DeviationPath::StationedSpine, "", bound),
+        )
+    }))
+}
 
-/// The deviation of a sectioned surface (#241); see [`STATIONED_SAMPLING`].
-pub(crate) fn of_sectioned_surface() -> Deviation {
-    Deviation::one(
-        DeviationPath::SectionedSurface,
-        "",
-        DeviationBound::Unbounded(STATIONED_SAMPLING),
-    )
+/// The deviation of a sectioned surface (#241, #247): the bound
+/// `crate::station` certified for its mesh.
+pub(crate) fn of_sectioned_surface(bound: DeviationBound) -> Deviation {
+    Deviation::one(DeviationPath::SectionedSurface, "", bound)
 }
 
 /// The deviation of a CSG primitive meshed for chord budget `chord`.

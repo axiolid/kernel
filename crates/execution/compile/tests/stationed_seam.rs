@@ -185,12 +185,14 @@ fn a_spine_across_a_corner_is_mitred_in_the_bisector_plane() {
     // The mitred prism holds the section along the centreline, 8 + 8 m.
     let got = volume(&mesh);
     assert!((got - 2.0 * 16.0).abs() <= 1e-9, "volume {got}");
-    // The run's deviation is still reported as sampled.
+    // A constant section on straight legs is its own exact surface, the
+    // mitre's cut included (#247): certified, and within the budget.
+    assert!(report.meets_requested(), "{report:?}");
     assert!(report
         .contributions
         .iter()
         .any(|c| c.path == DeviationPath::StationedSpine
-            && matches!(c.bound, DeviationBound::Unbounded(_))));
+            && matches!(c.bound, DeviationBound::Certified(_))));
 }
 
 #[test]

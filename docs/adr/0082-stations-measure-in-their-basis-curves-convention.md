@@ -1240,3 +1240,91 @@ Evidence: `crates/execution/compile/src/directrix.rs`
 `crates/execution/compile/src/station/basis.rs` (`parameter2`),
 `crates/execution/compile/tests/point_trimmed_spline.rs` and
 `scripts/probe_point_trim_mutants.py`.
+
+## Amendment 2026-10-13: certified bounds and exact bodies for runs of sections (#247)
+
+Runs of sections at stations (`StationedSpine`, `SectionsAtStations`,
+`SectionedSurface`, `OpenSectionsAtStations`) were meshed by bisection
+until a midpoint and a flatness test passed, and reported
+`DeviationBound::Unbounded("stationed sections: ... sampled, not
+bounded")`; the exact compiler refused them. A consumer (axioval, through
+ifc-geometry's IFC4X3 sectioned solids) could not cite even a deck along a
+straight polyline whose rectangle widens from 2 m to 4 m.
+
+- **The exact surface.** Between two stations vertex `k` stands at `A_k(s)
+  = O(s) + lat L + vert U + long T + x_k L_t + y_k U_t`, the offsets in the
+  base frame and the profile point in the frame turned by the interpolated
+  orientation, all linear in distance (the meshing rule of #241 and #246).
+  At a fixed `s` the placement is rigid, so the exact section's edge is the
+  segment between its vertices: the surface is `P(s, v) = (1 - v) A_k(s) +
+  v A_l(s)` per edge. A curved profile is the exact profile only where every
+  section is that one profile (the interpolation between a profile and
+  itself is the profile); different curved profiles have no vertex
+  correspondence and stay unbounded by name.
+- **The bound per cell** (`axiolid-mesh-compile` `station::bound`). With
+  `l_k` the chord of `A_k` between the mesh's vertices and `B` the bilinear
+  patch over a wall quad, `|P - B| <= max(e_k, e_l)` (`P` and `B` are the
+  same convex combination of `A` and `l`) and `B` is within
+  `loft::quad_deviation` of the two triangles. `e_k` is `h^2 / 8 sup |A_k''|`
+  per piece, the cell split at every seam strictly inside it (a joint whose
+  tangents agree, a change of curvature or grade, a jump of a banked
+  curve's roll), plus the largest distance of a breakpoint value `A_k(c+-)`
+  (and of an end read from another side than the cell's, #301) from the
+  chord. `sup |A''|` is assembled from the frame law's derivative bounds
+  (`axiolid-evaluate` `station::piece_frame_bounds`): `T'` and `T''` from the
+  curve (`1/r` and `1/r^2` on a circle; `D_2 / sigma` and `2 D_3 / sigma + 6
+  D_2^2 / sigma^2` on an elevated or banked curve, #252's), the axes through
+  the unit-vector rule (`|u'| <= |w'| / rho`, `|u''| <= 2 |w''| / rho + 6
+  |w'|^2 / rho^2`, `rho` a certified lower bound of the horizontal tangent)
+  for the reference-up, plan and rolled frames, the roll `asin(g)` bounded
+  from the cant law's certified suprema under both conventions. A turned
+  axis adds its components' derivatives (orientations interpolated
+  linearly and orthonormalised, bounded by the same rule). Where the
+  distance is read by the arc-length inverse (a circle, a polyline: a
+  speed constant per panel, so the rule is exact up to rounding), each
+  vertex stands within `delta = 2 ARC_LENGTH_TOLERANCE max(1, s)` of the
+  distance asked, and `delta (S + 2 Q)` per vertex covers the shifted
+  vertices, the slivers at the ends and the longer cells.
+- **Refinement.** The stations are bisected until the sampling test passes
+  AND the cell's certified bound fits the budget (half of it beside a
+  profile's flattening in a spine), so the report meets the request
+  wherever the run is bounded; the reported value is the worst cell's,
+  recomputed on the mesh's own vertices.
+- **Mitres.** A cell ending on a mitre's plane is exact where the piece is
+  straight and the section constant across the cell (every vertex runs on
+  a line through the plane, and the wall is a planar strip cut by it):
+  only its `quad_deviation` counts. Any other cell beside a mitre is
+  unbounded by name: the definition of the cut surface at a mitre is the
+  projection of each side's section, which a changing section or a curved
+  piece does not make a ruled surface.
+- **Unbounded by name.** A basis framed numerically (an ellipse, a
+  B-spline, an intrinsic curve, a chain, an offset; a skewed circle; an
+  elevated or banked curve with another plan or an intrinsic profile), a
+  tangent too steep to bound its horizontal part, a roll reaching a
+  quarter turn, the mitre cells above, and different curved profiles.
+- **Exact bodies** (`ReferenceExactCompiler`). A constant section along a
+  line or an open polyline whose vertices lie on one line is the profile
+  extruded along the tangent in the section's plane (oblique under a
+  tilted orientation); along a horizontal circle (2D, or 3D in a
+  horizontal plane), unturned and without a longitudinal offset, it is the
+  profile revolved about the circle's axis, which lies in the section's
+  plane along its up, by `(s1 - s0) / r`; a linear taper of straight-edged
+  sections in one orientation along a straight basis is the planar
+  polyhedron `axiolid-construct` `loft_exact` builds, each wall a plane, a
+  wall whose corners are not coplanar refused by name. The frames are read
+  in closed form (the line itself, the circle's angle `s / r`). Every
+  other run is refused by name; the stations are read first, so a station
+  beyond the basis is refused as the mesh compiler refuses it.
+
+| Option | Why not |
+| --- | --- |
+| Branch and bound against an exact parameterisation (#232's tube search) | The mesh's vertices sit at known surface parameters, so the closed per-cell argument is direct, cheaper, and bounds the refinement as it runs. |
+| Keep the sampling test as the only refinement and report the bound | The report would often exceed the budget it was asked for; bounding while refining makes `meets_requested` hold wherever the run is bounded. |
+| Measure the run against a fitted surface | A fitted surface is not the exact one; the bound would be relative to an approximation. |
+| Bound a mitre's cut on curved pieces from the curvature | The cut surface is the projection of each side's section along its tangent, not a sweep; bounding it needs its own definition, left open. |
+| An exact taper whose walls are warped, as bilinear B-spline patches | A degree (1, 1) patch is exact, but the B-rep builders here make planar walls; refused by name until a consumer needs it. |
+
+Still open: cells beside a mitre on curved pieces or with a changing
+section; numerically framed bases (their frame needs a certified
+arc-length inverse); exact bodies along a circle with a changing section
+(not ruled by lines) and with a turned section, and warped tapers.

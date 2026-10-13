@@ -360,6 +360,50 @@ fn cant_bounds(curve: &Banked3, lo: Scalar, hi: Scalar) -> Option<[Scalar; 3]> {
     out.iter().all(|v| v.is_finite()).then_some(out)
 }
 
+/// Certified `(sup |phi'|, sup |phi''|)` of a banked curve's roll over
+/// `[lo, hi]` inside one piece of its cant law (#247).
+///
+/// The roll is `asin(g)`: `g = D / b` about the tangent, `g = D w / b`
+/// with `w = sqrt(1 + G^2) = 1 / cos(theta)` for a vertical rise, `G` the
+/// grade of the point path. With `G_j` the point path's certified
+/// suprema (`|G| <= sup |c'|`, `|G'| <= sup |c''|`, `|G''| <= sup |c'''|`),
+/// `|w'| <= |G'|` and `|w''| <= |G''| + |G'|^2`; `D`'s are the cant's
+/// (`cant_bounds`), `sup |D| <= |D(lo)| + (hi - lo) sup |D'|`. Then
+/// `phi' = g' / c` and `phi'' = g'' / c + g g'^2 / c^3`, `c = sqrt(1 -
+/// g^2) >= sqrt(1 - sup |g|^2)`. `None` across a seam of the cant law, off
+/// it, for a held-rail piece, or where `sup |g|` reaches one.
+pub(crate) fn roll_bounds(curve: &Banked3, lo: Scalar, hi: Scalar) -> Option<[Scalar; 2]> {
+    let (lo, hi) = (lo.min(hi), lo.max(hi));
+    let b = curve.rail_head_distance;
+    if !(b.is_finite() && b > 0.0) || curve.cant.has_rail_pieces() {
+        return None;
+    }
+    let [d1, d2, _] = cant_bounds(curve, lo, hi)?;
+    let d0 = curve.cant_at(lo).ok()?.abs() + (hi - lo) * d1;
+    let (g0, g1, g2) = match curve.convention {
+        axiolid_curve::BankConvention::TangentRotation => (d0 / b, d1 / b, d2 / b),
+        axiolid_curve::BankConvention::VerticalRise => {
+            let point = crate::elevated::banked_derivative_bounds(curve, lo, hi)?;
+            let w = point.first.hypot(1.0);
+            let w1 = point.second;
+            let w2 = point.third + point.second * point.second;
+            (
+                d0 * w / b,
+                (d1 * w + d0 * w1) / b,
+                (d2 * w + 2.0 * d1 * w1 + d0 * w2) / b,
+            )
+        }
+        _ => return None,
+    };
+    if g0.is_nan() || g0 >= 1.0 {
+        return None;
+    }
+    let c = (1.0 - g0 * g0).sqrt();
+    let out =
+        [g1 / c, g2 / c + g0 * g1 * g1 / (c * c * c)].map(|v| v * (1.0 + crate::bound::ROUNDING));
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
 /// `sup |f^(k)|` over `xi` in `[lo, hi]` (clamped to `[0, 1]`) of the
 /// Viennese bend's shape `f = xi^4 (35 - 84 xi + 70 xi^2 - 20 xi^3)`, for
 /// `k` in `1..=3`:

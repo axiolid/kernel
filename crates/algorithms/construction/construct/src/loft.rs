@@ -154,7 +154,7 @@ pub fn loft(rings: &Rings, stations: &[Station], closed: bool) -> GeomResult<Tri
 /// The convexity test runs in floating point with a relative slack of
 /// `1e-12`: a quad that fails it by less leaves an uncovered sliver some
 /// `1e-12` of its size wide, far below any chord budget.
-pub(crate) fn quad_deviation(a: Point3, b: Point3, c: Point3, d: Point3) -> Scalar {
+pub fn quad_deviation(a: Point3, b: Point3, c: Point3, d: Point3) -> Scalar {
     let twist = (a - b - c + d).length() / 4.0;
     let mut best = twist
         .min((b - a).length())

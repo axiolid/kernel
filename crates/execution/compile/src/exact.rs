@@ -7,8 +7,10 @@
 //! the profile normal, #275), revolutions,
 //! booleans of sharp rectangle prisms along +z, differences of placed
 //! extrusions ([`boolean`], #228), clips of those by half-spaces ([`clip`],
-//! #234), disks swept along one segment or one arc, and instances of any
-//! of these under a rigid transform are compiled
+//! #234), disks swept along one segment or one arc, runs of sections at
+//! stations with a closed form (#247: a constant section along a line or a
+//! horizontal circle, a linear taper along a line; `crate::station`), and
+//! instances of any of these under a rigid transform are compiled
 //! exactly; every other family is refused with `GeomError::UnsupportedInput`
 //! naming it.
 //!
@@ -429,6 +431,35 @@ impl<'a> ExactCompilation<'a> {
                 self.set_flattened(root, width);
                 Ok(body)
             }
+            // A constant section along a line or a horizontal circle, and a
+            // linear taper along a line, have closed forms (#247).
+            GeometryNode::SolidOperation(SolidOperation::StationedSpine {
+                directrix,
+                sections,
+                frame,
+            }) => {
+                let sections: Vec<_> = sections.iter().copied().map(Into::into).collect();
+                crate::station::stationed_spine_exact(
+                    self.graph,
+                    *directrix,
+                    &sections,
+                    *frame,
+                    self.options,
+                    unsupported,
+                )
+            }
+            GeometryNode::SolidOperation(SolidOperation::SectionsAtStations {
+                directrix,
+                sections,
+                frame,
+            }) => crate::station::stationed_spine_exact(
+                self.graph,
+                *directrix,
+                sections,
+                *frame,
+                self.options,
+                unsupported,
+            ),
             _ => Err(unsupported(exact_input_family(node))),
         }
     }

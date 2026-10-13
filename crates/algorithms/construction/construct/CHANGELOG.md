@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `loft_exact::loft_polygon_stations_exact` (#247): an exact closed B-rep
+  of planar faces joining planar polygon sections vertex for vertex, caps
+  with holes and one planar wall per ring edge and span; a wall whose
+  corners are not coplanar is refused by name (`loft_exact::WARPED_WALL`).
+- `loft::quad_deviation` is public (#247): the bound a station run's mesh
+  cells use for the wall quad against its two triangles.
+
 ## [0.3.17] - 2026-10-09
 
 ### Fixed

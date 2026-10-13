@@ -22,8 +22,18 @@
 //! the offsets, and each section point with its counterpart. The meshed
 //! sections stand at the stations and at distances bisected between them
 //! until every placed point at an interval's midpoint is within the chord
-//! budget of the midpoint of its chord. That test is a sample, not a
-//! proof, so these paths report [`DeviationBound::Unbounded`] by name.
+//! budget of the midpoint of its chord, and (#247) until each cell's
+//! certified bound fits the budget. The `bound` module states the exact
+//! surface and the bound: a sectioned spine or surface reports
+//! [`DeviationBound::Certified`] wherever the frame law along its basis has
+//! certified derivative bounds, and [`DeviationBound::Unbounded`] by name
+//! elsewhere (a numerically framed basis, a cell beside a mitre on a curved
+//! piece or with a changing section, different curved profiles).
+//!
+//! The `exact` module builds the runs with a closed form exactly (#247):
+//! a constant section along a line or a straight polyline (an extrusion)
+//! or along a horizontal circle (a revolution), and a linear taper of
+//! straight-edged sections along a straight basis (a planar polyhedron).
 //!
 //! # Orientation and tags (#246)
 //!
@@ -189,7 +199,7 @@
 //! [`DeviationBound::Unbounded`]: crate::DeviationBound::Unbounded
 
 use axiolid_construct::loft::{loft_tapered, Station as LoftStation};
-use axiolid_construct::profile::{profile_rings, Rings};
+use axiolid_construct::profile::{profile_deviation, profile_rings, ProfileDeviation, Rings};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Transform3};
 use axiolid_curve::Curve2;
@@ -203,10 +213,15 @@ use axiolid_profile::{Contour, Profile};
 use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
 use axiolid_reference::station::{Mitre, SectionFrame, StationSeam};
 
+use crate::DeviationBound;
+
 mod basis;
+mod bound;
+mod exact;
 
 pub use basis::curve_path;
 pub(crate) use basis::Basis;
+pub(crate) use exact::stationed_spine_exact;
 
 /// Most sections one interval between two stations is bisected into.
 const MAX_DEPTH: u32 = 12;
@@ -836,23 +851,27 @@ fn quad_spread(a: Point3, b: Point3, c: Point3, d: Point3) -> Scalar {
 }
 
 /// Distances at which an interval `[a, b]` is meshed, `a` included and `b`
-/// excluded: bisected until [`passes`] holds, at most [`MAX_DEPTH`] deep.
+/// excluded: bisected until [`passes`] holds and `accept` takes the cell
+/// (#247: its certified bound within the budget), at most [`MAX_DEPTH`]
+/// deep.
 ///
 /// The ends are read as the pieces inside the interval see them (#263): a
 /// mitre's knot at `a` as its outgoing piece's plain section, at `b` as its
 /// incoming piece's, so an interval beside a mitre is sampled as that
 /// piece alone would be. A midpoint section a mitre would cut (`None`) is
 /// not inserted: the interval is joined straight to its end instead.
-fn refine<F>(
+fn refine<F, A>(
     a: Scalar,
     b: Scalar,
     chord: Scalar,
     edges: &[(usize, usize)],
     eval: &F,
+    accept: &A,
     out: &mut Vec<Scalar>,
 ) -> GeomResult<()>
 where
     F: Fn(Scalar, Reading) -> GeomResult<Option<Vec<Point3>>>,
+    A: Fn(Scalar, Scalar, &[Point3], &[Point3]) -> GeomResult<bool>,
 {
     let start = eval(a, Reading::Outgoing)?.ok_or_else(cut_by_mitre)?;
     let end = eval(b, Reading::Incoming)?.ok_or_else(cut_by_mitre)?;
@@ -861,9 +880,12 @@ where
     while let Some((lo, hi, at_lo, at_hi, depth)) = stack.pop() {
         let mid = 0.5 * (lo + hi);
         let at_mid = eval(mid, Reading::Placed)?;
-        let straight = at_mid
-            .as_ref()
-            .is_none_or(|at_mid| passes(&at_lo, &at_hi, at_mid, edges, chord));
+        let straight = match &at_mid {
+            None => true,
+            Some(at_mid) => {
+                passes(&at_lo, &at_hi, at_mid, edges, chord) && accept(lo, hi, &at_lo, &at_hi)?
+            }
+        };
         match at_mid {
             Some(at_mid) if !(straight || depth >= MAX_DEPTH || !(mid > lo && mid < hi)) => {
                 stack.push((mid, hi, at_mid.clone(), at_hi, depth + 1));
@@ -881,18 +903,20 @@ where
 }
 
 /// Every distance a run of stations is meshed at, first and last included.
-fn sample_run<F>(
+fn sample_run<F, A>(
     distances: &[Scalar],
     chord: Scalar,
     edges: &[(usize, usize)],
     eval: F,
+    accept: A,
 ) -> GeomResult<Vec<Scalar>>
 where
     F: Fn(Scalar, Reading) -> GeomResult<Option<Vec<Point3>>>,
+    A: Fn(Scalar, Scalar, &[Point3], &[Point3]) -> GeomResult<bool>,
 {
     let mut out = Vec::new();
     for pair in distances.windows(2) {
-        refine(pair[0], pair[1], chord, edges, &eval, &mut out)?;
+        refine(pair[0], pair[1], chord, edges, &eval, &accept, &mut out)?;
     }
     if let Some(last) = distances.last() {
         out.push(*last);
@@ -976,9 +1000,13 @@ pub(crate) fn offset_curve_points(
     let (run, knots) = Run::new(basis, frame, knots, sides)?;
     let chord = crate::compiler::chord_error(options);
     let at = |s, reading| offset_point(&run, &stations, &distances, s, reading);
-    let samples = sample_run(&knots, chord, &[], |s, reading| {
-        at(s, reading).map(|p| p.map(|p| vec![p]))
-    })?;
+    let samples = sample_run(
+        &knots,
+        chord,
+        &[],
+        |s, reading| at(s, reading).map(|p| p.map(|p| vec![p])),
+        |_, _, _, _| Ok(true),
+    )?;
     let mut points = samples
         .into_iter()
         .map(|s| at(s, Reading::Placed)?.ok_or_else(cut_by_mitre))
@@ -1030,61 +1058,23 @@ pub(crate) fn stationed_spine(
     frame: StationFrame,
     options: &ExecutionOptions,
 ) -> GeomResult<TriMesh> {
-    if sections.len() < 2 {
-        return Err(GeomError::InvalidInput(
-            "a station-placed spine needs at least two sections".into(),
-        ));
-    }
+    stationed_spine_bounded(graph, directrix, sections, frame, options).map(|(mesh, _)| mesh)
+}
+
+/// [`stationed_spine`] and the deviation of its mesh (#247): the
+/// profile's flattening bound plus the worst cell's certified bound
+/// ([`bound`]), or the reason it is unbounded.
+pub(crate) fn stationed_spine_bounded(
+    graph: &GeometryGraph,
+    directrix: NodeId,
+    sections: &[SectionAtStation],
+    frame: StationFrame,
+    options: &ExecutionOptions,
+) -> GeomResult<(TriMesh, DeviationBound)> {
     let basis = Basis::of(graph, directrix)?;
     let half = 0.5 * crate::compiler::chord_error(options);
-    let tagged = !sections[0].tags.is_empty();
-    if sections
-        .iter()
-        .any(|section| section.tags.is_empty() == tagged)
-    {
-        return Err(GeomError::InvalidInput(
-            "station-placed spine sections mix tagged and untagged sections: tag every \
-             section or none"
-                .into(),
-        ));
-    }
-    let shape = |section: &SectionAtStation| match graph.get(section.profile) {
-        Some(GeometryNode::Profile(shape)) => Ok(shape),
-        _ => Err(GeomError::InvalidInput(format!(
-            "spine section profile {:?} is not a Profile node",
-            section.profile
-        ))),
-    };
-    let rings = if tagged {
-        let tagged = sections
-            .iter()
-            .map(|section| tagged_rings(shape(section)?, &section.tags, options.tolerance()))
-            .collect::<GeomResult<Vec<_>>>()?;
-        let first = &tagged[0].1;
-        tagged
-            .iter()
-            .map(|(rings, tags)| match_rings(first, rings, tags))
-            .collect::<GeomResult<Vec<_>>>()?
-    } else {
-        sections
-            .iter()
-            .map(|section| profile_rings(shape(section)?, half, options.tolerance()))
-            .collect::<GeomResult<Vec<_>>>()?
-    };
-    if rings.iter().any(|ring| !same_structure(ring, &rings[0])) {
-        return Err(GeomError::InvalidInput(
-            "station-placed spine sections must share their ring structure: vertices are \
-             matched by ring and index"
-                .into(),
-        ));
-    }
-    let distances: Vec<Scalar> = sections.iter().map(|s| s.station.distance).collect();
-    if distances.windows(2).any(|pair| pair[1] <= pair[0]) {
-        return Err(GeomError::InvalidInput(
-            "station-placed spine distances must increase strictly".into(),
-        ));
-    }
-    let (distances, sides) = snapped_sections(&basis, sections)?;
+    let (rings, tagged) = spine_rings(graph, sections, half, options.tolerance())?;
+    let (distances, sides) = spine_distances(&basis, sections)?;
     let (run, knots) = Run::new(basis, frame, distances.clone(), sides)?;
     let placed = |s: Scalar, reading: Reading| -> GeomResult<Option<(Rings, Vec<Point3>)>> {
         let (i, u) = interval(&distances, s);
@@ -1116,12 +1106,36 @@ pub(crate) fn stationed_spine(
         edges.extend((0..len).map(|k| (base + k, base + (k + 1) % len)));
         base += len;
     }
-    let samples = sample_run(&knots, half, &edges, |s, reading| {
-        placed(s, reading).map(|section| section.map(|(_, points)| points))
-    })?;
+    let profile = profile_bound(graph, sections, tagged, half, options.tolerance())?;
+    let law = bound::SectionLaw::new(
+        &run,
+        &distances,
+        sections.iter().map(|s| s.station.offsets).collect(),
+        sections.iter().map(|s| s.orientation).collect(),
+        rings
+            .iter()
+            .map(|r| {
+                r.outer
+                    .iter()
+                    .chain(r.holes.iter().flatten())
+                    .copied()
+                    .collect()
+            })
+            .collect(),
+        &edges,
+    )?;
+    let samples = sample_run(
+        &knots,
+        half,
+        &edges,
+        |s, reading| placed(s, reading).map(|section| section.map(|(_, points)| points)),
+        |lo, hi, at_lo, at_hi| within(&law, profile.is_ok(), half, lo, hi, at_lo, at_hi),
+    )?;
     let mut stations = Vec::with_capacity(samples.len());
-    for s in samples {
-        let (local, points) = placed(s, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
+    let mut rows = Vec::with_capacity(samples.len());
+    for s in &samples {
+        let (local, points) = placed(*s, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
+        rows.push(points.clone());
         let mut it = points.into_iter();
         let mut loops = Vec::with_capacity(1 + local.holes.len());
         loops.push(it.by_ref().take(local.outer.len()).collect());
@@ -1130,7 +1144,170 @@ pub(crate) fn stationed_spine(
         }
         stations.push(LoftStation { loops });
     }
-    loft_tapered(&rings[0], &rings[rings.len() - 1], &stations)
+    let bound = settle(&law, profile, &samples, &rows)?;
+    let mesh = loft_tapered(&rings[0], &rings[rings.len() - 1], &stations)?;
+    Ok((mesh, bound))
+}
+
+/// A spine's section rings, each matched to the first's vertex for vertex
+/// (by tag, or by ring and index), the untagged ones flattened to
+/// `budget`; and whether the sections are tagged.
+pub(super) fn spine_rings(
+    graph: &GeometryGraph,
+    sections: &[SectionAtStation],
+    budget: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<(Vec<Rings>, bool)> {
+    if sections.len() < 2 {
+        return Err(GeomError::InvalidInput(
+            "a station-placed spine needs at least two sections".into(),
+        ));
+    }
+    let tagged = !sections[0].tags.is_empty();
+    if sections
+        .iter()
+        .any(|section| section.tags.is_empty() == tagged)
+    {
+        return Err(GeomError::InvalidInput(
+            "station-placed spine sections mix tagged and untagged sections: tag every \
+             section or none"
+                .into(),
+        ));
+    }
+    let shape = |section: &SectionAtStation| match graph.get(section.profile) {
+        Some(GeometryNode::Profile(shape)) => Ok(shape),
+        _ => Err(GeomError::InvalidInput(format!(
+            "spine section profile {:?} is not a Profile node",
+            section.profile
+        ))),
+    };
+    let rings = if tagged {
+        let tagged = sections
+            .iter()
+            .map(|section| tagged_rings(shape(section)?, &section.tags, tolerance))
+            .collect::<GeomResult<Vec<_>>>()?;
+        let first = &tagged[0].1;
+        tagged
+            .iter()
+            .map(|(rings, tags)| match_rings(first, rings, tags))
+            .collect::<GeomResult<Vec<_>>>()?
+    } else {
+        sections
+            .iter()
+            .map(|section| profile_rings(shape(section)?, budget, tolerance))
+            .collect::<GeomResult<Vec<_>>>()?
+    };
+    if rings.iter().any(|ring| !same_structure(ring, &rings[0])) {
+        return Err(GeomError::InvalidInput(
+            "station-placed spine sections must share their ring structure: vertices are \
+             matched by ring and index"
+                .into(),
+        ));
+    }
+    Ok((rings, tagged))
+}
+
+/// A spine's stations' distances, increasing as given and snapped by
+/// their windows (#301), with the side each names.
+pub(super) fn spine_distances(
+    basis: &Basis<'_>,
+    sections: &[SectionAtStation],
+) -> GeomResult<(Vec<Scalar>, RunSides)> {
+    if sections
+        .windows(2)
+        .any(|pair| pair[1].station.distance <= pair[0].station.distance)
+    {
+        return Err(GeomError::InvalidInput(
+            "station-placed spine distances must increase strictly".into(),
+        ));
+    }
+    snapped_sections(basis, sections)
+}
+
+/// Why sections with different curved profiles are unbounded (#247).
+const CURVED_TAPER: &str =
+    "stationed sections: different curved profiles at the stations have no exact vertex \
+     correspondence between them";
+
+/// The profile's share of a spine's bound (#247): `0` for straight-edged
+/// sections (their rings are the exact profiles, a tagged section's
+/// always), the worst flattening bound where every section is one curved
+/// profile (the interpolation between a profile and itself is that
+/// profile, placed rigidly), else the reason it is unbounded.
+fn profile_bound(
+    graph: &GeometryGraph,
+    sections: &[SectionAtStation],
+    tagged: bool,
+    budget: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<Result<Scalar, &'static str>> {
+    if tagged {
+        return Ok(Ok(0.0));
+    }
+    let mut worst: Scalar = 0.0;
+    for section in sections {
+        let Some(GeometryNode::Profile(shape)) = graph.get(section.profile) else {
+            return Ok(Err(CURVED_TAPER));
+        };
+        match profile_deviation(shape, budget, tolerance)? {
+            ProfileDeviation::Bounded(d) => worst = worst.max(d),
+            ProfileDeviation::Unbounded(reason) => return Ok(Err(reason)),
+            _ => return Ok(Err("profile deviation")),
+        }
+    }
+    let first = graph.get(sections[0].profile);
+    let one = sections
+        .iter()
+        .all(|s| s.profile == sections[0].profile || graph.get(s.profile) == first);
+    Ok(if worst == 0.0 || one {
+        Ok(worst)
+    } else {
+        Err(CURVED_TAPER)
+    })
+}
+
+/// Whether a sampled cell is fine enough (#247): its certified bound within
+/// `budget`, or any cell where the run is not bounded (the sampling test
+/// alone decides there).
+fn within(
+    law: &bound::SectionLaw<'_, '_>,
+    bounded: bool,
+    budget: Scalar,
+    lo: Scalar,
+    hi: Scalar,
+    at_lo: &[Point3],
+    at_hi: &[Point3],
+) -> GeomResult<bool> {
+    if !bounded {
+        return Ok(true);
+    }
+    Ok(law
+        .cell(lo, hi, at_lo, at_hi)?
+        .map_or(true, |bound| bound <= budget))
+}
+
+/// A run's deviation (#247): `fixed` (the profile's share) plus the worst
+/// certified bound over the meshed cells between consecutive `samples`,
+/// whose placed points are `rows`; unbounded by the first reason met.
+fn settle(
+    law: &bound::SectionLaw<'_, '_>,
+    fixed: Result<Scalar, &'static str>,
+    samples: &[Scalar],
+    rows: &[Vec<Point3>],
+) -> GeomResult<DeviationBound> {
+    let mut worst = match fixed {
+        Ok(value) => value,
+        Err(reason) => return Ok(DeviationBound::Unbounded(reason)),
+    };
+    let mut cells: Scalar = 0.0;
+    for (pair, points) in samples.windows(2).zip(rows.windows(2)) {
+        match law.cell(pair[0], pair[1], &points[0], &points[1])? {
+            Ok(value) => cells = cells.max(value),
+            Err(reason) => return Ok(DeviationBound::Unbounded(reason)),
+        }
+    }
+    worst += cells;
+    Ok(DeviationBound::Certified(worst))
 }
 
 /// Why a tagged closed section cannot be matched (#246).
@@ -1330,14 +1507,16 @@ fn open_section(graph: &GeometryGraph, section: &SectionAtStation) -> GeomResult
 }
 
 /// Mesh a [`SurfaceRelation::SectionedSurface`](axiolid_model::SurfaceRelation::SectionedSurface)
-/// as an open sheet.
+/// as an open sheet, with its deviation (#247): the worst cell's certified
+/// bound ([`bound`]; an open section is a polyline, its own exact
+/// section), or the reason it is unbounded.
 pub(crate) fn sectioned_surface(
     graph: &GeometryGraph,
     directrix: NodeId,
     sections: &[SectionAtStation],
     frame: StationFrame,
     options: &ExecutionOptions,
-) -> GeomResult<TriMesh> {
+) -> GeomResult<(TriMesh, DeviationBound)> {
     if sections.len() < 2 {
         return Err(GeomError::InvalidInput(
             "a sectioned surface needs at least two sections".into(),
@@ -1402,11 +1581,25 @@ pub(crate) fn sectioned_surface(
     };
     let chord = crate::compiler::chord_error(options);
     let edges: Vec<(usize, usize)> = (0..count - 1).map(|k| (k, k + 1)).collect();
-    let samples = sample_run(&knots, chord, &edges, placed)?;
+    let law = bound::SectionLaw::new(
+        &run,
+        &distances,
+        sections.iter().map(|s| s.station.offsets).collect(),
+        sections.iter().map(|s| s.orientation).collect(),
+        polylines.clone(),
+        &edges,
+    )?;
+    let samples = sample_run(&knots, chord, &edges, placed, |lo, hi, at_lo, at_hi| {
+        within(&law, true, chord, lo, hi, at_lo, at_hi)
+    })?;
     let mut positions = Vec::with_capacity(samples.len() * count);
+    let mut rows = Vec::with_capacity(samples.len());
     for s in &samples {
-        positions.extend(placed(*s, Reading::Placed)?.ok_or_else(cut_by_mitre)?);
+        let row = placed(*s, Reading::Placed)?.ok_or_else(cut_by_mitre)?;
+        positions.extend(row.iter().copied());
+        rows.push(row);
     }
+    let bound = settle(&law, Ok(0.0), &samples, &rows)?;
     let mut indices = Vec::with_capacity((samples.len() - 1) * (count - 1) * 6);
     for row in 0..samples.len() - 1 {
         let a = (row * count) as u32;
@@ -1417,7 +1610,7 @@ pub(crate) fn sectioned_surface(
     }
     let mesh = TriMesh::new(positions, indices);
     reject_degenerate(&mesh, options.tolerance())?;
-    Ok(mesh)
+    Ok((mesh, bound))
 }
 
 /// Refuse a sheet with a collapsed triangle: two sections that place a

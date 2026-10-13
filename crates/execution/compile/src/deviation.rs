@@ -102,6 +102,16 @@
 //!   the origin) is not part of the bound, as the rounding of computing a
 //!   construction's own vertices is not.
 //!   Collections take the worst member.
+//! - Runs of sections at stations (#247): stationed spines and sectioned
+//!   surfaces are bounded cell by cell as they are sampled
+//!   (`crate::station`'s `bound` module): the vertex paths' chord bound
+//!   from certified derivative bounds of the frame law, breakpoints at
+//!   seams inside a cell, and the wall quad's
+//!   `axiolid_construct::loft::quad_deviation`, plus a spine's profile
+//!   flattening, [`DeviationBound::Certified`]; a numerically framed basis,
+//!   a cell beside a mitre on a curved piece or with a changing section,
+//!   and different curved profiles are [`DeviationBound::Unbounded`] by
+//!   name.
 //! - Instances at stations (#264) move their source rigidly: on a line
 //!   basis the frame is exact and the source's bound stands; on any other
 //!   the frame is the exact curve's at a distance read by an estimate (the
@@ -168,7 +178,9 @@ use axiolid_core::{Scalar, Transform3};
 mod boolean;
 mod paths;
 pub(crate) use boolean::{emitted_booleans, of_boolean};
-pub(crate) use paths::{of_curve_bounded, of_primitive, of_sectioned_surface, of_solid};
+pub(crate) use paths::{
+    of_curve_bounded, of_primitive, of_sectioned_surface, of_solid, stationed_spine,
+};
 
 /// The [`DeviationContribution::detail`] of authored polygon faces warped
 /// beyond the linear tolerance (#254).

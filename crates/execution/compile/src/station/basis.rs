@@ -37,11 +37,13 @@ use axiolid_model::{
     CurveRelation, GeometryGraph, GeometryNode, MasterRepresentation, NodeId, RunStation, SeamSide,
     StationFrame, TrimSelector, TrimmingPreference,
 };
+use axiolid_reference::arc_parameter::ARC_LENGTH_TOLERANCE;
 use axiolid_reference::station::{
-    exact_station_seams2, exact_station_seams3, offset_pieces, snapped_distance2,
-    snapped_distance3, station_frame_is_exact2, station_frame_is_exact3, station_seams2,
-    station_seams3, station_section2_on, station_section3_on, CompositeBasis, DistanceConvention,
-    SectionFrame, StationCurve, StationPiece, StationSeam, JOINT_TOLERANCE,
+    exact_station_seams2, exact_station_seams3, offset_pieces, piece_frame_bounds,
+    snapped_distance2, snapped_distance3, station_frame_is_exact2, station_frame_is_exact3,
+    station_seams2, station_seams3, station_section2_on, station_section3_on, CompositeBasis,
+    DistanceConvention, FrameLawBounds, FrameReading, SectionFrame, StationCurve, StationPiece,
+    StationSeam, JOINT_TOLERANCE,
 };
 
 /// Most relations and placements a station basis may be nested through.
@@ -248,6 +250,39 @@ impl<'g> Basis<'g> {
         match self {
             Self::Atomic { exact, .. } => *exact,
             Self::Composite(composite) => composite.frame_is_exact_at(distance, side),
+        }
+    }
+
+    /// Certified derivative bounds of the frame law over `[a, b]`, a span
+    /// that crosses no seam (#247): the piece holding it read by
+    /// `axiolid_reference::station::piece_frame_bounds`; `None` where they
+    /// are not certified.
+    pub(super) fn frame_bounds(
+        &self,
+        a: Scalar,
+        b: Scalar,
+        reading: FrameReading,
+    ) -> Option<FrameLawBounds> {
+        match self {
+            Self::Atomic { curve, placed, .. } => {
+                let mut piece = StationPiece::between(*curve, a, b).ok()?;
+                if let Some(rigid) = placed {
+                    piece = piece.placed(*rigid, true);
+                }
+                piece_frame_bounds(&piece, 0.0, b - a, reading)
+            }
+            Self::Composite(composite) => {
+                let slack = 2.0 * ARC_LENGTH_TOLERANCE * b.abs().max(1.0);
+                let mut start = 0.0;
+                for piece in composite.pieces() {
+                    let end = start + piece.length();
+                    if a >= start - slack && b <= end + slack {
+                        return piece_frame_bounds(piece, a - start, b - start, reading);
+                    }
+                    start = end;
+                }
+                None
+            }
         }
     }
 
