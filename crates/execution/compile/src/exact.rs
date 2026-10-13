@@ -23,6 +23,15 @@
 //! tolerance (#236): an exact [`BooleanReport`] means the body is the exact
 //! result of its operands as given; otherwise it was built from operands
 //! moved by at most the report's magnitudes, within the tolerance.
+//!
+//! Only for a boolean's deviation report (#266, crate-internal), a
+//! compilation may flatten mesh operands: an authored mesh, or a B-rep
+//! of planes and warped faces without a surface, becomes the exact
+//! polyhedron of the triangles the mesh compiler makes of it
+//! (`polyhedral`), and the largest slab width a warped face was flattened
+//! by is reported with the body. That is the perturbed operand of
+//! ADR 0080, not the exact surface of a warped face, so the public
+//! compiler never does it and refuses meshes by name.
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,6 +52,7 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 mod boolean;
 mod clip;
+mod polyhedral;
 
 /// Scalar reference implementation of the exact-compilation capability.
 #[derive(Debug, Clone, Copy, Default)]
@@ -88,6 +98,31 @@ impl ReferenceExactCompiler {
         let mut compilation = ExactCompilation::new(graph, options);
         let body = compilation.compile(root)?;
         Ok((body, compilation.report_of(root)))
+    }
+
+    /// [`Self::compile_exact_with_report`] for a boolean's deviation
+    /// report (#266): mesh operands (authored meshes, and B-reps whose
+    /// faces are all planes or warped faces without a surface) are taken
+    /// as the exact polyhedra of their triangle meshes, and a union or
+    /// intersection is taken when an operand is such a mesh. Also returns
+    /// the largest slab width any flattened operand beneath `root` was
+    /// moved by (zero when none was warped). The public compiler keeps
+    /// refusing meshes: their triangles are one reading of a warped face,
+    /// not its exact surface.
+    pub(crate) fn compile_flattened_with_report(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<(ExactBRep, BooleanReport, Scalar)> {
+        let mut compilation = ExactCompilation::new(graph, options);
+        compilation.flatten = true;
+        let body = compilation.compile(root)?;
+        Ok((
+            body,
+            compilation.report_of(root),
+            compilation.flattened_of(root),
+        ))
     }
 
     /// [`Self::compile_exact_with_report`] for several roots in one
@@ -157,6 +192,13 @@ struct ExactCompilation<'a> {
     reports: HashMap<NodeId, BooleanReport>,
     /// The report of the general boolean `compile_boolean` just ran.
     boolean_report: Option<BooleanReport>,
+    /// Whether mesh operands are taken as the exact polyhedra of their
+    /// triangle meshes (#266,
+    /// [`ReferenceExactCompiler::compile_flattened_with_report`]).
+    flatten: bool,
+    /// Per compiled node with a warped mesh beneath it: the largest slab
+    /// width a flattened operand was moved by (#266). Absent means none.
+    flattened: HashMap<NodeId, Scalar>,
 }
 
 impl<'a> ExactCompilation<'a> {
@@ -170,6 +212,54 @@ impl<'a> ExactCompilation<'a> {
             evaluated_nodes: 0,
             reports: HashMap::new(),
             boolean_report: None,
+            flatten: false,
+            flattened: HashMap::new(),
+        }
+    }
+
+    /// The largest slab width of the meshes flattened beneath a node.
+    fn flattened_of(&self, node: NodeId) -> Scalar {
+        self.flattened.get(&node).copied().unwrap_or(0.0)
+    }
+
+    /// Record the largest slab width flattened beneath a node, if any.
+    fn set_flattened(&mut self, node: NodeId, width: Scalar) {
+        if width > 0.0 {
+            self.flattened.insert(node, width);
+        }
+    }
+
+    /// A mesh operand as the exact polyhedron of its triangle mesh, with
+    /// the slab width its warped faces were flattened by (#266).
+    fn flattened_mesh(&self, node: &GeometryNode) -> GeomResult<(ExactBRep, Scalar)> {
+        match node {
+            GeometryNode::PolygonMesh(mesh) => {
+                let (triangles, warp) =
+                    crate::compiler::compile_authored_polygons(mesh, self.options)?;
+                Ok((polyhedral::from_triangles(&triangles)?, warp.unwrap_or(0.0)))
+            }
+            GeometryNode::TriMesh(mesh) => Ok((polyhedral::from_triangles(mesh)?, 0.0)),
+            GeometryNode::BRep(brep) => {
+                let (triangles, closure, deviation) = crate::brep::tessellate(
+                    brep,
+                    self.graph,
+                    self.options.tolerance(),
+                    crate::compiler::chord_error(self.options),
+                )?;
+                if closure != axiolid_mesh_compile_contract::MeshClosure::Solid {
+                    return Err(unsupported(
+                        "exact boolean over a B-rep operand that bounds no solid",
+                    ));
+                }
+                let warp = deviation.polyhedral_warp().ok_or_else(|| {
+                    unsupported(
+                        "exact boolean over a B-rep operand with a face that is neither a plane \
+                         with straight edges nor a warped face without a surface",
+                    )
+                })?;
+                Ok((polyhedral::from_triangles(&triangles)?, warp))
+            }
+            other => Err(unsupported(exact_input_family(other))),
         }
     }
 
@@ -254,6 +344,7 @@ impl<'a> ExactCompilation<'a> {
                 let instance = *instance;
                 let source = self.compile(instance.source)?;
                 self.set_report(root, self.report_of(instance.source));
+                self.set_flattened(root, self.flattened_of(instance.source));
                 source
                     .transformed(&instance.transform)
                     .map_err(|error| match error {
@@ -278,6 +369,7 @@ impl<'a> ExactCompilation<'a> {
                 }
                 let source = self.compile(source_id)?;
                 self.set_report(root, self.report_of(source_id));
+                self.set_flattened(root, self.flattened_of(source_id));
                 source
                     .transformed(&placement.transform)
                     .map_err(|error| match error {
@@ -324,6 +416,17 @@ impl<'a> ExactCompilation<'a> {
                     .merged(&self.report_of(right))
                     .merged(&own);
                 self.set_report(root, report);
+                let width = self.flattened_of(left).max(self.flattened_of(right));
+                self.set_flattened(root, width);
+                Ok(body)
+            }
+            // Only for a boolean's report (#266): a mesh operand flattened
+            // to the exact polyhedron of its triangles.
+            GeometryNode::PolygonMesh(_) | GeometryNode::TriMesh(_) | GeometryNode::BRep(_)
+                if self.flatten =>
+            {
+                let (body, width) = self.flattened_mesh(node)?;
+                self.set_flattened(root, width);
                 Ok(body)
             }
             _ => Err(unsupported(exact_input_family(node))),

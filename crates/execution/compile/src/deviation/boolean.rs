@@ -61,6 +61,26 @@
 //! exact axis matrices, or crossing only transversally). Otherwise the
 //! detail keeps "operands within tolerance".
 //!
+//! # Warped mesh operands (#266)
+//!
+//! The exact result is compiled with
+//! `ReferenceExactCompiler::compile_flattened_with_report`, which also
+//! takes mesh operands: an authored polygon or triangle mesh, and a B-rep
+//! whose faces are all planes with straight edges or warped faces without
+//! a surface, each as the exact polyhedron of the triangles the mesh
+//! compiler makes of it (`crate::exact`'s `polyhedral` module), and a
+//! union or intersection when an operand is such a mesh. A warped face's
+//! triangles lie within its slab width `w` of every reading of the face,
+//! both ways (`crate::planar`), so that exact result is the exact boolean
+//! of operands perturbed by at most the largest such `w`: ADR 0080's
+//! contract, with the perturbation reported. The contribution is the
+//! measured distance `d` to it plus `w` (rounded up), under the detail
+//! [`FLATTENED`]; the search settles within the budget less `w`, so a
+//! boolean whose slab widths fit the budget reports within it. An
+//! unwarped mesh (`w = 0`) is the exact polyhedron it describes and is
+//! measured like any exact operand. A flattened boolean the exact
+//! compiler refuses is unbounded by the refusal's name, like any other.
+//!
 //! # Which booleans are measured
 //!
 //! Only those whose result is emitted ([`emitted_booleans`]): a boolean
@@ -80,8 +100,9 @@
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (a union or intersection of placed
-//! operands, an operand that is not a placed extrusion, a configuration the
-//! general boolean cannot build) carries the refusal's name. A face whose
+//! extrusions, an operand that is neither a placed extrusion nor a mesh it
+//! flattens, a configuration the general boolean cannot build) carries the
+//! refusal's name. A face whose
 //! surface family has no derivative bounds, whose pcurve family has no
 //! certified chord bound, or whose loops do not close in its parameters
 //! (a periodic face trimmed by two separate circles) is unbounded by name.
@@ -113,6 +134,12 @@ const MEASURED: &str = "measured against the exact compiler's result, operands w
 /// operands as given (#236).
 const MEASURED_EXACT: &str =
     "measured against the exact compiler's result, the exact boolean of the given operands";
+/// The detail of a boolean with a warped mesh operand (#266), measured
+/// against the exact boolean of its operands flattened to their triangle
+/// meshes, the bound widened by the largest slab width they were
+/// flattened by.
+const FLATTENED: &str =
+    "measured against the exact boolean of operands flattened within their slab width, plus it";
 /// The detail of a boolean with no exact result to measure against.
 const NO_EXACT: &str = "no exact result";
 
@@ -130,8 +157,8 @@ pub(crate) fn of_boolean(
     options: &ExecutionOptions,
     mesh: &TriMesh,
 ) -> Deviation {
-    let (exact, report) =
-        match ReferenceExactCompiler::new().compile_exact_with_report(graph, id, options) {
+    let (exact, report, flattened) =
+        match ReferenceExactCompiler::new().compile_flattened_with_report(graph, id, options) {
             Ok(compiled) => compiled,
             Err(error) => {
                 return Deviation::one(
@@ -141,19 +168,50 @@ pub(crate) fn of_boolean(
                 )
             }
         };
-    // No decision within tolerance: the exact compiler's result is the
-    // boolean of the operands as given, and the bound holds for it (#236).
-    let detail = if report.is_exact() {
+    // A warped operand was flattened to its triangles (#266): the result
+    // is the exact boolean of operands moved by up to `flattened`. No
+    // decision within tolerance otherwise: the exact compiler's result is
+    // the boolean of the operands as given, and the bound holds for it
+    // (#236).
+    let detail = if flattened > 0.0 {
+        FLATTENED
+    } else if report.is_exact() {
         MEASURED_EXACT
     } else {
         MEASURED
     };
-    let target = crate::compiler::chord_error(options);
-    let bound = match measure(&exact, mesh, target, target) {
-        Ok(value) => DeviationBound::Certified(value),
+    let budget = crate::compiler::chord_error(options);
+    // The flattening takes its share of the budget first (#266): the
+    // search settles once within what is left, so a boolean whose
+    // operands' slab widths fit the budget still reports within it. One
+    // that does not fit cannot meet it whatever the search finds, so it
+    // settles within the budget too rather than tightening further.
+    let measured = if flattened < budget {
+        let left = budget - flattened;
+        measure(&exact, mesh, left, left)
+    } else {
+        measure(&exact, mesh, budget, budget)
+    };
+    let bound = match measured {
+        Ok(value) => DeviationBound::Certified(widened(value, flattened)),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
     Deviation::one(DeviationPath::Boolean, detail, bound)
+}
+
+/// The measured distance to the exact boolean of the flattened operands,
+/// widened by how far they were flattened (#266): their sum, rounded up
+/// when the `f64` sum rounded down (Knuth's two-sum gives the error
+/// exactly), so never below the real sum.
+fn widened(measured: Scalar, flattened: Scalar) -> Scalar {
+    let sum = measured + flattened;
+    let back = sum - flattened;
+    let error = (flattened - (sum - back)) + (measured - back);
+    if error > 0.0 {
+        sum.next_up()
+    } else {
+        sum
+    }
 }
 
 /// The boolean nodes whose meshes `root` emits: reached from `root`

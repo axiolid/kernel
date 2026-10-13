@@ -40,11 +40,11 @@ MUTANTS = [
     # #236: the detail claims the given operands only when nothing was
     # read within tolerance.
     ('detail claims the given operands whatever the report', BOOL,
-     '    let detail = if report.is_exact() {',
-     '    let detail = if true {', [MEASURED]),
+     '    } else if report.is_exact() {',
+     '    } else if true {', [MEASURED]),
     ('detail never claims the given operands', BOOL,
-     '    let detail = if report.is_exact() {',
-     '    let detail = if false {', [MEASURED]),
+     '    } else if report.is_exact() {',
+     '    } else if false {', [MEASURED]),
 ]
 
 probe_lib.main(MUTANTS, timeout=1800)

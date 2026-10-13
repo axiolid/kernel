@@ -33,6 +33,16 @@
 //! the general boolean cannot build exactly ([`BooleanError`]) are
 //! `GeomError::UnsupportedInput` naming the case. A difference that removes
 //! the whole subject is `GeomError::Degenerate`. Nothing is meshed.
+//!
+//! # Mesh operands, for a boolean's report only (#266)
+//!
+//! A compilation that flattens meshes (crate-internal, for
+//! `crate::deviation`) reads an authored mesh, or a B-rep of planes and
+//! warped faces without a surface, as a placed operand too, compiled to the
+//! exact polyhedron of its triangles (`super::polyhedral`), as subject or
+//! tool, and takes any operator when an operand is such a mesh. The rest
+//! of the dispatch, and every refusal above, is unchanged; the public
+//! compiler still refuses a mesh operand by name.
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
@@ -51,6 +61,10 @@ enum Placed {
     Extrusion,
     /// Another boolean, under zero or more rigid placements.
     Boolean,
+    /// A mesh operand taken as the exact polyhedron of its triangles,
+    /// under zero or more rigid placements: only when the compilation
+    /// flattens meshes for a boolean's report (#266).
+    Mesh,
 }
 
 impl ExactCompilation<'_> {
@@ -71,14 +85,18 @@ impl ExactCompilation<'_> {
         // The subject may be a placed extrusion or an earlier cut (a placed
         // boolean, which compiles or refuses by itself); the tool is read
         // through its placements too.
-        self.placed(left)?;
+        let subject = self.placed(left)?;
         let tool = self.placed(right)?;
-        if operator != BooleanOperator::Difference {
+        // A mesh operand is flattened only for a boolean's report (#266),
+        // whose meshes are unions as often as differences; the compiler's
+        // own scope for placed extrusions stays differences.
+        let meshed = subject == Placed::Mesh || tool == Placed::Mesh;
+        if operator != BooleanOperator::Difference && !meshed {
             return Err(unsupported(
                 "exact union or intersection of placed operands",
             ));
         }
-        if tool != Placed::Extrusion {
+        if !matches!(tool, Placed::Extrusion | Placed::Mesh) {
             return Err(unsupported(
                 "exact boolean tool that is not a placed extrusion",
             ));
@@ -107,6 +125,11 @@ impl ExactCompilation<'_> {
                 }
                 GeometryNode::SolidOperation(SolidOperation::Boolean { .. }) => {
                     return Ok(Placed::Boolean)
+                }
+                GeometryNode::PolygonMesh(_) | GeometryNode::TriMesh(_) | GeometryNode::BRep(_)
+                    if self.flatten =>
+                {
+                    return Ok(Placed::Mesh)
                 }
                 _ => {
                     return Err(unsupported(

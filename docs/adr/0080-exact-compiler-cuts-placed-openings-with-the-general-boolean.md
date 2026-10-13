@@ -487,3 +487,72 @@ coordinates closed; the fallback with a mesh boolean that refuses the
 snapped operands), the snap's unit tests, and
 `crates/algorithms/construction/brep-boolean/tests/openings.rs`; probe
 `scripts/probe_thin_skin_mutants.py`.
+
+## Amendment 2026-10-13: a warped operand's slab width in a boolean's bound (#266)
+
+Since #261/#257 a warped authored polygon face, or a warped B-rep face
+without a surface, compiles with a certified bound: the width `w` of the
+slab its corners span about its fit plane, within which its triangles
+and every reading of the face (either diagonal, the flattened face, a
+bilinear patch) lie of each other, both ways. Under a boolean the same
+operand made the report unbounded: the exact compiler refuses meshes, so
+nothing was measured, and a consumer compiled every authored operand
+alone to find its warp.
+
+- **Reading.** This ADR's guarantee already states a boolean's result as
+  the exact boolean of operands perturbed within a reported amount. A
+  warped operand's triangles are such a perturbation of it, by `w`, and
+  they are exact polyhedra. So the deviation report measures a boolean
+  with a mesh operand against the exact boolean of the operands
+  flattened to their triangles, and reports the flattening.
+- **Decision: flatten for the report only.** A crate-internal mode of the
+  exact compilation (`compile_flattened_with_report`) takes an authored
+  polygon or triangle mesh, and a B-rep whose faces are all planes with
+  straight edges or warped faces without a surface, as the exact
+  polyhedron of the triangles the mesh compiler makes of it (one planar
+  face per triangle, line edges shared by index; a mesh that is not a
+  closed, consistently wound two-manifold or is wound inside out is
+  refused by name), as subject or tool, through rigid placements, and as
+  a clip's subject. Where an operand is such a mesh it takes union and
+  intersection too, since meshes are unioned as often as cut; unions of
+  placed extrusions stay refused. It records the largest `w` flattened
+  beneath each node, through instances and booleans. The public
+  `ReferenceExactCompiler` is unchanged and refuses meshes by name: the
+  triangles are one reading of a warped face, not its surface.
+- **Decision: the composition.** The boolean's contribution is
+  `Certified(d + w)`, `d` the certified distance from that exact result to
+  the mesh, `w` the largest slab width flattened beneath the boolean, the
+  sum rounded up, under the detail "measured against the exact boolean of
+  operands flattened within their slab width, plus it". The search
+  settles within the budget less `w`, so slab widths that fit the budget
+  leave the measurement the rest and `meets_requested` follows; widths
+  that do not fit settle within the budget. Each warped operand's own
+  contribution travels with the boolean (as the #276 snap does), so the
+  report names what was flattened. An operand's one-sided bound still
+  never composes into a boolean's (#235); the slab width does because it
+  is two-sided.
+- **What it covers.** Relative to the flattened operands, the bound is
+  exact surface to mesh, as for every measured boolean. The `+ w` covers
+  the boolean of the unflattened operands where they cross transversally
+  (the tests sample the boolean of the bilinear and both diagonal
+  readings densely); near tangency the boolean of the unperturbed
+  operands can lie further, and the guarantee is this ADR's: the exact
+  boolean of operands perturbed within the reported deviation.
+- **Refused by name.** Where the exact boolean cannot take the flattened
+  operand (an open mesh, a B-rep with a curved face, a tool that is
+  itself a boolean, a configuration the general boolean refuses, such as
+  a point too close to a fine fan of triangles to classify), the boolean
+  is `Unbounded` with that refusal's name, and the warp is still named;
+  never unbounded without a reason.
+- **Unwarped meshes.** `w = 0`: the polyhedron is the mesh's exact
+  surface, and an unwarped authored box cut, unioned or intersected with
+  a placed box is measured against the exact boolean of the operands as
+  given (an empty report), within the budget.
+
+Tests: `crates/execution/compile/tests/warped_boolean.rs` (a unit box with
+one corner lifted 5 cm and a saddle of +-5 cm, authored and as a B-rep,
+unioned with and cut by a planar box, and as the tool; at budgets of
+1 mm, 5 cm and 20 cm; an unwarped pair by every operator; a chain under an
+instance; a refusal by name), the polyhedron's unit tests in
+`crates/execution/compile/src/exact/polyhedral.rs`; probe
+`scripts/probe_polygon_faces_mutants.py` (#266 mutants).

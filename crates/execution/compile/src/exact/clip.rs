@@ -489,6 +489,14 @@ impl ExactCompilation<'_> {
                     Ok(self.envelope(left)?.union(self.envelope(right)?))
                 }
             }
+            // A mesh flattened for a boolean's report (#266): every edge of
+            // its polyhedron is a segment, so its edges' box holds it.
+            GeometryNode::PolygonMesh(_) | GeometryNode::TriMesh(_) | GeometryNode::BRep(_)
+                if self.flatten =>
+            {
+                let solid = self.compile(id)?;
+                edge_box(&solid)
+            }
             _ => Err(unsupported(
                 "exact half-space clip of a subject not built from placed extrusions",
             )),

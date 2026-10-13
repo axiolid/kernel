@@ -112,7 +112,8 @@
 //!   a one-sided bound on each operand does not bound it, so nothing is
 //!   derived from the operands. Where `ReferenceExactCompiler` builds the
 //!   exact result of the same node (differences of placed extrusions,
-//!   #228, and half-space clips, #234), the mesh is certified against that
+//!   #228, and half-space clips, #234; for the report also booleans with
+//!   a mesh operand, any operator, below), the mesh is certified against that
 //!   exact B-rep by the branch and bound above, over each face's trimmed
 //!   parameter domain; a boolean it refuses is unbounded with the
 //!   refusal's name. The bound is relative to the exact compiler's result,
@@ -131,6 +132,34 @@
 //!   carried through instances and enclosing booleans, the measured ones
 //!   included; it never exceeds the tolerance. A boolean whose snapped
 //!   operands are refused is cut as given and reports no snap.
+//! - Warped operands (#266): an operand that is an authored mesh, or a
+//!   B-rep whose faces are all planes with straight edges or warped faces
+//!   without a surface, is measured as the exact polyhedron of its
+//!   triangle mesh: a warped face flattened to its triangles, within its
+//!   slab width `w` of every reading of the face (`crate::planar`), both
+//!   ways. That is how an operand's certified bound composes into a
+//!   boolean's: not as a one-sided bound (above), but as a two-sided
+//!   perturbation of the operand. The boolean's mesh is measured against
+//!   the exact boolean of the flattened operands (ADR 0080: the exact
+//!   boolean of operands perturbed within the reported deviation), by `d`,
+//!   and its contribution is [`DeviationBound::Certified`] `d + w`, `w`
+//!   the largest slab width of any operand flattened beneath it, under
+//!   the detail "measured against the exact boolean of operands flattened
+//!   within their slab width, plus it". The search settles within the
+//!   budget less `w`, so a boolean whose slab widths fit the budget
+//!   reports within it, and `meets_requested` follows. Each warped
+//!   operand's own contribution ("non-planar authored face", "non-planar
+//!   face without a surface") is carried as the snap is, so the report
+//!   names it. Transversal to the cut, the boolean of the unflattened operands
+//!   is within `d + w` of the mesh too; near tangency the guarantee is
+//!   ADR 0080's, relative to the flattened operands. Where the exact
+//!   boolean cannot take the flattened operand (a mesh that is not a
+//!   closed two-manifold, a B-rep with a curved face, a tool that is
+//!   itself a boolean, a configuration the general boolean refuses) the
+//!   boolean is [`DeviationBound::Unbounded`] with that refusal's name,
+//!   and the warp is still named. An unwarped mesh operand (`w = 0`) is
+//!   measured like any exact operand, against the exact boolean of the
+//!   operands as given when no decision within tolerance fired.
 //!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
@@ -192,7 +221,14 @@ pub enum DeviationPath {
     BRepFace,
     /// A plane trimmed by boundary curves.
     CurveBoundedPlane,
-    /// A boolean of two meshes.
+    /// A boolean of two meshes, measured against its exact result (#235).
+    ///
+    /// An operand's own bound does not compose into it as a one-sided
+    /// bound: a boolean is measured, not derived. A warped operand (#266)
+    /// enters as a two-sided perturbation: the exact result is the boolean
+    /// of the operands flattened to their triangles, each within its slab
+    /// width `w` of every reading, and the contribution is the measured
+    /// distance plus the largest `w` (see the module's "Warped operands").
     Boolean,
     /// A path that does not report its deviation.
     Unreported,
@@ -357,15 +393,40 @@ impl Deviation {
         }
     }
 
-    /// Fold in `other`'s [`SNAPPED_OPERANDS`] contributions: a boolean's
-    /// snap stays reported when an enclosing boolean replaces the rest of
-    /// its deviation (#276).
-    pub(crate) fn carry_snaps(&mut self, other: &Self) {
+    /// Fold in `other`'s operand perturbations: its [`SNAPPED_OPERANDS`]
+    /// contributions (#276) and its warped faces' slab widths
+    /// ([`WARPED_AUTHORED_FACE`], [`WARPED_BREP_FACE`], #266). They stay
+    /// reported when a boolean replaces the rest of an operand's
+    /// deviation, so the report names every operand that was moved or
+    /// flattened, through any chain of booleans.
+    pub(crate) fn carry_perturbations(&mut self, other: &Self) {
         for c in &other.0 {
-            if c.path == DeviationPath::Boolean && c.detail == SNAPPED_OPERANDS {
+            let carried = matches!(
+                (c.path, c.detail),
+                (DeviationPath::Boolean, SNAPPED_OPERANDS)
+                    | (DeviationPath::AuthoredMesh, WARPED_AUTHORED_FACE)
+                    | (DeviationPath::BRepFace, WARPED_BREP_FACE)
+            );
+            if carried {
                 self.add(c.path, c.detail, c.bound);
             }
         }
+    }
+
+    /// The largest slab width of a B-rep's warped faces when its mesh is
+    /// the polyhedron it describes up to them (#266): every contribution
+    /// an exact plane with straight edges, or a warped face without a
+    /// surface. `None` when any face is curved, chorded or off its plane.
+    pub(crate) fn polyhedral_warp(&self) -> Option<Scalar> {
+        self.0
+            .iter()
+            .try_fold(0.0, |widest: Scalar, c| match (c.path, c.detail, c.bound) {
+                (DeviationPath::BRepFace, "plane", DeviationBound::Proven(0.0)) => Some(widest),
+                (DeviationPath::BRepFace, WARPED_BREP_FACE, DeviationBound::Certified(width)) => {
+                    Some(widest.max(width))
+                }
+                _ => None,
+            })
     }
 
     /// The same contributions after a transform: lengths grow by at most

@@ -131,10 +131,10 @@ MUTANTS = [
      '                crate::deviation::DeviationBound::Certified(moved),',
      '                crate::deviation::DeviationBound::Certified(moved * 0.25),', [MESH]),
     ('an inner snap dropped by the outer boolean', COMPILER,
-     '        built.deviation.carry_snaps(&subject.deviation);',
+     '        built.deviation.carry_perturbations(&subject.deviation);',
      '        let _ = &subject.deviation;', [MESH]),
     ('an inner snap dropped by the measured deviation', COMPILER,
-     '                        deviation.carry_snaps(&built.deviation);',
+     '                        deviation.carry_perturbations(&built.deviation);',
      '                        let _ = &built.deviation;', [MESH]),
 ]
 

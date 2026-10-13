@@ -9,6 +9,30 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A boolean with a warped operand reports a certified bound that covers
+  the warp (#266, ADR 0080 amendment). `compile_mesh_with_deviation`
+  measures a boolean whose operand is an authored polygon or triangle
+  mesh, or a B-rep of planes and warped faces without a surface, against
+  the exact boolean of its operands flattened to their triangles (each
+  within its slab width of every reading of its warped faces, #261), by
+  any operator, and reports `DeviationPath::Boolean` under "measured
+  against the exact boolean of operands flattened within their slab
+  width, plus it" with the measured distance plus the largest slab width;
+  the search settles within the budget less that width, so
+  `meets_requested` holds exactly when the widths and the measurement fit
+  the budget. Each warped operand's own contribution ("non-planar authored
+  face", "non-planar face without a surface") travels with the boolean,
+  as a snap does. An unwarped mesh operand is measured against the exact
+  boolean of the operands as given. Where the exact boolean cannot take
+  the flattened operand (a mesh that does not close, a B-rep with a curved
+  face, a tool that is itself a boolean, a configuration the general
+  boolean refuses) the boolean stays unbounded by that refusal's name.
+  These booleans were unbounded before ("exact boolean operand that is
+  not an extrusion"); `ReferenceExactCompiler` itself still refuses mesh
+  operands by name.
+
 ### Fixed
 
 - A trim of a B-spline by points compiles (#306, ADR 0082 amendment): a

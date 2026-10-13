@@ -40,7 +40,9 @@
 //! it ([`PolygonRefusal::NotPlanar`]); the mesh compiler's authored polygon
 //! path uses [`triangulate_authored_polygon`] instead, which triangulates
 //! it through the same three steps and reports how far it is warped. The
-//! exact compiler refuses polygon meshes altogether.
+//! exact compiler refuses polygon meshes altogether; only a boolean's
+//! deviation report takes their triangles as the operand perturbed within
+//! the slab width below (#266, `crate::deviation`).
 //!
 //! The steps are unchanged, so a face within the tolerance of its plane
 //! triangulates exactly as before. A warped face is projected onto its fit

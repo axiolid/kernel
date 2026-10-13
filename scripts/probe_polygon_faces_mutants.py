@@ -45,6 +45,18 @@ a dropped corner, pinches refused). 26 / 26 killed on the first run.
 "triangles pass through untriangulated" re-anchored on the refactored
 `clip_projected` and on the face's rings after the weld; the weld itself
 is probed by `probe_shared_edge_weld_mutants.py`.
+
+#266 (a boolean with a warped operand measured against the exact boolean
+of its operands flattened to their triangles, the bound widened by the
+slab width): sixteen mutants on the composition (the width added, the
+budget shared, the detail, the width carried through instances,
+booleans' subjects, authored and B-rep operands, the warped operands
+named), the dispatch (mesh unions, mesh tools, clips of meshes, the
+public compiler still refusing meshes) and the polyhedron (inside-out
+meshes), run against the `warped_boolean` target and the polyhedron's
+unit tests. Not listed, as equivalent at test resolution: rounding the
+widened sum down (one ulp), and the polyhedron's own manifold test,
+which the B-rep audit after assembly repeats.
 """
 import pathlib
 
@@ -54,6 +66,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 P = "crates/execution/compile/src/planar.rs"
 C = "crates/execution/compile/src/compiler.rs"
 B = "crates/execution/compile/src/brep.rs"
+DB = "crates/execution/compile/src/deviation/boolean.rs"
+D = "crates/execution/compile/src/deviation.rs"
+E = "crates/execution/compile/src/exact.rs"
+EB = "crates/execution/compile/src/exact/boolean.rs"
+EC = "crates/execution/compile/src/exact/clip.rs"
+EP = "crates/execution/compile/src/exact/polyhedral.rs"
+# #266: the warped boolean's own tests, and the polyhedron's unit tests.
+W = [
+    ["-p", "axiolid-mesh-compile", "--test", "warped_boolean"],
+    ["-p", "axiolid-mesh-compile", "--lib", "exact::polyhedral"],
+]
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "authored_polygons"],
     ["-p", "axiolid-mesh-compile", "--lib", "planar"],
@@ -111,11 +134,11 @@ MUTANTS = [
      "                                crate::deviation::WARPED_AUTHORED_FACE,",
      "                                \"\","),
     ("warp not reported", C,
-     "                            None => built,\n                            Some(warp) => {",
-     "                            _ => built,\n                            Some(warp) if false => {"),
+     "                        None => built,\n                        Some(warp) => {",
+     "                        _ => built,\n                        Some(warp) if false => {"),
     ("worst warp across faces dropped", C,
-     "                warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));",
-     "                warp = Some(face_warp);"),
+     "            warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));",
+     "            warp = Some(face_warp);"),
     ("holes not passed to the clipper", P,
      "    let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(|error| {",
      "    let indices = clip_planar_face(&flat[..hole_starts.first().copied().unwrap_or(flat.len())], &[], linear).map_err(|error| {"),
@@ -132,14 +155,62 @@ MUTANTS = [
      "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Accept)?;",
      "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Refuse)?;"),
     ("triangles pass through untriangulated", C,
-     "            if rings.len() == 1 && rings[0].len() == 3 {",
-     "            if rings.len() == 1 {"),
+     "        if rings.len() == 1 && rings[0].len() == 3 {",
+     "        if rings.len() == 1 {"),
     ("hole indices not range-checked", C,
-     "            .flat_map(|face| face_rings(face).flatten().copied())",
-     "            .flat_map(|face| face.outer.iter().copied())"),
+     "        .flat_map(|face| face_rings(face).flatten().copied())",
+     "        .flat_map(|face| face.outer.iter().copied())"),
     ("face index in error off by one", P,
      "        _ => GeomError::InvalidInput(format!(\n            \"authored polygon face {face} cannot be triangulated: {refusal}\"\n        )),",
      "        _ => GeomError::InvalidInput(format!(\n            \"authored polygon face {} cannot be triangulated: {refusal}\", face + 1\n        )),"),
+    ("flattening not added to the boolean's bound (#266)", DB,
+     "        Ok(value) => DeviationBound::Certified(widened(value, flattened)),",
+     "        Ok(value) => DeviationBound::Certified(value),", W),
+    ("budget not shared with the flattening (#266)", DB,
+     "        let left = budget - flattened;",
+     "        let left = budget;", W),
+    ("flattened boolean not named (#266)", DB,
+     "    let detail = if flattened > 0.0 {",
+     "    let detail = if flattened < 0.0 {", W),
+    ("slab width lost under an instance (#266)", E,
+     "                self.set_flattened(root, self.flattened_of(instance.source));\n",
+     "", W),
+    ("slab width lost through a boolean's subject (#266)", E,
+     "                let width = self.flattened_of(left).max(self.flattened_of(right));",
+     "                let width = self.flattened_of(right);", W),
+    ("authored slab width not recorded (#266)", E,
+     "warp.unwrap_or(0.0)))",
+     "0.0 * warp.unwrap_or(0.0)))", W),
+    ("B-rep slab width not recorded (#266)", D,
+     "                    Some(widest.max(width))",
+     "                    Some(widest + 0.0 * width)", W),
+    ("warped authored operand not named under a boolean (#266)", D,
+     "                    | (DeviationPath::AuthoredMesh, WARPED_AUTHORED_FACE)\n",
+     "", W),
+    ("warped B-rep operand not named under a boolean (#266)", D,
+     "                    | (DeviationPath::BRepFace, WARPED_BREP_FACE)\n",
+     "", W),
+    ("mesh unions refused unless both operands are meshes (#266)", EB,
+     "        let meshed = subject == Placed::Mesh || tool == Placed::Mesh;",
+     "        let meshed = subject == Placed::Mesh && tool == Placed::Mesh;", W),
+    ("mesh tool refused (#266)", EB,
+     "        if !matches!(tool, Placed::Extrusion | Placed::Mesh) {",
+     "        if !matches!(tool, Placed::Extrusion) {", W),
+    ("meshes placed outside the report (#266)", EB,
+     "                    if self.flatten =>",
+     "                    if true =>", W),
+    ("mesh clip subject refused (#266)", EC,
+     "                if self.flatten =>",
+     "                if false =>", W),
+    ("public compiler flattens meshes (#266)", E,
+     "            flatten: false,",
+     "            flatten: true,", W),
+    ("report compiles without flattening (#266)", E,
+     "        compilation.flatten = true;",
+     "        compilation.flatten = false;", W),
+    ("inside-out mesh accepted (#266)", EP,
+     "    if volume.is_nan() || volume <= 0.0 {",
+     "    if volume.is_nan() {", W),
 ]
 
 probe_lib.main(MUTANTS, tests=TARGETS, timeout=900)

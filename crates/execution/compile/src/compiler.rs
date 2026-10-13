@@ -384,112 +384,6 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .ok_or_else(|| GeomError::InvalidInput(format!("root {root:?} produced no mesh")))
     }
 
-    /// Convert an authored polygon mesh to triangles (#160).
-    ///
-    /// A plain triangle keeps its exact corner order. Any other face -- an
-    /// n-gon, a concave face, a face with holes (IFC4
-    /// `IfcIndexedPolygonalFaceWithVoids`) -- is triangulated in its own
-    /// plane by [`crate::planar::triangulate_polygon`]. Positions are kept
-    /// as authored and shared, so the output welds exactly where the input
-    /// did; no position is moved or added. A corner that one face's
-    /// triangulation inserts into a ring edge (a hole touching the outer
-    /// edge at an interior point) is inserted into every face sharing that
-    /// edge by index, a triangle face included, so the faces still meet
-    /// along the same pieces of it ([`crate::weld`], #265).
-    ///
-    /// A face with no area, or whose rings cross in its plane, is refused
-    /// with an error naming its index. A face off its plane by more than
-    /// the linear tolerance has no unique surface; it is triangulated in
-    /// its fit plane all the same (#254), and the largest warp of any such
-    /// face (the width of the slab its corners span about that plane, #261)
-    /// is returned with the mesh, `None` when every face is planar.
-    /// [`crate::planar`] states what that warp bounds; the caller reports
-    /// it as a certified deviation, never as exact.
-    fn compile_authored_polygons(
-        &self,
-        mesh: &axiolid_mesh::PolygonMesh,
-        options: &ExecutionOptions,
-    ) -> GeomResult<(TriMesh, Option<Scalar>)> {
-        let position_count = mesh.positions.len();
-        if let Some(index) = mesh
-            .faces
-            .iter()
-            .flat_map(|face| face_rings(face).flatten().copied())
-            .find(|&index| index as usize >= position_count)
-        {
-            return Err(GeomError::InvalidInput(format!(
-                "authored polygon index {index} exceeds position count {position_count}"
-            )));
-        }
-
-        let mut positions = Vec::new();
-        positions
-            .try_reserve_exact(position_count)
-            .map_err(|_| GeomError::BudgetExceeded {
-                resource: "authored polygon positions",
-            })?;
-        positions.extend_from_slice(&mesh.positions);
-
-        // A polygon with k corners (holes included) gives at most
-        // k + 2 * holes - 2 triangles; bound by corner count times three.
-        let index_bound = mesh
-            .faces
-            .iter()
-            .try_fold(0_usize, |total, face| {
-                let corners = face_rings(face).map(Vec::len).sum::<usize>();
-                corners
-                    .checked_add(2 * face.holes.len())
-                    .and_then(|triangles| triangles.checked_mul(3))
-                    .and_then(|indices| total.checked_add(indices))
-            })
-            .ok_or(GeomError::BudgetExceeded {
-                resource: "authored polygon indices",
-            })?;
-        let mut indices = Vec::new();
-        indices
-            .try_reserve_exact(index_bound)
-            .map_err(|_| GeomError::BudgetExceeded {
-                resource: "authored polygon indices",
-            })?;
-
-        let linear = options.tolerance().linear();
-        let splits = authored_edge_splits(mesh);
-        let mut warp: Option<Scalar> = None;
-        for (face_index, face) in mesh.faces.iter().enumerate() {
-            let mut rings: Vec<Vec<u32>> = face_rings(face).cloned().collect();
-            // Weld through every corner a face inserts into a shared edge
-            // (#265): this face takes each such corner on its own copy of
-            // the edge, a triangle face included, which then has four.
-            splits.split(&mut rings, |i| (i, mesh.positions[i as usize]), |i, _| i);
-            if rings.len() == 1 && rings[0].len() == 3 {
-                indices.extend_from_slice(&rings[0]);
-                continue;
-            }
-            // A repeated corner (an exporter's closing point, a doubled
-            // corner) needs no handling here: `planar::clip_projected` drops
-            // coincident consecutive points itself
-            // (`a_repeated_closing_corner_is_not_a_triangle`).
-            let points: Vec<Vec<axiolid_core::Point3>> = rings
-                .iter()
-                .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
-                .collect();
-            let views: Vec<&[axiolid_core::Point3]> = points.iter().map(Vec::as_slice).collect();
-            let local = crate::planar::triangulate_authored_polygon(&views, linear)
-                .map_err(|refusal| crate::planar::face_error(face_index, refusal))?;
-            if let Some(face_warp) = local.warp {
-                warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));
-            }
-            let corners: Vec<u32> = rings.into_iter().flatten().collect();
-            indices.extend(local.indices.into_iter().map(|corner| corners[corner]));
-        }
-
-        let triangles = TriMesh::new(positions, indices);
-        triangles.validate_structure().map_err(|error| {
-            GeomError::InvalidInput(format!("invalid authored polygon mesh: {error}"))
-        })?;
-        Ok((triangles, warp))
-    }
-
     /// Build one node, assuming its mesh dependencies are already cached.
     fn build(
         &self,
@@ -504,22 +398,21 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         match node {
             GeometryNode::TriMesh(mesh) => Ok(authored_mesh(mesh.clone(), options)),
             GeometryNode::PolygonMesh(mesh) => {
-                self.compile_authored_polygons(mesh, options)
-                    .map(|(mesh, warp)| {
-                        let built = authored_mesh(mesh, options);
-                        match warp {
-                            None => built,
-                            Some(warp) => {
-                                let mut deviation = built.deviation.clone();
-                                deviation.add(
-                                    crate::deviation::DeviationPath::AuthoredMesh,
-                                    crate::deviation::WARPED_AUTHORED_FACE,
-                                    crate::deviation::DeviationBound::Certified(warp),
-                                );
-                                built.with_deviation(deviation)
-                            }
+                compile_authored_polygons(mesh, options).map(|(mesh, warp)| {
+                    let built = authored_mesh(mesh, options);
+                    match warp {
+                        None => built,
+                        Some(warp) => {
+                            let mut deviation = built.deviation.clone();
+                            deviation.add(
+                                crate::deviation::DeviationPath::AuthoredMesh,
+                                crate::deviation::WARPED_AUTHORED_FACE,
+                                crate::deviation::DeviationBound::Certified(warp),
+                            );
+                            built.with_deviation(deviation)
                         }
-                    })
+                    }
+                })
             }
             GeometryNode::Instance(instance) => {
                 let source_budget = instance_local_budget(instance.transform, Budget::of(options))?;
@@ -565,7 +458,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     Measure::Deviation(emitted) if emitted.contains(&id) => {
                         let mut deviation =
                             crate::deviation::of_boolean(graph, id, options, &built.mesh);
-                        deviation.carry_snaps(&built.deviation);
+                        deviation.carry_perturbations(&built.deviation);
                         built.with_deviation(deviation)
                     }
                     Measure::Deviation(_) | Measure::Skip => built,
@@ -716,9 +609,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             tool_fates,
             outcome.evidence.attribute_fates,
         );
-        built.deviation.carry_snaps(&subject.deviation);
+        built.deviation.carry_perturbations(&subject.deviation);
         if let Some(tool) = tool_deviation {
-            built.deviation.carry_snaps(tool);
+            built.deviation.carry_perturbations(tool);
         }
         if moved > 0.0 {
             built.deviation.add(
@@ -1315,6 +1208,111 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             report,
         ))
     }
+}
+
+/// Convert an authored polygon mesh to triangles (#160).
+///
+/// A plain triangle keeps its exact corner order. Any other face -- an
+/// n-gon, a concave face, a face with holes (IFC4
+/// `IfcIndexedPolygonalFaceWithVoids`) -- is triangulated in its own
+/// plane by [`crate::planar::triangulate_polygon`]. Positions are kept
+/// as authored and shared, so the output welds exactly where the input
+/// did; no position is moved or added. A corner that one face's
+/// triangulation inserts into a ring edge (a hole touching the outer
+/// edge at an interior point) is inserted into every face sharing that
+/// edge by index, a triangle face included, so the faces still meet
+/// along the same pieces of it ([`crate::weld`], #265).
+///
+/// A face with no area, or whose rings cross in its plane, is refused
+/// with an error naming its index. A face off its plane by more than
+/// the linear tolerance has no unique surface; it is triangulated in
+/// its fit plane all the same (#254), and the largest warp of any such
+/// face (the width of the slab its corners span about that plane, #261)
+/// is returned with the mesh, `None` when every face is planar.
+/// [`crate::planar`] states what that warp bounds; the caller reports
+/// it as a certified deviation, never as exact.
+pub(crate) fn compile_authored_polygons(
+    mesh: &axiolid_mesh::PolygonMesh,
+    options: &ExecutionOptions,
+) -> GeomResult<(TriMesh, Option<Scalar>)> {
+    let position_count = mesh.positions.len();
+    if let Some(index) = mesh
+        .faces
+        .iter()
+        .flat_map(|face| face_rings(face).flatten().copied())
+        .find(|&index| index as usize >= position_count)
+    {
+        return Err(GeomError::InvalidInput(format!(
+            "authored polygon index {index} exceeds position count {position_count}"
+        )));
+    }
+
+    let mut positions = Vec::new();
+    positions
+        .try_reserve_exact(position_count)
+        .map_err(|_| GeomError::BudgetExceeded {
+            resource: "authored polygon positions",
+        })?;
+    positions.extend_from_slice(&mesh.positions);
+
+    // A polygon with k corners (holes included) gives at most
+    // k + 2 * holes - 2 triangles; bound by corner count times three.
+    let index_bound = mesh
+        .faces
+        .iter()
+        .try_fold(0_usize, |total, face| {
+            let corners = face_rings(face).map(Vec::len).sum::<usize>();
+            corners
+                .checked_add(2 * face.holes.len())
+                .and_then(|triangles| triangles.checked_mul(3))
+                .and_then(|indices| total.checked_add(indices))
+        })
+        .ok_or(GeomError::BudgetExceeded {
+            resource: "authored polygon indices",
+        })?;
+    let mut indices = Vec::new();
+    indices
+        .try_reserve_exact(index_bound)
+        .map_err(|_| GeomError::BudgetExceeded {
+            resource: "authored polygon indices",
+        })?;
+
+    let linear = options.tolerance().linear();
+    let splits = authored_edge_splits(mesh);
+    let mut warp: Option<Scalar> = None;
+    for (face_index, face) in mesh.faces.iter().enumerate() {
+        let mut rings: Vec<Vec<u32>> = face_rings(face).cloned().collect();
+        // Weld through every corner a face inserts into a shared edge
+        // (#265): this face takes each such corner on its own copy of
+        // the edge, a triangle face included, which then has four.
+        splits.split(&mut rings, |i| (i, mesh.positions[i as usize]), |i, _| i);
+        if rings.len() == 1 && rings[0].len() == 3 {
+            indices.extend_from_slice(&rings[0]);
+            continue;
+        }
+        // A repeated corner (an exporter's closing point, a doubled
+        // corner) needs no handling here: `planar::clip_projected` drops
+        // coincident consecutive points itself
+        // (`a_repeated_closing_corner_is_not_a_triangle`).
+        let points: Vec<Vec<axiolid_core::Point3>> = rings
+            .iter()
+            .map(|ring| ring.iter().map(|&i| mesh.positions[i as usize]).collect())
+            .collect();
+        let views: Vec<&[axiolid_core::Point3]> = points.iter().map(Vec::as_slice).collect();
+        let local = crate::planar::triangulate_authored_polygon(&views, linear)
+            .map_err(|refusal| crate::planar::face_error(face_index, refusal))?;
+        if let Some(face_warp) = local.warp {
+            warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));
+        }
+        let corners: Vec<u32> = rings.into_iter().flatten().collect();
+        indices.extend(local.indices.into_iter().map(|corner| corners[corner]));
+    }
+
+    let triangles = TriMesh::new(positions, indices);
+    triangles.validate_structure().map_err(|error| {
+        GeomError::InvalidInput(format!("invalid authored polygon mesh: {error}"))
+    })?;
+    Ok((triangles, warp))
 }
 
 /// The corners the authored polygon faces of `mesh` insert into their own
