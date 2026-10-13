@@ -510,4 +510,18 @@ impl CurveEvaluator for ReferenceCurveEvaluator {
     ) -> GeomResult<Vec<DistanceInterval>> {
         CompositeBasis::from_path(path)?.joint_intervals(tolerance)
     }
+
+    /// [`CompositeBasis::joint_intervals_within`] of the path (#305): the
+    /// joints whose certified interval meets the window, each bitwise as
+    /// [`Self::path_joint_distances`] gives it, certifying only the pieces
+    /// before and within the window.
+    fn path_joint_distances_within(
+        &self,
+        path: &CurvePath,
+        around: Scalar,
+        window: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<(usize, DistanceInterval)>> {
+        CompositeBasis::from_path(path)?.joint_intervals_within(around, window, tolerance)
+    }
 }

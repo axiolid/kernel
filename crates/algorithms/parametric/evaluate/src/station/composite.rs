@@ -126,10 +126,11 @@
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Point3, Scalar, Transform3};
 use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathOffset, PathPiece, SeamSide};
-use axiolid_curve_evaluate_contract::DistanceConvention;
+use axiolid_curve_evaluate_contract::{window_span, DistanceConvention};
 
 use super::certify::{
     checked_tolerance, curve_span, piece_length, CertifiedSeam, DistanceInterval, Running,
+    POINT_ROUNDING, UNCERTIFIED_LENGTH,
 };
 use super::offset::{OffsetTable, StationOffset};
 use super::seam::tidy;
@@ -148,6 +149,13 @@ use crate::curve::{evaluate2, evaluate3};
 /// [`CompositeBasis`] meet: their joint points may be `JOINT_TOLERANCE *
 /// max(1, |p|)` apart, `|p|` the joint's largest coordinate magnitude.
 pub const JOINT_TOLERANCE: Scalar = 1e-9;
+
+/// The rounding a piece's chord ([`StationPiece::length_floor`]) is reduced
+/// by, relative to the largest coordinate of its end points and its
+/// length: a hundred times [`POINT_ROUNDING`], so the floor stays below the
+/// lower bound [`super::certify`] certifies, whose chords carry that
+/// rounding once each.
+const CHORD_ROUNDING: Scalar = 100.0 * POINT_ROUNDING;
 
 /// The arc-length tolerance around a distance: what counts as ON a seam or
 /// a joint.
@@ -629,6 +637,29 @@ impl<'c> StationPiece<'c> {
         })
     }
 
+    /// A certified lower bound of the piece's length in its station measure
+    /// (#305), with no quadrature: the chord between the points read as its
+    /// ends, in the plan where it is measured in plan (a plan length is
+    /// never shorter than its plan chord), less their rounding. Read
+    /// unplaced: a placement is rigid, and one that tilts `+Z` under a
+    /// plan-measured curve is refused where the piece is read.
+    fn length_floor(&self, table: Option<&OffsetTable>) -> GeomResult<Scalar> {
+        let a = self.curve.point_at(self.start, table)?;
+        let b = self.curve.point_at(self.end, table)?;
+        let d = b - a;
+        let chord = match self.convention() {
+            DistanceConvention::PlanDistance => d.x.hypot(d.y),
+            _ => d.length(),
+        };
+        let scale = a
+            .abs()
+            .max_element()
+            .max(b.abs().max_element())
+            .max(self.length())
+            .max(1.0);
+        Ok((chord - CHORD_ROUNDING * scale).max(0.0))
+    }
+
     /// The section frame at distance `u` into the piece, read from `side`
     /// on a seam of its curve; at the piece's own ends it is always read
     /// from inside the piece.
@@ -975,23 +1006,86 @@ impl<'c> CompositeBasis<'c> {
     /// within the panel budget, and the evaluators' refusals, by name.
     pub fn joint_intervals(&self, tolerance: Scalar) -> GeomResult<Vec<DistanceInterval>> {
         let tolerance = checked_tolerance(tolerance)?;
+        Ok(self
+            .certified_joints(tolerance, None)?
+            .into_iter()
+            .map(|(_, interval)| interval)
+            .collect())
+    }
+
+    /// The composite's interior joints that can fall within `window` of
+    /// `around` (#305): each with its index among the joints and the
+    /// interval [`Self::joint_intervals`] gives it at `tolerance`,
+    /// bitwise (the tolerance shared among the same pieces, summed in the
+    /// same order), for every joint whose interval meets `[around - window,
+    /// around + window]`, edges included.
+    ///
+    /// Only the pieces those joints lie after are certified. Every piece
+    /// before the window is, since its length moves the joints after it.
+    /// A joint is known to lie past the window, and no piece after it is
+    /// read, once the certified lower end of the joint before it plus a
+    /// certified lower bound of its piece's length with no quadrature (the
+    /// chord between its ends, in the plan where it is measured in plan)
+    /// passes the window's end. So a piece whose length cannot be certified does not refuse the query
+    /// when it lies after the window, or across its end far enough that
+    /// its chord carries its own end past it; before the window, or ending
+    /// within reach of it, it refuses by name. A joint left out truly lies
+    /// outside the window, and one whose interval lies inside it is
+    /// returned.
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive, an `around` that is not
+    /// finite or a `window` that is negative or not finite, by name; and as
+    /// [`Self::joint_intervals`], for the pieces before and within the
+    /// window only.
+    pub fn joint_intervals_within(
+        &self,
+        around: Scalar,
+        window: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<(usize, DistanceInterval)>> {
+        let tolerance = checked_tolerance(tolerance)?;
+        let span = window_span(around, window)?;
+        self.certified_joints(tolerance, Some(span))
+    }
+
+    /// Each interior joint's index and certified interval at `tolerance`;
+    /// within `span` only, when one is given (see
+    /// [`Self::joint_intervals_within`]).
+    fn certified_joints(
+        &self,
+        tolerance: Scalar,
+        span: Option<DistanceInterval>,
+    ) -> GeomResult<Vec<(usize, DistanceInterval)>> {
         let shares = self.shares(tolerance);
         let joints = self.pieces.len().saturating_sub(1);
         let mut run = Running::ZERO;
         let mut out = Vec::with_capacity(joints);
-        for ((piece, table), share) in self
+        for (k, ((piece, table), share)) in self
             .pieces
             .iter()
             .zip(&self.tables)
             .zip(shares)
             .take(joints)
+            .enumerate()
         {
+            if let Some(span) = span {
+                // The joint's lower end with no quadrature, rounded down.
+                let floor = (run.interval().lower + piece.length_floor(table.as_ref())?)
+                    * (1.0 - 4.0 * Scalar::EPSILON);
+                if floor > span.upper {
+                    break;
+                }
+            }
             run = run.plus(piece_length(piece, table.as_ref(), share)?);
             let interval = run.interval();
             if interval.width().is_nan() || interval.width() > tolerance {
-                return Err(unsupported(super::certify::UNCERTIFIED_LENGTH));
+                return Err(unsupported(UNCERTIFIED_LENGTH));
             }
-            out.push(interval);
+            if span.is_none_or(|span| interval.meets(&span)) {
+                out.push((k, interval));
+            }
         }
         Ok(out)
     }

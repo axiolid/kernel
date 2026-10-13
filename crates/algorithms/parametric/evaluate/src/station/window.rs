@@ -38,13 +38,15 @@
 //! A window of `0` reads the distance as it is, the arc-length tolerance
 //! alone; a negative or non-finite window is refused by name.
 //!
-//! [`DistanceInterval`]: super::certify::DistanceInterval
+//! The same test of an interval against a window, [`DistanceInterval::meets`],
+//! picks the joints [`CompositeBasis::joint_intervals_within`] (#305) and the
+//! curve-evaluation contract's `path_joint_distances_within` return.
 
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::Scalar;
 use axiolid_curve::{Curve2, Curve3};
 
-use super::certify::{atomic_seams, CertifiedSeam};
+use super::certify::{atomic_seams, CertifiedSeam, DistanceInterval};
 use super::composite::StationCurve;
 use super::{station_seams2, station_seams3};
 use crate::arc_parameter::ARC_LENGTH_TOLERANCE;
@@ -111,7 +113,7 @@ pub(crate) fn snap(
     let mut straddled = false;
     for seam in seams {
         let interval = seam.interval;
-        if interval.upper < lo || interval.lower > hi {
+        if !interval.meets(&DistanceInterval::new(lo, hi)) {
             continue;
         }
         if interval.lower >= lo && interval.upper <= hi {

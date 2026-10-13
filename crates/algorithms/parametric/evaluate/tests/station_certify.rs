@@ -812,3 +812,336 @@ fn an_open_offset_of_a_b_spline_needs_no_length() {
         base[0].end
     );
 }
+
+// --- joints near a window (#305) ------------------------------------------------
+
+/// The Bezier of [`bezier`] moved by `shift`.
+fn bezier_at(shift: Vec2) -> ([Point2; 4], Curve2) {
+    let (mut p, mut curve) = bezier();
+    for point in &mut p {
+        *point += shift;
+    }
+    if let Curve2::BSpline(spline) = &mut curve {
+        spline.control_points = p.to_vec();
+    }
+    (p, curve)
+}
+
+/// The arc length of the offset by `distance` of the Bezier with control
+/// points `p`, written out and integrated independently.
+fn bezier_offset_length(p: [Point2; 4], distance: Scalar) -> Scalar {
+    let first = |t: Scalar| {
+        let u = 1.0 - t;
+        3.0 * (u * u * (p[1] - p[0]) + 2.0 * u * t * (p[2] - p[1]) + t * t * (p[3] - p[2]))
+    };
+    let second =
+        |t: Scalar| 6.0 * ((1.0 - t) * (p[2] - 2.0 * p[1] + p[0]) + t * (p[3] - 2.0 * p[2] + p[1]));
+    let speed = |t: Scalar| {
+        let (d1, d2) = (first(t), second(t));
+        let n = d1.length();
+        let unit_rate = (d2 * (n * n) - d1 * d1.dot(d2)) / (n * n * n);
+        (d1 + distance * unit_rate.perp()).length()
+    };
+    simpson(&speed, 0.0, 1.0, 1e-13)
+}
+
+/// The whole of an offset of the whole of `base`, no length stated.
+fn open_offset(base: PathCurve, law: OffsetLaw) -> PathPiece {
+    PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(
+        PathPiece::whole(base),
+        law,
+    ))))
+}
+
+/// Four pieces, each the offset of a whole curve, no length stated: beside
+/// a Bezier by 1 (certified by chords), beside a line by 1 over 10, beside
+/// a second Bezier by `middle` (`(1, 1)`: by 1, certified; `(1, 2)`: by
+/// distances widening from 1 to 2, a law in the spline's numerical arc
+/// length, so its length is not certified), beside a line by `middle.1`
+/// over 10. The Beziers' ends run along `+x`, so the offsets meet.
+fn four_offsets(middle: (Scalar, Scalar)) -> CurvePath {
+    let (_, first) = bezier();
+    let (_, second) = bezier_at(Vec2::new(100.0, 20.0));
+    let line = |x: Scalar, y: Scalar| line2(Point2::new(x, y), Vec2::new(10.0, 0.0));
+    let by = |distance| OffsetLaw::Planar { distance };
+    let law = if middle.0 == middle.1 {
+        by(middle.0)
+    } else {
+        OffsetLaw::Linear {
+            start: PathOffsets::new(middle.0, 0.0, 0.0),
+            end: PathOffsets::new(middle.1, 0.0, 0.0),
+            frame: OffsetFrame::Section,
+        }
+    };
+    CurvePath::new(vec![
+        open_offset(PathCurve::Two(first), by(1.0)),
+        open_offset(PathCurve::Two(line(90.0, 20.0)), by(1.0)),
+        open_offset(PathCurve::Two(second), law),
+        open_offset(PathCurve::Two(line(190.0, 40.0)), by(middle.1)),
+    ])
+}
+
+/// The kernel's own (estimated) joint distances of `path`.
+fn nominal_joints(path: &CurvePath) -> Vec<Scalar> {
+    let basis = CompositeBasis::from_path(path).unwrap();
+    let mut run = 0.0;
+    let mut out = Vec::new();
+    for piece in &basis.pieces()[..basis.pieces().len() - 1] {
+        run += piece.length();
+        out.push(run);
+    }
+    out
+}
+
+fn joints_of(found: &[(usize, DistanceInterval)]) -> Vec<usize> {
+    found.iter().map(|(joint, _)| *joint).collect()
+}
+
+#[test]
+fn an_uncertifiable_piece_after_the_window_leaves_the_joints_before_it_certified() {
+    let path = four_offsets((1.0, 2.0));
+    let provider = ReferenceCurveEvaluator::new();
+    let tolerance = 1e-6;
+    // Every joint at once: refused, since the widening offset's length is
+    // not certified.
+    refused(
+        provider.path_joint_distances(&path, tolerance),
+        UNCERTIFIED_LENGTH,
+    );
+    let (p, _) = bezier();
+    let first = bezier_offset_length(p, 1.0);
+    let truths = [first, first + 10.0];
+    let nominal = nominal_joints(&path);
+    // A window on the second joint, the one the widening offset starts at:
+    // its interval sums a numerical length and an exact one, and the
+    // widening offset's chord, 92 long, carries the next joint past it.
+    let found = provider
+        .path_joint_distances_within(&path, nominal[1], 0.5, tolerance)
+        .unwrap();
+    assert_eq!(joints_of(&found), [1]);
+    certifies(found[0].1, truths[1], tolerance, "second joint");
+    assert!(!found[0].1.is_point(), "the prefix's interval widens");
+    // On the first joint, and over both.
+    let found = provider
+        .path_joint_distances_within(&path, nominal[0], 0.5, tolerance)
+        .unwrap();
+    assert_eq!(joints_of(&found), [0]);
+    certifies(found[0].1, truths[0], tolerance, "first joint");
+    let found = provider
+        .path_joint_distances_within(&path, nominal[0] + 5.0, 6.0, tolerance)
+        .unwrap();
+    assert_eq!(joints_of(&found), [0, 1]);
+    for (joint, interval) in &found {
+        certifies(*interval, truths[*joint], tolerance, "both joints");
+    }
+    // Inside the widening offset, far from its ends: no joint can fall
+    // there, so none is returned, and nothing is refused.
+    assert_eq!(
+        provider
+            .path_joint_distances_within(&path, nominal[1] + 40.0, 1.0, tolerance)
+            .unwrap(),
+        vec![]
+    );
+    // Between the first two joints: none.
+    assert_eq!(
+        provider
+            .path_joint_distances_within(&path, nominal[0] + 5.0, 1.0, tolerance)
+            .unwrap(),
+        vec![]
+    );
+    // Through the composite, the same answer.
+    assert_eq!(
+        CompositeBasis::from_path(&path)
+            .unwrap()
+            .joint_intervals_within(nominal[1], 0.5, tolerance)
+            .unwrap(),
+        provider
+            .path_joint_distances_within(&path, nominal[1], 0.5, tolerance)
+            .unwrap()
+    );
+}
+
+#[test]
+fn uncertainty_reaching_the_window_is_refused_by_name() {
+    let path = four_offsets((1.0, 2.0));
+    let provider = ReferenceCurveEvaluator::new();
+    let nominal = nominal_joints(&path);
+    // On the joint the widening offset ends at.
+    refused(
+        provider.path_joint_distances_within(&path, nominal[2], 0.5, 1e-6),
+        UNCERTIFIED_LENGTH,
+    );
+    // Past it, on the last piece: the window's position against the joint
+    // is what the widening offset's length leaves unknown.
+    refused(
+        provider.path_joint_distances_within(&path, nominal[2] + 5.0, 0.5, 1e-6),
+        UNCERTIFIED_LENGTH,
+    );
+    // Before it, but within reach of its chord (92.2, of a length above
+    // it): the joint could fall within the window.
+    let chord = 90.0_f64.hypot(20.0);
+    assert!(nominal[2] - nominal[1] > chord + 0.5);
+    refused(
+        provider.path_joint_distances_within(&path, nominal[1] + chord - 1.0, 1.5, 1e-6),
+        UNCERTIFIED_LENGTH,
+    );
+}
+
+#[test]
+fn an_uncertifiable_piece_before_the_window_refuses_it_by_name() {
+    // Reversed: the line by 2, the widening offset backwards, the line by
+    // 1, the first offset backwards.
+    let path = four_offsets((1.0, 2.0)).reversed();
+    let provider = ReferenceCurveEvaluator::new();
+    let nominal = nominal_joints(&path);
+    assert_eq!(nominal[0], 10.0);
+    // Every window after the widening offset is refused: no coarser bound
+    // of its length is substituted.
+    for (around, window) in [
+        (nominal[1], 0.5),
+        (nominal[1] + 5.0, 1.0),
+        (nominal[2], 0.5),
+    ] {
+        refused(
+            provider.path_joint_distances_within(&path, around, window, 1e-6),
+            UNCERTIFIED_LENGTH,
+        );
+    }
+    // Before it the joint is certified, and inside it none can fall.
+    assert_eq!(
+        provider
+            .path_joint_distances_within(&path, 10.0, 0.5, 1e-6)
+            .unwrap(),
+        vec![(0, DistanceInterval::point(10.0))]
+    );
+    assert_eq!(
+        provider
+            .path_joint_distances_within(&path, 50.0, 1.0, 1e-6)
+            .unwrap(),
+        vec![]
+    );
+}
+
+#[test]
+fn joints_near_a_window_agree_with_every_joint() {
+    let spiral = clothoid_then_arc();
+    let line = line2(Point2::ZERO, Vec2::new(2.0, 0.0));
+    let arc = Curve2::Circle(Circle2 {
+        frame: frame(Point2::new(15.0, 5.0), Vec2::new(0.0, -1.0), Vec2::X),
+        radius: 5.0,
+    });
+    let quarter = core::f64::consts::FRAC_PI_2 * 5.0;
+    let up = line2(Point2::new(20.0, 5.0), Vec2::Y);
+    let exact = CompositeBasis::new(
+        offset_pieces(
+            &[
+                StationPiece::between(StationCurve::Two(&line), 0.0, 15.0).unwrap(),
+                StationPiece::between(StationCurve::Two(&arc), 0.0, quarter).unwrap(),
+                StationPiece::between(StationCurve::Two(&up), 0.0, 1.0).unwrap(),
+            ],
+            OffsetLaw::Planar { distance: 1.0 },
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .path();
+    let clothoid = CompositeBasis::new(
+        offset_pieces(
+            &[StationPiece::whole(StationCurve::Two(&spiral)).unwrap()],
+            OffsetLaw::Planar { distance: 5.0 },
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .path();
+    let paths = [
+        ("line, arc and line", exact),
+        ("four offsets", four_offsets((1.0, 1.0))),
+        ("four offsets reversed", four_offsets((1.0, 1.0)).reversed()),
+        ("clothoid", clothoid),
+    ];
+    let provider = ReferenceCurveEvaluator::new();
+    for (what, path) in &paths {
+        let nominal = nominal_joints(path);
+        let length = CompositeBasis::from_path(path).unwrap().length();
+        for tolerance in [1e-4, 1e-6] {
+            let all = provider.path_joint_distances(path, tolerance).unwrap();
+            let mut windows = vec![(0.5 * length, 2.0 * length), (-5.0, 1.0)];
+            for (k, joint) in nominal.iter().enumerate() {
+                let next = nominal.get(k + 1).copied().unwrap_or(length);
+                windows.extend([
+                    (*joint, 0.1),
+                    (joint - 0.3, 0.1),
+                    (joint + 0.3, 0.1),
+                    (0.5 * (joint + next), 0.25 * (next - joint)),
+                    (0.5 * (joint + next), 0.5 * (next - joint) + 0.1),
+                ]);
+            }
+            for (around, window) in windows {
+                let span = DistanceInterval::new(around - window, around + window);
+                let want: Vec<_> = all
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, interval)| interval.meets(&span))
+                    .collect();
+                let found = provider
+                    .path_joint_distances_within(path, around, window, tolerance)
+                    .unwrap();
+                assert_eq!(
+                    found, want,
+                    "{what} at {tolerance:e}, window {window} around {around}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_window_that_is_not_finite_or_negative_is_refused() {
+    let path = four_offsets((1.0, 2.0));
+    let basis = CompositeBasis::from_path(&path).unwrap();
+    for (around, window, tolerance) in [
+        (Scalar::NAN, 1.0, 1e-6),
+        (Scalar::NEG_INFINITY, 1.0, 1e-6),
+        (10.0, -1.0, 1e-6),
+        (10.0, Scalar::INFINITY, 1e-6),
+        (10.0, 1.0, 0.0),
+        (10.0, 1.0, Scalar::NAN),
+    ] {
+        assert!(
+            matches!(
+                basis.joint_intervals_within(around, window, tolerance),
+                Err(GeomError::InvalidInput(_))
+            ),
+            "{around} {window} {tolerance}"
+        );
+    }
+}
+
+#[test]
+fn a_plan_measured_piece_is_floored_by_its_plan_chord() {
+    // At a grade of 100% the 3D chord of a piece is sqrt(2) times its plan
+    // length, which is what a plan-measured path runs in: only the plan
+    // chord bounds it from below.
+    let steep = Curve3::Elevated(Elevated3::new(
+        line2(Point2::ZERO, Vec2::X),
+        ElevationLaw::Polynomial {
+            coefficients: vec![0.0, 1.0],
+        },
+    ));
+    let path = CurvePath::new(vec![
+        PathPiece::new(PathCurve::Three(steep.clone()), 0.0, 10.0),
+        PathPiece::new(PathCurve::Three(steep), 10.0, 20.0),
+    ]);
+    let provider = ReferenceCurveEvaluator::new();
+    for (around, window) in [(10.0, 0.5), (11.0, 1.0), (12.0, 3.0)] {
+        assert_eq!(
+            provider
+                .path_joint_distances_within(&path, around, window, 1e-9)
+                .unwrap(),
+            vec![(0, DistanceInterval::point(10.0))],
+            "window {window} around {around}"
+        );
+    }
+}

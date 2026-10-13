@@ -9,6 +9,25 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Joints near a window (#305, ADR 0082 amendment):
+  `CompositeBasis::joint_intervals_within(around, window, tolerance)`, and
+  `ReferenceCurveEvaluator::path_joint_distances_within` through it,
+  returns the joints whose certified interval meets `[around - window,
+  around + window]`, each bitwise as `joint_intervals` gives it (the same
+  tolerance shares, summed in the same order). Every piece before the
+  window is certified and its interval carried into the joints after it;
+  no piece after the window is read, a joint being known past it once the
+  certified lower end of the joint before it plus its piece's chord (the
+  plan chord on a plan-measured piece) passes the window's end. So an
+  uncertifiable piece (an offset by distances along a B-spline) after the
+  window, or across its end far enough that its chord carries its own end
+  past it, no longer refuses the query; one before the window, or within
+  reach of it, refuses it naming `UNCERTIFIED_LENGTH`. The seam-snapping
+  window's test of an interval against a window is
+  `DistanceInterval::meets`, shared with it.
+
 ## [0.3.12] - 2026-10-12
 
 ### Added

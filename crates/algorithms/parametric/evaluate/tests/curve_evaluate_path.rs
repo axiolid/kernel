@@ -14,12 +14,13 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, Curve2, Curve3, CurvePath, Elevated3,
-    ElevationLaw, Line2, Line3, PathCurve, PathPiece, SeamSide,
+    BSplineCurve, BankConvention, Banked3, CantLaw, CantPiece, Circle2, Curve2, Curve3, CurvePath,
+    Elevated3, ElevationLaw, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset,
+    PathOffsets, PathPiece, SeamSide,
 };
 use axiolid_curve_evaluate_contract::{
-    conformance, CurveEvaluator, CurveMeasure, DistanceConvention, CURVE_PATH_UNSUPPORTED,
-    OPEN_PATH_END_UNSUPPORTED, PATH_JOINT_DISTANCES_UNSUPPORTED,
+    conformance, CurveEvaluator, CurveMeasure, DistanceConvention, DistanceInterval,
+    CURVE_PATH_UNSUPPORTED, OPEN_PATH_END_UNSUPPORTED, PATH_JOINT_DISTANCES_UNSUPPORTED,
 };
 use axiolid_evaluate::station::{CompositeBasis, StationCurve, StationPiece};
 use axiolid_evaluate::ReferenceCurveEvaluator;
@@ -947,4 +948,280 @@ fn the_conformance_suite_reads_open_ends() {
         conformance::check(&OpenEnds(ReferenceCurveEvaluator::new(), Open::Unsupported)),
         Vec::new()
     );
+}
+
+// --- joints near a window (#305) ------------------------------------------------
+
+/// A provider that certifies every joint but leaves the windowed query to
+/// the contract's default.
+#[derive(Debug)]
+struct WholePathOnly(ReferenceCurveEvaluator);
+
+impl Backend for WholePathOnly {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor::new(
+            BackendId::new("whole-path-only"),
+            ExecutionTarget::PortableCpu,
+        )
+    }
+}
+
+impl CurveEvaluator for WholePathOnly {
+    fn distance_convention(&self, curve: &Curve3) -> DistanceConvention {
+        self.0.distance_convention(curve)
+    }
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3> {
+        self.0.point_at(curve, at)
+    }
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3> {
+        self.0.tangent_at(curve, at)
+    }
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        self.0.frame_at(curve, at)
+    }
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<DistanceInterval>> {
+        self.0.path_joint_distances(path, tolerance)
+    }
+}
+
+/// A line along `+x` over `[-10, 0]` offset by 1, then the offset of a
+/// cubic Bezier from the origin widening from 1 to 2: a law in the
+/// spline's numerical arc length, so its length is not certified.
+fn line_then_widening() -> CurvePath {
+    let spline = Curve2::BSpline(BSplineCurve {
+        degree: 3,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(30.0, 0.0),
+            Point2::new(60.0, 20.0),
+            Point2::new(90.0, 20.0),
+        ],
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![4, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    });
+    let line = PathPiece::new(
+        PathCurve::Two(Curve2::Line(Line2 {
+            origin: Point2::new(-10.0, 0.0),
+            direction: Vec2::X,
+        })),
+        0.0,
+        10.0,
+    );
+    let widening = OffsetLaw::Linear {
+        start: PathOffsets::new(1.0, 0.0, 0.0),
+        end: PathOffsets::new(2.0, 0.0, 0.0),
+        frame: OffsetFrame::Section,
+    };
+    CurvePath::new(vec![
+        PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(
+            line,
+            OffsetLaw::Planar { distance: 1.0 },
+        )))),
+        PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(
+            PathPiece::whole(PathCurve::Two(spline.clone())),
+            widening,
+        )))),
+        PathPiece::new(
+            PathCurve::Two(Curve2::Line(Line2 {
+                origin: Point2::new(90.0, 22.0),
+                direction: Vec2::X,
+            })),
+            0.0,
+            5.0,
+        ),
+    ])
+}
+
+#[test]
+fn a_provider_without_joint_distances_refuses_a_window_by_name() {
+    let (line, circle) = (line(), circle());
+    let path = line_and_arc(&line, &circle);
+    match SingleCurves(ReferenceCurveEvaluator::new())
+        .path_joint_distances_within(&path, 10.0, 0.5, 1e-6)
+    {
+        Err(GeomError::UnsupportedInput {
+            backend,
+            operation,
+            input,
+        }) => {
+            assert_eq!(backend, BackendId::new("single-curves"));
+            assert_eq!(operation, Operation::CurveEvaluation);
+            assert_eq!(input, PATH_JOINT_DISTANCES_UNSUPPORTED);
+        }
+        other => panic!("expected a refusal naming joint distances, got {other:?}"),
+    }
+    // A window that is not finite is refused before anything is read.
+    assert!(matches!(
+        SingleCurves(ReferenceCurveEvaluator::new()).path_joint_distances_within(
+            &path,
+            10.0,
+            Scalar::NAN,
+            1e-6
+        ),
+        Err(GeomError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn the_default_window_keeps_the_certified_joints_that_meet_it() {
+    let (line, circle) = (line(), circle());
+    let path = line_and_arc(&line, &circle);
+    let reference = ReferenceCurveEvaluator::new();
+    let whole = WholePathOnly(ReferenceCurveEvaluator::new());
+    for (around, window) in [(10.0, 0.5), (9.0, 1.0), (11.0, 0.9), (5.0, 100.0)] {
+        let by_default = whole
+            .path_joint_distances_within(&path, around, window, 1e-6)
+            .unwrap();
+        assert_eq!(
+            by_default,
+            reference
+                .path_joint_distances_within(&path, around, window, 1e-6)
+                .unwrap(),
+            "window {window} around {around}"
+        );
+        let expected = if (around - 10.0).abs() <= window {
+            vec![(0, DistanceInterval::point(10.0))]
+        } else {
+            vec![]
+        };
+        assert_eq!(by_default, expected, "window {window} around {around}");
+    }
+    // The default certifies the whole path, so a piece after the window
+    // whose length is not certified refuses it; the reference provider
+    // certifies only what the window needs.
+    let widening = line_then_widening();
+    refused(
+        whole.path_joint_distances_within(&widening, 10.0, 0.5, 1e-6),
+        "a certified length of a station piece",
+    );
+    assert_eq!(
+        reference
+            .path_joint_distances_within(&widening, 10.0, 0.5, 1e-6)
+            .unwrap(),
+        vec![(0, DistanceInterval::point(10.0))]
+    );
+    refused(
+        reference.path_joint_distances_within(&widening, 104.0, 3.0, 1e-6),
+        "a certified length of a station piece",
+    );
+    assert_eq!(conformance::check(&whole), Vec::new());
+}
+
+/// A provider whose windowed joints are wrong (#305): `Bad::All` answers
+/// every joint whatever the window, `Bad::Shifted` shifts each interval by
+/// a millimetre, `Bad::Missing` answers none, `Bad::Reindexed` names each
+/// joint by the next one's index, `Bad::Invalid` refuses as bad input,
+/// `Bad::Lenient` answers a window that is not finite as empty.
+#[derive(Debug)]
+struct Windowed(ReferenceCurveEvaluator, Bad);
+
+#[derive(Debug, Clone, Copy)]
+enum Bad {
+    All,
+    Shifted,
+    Missing,
+    Reindexed,
+    Invalid,
+    Lenient,
+}
+
+impl Backend for Windowed {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor::new(BackendId::new("windowed"), ExecutionTarget::PortableCpu)
+    }
+}
+
+impl CurveEvaluator for Windowed {
+    fn distance_convention(&self, curve: &Curve3) -> DistanceConvention {
+        self.0.distance_convention(curve)
+    }
+    fn point_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Point3> {
+        self.0.point_at(curve, at)
+    }
+    fn tangent_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Vec3> {
+        self.0.tangent_at(curve, at)
+    }
+    fn frame_at(&self, curve: &Curve3, at: CurveMeasure) -> GeomResult<Frame3> {
+        self.0.frame_at(curve, at)
+    }
+    fn path_joint_distances(
+        &self,
+        path: &CurvePath,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<DistanceInterval>> {
+        self.0.path_joint_distances(path, tolerance)
+    }
+    fn path_joint_distances_within(
+        &self,
+        path: &CurvePath,
+        around: Scalar,
+        window: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<Vec<(usize, DistanceInterval)>> {
+        let found = || {
+            self.0
+                .path_joint_distances_within(path, around, window, tolerance)
+        };
+        match self.1 {
+            Bad::All => Ok(self
+                .0
+                .path_joint_distances(path, tolerance)?
+                .into_iter()
+                .enumerate()
+                .collect()),
+            Bad::Shifted => Ok(found()?
+                .into_iter()
+                .map(|(k, j)| (k, DistanceInterval::new(j.lower + 1e-3, j.upper + 1e-3)))
+                .collect()),
+            Bad::Missing => {
+                found()?;
+                Ok(Vec::new())
+            }
+            Bad::Reindexed => Ok(found()?.into_iter().map(|(k, j)| (k + 1, j)).collect()),
+            Bad::Invalid => Err(GeomError::InvalidInput("no window".into())),
+            Bad::Lenient => {
+                if around.is_finite() && window.is_finite() && window >= 0.0 {
+                    found()
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_conformance_suite_rejects_wrong_joints_near_a_window() {
+    for (bad, check) in [
+        (Bad::All, "joints near a window meet it"),
+        (Bad::Shifted, "joints near a window are certified"),
+        (
+            Bad::Shifted,
+            "joints near a window agree with every joint's",
+        ),
+        (Bad::Missing, "every joint within a window is returned"),
+        (Bad::Reindexed, "joints near a window are certified"),
+        (
+            Bad::Invalid,
+            "joints near a window are certified or refused as unsupported",
+        ),
+        (
+            Bad::Lenient,
+            "a window or tolerance that is not finite, or negative, is refused",
+        ),
+    ] {
+        let failures = conformance::check(&Windowed(ReferenceCurveEvaluator::new(), bad));
+        assert!(
+            failures.iter().any(|f| f.check == check),
+            "{bad:?}, {check}: {failures:?}"
+        );
+    }
 }
