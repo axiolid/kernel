@@ -453,6 +453,13 @@ fn a_composite_of_bounded_pieces_reads_as_its_stated_composite_and_certifies() {
         for (joint, truth) in joints.iter().zip(truths) {
             certifies(*joint, truth, tolerance, "bounded composite");
         }
+        // The joints near a window (#305) are the same certificates.
+        for (k, truth) in truths.iter().enumerate() {
+            let near = provider
+                .path_joint_distances_within(&path, *truth, 0.5, tolerance)
+                .unwrap();
+            assert_eq!(near, vec![(k, joints[k])], "joint {k} at {tolerance:e}");
+        }
     }
     // The ellipse ends where its closed form puts it.
     let end = provider

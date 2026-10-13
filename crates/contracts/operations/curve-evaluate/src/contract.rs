@@ -118,8 +118,9 @@ use crate::{CurveMeasure, DistanceConvention, DistanceInterval};
 /// curve's station measure: exact where that is read from stored data,
 /// otherwise the same estimate it measures a span between parameters by,
 /// so the path reads as the stated path holding those distances and
-/// [`path_joint_distances`](Self::path_joint_distances) certifies the
-/// joints after it. A provider that does not read bounds refuses a path
+/// [`path_joint_distances`](Self::path_joint_distances) and
+/// [`path_joint_distances_within`](Self::path_joint_distances_within)
+/// certify the joints after it. A provider that does not read bounds refuses a path
 /// with one naming [`PATH_PIECE_BOUND_UNSUPPORTED`], never reading the
 /// `start` or `end` the piece leaves unset.
 ///

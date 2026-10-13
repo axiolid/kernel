@@ -114,18 +114,18 @@ MUTANTS = [
      '            reversed: piece.reversed,\n            placement: piece.placement,',
      '            reversed: piece.reversed,\n            placement: None,', [PATH, COMP]),
     ('a path piece\'s placement claimed exact', E,
-     '            placement_exact: piece.placement_exact,\n            ..Self::between',
-     '            placement_exact: true,\n            ..Self::between', [PATH]),
+     '            placement_exact: piece.placement_exact,\n            ..span',
+     '            placement_exact: true,\n            ..span', [PATH]),
     ('a path piece\'s span not checked', E,
-     '            ..Self::between(curve, piece.start, end)?',
-     '            ..Self {\n'
-     '                curve,\n'
-     '                start: piece.start,\n'
-     '                end,\n'
-     '                reversed: false,\n'
-     '                placement: None,\n'
-     '                placement_exact: true,\n'
-     '            }', [PATH]),
+     '                Self::between(curve, start, end)?',
+     '                Self {\n'
+     '                    curve,\n'
+     '                    start,\n'
+     '                    end,\n'
+     '                    reversed: false,\n'
+     '                    placement: None,\n'
+     '                    placement_exact: true,\n'
+     '                }', [PATH]),
     ('a station piece hands out no sense', E,
      '        out.reversed = piece.reversed;\n', '', [PATH, COMP]),
     ('a station piece hands out no placement', E,
