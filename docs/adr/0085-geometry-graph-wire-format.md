@@ -359,3 +359,15 @@ rules above.
   refuses it as an unknown field. `scripts/probe_run_basis_end_mutants.py`
   writes an absent end, reads one in a 1.2 payload, never labels 1.3 and
   ignores the carrier; each is caught.
+
+## Note 2026-10-13: exact JSON reals need correctly rounded parsing
+
+The bit-exact promise for reals holds only if the JSON reader rounds
+correctly. `serde_json`'s default fast parser does not: it lands one ulp off
+for about a quarter of ordinary doubles. The workspace therefore enables
+`serde_json`'s `float_roundtrip` feature, and a test sweeps 6,000 doubles
+across twenty magnitudes through JSON and CBOR. A host reading these
+payloads in another language needs a correctly rounded decimal parser (most
+standard libraries have one, such as JavaScript's `Number` or Python's
+`float`).
+

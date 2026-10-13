@@ -1461,6 +1461,63 @@ fn reals_round_trip_bit_exactly() {
     assert!(graph.to_json().unwrap().contains("-0.0"));
 }
 
+#[test]
+fn many_ordinary_reals_round_trip_bit_exactly() {
+    // A JSON reader without correctly rounded parsing lands one ulp off for
+    // roughly a quarter of ordinary doubles (12.838242182209141 is one), so a
+    // handful of simple values cannot pin the ADR 0085 promise. Sweep a
+    // deterministic spread of mantissas across magnitudes instead.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut values = Vec::new();
+    for exponent in -12..=7 {
+        for _ in 0..300 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let mantissa = 1.0 + (state >> 11) as f64 / (1u64 << 53) as f64;
+            let sign = if state & 1 == 0 { 1.0 } else { -1.0 };
+            values.push(sign * mantissa * 10f64.powi(exponent));
+        }
+    }
+    values.push(12.838_242_182_209_141);
+    values.push(10.003_124_511_871_276);
+    while values.len() % 3 != 0 {
+        values.push(0.0);
+    }
+    let points: Vec<Point3> = values
+        .chunks(3)
+        .map(|c| Vec3::new(c[0], c[1], c[2]))
+        .collect();
+    let mut builder = GeometryGraphBuilder::new();
+    let list = builder.push(GeometryNode::PointList3(points)).unwrap();
+    let graph = builder.finish(vec![list]).unwrap();
+    let bits = |graph: &GeometryGraph| -> Vec<u64> {
+        let (_, GeometryNode::PointList3(points)) = graph.iter().next().unwrap() else {
+            panic!("not a point list");
+        };
+        points
+            .iter()
+            .flat_map(|point| point.to_array())
+            .map(f64::to_bits)
+            .collect()
+    };
+    let expected = bits(&graph);
+    let json = GeometryGraph::from_json(&graph.to_json().unwrap()).unwrap();
+    let off = expected
+        .iter()
+        .zip(bits(&json))
+        .filter(|(a, b)| **a != *b)
+        .count();
+    assert_eq!(
+        off,
+        0,
+        "{off} of {} reals changed through JSON",
+        values.len()
+    );
+    let cbor = GeometryGraph::from_cbor(&graph.to_cbor().unwrap()).unwrap();
+    assert_eq!(bits(&cbor), expected, "CBOR");
+}
+
 // ---------------------------------------------------------------------------
 // Golden payloads
 // ---------------------------------------------------------------------------
