@@ -43,9 +43,15 @@
 //!   (#231). Tapered revolutions only between straight-edged profiles,
 //!   whose rings correspond exactly; tapered extrusions are unbounded
 //!   (their twisted walls are not measured).
-//! - Swept disks: along lines, polylines (filleted) and chains of
-//!   segments and arcs by `axiolid_construct::pipe`'s proof (#232), along
-//!   one circular arc by #231's; along an ellipse, a B-spline, or an
+//! - Swept disks: along lines, polylines (filleted, open or closed) and
+//!   chains of segments and arcs by `axiolid_construct::pipe`'s proof
+//!   (#232, #245, #248: a loop's closing twist is part of it), along one
+//!   circular arc by #231's; a corner mitred beside an arc (#248) is
+//!   certified by the branch and bound below, over the bend's band of
+//!   torus up to the mitre plane and the planar face between the two
+//!   tubes' sections (each trimmed by certain inequalities on its cells),
+//!   and reported [`DeviationBound::Certified`] under the detail
+//!   [`MITRE_BESIDE_AN_ARC`]; along an ellipse, a B-spline, or an
 //!   elevated or banked curve without a grade break (#252, its derivative
 //!   bounds in plan distance from `axiolid_reference::elevated`), certified
 //!   against the exact tube (walls, bore and square end caps) by branch and
@@ -176,6 +182,7 @@
 use axiolid_core::{Scalar, Transform3};
 
 mod boolean;
+mod mitre;
 mod paths;
 pub(crate) use boolean::{emitted_booleans, of_boolean};
 pub(crate) use paths::{
@@ -194,6 +201,12 @@ pub(crate) const WARPED_AUTHORED_FACE: &str = "non-planar authored face";
 /// plane holds its Steiner points exactly and reports nothing.
 pub(crate) const KEYHOLE_STEINER_POINT: &str =
     "point added inside a keyhole face, off an axis plane";
+
+/// The [`DeviationContribution::detail`] of the corners a swept disk mitres
+/// beside an arc (#248): the bend's band and the planar face between the
+/// two tubes' sections, certified against the mesh by branch and bound;
+/// the rest of the pipe stays proven under its own detail.
+pub const MITRE_BESIDE_AN_ARC: &str = "mitre beside an arc";
 
 /// The [`DeviationContribution::detail`] of a node placed at a station
 /// whose frame is read at a numerically resolved distance (#264).

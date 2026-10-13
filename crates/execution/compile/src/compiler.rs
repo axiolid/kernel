@@ -669,7 +669,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             return run;
         }
         let mut mesh = self.build_solid(graph, operation, options)?;
-        let mut deviation = crate::deviation::of_solid(graph, operation, options, &mesh)?;
+        let mut deviation = crate::deviation::of_solid(graph, operation, options, options, &mesh)?;
         if !matches!(operation, SolidOperation::SweptDisk { .. }) {
             return Ok((mesh, deviation));
         }
@@ -684,7 +684,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 break;
             };
             let refined = self.build_solid(graph, operation, &finer)?;
-            let certified = crate::deviation::of_solid(graph, operation, options, &refined)?;
+            let certified =
+                crate::deviation::of_solid(graph, operation, options, &finer, &refined)?;
             match certified.certified_over(budget) {
                 // No better: the overshoot is not the stations' to remove.
                 Some(next) if next >= over => break,
@@ -779,7 +780,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             // construction splits the budget between the section and the
             // directrix and refines the directrix until its walls fit.
             // Lines, polylines and composites of lines and arcs are swept
-            // piece by piece, corners mitred (#245) or filleted (#232).
+            // piece by piece, corners mitred (#245, beside an arc #248) or
+            // filleted (#232); a closed polyline is swept as a loop (#248).
             SolidOperation::SweptDisk {
                 directrix,
                 radius,
@@ -794,8 +796,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         input: "a parameter range on a swept disk with a fillet radius",
                     })
                 }
-                Some(pieces) => axiolid_construct::pipe::swept_disk_along_pieces(
-                    &pieces,
+                Some(path) if path.closed => axiolid_construct::pipe::swept_disk_along_loop(
+                    &path.pieces,
+                    *radius,
+                    *inner_radius,
+                    *fillet_radius,
+                    chord_error(options),
+                ),
+                Some(path) => axiolid_construct::pipe::swept_disk_along_pieces(
+                    &path.pieces,
                     *radius,
                     *inner_radius,
                     *fillet_radius,

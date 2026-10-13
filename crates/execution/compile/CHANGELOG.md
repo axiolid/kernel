@@ -108,6 +108,22 @@ caret rule for `0.x` versions.
 - `pinch::find`, which refuses a boolean result that touches itself,
   welds positions by value (#283), so a corner written with `-0.0` meets
   its `0.0` twin, as #269 fixed in construct.
+- **Swept disks along closed polylines and with corners beside an arc
+  (#248).** A closed polyline is swept as a loop by
+  `axiolid_construct::pipe::swept_disk_along_loop` (its closing segment
+  included, a repeated first point dropped), mitred or filleted where it
+  closes too; a parameter range on it, and a closed polyline inside a
+  composite, are refused by name. Its deviation stays proven, under the
+  detail `"closed loop of segments and arcs"`, the closing twist
+  included. A corner between a segment or an arc and an arc is mitred
+  instead of refused: the rest of the pipe stays proven, and the bend's
+  band of torus up to the mitre plane and the planar face between the
+  two tubes' sections are certified against the mesh by branch and bound
+  (cells trimmed by certain height, distance and azimuth tests),
+  reported `Certified` under the new detail
+  `deviation::MITRE_BESIDE_AN_ARC`. Measured within the budget at 1 mm
+  and 0.1 mm for corners of 20 to 120 degrees before, after and between
+  bends, in and out of the bend's plane, solid and hollow.
 
 ## [0.3.23] - 2026-10-13
 

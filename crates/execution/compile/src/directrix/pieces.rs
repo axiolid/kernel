@@ -5,7 +5,10 @@
 //! reading in the parent module, so `axiolid_construct::pipe` can bound
 //! the tube against its exact centreline and mitre its corners. Any
 //! other family (an ellipse, a B-spline) yields `None`, and the caller
-//! sweeps the sampled path as before.
+//! sweeps the sampled path as before. A closed polyline is a loop (#248):
+//! its closing segment included, swept by
+//! `axiolid_construct::pipe::swept_disk_along_loop`; a parameter range on
+//! it, or a closed polyline inside a composite, is refused by name.
 
 use axiolid_construct::pipe::PathPiece;
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
@@ -18,6 +21,15 @@ use super::{
     MAX_DEPTH,
 };
 
+/// A directrix read as exact pieces.
+#[derive(Debug, Clone)]
+pub(crate) struct PiecePath {
+    /// The pieces in the direction of travel.
+    pub(crate) pieces: Vec<PathPiece>,
+    /// Whether the last piece ends where the first starts, as a loop.
+    pub(crate) closed: bool,
+}
+
 /// The directrix as exact pieces in the direction of travel, or `None`
 /// when it holds a curve other than a line, a polyline or a circle, or is
 /// one circle or arc alone (that keeps the conic sweep of #231).
@@ -26,15 +38,26 @@ pub(crate) fn pieces(
     id: NodeId,
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
-) -> GeomResult<Option<Vec<PathPiece>>> {
+) -> GeomResult<Option<PiecePath>> {
     let pieces = resolve(graph, id, range, options, 0)?;
-    Ok(pieces.filter(|p| !matches!(p.as_slice(), [PathPiece::Arc { .. }])))
+    Ok(pieces.filter(|p| p.closed || !matches!(p.pieces.as_slice(), [PathPiece::Arc { .. }])))
 }
 
-type Resolved = Option<Vec<PathPiece>>;
+type Resolved = Option<PiecePath>;
 
-fn reversed(pieces: Resolved) -> Resolved {
-    pieces.map(|p| p.iter().rev().map(PathPiece::reversed).collect())
+/// Open pieces.
+fn open(pieces: Vec<PathPiece>) -> Resolved {
+    Some(PiecePath {
+        pieces,
+        closed: false,
+    })
+}
+
+fn reversed(path: Resolved) -> Resolved {
+    path.map(|p| PiecePath {
+        pieces: p.pieces.iter().rev().map(PathPiece::reversed).collect(),
+        closed: p.closed,
+    })
 }
 
 fn resolve(
@@ -105,7 +128,7 @@ fn resolve(
                 };
                 let (lo, hi) =
                     periodic_trim_interval(period, a, b, *sense_agreement, range, options)?;
-                let out = arc(circle, lo, hi).map(|p| vec![p]);
+                let out = arc(circle, lo, hi).and_then(|p| open(vec![p]));
                 return Ok(if *sense_agreement { out } else { reversed(out) });
             }
             let selected = range.unwrap_or((a, b));
@@ -127,12 +150,18 @@ fn resolve(
                 let Some(child) = resolve(graph, segment.curve, None, options, depth + 1)? else {
                     return Ok(None);
                 };
-                let child = if segment.same_sense {
-                    Some(child)
-                } else {
-                    reversed(Some(child))
+                if child.closed {
+                    return Err(GeomError::UnsupportedInput {
+                        backend: crate::BACKEND_ID,
+                        operation: axiolid_contracts::Operation::Sweep,
+                        input: "a swept disk along a composite holding a closed polyline",
+                    });
                 }
-                .unwrap_or_default();
+                let child = if segment.same_sense {
+                    child.pieces
+                } else {
+                    reversed(Some(child)).map(|p| p.pieces).unwrap_or_default()
+                };
                 if let (Some(last), Some(first)) = (out.last(), child.first()) {
                     let gap = last.end_point().distance(first.start_point());
                     if gap > slack {
@@ -144,8 +173,8 @@ fn resolve(
                 out.extend(child);
             }
             match range {
-                None => Ok(Some(out)),
-                Some((start, end)) => trim_by_length(&out, start, end, slack).map(Some),
+                None => Ok(open(out)),
+                Some((start, end)) => trim_by_length(&out, start, end, slack).map(open),
             }
         }
         // No exact pieces: swept as sampled (#241).
@@ -211,22 +240,43 @@ fn curve_pieces(
     match curve {
         Curve3::Line(line) => {
             let d = domain(curve, range, options)?;
-            Ok(Some(vec![PathPiece::Segment {
+            Ok(open(vec![PathPiece::Segment {
                 start: line.origin + line.direction * d.start,
                 end: line.origin + line.direction * d.end,
             }]))
         }
-        Curve3::Polyline(polyline) => {
-            // Its last section would have to be mitred back onto its first,
-            // and the frames carried round a loop that leaves its plane do
-            // not return to themselves; not built yet (#245).
-            if polyline.closed {
+        Curve3::Polyline(polyline) if polyline.closed => {
+            // A loop (#248): every vertex a joint, the one where it closes
+            // too. A range would cut the loop open somewhere in it.
+            if range.is_some() {
                 return Err(GeomError::UnsupportedInput {
                     backend: crate::BACKEND_ID,
                     operation: axiolid_contracts::Operation::Sweep,
-                    input: "a swept disk along a closed polyline (the mitre where it closes)",
+                    input: "a parameter range on a swept disk along a closed polyline",
                 });
             }
+            let mut points = polyline.points.clone();
+            // A closed polyline may or may not repeat its first point.
+            if points.len() > 1 && points.first() == points.last() {
+                points.pop();
+            }
+            let n = points.len();
+            let pieces: Vec<PathPiece> = (0..n)
+                .map(|k| (points[k], points[(k + 1) % n]))
+                .filter(|(start, end)| start != end)
+                .map(|(start, end)| PathPiece::Segment { start, end })
+                .collect();
+            if pieces.len() < 2 {
+                return Err(GeomError::Degenerate(
+                    "a closed sweep directrix needs at least three distinct points".into(),
+                ));
+            }
+            Ok(Some(PiecePath {
+                pieces,
+                closed: true,
+            }))
+        }
+        Curve3::Polyline(polyline) => {
             let d = domain(curve, range, options)?;
             let points = &polyline.points;
             let requested = d.end - d.start;
@@ -260,11 +310,11 @@ fn curve_pieces(
                     "a sweep directrix needs at least two points".into(),
                 ));
             }
-            Ok(Some(out))
+            Ok(open(out))
         }
         Curve3::Circle(circle) => {
             let d = domain(curve, range, options)?;
-            Ok(arc(circle, d.start, d.end).map(|p| vec![p]))
+            Ok(arc(circle, d.start, d.end).and_then(|p| open(vec![p])))
         }
         _ => Ok(None),
     }

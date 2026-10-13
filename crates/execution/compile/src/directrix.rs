@@ -12,7 +12,7 @@ use axiolid_reference::station::StationCurve;
 
 mod elevated;
 mod pieces;
-pub(crate) use pieces::pieces;
+pub(crate) use pieces::{pieces, PiecePath};
 
 const MAX_DEPTH: usize = 256;
 const MAX_POINTS: usize = 1_000_000;

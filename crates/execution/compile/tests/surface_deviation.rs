@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
+use axiolid_construct::pipe::{PathPiece, PipePlan};
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{
     Frame2, Frame3, Interval, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3,
@@ -1324,16 +1325,22 @@ fn a_joint_within_the_stated_angular_tolerance_is_swept_within_the_budget() {
         assert_watertight("kink within tolerance", &mesh);
         assert_pipe_volume("kink within tolerance", &mesh, r, length, budget);
         assert_within("kink within tolerance", &mesh, &samples, budget);
-        // Just past the tolerance it is a corner.
+        // Just past the tolerance it is a corner, mitred beside the arc
+        // and certified rather than proven (#248).
         let legs = kinked(1.1 * joint_tolerance(budget, r), 0.12);
-        let refused = try_compile(
-            |b| {
-                let path = composite(b, &legs, Spelling::Trims);
-                swept_disk(b, path, r, None)
-            },
-            &options,
+        let mut builder = GeometryGraphBuilder::new();
+        let path = composite(&mut builder, &legs, Spelling::Trims);
+        let root = swept_disk(&mut builder, path, r, None);
+        let graph = builder.finish(vec![root]).expect("a valid graph");
+        let (_, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_with_deviation(&graph, root, &options)
+            .expect("the corner is mitred");
+        assert!(
+            report.contributions.iter().any(|c| c.detail
+                == axiolid_mesh_compile::deviation::MITRE_BESIDE_AN_ARC
+                && matches!(c.bound, DeviationBound::Certified(_))),
+            "{report:?}"
         );
-        assert!(is_invalid(&refused, "corner"), "{}", outcome(&refused));
     }
 }
 
@@ -1753,41 +1760,8 @@ fn only_impossible_mitres_are_refused_by_name() {
     // A reversal has no half angle to mitre at.
     let back = refused(&[Point3::ZERO, Point3::X, 0.5 * Point3::X], r);
     assert!(is_invalid(&back, "reverses"), "{}", outcome(&back));
-    // A corner beside an arc: no ring lies on both the cylinder's and the
-    // torus's cut, so it is refused rather than mitred.
-    let bend = Turtle::new(Point3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))
-        .bend(0.2, FRAC_PI_2, -Vec3::X)
-        .straight(0.5);
-    let mut legs = vec![Leg::Straight {
-        from: Point3::ZERO,
-        dir: Vec3::X,
-        length: 1.0,
-    }];
-    legs.extend(bend.legs);
-    let beside = try_compile(
-        |b| {
-            let path = composite(b, &legs, Spelling::Trims);
-            swept_disk(b, path, r, None)
-        },
-        &ExecutionOptions::new(Tolerance::MILLIMETRE),
-    );
-    assert!(is_invalid(&beside, "beside an arc"), "{}", outcome(&beside));
-    // A closed polyline would need a mitre where it closes: not built.
-    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
-    for fillet in [None, Some(0.2)] {
-        let closed = try_compile(
-            |b| {
-                let path = polyline(b, &sharp(1.0), true);
-                swept_disk(b, path, r, fillet)
-            },
-            &options,
-        );
-        assert!(
-            matches!(closed, Err(GeomError::UnsupportedInput { input, .. }) if input.contains("closed polyline")),
-            "{fillet:?}: {}",
-            outcome(&closed)
-        );
-    }
+    // A corner beside an arc is mitred too (#248), and a closed polyline
+    // mitred where it closes; see the tests below.
     // Collinear vertices are no corner.
     let straight = refused(&[Point3::ZERO, Point3::X, 2.0 * Point3::X], r);
     assert!(straight.is_ok(), "{}", outcome(&straight));
@@ -1941,4 +1915,816 @@ fn a_primitive_cylinder_or_cone_beyond_the_segment_cap_is_refused() {
             outcome(&refused)
         );
     }
+}
+
+// --- #248: corners mitred beside an arc, closed polylines, the horn torus ---
+
+impl Turtle {
+    /// A sharp corner: the heading turned by `angle` toward `toward` (made
+    /// perpendicular to it), with no bend.
+    fn corner(mut self, angle: Scalar, toward: Vec3) -> Self {
+        let side = (toward - self.dir * self.dir.dot(toward)).normalize();
+        self.dir = (self.dir * angle.cos() + side * angle.sin()).normalize();
+        self
+    }
+}
+
+impl Leg {
+    /// The point `p` of the leg's start section carried to the fraction
+    /// `s` of the leg along its own line or circle, continued past either
+    /// end.
+    fn carry(&self, p: Point3, s: Scalar) -> Point3 {
+        match *self {
+            Leg::Straight { dir, length, .. } => p + dir * (length * s),
+            Leg::Bend {
+                centre,
+                axis,
+                angle,
+                ..
+            } => rotate(p, centre, axis, angle * s),
+        }
+    }
+
+    /// Whether `x` lies in the leg's tube between radii `ri` and `r`,
+    /// continued a little past its ends (a straight leg's whole line, a
+    /// bend's circle 0.6 rad either side).
+    fn holds(&self, x: Point3, ri: Scalar, r: Scalar) -> bool {
+        let dist = match *self {
+            Leg::Straight { from, dir, .. } => {
+                let q = x - from;
+                (q - dir * q.dot(dir)).length()
+            }
+            Leg::Bend {
+                centre,
+                axis,
+                from,
+                angle,
+            } => {
+                let q = x - centre;
+                let h = q.dot(axis);
+                let rho = (q - axis * h).length();
+                let f = from - centre;
+                let azimuth = axis.dot(f.cross(q)).atan2(f.dot(q));
+                if azimuth < -0.6 || azimuth > angle + 0.6 {
+                    return false;
+                }
+                (rho - f.length()).hypot(h)
+            }
+        };
+        dist >= ri && dist <= r
+    }
+}
+
+/// The mitre normal where `a` ends and `b` starts, `None` where they are
+/// tangent: the bisector of the two tangents.
+fn mitre_between(a: &Leg, b: &Leg) -> Option<Vec3> {
+    let (u, v) = (a.tangent(1.0), b.tangent(0.0));
+    (u.cross(v).length() > 1e-9).then(|| (u + v).normalize())
+}
+
+/// The fraction of `leg` at which the circle or line of start-section
+/// point `p` crosses the plane through `corner` with normal `n`, near
+/// `near` (0 or 1): the first sign change scanning outward both ways.
+fn crossing(leg: &Leg, p: Point3, corner: Point3, n: Vec3, near: Scalar) -> Scalar {
+    let width = match *leg {
+        Leg::Straight { length, .. } => 1.0 / length,
+        Leg::Bend { angle, .. } => 1.0 / angle,
+    };
+    let h = |s: Scalar| (leg.carry(p, s) - corner).dot(n);
+    let steps = 400;
+    let mut found = None;
+    for k in 0..steps {
+        let (a, b) = (
+            near - width + 2.0 * width * k as Scalar / steps as Scalar,
+            near - width + 2.0 * width * (k + 1) as Scalar / steps as Scalar,
+        );
+        if (h(a) < 0.0) != (h(b) < 0.0) {
+            let (mut lo, mut hi) = (a, b);
+            for _ in 0..100 {
+                let m = 0.5 * (lo + hi);
+                if (h(m) < 0.0) == (h(lo) < 0.0) {
+                    lo = m;
+                } else {
+                    hi = m;
+                }
+            }
+            let root = 0.5 * (lo + hi);
+            if found.is_none_or(|f: Scalar| (root - near).abs() < (f - near).abs()) {
+                found = Some(root);
+            }
+        }
+    }
+    found.expect("the mitre plane crosses the leg's line near its end")
+}
+
+/// A pipe along `legs`, each corner (a joint whose tangents differ)
+/// mitred at half angle, in closed form: each leg's tube continued to its
+/// mitre planes and cut by them.
+struct Mitred<'a> {
+    legs: &'a [Leg],
+    closed: bool,
+    radii: (Scalar, Scalar),
+}
+
+impl Mitred<'_> {
+    fn joint(&self, k: usize) -> Option<(Point3, Vec3)> {
+        let m = self.legs.len();
+        let (a, b) = match k.checked_sub(1) {
+            Some(i) => (&self.legs[i], &self.legs[k % m]),
+            None if self.closed => (&self.legs[m - 1], &self.legs[0]),
+            None => return None,
+        };
+        if k == m && !self.closed {
+            return None;
+        }
+        mitre_between(a, b).map(|n| (a.point(1.0), n))
+    }
+
+    /// The leg's start-section point at azimuth `beta` and radius `rho`.
+    fn section(leg: &Leg, beta: Scalar, rho: Scalar) -> Point3 {
+        let (n1, n2) = normals(leg.tangent(0.0));
+        leg.point(0.0) + (n1 * beta.cos() + n2 * beta.sin()) * rho
+    }
+
+    /// The fractions of leg `k` its tube runs between on the circle or
+    /// line of start-section point `p`.
+    fn extent(&self, k: usize, p: Point3) -> (Scalar, Scalar) {
+        let leg = &self.legs[k];
+        let s0 = self
+            .joint(k)
+            .map_or(0.0, |(c, n)| crossing(leg, p, c, n, 0.0));
+        let s1 = self
+            .joint(k + 1)
+            .map_or(1.0, |(c, n)| crossing(leg, p, c, n, 1.0));
+        (s0, s1)
+    }
+
+    fn samples(&self) -> Vec<Point3> {
+        let (ri, r) = self.radii;
+        let mut out = Vec::new();
+        let walls: Vec<Scalar> = if ri > 0.0 { vec![r, ri] } else { vec![r] };
+        for (k, leg) in self.legs.iter().enumerate() {
+            let along = match leg {
+                Leg::Straight { .. } => 24,
+                Leg::Bend { .. } => 360,
+            };
+            for &rho in &walls {
+                for beta in span(0.0, TAU, 360) {
+                    let p = Self::section(leg, beta, rho);
+                    let (s0, s1) = self.extent(k, p);
+                    let at = span(0.0, 1.0, along).chain([0.0, 1.0]);
+                    out.extend(at.map(|t| leg.carry(p, s0 + (s1 - s0) * t)));
+                }
+            }
+        }
+        // The planar face of each mitre: the plane's points in one tube.
+        let m = self.legs.len();
+        let joints = if self.closed { m } else { m - 1 };
+        for k in 1..=joints {
+            let Some((corner, n)) = self.joint(k) else {
+                continue;
+            };
+            let (a, b) = (&self.legs[k - 1], &self.legs[k % m]);
+            let (m1, m2) = normals(n);
+            for rho in span(0.0, 3.0 * r, 90) {
+                for phi in span(0.0, TAU, 720) {
+                    let x = corner + (m1 * phi.cos() + m2 * phi.sin()) * rho;
+                    if a.holds(x, ri, r) != b.holds(x, ri, r) {
+                        out.push(x);
+                    }
+                }
+            }
+        }
+        if !self.closed {
+            let (first, last) = (&self.legs[0], &self.legs[m - 1]);
+            for (c, t) in [
+                (first.point(0.0), first.tangent(0.0)),
+                (last.point(1.0), last.tangent(1.0)),
+            ] {
+                let (n1, n2) = normals(t);
+                for rho in span(ri, r, 12) {
+                    out.extend(
+                        span(0.0, TAU, 90).map(|v| c + n1 * (rho * v.cos()) + n2 * (rho * v.sin())),
+                    );
+                }
+            }
+        }
+        out
+    }
+
+    /// The exact volume: each straight leg holds its section's area times
+    /// its length (a plane through an axis point cuts as much off as it
+    /// adds), each bend its section's area times its centreline length
+    /// (Pappus) plus, at a mitred end, the volume its circles sweep past
+    /// the end section, `integral of rho_axis * turn dA`, by quadrature.
+    fn volume(&self) -> Scalar {
+        let (ri, r) = self.radii;
+        let area = PI * (r * r - ri * ri);
+        let mut total = 0.0;
+        for (k, leg) in self.legs.iter().enumerate() {
+            total += area * leg.length();
+            let Leg::Bend {
+                centre,
+                axis,
+                angle,
+                ..
+            } = *leg
+            else {
+                continue;
+            };
+            let (nr, nb) = (80, 240);
+            let mut extra = 0.0;
+            for i in 0..nr {
+                let rho = ri + (r - ri) * (i as Scalar + 0.5) / nr as Scalar;
+                for j in 0..nb {
+                    let beta = TAU * (j as Scalar + 0.5) / nb as Scalar;
+                    let p = Self::section(leg, beta, rho);
+                    let q = p - centre;
+                    let to_axis = (q - axis * q.dot(axis)).length();
+                    let (s0, s1) = self.extent(k, p);
+                    let da = rho * (r - ri) / nr as Scalar * TAU / nb as Scalar;
+                    extra += to_axis * angle * ((s1 - 1.0) - s0) * da;
+                }
+            }
+            total += extra;
+        }
+        total
+    }
+
+    fn area(&self) -> Scalar {
+        let (ri, r) = self.radii;
+        let length: Scalar = self.legs.iter().map(Leg::length).sum();
+        TAU * (r + ri) * length * 1.5 + 2.0 * PI * (r * r - ri * ri)
+    }
+}
+
+/// Compile with the deviation report, and check the mesh against the exact
+/// pipe: watertight, its volume, and every sample within the reported
+/// bound, which is within the budget.
+fn check_mitred(name: &str, legs: &[Leg], radii: (Scalar, Scalar), beside_arc: bool) {
+    let pipe = Mitred {
+        legs,
+        closed: false,
+        radii,
+    };
+    let samples = pipe.samples();
+    let exact = pipe.volume();
+    let inner = (radii.0 > 0.0).then_some(radii.0);
+    for (options, budget) in budgets() {
+        let mut builder = GeometryGraphBuilder::new();
+        let path = composite(&mut builder, legs, Spelling::Trims);
+        let root = swept_tube(&mut builder, path, radii.1, inner);
+        let graph = builder.finish(vec![root]).expect("a valid graph");
+        let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_with_deviation(&graph, root, &options)
+            .expect("the body compiles");
+        let mesh = outcome.mesh;
+        let name = format!("{name}, radii {radii:?}");
+        let certified = report
+            .contributions
+            .iter()
+            .find(|c| c.detail == axiolid_mesh_compile::deviation::MITRE_BESIDE_AN_ARC)
+            .map(|c| c.bound);
+        if beside_arc {
+            assert!(
+                matches!(certified, Some(DeviationBound::Certified(_))),
+                "{name}: {report:?}"
+            );
+        } else {
+            assert!(certified.is_none(), "{name}: {report:?}");
+        }
+        assert!(report.meets_requested(), "{name}: {report:?}");
+        assert_watertight(&name, &mesh);
+        let got = axiolid_measure::volume_properties(&mesh, Tolerance::new(1e-9, 1e-9).unwrap())
+            .unwrap_or_else(|e| panic!("{name}: not a closed two-manifold: {e:?}"))
+            .signed_volume;
+        eprintln!("{name}: volume {got:.12e}, exact {exact:.12e}");
+        assert!(
+            got > 0.0 && (got - exact).abs() <= pipe.area() * budget,
+            "{name}: volume {got} against the exact {exact} (budget {budget:e})"
+        );
+        let bound = report.bound.unwrap();
+        let worst = assert_within(&name, &mesh, &samples, budget);
+        assert!(
+            worst <= bound,
+            "{name}: sampled {worst:e} above the bound {bound:e}"
+        );
+    }
+}
+
+/// The legs of the issue's corner beside an arc: a straight leg, a corner
+/// of `degrees` toward `toward`, a bend of radius `big` through a quarter
+/// turn toward `bend_toward`, and a straight leg off it.
+fn leg_then_bend(degrees: Scalar, toward: Vec3, big: Scalar, bend_toward: Vec3) -> Vec<Leg> {
+    Turtle::new(Point3::new(0.1, -0.2, 0.3), Vec3::X)
+        .straight(0.6)
+        .corner(degrees.to_radians(), toward)
+        .bend(big, FRAC_PI_2, bend_toward)
+        .straight(0.4)
+        .legs
+}
+
+#[test]
+fn a_corner_mitred_beside_an_arc_is_certified_within_the_budget() {
+    // A straight leg meeting a bend at a sharp corner, turned into the
+    // bend's plane either way and out of it, at 20 to 120 degrees.
+    let r = 0.05;
+    for (degrees, toward, bend_toward) in [
+        (20.0, Vec3::Y, Vec3::Y),
+        (60.0, Vec3::Y, -Vec3::Y),
+        (90.0, Vec3::Y, Vec3::X),
+        (90.0, Vec3::Z, Vec3::X),
+        (120.0, -Vec3::Y, Vec3::Z),
+    ] {
+        let legs = leg_then_bend(degrees, toward, 0.25, bend_toward);
+        check_mitred(
+            &format!("{degrees} degree corner before a bend"),
+            &legs,
+            (0.0, r),
+            true,
+        );
+    }
+}
+
+#[test]
+fn corners_after_a_bend_and_between_two_bends_are_certified_within_the_budget() {
+    let r = 0.05;
+    let bend_then_leg = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.3)
+        .bend(0.3, FRAC_PI_2, Vec3::Y)
+        .corner(70f64.to_radians(), Vec3::new(0.3, 0.0, 1.0))
+        .straight(0.5)
+        .legs;
+    check_mitred("corner after a bend", &bend_then_leg, (0.0, r), true);
+    let two_bends = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.3)
+        .bend(0.3, FRAC_PI_2, Vec3::Y)
+        .corner(50f64.to_radians(), -Vec3::X)
+        .bend(0.25, 1.2, Vec3::Z)
+        .straight(0.3)
+        .legs;
+    check_mitred("corner between two bends", &two_bends, (0.0, r), true);
+    // Hollow: the bore is cut by the same plane.
+    check_mitred(
+        "hollow corner between two bends",
+        &two_bends,
+        (0.03, r),
+        true,
+    );
+}
+
+#[test]
+fn a_mitre_beside_an_arc_names_what_it_cannot_build() {
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let attempt = |legs: &[Leg], r: Scalar| {
+        try_compile(
+            |b| {
+                let path = composite(b, legs, Spelling::Trims);
+                swept_disk(b, path, r, None)
+            },
+            &options,
+        )
+    };
+    // A corner of nearly half a turn beside a bend just wider than the
+    // disk: the mitre plane wraps round the bend's tube.
+    let tight = leg_then_bend(170.0, Vec3::Y, 0.06, -Vec3::Y);
+    let wraps = attempt(&tight, 0.05);
+    assert!(
+        is_invalid(&wraps, "does not clear the bend's tube"),
+        "{}",
+        outcome(&wraps)
+    );
+    // A short bend whose band needs more than it turns.
+    let short = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.4)
+        .corner(FRAC_PI_2, Vec3::Y)
+        .bend(0.25, 0.05, Vec3::X)
+        .straight(0.4)
+        .legs;
+    let past = attempt(&short, 0.05);
+    assert!(
+        is_invalid(&past, "reach past the arc"),
+        "{}",
+        outcome(&past)
+    );
+    // With a fillet radius only corners between segments are rounded.
+    let filleted_bend = try_compile(
+        |b| {
+            let legs = leg_then_bend(60.0, Vec3::Y, 0.25, Vec3::Y);
+            let path = composite(b, &legs, Spelling::Trims);
+            swept_disk(b, path, 0.05, Some(0.2))
+        },
+        &options,
+    );
+    assert!(
+        is_invalid(
+            &filleted_bend,
+            "only corners between two straight segments are filleted"
+        ),
+        "{}",
+        outcome(&filleted_bend)
+    );
+}
+
+/// The legs of the closed polyline `points` (its last point joined back
+/// to its first).
+fn loop_legs(points: &[Point3]) -> Vec<Leg> {
+    let n = points.len();
+    (0..n)
+        .map(|k| {
+            let (a, b) = (points[k], points[(k + 1) % n]);
+            Leg::Straight {
+                from: a,
+                dir: (b - a).normalize(),
+                length: (b - a).length(),
+            }
+        })
+        .collect()
+}
+
+/// Loops: a planar square, a planar L, and two leaving their plane.
+fn loops() -> Vec<(&'static str, Vec<Point3>, bool)> {
+    vec![
+        (
+            "square",
+            vec![
+                Point3::new(0.1, 0.2, 0.3),
+                Point3::new(1.1, 0.2, 0.3),
+                Point3::new(1.1, 1.2, 0.3),
+                Point3::new(0.1, 1.2, 0.3),
+            ],
+            true,
+        ),
+        (
+            "L-shaped hexagon",
+            vec![
+                Point3::ZERO,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 0.4, 0.0),
+                Point3::new(0.4, 0.4, 0.0),
+                Point3::new(0.4, 1.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            true,
+        ),
+        (
+            "skew pentagon",
+            vec![
+                Point3::ZERO,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.2, 1.0, 0.5),
+                Point3::new(0.3, 1.4, -0.2),
+                Point3::new(-0.2, 0.6, 0.4),
+            ],
+            false,
+        ),
+        (
+            "chair hexagon",
+            vec![
+                Point3::new(1.0, 0.0, 0.3),
+                Point3::new(0.5, 0.9, -0.2),
+                Point3::new(-0.6, 0.8, 0.35),
+                Point3::new(-1.0, 0.0, -0.3),
+                Point3::new(-0.4, -0.9, 0.2),
+                Point3::new(0.5, -0.85, -0.4),
+            ],
+            false,
+        ),
+    ]
+}
+
+/// The pipe's plan as the compiler sweeps a closed polyline.
+fn loop_plan(points: &[Point3], r: Scalar, fillet: Option<Scalar>, chord: Scalar) -> PipePlan {
+    let n = points.len();
+    let pieces: Vec<PathPiece> = (0..n)
+        .map(|k| PathPiece::Segment {
+            start: points[k],
+            end: points[(k + 1) % n],
+        })
+        .collect();
+    axiolid_construct::pipe::pipe_plan(&pieces, true, r, None, fillet, chord).unwrap()
+}
+
+#[test]
+fn closed_polylines_are_mitred_all_round_within_the_budget() {
+    // Every vertex of a closed polyline is a corner, the one where it
+    // closes too. A loop leaving its plane brings a carried frame back
+    // turned; that twist is spread over the loop and stays proven.
+    for (name, points, planar) in loops() {
+        let legs = loop_legs(&points);
+        let length: Scalar = legs.iter().map(Leg::length).sum();
+        for (r, inner) in [(0.05, None), (0.08, Some(0.05))] {
+            let ri = inner.unwrap_or(0.0);
+            let pipe = Mitred {
+                legs: &legs,
+                closed: true,
+                radii: (ri, r),
+            };
+            let samples = pipe.samples();
+            for (options, budget) in budgets() {
+                let plan = loop_plan(&points, r, None, budget);
+                eprintln!("{name}: closing twist {}", plan.twist);
+                if planar {
+                    assert!(plan.twist.abs() < 1e-9, "{name}: {}", plan.twist);
+                } else {
+                    assert!(plan.twist.abs() > 1e-3, "{name}: {}", plan.twist);
+                }
+                let mut builder = GeometryGraphBuilder::new();
+                let path = polyline(&mut builder, &points, true);
+                let root = swept_tube(&mut builder, path, r, inner);
+                let graph = builder.finish(vec![root]).expect("a valid graph");
+                let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+                    .compile_mesh_with_deviation(&graph, root, &options)
+                    .expect("the loop compiles");
+                let mesh = outcome.mesh;
+                let name = format!("{name} loop, r {r}, bore {inner:?}");
+                assert!(
+                    report
+                        .contributions
+                        .iter()
+                        .any(|c| c.path == DeviationPath::SweptDisk
+                            && c.detail == "closed loop of segments and arcs"
+                            && matches!(c.bound, DeviationBound::Proven(b) if b <= budget)),
+                    "{name}: {report:?}"
+                );
+                assert!(report.meets_requested(), "{name}: {report:?}");
+                assert_watertight(&name, &mesh);
+                let got =
+                    axiolid_measure::volume_properties(&mesh, Tolerance::new(1e-9, 1e-9).unwrap())
+                        .unwrap_or_else(|e| panic!("{name}: not a closed two-manifold: {e:?}"))
+                        .signed_volume;
+                let exact = PI * (r * r - ri * ri) * length;
+                let area = TAU * (r + ri) * length;
+                eprintln!("{name}: volume {got:.12e}, exact {exact:.12e}");
+                // Inscribed: the walls lie inside the outer tube, and
+                // outside the bore, by at most the budget.
+                assert!(
+                    got > 0.0
+                        && (inner.is_some() || got <= exact)
+                        && (exact - got).abs() <= area * budget,
+                    "{name}: volume {got} against the mitred loop's {exact}"
+                );
+                if planar {
+                    // Untwisted, the walls are the mitred prism's: one
+                    // station per vertex, the polygon's area times the
+                    // length to rounding.
+                    // The first station is the mitre ring at the first
+                    // vertex: on its plane and on the first leg's cylinder.
+                    let n0 = mitre_between(&legs[legs.len() - 1], &legs[0]).unwrap();
+                    let Leg::Straight { dir, .. } = legs[0] else {
+                        unreachable!()
+                    };
+                    let on_ring = |radius: Scalar| {
+                        mesh.positions
+                            .iter()
+                            .filter(|p| {
+                                let q = **p - points[0];
+                                q.dot(n0).abs() <= 1e-12
+                                    && ((q - dir * q.dot(dir)).length() - radius).abs() <= 1e-12
+                            })
+                            .count()
+                    };
+                    let outer = on_ring(r);
+                    let bore = inner.map_or(0, on_ring);
+                    assert_eq!(
+                        mesh.positions.len(),
+                        points.len() * (outer + bore),
+                        "{name}"
+                    );
+                    let prism = (polygon_area(outer, r)
+                        - inner.map_or(0.0, |ri| polygon_area(bore, ri)))
+                        * length;
+                    assert!((got - prism).abs() <= 1e-9 * prism, "{name}: {got} {prism}");
+                }
+                assert_within(&name, &mesh, &samples, budget);
+            }
+        }
+    }
+}
+
+#[test]
+fn filleted_closed_polylines_stay_within_the_budget() {
+    // IfcSweptDiskSolidPolygonal along a closed polyline: every corner
+    // rounded, the closing one too; Pappus for the volume.
+    let (r, fillet) = (0.04, 0.15);
+    for (name, points, _) in loops() {
+        if name == "L-shaped hexagon" {
+            continue;
+        }
+        let plan = loop_plan(&points, r, Some(fillet), 1e-3);
+        assert!(plan.closed && plan.arc_mitres.is_empty(), "{name}");
+        // Every corner rounded, the closing one too: one bend per vertex,
+        // and every joint of the loop tangent.
+        let bends = plan
+            .pieces
+            .iter()
+            .filter(|p| matches!(p, PathPiece::Arc { .. }))
+            .count();
+        assert_eq!(bends, points.len(), "{name}");
+        let m = plan.pieces.len();
+        for k in 0..m {
+            let (a, b) = (&plan.pieces[k], &plan.pieces[(k + 1) % m]);
+            assert!(
+                (a.end_point() - b.start_point()).length() < 1e-12,
+                "{name} {k}"
+            );
+            assert!(
+                a.end_tangent().cross(b.start_tangent()).length() < 1e-9,
+                "{name} {k}"
+            );
+        }
+        let legs: Vec<Leg> = plan
+            .pieces
+            .iter()
+            .map(|piece| match *piece {
+                PathPiece::Segment { start, end } => Leg::Straight {
+                    from: start,
+                    dir: (end - start).normalize(),
+                    length: (end - start).length(),
+                },
+                PathPiece::Arc {
+                    centre,
+                    axis,
+                    start,
+                    angle,
+                } => Leg::Bend {
+                    centre,
+                    axis,
+                    from: start,
+                    angle,
+                },
+                _ => unreachable!(),
+            })
+            .collect();
+        let length: Scalar = legs.iter().map(Leg::length).sum();
+        let pipe = Mitred {
+            legs: &legs,
+            closed: true,
+            radii: (0.0, r),
+        };
+        let samples = pipe.samples();
+        for (options, budget) in budgets() {
+            let mesh = compile(
+                |b| {
+                    let path = polyline(b, &points, true);
+                    swept_disk(b, path, r, Some(fillet))
+                },
+                &options,
+            );
+            let name = format!("{name} loop filleted to {fillet}");
+            assert_watertight(&name, &mesh);
+            let got =
+                axiolid_measure::volume_properties(&mesh, Tolerance::new(1e-9, 1e-9).unwrap())
+                    .unwrap()
+                    .signed_volume;
+            let want = PI * r * r * length;
+            assert!(
+                got > 0.0 && got <= want * (1.0 + 1e-12) && want - got <= TAU * r * length * budget,
+                "{name}: volume {got} against Pappus {want}"
+            );
+            assert_within(&name, &mesh, &samples, budget);
+        }
+    }
+}
+
+#[test]
+fn a_closed_polyline_refuses_by_name_what_it_cannot_sweep() {
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let square = [
+        Point3::ZERO,
+        Point3::X,
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::Y,
+    ];
+    // A range would cut the loop open somewhere in it.
+    let ranged = try_compile(
+        |b| {
+            let path = polyline(b, &square, true);
+            b.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+                directrix: path,
+                radius: 0.05,
+                inner_radius: None,
+                parameter_range: Some((0.5, 2.5)),
+                fillet_radius: None,
+            }))
+            .unwrap()
+        },
+        &options,
+    );
+    assert!(
+        matches!(&ranged, Err(GeomError::UnsupportedInput { input, .. }) if input.contains("closed polyline")),
+        "{}",
+        outcome(&ranged)
+    );
+    // A closed polyline inside a composite.
+    let nested = try_compile(
+        |b| {
+            let inner = polyline(b, &square, true);
+            let path = b
+                .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+                    segments: vec![CurveSegment {
+                        curve: inner,
+                        same_sense: true,
+                        transition: Transition::Continuous,
+                    }],
+                }))
+                .unwrap();
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert!(
+        matches!(&nested, Err(GeomError::UnsupportedInput { input, .. }) if input.contains("closed polyline")),
+        "{}",
+        outcome(&nested)
+    );
+    // A loop whose last point repeats its first is the same loop.
+    let mut repeated = square.to_vec();
+    repeated.push(square[0]);
+    let a = compile(
+        |b| {
+            let path = polyline(b, &repeated, true);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    let b = compile(
+        |b| {
+            let path = polyline(b, &square, true);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert_eq!(a.positions.len(), b.positions.len());
+}
+
+#[test]
+fn a_twist_with_no_clear_length_to_take_it_is_refused_by_name() {
+    // A skew loop whose every leg lies within the mitre zones at its ends,
+    // where the frame must hold, so its twist has nowhere to go; no mitre
+    // reaches through its leg.
+    let points = [
+        Point3::new(0.6, 0.6, -0.9),
+        Point3::new(-0.3, -0.8, -0.6),
+        Point3::new(-0.6, 0.7, -0.7),
+        Point3::new(-0.4, 0.0, 0.7),
+    ];
+    let pieces: Vec<PathPiece> = (0..4)
+        .map(|k| PathPiece::Segment {
+            start: points[k],
+            end: points[(k + 1) % 4],
+        })
+        .collect();
+    let plan = axiolid_construct::pipe::pipe_plan(&pieces, true, 0.4, None, None, 1e-3);
+    let refused = axiolid_construct::pipe::swept_disk_along_loop(&pieces, 0.4, None, None, 1e-3);
+    assert!(
+        matches!(&refused, Err(GeomError::InvalidInput(m)) if m.contains("no part of the loop is clear")),
+        "{plan:?}: {}",
+        outcome(&refused)
+    );
+}
+
+#[test]
+fn a_disk_as_wide_as_its_fillet_stays_refused_as_a_horn_torus() {
+    // The format permits a fillet radius equal to the disk radius; the
+    // bend is then a horn torus pinched to a point on its axis, a boundary
+    // that is not a two-manifold (#248 keeps the refusal). Closed loops
+    // and composites with a bend that tight are refused the same way.
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+    let square = [
+        Point3::ZERO,
+        Point3::X,
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::Y,
+    ];
+    for closed in [false, true] {
+        let horn = try_compile(
+            |b| {
+                let path = polyline(b, &square, closed);
+                swept_disk(b, path, 0.1, Some(0.1))
+            },
+            &options,
+        );
+        assert!(
+            is_invalid(&horn, "equals the fillet radius") && is_invalid(&horn, "horn torus"),
+            "{closed}: {}",
+            outcome(&horn)
+        );
+    }
+    let bend = Turtle::new(Point3::ZERO, Vec3::X)
+        .straight(0.3)
+        .bend(0.05, FRAC_PI_2, Vec3::Y)
+        .straight(0.3);
+    let horn = try_compile(
+        |b| {
+            let path = composite(b, &bend.legs, Spelling::Trims);
+            swept_disk(b, path, 0.05, None)
+        },
+        &options,
+    );
+    assert!(
+        is_invalid(&horn, "equals the bend radius") && is_invalid(&horn, "horn torus"),
+        "{}",
+        outcome(&horn)
+    );
 }

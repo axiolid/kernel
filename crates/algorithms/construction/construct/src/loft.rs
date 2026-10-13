@@ -16,6 +16,7 @@ use axiolid_mesh::TriMesh;
 use crate::profile::Rings;
 
 /// One station: the profile's rings already placed in 3D.
+#[derive(Debug, Clone)]
 pub struct Station {
     /// Outer ring followed by each hole, in `Rings` order.
     pub loops: Vec<Vec<Point3>>,
@@ -224,6 +225,7 @@ pub(crate) fn span_deviation(from: &Station, to: &Station) -> Scalar {
 /// A sweep needs a full frame, not just a tangent: the profile's x and y
 /// axes have to be carried along the path, and how they are carried is
 /// exactly what distinguishes the sweep families from each other.
+#[derive(Debug, Clone)]
 pub struct Frame {
     /// Frame origin on the directrix.
     pub origin: Point3,

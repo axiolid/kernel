@@ -41,6 +41,48 @@ caret rule for `0.x` versions.
   no seam edge; the thin rim needs a Steiner point; the off-grid rim
   within rounding. Mutation probe:
   `scripts/probe_keyhole_shell_mutants.py`.
+- **Swept disks mitre a corner beside an arc (#248).** Such a corner was
+  refused by name; it is now mitred at half angle like a corner between
+  two segments, which is what the format defines. The mitre plane cuts
+  the bend's torus in a different curve than the tube on its other side,
+  so the end of the bend is meshed as a `pipe::MitreBand`: from a square
+  section `back` short of the corner, each profile vertex walks along
+  its own circle of the torus to the plane (every band vertex on the
+  exact torus), and a strip just short of the plane joins it to the ring
+  shared across the mitre, meshing the planar face between the two
+  sections. `back` and `ahead` are the least turns at which the section
+  short of and past the corner clears the plane by `0.01 r`, from the
+  closed form of the height's extremes over a section, so every circle
+  of the torus crosses the plane once between them; a corner whose plane does not clear
+  the bend's tube within a quarter turn, and bands needing more of an arc
+  than it turns, are refused by name. A segment beside the arc keeps its
+  own mitre ring, so its proof (#245) stands; the band and the strip are
+  certified by the caller, which `pipe::pipe_plan` serves
+  (`PipePlan::arc_mitres`, `ArcMitre`, `MitreSide`).
+- **Swept disks round closed directrices (#248).**
+  `pipe::swept_disk_along_loop` sweeps pieces whose last ends where the
+  first starts: that joint is mitred, filleted or tangent like any other,
+  and the walls close on the first station without caps. A frame carried
+  round a non-planar loop comes back turned by the loop's holonomy
+  (`PipePlan::twist`, in `(-pi, pi]` about the first tangent); the pipe
+  turns its frames back by it uniformly over the loop's clear length
+  (segments outside the `r tan(theta/2)` mitre zones, bends outside their
+  bands), holding the frame in the zones so every mitre still shares one
+  ring on both cylinders. The twist is inside the proven bound (the span
+  bound measures it; a twisted segment gets stations until each span's
+  twist fits, more than 4096 is refused with `BudgetExceeded`), and the
+  last span pays its measured distance from the first station. A loop
+  whose frame comes back turned with no clear length to take it is
+  refused by name.
+- `loft::Station` and `loft::Frame` derive `Debug` and `Clone`.
+
+### Documented
+
+- A disk radius equal to a fillet or bend radius stays refused by name
+  (#248), though the format permits it: the bend is a horn torus whose
+  inner wall pinches to one point on its axis, a boundary that is not a
+  two-manifold, which a closed mesh could only meet at a non-manifold
+  vertex or misstate by standing off it.
 
 ## [0.3.17] - 2026-10-09
 

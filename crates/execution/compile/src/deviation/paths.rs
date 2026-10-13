@@ -14,11 +14,15 @@ use super::{Deviation, DeviationBound, DeviationPath};
 use crate::certify::{certify_thin_quads, Cell, Patch};
 use crate::directrix::DirectrixKind;
 
-/// The deviation of a non-boolean solid the compiler built as `mesh`.
+/// The deviation of a non-boolean solid the compiler built as `mesh`,
+/// against the budget of `options`; `built` holds the options it was built
+/// with (a finer chord when the compiler rebuilt it, #252), which a pipe's
+/// plan is read at.
 pub(crate) fn of_solid(
     graph: &GeometryGraph,
     operation: &SolidOperation,
     options: &ExecutionOptions,
+    built: &ExecutionOptions,
     mesh: &TriMesh,
 ) -> GeomResult<Deviation> {
     let chord = crate::compiler::chord_error(options);
@@ -83,19 +87,28 @@ pub(crate) fn of_solid(
             radius,
             inner_radius,
             parameter_range,
-            ..
+            fillet_radius,
         } => {
-            // Lines, polylines (filleted or not) and chains of segments and
-            // arcs are swept piece by piece by `axiolid_construct::pipe`,
-            // which proves the budget (#232), mitred corners included (#245);
-            // the compiler takes that path whenever the directrix resolves
-            // to pieces, and refuses what it cannot prove.
-            if crate::directrix::pieces(graph, *directrix, *parameter_range, options)?.is_some() {
-                return Ok(Deviation::one(
-                    DeviationPath::SweptDisk,
-                    "segments and arcs",
-                    DeviationBound::Proven(chord),
-                ));
+            // Lines, polylines (filleted or not, open or closed) and chains
+            // of segments and arcs are swept piece by piece by
+            // `axiolid_construct::pipe`, which proves the budget (#232),
+            // mitred corners between segments and loops included (#245,
+            // #248); a corner mitred beside an arc is certified against the
+            // mesh (#248). The compiler takes that path whenever the
+            // directrix resolves to pieces, and refuses what it cannot
+            // bound.
+            if let Some(path) =
+                crate::directrix::pieces(graph, *directrix, *parameter_range, options)?
+            {
+                return super::mitre::of_pipe(
+                    &path,
+                    *radius,
+                    *inner_radius,
+                    *fillet_radius,
+                    crate::compiler::chord_error(built),
+                    chord,
+                    mesh,
+                );
             }
             let kind = crate::directrix::kind(graph, *directrix, *parameter_range, options)?;
             match kind {
