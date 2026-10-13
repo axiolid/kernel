@@ -9,6 +9,29 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- An explicit opt-in to drop degenerate input rings instead of refusing
+  the whole overlay, each drop reported (#256). `overlay_with` and
+  `union_soup_with` take `OverlayOptions`; their default is `overlay` and
+  `union_soup` exactly, a named refusal.
+  `OverlayOptions::new().dropping_degenerate_rings()` leaves out a ring
+  that has fewer than three points, an edge no longer than the tolerance
+  (`RepeatedVertex`), or an area of at most `tolerance.linear()^2` under
+  the exact `ZeroArea` rule, and lists it in `ReportedOverlay::dropped` /
+  `ReportedUnion::dropped` as a `DroppedRing`: operand, polygon, outer or
+  hole index, `DropReason`, and the magnitude of its signed area, summed
+  exactly and rounded once, with a proven upper bound. A hole of a dropped
+  outer is dropped and reported with it (`OuterDropped`); a degenerate
+  hole of a kept outer is dropped alone. A self-intersecting ring is never
+  dropped, nor a `RepeatedVertex` ring that still crosses itself once its
+  short edges are merged, since its signed area is not what leaving it out
+  removes; non-finite points, holes outside a kept outer and invalid
+  frames stay refusals too. The overlay of the kept rings is exact as
+  usual, and its evidence counts the kept rings.
+  `scripts/probe_degenerate_drop_mutants.py` lists the faults
+  `tests/degenerate_drop.rs` must catch.
+
 ## [0.3.13] - 2026-10-10
 
 ### Fixed

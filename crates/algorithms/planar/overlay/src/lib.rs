@@ -15,12 +15,21 @@
 //! the other edge within the tolerance, or a proper crossing with each
 //! segment's ends strictly on both sides of the other's line. So an
 //! operation's settled output is a valid operand wherever it lies.
+//!
+//! A degenerate input ring refuses the operation by default. Asked
+//! explicitly, [`overlay_with`] and [`union_soup_with`] leave out a ring
+//! that is too short, has a repeated vertex, or has zero area under the
+//! exact `ZeroArea` rule, and report each one with its area
+//! (`degenerate`, #256); a self-intersecting ring is never dropped.
+//! `scripts/probe_degenerate_drop_mutants.py` lists the faults the tests
+//! in `tests/degenerate_drop.rs` must catch.
 mod arc;
 mod arc_overlay;
 mod arrangement;
 mod circle;
 mod contact;
 mod convex_parts;
+mod degenerate;
 mod exact_arc;
 mod exact_overlay;
 mod minkowski;
@@ -40,6 +49,10 @@ pub use arrangement::{
 };
 pub use circle::{
     minimum_enclosing_circle, CircleError, CircleEvidence, EnclosingCircle, MinimumCircle,
+};
+pub use degenerate::{
+    DegenerateRings, DropReason, DroppedRing, OverlayOperand, OverlayOptions, ReportedOverlay,
+    ReportedUnion, RingRole,
 };
 pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound};
 pub use offset::{
@@ -298,6 +311,19 @@ pub(crate) fn validate_ring(r: &Ring, t: Tolerance) -> Result<(), OverlayError> 
     Ok(())
 }
 fn validate(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
+    validate_frame(input, t)?;
+    for p in &input.polygons {
+        validate_ring(&p.outer, t)?;
+        for h in &p.holes {
+            validate_ring(h, t)?;
+            if hole_outside(&p.outer, h, t) {
+                return Err(OverlayError::HoleOutsideOuter);
+            }
+        }
+    }
+    Ok(())
+}
+fn validate_frame(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
     let f = input.frame;
     if !f.origin.is_finite()
         || !f.x.is_finite()
@@ -308,15 +334,6 @@ fn validate(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
         || f.x.perp_dot(f.y) <= 0.
     {
         return Err(OverlayError::InvalidFrame);
-    }
-    for p in &input.polygons {
-        validate_ring(&p.outer, t)?;
-        for h in &p.holes {
-            validate_ring(h, t)?;
-            if hole_outside(&p.outer, h, t) {
-                return Err(OverlayError::HoleOutsideOuter);
-            }
-        }
     }
     Ok(())
 }
@@ -395,26 +412,68 @@ pub fn overlay(
     fill: FillRule,
     tolerance: Tolerance,
 ) -> Result<OverlayResult, OverlayError> {
-    validate(subject, tolerance)?;
-    validate(clip, tolerance)?;
+    overlay_with(
+        subject,
+        clip,
+        operation,
+        fill,
+        tolerance,
+        OverlayOptions::new(),
+    )
+    .map(|reported| reported.result)
+}
+
+/// [`overlay`] with explicit options; the default options make it
+/// [`overlay`] exactly.
+///
+/// With [`OverlayOptions::dropping_degenerate_rings`] a ring that is too
+/// short, has a repeated vertex, or has zero area under the exact
+/// `ZeroArea` rule is left out instead of refusing the overlay, a hole
+/// goes with its dropped outer ring, and each such ring is reported in
+/// [`ReportedOverlay::dropped`] with its operand, polygon, ring, reason
+/// and area (#256). Every other fault is refused as by [`overlay`]; a
+/// self-intersecting ring is never dropped. The overlay of the kept rings
+/// is exact as usual, and its evidence counts the kept rings. The rules
+/// are in the docs of [`DropReason`] and of the `degenerate` module.
+pub fn overlay_with(
+    subject: &OverlayInput,
+    clip: &OverlayInput,
+    operation: OverlayOperation,
+    fill: FillRule,
+    tolerance: Tolerance,
+    options: OverlayOptions,
+) -> Result<ReportedOverlay, OverlayError> {
+    let mut dropped = Vec::new();
+    let subject_polygons = degenerate::admit(
+        subject,
+        OverlayOperand::Subject,
+        tolerance,
+        options,
+        &mut dropped,
+    )?;
+    let clip_polygons =
+        degenerate::admit(clip, OverlayOperand::Clip, tolerance, options, &mut dropped)?;
     if subject.frame != clip.frame {
         return Err(OverlayError::InvalidFrame);
     };
     let rings = exact_overlay::boolean(
-        &subject.polygons,
-        &clip.polygons,
+        &subject_polygons,
+        &clip_polygons,
         operation,
         fill,
         tolerance.linear(),
     )?;
     let polygons = settle::settle(canonical_polygons(rings), tolerance);
     let evidence = OverlayEvidence {
-        subject_rings: subject.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
-        clip_rings: clip.polygons.iter().map(|p| 1 + p.holes.len()).sum(),
+        subject_rings: subject_polygons.iter().map(|p| 1 + p.holes.len()).sum(),
+        clip_rings: clip_polygons.iter().map(|p| 1 + p.holes.len()).sum(),
         output_polygons: polygons.len(),
         output_holes: polygons.iter().map(|polygon| polygon.holes.len()).sum(),
     };
-    Ok(OverlayResult { polygons, evidence })
+    Ok(ReportedOverlay {
+        result: OverlayResult { polygons, evidence },
+        dropped,
+    })
 }
 
 /// Union a set of individually-valid rings that may overlap each other.
@@ -428,6 +487,52 @@ pub fn union_soup(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, 
     for ring in rings {
         validate_ring(ring, tolerance)?;
     }
+    union_valid(rings, tolerance)
+}
+
+/// [`union_soup`] with explicit options; the default options make it
+/// [`union_soup`] exactly.
+///
+/// With [`OverlayOptions::dropping_degenerate_rings`] a ring that is too
+/// short, has a repeated vertex, or has zero area under the exact
+/// `ZeroArea` rule is left out and reported in [`ReportedUnion::dropped`],
+/// as [`overlay_with`] does (#256): operand
+/// [`OverlayOperand::Subject`], polygon the ring's index, role
+/// [`RingRole::Outer`]. Every other fault is refused as by
+/// [`union_soup`].
+pub fn union_soup_with(
+    rings: &[Ring],
+    tolerance: Tolerance,
+    options: OverlayOptions,
+) -> Result<ReportedUnion, OverlayError> {
+    let mut dropped = Vec::new();
+    let mut kept = Vec::with_capacity(rings.len());
+    for (index, ring) in rings.iter().enumerate() {
+        if options.degenerate_rings == DegenerateRings::Refuse {
+            validate_ring(ring, tolerance)?;
+            kept.push(ring.clone());
+            continue;
+        }
+        match degenerate::checked(ring, tolerance)? {
+            None => kept.push(ring.clone()),
+            Some(reason) => {
+                let place = degenerate::Place {
+                    operand: OverlayOperand::Subject,
+                    polygon: index,
+                    ring: RingRole::Outer,
+                };
+                dropped.push(degenerate::report(ring, place, reason));
+            }
+        }
+    }
+    Ok(ReportedUnion {
+        polygons: union_valid(&kept, tolerance)?,
+        dropped,
+    })
+}
+
+/// The union of rings already validated one by one.
+fn union_valid(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, OverlayError> {
     if rings.is_empty() {
         return Ok(Vec::new());
     }

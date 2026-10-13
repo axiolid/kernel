@@ -21,6 +21,12 @@ cargo add axiolid-overlay
   meet (`src/contact.rs`, #272): an end on the other edge within the tolerance, or a proper
   crossing, so every output is a valid operand wherever it lies.
   `scripts/probe_edge_contact_mutants.py` lists the faults its tests must catch.
+- A degenerate input ring refuses the operation by default. `overlay_with` and
+  `union_soup_with` with `OverlayOptions::dropping_degenerate_rings` leave out a ring that
+  is too short, has a repeated vertex, or has zero area under the exact `ZeroArea` rule,
+  and report each one with its place, reason and area (`src/degenerate.rs`, #256). A
+  self-intersecting ring is never dropped. `scripts/probe_degenerate_drop_mutants.py` lists
+  the faults its tests must catch.
 - `segment_intersections` (`src/segment_sweep.rs`, #146) is a Bentley-Ottmann sweep over
   many segments with its own exact rational points; its reporting rule and degeneracy
   handling are in that module's docs, and `scripts/probe_segment_sweep_mutants.py` lists
