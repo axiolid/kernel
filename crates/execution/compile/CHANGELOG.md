@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.24] - 2026-10-13
+
 ### Added
 
 - A boolean with a warped operand reports a certified bound that covers

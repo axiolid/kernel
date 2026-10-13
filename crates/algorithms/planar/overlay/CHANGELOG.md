@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-10-13
+
 ### Added
 
 - An explicit opt-in to drop degenerate input rings instead of refusing

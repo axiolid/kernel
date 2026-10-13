@@ -8,7 +8,7 @@ Portable and runtime-optimized CPU execution context for Axiolid geometry.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-13) |
 | crates.io | [`axiolid-backend-cpu`](https://crates.io/crates/axiolid-backend-cpu) |
 | Facade | [`axiolid`](./axiolid) feature `cpu` |
 | Layer | execution (`execution.context`) |
@@ -37,11 +37,17 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-13):
 
-### Changed
+### Fixed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- With `parallel`, a one-thread `CpuExecution` runs `install` on a local
+  pool of one worker (#259). It ran the closure directly, on whatever pool
+  the caller was in, so a provider reading `rayon::current_num_threads()`
+  there saw the caller's width instead of the configured one, and sized
+  its work or its scratch for it. A context from `CpuExecutionBuilder`
+  starts the pool when it is built and reports a failure there; one from
+  `CpuExecution::portable` or `CpuExecution::detect` starts it on first
+  `install`. Clones share the pool.
 
 Full history: [`crates/execution/cpu/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/cpu/CHANGELOG.md)

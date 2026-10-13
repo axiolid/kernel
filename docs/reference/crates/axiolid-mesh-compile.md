@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.23 (2026-10-13) |
+| Latest release | 0.3.24 (2026-10-13) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -72,21 +72,122 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.23 (2026-10-13):
+Latest release, 0.3.24 (2026-10-13):
 
 ### Added
 
-- Offset runs continue to their basis's ends without a stated length
-  (#303, ADR 0082 amendment): a station of an `OffsetsAtStations` at its
-  basis's start (`RunStation::at_basis_start`) is read at `0`, one at its
-  end (`RunStation::at_basis_end`) at the basis's length by the kernel's
-  own measure, the length `station::curve_path` states for the basis as
-  `CompositeBasis` measures it, bitwise (a line's parameter domain
-  `|d|`), so the run reads exactly as the one stated at that number, swept
-  as a directrix and flattened as a basis or a curve path. Resolution
-  comes before the #301 snapping, so an end station's window snaps from
-  the resolved end; resolved distances that do not increase strictly (a
-  stated station at or past the basis's end) are refused by name as
-  `InvalidInput`.
+- A boolean with a warped operand reports a certified bound that covers
+  the warp (#266, ADR 0080 amendment). `compile_mesh_with_deviation`
+  measures a boolean whose operand is an authored polygon or triangle
+  mesh, or a B-rep of planes and warped faces without a surface, against
+  the exact boolean of its operands flattened to their triangles (each
+  within its slab width of every reading of its warped faces, #261), by
+  any operator, and reports `DeviationPath::Boolean` under "measured
+  against the exact boolean of operands flattened within their slab
+  width, plus it" with the measured distance plus the largest slab width;
+  the search settles within the budget less that width, so
+  `meets_requested` holds exactly when the widths and the measurement fit
+  the budget. Each warped operand's own contribution ("non-planar authored
+  face", "non-planar face without a surface") travels with the boolean,
+  as a snap does. An unwarped mesh operand is measured against the exact
+  boolean of the operands as given. Where the exact boolean cannot take
+  the flattened operand (a mesh that does not close, a B-rep with a curved
+  face, a tool that is itself a boolean, a configuration the general
+  boolean refuses) the boolean stays unbounded by that refusal's name.
+  These booleans were unbounded before ("exact boolean operand that is
+  not an extrusion"); `ReferenceExactCompiler` itself still refuses mesh
+  operands by name.
+- Certified deviation for runs of sections at stations (#247, ADR 0082
+  amendment): `StationedSpine`, `SectionsAtStations`, `SectionedSurface`
+  and `OpenSectionsAtStations` report `DeviationBound::Certified` instead
+  of `Unbounded` wherever the frame law along the basis has certified
+  derivative bounds (lines, polylines, circles, elevated and banked curves
+  with line or circle plans and closed-form profiles; section and plan
+  frames; placed and reversed composite pieces). Each mesh cell is bounded
+  by its vertex paths' chord bound `h^2 / 8 sup |A''|`, breakpoints at the
+  seams inside it, the wall quad's `loft::quad_deviation` and the
+  arc-length inverse's slack; the stations are refined until the bound
+  fits the budget. A constant section on straight legs is bounded through
+  its mitres. Unbounded by name: a numerically framed basis, a cell beside
+  a mitre on a curved piece or with a changing section, and different
+  curved profiles.
+- `ReferenceExactCompiler` compiles a `StationedSpine` or
+  `SectionsAtStations` exactly where it has a closed form (#247): a
+  constant section along a line or a straight polyline (an extrusion,
+  oblique under a tilted orientation), along a horizontal circle (a
+  revolution), and a linear taper of straight-edged sections along a line
+  (a planar polyhedron); every other run is refused by name.
+
+### Changed
+
+- The stations of such a run are refined until the certified bound fits
+  as well as the sampling test, so a curved run may mesh finer (#247). The
+  exact compiler now reads a stationed spine's stations before refusing
+  it, so a station beyond the basis is refused as the mesh compiler
+  refuses it.
+
+### Fixed
+
+- A trim of a B-spline by points compiles (#306, ADR 0082 amendment): a
+  graph trim's point selector on a 2D or 3D B-spline, which the closed-form
+  inversion refused, is resolved by the inversion a curve path's point
+  bound takes (#304, `StationCurve::parameter_at_bound`): the same
+  point-bound tolerance, sampling, Newton refinement and merging of places,
+  for station bases, sweep directrices and their pieces alike. The trim
+  therefore flattens bitwise to the piece bounded by `PathBound::Point` at
+  those points, with and against its sense. A point off the B-spline, or
+  one it passes through twice, is refused naming `PATH_POINT_OFF_CURVE` or
+  `PATH_POINT_AMBIGUOUS` unless the trim falls back to a parameter
+  selector beside it.
+- **A keyhole face's seam is never a triangle edge of a shell (#283, ADR
+  0083 amendment).** Planar B-rep faces and authored polygon faces are
+  triangulated by `planar::clip_shell_face` over construct's
+  `triangulate_shell_face`: where the clipper made the seam of a keyhole
+  ring (#270) a triangle edge, it is flipped away or split off at a
+  Steiner point inside the face. Faces that run along the same segment
+  (a rim's two end faces at its cut) then pair along it alone instead of
+  meeting four triangle uses of it, so a declared B-rep solid reads as
+  `Solid` rather than `OpenSolid` and authored polygons as a solid rather
+  than a surface. A Steiner point is placed in space by the same chain of
+  midpoints of the face's corners, so it lies exactly in a face in an
+  axis plane; elsewhere within rounding, reported as the certified
+  deviation `"point added inside a keyhole face, off an axis plane"`
+  (path `BRepFace` or `AuthoredMesh`), bounded by the slab width of the
+  face's corners and Steiner points about its fit plane. Like a warp's
+  slab width (#266), it is carried by name through booleans, counts
+  towards the width an operand is flattened by when a boolean is measured
+  against its flattened operands, and a B-rep with Steiner points still
+  counts as a polyhedron there. Each triangle at
+  a Steiner point is re-checked, exactly, in the face's projection after
+  placing it; the noise-band split is kept only where it puts no edge
+  back on a seam. Curve-bounded planes keep the surface-patch path.
+  Where no other face shares the seam, as in every valid two-manifold
+  shell, the seam as a triangle edge was only a diagonal and those shells
+  were already closed; they keep their closure and volume. Tests
+  (`tests/keyhole_shell.rs`): a box whose top face is a keyhole into a
+  pyramid pocket, wide and as the corpus's thin rim seamed at its corner,
+  with and without a fin of two coincident faces hanging from the seam,
+  as B-rep and as authored polygons, closed with exact volume and the
+  seam used by no triangle of the face; the same tilted out of the axis
+  planes reports its Steiner point.
+- `pinch::find`, which refuses a boolean result that touches itself,
+  welds positions by value (#283), so a corner written with `-0.0` meets
+  its `0.0` twin, as #269 fixed in construct.
+- **Swept disks along closed polylines and with corners beside an arc
+  (#248).** A closed polyline is swept as a loop by
+  `axiolid_construct::pipe::swept_disk_along_loop` (its closing segment
+  included, a repeated first point dropped), mitred or filleted where it
+  closes too; a parameter range on it, and a closed polyline inside a
+  composite, are refused by name. Its deviation stays proven, under the
+  detail `"closed loop of segments and arcs"`, the closing twist
+  included. A corner between a segment or an arc and an arc is mitred
+  instead of refused: the rest of the pipe stays proven, and the bend's
+  band of torus up to the mitre plane and the planar face between the
+  two tubes' sections are certified against the mesh by branch and bound
+  (cells trimmed by certain height, distance and azimuth tests),
+  reported `Certified` under the new detail
+  `deviation::MITRE_BESIDE_AN_ARC`. Measured within the budget at 1 mm
+  and 0.1 mm for corners of 20 to 120 degrees before, after and between
+  bends, in and out of the bend's plane, solid and hollow.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

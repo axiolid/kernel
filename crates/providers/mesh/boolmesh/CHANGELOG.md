@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-13
+
 ### Fixed
 
 - A memory budget holds for `union_many` and `subtract_many` (#259). The

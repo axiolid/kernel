@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-13
+
 ### Fixed
 
 - With `parallel`, a one-thread `CpuExecution` runs `install` on a local

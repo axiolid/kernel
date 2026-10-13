@@ -42,6 +42,19 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-backend-cpu
 
+### 0.3.2 - 2026-10-13
+
+### Fixed
+
+- With `parallel`, a one-thread `CpuExecution` runs `install` on a local
+  pool of one worker (#259). It ran the closure directly, on whatever pool
+  the caller was in, so a provider reading `rayon::current_num_threads()`
+  there saw the caller's width instead of the configured one, and sized
+  its work or its scratch for it. A context from `CpuExecutionBuilder`
+  starts the pool when it is built and reports a failure there; one from
+  `CpuExecution::portable` or `CpuExecution::detect` starts it on first
+  `install`. Clones share the pool.
+
 ### 0.3.1 - 2026-09-28
 
 ### Changed
@@ -481,6 +494,83 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.18 - 2026-10-13
+
+### Added
+
+- `loft_exact::loft_polygon_stations_exact` (#247): an exact closed B-rep
+  of planar faces joining planar polygon sections vertex for vertex, caps
+  with holes and one planar wall per ring edge and span; a wall whose
+  corners are not coplanar is refused by name (`loft_exact::WARPED_WALL`).
+- `loft::quad_deviation` is public (#247): the bound a station run's mesh
+  cells use for the wall quad against its two triangles.
+- **Keyhole faces of a closed shell triangulate without a seam edge
+  (#283, ADR 0083 amendment).** `profile::triangulate_shell_face` is
+  `triangulate_with(.., PinchPolicy::Accept)` for a planar face of a
+  shell: no triangle edge lies on a seam (#270). Where the clipper would
+  make the seam a triangle edge, the two triangles on it are replaced by
+  the other diagonal of their quadrilateral when it is strictly convex,
+  and otherwise by four triangles around a Steiner point strictly inside
+  it, off the seam's line (a thin rim seamed at its corner always takes
+  one). A `SteinerPoint` is a chain of midpoints of the face's own points
+  (the seam's midpoint halved towards a corner, one halving past the
+  first that fits, as a margin against a caller's projection rounding),
+  which `SteinerPoint::place` replays over any point type, so a caller
+  lifting the face into space places it exactly in an axis plane. The
+  result (`ShellFaceTriangulation`: points `outer ++ holes ++ steiner`,
+  triangles, Steiner points) is certified against the cover it replaces:
+  every triangle strictly counter-clockwise, every directed edge once,
+  the same boundary, two more triangles per Steiner point, no edge on a
+  seam; a seam no point can be placed off is refused by name. Rings
+  without a seam triangulate exactly as under `Accept`. Tests
+  (`tests/profile_pinches.rs`): every keyhole fixture from every start,
+  either way round and under every zero-sign pattern, tiled exactly with
+  no seam edge; the thin rim needs a Steiner point; the off-grid rim
+  within rounding. Mutation probe:
+  `scripts/probe_keyhole_shell_mutants.py`.
+- **Swept disks mitre a corner beside an arc (#248).** Such a corner was
+  refused by name; it is now mitred at half angle like a corner between
+  two segments, which is what the format defines. The mitre plane cuts
+  the bend's torus in a different curve than the tube on its other side,
+  so the end of the bend is meshed as a `pipe::MitreBand`: from a square
+  section `back` short of the corner, each profile vertex walks along
+  its own circle of the torus to the plane (every band vertex on the
+  exact torus), and a strip just short of the plane joins it to the ring
+  shared across the mitre, meshing the planar face between the two
+  sections. `back` and `ahead` are the least turns at which the section
+  short of and past the corner clears the plane by `0.01 r`, from the
+  closed form of the height's extremes over a section, so every circle
+  of the torus crosses the plane once between them; a corner whose plane does not clear
+  the bend's tube within a quarter turn, and bands needing more of an arc
+  than it turns, are refused by name. A segment beside the arc keeps its
+  own mitre ring, so its proof (#245) stands; the band and the strip are
+  certified by the caller, which `pipe::pipe_plan` serves
+  (`PipePlan::arc_mitres`, `ArcMitre`, `MitreSide`).
+- **Swept disks round closed directrices (#248).**
+  `pipe::swept_disk_along_loop` sweeps pieces whose last ends where the
+  first starts: that joint is mitred, filleted or tangent like any other,
+  and the walls close on the first station without caps. A frame carried
+  round a non-planar loop comes back turned by the loop's holonomy
+  (`PipePlan::twist`, in `(-pi, pi]` about the first tangent); the pipe
+  turns its frames back by it uniformly over the loop's clear length
+  (segments outside the `r tan(theta/2)` mitre zones, bends outside their
+  bands), holding the frame in the zones so every mitre still shares one
+  ring on both cylinders. The twist is inside the proven bound (the span
+  bound measures it; a twisted segment gets stations until each span's
+  twist fits, more than 4096 is refused with `BudgetExceeded`), and the
+  last span pays its measured distance from the first station. A loop
+  whose frame comes back turned with no clear length to take it is
+  refused by name.
+- `loft::Station` and `loft::Frame` derive `Debug` and `Clone`.
+
+### Documented
+
+- A disk radius equal to a fillet or bend radius stays refused by name
+  (#248), though the format permits it: the bend is a horn torus whose
+  inner wall pinches to one point on its axis, a boundary that is not a
+  two-manifold, which a closed mesh could only meet at a non-manifold
+  vertex or misstate by standing off it.
 
 ### 0.3.17 - 2026-10-09
 
@@ -1582,6 +1672,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.3 - 2026-10-13
+
+### Fixed
+
+- A one-thread context from `with_execution` is charged one worker and
+  runs the provider on a pool of one (#259). It installed no pool, so the
+  call ran on whatever pool the caller was in, and the budget fell back to
+  the options' `Parallelism`.
+
 ### 0.3.2 - 2026-10-04
 
 ### Fixed
@@ -1604,6 +1703,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.14 - 2026-10-13
+
+### Added
+
+- `station::piece_frame_bounds`, `FrameLawBounds` and `FrameReading`
+  (#247, ADR 0082 amendment): certified suprema of the first two
+  derivatives, in station distance, of a station piece's basis point and
+  section (or plan) frame over a span crossing no seam, for lines,
+  polylines, orthonormal circles, and elevated and banked curves with a
+  line or circle plan and a closed-form profile (a banked curve's roll
+  bounded through its cant law), reversed and placed pieces included; with
+  the slack of the arc-length inverse where the measure is read by it.
+  `None` for every numerically framed family.
 
 ### 0.3.13 - 2026-10-13
 
@@ -2611,6 +2724,51 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-boolmesh
 
+### 0.3.5 - 2026-10-13
+
+### Fixed
+
+- A memory budget holds for `union_many` and `subtract_many` (#259). The
+  declared bound covers one boolean in its operands' triangles; a batch has
+  no such bound in its input, because union intermediates outgrow their
+  operands and a cut subject grows with every group, and with
+  `parallel-batch` a worker waiting inside one boolean's join steals other
+  pairs, so every pair of a level can be in flight on fewer workers (5 on
+  4 workers was observed). Each step is now charged when its operands
+  exist: the declared bound for every boolean that can be live (all pairs
+  of a `parallel-batch` level at once, one otherwise, the per-worker term
+  once), plus what the batch holds (its copies, the previous level's
+  results, the cut subject, a fused tool, its node and index lists). The
+  first step that does not fit is refused with `BudgetExceeded` before it
+  starts. Before, `union_many` was charged once for its input triangles
+  and `subtract_many` not at all beyond each boolean's own check, which
+  only ran with `parallel`.
+- A boolean given a budget directly, without dispatch, is checked in every
+  build, not only with `parallel`.
+
+### Changed
+
+- `union_many` borrows the solids that need no channel conformance and
+  moves an odd trailing solid to the next level instead of copying it, and
+  `subtract_many` borrows the subject until the first group cuts it: each
+  copy was scratch held through the batch.
+- The per-worker term no longer includes the 64 KiB base with
+  `parallel-batch`. That was the batch's concurrency charged per worker,
+  which stolen work can exceed; the batch now charges it per pair. With
+  `parallel-batch` alone the term is the 16 KiB of a worker's bookkeeping.
+- The `scratch_bound` test and the `scratch_probe` binary measure both
+  batch paths at 14 workloads that grow (overlapping boxes, a slab cut by
+  overlapping tools, at several sizes, with and without an attribute
+  channel) on 1 to 64 workers under the forced schedule: each run at the
+  smallest budget it admits stays within it (at most 73% of it), the run a
+  byte below is refused within it, and a 1 KiB budget is refused before
+  any copy is made. A window now counts only its own allocations: memory
+  of an earlier pool freed inside it (rayon retires deque buffers through
+  an epoch collector) hid up to 7 KB of a peak.
+- `tests/batch_budget.rs` pins what each step is charged, and
+  `scripts/probe_scratch_bound_mutants.py` kills a charge that drops any
+  of its terms.
+
 ### 0.3.4 - 2026-10-04
 
 ### Fixed
@@ -2706,6 +2864,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-contract
 
+### 0.3.3 - 2026-10-13
+
+### Changed
+
+- `MeshBoolean::scratch_requirement` says what it means for the batch
+  methods (#259): the bound of each boolean on that step's operands, not of
+  the batch in its input triangles. A provider whose batch holds
+  intermediates or runs booleans concurrently charges each step when its
+  operands exist and refuses with `BudgetExceeded` before the first that
+  does not fit, so the registry's check before a batch is necessary, not
+  sufficient.
+
 ### 0.3.2 - 2026-10-04
 
 ### Changed
@@ -2733,6 +2903,124 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.24 - 2026-10-13
+
+### Added
+
+- A boolean with a warped operand reports a certified bound that covers
+  the warp (#266, ADR 0080 amendment). `compile_mesh_with_deviation`
+  measures a boolean whose operand is an authored polygon or triangle
+  mesh, or a B-rep of planes and warped faces without a surface, against
+  the exact boolean of its operands flattened to their triangles (each
+  within its slab width of every reading of its warped faces, #261), by
+  any operator, and reports `DeviationPath::Boolean` under "measured
+  against the exact boolean of operands flattened within their slab
+  width, plus it" with the measured distance plus the largest slab width;
+  the search settles within the budget less that width, so
+  `meets_requested` holds exactly when the widths and the measurement fit
+  the budget. Each warped operand's own contribution ("non-planar authored
+  face", "non-planar face without a surface") travels with the boolean,
+  as a snap does. An unwarped mesh operand is measured against the exact
+  boolean of the operands as given. Where the exact boolean cannot take
+  the flattened operand (a mesh that does not close, a B-rep with a curved
+  face, a tool that is itself a boolean, a configuration the general
+  boolean refuses) the boolean stays unbounded by that refusal's name.
+  These booleans were unbounded before ("exact boolean operand that is
+  not an extrusion"); `ReferenceExactCompiler` itself still refuses mesh
+  operands by name.
+- Certified deviation for runs of sections at stations (#247, ADR 0082
+  amendment): `StationedSpine`, `SectionsAtStations`, `SectionedSurface`
+  and `OpenSectionsAtStations` report `DeviationBound::Certified` instead
+  of `Unbounded` wherever the frame law along the basis has certified
+  derivative bounds (lines, polylines, circles, elevated and banked curves
+  with line or circle plans and closed-form profiles; section and plan
+  frames; placed and reversed composite pieces). Each mesh cell is bounded
+  by its vertex paths' chord bound `h^2 / 8 sup |A''|`, breakpoints at the
+  seams inside it, the wall quad's `loft::quad_deviation` and the
+  arc-length inverse's slack; the stations are refined until the bound
+  fits the budget. A constant section on straight legs is bounded through
+  its mitres. Unbounded by name: a numerically framed basis, a cell beside
+  a mitre on a curved piece or with a changing section, and different
+  curved profiles.
+- `ReferenceExactCompiler` compiles a `StationedSpine` or
+  `SectionsAtStations` exactly where it has a closed form (#247): a
+  constant section along a line or a straight polyline (an extrusion,
+  oblique under a tilted orientation), along a horizontal circle (a
+  revolution), and a linear taper of straight-edged sections along a line
+  (a planar polyhedron); every other run is refused by name.
+
+### Changed
+
+- The stations of such a run are refined until the certified bound fits
+  as well as the sampling test, so a curved run may mesh finer (#247). The
+  exact compiler now reads a stationed spine's stations before refusing
+  it, so a station beyond the basis is refused as the mesh compiler
+  refuses it.
+
+### Fixed
+
+- A trim of a B-spline by points compiles (#306, ADR 0082 amendment): a
+  graph trim's point selector on a 2D or 3D B-spline, which the closed-form
+  inversion refused, is resolved by the inversion a curve path's point
+  bound takes (#304, `StationCurve::parameter_at_bound`): the same
+  point-bound tolerance, sampling, Newton refinement and merging of places,
+  for station bases, sweep directrices and their pieces alike. The trim
+  therefore flattens bitwise to the piece bounded by `PathBound::Point` at
+  those points, with and against its sense. A point off the B-spline, or
+  one it passes through twice, is refused naming `PATH_POINT_OFF_CURVE` or
+  `PATH_POINT_AMBIGUOUS` unless the trim falls back to a parameter
+  selector beside it.
+- **A keyhole face's seam is never a triangle edge of a shell (#283, ADR
+  0083 amendment).** Planar B-rep faces and authored polygon faces are
+  triangulated by `planar::clip_shell_face` over construct's
+  `triangulate_shell_face`: where the clipper made the seam of a keyhole
+  ring (#270) a triangle edge, it is flipped away or split off at a
+  Steiner point inside the face. Faces that run along the same segment
+  (a rim's two end faces at its cut) then pair along it alone instead of
+  meeting four triangle uses of it, so a declared B-rep solid reads as
+  `Solid` rather than `OpenSolid` and authored polygons as a solid rather
+  than a surface. A Steiner point is placed in space by the same chain of
+  midpoints of the face's corners, so it lies exactly in a face in an
+  axis plane; elsewhere within rounding, reported as the certified
+  deviation `"point added inside a keyhole face, off an axis plane"`
+  (path `BRepFace` or `AuthoredMesh`), bounded by the slab width of the
+  face's corners and Steiner points about its fit plane. Like a warp's
+  slab width (#266), it is carried by name through booleans, counts
+  towards the width an operand is flattened by when a boolean is measured
+  against its flattened operands, and a B-rep with Steiner points still
+  counts as a polyhedron there. Each triangle at
+  a Steiner point is re-checked, exactly, in the face's projection after
+  placing it; the noise-band split is kept only where it puts no edge
+  back on a seam. Curve-bounded planes keep the surface-patch path.
+  Where no other face shares the seam, as in every valid two-manifold
+  shell, the seam as a triangle edge was only a diagonal and those shells
+  were already closed; they keep their closure and volume. Tests
+  (`tests/keyhole_shell.rs`): a box whose top face is a keyhole into a
+  pyramid pocket, wide and as the corpus's thin rim seamed at its corner,
+  with and without a fin of two coincident faces hanging from the seam,
+  as B-rep and as authored polygons, closed with exact volume and the
+  seam used by no triangle of the face; the same tilted out of the axis
+  planes reports its Steiner point.
+- `pinch::find`, which refuses a boolean result that touches itself,
+  welds positions by value (#283), so a corner written with `-0.0` meets
+  its `0.0` twin, as #269 fixed in construct.
+- **Swept disks along closed polylines and with corners beside an arc
+  (#248).** A closed polyline is swept as a loop by
+  `axiolid_construct::pipe::swept_disk_along_loop` (its closing segment
+  included, a repeated first point dropped), mitred or filleted where it
+  closes too; a parameter range on it, and a closed polyline inside a
+  composite, are refused by name. Its deviation stays proven, under the
+  detail `"closed loop of segments and arcs"`, the closing twist
+  included. A corner between a segment or an arc and an arc is mitred
+  instead of refused: the rest of the pipe stays proven, and the bend's
+  band of torus up to the mitre plane and the planar face between the
+  two tubes' sections are certified against the mesh by branch and bound
+  (cells trimmed by certain height, distance and azimuth tests),
+  reported `Certified` under the new detail
+  `deviation::MITRE_BESIDE_AN_ARC`. Measured within the budget at 1 mm
+  and 0.1 mm for corners of 20 to 120 degrees before, after and between
+  bends, in and out of the bend's plane, solid and hollow.
 
 ### 0.3.23 - 2026-10-13
 
@@ -4311,6 +4599,60 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.14 - 2026-10-13
+
+### Added
+
+- An explicit opt-in to drop degenerate input rings instead of refusing
+  the whole overlay, each drop reported (#256). `overlay_with` and
+  `union_soup_with` take `OverlayOptions`; their default is `overlay` and
+  `union_soup` exactly, a named refusal.
+  `OverlayOptions::new().dropping_degenerate_rings()` leaves out a ring
+  that has fewer than three points, an edge no longer than the tolerance
+  (`RepeatedVertex`), or an area of at most `tolerance.linear()^2` under
+  the exact `ZeroArea` rule, and lists it in `ReportedOverlay::dropped` /
+  `ReportedUnion::dropped` as a `DroppedRing`: operand, polygon, outer or
+  hole index, `DropReason`, and the magnitude of its signed area, summed
+  exactly and rounded once, with a proven upper bound. A hole of a dropped
+  outer is dropped and reported with it (`OuterDropped`); a degenerate
+  hole of a kept outer is dropped alone. A self-intersecting ring is never
+  dropped, nor a `RepeatedVertex` ring that still crosses itself once its
+  short edges are merged, since its signed area is not what leaving it out
+  removes; non-finite points, holes outside a kept outer and invalid
+  frames stay refusals too. The overlay of the kept rings is exact as
+  usual, and its evidence counts the kept rings.
+  `scripts/probe_degenerate_drop_mutants.py` lists the faults
+  `tests/degenerate_drop.rs` must catch.
+
+### Changed
+
+- Exact straight-edge booleans are faster on soups whose rings share no
+  edges, with results bit for bit the same (#218). The union of 2,000
+  random overlapping triangles takes about 94 ms, from about 290 ms (the
+  grid backend: about 26 ms), and two crossing 1000-gons about 8.1 ms,
+  from 12.3 ms, two thirds of it now operand validation; a union of two
+  60 x 60 meshes given as triangle soups takes about 19.5 ms, from
+  144 ms. Measured with `cargo bench -p axiolid-benchmark --bench
+  overlay_soup`, five interleaved rounds on a shared machine. The
+  subdivision takes a segment no other boundary runs along as carried by
+  its own ring only, and carries the rings containing a piece across a
+  stop where exactly one other segment crosses, instead of searching for
+  carriers and counting windings from a sample for every piece; any
+  other stop counts afresh, and debug builds check both shortcuts
+  against the search and the count. Samples on segments, crossings of two
+  segments and input vertices keep their exact coefficients unbuilt until
+  a question gets past their boxes; copies of a point share an identity
+  that settles equality and interning at once; a ring's edges share their
+  vertices, and each segment its direction. Rounding a crossing compares
+  the offset from its guess in a tight interval before any exact
+  midpoint, the subdivision's queries reuse their buffers, and the snap
+  to the tolerance (#222) finds the vertices near an edge through a grid,
+  not its whole band of `x`, which made mesh soups slow. Arc booleans
+  share the changes and are unchanged or faster in `benches/arc_overlay`.
+  `tests/soup_membership.rs` checks soups by point membership, and
+  `scripts/probe_overlay_soup_mutants.py` lists the faults it and the
+  suite must catch.
 
 ### 0.3.13 - 2026-10-10
 

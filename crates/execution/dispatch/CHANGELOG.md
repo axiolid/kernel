@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-13
+
 ### Fixed
 
 - A one-thread context from `with_execution` is charged one worker and

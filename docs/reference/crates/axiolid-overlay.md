@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.13 (2026-10-10) |
+| Latest release | 0.3.14 (2026-10-13) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -49,29 +49,58 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.13 (2026-10-10):
+Latest release, 0.3.14 (2026-10-13):
 
-### Fixed
+### Added
 
-- `overlay` accepts its own settled output as an operand when that output
-  holds two collinear edges that do not touch (#272). Operand validation
-  asks whether non-adjacent edges meet, and its crossing test read the
-  side of a rounded cross product with `0.0` counted as a side: two
-  disjoint edges on one line whose cross products rounded to `0.0` and to
-  a tiny positive residue counted as crossing, and the union of a turned
-  U fed back was refused as `SelfIntersection` (6 of 20,000 turned copies
-  in the report). Every contact decision is now exact, in the new
-  `contact` module that validation and settling share: a proper crossing
-  needs each segment's ends strictly on both sides of the other's line,
-  an end touches another edge when its cross product is within the
-  tolerance and it lies in the edge's box widened by the tolerance, both
-  decided exactly, and collinear edges therefore meet only when their
-  extents do. The test whether a hole's corner lies inside its outer ring
-  is an exact orientation sign too, and settling puts a proper crossing at
-  the double nearest the exact one instead of at a point interpolated from
-  rounded cross products, which edges crossing at a hair's angle put
-  anywhere along the edge. A ring decides the same at any distance from
-  the origin. `scripts/probe_edge_contact_mutants.py` lists the faults the
-  tests must catch.
+- An explicit opt-in to drop degenerate input rings instead of refusing
+  the whole overlay, each drop reported (#256). `overlay_with` and
+  `union_soup_with` take `OverlayOptions`; their default is `overlay` and
+  `union_soup` exactly, a named refusal.
+  `OverlayOptions::new().dropping_degenerate_rings()` leaves out a ring
+  that has fewer than three points, an edge no longer than the tolerance
+  (`RepeatedVertex`), or an area of at most `tolerance.linear()^2` under
+  the exact `ZeroArea` rule, and lists it in `ReportedOverlay::dropped` /
+  `ReportedUnion::dropped` as a `DroppedRing`: operand, polygon, outer or
+  hole index, `DropReason`, and the magnitude of its signed area, summed
+  exactly and rounded once, with a proven upper bound. A hole of a dropped
+  outer is dropped and reported with it (`OuterDropped`); a degenerate
+  hole of a kept outer is dropped alone. A self-intersecting ring is never
+  dropped, nor a `RepeatedVertex` ring that still crosses itself once its
+  short edges are merged, since its signed area is not what leaving it out
+  removes; non-finite points, holes outside a kept outer and invalid
+  frames stay refusals too. The overlay of the kept rings is exact as
+  usual, and its evidence counts the kept rings.
+  `scripts/probe_degenerate_drop_mutants.py` lists the faults
+  `tests/degenerate_drop.rs` must catch.
+
+### Changed
+
+- Exact straight-edge booleans are faster on soups whose rings share no
+  edges, with results bit for bit the same (#218). The union of 2,000
+  random overlapping triangles takes about 94 ms, from about 290 ms (the
+  grid backend: about 26 ms), and two crossing 1000-gons about 8.1 ms,
+  from 12.3 ms, two thirds of it now operand validation; a union of two
+  60 x 60 meshes given as triangle soups takes about 19.5 ms, from
+  144 ms. Measured with `cargo bench -p axiolid-benchmark --bench
+  overlay_soup`, five interleaved rounds on a shared machine. The
+  subdivision takes a segment no other boundary runs along as carried by
+  its own ring only, and carries the rings containing a piece across a
+  stop where exactly one other segment crosses, instead of searching for
+  carriers and counting windings from a sample for every piece; any
+  other stop counts afresh, and debug builds check both shortcuts
+  against the search and the count. Samples on segments, crossings of two
+  segments and input vertices keep their exact coefficients unbuilt until
+  a question gets past their boxes; copies of a point share an identity
+  that settles equality and interning at once; a ring's edges share their
+  vertices, and each segment its direction. Rounding a crossing compares
+  the offset from its guess in a tight interval before any exact
+  midpoint, the subdivision's queries reuse their buffers, and the snap
+  to the tolerance (#222) finds the vertices near an edge through a grid,
+  not its whole band of `x`, which made mesh soups slow. Arc booleans
+  share the changes and are unchanged or faster in `benches/arc_overlay`.
+  `tests/soup_membership.rs` checks soups by point membership, and
+  `scripts/probe_overlay_soup_mutants.py` lists the faults it and the
+  suite must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

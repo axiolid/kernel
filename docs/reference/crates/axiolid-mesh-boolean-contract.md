@@ -8,7 +8,7 @@ Portable mesh boolean request, result, evidence, and conformance contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-04) |
+| Latest release | 0.3.3 (2026-10-13) |
 | crates.io | [`axiolid-mesh-boolean-contract`](https://crates.io/crates/axiolid-mesh-boolean-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-boolean` |
 | Layer | contracts (`contract.operation`) |
@@ -32,12 +32,16 @@ implement it, and `axiolid-dispatch` chooses between them.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-04):
+Latest release, 0.3.3 (2026-10-13):
 
 ### Changed
 
-- `MeshBoolean::scratch_requirement` says what it is charged for: the
-  input triangles of every operand together, and the worker threads the
-  call runs on (#226).
+- `MeshBoolean::scratch_requirement` says what it means for the batch
+  methods (#259): the bound of each boolean on that step's operands, not of
+  the batch in its input triangles. A provider whose batch holds
+  intermediates or runs booleans concurrently charges each step when its
+  operands exist and refuses with `BudgetExceeded` before the first that
+  does not fit, so the registry's check before a batch is necessary, not
+  sufficient.
 
 Full history: [`crates/contracts/operations/mesh-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-boolean/CHANGELOG.md)

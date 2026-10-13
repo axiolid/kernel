@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-13
+
 ### Changed
 
 - `MeshBoolean::scratch_requirement` says what it means for the batch

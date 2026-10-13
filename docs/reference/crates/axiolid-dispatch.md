@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-04) |
+| Latest release | 0.3.3 (2026-10-13) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -50,17 +50,13 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-04):
+Latest release, 0.3.3 (2026-10-13):
 
 ### Fixed
 
-- `MeshBooleanRegistry::boolean` budgets both operands (#226). It counted
-  the subject's triangles alone, so a provider's declared scratch was
-  checked at up to half the input it would really be given; `subtract_many`
-  and `union_many` already counted every operand.
-- A per-worker scratch term (`ScratchRequirement::Affine`) is charged for
-  the width of the pool configured with `with_execution` when it has more
-  than one thread, since every provider call runs inside it, and otherwise
-  for the options' `Parallelism`.
+- A one-thread context from `with_execution` is charged one worker and
+  runs the provider on a pool of one (#259). It installed no pool, so the
+  call ran on whatever pool the caller was in, and the budget fell back to
+  the options' `Parallelism`.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

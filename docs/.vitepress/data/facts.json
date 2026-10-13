@@ -22,10 +22,10 @@
       "description": "Portable and runtime-optimized CPU execution context for Axiolid geometry",
       "layer": "execution",
       "path": "crates/execution/cpu",
-      "released": "0.3.1",
-      "released_date": "2026-09-28",
+      "released": "0.3.2",
+      "released_date": "2026-10-13",
       "role": "execution.context",
-      "version": "0.3.1"
+      "version": "0.3.2"
     },
     "axiolid-backend-gpu": {
       "description": "GPU executor adapter contract for batched Axiolid geometry",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.17",
-      "released_date": "2026-10-09",
+      "released": "0.3.18",
+      "released_date": "2026-10-13",
       "role": "algorithm.construction",
-      "version": "0.3.17"
+      "version": "0.3.18"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -157,19 +157,19 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.2",
-      "released_date": "2026-10-04",
+      "released": "0.3.3",
+      "released_date": "2026-10-13",
       "role": "execution.dispatch",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.13",
+      "released": "0.3.14",
       "released_date": "2026-10-13",
       "role": "algorithm.parametric",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -292,28 +292,28 @@
       "description": "boolmesh-backed MeshBoolean provider",
       "layer": "providers",
       "path": "crates/providers/mesh/boolmesh",
-      "released": "0.3.4",
-      "released_date": "2026-10-04",
+      "released": "0.3.5",
+      "released_date": "2026-10-13",
       "role": "provider.mesh",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-mesh-boolean-contract": {
       "description": "Portable mesh boolean request, result, evidence, and conformance contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-boolean",
-      "released": "0.3.2",
-      "released_date": "2026-10-04",
+      "released": "0.3.3",
+      "released_date": "2026-10-13",
       "role": "contract.operation",
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     "axiolid-mesh-compile": {
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.23",
+      "released": "0.3.24",
       "released_date": "2026-10-13",
       "role": "execution.orchestration",
-      "version": "0.3.23"
+      "version": "0.3.24"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.13",
-      "released_date": "2026-10-10",
+      "released": "0.3.14",
+      "released_date": "2026-10-13",
       "role": "algorithm.planar",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

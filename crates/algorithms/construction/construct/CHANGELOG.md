@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-10-13
+
 ### Added
 
 - `loft_exact::loft_polygon_stations_exact` (#247): an exact closed B-rep

@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-backend-cpu"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "rayon",
 ]
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-construct"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-dispatch"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-backend-cpu",
  "axiolid-contracts",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-boolean-boolmesh"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-boolean-contract"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.23"
+version = "0.3.24"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-overlay"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
