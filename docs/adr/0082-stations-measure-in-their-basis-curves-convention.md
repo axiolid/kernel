@@ -141,6 +141,13 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
   `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs` and
   `scripts/probe_curve_path_open_end_mutants.py` (#298).
+- `crates/algorithms/parametric/evaluate/src/station/composite.rs`
+  (`CompositeBasis::joint_intervals_within`),
+  `crates/contracts/operations/curve-evaluate/src/contract.rs`
+  (`path_joint_distances_within`),
+  `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
+  `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs` and
+  `scripts/probe_joint_window_mutants.py` (#305).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -976,3 +983,78 @@ to be refused.
 Still open: windows on `StationedSpine`, `SectionedSurface` and
 `OffsetByStations` themselves (their general forms carry them); a side at a
 run's ends that disagrees with the run's reading is ignored, not refused.
+
+## Amendment 2026-10-13: joints near a window on the curve-evaluation contract (#305)
+
+`path_joint_distances` (#294 (a)) certifies every joint of a path, so one
+piece whose length cannot be certified anywhere on it (an offset by
+distances along a B-spline, `UNCERTIFIED_LENGTH`) refused every derived
+placement on that path, however far from it (openbimrs/ifc#436). A station
+with a seam window (#294 (c), #301) already certifies only the seams it
+needs; a caller deriving through the contract had no equivalent.
+
+- **The query.** `CurveEvaluator::path_joint_distances_within(path, around,
+  window, tolerance)`, a defaulted trait method (a minor change), answers
+  `(joint, interval)` pairs in order: `joint` the index among the path's
+  joints (its position in `path_joint_distances`' answer), `interval`
+  certified as that query certifies it, no wider than `tolerance`.
+  Returned: every joint whose interval meets `[around - window, around +
+  window]`, edges included (`DistanceInterval::meets`, the same test the
+  seam-snapping window uses to tell a seam outside it). Left out: only
+  joints certified to lie outside it. A centre that is not finite or a
+  window negative or not finite is `InvalidInput` (`window_span`).
+- **What is certified.** Every piece BEFORE the window, since its length
+  moves every joint after it; the certified intervals are summed as
+  `joint_intervals` sums them and widen with each numerical piece, within
+  the tolerance. Each joint that can fall WITHIN the window. Nothing AFTER
+  it: a joint is known to lie past the window once the certified lower end
+  of the joint before it plus a certified lower bound of its piece's
+  length with no quadrature passes the window's end. That bound is the
+  piece's chord between the points read as its ends (the plan chord on a
+  plan-measured piece, since a plan length is never shorter than it), less
+  `100 * POINT_ROUNDING` of the coordinates and the length. So the reading
+  stops at the first such joint, and an uncertifiable piece after the
+  window, or across its end where its chord alone carries its own end past
+  it (a window inside the piece, far from its end), is never certified.
+- **An uncertifiable piece before the window, or within reach of it,
+  refuses the query by name** (`UNCERTIFIED_LENGTH`): every joint after it
+  moves with its length, so where the window lies against them is unknown.
+  No coarser bound is substituted. One that reaches every such piece (the
+  chord below; above, the base's length scaled by the offset's largest
+  speed factor) would be wider, by a share of the piece's length, than any
+  tolerance a placement asks for, so the joints after it could be returned
+  only by breaking the width the contract states.
+- **Agreement.** The reference provider (`CompositeBasis::
+  joint_intervals_within`) shares the tolerance among ALL pieces by their
+  estimated lengths, as `joint_intervals` does (no certification needed
+  for that), and sums in the same order, so each joint it returns carries
+  bitwise the interval `path_joint_distances` gives it wherever that
+  succeeds; a joint whose interval lies inside the window is always
+  returned, and one left out truly lies outside. The seam-snapping window
+  keeps its own sharing among the pieces before it (#294 `perf`): a
+  station's snapped distance needs no agreement with a whole-path answer.
+- **The default** delegates to `path_joint_distances` and keeps the joints
+  that meet the window, as the plain path queries delegate to the sided
+  ones: it cannot be wrong where that query is right. A provider that does
+  not certify joints therefore refuses it naming
+  `PATH_JOINT_DISTANCES_UNSUPPORTED`, and one that certifies whole paths
+  answers windows without change, if no more often. The conformance suite
+  asks four lines turning at right angles (joints at 10, 20, 30) and the
+  widening offset then line of #294 for windows on, between, over and past
+  their joints: each returned joint certified and meeting its window, every
+  joint truly within a window returned, each agreeing with the provider's
+  whole-path answer, a bad window or tolerance refused; or the query
+  refused as unsupported.
+
+| Option | Why not |
+| --- | --- |
+| A per-joint query, `path_joint_distance(path, joint, tolerance)` | The caller holds a distance, not a joint index: it would have to know which joints lie near it, which is what it cannot tell without the certificates; and every joint before it would be certified again per call. |
+| A coarse certified bound for an uncertifiable piece before the window | Wider than any tolerance a placement asks for, so the joints after it could not be returned anyway; deciding only that none falls in the window would need an upper bound on an offset whose law runs in a numerical arc length, a new certificate for little gain. |
+| Share the tolerance among the pieces up to the window only (as the seam window does) | Fewer panels when long numerical pieces follow, but the windowed interval would differ from `path_joint_distances`' for the same joint: two certificates of one joint a caller would have to reconcile. |
+| Return only the joints whose interval lies inside the window | A joint straddling the window's edge can fall within it; leaving it out would tell the caller there is none. The caller sees the interval and decides, as the seam window refuses a straddling seam by name. |
+| Default refusing by name, not delegating | A provider that certifies whole paths would refuse windows it can answer correctly. |
+
+Still open: joints after an uncertifiable piece (certified lengths of
+offsets by distances along ellipses and B-splines, #294); a piece's own
+seams (a polyline's vertex, a B-spline's corner knot) on the contract,
+which only the seam-snapping window certifies.
