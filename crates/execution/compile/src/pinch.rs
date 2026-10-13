@@ -25,8 +25,19 @@ pub(crate) enum Pinch {
 
 /// The first pinch in `mesh`, welding coincident positions; `None` when
 /// every welded edge has at most two faces and every welded vertex one fan.
+///
+/// Positions weld by value: `-0.0` is the same coordinate as `0.0` (#283,
+/// the pattern #269 fixed in construct), so a contact at a corner one
+/// operand writes with a negative zero is still found.
 pub(crate) fn find(mesh: &TriMesh) -> Option<Pinch> {
-    let key = |p: Point3| (p.x.to_bits(), p.y.to_bits(), p.z.to_bits());
+    // `+ 0.0` turns -0.0 into 0.0 and leaves every other value alone.
+    let key = |p: Point3| {
+        (
+            (p.x + 0.0).to_bits(),
+            (p.y + 0.0).to_bits(),
+            (p.z + 0.0).to_bits(),
+        )
+    };
     let mut ids: HashMap<(u64, u64, u64), u32> = HashMap::new();
     let mut at: Vec<Point3> = Vec::new();
     let welded: Vec<u32> = mesh
@@ -145,6 +156,30 @@ mod tests {
         ]);
         let b = tetra([
             p(0.0, 0.0, 0.0),
+            p(-1.0, 0.0, 0.0),
+            p(0.0, -1.0, 0.0),
+            p(0.0, 0.0, -1.0),
+        ]);
+        assert_eq!(
+            find(&join(a, b)),
+            Some(Pinch::Vertex {
+                at: p(0.0, 0.0, 0.0)
+            })
+        );
+    }
+
+    #[test]
+    fn a_corner_written_with_negative_zeros_welds_to_its_twin() {
+        // The second solid writes the shared corner as (-0.0, -0.0, -0.0):
+        // the same point, so they still pinch there.
+        let a = tetra([
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(0.0, 1.0, 0.0),
+            p(0.0, 0.0, 1.0),
+        ]);
+        let b = tetra([
+            p(-0.0, -0.0, -0.0),
             p(-1.0, 0.0, 0.0),
             p(0.0, -1.0, 0.0),
             p(0.0, 0.0, -1.0),

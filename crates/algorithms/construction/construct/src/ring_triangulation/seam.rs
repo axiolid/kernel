@@ -45,7 +45,9 @@
 //! the point's first index in `outer ++ holes`, as at a pinch. A seam may
 //! be a triangle edge, used once in each direction, or not one at all;
 //! some regions force it (a thin rim seamed at its corner), and faces
-//! sharing the seam then meet four triangle uses of it.
+//! sharing the seam then meet four triangle uses of it. A planar face of a
+//! closed shell has [`seal`](super::seal) take every seam out of the
+//! triangle edges afterwards (#283), from the seam [`ends`] found here.
 //!
 //! [`PinchPolicy::Refuse`](super::PinchPolicy) refuses a ring with a seam
 //! by name ([`refuse_for_solid`]): an extruded keyhole puts two
@@ -178,6 +180,21 @@ pub(super) fn triangulate(
         .into_iter()
         .map(|t| t.map(|v| first[parts.back[v as usize] as usize]))
         .collect())
+}
+
+/// Each seam's two ends, by the first index of their points in `points`,
+/// as [`triangulate`] references them (#283).
+pub(super) fn ends(points: &[Point2], rings: &[Range<usize>], seams: &[Seam]) -> Vec<[u32; 2]> {
+    let first = pinch::canonical(points, &[])
+        .unwrap_or_else(|| (0..points.len() as u32).collect::<Vec<u32>>());
+    seams
+        .iter()
+        .map(|seam| {
+            let ring = &rings[seam.ring];
+            let at = |k: usize| first[ring.start + k % ring.len()];
+            [at(seam.open), at(seam.open + 1)]
+        })
+        .collect()
 }
 
 /// [`check_clear`], [`split`], then the parts' own validation: the parts

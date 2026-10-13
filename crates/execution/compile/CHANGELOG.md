@@ -74,6 +74,40 @@ caret rule for `0.x` versions.
   one it passes through twice, is refused naming `PATH_POINT_OFF_CURVE` or
   `PATH_POINT_AMBIGUOUS` unless the trim falls back to a parameter
   selector beside it.
+- **A keyhole face's seam is never a triangle edge of a shell (#283, ADR
+  0083 amendment).** Planar B-rep faces and authored polygon faces are
+  triangulated by `planar::clip_shell_face` over construct's
+  `triangulate_shell_face`: where the clipper made the seam of a keyhole
+  ring (#270) a triangle edge, it is flipped away or split off at a
+  Steiner point inside the face. Faces that run along the same segment
+  (a rim's two end faces at its cut) then pair along it alone instead of
+  meeting four triangle uses of it, so a declared B-rep solid reads as
+  `Solid` rather than `OpenSolid` and authored polygons as a solid rather
+  than a surface. A Steiner point is placed in space by the same chain of
+  midpoints of the face's corners, so it lies exactly in a face in an
+  axis plane; elsewhere within rounding, reported as the certified
+  deviation `"point added inside a keyhole face, off an axis plane"`
+  (path `BRepFace` or `AuthoredMesh`), bounded by the slab width of the
+  face's corners and Steiner points about its fit plane. Like a warp's
+  slab width (#266), it is carried by name through booleans, counts
+  towards the width an operand is flattened by when a boolean is measured
+  against its flattened operands, and a B-rep with Steiner points still
+  counts as a polyhedron there. Each triangle at
+  a Steiner point is re-checked, exactly, in the face's projection after
+  placing it; the noise-band split is kept only where it puts no edge
+  back on a seam. Curve-bounded planes keep the surface-patch path.
+  Where no other face shares the seam, as in every valid two-manifold
+  shell, the seam as a triangle edge was only a diagonal and those shells
+  were already closed; they keep their closure and volume. Tests
+  (`tests/keyhole_shell.rs`): a box whose top face is a keyhole into a
+  pyramid pocket, wide and as the corpus's thin rim seamed at its corner,
+  with and without a fin of two coincident faces hanging from the seam,
+  as B-rep and as authored polygons, closed with exact volume and the
+  seam used by no triangle of the face; the same tilted out of the axis
+  planes reports its Steiner point.
+- `pinch::find`, which refuses a boolean result that touches itself,
+  welds positions by value (#283), so a corner written with `-0.0` meets
+  its `0.0` twin, as #269 fixed in construct.
 
 ## [0.3.23] - 2026-10-13
 

@@ -17,6 +17,30 @@ caret rule for `0.x` versions.
   corners are not coplanar is refused by name (`loft_exact::WARPED_WALL`).
 - `loft::quad_deviation` is public (#247): the bound a station run's mesh
   cells use for the wall quad against its two triangles.
+- **Keyhole faces of a closed shell triangulate without a seam edge
+  (#283, ADR 0083 amendment).** `profile::triangulate_shell_face` is
+  `triangulate_with(.., PinchPolicy::Accept)` for a planar face of a
+  shell: no triangle edge lies on a seam (#270). Where the clipper would
+  make the seam a triangle edge, the two triangles on it are replaced by
+  the other diagonal of their quadrilateral when it is strictly convex,
+  and otherwise by four triangles around a Steiner point strictly inside
+  it, off the seam's line (a thin rim seamed at its corner always takes
+  one). A `SteinerPoint` is a chain of midpoints of the face's own points
+  (the seam's midpoint halved towards a corner, one halving past the
+  first that fits, as a margin against a caller's projection rounding),
+  which `SteinerPoint::place` replays over any point type, so a caller
+  lifting the face into space places it exactly in an axis plane. The
+  result (`ShellFaceTriangulation`: points `outer ++ holes ++ steiner`,
+  triangles, Steiner points) is certified against the cover it replaces:
+  every triangle strictly counter-clockwise, every directed edge once,
+  the same boundary, two more triangles per Steiner point, no edge on a
+  seam; a seam no point can be placed off is refused by name. Rings
+  without a seam triangulate exactly as under `Accept`. Tests
+  (`tests/profile_pinches.rs`): every keyhole fixture from every start,
+  either way round and under every zero-sign pattern, tiled exactly with
+  no seam edge; the thin rim needs a Steiner point; the off-grid rim
+  within rounding. Mutation probe:
+  `scripts/probe_keyhole_shell_mutants.py`.
 
 ## [0.3.17] - 2026-10-09
 

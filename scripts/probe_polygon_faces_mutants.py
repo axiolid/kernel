@@ -57,6 +57,18 @@ meshes), run against the `warped_boolean` target and the polyhedron's
 unit tests. Not listed, as equivalent at test resolution: rounding the
 widened sum down (one ulp), and the polyhedron's own manifold test,
 which the B-rep audit after assembly repeats.
+
+#283 (keyhole faces of a shell): seven mutants re-anchored on the
+authored path's `clip_shell_face` and on the warp and Steiner reports
+sharing one loop; 7 / 7 still killed. The seam itself is probed by
+`probe_keyhole_shell_mutants.py`. Rebased onto #266: its two slab-width
+mutants re-anchored where the width now also takes the Steiner offset.
+Authored and B-rep faces no longer go through `clip_projected` (now only
+curved faces' parameter domains), so "triangles not mapped back past a
+dropped corner" and "faces refuse rings touching at a point" survived on
+it (40 / 42); they are re-anchored on the shell path the faces take
+(`clip_shell_face`'s index map, construct's `triangulate_sealed`):
+42 / 42 killed.
 """
 import pathlib
 
@@ -65,6 +77,7 @@ import probe_lib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 P = "crates/execution/compile/src/planar.rs"
 C = "crates/execution/compile/src/compiler.rs"
+SEALED = "crates/algorithms/construction/construct/src/ring_triangulation.rs"
 B = "crates/execution/compile/src/brep.rs"
 DB = "crates/execution/compile/src/deviation/boolean.rs"
 D = "crates/execution/compile/src/deviation.rs"
@@ -92,11 +105,11 @@ MUTANTS = [
      "        (self.largest > linear).then(|| self.slab_width())",
      "        (self.largest > 0.0).then(|| self.slab_width())"),
     ("planar callers no longer refuse a warp", P,
-     "    triangulate_in_fit_plane(rings, linear, true).map(|(indices, _)| indices)",
-     "    triangulate_in_fit_plane(rings, linear, false).map(|(indices, _)| indices)"),
+     "    triangulate_in_fit_plane(rings, linear, true, false).map(|face| face.indices)",
+     "    triangulate_in_fit_plane(rings, linear, false, false).map(|face| face.indices)"),
     ("authored faces refuse a warp again", P,
-     "    triangulate_in_fit_plane(rings, linear, false)\n",
-     "    triangulate_in_fit_plane(rings, linear, true)\n"),
+     "    triangulate_in_fit_plane(rings, linear, false, true)\n",
+     "    triangulate_in_fit_plane(rings, linear, true, true)\n"),
     ("warp halved", P,
      "        (self.above - self.below) + 64.0 * f64::EPSILON * self.reach",
      "        0.5 * (self.above - self.below)"),
@@ -125,23 +138,27 @@ MUTANTS = [
      "            crate::deviation::WARPED_BREP_FACE,",
      "            \"plane\","),
     ("B-rep warp measured on the outer ring only (#257)", B,
-     "    let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();",
-     "    let views: Vec<&[Vec3]> = points.iter().take(1).map(Vec::as_slice).collect();"),
+     "    let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();\n    let warp =",
+     "    let views: Vec<&[Vec3]> = points.iter().take(1).map(Vec::as_slice).collect();\n    let warp ="),
     ("warp reported as proven", C,
-     "                                crate::deviation::DeviationBound::Certified(warp),",
-     "                                crate::deviation::DeviationBound::Proven(warp),"),
+     "                                crate::deviation::DeviationBound::Certified(bound),",
+     "                                if detail == crate::deviation::WARPED_AUTHORED_FACE {\n"
+     "                                    crate::deviation::DeviationBound::Proven(bound)\n"
+     "                                } else {\n"
+     "                                    crate::deviation::DeviationBound::Certified(bound)\n"
+     "                                },"),
     ("warp folded into the exact authored contribution", C,
-     "                                crate::deviation::WARPED_AUTHORED_FACE,",
-     "                                \"\","),
+     "                        (crate::deviation::WARPED_AUTHORED_FACE, warp),",
+     "                        (\"\", warp),"),
     ("warp not reported", C,
-     "                        None => built,\n                        Some(warp) => {",
-     "                        _ => built,\n                        Some(warp) if false => {"),
+     "                        (crate::deviation::WARPED_AUTHORED_FACE, warp),",
+     "                        (crate::deviation::WARPED_AUTHORED_FACE, warp.and(None)),"),
     ("worst warp across faces dropped", C,
      "            warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));",
      "            warp = Some(face_warp);"),
     ("holes not passed to the clipper", P,
-     "    let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(|error| {",
-     "    let indices = clip_planar_face(&flat[..hole_starts.first().copied().unwrap_or(flat.len())], &[], linear).map_err(|error| {"),
+     "        clip_shell_face(&flat, &hole_starts, linear, &corners, &projection).map_err(refusal)?;",
+     "        clip_shell_face(&flat[..hole_starts.first().copied().unwrap_or(flat.len())], &[], linear, &corners, &projection).map_err(refusal)?;"),
     ("repeated corner kept (#260)", P,
      "            if ring.last() != Some(&point) {",
      "            if true {"),
@@ -149,11 +166,11 @@ MUTANTS = [
      "        while ring.len() > 1 && ring.first() == ring.last() {",
      "        while false && ring.len() > 1 && ring.first() == ring.last() {"),
     ("triangles not mapped back past a dropped corner (#260)", P,
-     "        .map(|corner| kept[corner as usize])",
-     "        .map(|corner| corner as usize)"),
-    ("faces refuse rings touching at a point (#260)", P,
-     "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Accept)?;",
-     "    let (_, triangles) = triangulate_with(&rings, PinchPolicy::Refuse)?;"),
+     "            kept[v]\n",
+     "            v\n"),
+    ("faces refuse rings touching at a point (#260)", SEALED,
+     "        let triangles = without_seams(&points, &rings, PinchPolicy::Accept)?;",
+     "        let triangles = without_seams(&points, &rings, PinchPolicy::Refuse)?;"),
     ("triangles pass through untriangulated", C,
      "        if rings.len() == 1 && rings[0].len() == 3 {",
      "        if rings.len() == 1 {"),
@@ -179,11 +196,11 @@ MUTANTS = [
      "                let width = self.flattened_of(left).max(self.flattened_of(right));",
      "                let width = self.flattened_of(right);", W),
     ("authored slab width not recorded (#266)", E,
-     "warp.unwrap_or(0.0)))",
-     "0.0 * warp.unwrap_or(0.0)))", W),
+     "                let width = warp.unwrap_or(0.0).max(steiner_offset.unwrap_or(0.0));",
+     "                let width = (0.0 * warp.unwrap_or(0.0)).max(steiner_offset.unwrap_or(0.0));", W),
     ("B-rep slab width not recorded (#266)", D,
-     "                    Some(widest.max(width))",
-     "                    Some(widest + 0.0 * width)", W),
+     "                ) => Some(widest.max(width)),",
+     "                ) => Some(widest + 0.0 * width),", W),
     ("warped authored operand not named under a boolean (#266)", D,
      "                    | (DeviationPath::AuthoredMesh, WARPED_AUTHORED_FACE)\n",
      "", W),

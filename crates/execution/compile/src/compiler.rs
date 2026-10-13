@@ -398,20 +398,22 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         match node {
             GeometryNode::TriMesh(mesh) => Ok(authored_mesh(mesh.clone(), options)),
             GeometryNode::PolygonMesh(mesh) => {
-                compile_authored_polygons(mesh, options).map(|(mesh, warp)| {
+                compile_authored_polygons(mesh, options).map(|(mesh, warp, steiner_offset)| {
                     let built = authored_mesh(mesh, options);
-                    match warp {
-                        None => built,
-                        Some(warp) => {
-                            let mut deviation = built.deviation.clone();
+                    let mut deviation = built.deviation.clone();
+                    for (detail, bound) in [
+                        (crate::deviation::WARPED_AUTHORED_FACE, warp),
+                        (crate::deviation::KEYHOLE_STEINER_POINT, steiner_offset),
+                    ] {
+                        if let Some(bound) = bound {
                             deviation.add(
                                 crate::deviation::DeviationPath::AuthoredMesh,
-                                crate::deviation::WARPED_AUTHORED_FACE,
-                                crate::deviation::DeviationBound::Certified(warp),
+                                detail,
+                                crate::deviation::DeviationBound::Certified(bound),
                             );
-                            built.with_deviation(deviation)
                         }
                     }
+                    built.with_deviation(deviation)
                 })
             }
             GeometryNode::Instance(instance) => {
@@ -1219,9 +1221,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 /// A plain triangle keeps its exact corner order. Any other face -- an
 /// n-gon, a concave face, a face with holes (IFC4
 /// `IfcIndexedPolygonalFaceWithVoids`) -- is triangulated in its own
-/// plane by [`crate::planar::triangulate_polygon`]. Positions are kept
-/// as authored and shared, so the output welds exactly where the input
-/// did; no position is moved or added. A corner that one face's
+/// plane by [`crate::planar::triangulate_authored_polygon`]. Positions
+/// are kept as authored and shared, so the output welds exactly where the
+/// input did; no position is moved. The only positions added are the
+/// Steiner points a keyhole face places inside itself so that its seam is
+/// no triangle edge (#283), each used by that face alone. A corner that
+/// one face's
 /// triangulation inserts into a ring edge (a hole touching the outer
 /// edge at an interior point) is inserted into every face sharing that
 /// edge by index, a triangle face included, so the faces still meet
@@ -1234,11 +1239,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 /// face (the width of the slab its corners span about that plane, #261)
 /// is returned with the mesh, `None` when every face is planar.
 /// [`crate::planar`] states what that warp bounds; the caller reports
-/// it as a certified deviation, never as exact.
+/// it as a certified deviation, never as exact. So is the largest
+/// [`crate::planar::steiner_offset`] of a keyhole face whose Steiner
+/// points lie off an axis plane (#283), `None` when there is none.
 pub(crate) fn compile_authored_polygons(
     mesh: &axiolid_mesh::PolygonMesh,
     options: &ExecutionOptions,
-) -> GeomResult<(TriMesh, Option<Scalar>)> {
+) -> GeomResult<(TriMesh, Option<Scalar>, Option<Scalar>)> {
     let position_count = mesh.positions.len();
     if let Some(index) = mesh
         .faces
@@ -1284,6 +1291,7 @@ pub(crate) fn compile_authored_polygons(
     let linear = options.tolerance().linear();
     let splits = authored_edge_splits(mesh);
     let mut warp: Option<Scalar> = None;
+    let mut steiner_offset: Option<Scalar> = None;
     for (face_index, face) in mesh.faces.iter().enumerate() {
         let mut rings: Vec<Vec<u32>> = face_rings(face).cloned().collect();
         // Weld through every corner a face inserts into a shared edge
@@ -1308,7 +1316,19 @@ pub(crate) fn compile_authored_polygons(
         if let Some(face_warp) = local.warp {
             warp = Some(warp.map_or(face_warp, |w| w.max(face_warp)));
         }
-        let corners: Vec<u32> = rings.into_iter().flatten().collect();
+        if let Some(offset) = local.steiner_offset {
+            steiner_offset = Some(steiner_offset.map_or(offset, |w| w.max(offset)));
+        }
+        let mut corners: Vec<u32> = rings.into_iter().flatten().collect();
+        // Steiner points follow the corners, each a new position of this
+        // face alone (#283).
+        for point in local.steiner {
+            let index = u32::try_from(positions.len()).map_err(|_| GeomError::BudgetExceeded {
+                resource: "authored polygon positions",
+            })?;
+            positions.push(point);
+            corners.push(index);
+        }
         indices.extend(local.indices.into_iter().map(|corner| corners[corner]));
     }
 
@@ -1316,7 +1336,7 @@ pub(crate) fn compile_authored_polygons(
     triangles.validate_structure().map_err(|error| {
         GeomError::InvalidInput(format!("invalid authored polygon mesh: {error}"))
     })?;
-    Ok((triangles, warp))
+    Ok((triangles, warp, steiner_offset))
 }
 
 /// The corners the authored polygon faces of `mesh` insert into their own

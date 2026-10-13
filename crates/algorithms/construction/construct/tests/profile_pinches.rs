@@ -22,7 +22,9 @@
 use std::collections::HashMap;
 
 use axiolid_construct::extrude::extrude_profile;
-use axiolid_construct::profile::{ring_touches, triangulate, triangulate_with, PinchPolicy, Rings};
+use axiolid_construct::profile::{
+    ring_touches, triangulate, triangulate_shell_face, triangulate_with, PinchPolicy, Rings,
+};
 use axiolid_contracts::GeomError;
 use axiolid_core::{Point2, Tolerance, Vec3};
 use axiolid_guarantees::Sign;
@@ -66,6 +68,18 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
         .unwrap_or_else(|e| panic!("{what}: refused: {e:?}"));
     let count: usize = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
     assert_eq!(points.len(), count, "{what}: vertex layout changed");
+    assert_covers(rings, &points, &triangles, what, exact)
+}
+
+/// [`assert_tiles`] over a given triangulation, whose points may extend
+/// `outer ++ holes` by Steiner points (#283).
+fn assert_covers(
+    rings: &Rings,
+    points: &[Point2],
+    triangles: &[[u32; 3]],
+    what: &str,
+    exact: bool,
+) -> (f64, usize) {
     let first = |v: u32| {
         points
             .iter()
@@ -74,7 +88,7 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
     };
 
     let mut covered = 0.0;
-    for t in &triangles {
+    for t in triangles {
         for &v in t {
             assert_eq!(
                 first(v),
@@ -110,7 +124,7 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
     // edge in its own direction, and those pieces cover each ring edge once.
     let key = |q: Point2| ((q.x + 0.0).to_bits(), (q.y + 0.0).to_bits());
     let mut directed: HashMap<(Key, Key), (Point2, Point2, u32)> = HashMap::new();
-    for t in &triangles {
+    for t in triangles {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             let (pa, pb) = (points[a as usize], points[b as usize]);
             directed.entry((key(pa), key(pb))).or_insert((pa, pb, 0)).2 += 1;
@@ -164,6 +178,71 @@ fn assert_tiles(rings: &Rings, what: &str, exact: bool) -> (f64, usize) {
         }
     }
     (covered, triangles.len())
+}
+
+/// A planar face of a closed shell (#283): the region [`assert_tiles`]
+/// checks, tiled the same way with `2 * steiner` more triangles, and no
+/// triangle edge on a seam (a ring edge the rings also run the other way).
+/// Each Steiner point is where its chain of midpoints puts it. Rings
+/// without a seam triangulate exactly as under `Accept`. Returns the
+/// number of Steiner points.
+fn assert_sealed(rings: &Rings, accepted: usize, twice: f64, what: &str) -> usize {
+    let what = format!("{what}, sealed");
+    let sealed = triangulate_shell_face(rings).unwrap_or_else(|e| panic!("{what}: refused: {e:?}"));
+    let count: usize = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
+    let ring_points: Vec<Point2> = core::iter::once(&rings.outer)
+        .chain(&rings.holes)
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(&sealed.points[..count], &ring_points[..], "{what}: layout");
+    assert_eq!(sealed.points.len(), count + sealed.steiner.len(), "{what}");
+    for (k, steiner) in sealed.steiner.iter().enumerate() {
+        let placed = steiner.place(
+            |v| sealed.points[v as usize],
+            |a, b| p((a.x + b.x) * 0.5, (a.y + b.y) * 0.5),
+        );
+        assert_eq!(
+            placed,
+            sealed.points[count + k],
+            "{what}: Steiner point {k}"
+        );
+        assert!(steiner.halvings >= 1, "{what}: on the seam");
+    }
+    let (covered, triangles) = assert_covers(rings, &sealed.points, &sealed.triangles, &what, true);
+    assert_eq!(covered, twice, "{what}: area");
+    assert_eq!(
+        triangles,
+        accepted + 2 * sealed.steiner.len(),
+        "{what}: triangle count"
+    );
+    let ring_edges: Vec<(Point2, Point2)> = core::iter::once(&rings.outer)
+        .chain(&rings.holes)
+        .flat_map(|ring| (0..ring.len()).map(move |k| (ring[k], ring[(k + 1) % ring.len()])))
+        .collect();
+    let seams: Vec<(Point2, Point2)> = ring_edges
+        .iter()
+        .copied()
+        .filter(|&(u, v)| ring_edges.contains(&(v, u)))
+        .collect();
+    for t in &sealed.triangles {
+        for k in 0..3 {
+            let edge = (
+                sealed.points[t[k] as usize],
+                sealed.points[t[(k + 1) % 3] as usize],
+            );
+            assert!(
+                !seams.contains(&edge),
+                "{what}: {t:?} has an edge on a seam"
+            );
+        }
+    }
+    if seams.is_empty() {
+        let accept = triangulate_with(rings, PinchPolicy::Accept).expect("accepted");
+        assert_eq!((sealed.points, sealed.triangles), accept, "{what}: no seam");
+        return 0;
+    }
+    sealed.steiner.len()
 }
 
 /// A point's exact coordinates, as a hash key.
@@ -253,6 +332,7 @@ fn check_signed(rings: Rings, triangles: usize, twice: f64, refusal: &str, what:
             let (covered, count) = assert_tiles(&turned, &what, true);
             assert_eq!(covered, twice, "{what}: area");
             assert_eq!(count, triangles, "{what}: triangle count");
+            assert_sealed(&turned, triangles, twice, &what);
         }
     }
     match triangulate(&rings) {
@@ -1120,6 +1200,14 @@ fn a_thin_rim_with_a_short_seam_triangulates() {
         p(e, e),
     ];
     let twice = 2.0 * (0.5 * 0.375 - (0.5 - 2.0 * e) * (0.375 - 2.0 * e));
+    // No triangulation on the rim's own vertices avoids the seam (#283):
+    // any fan at the outer corner that skips the inner one covers it, so
+    // a face of a shell takes a Steiner point.
+    let forced = assert_sealed(&region(ring.clone(), vec![]), 8, twice, "thin rim");
+    assert!(
+        forced > 0,
+        "thin rim: the seam is forced, yet no Steiner point"
+    );
     check(region(ring, vec![]), 8, twice, "seam both ways", "thin rim");
     // The same at 0.1 mm, off the grid: the area within rounding.
     let e = 1e-4;
@@ -1143,6 +1231,23 @@ fn a_thin_rim_with_a_short_seam_triangulates() {
     assert!(
         (covered - 2.0 * (outer - inner)).abs() <= 1e-12,
         "thin rim at 0.1 mm: {covered}"
+    );
+    let sealed = triangulate_shell_face(&rings).expect("a face of a shell");
+    assert!(
+        !sealed.steiner.is_empty(),
+        "thin rim at 0.1 mm: forced seam"
+    );
+    let (covered, count) = assert_covers(
+        &rings,
+        &sealed.points,
+        &sealed.triangles,
+        "thin rim at 0.1 mm, sealed",
+        false,
+    );
+    assert_eq!(count, 8 + 2 * sealed.steiner.len());
+    assert!(
+        (covered - 2.0 * (outer - inner)).abs() <= 1e-12,
+        "thin rim at 0.1 mm, sealed: {covered}"
     );
 }
 

@@ -236,9 +236,13 @@ impl<'a> ExactCompilation<'a> {
     fn flattened_mesh(&self, node: &GeometryNode) -> GeomResult<(ExactBRep, Scalar)> {
         match node {
             GeometryNode::PolygonMesh(mesh) => {
-                let (triangles, warp) =
+                // A keyhole face's Steiner points off an axis plane (#283)
+                // move the mesh off the cover by at most their slab width,
+                // the same kind of bound as a warp: flattened by either.
+                let (triangles, warp, steiner_offset) =
                     crate::compiler::compile_authored_polygons(mesh, self.options)?;
-                Ok((polyhedral::from_triangles(&triangles)?, warp.unwrap_or(0.0)))
+                let width = warp.unwrap_or(0.0).max(steiner_offset.unwrap_or(0.0));
+                Ok((polyhedral::from_triangles(&triangles)?, width))
             }
             GeometryNode::TriMesh(mesh) => Ok((polyhedral::from_triangles(mesh)?, 0.0)),
             GeometryNode::BRep(brep) => {

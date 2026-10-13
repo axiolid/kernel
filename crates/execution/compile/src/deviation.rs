@@ -186,6 +186,15 @@ pub(crate) use paths::{
 /// beyond the linear tolerance (#254).
 pub(crate) const WARPED_AUTHORED_FACE: &str = "non-planar authored face";
 
+/// The [`DeviationContribution::detail`] of a keyhole face, authored or a
+/// B-rep's, whose Steiner points lie off an axis plane (#283): a face
+/// takes them so that its seam is no triangle edge, each a chain of
+/// midpoints of its corners, so within rounding of the face. The bound is
+/// the slab width of [`crate::planar::steiner_offset`]. A face in an axis
+/// plane holds its Steiner points exactly and reports nothing.
+pub(crate) const KEYHOLE_STEINER_POINT: &str =
+    "point added inside a keyhole face, off an axis plane";
+
 /// The [`DeviationContribution::detail`] of a node placed at a station
 /// whose frame is read at a numerically resolved distance (#264).
 pub(crate) const NUMERICAL_STATION_FRAME: &str = "frame at a numerically resolved station";
@@ -407,7 +416,9 @@ impl Deviation {
 
     /// Fold in `other`'s operand perturbations: its [`SNAPPED_OPERANDS`]
     /// contributions (#276) and its warped faces' slab widths
-    /// ([`WARPED_AUTHORED_FACE`], [`WARPED_BREP_FACE`], #266). They stay
+    /// ([`WARPED_AUTHORED_FACE`], [`WARPED_BREP_FACE`], #266), and the slab
+    /// widths of keyhole faces' Steiner points off an axis plane
+    /// ([`KEYHOLE_STEINER_POINT`], #283). They stay
     /// reported when a boolean replaces the rest of an operand's
     /// deviation, so the report names every operand that was moved or
     /// flattened, through any chain of booleans.
@@ -418,6 +429,8 @@ impl Deviation {
                 (DeviationPath::Boolean, SNAPPED_OPERANDS)
                     | (DeviationPath::AuthoredMesh, WARPED_AUTHORED_FACE)
                     | (DeviationPath::BRepFace, WARPED_BREP_FACE)
+                    | (DeviationPath::AuthoredMesh, KEYHOLE_STEINER_POINT)
+                    | (DeviationPath::BRepFace, KEYHOLE_STEINER_POINT)
             );
             if carried {
                 self.add(c.path, c.detail, c.bound);
@@ -427,16 +440,20 @@ impl Deviation {
 
     /// The largest slab width of a B-rep's warped faces when its mesh is
     /// the polyhedron it describes up to them (#266): every contribution
-    /// an exact plane with straight edges, or a warped face without a
-    /// surface. `None` when any face is curved, chorded or off its plane.
+    /// an exact plane with straight edges, a warped face without a
+    /// surface, or a keyhole face's Steiner points off an axis plane,
+    /// whose bound is a slab width too (#283). `None` when any face is
+    /// curved, chorded or off its plane.
     pub(crate) fn polyhedral_warp(&self) -> Option<Scalar> {
         self.0
             .iter()
             .try_fold(0.0, |widest: Scalar, c| match (c.path, c.detail, c.bound) {
                 (DeviationPath::BRepFace, "plane", DeviationBound::Proven(0.0)) => Some(widest),
-                (DeviationPath::BRepFace, WARPED_BREP_FACE, DeviationBound::Certified(width)) => {
-                    Some(widest.max(width))
-                }
+                (
+                    DeviationPath::BRepFace,
+                    WARPED_BREP_FACE | KEYHOLE_STEINER_POINT,
+                    DeviationBound::Certified(width),
+                ) => Some(widest.max(width)),
                 _ => None,
             })
     }

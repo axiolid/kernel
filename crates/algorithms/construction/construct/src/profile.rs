@@ -499,7 +499,9 @@ pub enum PinchPolicy {
 /// bounds what its other edges bound, and is split at its seams into the
 /// loops they join, triangulated as above (a hole loop drawn either way
 /// round is a hole; a seam between two loops side by side leaves two
-/// parts). A seam may be a triangle edge, once each way, or none at all.
+/// parts). A seam may be a triangle edge, once each way, or none at all;
+/// a planar face of a closed shell uses [`triangulate_shell_face`], which
+/// never makes it one (#283).
 ///
 /// # Errors
 ///
@@ -516,6 +518,12 @@ pub fn triangulate_with(
     rings: &Rings,
     pinches: PinchPolicy,
 ) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
+    check_ring_sizes(rings)?;
+    crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes, pinches)
+}
+
+/// Refuse an outer ring or a hole of fewer than three vertices.
+fn check_ring_sizes(rings: &Rings) -> GeomResult<()> {
     if rings.outer.len() < 3 {
         return Err(GeomError::InvalidInput(format!(
             "profile outer ring needs at least 3 vertices, got {}",
@@ -530,7 +538,7 @@ pub fn triangulate_with(
             )));
         }
     }
-    crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes, pinches)
+    Ok(())
 }
 
 /// A vertex lying inside an edge of a ring, away from both its ends, as
@@ -581,6 +589,101 @@ pub fn ring_touches(rings: &Rings) -> GeomResult<Vec<RingTouch>> {
             .into_iter()
             .map(|(ring, edge, vertex)| RingTouch { ring, edge, vertex })
             .collect()
+    })
+}
+
+/// A triangulation of a planar face of a closed shell, from
+/// [`triangulate_shell_face`] (#283).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShellFaceTriangulation {
+    /// `outer ++ holes`, then each of [`Self::steiner`] at the position
+    /// its chain of midpoints gives in the plane.
+    pub points: Vec<Point2>,
+    /// Counter-clockwise triangles over [`Self::points`].
+    pub triangles: Vec<[u32; 3]>,
+    /// The points added inside the face, in order: point `k` of these is
+    /// `points[outer.len() + holes' lengths + k]`.
+    pub steiner: Vec<SteinerPoint>,
+}
+
+/// A point [`triangulate_shell_face`] adds inside a face, as a chain of
+/// midpoints of the face's own points (#283): the midpoint `m` of the
+/// seam from `seam[0]` to `seam[1]`, then `halvings` times the midpoint
+/// of `m` and the point so far, starting from `toward`.
+///
+/// A caller that lifts the face back into space places the point with the
+/// same chain over its own points ([`Self::place`]). On a face lying in an
+/// axis plane, the midpoint of two points with that coordinate in common
+/// keeps it exactly, so the point lies exactly in the plane; elsewhere it
+/// lies within the rounding of the chain.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SteinerPoint {
+    /// The seam's two ends, by index into
+    /// [`ShellFaceTriangulation::points`].
+    pub seam: [u32; 2],
+    /// The point the seam's midpoint is moved towards: a corner of one of
+    /// the seam's two triangles, possibly an earlier Steiner point.
+    pub toward: u32,
+    /// How often the point is moved half way, at least once.
+    pub halvings: u32,
+}
+
+impl SteinerPoint {
+    /// The point by its chain of midpoints, over any point type: `at`
+    /// gives a point by its index (earlier Steiner points included), and
+    /// `midpoint` the midpoint of two points.
+    pub fn place<T: Copy>(&self, at: impl Fn(u32) -> T, midpoint: impl Fn(T, T) -> T) -> T {
+        crate::ring_triangulation::Steiner {
+            seam: self.seam,
+            toward: self.toward,
+            halvings: self.halvings,
+        }
+        .place(at, midpoint)
+    }
+}
+
+/// Triangulate a planar face of a closed shell (#283): as
+/// [`triangulate_with`] under [`PinchPolicy::Accept`], and no triangle
+/// edge lies on a seam.
+///
+/// A seam (a keyhole's segment run both ways, #270) may be a triangle edge
+/// there. Inside one face that is only a diagonal, but other faces of a
+/// shell can run along the same segment (a rim's two end faces at its
+/// cut), and with the seam a triangle edge too that segment has four
+/// triangle uses. So where a seam would be a triangle edge, the two
+/// triangles on it are replaced: by the other diagonal of their
+/// quadrilateral where it is strictly convex, otherwise by four triangles
+/// around a [`SteinerPoint`] strictly inside it and off the seam's line
+/// (a thin rim seamed at its corner has no triangulation on its own
+/// vertices without the seam). A Steiner point adds no area and moves no
+/// boundary: the result is certified against the cover it replaces, the
+/// same boundary edges with every triangle strictly counter-clockwise.
+///
+/// Rings without a seam triangulate exactly as under
+/// [`PinchPolicy::Accept`], with no Steiner point.
+///
+/// # Errors
+///
+/// As [`triangulate_with`] under [`PinchPolicy::Accept`]; `Degenerate`
+/// naming the seam when no Steiner point can be placed off it, and when
+/// the result fails its certificate.
+pub fn triangulate_shell_face(rings: &Rings) -> GeomResult<ShellFaceTriangulation> {
+    check_ring_sizes(rings)?;
+    let (points, triangles, steiner) =
+        crate::ring_triangulation::triangulate_sealed(&rings.outer, &rings.holes)?;
+    Ok(ShellFaceTriangulation {
+        points,
+        triangles,
+        steiner: steiner
+            .into_iter()
+            .map(|s| SteinerPoint {
+                seam: s.seam,
+                toward: s.toward,
+                halvings: s.halvings,
+            })
+            .collect(),
     })
 }
 

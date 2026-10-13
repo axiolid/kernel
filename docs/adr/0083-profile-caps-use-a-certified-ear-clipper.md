@@ -90,7 +90,8 @@ edge lines coincide constantly.
 
 - `crates/algorithms/construction/construct/src/ring_triangulation.rs` and
   its `validate`, `bridge` and `clip` submodules; `pinch` (#262) and
-  `seam` (#270) under `PinchPolicy::Accept`.
+  `seam` (#270) under `PinchPolicy::Accept`; `seal` (#283) for planar
+  faces of a shell (`profile::triangulate_shell_face`).
 - `crates/algorithms/construction/construct/src/profile.rs` —
   `triangulate` delegates here.
 - `crates/algorithms/construction/construct/tests/profile_holes.rs` — the
@@ -298,3 +299,78 @@ faceted prism meshed open (`OpenSolid` since #265).
 | Drop the split | The clipper's slivers along shared noisy runs put one diagonal into two faces, four uses of one edge (the reason the split stayed in #260). |
 | Remove a near-collinear corner from every face sharing it | Moves the shell off its authored corners and needs the bound widened by the offset; keeping the corner costs nothing. |
 | Widen or tighten the band | Any band is non-transitive at its edge; the failure depends on the arrangement, not on one distance. |
+
+## Amendment 2026-10-13: no seam edge on a face of a shell (#283)
+
+The #270 amendment let a seam be a triangle edge, once each way, and
+named the cost: faces that also run along the seam (a rim's two end
+faces at its cut) then meet four triangle uses of that segment, and
+mesh-compile's closure check (#265) reports the solid as `OpenSolid`,
+authored polygons as a surface. Some regions force the seam on the
+face's own vertices: a thin rim seamed at its corner.
+
+- **Faces of a shell take the seam out.**
+  `profile::triangulate_shell_face(rings)` is the `Accept` triangulation
+  followed by `seal`: for each seam that is a triangle edge, the two
+  triangles on it, `(p, q, c)` and `(q, p, d)`, are replaced by the other
+  diagonal `c d` when the quadrilateral `p d q c` is strictly convex, and
+  otherwise by four triangles around a Steiner point strictly inside it
+  and off the seam's line. Every decision is an exact `orient2d` sign.
+  mesh-compile triangulates planar B-rep faces and authored polygon
+  faces this way (`planar::clip_shell_face`); 2D regions, surface paths
+  and curve-bounded planes keep `Accept`, unchanged.
+- **Where the point goes.** The seam's midpoint `m` lies strictly inside
+  all four half-planes of the quadrilateral, so points near it do too.
+  The candidates are `m` halved towards `c` or `d`, one to 60 times; the
+  first that fits is halved once more, which keeps it inside by half
+  `m`'s clearance rather than on a line through two corners that only a
+  caller's rounded projection moved apart (the 4 x 4 keyhole projected
+  about its centroid did exactly that: the first fit was collinear with
+  two corners in space, a triangle of no area). If no candidate fits,
+  the seam is refused by name. A `SteinerPoint` is the chain of midpoints
+  itself, so a caller places it in space with the same chain
+  (`SteinerPoint::place`): on a face in an axis plane every midpoint of
+  two points sharing that coordinate keeps it, and the point lies
+  exactly in the plane. mesh-compile re-checks every triangle at the
+  point, exactly, in the face's projection once placed, and refuses the
+  face by name if one no longer turns counter-clockwise.
+- **Reported, never silent.** A face off the axis planes holds its
+  Steiner points within rounding. mesh-compile reports them as the
+  certified deviation `"point added inside a keyhole face, off an axis
+  plane"` (path `BRepFace` or `AuthoredMesh`), bounded by the slab width
+  (#261) of the face's corners and Steiner points about its fit plane:
+  the cover and the mesh both lie in that slab and are graphs over the
+  same projected face, so they differ along the normal by at most its
+  width. A face in an axis plane reports nothing. The bound is a slab
+  width like a warped face's, so the flattened-operand measurement of a
+  boolean (#266) treats it as one: carried by name through booleans,
+  folded into the width the operand is flattened by, and a B-rep whose
+  faces are planes, warped faces or keyhole faces with Steiner points is
+  still measured as a polyhedron.
+- **Certificate.** The sealed triangles are certified against the cover
+  they replace: every triangle strictly counter-clockwise, every
+  directed edge once, the same net boundary (each directed edge's uses
+  less its reverse's), two more triangles per Steiner point, and no
+  triangle edge on a seam. Positive triangles with the boundary of a
+  certified cover cover every point the same number of times, its
+  winding number, so they tile the same region once: a Steiner point
+  adds no area and moves no boundary. The noise-band split (#278) runs
+  after it and is kept only if it puts no edge back on a seam.
+- **What was already closed.** In a two-manifold shell no other face
+  can use the seam: the keyhole face already uses its edge twice. There
+  a seam triangle edge was only a diagonal of the face, used twice in
+  opposite directions, and a box whose top face is a keyhole into a
+  pocket compiled as a closed `Solid` before this change too. The four
+  uses need faces that run along the seam, such as coincident faces at a
+  rim's cut; those shells now pair along it.
+
+| Option | Why not |
+| --- | --- |
+| Duplicate the seam's ends in the output | Each copy of the seam is then a separate edge, but the faces sharing the seam pair with only one copy: edge pairing breaks. |
+| Accept a seam used four times with balanced direction as closed | Weakens #265's guarantee that a `Solid` is two-manifold by index. |
+| Place the Steiner point by lifting its plane position through the projection | The projection origin (an authored face's centroid) is rounded, so even a face in an axis plane would get the point off it. |
+
+The mutation probe `scripts/probe_keyhole_shell_mutants.py` covers the
+seal, the certificate, the placement and report in mesh-compile, and the
+issue's related cleanup (`pinch::find` welding `-0.0` with `0.0`):
+22 / 22 mutants killed on the first run.

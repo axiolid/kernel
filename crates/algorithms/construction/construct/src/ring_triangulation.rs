@@ -28,7 +28,9 @@
 //! A ring that joins a hole by a seam it runs along both ways, a keyhole,
 //! is refused for solids by name too; under [`PinchPolicy::Accept`]
 //! [`seam`] removes its seams, whose two copies cancel, and triangulates
-//! the parts they separate on the pinch path (#270).
+//! the parts they separate on the pinch path (#270). For a planar face of
+//! a closed shell, [`seal`] then takes every seam out of the triangle
+//! edges, by a flip or at a Steiner point inside the face (#283).
 //!
 //! This replaced `earcut` (ADR 0083). earcut drops nodes where the bridged
 //! ring runs straight on and lets only reflex nodes block an ear, so for two
@@ -50,8 +52,11 @@ use crate::profile::PinchPolicy;
 mod bridge;
 mod clip;
 mod pinch;
+mod seal;
 mod seam;
 mod validate;
+
+pub(crate) use seal::Steiner;
 
 /// Triangulate `outer` with `holes`, over the vertex list `outer ++ holes`.
 ///
@@ -73,18 +78,49 @@ pub(crate) fn triangulate_rings(
         let triangles = seam::triangulate(&points, &rings, &seams)?;
         return Ok((points, triangles));
     }
-    let source: Vec<usize> = (0..rings.len()).collect();
-    let touches = validate::check_edges(&points, &rings, &source, policy)?;
-    if let Some(canon) = pinch::canonical(&points, &touches) {
-        // Only `Accept` lets rings touch, so only it gets here.
-        let triangles = pinch::triangulate(&points, &rings, &source, &canon, &touches)?;
-        return Ok((points, triangles));
-    }
-    let loops = validate::orient_and_place(&points, &rings)?;
-    let mut polygon = bridge::bridge_holes(&points, &loops)?;
-    let triangles = clip::clip_ears(&points, &mut polygon)?;
-    certify(&points, &loops, &triangles, 1, loops.len() - 1)?;
+    let triangles = without_seams(&points, &rings, policy)?;
     Ok((points, triangles))
+}
+
+/// A sealed triangulation: `outer ++ holes ++ steiner` points, the
+/// triangles, and the Steiner points in the order appended.
+pub(crate) type Sealed = (Vec<Point2>, Vec<[u32; 3]>, Vec<Steiner>);
+
+/// [`triangulate_rings`] under [`PinchPolicy::Accept`] for a planar face
+/// of a closed shell (#283): no triangle edge lies on a seam. Seams that
+/// would be triangle edges are flipped away or split off at Steiner
+/// points ([`seal`]), appended to `outer ++ holes` in the order returned.
+pub(crate) fn triangulate_sealed(outer: &[Point2], holes: &[Vec<Point2>]) -> GeomResult<Sealed> {
+    let (mut points, rings) = gather(outer, holes)?;
+    validate::check_rings(&points, &rings)?;
+    let seams = seam::find(&points, &rings);
+    if seams.is_empty() {
+        let triangles = without_seams(&points, &rings, PinchPolicy::Accept)?;
+        return Ok((points, triangles, Vec::new()));
+    }
+    let mut triangles = seam::triangulate(&points, &rings, &seams)?;
+    let ends = seam::ends(&points, &rings, &seams);
+    let steiner = seal::seal(&mut points, &mut triangles, &ends)?;
+    Ok((points, triangles, steiner))
+}
+
+/// Triangulate validated rings that have no seam.
+fn without_seams(
+    points: &[Point2],
+    rings: &[core::ops::Range<usize>],
+    policy: PinchPolicy,
+) -> GeomResult<Vec<[u32; 3]>> {
+    let source: Vec<usize> = (0..rings.len()).collect();
+    let touches = validate::check_edges(points, rings, &source, policy)?;
+    if let Some(canon) = pinch::canonical(points, &touches) {
+        // Only `Accept` lets rings touch, so only it gets here.
+        return pinch::triangulate(points, rings, &source, &canon, &touches);
+    }
+    let loops = validate::orient_and_place(points, rings)?;
+    let mut polygon = bridge::bridge_holes(points, &loops)?;
+    let triangles = clip::clip_ears(points, &mut polygon)?;
+    certify(points, &loops, &triangles, 1, loops.len() - 1)?;
+    Ok(triangles)
 }
 
 /// The vertex list `outer ++ holes` with each ring's range in it, refused

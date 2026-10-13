@@ -32,6 +32,21 @@
 //! discarded for the certified cover (#278). A face never drops a corner
 //! its neighbours keep, which would open a closed shell.
 //!
+//! # Keyhole faces of a shell (#283)
+//!
+//! B-rep faces and authored polygon faces may be faces of a closed shell,
+//! so they are triangulated by [`clip_shell_face`]: a keyhole ring's seam
+//! (#270) is never a triangle edge, since other faces can run along the
+//! same segment. Where the clipper would make it one, it flips the seam
+//! away, or adds a Steiner point inside the face (always for a thin rim
+//! seamed at its corner). A Steiner point is a chain of midpoints of the
+//! face's corners, placed in space by the same chain: exactly in the
+//! face's plane when the face lies in an axis plane, otherwise within
+//! rounding, reported as [`crate::deviation::KEYHOLE_STEINER_POINT`] with
+//! the bound of [`steiner_offset`]. It belongs to its face alone, adds no
+//! area and moves no boundary. Curve-bounded planes are surface patches
+//! and keep [`clip_planar_face`].
+//!
 //! # Warped authored faces (#254)
 //!
 //! An authored polygon face whose corners lie off its plane by more than
@@ -105,7 +120,9 @@
 //! as before, when a corner lies further than the linear tolerance from
 //! `P`.
 
-use axiolid_construct::profile::{ring_touches, triangulate_with, PinchPolicy, Rings};
+use axiolid_construct::profile::{
+    ring_touches, triangulate_shell_face, triangulate_with, PinchPolicy, Rings,
+};
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
 
@@ -277,6 +294,197 @@ pub(crate) fn clip_planar_face(
     Ok(indices)
 }
 
+/// How a face's corners are projected into its plane: `p - origin` along
+/// the in-plane axes `(u, v)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Projection {
+    pub origin: Vec3,
+    pub u: Vec3,
+    pub v: Vec3,
+}
+
+impl Projection {
+    /// A point's in-plane coordinates.
+    pub(crate) fn apply(&self, p: Vec3) -> [Scalar; 2] {
+        let d = p - self.origin;
+        [d.dot(self.u), d.dot(self.v)]
+    }
+}
+
+/// A planar face of a closed shell triangulated by [`clip_shell_face`]:
+/// three indices per triangle into the face's corners followed by
+/// `steiner`, the points added inside the face (#283).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ShellCover {
+    pub indices: Vec<usize>,
+    pub steiner: Vec<Vec3>,
+}
+
+/// [`clip_planar_face`] for a planar face of a closed shell (#283): no
+/// triangle edge lies on a seam, the segment a keyhole ring runs along
+/// both ways.
+///
+/// The clipper ([`triangulate_shell_face`]) takes each seam that would be
+/// a triangle edge out, flipping it or adding a Steiner point inside its
+/// two triangles. Each Steiner point is placed in space by the same chain
+/// of midpoints of `corners` (the face's corners, in the order of `flat`)
+/// that placed it in the plane, so on a face in an axis plane it lies
+/// exactly in that plane, and elsewhere within rounding, which
+/// [`steiner_offset`] bounds. Its position is projected back with
+/// `projection`, as the corners were, and every triangle at it must still
+/// turn strictly counter-clockwise there, decided exactly; otherwise the
+/// face is refused by name. The noise-band split runs as on any face, and
+/// is discarded for the clipper's cover if it would put a triangle edge
+/// back on a seam.
+pub(crate) fn clip_shell_face(
+    flat: &[[Scalar; 2]],
+    hole_starts: &[usize],
+    linear: Scalar,
+    corners: &[Vec3],
+    projection: &Projection,
+) -> GeomResult<ShellCover> {
+    let (rings, kept) = projected_rings(flat, hole_starts);
+    let sealed = triangulate_shell_face(&rings)?;
+    let count = flat.len();
+    let to_flat = |v: u32| {
+        let v = v as usize;
+        if v < kept.len() {
+            kept[v]
+        } else {
+            count + (v - kept.len())
+        }
+    };
+    let mut steiner: Vec<Vec3> = Vec::with_capacity(sealed.steiner.len());
+    for point in &sealed.steiner {
+        let placed = point.place(
+            |v| {
+                let i = to_flat(v);
+                if i < count {
+                    corners[i]
+                } else {
+                    steiner[i - count]
+                }
+            },
+            |a, b| (a + b) * 0.5,
+        );
+        if !placed.is_finite() {
+            return Err(GeomError::Degenerate(
+                "planar face Steiner point is not finite".to_owned(),
+            ));
+        }
+        steiner.push(placed);
+    }
+    let mut extended = flat.to_vec();
+    extended.extend(steiner.iter().map(|&p| projection.apply(p)));
+    let cover: Vec<usize> = sealed
+        .triangles
+        .iter()
+        .flatten()
+        .map(|&v| to_flat(v))
+        .collect();
+    if let Some(t) = steiner_turns(&extended, count, &cover) {
+        return Err(GeomError::Degenerate(format!(
+            "planar face Steiner point, placed in space, does not turn triangle {t:?} \
+             counter-clockwise in the face's plane"
+        )));
+    }
+    let seams = seam_segments(&rings);
+    let mut split = cover.clone();
+    split_invented_edges_over(
+        &extended,
+        count,
+        hole_starts,
+        collinear_band(linear),
+        &mut split,
+    );
+    let on_seam = |indices: &[usize]| {
+        indices.chunks_exact(3).any(|t| {
+            (0..3).any(|k| {
+                let (a, b) = (extended[t[k]], extended[t[(k + 1) % 3]]);
+                seams.contains(&(Point2::new(a[0], a[1]), Point2::new(b[0], b[1])))
+            })
+        })
+    };
+    let indices = if on_seam(&split) || steiner_turns(&extended, count, &split).is_some() {
+        cover
+    } else {
+        split
+    };
+    Ok(ShellCover { indices, steiner })
+}
+
+/// The first triangle at a Steiner point (an index from `corners` on)
+/// that does not turn strictly counter-clockwise in `flat`, decided
+/// exactly.
+fn steiner_turns(flat: &[[Scalar; 2]], corners: usize, indices: &[usize]) -> Option<[usize; 3]> {
+    let at = |i: usize| Point2::new(flat[i][0], flat[i][1]);
+    indices
+        .chunks_exact(3)
+        .find(|t| {
+            t.iter().any(|&i| i >= corners)
+                && axiolid_reference::orient2d(at(t[0]), at(t[1]), at(t[2])).sign()
+                    != Some(axiolid_guarantees::Sign::Positive)
+        })
+        .map(|t| [t[0], t[1], t[2]])
+}
+
+/// The seams of `rings`: every ring edge whose reverse is a ring edge
+/// too, in both directions, by its ends' coordinates.
+fn seam_segments(rings: &Rings) -> Vec<(Point2, Point2)> {
+    let edges: Vec<(Point2, Point2)> = std::iter::once(&rings.outer)
+        .chain(&rings.holes)
+        .flat_map(|ring| (0..ring.len()).map(move |k| (ring[k], ring[(k + 1) % ring.len()])))
+        .collect();
+    edges
+        .iter()
+        .copied()
+        .filter(|&(a, b)| edges.contains(&(b, a)))
+        .collect()
+}
+
+/// How far the Steiner points of a face may put its mesh from the cover
+/// they replaced (#283), `None` when they lie exactly in the face's plane.
+///
+/// `rings` are the face's corners, the outer ring first, and `steiner` the
+/// points [`clip_shell_face`] added. When every corner has one coordinate
+/// in common, the face lies in an axis plane and every Steiner point, a
+/// chain of midpoints, has that coordinate too: nothing moved off the
+/// face. Otherwise the bound is the slab width of the module notes over
+/// the corners and the Steiner points together, about the fit plane: the
+/// cover and the mesh both lie in that slab and are graphs over the same
+/// projected face (both certified there), so over every point of it they
+/// differ along the normal by at most its width.
+///
+/// # Refusals
+///
+/// [`PolygonRefusal::NoPlane`] when the outer ring has no plane.
+pub(crate) fn steiner_offset(
+    rings: &[&[Vec3]],
+    steiner: &[Vec3],
+) -> Result<Option<Scalar>, PolygonRefusal> {
+    if steiner.is_empty() {
+        return Ok(None);
+    }
+    let points = || rings.iter().flat_map(|ring| ring.iter()).chain(steiner);
+    let Some(&first) = points().next() else {
+        return Err(PolygonRefusal::NoPlane);
+    };
+    let coordinate = |p: Vec3, k: usize| [p.x, p.y, p.z][k];
+    if (0..3).any(|k| points().all(|&p| coordinate(p, k) == coordinate(first, k))) {
+        return Ok(None);
+    }
+    let Some(outer) = rings.first().filter(|outer| !outer.is_empty()) else {
+        return Err(PolygonRefusal::NoPlane);
+    };
+    let normal = newell_normal(outer.iter().copied());
+    plane_axes(normal).ok_or(PolygonRefusal::NoPlane)?;
+    let n = normal.normalize();
+    let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
+    let mut all: Vec<&[Vec3]> = rings.to_vec();
+    all.push(steiner);
+    Ok(Some(CornerSpread::of(&all, centroid, n)?.slab_width()))
+}
+
 /// How far off a segment a corner may lie and still count as on it.
 ///
 /// A thousandth of the model's linear tolerance: 1 um at
@@ -339,8 +547,22 @@ fn split_invented_edges(
     noise: Scalar,
     indices: &mut Vec<usize>,
 ) {
+    split_invented_edges_over(flat, flat.len(), hole_starts, noise, indices);
+}
+
+/// [`split_invented_edges`] where only the first `corners` points of
+/// `flat` are the rings' corners; the rest are Steiner points a keyhole
+/// face added inside itself (#283), which lie on no ring and are shared
+/// with no other face, so they split no edge.
+fn split_invented_edges_over(
+    flat: &[[Scalar; 2]],
+    corners: usize,
+    hole_starts: &[usize],
+    noise: Scalar,
+    indices: &mut Vec<usize>,
+) {
     const MAX_SPLIT_WORK: usize = 1 << 26;
-    let n = flat.len();
+    let n = corners.min(flat.len());
     let triangles = indices.len() / 3;
     if triangles == 0 || triangles.saturating_mul(3).saturating_mul(n) > MAX_SPLIT_WORK {
         return;
@@ -430,7 +652,7 @@ fn split_invented_edges(
                 continue;
             }
             let (a, b) = (flat[key.0], flat[key.1]);
-            let mut found: Vec<(Scalar, usize)> = flat
+            let mut found: Vec<(Scalar, usize)> = flat[..n]
                 .iter()
                 .enumerate()
                 .filter(|&(c, _)| c != key.0 && c != key.1)
@@ -679,7 +901,7 @@ pub(crate) fn triangulate_polygon(
     rings: &[&[Vec3]],
     linear: Scalar,
 ) -> Result<Vec<usize>, PolygonRefusal> {
-    triangulate_in_fit_plane(rings, linear, true).map(|(indices, _)| indices)
+    triangulate_in_fit_plane(rings, linear, true, false).map(|face| face.indices)
 }
 
 /// An authored polygon face's triangles and how far it is warped (#254).
@@ -692,12 +914,21 @@ pub(crate) struct AuthoredTriangulation {
     /// [`triangulate_polygon`] returns. Otherwise `Some(w)`, the bound of
     /// the module notes, above the tolerance.
     pub warp: Option<Scalar>,
+    /// The points a keyhole face added inside itself so that no triangle
+    /// edge lies on its seam (#283), referenced by the indices from the
+    /// rings' corner count on. Empty for a face without a seam.
+    pub steiner: Vec<Vec3>,
+    /// `None` when every point of `steiner` lies exactly in the face's
+    /// axis plane, or there is none; otherwise [`steiner_offset`]'s bound.
+    pub steiner_offset: Option<Scalar>,
 }
 
 /// [`triangulate_polygon`] for an authored polygon face: a face warped
 /// beyond the linear tolerance is triangulated too and its warp reported,
 /// so [`PolygonRefusal::NotPlanar`] never comes back. The module notes say
-/// what the warp bounds.
+/// what the warp bounds. The face may be one of a closed shell, so it is
+/// triangulated by [`clip_shell_face`]: a keyhole face's seam is never a
+/// triangle edge (#283).
 ///
 /// # Refusals
 ///
@@ -707,19 +938,20 @@ pub(crate) fn triangulate_authored_polygon(
     rings: &[&[Vec3]],
     linear: Scalar,
 ) -> Result<AuthoredTriangulation, PolygonRefusal> {
-    triangulate_in_fit_plane(rings, linear, false)
-        .map(|(indices, warp)| AuthoredTriangulation { indices, warp })
+    triangulate_in_fit_plane(rings, linear, false, true)
 }
 
 /// The shared triangulation. With `refuse_warp`, a corner off the fit
 /// plane by more than `linear` is refused before anything is triangulated,
 /// as it always was; without, the face is triangulated and its warp
-/// returned.
+/// returned. With `shell`, the face is triangulated as a face of a closed
+/// shell ([`clip_shell_face`], #283).
 fn triangulate_in_fit_plane(
     rings: &[&[Vec3]],
     linear: Scalar,
     refuse_warp: bool,
-) -> Result<(Vec<usize>, Option<Scalar>), PolygonRefusal> {
+    shell: bool,
+) -> Result<AuthoredTriangulation, PolygonRefusal> {
     let Some(outer) = rings.first() else {
         return Err(PolygonRefusal::NoPlane);
     };
@@ -736,39 +968,54 @@ fn triangulate_in_fit_plane(
         return Err(PolygonRefusal::NotPlanar(spread.largest));
     }
 
-    let (flat, hole_starts) = project_about(rings, centroid, u, v);
+    let projection = Projection {
+        origin: centroid,
+        u,
+        v,
+    };
+    let (flat, hole_starts) = project_about(rings, &projection);
 
     // The outer ring is counter-clockwise in (u, v) by construction of the
     // axes, and the clipper's triangles always are, so they keep the
     // authored winding. Its certificate replaces the area cross-check that
     // earcut, which returned partial covers on crossing rings, needed.
-    let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(|error| {
+    let refusal = |error: GeomError| {
         PolygonRefusal::Rings(match error {
             GeomError::InvalidInput(reason) | GeomError::Degenerate(reason) => reason,
             other => other.to_string(),
         })
-    })?;
-    Ok((indices, warp))
+    };
+    if !shell {
+        let indices = clip_planar_face(&flat, &hole_starts, linear).map_err(refusal)?;
+        return Ok(AuthoredTriangulation {
+            indices,
+            warp,
+            steiner: Vec::new(),
+            steiner_offset: None,
+        });
+    }
+    let corners: Vec<Vec3> = rings.iter().flat_map(|ring| ring.iter().copied()).collect();
+    let cover =
+        clip_shell_face(&flat, &hole_starts, linear, &corners, &projection).map_err(refusal)?;
+    let steiner_offset = steiner_offset(rings, &cover.steiner)?;
+    Ok(AuthoredTriangulation {
+        indices: cover.indices,
+        warp,
+        steiner: cover.steiner,
+        steiner_offset,
+    })
 }
 
 /// `rings` projected onto the axes `(u, v)` about `origin`, concatenated,
 /// with the index at which each hole starts.
-fn project_about(
-    rings: &[&[Vec3]],
-    origin: Vec3,
-    u: Vec3,
-    v: Vec3,
-) -> (Vec<[Scalar; 2]>, Vec<usize>) {
+fn project_about(rings: &[&[Vec3]], projection: &Projection) -> (Vec<[Scalar; 2]>, Vec<usize>) {
     let mut flat: Vec<[Scalar; 2]> = Vec::new();
     let mut hole_starts: Vec<usize> = Vec::with_capacity(rings.len().saturating_sub(1));
     for (index, ring) in rings.iter().enumerate() {
         if index > 0 {
             hole_starts.push(flat.len());
         }
-        flat.extend(ring.iter().map(|&p| {
-            let d = p - origin;
-            [d.dot(u), d.dot(v)]
-        }));
+        flat.extend(ring.iter().map(|&p| projection.apply(p)));
     }
     (flat, hole_starts)
 }
@@ -785,7 +1032,12 @@ pub(crate) fn authored_edge_touches(rings: &[&[Vec3]]) -> Vec<EdgeTouch> {
         return Vec::new();
     };
     let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
-    let (flat, hole_starts) = project_about(rings, centroid, u, v);
+    let projection = Projection {
+        origin: centroid,
+        u,
+        v,
+    };
+    let (flat, hole_starts) = project_about(rings, &projection);
     edge_touches(&flat, &hole_starts)
 }
 

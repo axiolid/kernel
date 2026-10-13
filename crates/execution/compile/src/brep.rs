@@ -99,7 +99,9 @@ use axiolid_model::NodeId;
 use axiolid_topology::{BRep, Orientation};
 use std::collections::{HashMap, HashSet};
 
-use crate::planar::{clip_planar_face, clip_projected, edge_touches, newell_normal, plane_axes};
+use crate::planar::{
+    clip_projected, clip_shell_face, edge_touches, newell_normal, plane_axes, Projection,
+};
 use crate::weld::EdgeSplits;
 
 const MAX_BREP_FACES: usize = 1 << 16;
@@ -509,14 +511,24 @@ fn append_face(
     // this face takes each such corner on its own copy of the edge.
     ctx.splits
         .split(&mut rings, |corner| corner, |vertex, point| (vertex, point));
-    let (flat, hole_starts) = project_rings(&rings).ok_or_else(|| {
+    let (flat, hole_starts, projection) = project_rings(&rings).ok_or_else(|| {
         GeomError::Degenerate("planar face outer bound has no stable plane".into())
     })?;
     let positions: Vec<(axiolid_topology::VertexId, Vec3)> =
         rings.iter().flatten().copied().collect();
 
-    let indices = clip_planar_face(&flat, &hole_starts, ctx.tolerance.linear())
-        .map_err(|error| face_triangulation_error("planar face", error))?;
+    // A face of a shell: a keyhole's seam is never a triangle edge (#283).
+    let corners: Vec<Vec3> = positions.iter().map(|&(_, point)| point).collect();
+    let cover = clip_shell_face(
+        &flat,
+        &hole_starts,
+        ctx.tolerance.linear(),
+        &corners,
+        &projection,
+    )
+    .map_err(|error| face_triangulation_error("planar face", error))?;
+    report_steiner(&rings, &cover.steiner, deviation)?;
+    let indices = cover.indices;
     checked_output_len(
         mesh.indices.len(),
         indices.len(),
@@ -534,11 +546,11 @@ fn append_face(
         .collect();
     checked_output_len(
         mesh.positions.len(),
-        new_vertices.len(),
+        new_vertices.len() + cover.steiner.len(),
         MAX_MESH_POSITIONS,
         "mesh positions",
     )?;
-    let mut local: Vec<u32> = Vec::with_capacity(positions.len());
+    let mut local: Vec<u32> = Vec::with_capacity(positions.len() + cover.steiner.len());
     for &(vertex, point) in &positions {
         let index = *welded.entry(vertex).or_insert_with(|| {
             let next = mesh.positions.len() as u32;
@@ -546,6 +558,11 @@ fn append_face(
             next
         });
         local.push(index);
+    }
+    // Steiner points belong to this face alone and weld with nothing.
+    for &point in &cover.steiner {
+        local.push(mesh.positions.len() as u32);
+        mesh.positions.push(point);
     }
 
     for triangle in indices.chunks_exact(3) {
@@ -593,26 +610,27 @@ fn planar_rings(
 
 /// A planar face's rings projected onto the plane of the outer ring's
 /// Newell normal, about its first corner, with the index in the
-/// projection at which each hole starts; `None` when the outer ring has
-/// no stable plane.
+/// projection at which each hole starts, and the projection; `None` when
+/// the outer ring has no stable plane.
 fn project_rings(
     rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
-) -> Option<(Vec<[Scalar; 2]>, Vec<usize>)> {
+) -> Option<(Vec<[Scalar; 2]>, Vec<usize>, Projection)> {
     let outer = rings.first()?;
     let (u, v) = plane_axes(newell_normal(outer.iter().map(|&(_, p)| p)))?;
-    let origin = outer.first()?.1;
+    let projection = Projection {
+        origin: outer.first()?.1,
+        u,
+        v,
+    };
     let mut flat: Vec<[Scalar; 2]> = Vec::new();
     let mut hole_starts: Vec<usize> = Vec::new();
     for (index, ring) in rings.iter().enumerate() {
         if index > 0 {
             hole_starts.push(flat.len());
         }
-        flat.extend(ring.iter().map(|&(_, point)| {
-            let d = point - origin;
-            [d.dot(u), d.dot(v)]
-        }));
+        flat.extend(ring.iter().map(|&(_, point)| projection.apply(point)));
     }
-    Some((flat, hole_starts))
+    Some((flat, hole_starts, projection))
 }
 
 /// The corners the planar faces of `shells` insert into their own ring
@@ -641,7 +659,7 @@ fn shared_edge_splits(
         if rings.len() == 1 && rings[0].len() == 3 {
             continue;
         }
-        let Some((flat, hole_starts)) = project_rings(&rings) else {
+        let Some((flat, hole_starts, _)) = project_rings(&rings) else {
             continue;
         };
         let touches = edge_touches(&flat, &hole_starts);
@@ -691,6 +709,36 @@ fn report_warp(
             DeviationPath::BRepFace,
             crate::deviation::WARPED_BREP_FACE,
             DeviationBound::Certified(warp),
+        );
+    }
+    Ok(())
+}
+
+/// Report the Steiner points a keyhole face added inside itself (#283)
+/// when they lie off an axis plane: within rounding of the face, bounded
+/// by [`crate::planar::steiner_offset`]. A face in an axis plane holds
+/// them exactly and reports nothing.
+fn report_steiner(
+    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
+    steiner: &[Vec3],
+    deviation: &mut Deviation,
+) -> GeomResult<()> {
+    if steiner.is_empty() {
+        return Ok(());
+    }
+    let points: Vec<Vec<Vec3>> = rings
+        .iter()
+        .map(|ring| ring.iter().map(|&(_, p)| p).collect())
+        .collect();
+    let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();
+    let offset = crate::planar::steiner_offset(&views, steiner).map_err(|refusal| {
+        GeomError::Degenerate(format!("planar face cannot be measured: {refusal}"))
+    })?;
+    if let Some(offset) = offset {
+        deviation.add(
+            DeviationPath::BRepFace,
+            crate::deviation::KEYHOLE_STEINER_POINT,
+            DeviationBound::Certified(offset),
         );
     }
     Ok(())
