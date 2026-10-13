@@ -184,3 +184,22 @@ read each side from the ascending list of rings that hold it. The flags
 made memory, and the Minkowski face selection's time, grow as pieces
 times rings; a sum reads one ring per boundary edge, so a 3,400-corner
 floor needed more than 12 GB.
+
+Note (#218): two shortcuts in the subdivision replace per-piece searches,
+both topological and both falling back to the search. A segment that no
+other segment meets in two points (so no boundary runs along it) is
+carried by its own ring only: another boundary through a point inside
+one of its pieces would cross it there and make a stop. Along such a
+segment, a stop that exactly one other segment crosses, interior to both
+and met by no other boundary, changes the winding number of that
+segment's ring by one and no other, so the rings containing the next
+piece are the previous piece's with that ring toggled; any other stop,
+and every first piece, counts windings from a sample as before. Debug
+builds compare both shortcuts with the search and the count. Exact
+points built from doubles (input vertices, samples on segments, crossings
+of two segments) carry interval boxes and build their coefficients only
+when a question gets past them, and the identity of a point's shared
+coefficients proves equality. Every decision stays the same exact sign,
+and output is byte-identical: union of 2,000 random triangles about 94 ms
+from 290 ms (grid backend 26 ms), meshes given as soups about 19.5 ms
+from 144 ms (`tools/benchmark/benches/overlay_soup.rs`).

@@ -32,6 +32,35 @@ caret rule for `0.x` versions.
   `scripts/probe_degenerate_drop_mutants.py` lists the faults
   `tests/degenerate_drop.rs` must catch.
 
+### Changed
+
+- Exact straight-edge booleans are faster on soups whose rings share no
+  edges, with results bit for bit the same (#218). The union of 2,000
+  random overlapping triangles takes about 94 ms, from about 290 ms (the
+  grid backend: about 26 ms), and two crossing 1000-gons about 8.1 ms,
+  from 12.3 ms, two thirds of it now operand validation; a union of two
+  60 x 60 meshes given as triangle soups takes about 19.5 ms, from
+  144 ms. Measured with `cargo bench -p axiolid-benchmark --bench
+  overlay_soup`, five interleaved rounds on a shared machine. The
+  subdivision takes a segment no other boundary runs along as carried by
+  its own ring only, and carries the rings containing a piece across a
+  stop where exactly one other segment crosses, instead of searching for
+  carriers and counting windings from a sample for every piece; any
+  other stop counts afresh, and debug builds check both shortcuts
+  against the search and the count. Samples on segments, crossings of two
+  segments and input vertices keep their exact coefficients unbuilt until
+  a question gets past their boxes; copies of a point share an identity
+  that settles equality and interning at once; a ring's edges share their
+  vertices, and each segment its direction. Rounding a crossing compares
+  the offset from its guess in a tight interval before any exact
+  midpoint, the subdivision's queries reuse their buffers, and the snap
+  to the tolerance (#222) finds the vertices near an edge through a grid,
+  not its whole band of `x`, which made mesh soups slow. Arc booleans
+  share the changes and are unchanged or faster in `benches/arc_overlay`.
+  `tests/soup_membership.rs` checks soups by point membership, and
+  `scripts/probe_overlay_soup_mutants.py` lists the faults it and the
+  suite must catch.
+
 ## [0.3.13] - 2026-10-10
 
 ### Fixed

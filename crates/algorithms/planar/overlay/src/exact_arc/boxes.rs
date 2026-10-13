@@ -46,10 +46,20 @@ impl BoxTree {
 
     /// Every item whose box passes `test`, ascending. `test` must pass a
     /// node's box whenever it passes a box inside it.
-    pub(crate) fn query(&self, test: impl Fn(&Bounds) -> bool) -> Vec<usize> {
-        let mut out = self.always.clone();
+    ///
+    /// The items go into `out`, replacing what it held, with `stack` as
+    /// scratch: callers asking once per piece reuse both (#218).
+    pub(crate) fn query_into(
+        &self,
+        test: impl Fn(&Bounds) -> bool,
+        out: &mut Vec<usize>,
+        stack: &mut Vec<usize>,
+    ) {
+        out.clear();
+        out.extend_from_slice(&self.always);
         if !self.nodes.is_empty() {
-            let mut stack = vec![0];
+            stack.clear();
+            stack.push(0);
             while let Some(index) = stack.pop() {
                 let node = &self.nodes[index];
                 if !test(&node.bounds) {
@@ -70,7 +80,6 @@ impl BoxTree {
         }
         // Ascending, so callers see items in a fixed order.
         out.sort_unstable();
-        out
     }
 }
 

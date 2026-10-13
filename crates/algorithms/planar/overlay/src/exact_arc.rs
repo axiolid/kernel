@@ -39,6 +39,18 @@
 //!   (`edge.rs::segments_quick`, `orient_f64`), and each must return `None`
 //!   when its sign is not certain. `Sign` is `#[non_exhaustive]`; match
 //!   `Positive` and `Negative` and treat anything else as zero.
+//! - A point's boxes must hold it. Input vertices, samples on segments and
+//!   crossings of two segments are lazy (#218): their boxes come from
+//!   interval arithmetic on the doubles, and their exact coefficients are
+//!   built only when a question gets past the boxes. Copies of one point
+//!   share an identity (`XPoint::id`), which proves equality; distinct
+//!   identities prove nothing.
+//! - The subdivision's shortcuts (#218, `arrangement.rs`) are topological,
+//!   not numeric: a segment no other boundary runs along is carried by its
+//!   own ring only, and across a stop where exactly one other segment
+//!   crosses, the rings containing the pieces differ by that segment's
+//!   ring. Any other stop counts windings afresh from a sample. Debug
+//!   builds check both against the full search and count.
 //! - Output vertices are rounded once (`XPoint::rounded`, correctly rounded
 //!   for rational points). Rounded output must never be fed back into a
 //!   decision.
@@ -54,14 +66,21 @@
 //! `i_overlay` by point membership away from boundaries, and
 //! `tests/exact_straight.rs` pins bit-identical vertices and correctly
 //! rounded crossings.
+//! `tests/soup_membership.rs` checks unions of grid-snapped and random
+//! soups by point membership, and `scripts/probe_overlay_soup_mutants.py`
+//! lists the faults in the #218 shortcuts the suite must catch.
 //! `cargo bench -p axiolid-overlay --bench arc_overlay` measures per-call
-//! cost, and `SCALE=1` runs the edge-count scaling scenes instead; quote it
-//! when claiming a speed change.
+//! cost, and `SCALE=1` runs the edge-count scaling scenes instead;
+//! `cargo bench -p axiolid-benchmark --bench overlay_soup` times soups
+//! against the grid backend. Quote them when claiming a speed change.
 
 pub(crate) mod arrangement;
 mod boxes;
 mod edge;
 mod point;
+
+use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::Arc;
 
 use axiolid_core::Point2;
 use axiolid_exact::{Arith, Dyadic};
@@ -73,8 +92,14 @@ use crate::{OverlayError, OverlayOperation};
 use edge::{crossings, orient_f64, Carrier, Edge};
 
 /// The exact orientation of three doubles: positive when `c` lies left
-/// of the line `a -> b`. The `f64` filter answers almost always.
+/// of the line `a -> b`. The `f64` filter answers almost always; two equal
+/// points make the determinant exactly zero, which the filter leaves
+/// undecided, so they are answered first (#218: a ring's own vertices
+/// asked against its first edge reached the exact tier every time).
 pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
+    if a == b || c == a || c == b {
+        return Sign::Zero;
+    }
     orient_f64(a, b, c).unwrap_or_else(|| {
         orient(
             &XPoint::from_f64(a),
@@ -83,6 +108,46 @@ pub(crate) fn orient_doubles(a: Point2, b: Point2, c: Point2) -> Sign {
         )
     })
 }
+/// Maps keyed by integers, coordinate bits or point identities, hashed by
+/// multiplication (#218): the default keyed hasher cost a third of a mesh
+/// soup's union. Only lookups read the hash, so no result depends on it.
+pub(crate) type WordMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<WordHasher>>;
+
+/// A multiplicative hash over machine words, for [`WordMap`]: words are
+/// folded in by multiplication and the result mixed by the `SplitMix64`
+/// finaliser, so small integers and aligned addresses spread evenly.
+#[derive(Default)]
+pub(crate) struct WordHasher(u64);
+
+impl Hasher for WordHasher {
+    fn finish(&self) -> u64 {
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.write_u64(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u64(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+
+    fn write_i64(&mut self, word: i64) {
+        self.write_u64(word as u64);
+    }
+
+    fn write_usize(&mut self, word: usize) {
+        self.write_u64(word as u64);
+    }
+}
+
 pub(crate) use point::round_ratio;
 use point::{cmp_y, dy, orient, same_point, sign, Circle, Pred, Tangent, XPoint};
 
@@ -111,7 +176,7 @@ struct Piece {
     sample: XPoint,
     tangent: Tangent,
     /// `Some` for arcs: the circle and the travel turn (after reversal).
-    arc: Option<(Circle, Sign)>,
+    arc: Option<(Arc<Circle>, Sign)>,
     /// The original bulge when the piece is a whole input edge.
     whole_bulge: Option<f64>,
     /// Caller-assigned identity, carried through linking unchanged.
@@ -123,7 +188,7 @@ struct Piece {
 impl Piece {
     fn reversed(self) -> Self {
         let tangent = match self.tangent {
-            Tangent::Fixed(x, y) => Tangent::Fixed(x.neg(), y.neg()),
+            Tangent::Fixed(d) => Tangent::Fixed(Arc::new(d.reversed())),
             Tangent::Circle(c, turn) => Tangent::Circle(c, turn.flip()),
         };
         Self {
@@ -163,16 +228,22 @@ impl Piece {
 struct Mono {
     a: XPoint,
     b: XPoint,
-    arc: Option<(Circle, Sign)>,
+    arc: Option<(Arc<Circle>, Sign)>,
 }
 
 fn edges_of(ring: &ArcRing) -> Vec<Edge> {
     let n = ring.vertices.len();
+    let ends: Vec<XPoint> = ring
+        .vertices
+        .iter()
+        .map(|v| XPoint::from_f64(v.point))
+        .collect();
     (0..n)
         .map(|i| {
             let from = ring.vertices[i];
             let to = ring.vertices[(i + 1) % n];
-            Edge::new(from.point, to.point, from.bulge)
+            let (p0, p1) = (ends[i].clone(), ends[(i + 1) % n].clone());
+            Edge::with_ends(from.point, to.point, from.bulge, p0, p1)
         })
         .collect()
 }
@@ -271,21 +342,7 @@ fn crossing(part: &Mono, s: &XPoint) -> i64 {
 }
 
 fn tangent_of(edge: &Edge) -> Tangent {
-    match &edge.carrier {
-        Carrier::Segment => {
-            let (x, y) = edge_direction(edge);
-            Tangent::Fixed(x, y)
-        }
-        Carrier::Arc { circle, turn, .. } => Tangent::Circle(circle.clone(), *turn),
-    }
-}
-
-fn edge_direction(edge: &Edge) -> (Dyadic, Dyadic) {
-    let a = edge.p0.approx();
-    let b = edge.p1.approx();
-    // Input vertices are exact doubles, so this difference is exact in
-    // dyadic arithmetic.
-    (dy(b.x).sub(&dy(a.x)), dy(b.y).sub(&dy(a.y)))
+    edge.tangent.clone()
 }
 
 /// Approximate edge parameter of a point on the edge, by `f64` bisection
@@ -354,7 +411,7 @@ fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> XPoint {
         let scale = f64::from(1u32 << (bits / 2)) * f64::from(1u32 << (bits - bits / 2));
         let u = (mid * scale).round() / scale;
         if u > 0.0 && u < 1.0 {
-            let p = edge.point_at(&dy(u));
+            let p = edge.point_at_f64(u);
             if inside(&p) {
                 return p;
             }
@@ -376,7 +433,7 @@ fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> XPoint {
             if !(0.0..=1.0).contains(&u) {
                 return fallback;
             }
-            let p = edge.point_at(&dy(u));
+            let p = edge.point_at_f64(u);
             let ok = if want_before {
                 edge.order(&p, from) != Sign::Positive
             } else {

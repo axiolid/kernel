@@ -83,8 +83,8 @@ MUTANTS = [
      "            if on_left == left {",
      "            if on_left != left {", OT),
     ("containment ignored", ARR,
-     "                .filter(|&other| windings[other].winding(&piece.sample) != 0)",
-     "                .filter(|&other| windings[other].winding(&piece.sample) != 0 && false)", OT),
+     "                    .filter(|&other| windings[other].winding(&piece.sample, &mut scratch) != 0)",
+     "                    .filter(|&other| windings[other].winding(&piece.sample, &mut scratch) != 0 && false)", OT),
     # Measure fix.
     ("measure ignores face orientation", MEAS,
      "            ^ (face.orientation == Orientation::Reversed);",

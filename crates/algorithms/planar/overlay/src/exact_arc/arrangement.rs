@@ -11,6 +11,17 @@
 //! Every decision here is the same exact sign the boolean uses: where
 //! boundaries cross, whether two rings share a piece, which rings contain
 //! the region on each side of a piece.
+//!
+//! Soups whose rings share no edges (#218) are cut into many pieces, and
+//! two facts spare most of them a search: a segment no other boundary runs
+//! along (no other segment meets it in two points) is carried by its own
+//! ring only, since another boundary through one of its pieces would cross
+//! it there and make a stop; and along such a segment, a stop where
+//! exactly one other segment crosses, interior to both, enters or leaves
+//! only that segment's ring, which one following from whether the
+//! previous piece lay in it. The rings
+//! containing each later piece follow from the previous piece's; the first
+//! piece, and the piece after any other stop, count windings from a sample.
 
 use axiolid_guarantees::Sign;
 
@@ -21,7 +32,9 @@ use super::boxes::BoxTree;
 use super::edge::Bounds;
 use super::edge::{crossings, Edge};
 use super::point::{same_point, sign, Pred, XPoint};
-use super::{assemble, crossing, edges_of, monotone, sample, tangent_of, Carrier, Mono, Piece};
+use super::{
+    assemble, crossing, edges_of, monotone, sample, tangent_of, Carrier, Mono, Piece, WordMap,
+};
 
 /// One piece of the subdivision, before rounding.
 pub(crate) struct RawEdge {
@@ -150,15 +163,17 @@ impl Winder {
     }
 
     /// The winding number around `s`, which is not on the boundary.
-    fn winding(&self, s: &XPoint) -> i64 {
+    /// `scratch` holds query buffers reused across calls.
+    fn winding(&self, s: &XPoint, scratch: &mut (Vec<usize>, Vec<usize>)) -> i64 {
         match &self.tree {
             None => self.parts.iter().map(|part| crossing(part, s)).sum(),
             Some(tree) => {
                 // Only parts that may pass right of `s` count.
                 let (sx, sy) = s.enclosures();
-                tree.query(|b| b.may_hold((sx.0, f64::INFINITY), sy))
-                    .into_iter()
-                    .map(|index| crossing(&self.parts[index], s))
+                let (hits, stack) = scratch;
+                tree.query_into(|b| b.may_hold((sx.0, f64::INFINITY), sy), hits, stack);
+                hits.iter()
+                    .map(|&index| crossing(&self.parts[index], s))
                     .sum()
             }
         }
@@ -194,34 +209,71 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
     // Rings are simple, so a ring never splits itself. The points two
     // edges share are the same seen from either, so each pair is asked
     // once.
-    let mut cuts: Vec<Vec<XPoint>> = flat
+    //
+    // Each stop carries the edge (flat index) whose boundary crosses this
+    // one there when that crossing is simple (#218): two segments, one
+    // point in common, interior to both, and no other boundary through
+    // it. Only then does passing the stop along the edge change exactly
+    // one ring's winding number, by one, so that ring alone is entered or
+    // left; any other stop carries `None`.
+    let mut cuts: Vec<Vec<(XPoint, Option<usize>)>> = flat
         .iter()
-        .map(|&(ring, edge)| vec![edges[ring][edge].p0.clone(), edges[ring][edge].p1.clone()])
+        .map(|&(ring, edge)| {
+            let edge = &edges[ring][edge];
+            let mut stops = Vec::with_capacity(4);
+            stops.extend([(edge.p0.clone(), None), (edge.p1.clone(), None)]);
+            stops
+        })
         .collect();
-    let add = |stops: &mut Vec<XPoint>, x: &XPoint| {
-        if !stops.iter().any(|y| same_point(y, x)) {
-            stops.push(x.clone());
+    let add = |stops: &mut Vec<(XPoint, Option<usize>)>, x: &XPoint, tag: Option<usize>| {
+        match stops.iter_mut().find(|y| same_point(&y.0, x)) {
+            // Met again, from another edge or at an end: not simple.
+            Some(held) => held.1 = None,
+            None => stops.push((x.clone(), tag)),
         }
     };
+    // Segments another ring's boundary runs along for a stretch: their
+    // pieces may have other carriers.
+    let mut overlapped = vec![false; flat.len()];
+    // Query buffers, reused for every edge and piece.
+    let (mut hits, mut stack) = (Vec::new(), Vec::new());
+    let mut ring_hits = Vec::new();
+    let mut scratch = (Vec::new(), Vec::new());
     for (index, &(ring, own)) in flat.iter().enumerate() {
         let edge = &edges[ring][own];
-        for near in edge_tree.query(|b| b.overlaps(&edge.bounds)) {
+        edge_tree.query_into(|b| b.overlaps(&edge.bounds), &mut hits, &mut stack);
+        for &near in &hits {
             let (other, their) = flat[near];
             if near <= index || other == ring {
                 continue;
             }
-            for x in crossings(edge, &edges[other][their]) {
-                add(&mut cuts[index], &x);
-                add(&mut cuts[near], &x);
+            let theirs = &edges[other][their];
+            let xs = crossings(edge, theirs);
+            let straight = !edge.is_arc() && !theirs.is_arc();
+            // Two segments with two points in common share the stretch
+            // between them.
+            if straight && xs.len() > 1 {
+                overlapped[index] = true;
+                overlapped[near] = true;
+            }
+            // A point at an end of either segment is met again: the end
+            // is a stop already, or a vertex the next edge of its ring
+            // meets too, so `add` clears its tag.
+            let simple = straight && xs.len() == 1;
+            for x in &xs {
+                add(&mut cuts[index], x, simple.then_some(near));
+                add(&mut cuts[near], x, simple.then_some(index));
             }
         }
     }
 
-    let mut pieces = Vec::new();
-    let mut out = Vec::new();
-    for ((ring, _), (edge, mut stops)) in flat.iter().copied().zip(edges.iter().flatten().zip(cuts))
-    {
-        stops.sort_by(|a, b| match edge.order(a, b) {
+    // At most one piece between consecutive stops.
+    let count: usize = cuts.iter().map(|stops| stops.len() - 1).sum();
+    let mut pieces = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count);
+    let cut_edges = flat.iter().copied().zip(edges.iter().flatten().zip(cuts));
+    for (index, ((ring, own), (edge, mut stops))) in cut_edges.enumerate() {
+        stops.sort_by(|a, b| match edge.order(&a.0, &b.0) {
             Sign::Negative => std::cmp::Ordering::Less,
             Sign::Positive => std::cmp::Ordering::Greater,
             _ => std::cmp::Ordering::Equal,
@@ -235,11 +287,20 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
             Carrier::Arc { bulge, .. } if !split => Some(bulge.to_f64()),
             _ => None,
         };
+        // A segment no other boundary runs along (#218). Another ring's
+        // boundary through a point inside one of its pieces would cross
+        // it there, which would be a stop, so its own ring is the only
+        // carrier of every piece; and between two pieces the rings
+        // containing them differ only by the ring crossing at a simple
+        // stop, entered or left by the direction of the crossing.
+        let lone = !edge.is_arc() && !overlapped[index];
+        // The rings containing the previous piece of a lone segment.
+        let mut before: Option<Vec<usize>> = None;
         for w in stops.windows(2) {
             let piece = Piece {
-                sample: sample(edge, &w[0], &w[1]),
-                from: w[0].clone(),
-                to: w[1].clone(),
+                sample: sample(edge, &w[0].0, &w[1].0),
+                from: w[0].0.clone(),
+                to: w[1].0.clone(),
                 tangent: tangent_of(edge),
                 arc: arc.clone(),
                 whole_bulge: whole,
@@ -253,30 +314,41 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
             // An edge with the same two ends as this one (a triangle
             // soup's shared and repeated edges) carries every piece of
             // it, the same way when its ends come in the same order.
-            let mut carriers: Vec<(usize, usize, Option<bool>)> = Vec::new();
-            let mut kept_earlier = false;
-            for index in edge_tree.query(|b| b.may_hold(sx, sy)) {
-                let (other, their) = flat[index];
-                if carriers.iter().any(|c| c.0 == other) {
+            let mut carriers: Vec<(usize, usize, Option<bool>)> = Vec::with_capacity(2);
+            if lone && !cfg!(debug_assertions) {
+                carriers.push((ring, own, Some(true)));
+            } else {
+                // Debug builds search for a lone segment too, and check
+                // the shortcut against the search below.
+                let mut kept_earlier = false;
+                edge_tree.query_into(|b| b.may_hold(sx, sy), &mut hits, &mut stack);
+                for &index in &hits {
+                    let (other, their) = flat[index];
+                    if carriers.iter().any(|c| c.0 == other) {
+                        continue;
+                    }
+                    let theirs = &edges[other][their];
+                    let twin = edge.same_segment(theirs);
+                    if twin.is_some() || theirs.contains(&piece.sample) {
+                        // Splitting is mutual, so a boundary shared by two
+                        // rings yields identical pieces; the first ring
+                        // keeps it. Candidates come ring by ring.
+                        if other < ring {
+                            kept_earlier = true;
+                            break;
+                        }
+                        carriers.push((other, their, twin));
+                    }
+                }
+                debug_assert!(
+                    !lone || (!kept_earlier && carriers == [(ring, own, Some(true))]),
+                    "a lone segment is carried by its own ring only"
+                );
+                if kept_earlier {
                     continue;
                 }
-                let theirs = &edges[other][their];
-                let twin = edge.same_segment(theirs);
-                if twin.is_some() || theirs.contains(&piece.sample) {
-                    // Splitting is mutual, so a boundary shared by two
-                    // rings yields identical pieces; the first ring
-                    // keeps it. Candidates come ring by ring.
-                    if other < ring {
-                        kept_earlier = true;
-                        break;
-                    }
-                    carriers.push((other, their, twin));
-                }
             }
-            if kept_earlier {
-                continue;
-            }
-            let mut sources = Vec::new();
+            let mut sources = Vec::with_capacity(carriers.len());
             carriers.sort_unstable();
             for &(other, index, twin) in &carriers {
                 // A counter-clockwise ring has its inside on the left
@@ -291,15 +363,45 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
                 });
                 sources.push((other, index, same));
             }
-            // Winding numbers of the other rings, from the parts that
-            // may pass right of the sample.
-            let mut inside: Vec<usize> = ring_tree
-                .query(|b| b.may_hold(sx, sy))
-                .into_iter()
-                .filter(|other| !carriers.iter().any(|c| c.0 == *other))
-                .filter(|&other| windings[other].winding(&piece.sample) != 0)
-                .collect();
-            inside.sort_unstable();
+            // Across a simple stop of a lone segment, from the previous
+            // piece: the crossing ring's winding number changes by one,
+            // between zero and one for a simple ring, so it is left when
+            // it held the previous piece and entered otherwise.
+            let carried = match (&before, w[0].1) {
+                (Some(previous), Some(crossing)) => {
+                    let other = flat[crossing].0;
+                    let mut inside = Vec::with_capacity(previous.len() + 1);
+                    inside.extend_from_slice(previous);
+                    match inside.binary_search(&other) {
+                        Ok(at) => {
+                            inside.remove(at);
+                        }
+                        Err(at) => inside.insert(at, other),
+                    }
+                    Some(inside)
+                }
+                _ => None,
+            };
+            let mut counted = || -> Vec<usize> {
+                // Winding numbers of the other rings, from the parts that
+                // may pass right of the sample.
+                ring_tree.query_into(|b| b.may_hold(sx, sy), &mut ring_hits, &mut stack);
+                // Ascending, as the query returns them.
+                ring_hits
+                    .iter()
+                    .copied()
+                    .filter(|other| !carriers.iter().any(|c| c.0 == *other))
+                    .filter(|&other| windings[other].winding(&piece.sample, &mut scratch) != 0)
+                    .collect()
+            };
+            let inside = match carried {
+                Some(inside) => {
+                    debug_assert_eq!(inside, counted(), "rings carried across a stop");
+                    inside
+                }
+                None => counted(),
+            };
+            before = lone.then(|| inside.clone());
             out.push(RawEdge {
                 from: 0,
                 to: 0,
@@ -330,7 +432,7 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         }
     };
     let mut reach = 0.0f64;
-    let mut intern = |x: &XPoint| -> usize {
+    let mut interned = |x: &XPoint| -> usize {
         let ((lo, hi), _) = x.enclosures();
         let floor = lo - reach;
         if floor.is_finite() && hi.is_finite() {
@@ -353,6 +455,18 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         if lo.is_finite() {
             by_lo.insert((key(lo), index), (hi, index));
         }
+        index
+    };
+    // Copies of one point share its identity (#218): a stop ends one piece
+    // and starts the next, and a crossing splits two edges, so most points
+    // are met again as the same copy and need no search.
+    let mut by_id: WordMap<usize, usize> = WordMap::default();
+    let mut intern = |x: &XPoint| -> usize {
+        if let Some(&index) = by_id.get(&x.id()) {
+            return index;
+        }
+        let index = interned(x);
+        by_id.insert(x.id(), index);
         index
     };
     for (piece, edge) in pieces.iter().zip(out.iter_mut()) {

@@ -235,3 +235,51 @@ fn a_malformed_ring_is_refused_by_its_reason() {
     ]);
     assert!(ArcArrangement::new(&[rect(0.0, 0.0, 1.0, 1.0), bad], tol()).is_err());
 }
+
+#[test]
+fn a_shared_arc_is_one_piece_with_both_sources() {
+    // The upper half disc shares the disc's upper arc, the same way: one
+    // piece carried by both rings, with both insides on its left.
+    let half = ArcRing::new(vec![
+        ArcVertex::bulged(Point2::new(1.0, 0.0), 1.0),
+        ArcVertex::straight(Point2::new(-1.0, 0.0)),
+    ]);
+    let arr = ArcArrangement::new(&[disc(0.0, 0.0, 1.0), half], tol()).expect("valid");
+    let shared: Vec<_> = arr
+        .edges()
+        .iter()
+        .filter(|e| e.sources.len() == 2)
+        .collect();
+    assert_eq!(shared.len(), 1, "one piece for the shared arc");
+    assert!(shared[0].inside_left(0) == shared[0].inside_left(1));
+    assert_eq!(arr.edges().len(), 3, "lower arc, shared arc, diameter");
+}
+
+#[test]
+fn a_segment_touching_an_arc_stays_inside_its_ring() {
+    // The bottom of `dented` is an arc bowed up into the ring, its top at
+    // (0, 1); the strip's bottom edge touches it there from inside the
+    // ring. The touch is a stop where one other boundary meets the edge,
+    // but it crosses nothing: every piece of the strip lies inside
+    // `dented` on both sides (#218).
+    let dented = ArcRing::new(vec![
+        ArcVertex::bulged(Point2::new(-2.0, 0.0), -0.5),
+        ArcVertex::straight(Point2::new(2.0, 0.0)),
+        ArcVertex::straight(Point2::new(2.0, 4.0)),
+        ArcVertex::straight(Point2::new(-2.0, 4.0)),
+    ]);
+    let strip = rect(-1.0, 1.0, 1.0, 1.5);
+    let arr = ArcArrangement::new(&[dented, strip], tol()).expect("valid rings");
+    let mut pieces = 0;
+    for edge in arr.edges() {
+        if edge.sources.iter().all(|s| s.ring == 1) {
+            pieces += 1;
+            assert!(
+                edge.inside_left(0) && edge.inside_right(0),
+                "piece {edge:?} left the ring it lies in"
+            );
+        }
+    }
+    // The touch splits the strip's bottom edge in two.
+    assert_eq!(pieces, 5);
+}

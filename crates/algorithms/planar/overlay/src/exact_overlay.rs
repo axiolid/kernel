@@ -34,13 +34,11 @@
 //! the result is settled like every other output ([`crate::settle`]), which
 //! merges edges that rounding left shorter than the tolerance.
 
-use std::collections::HashMap;
-
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
 
 use crate::arc::{ArcRing, ArcVertex};
-use crate::exact_arc::{arrangement, orient_doubles};
+use crate::exact_arc::{arrangement, orient_doubles, WordMap as HashMap};
 use crate::{orientation, FillRule, OverlayError, OverlayOperation, Polygon, Ring};
 
 /// Which operand a ring belongs to, and how it counts.
@@ -211,7 +209,7 @@ fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
     };
     let original: Vec<Vec<Point2>> = rings.iter().map(|(_, r)| r.clone()).collect();
     // Vertices onto earlier ones, through a grid of `tolerance` cells.
-    let mut grid: HashMap<(i64, i64), Vec<Point2>> = HashMap::new();
+    let mut grid: HashMap<(i64, i64), Vec<Point2>> = HashMap::default();
     let mut moved = false;
     for (_, ring) in rings.iter_mut() {
         for v in ring.iter_mut() {
@@ -249,6 +247,8 @@ fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
     }
     reps.sort_by(|a, b| a.0.x.total_cmp(&b.0.x).then(a.0.y.total_cmp(&b.0.y)));
     reps.dedup_by(|a, b| identity(a.0) == identity(b.0) && a.1 == b.1);
+    let cells = RepGrid::new(&reps);
+    let mut near: Vec<usize> = Vec::new();
     for (index, entry) in rings.iter_mut().enumerate() {
         let ring = entry.1.clone();
         let n = ring.len();
@@ -263,8 +263,21 @@ fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
             }
             let (lo, hi) = (p.x.min(q.x) - tolerance, p.x.max(q.x) + tolerance);
             let first = reps.partition_point(|r| r.0.x < lo);
+            let last = reps.partition_point(|r| r.0.x <= hi);
+            // The vertices in the edge's box widened by the tolerance, in
+            // `reps` order: from the grid when it holds fewer candidates
+            // than the band of `x` (#218), else the band. Every vertex the
+            // test below accepts lies in that box, so the edges come out
+            // the same either way.
+            let (ylo, yhi) = (p.y.min(q.y), p.y.max(q.y));
+            let slack = tolerance + 1e-9 * (ylo.abs().max(yhi.abs()) + tolerance);
+            let (xs, ys) = ((lo, hi), (ylo - slack, yhi + slack));
+            if !cells.gather(&reps, xs, ys, last - first, &mut near) {
+                near.clear();
+                near.extend(first..last);
+            }
             let mut inside: Vec<(f64, Point2)> = Vec::new();
-            for &(r, owner) in reps[first..].iter().take_while(|r| r.0.x <= hi) {
+            for &(r, owner) in near.iter().map(|&k| &reps[k]) {
                 if owner == index || identity(r) == identity(p) || identity(r) == identity(q) {
                     continue;
                 }
@@ -319,6 +332,100 @@ fn snap_within(rings: &mut [(bool, Vec<Point2>)], tolerance: f64) {
     }
 }
 
+/// The snap's vertices by grid cell, so an edge finds the vertices near it
+/// without scanning every vertex in its band of `x` (#218): in a mesh
+/// given as a soup that band holds a whole column of the mesh.
+struct RepGrid {
+    /// Cell side; zero leaves every query to the band.
+    cell: f64,
+    /// Indices into the sorted vertices, ascending within each cell.
+    cells: HashMap<(i64, i64), Vec<usize>>,
+}
+
+impl RepGrid {
+    /// Cells holding about one vertex each on average.
+    fn new(reps: &[(Point2, usize)]) -> Self {
+        let mut grid = Self {
+            cell: 0.0,
+            cells: HashMap::default(),
+        };
+        let Some(bounds) = reps.iter().map(|r| (r.0, r.0)).reduce(|a, b| {
+            (
+                Point2::new(a.0.x.min(b.0.x), a.0.y.min(b.0.y)),
+                Point2::new(a.1.x.max(b.1.x), a.1.y.max(b.1.y)),
+            )
+        }) else {
+            return grid;
+        };
+        let (w, h) = (bounds.1.x - bounds.0.x, bounds.1.y - bounds.0.y);
+        let n = reps.len() as f64;
+        let cell = if w > 0.0 && h > 0.0 {
+            (w * h / n).sqrt()
+        } else {
+            w.max(h) / n
+        };
+        if !(cell.is_finite() && cell > 0.0) {
+            return grid;
+        }
+        grid.cell = cell;
+        for (k, r) in reps.iter().enumerate() {
+            let Some(key) = grid.key(r.0.x, r.0.y) else {
+                grid.cell = 0.0;
+                grid.cells.clear();
+                return grid;
+            };
+            grid.cells.entry(key).or_default().push(k);
+        }
+        grid
+    }
+
+    fn index(&self, v: f64) -> Option<i64> {
+        let i = (v / self.cell).floor();
+        (i.abs() < 1e15).then_some(i as i64)
+    }
+
+    fn key(&self, x: f64, y: f64) -> Option<(i64, i64)> {
+        Some((self.index(x)?, self.index(y)?))
+    }
+
+    /// The indices of the vertices in `[x.0, x.1] x [y.0, y.1]`, ascending,
+    /// into `out`, when fewer cells cover the box than `band` vertices lie
+    /// in its band of `x`; `false` leaves the scan to the caller.
+    fn gather(
+        &self,
+        reps: &[(Point2, usize)],
+        x: (f64, f64),
+        y: (f64, f64),
+        band: usize,
+        out: &mut Vec<usize>,
+    ) -> bool {
+        if self.cell == 0.0 {
+            return false;
+        }
+        let (Some((x0, y0)), Some((x1, y1))) = (self.key(x.0, y.0), self.key(x.1, y.1)) else {
+            return false;
+        };
+        let count = (x1 - x0 + 1).saturating_mul(y1 - y0 + 1);
+        if usize::try_from(count).map_or(true, |count| count >= band) {
+            return false;
+        }
+        out.clear();
+        for cx in x0..=x1 {
+            for cy in y0..=y1 {
+                let Some(held) = self.cells.get(&(cx, cy)) else {
+                    continue;
+                };
+                out.extend(held.iter().copied().filter(|&k| {
+                    let r = reps[k].0;
+                    r.x >= x.0 && r.x <= x.1 && r.y >= y.0 && r.y <= y.1
+                }));
+            }
+        }
+        out.sort_unstable();
+        true
+    }
+}
+
 /// Whether every vertex of a ring lies on one line, exactly: then the
 /// ring encloses no area, whatever its rounded area says, and a boolean
 /// leaves it out. The exact subdivision assumes simple rings, and a ring
@@ -344,10 +451,10 @@ fn identity(p: Point2) -> (u64, u64) {
 /// cancelled, split into cycles through distinct vertices -- or the rings
 /// as given, when nothing cancels or a cycle is not simple.
 fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
-    let mut ids: HashMap<(u64, u64), usize> = HashMap::new();
+    let mut ids: HashMap<(u64, u64), usize> = HashMap::default();
     let mut points: Vec<Point2> = Vec::new();
     // Net multiplicity of each edge, `+` from the lower vertex id.
-    let mut net: HashMap<(usize, usize), i64> = HashMap::new();
+    let mut net: HashMap<(usize, usize), i64> = HashMap::default();
     let mut total = 0usize;
     for ring in &rings {
         let mut id = |p: Point2| {

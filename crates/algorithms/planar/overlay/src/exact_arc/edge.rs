@@ -32,7 +32,9 @@ use axiolid_core::Point2;
 use axiolid_exact::{Arith, Dyadic};
 use axiolid_guarantees::Sign;
 
-use super::point::{dy, orient, same_point, sgn, sign, Circle, Pred, XPoint};
+use std::sync::Arc;
+
+use super::point::{dy, orient, same_point, sgn, sign, Circle, Direction, Pred, Tangent, XPoint};
 
 /// Which curve an edge follows.
 // Edges live in short per-call vectors; boxing the arc would add an
@@ -44,7 +46,7 @@ pub(crate) enum Carrier {
     Segment,
     /// A circular arc; `turn` is the sign of the bulge.
     Arc {
-        circle: Circle,
+        circle: Arc<Circle>,
         turn: Sign,
         bulge: Dyadic,
     },
@@ -139,9 +141,12 @@ pub(crate) struct Edge {
     pub(crate) p0: XPoint,
     pub(crate) p1: XPoint,
     p0f: Point2,
-    d: (Dyadic, Dyadic),
+    d: Arc<Direction>,
     pub(crate) carrier: Carrier,
     pub(crate) bounds: Bounds,
+    /// The travel direction along the edge, built once and shared by its
+    /// pieces (#218).
+    pub(crate) tangent: Tangent,
 }
 
 fn half(value: &Dyadic) -> Dyadic {
@@ -163,8 +168,10 @@ fn edge_bounds(from: Point2, to: Point2, bulge: f64) -> Bounds {
 }
 
 impl Edge {
-    /// The edge from `from` to `to` with the given bulge.
-    pub(crate) fn new(from: Point2, to: Point2, bulge: f64) -> Self {
+    /// The edge from `from` to `to` with the given bulge, whose exact ends
+    /// `p0` and `p1` (the same two points) are given: a ring's edges share
+    /// them, so a vertex is one point to every question about it (#218).
+    pub(crate) fn with_ends(from: Point2, to: Point2, bulge: f64, p0: XPoint, p1: XPoint) -> Self {
         let (p0x, p0y) = (dy(from.x), dy(from.y));
         let d = (dy(to.x).sub(&p0x), dy(to.y).sub(&p0y));
         let carrier = if bulge == 0.0 {
@@ -190,18 +197,24 @@ impl Edge {
                     .sub(&chord2.mul(&one_plus.square())),
             };
             Carrier::Arc {
-                circle,
+                circle: Arc::new(circle),
                 turn: sgn(&b),
                 bulge: b,
             }
         };
+        let d = Arc::new(Direction::new(d.0, d.1));
+        let tangent = match &carrier {
+            Carrier::Segment => Tangent::Fixed(d.clone()),
+            Carrier::Arc { circle, turn, .. } => Tangent::Circle(circle.clone(), *turn),
+        };
         Self {
-            p0: XPoint::from_f64(from),
-            p1: XPoint::from_f64(to),
+            p0,
+            p1,
             p0f: from,
             d,
             carrier,
             bounds: edge_bounds(from, to, bulge),
+            tangent,
         }
     }
 
@@ -214,8 +227,8 @@ impl Edge {
         let (p0x, p0y) = (dy(self.p0f.x), dy(self.p0f.y));
         match &self.carrier {
             Carrier::Segment => XPoint::rational(
-                p0x.add(&u.mul(&self.d.0)),
-                p0y.add(&u.mul(&self.d.1)),
+                p0x.add(&u.mul(&self.d.x)),
+                p0y.add(&u.mul(&self.d.y)),
                 dy(1.0),
             ),
             Carrier::Arc { bulge: b, .. } => {
@@ -226,14 +239,24 @@ impl Edge {
                 let one_minus = dy(1.0).sub(&s2);
                 let two_s = dy(2.0).mul(&s);
                 // V = (1 - s^2) D - 2 s perp(D), perp(D) = (-Dy, Dx)
-                let vx = one_minus.mul(&self.d.0).add(&two_s.mul(&self.d.1));
-                let vy = one_minus.mul(&self.d.1).sub(&two_s.mul(&self.d.0));
+                let vx = one_minus.mul(&self.d.x).add(&two_s.mul(&self.d.y));
+                let vy = one_minus.mul(&self.d.y).sub(&two_s.mul(&self.d.x));
                 XPoint::rational(
                     p0x.mul(&w).add(&g.mul(&vx)),
                     p0y.mul(&w).add(&g.mul(&vy)),
                     w,
                 )
             }
+        }
+    }
+
+    /// [`Edge::point_at`] at a parameter that is a double. On a segment
+    /// the point's coefficients wait behind a box (#218): a piece's sample
+    /// is asked about mostly where its box decides.
+    pub(crate) fn point_at_f64(&self, u: f64) -> XPoint {
+        match &self.carrier {
+            Carrier::Segment => XPoint::along(self.p0f, self.p1.approx(), u),
+            Carrier::Arc { .. } => self.point_at(&dy(u)),
         }
     }
 
@@ -483,29 +506,22 @@ pub(crate) fn crossings(first: &Edge, second: &Edge) -> Vec<XPoint> {
             if let Some(quick) = segments_quick(first, second) {
                 return quick;
             }
-            // Lines P0 + t D and Q0 + s E: cross(D, E) = 0 means parallel.
-            let (d, e) = (&first.d, &second.d);
-            let den = d.0.mul(&e.1).sub(&d.1.mul(&e.0));
-            if sgn(&den) == Sign::Zero {
-                endpoints_on_each_other(&mut push);
-            } else {
-                // t = cross(Q0 - P0, E) / cross(D, E)
-                let (p0x, p0y) = (dy(first.p0f.x), dy(first.p0f.y));
-                let (q0x, q0y) = (dy(second.p0f.x), dy(second.p0f.y));
-                let (rx, ry) = (q0x.sub(&p0x), q0y.sub(&p0y));
-                let num = rx.mul(&e.1).sub(&ry.mul(&e.0));
-                push(XPoint::rational(
-                    p0x.mul(&den).add(&num.mul(&d.0)),
-                    p0y.mul(&den).add(&num.mul(&d.1)),
-                    den,
-                ));
+            // Lines P0 + t D and Q0 + s E, with
+            // t = cross(Q0 - P0, E) / cross(D, E); none when parallel.
+            match XPoint::crossing(first.p0f, first.p1.approx(), second.p0f, second.p1.approx()) {
+                Some(x) => push(x),
+                None => endpoints_on_each_other(&mut push),
             }
         }
         (Carrier::Segment, Carrier::Arc { circle, .. })
         | (Carrier::Arc { circle, .. }, Carrier::Segment) => {
             let seg = if first.is_arc() { second } else { first };
             let (px, py) = (dy(seg.p0f.x), dy(seg.p0f.y));
-            let (points, _) = line_meets_circle((&px, &py, &dy(1.0)), &seg.d, circle);
+            let (points, _) = line_meets_circle(
+                (&px, &py, &dy(1.0)),
+                &(seg.d.x.clone(), seg.d.y.clone()),
+                circle,
+            );
             for x in points {
                 push(x);
             }

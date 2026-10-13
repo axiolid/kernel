@@ -74,8 +74,8 @@ MUTANTS = [
      "                    stack.push(node.end);\n",
      ""),
     ("long rings wound leftwards", "exact_arc/arrangement.rs",
-     "                tree.query(|b| b.may_hold((sx.0, f64::INFINITY), sy))",
-     "                tree.query(|b| b.may_hold((f64::NEG_INFINITY, sx.1), sy))"),
+     "                tree.query_into(|b| b.may_hold((sx.0, f64::INFINITY), sy), hits, stack);",
+     "                tree.query_into(|b| b.may_hold((f64::NEG_INFINITY, sx.1), sy), hits, stack);"),
 ]
 
 probe_lib.main(MUTANTS, tests=[["--release", "-p", "axiolid-overlay",
