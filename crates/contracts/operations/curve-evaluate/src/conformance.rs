@@ -8,8 +8,8 @@ use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
     Circle3, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3, ElevationLaw, Intrinsic3, Line2,
-    Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, Polyline3,
-    SeamSide,
+    Line3, OffsetFrame, OffsetLaw, PathBound, PathCurve, PathOffset, PathOffsets, PathPiece,
+    Polyline3, SeamSide,
 };
 
 use crate::{CurveEvaluator, CurveMeasure, DistanceConvention, DistanceInterval};
@@ -48,6 +48,7 @@ pub fn check<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
     out.extend(check_path_joints(provider));
     out.extend(check_path_joints_within(provider));
     out.extend(check_open_paths(provider));
+    out.extend(check_bounded_paths(provider));
     out
 }
 
@@ -1257,6 +1258,133 @@ fn check_open_paths<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> 
             "joint distances of an open path are certified or refused as unsupported",
             error.to_string(),
         )),
+    }
+    out
+}
+
+// --- bounds at a parameter or a point (#304) ------------------------------------
+
+/// A piece may start or end at a native parameter or a point (#304), and a
+/// provider that reads it resolves the distance itself. The path: a line
+/// from the origin along `+x` of direction `(10, 0, 0)` from parameter
+/// `0.2` to the point `(8, 0, 0)` (length 6), then a circle of radius 2
+/// about `(8, 2, 0)` from the point `(8, 0, 0)` (angle `3 pi / 2`) to
+/// parameter `0`, which follows it round the seam: a quarter arc of
+/// length `pi` to `(10, 2, 0)`. No distance is stated. Read forwards and
+/// reversed, its points must lie where the closed forms put them, and its
+/// joint, if certified, at 6 (reversed, `pi`). A point off its curve, and
+/// a closed polyline's seam (two parameters name it), must be refused,
+/// never read. A provider may refuse bounds as unsupported, typed, as it
+/// may refuse paths.
+fn check_bounded_paths<E: CurveEvaluator>(provider: &E) -> Vec<ConformanceFailure> {
+    let mut out = Vec::new();
+    let line = PathCurve::Three(Curve3::Line(Line3 {
+        origin: Point3::ZERO,
+        direction: Vec3::new(10.0, 0.0, 0.0),
+    }));
+    let circle = PathCurve::Three(Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::new(8.0, 2.0, 0.0),
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius: 2.0,
+    }));
+    let corner = PathBound::Point(Point3::new(8.0, 0.0, 0.0));
+    let forwards = CurvePath::new(vec![
+        PathPiece::bounded(line.clone(), PathBound::Parameter(0.2), corner),
+        PathPiece::bounded(circle, corner, PathBound::Parameter(0.0)),
+    ]);
+    let pi = core::f64::consts::PI;
+    let length = 6.0 + pi;
+    let eighth = core::f64::consts::SQRT_2;
+    let mid_arc = Point3::new(8.0 + eighth, 2.0 - eighth, 0.0);
+    let reversed = forwards.clone().reversed();
+    let places = [
+        ("forwards", &forwards, 0.0, Point3::new(2.0, 0.0, 0.0)),
+        ("forwards", &forwards, 3.0, Point3::new(5.0, 0.0, 0.0)),
+        ("forwards", &forwards, 6.0 + pi / 2.0, mid_arc),
+        ("forwards", &forwards, length, Point3::new(10.0, 2.0, 0.0)),
+        ("reversed", &reversed, 0.0, Point3::new(10.0, 2.0, 0.0)),
+        ("reversed", &reversed, pi / 2.0, mid_arc),
+        ("reversed", &reversed, pi + 1.0, Point3::new(7.0, 0.0, 0.0)),
+        ("reversed", &reversed, length, Point3::new(2.0, 0.0, 0.0)),
+    ];
+    let mut reads = false;
+    for (what, path, distance, want) in places {
+        match provider.path_point_at(path, CurveMeasure::Distance(distance)) {
+            Ok(point) => {
+                reads = true;
+                let off = (point - want).length();
+                if off > 1e-9 {
+                    out.push(fail(
+                        "a bound resolves to the distance of its parameter or point",
+                        format!("{what} bounded path at {distance}: {off:e} off"),
+                    ));
+                }
+            }
+            Err(error) if side_refused(&error) => {}
+            Err(error) => out.push(fail(
+                "a bounded path is answered or refused as unsupported",
+                format!("{what} bounded path at {distance}: {error}"),
+            )),
+        }
+    }
+    for (what, path, joint) in [("forwards", &forwards, 6.0), ("reversed", &reversed, pi)] {
+        match provider.path_joint_distances(path, JOINT_TOLERANCE) {
+            Ok(intervals) => {
+                if intervals.len() != 1 {
+                    out.push(fail(
+                        "joint distances of a bounded path are certified",
+                        format!("{what}: {} intervals for one joint", intervals.len()),
+                    ));
+                } else if let Err(detail) = certifies(intervals[0], joint, JOINT_TOLERANCE) {
+                    out.push(fail(
+                        "joint distances of a bounded path are certified",
+                        format!("{what}: {detail}"),
+                    ));
+                }
+            }
+            Err(error) if side_refused(&error) => {}
+            Err(error) => out.push(fail(
+                "joint distances of a bounded path are certified or refused as unsupported",
+                format!("{what}: {error}"),
+            )),
+        }
+    }
+    if !reads {
+        return out;
+    }
+    let off_curve = CurvePath::from(PathPiece::bounded(
+        line,
+        PathBound::Parameter(0.2),
+        PathBound::Point(Point3::new(5.0, 1e-3, 0.0)),
+    ));
+    let square = Curve3::Polyline(Polyline3 {
+        points: vec![
+            Point3::ZERO,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+        ],
+        closed: true,
+    });
+    let seam = CurvePath::from(PathPiece::bounded(
+        PathCurve::Three(square),
+        PathBound::Point(Point3::ZERO),
+        PathBound::Point(Point3::new(1.0, 1.0, 0.0)),
+    ));
+    for (what, path) in [
+        ("a point off its curve", &off_curve),
+        ("a closed polyline's seam", &seam),
+    ] {
+        if let Ok(point) = provider.path_point_at(path, CurveMeasure::Distance(0.5)) {
+            out.push(fail(
+                "a point bound off the curve or named by several parameters is refused",
+                format!("{what} was read, at {point:?}"),
+            ));
+        }
     }
     out
 }

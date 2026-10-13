@@ -19,11 +19,13 @@ pub use axiolid_contracts::{
     Operation,
 };
 pub use axiolid_curve::{
-    CurvePath, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, SeamSide,
+    CurvePath, OffsetFrame, OffsetLaw, PathBound, PathCurve, PathOffset, PathOffsets, PathPiece,
+    SeamSide,
 };
 pub use contract::{
     window_span, CurveEvaluator, CURVE_PATH_UNSUPPORTED, OPEN_PATH_END_UNSUPPORTED,
-    PATH_JOINT_DISTANCES_UNSUPPORTED, SEAM_SIDE_UNSUPPORTED,
+    PATH_JOINT_DISTANCES_UNSUPPORTED, PATH_PIECE_BOUND_UNSUPPORTED, PATH_POINT_AMBIGUOUS,
+    PATH_POINT_OFF_CURVE, SEAM_SIDE_UNSUPPORTED,
 };
 pub use convention::DistanceConvention;
 pub use interval::DistanceInterval;

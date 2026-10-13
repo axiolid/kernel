@@ -33,6 +33,17 @@ caret rule for `0.x` versions.
   agree with the provider's whole-path answer, and a bad window or
   tolerance must be refused; a provider may refuse it as unsupported.
 
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): the trait documentation states how a provider reading paths
+  resolves a `PathBound` (re-exported), and names its refusals:
+  `PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`, and
+  `PATH_PIECE_BOUND_UNSUPPORTED` for a provider that reads stated spans
+  only. The conformance suite reads a line from a parameter to a point and
+  a circle from that point round its seam to a parameter, forwards and
+  reversed, against closed forms, certifies its joint, and requires a
+  point off its curve and a closed polyline's seam to be refused; a
+  provider may refuse bounds as unsupported.
+
 ## [0.3.6] - 2026-10-12
 
 ### Added

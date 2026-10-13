@@ -105,6 +105,24 @@ use crate::{CurveMeasure, DistanceConvention, DistanceInterval};
 /// [`GeomError::UnsupportedInput`] naming [`OPEN_PATH_END_UNSUPPORTED`],
 /// never reading the `end` the piece leaves unset.
 ///
+/// A piece may also start or end at a [`PathBound`](axiolid_curve::PathBound)
+/// (#304): a native parameter of its curve, or a point on it in the
+/// curve's own coordinates ([`PathPiece::between_parameters`](axiolid_curve::PathPiece::between_parameters),
+/// [`PathPiece::bounded`](axiolid_curve::PathPiece::bounded)), since the
+/// distance to an interior parameter of an ellipse or a B-spline is a
+/// quadrature too. A provider that reads paths resolves a point to the
+/// one parameter naming it, refusing by a typed
+/// [`GeomError::UnsupportedInput`] a point off the curve
+/// ([`PATH_POINT_OFF_CURVE`]) or one several parameters name
+/// ([`PATH_POINT_AMBIGUOUS`]), and a parameter to its distance in the
+/// curve's station measure: exact where that is read from stored data,
+/// otherwise the same estimate it measures a span between parameters by,
+/// so the path reads as the stated path holding those distances and
+/// [`path_joint_distances`](Self::path_joint_distances) certifies the
+/// joints after it. A provider that does not read bounds refuses a path
+/// with one naming [`PATH_PIECE_BOUND_UNSUPPORTED`], never reading the
+/// `start` or `end` the piece leaves unset.
+///
 /// They have defaults so that adding them broke no provider: a provider
 /// that does not implement paths refuses every path query by a typed
 /// [`GeomError::UnsupportedInput`] naming [`CURVE_PATH_UNSUPPORTED`],
@@ -488,6 +506,28 @@ pub const PATH_JOINT_DISTANCES_UNSUPPORTED: &str =
 pub const OPEN_PATH_END_UNSUPPORTED: &str =
     "a curve path piece whose end is open (runs to its curve's end): this provider reads stated \
      spans only";
+
+/// The input a provider that reads curve paths but not piece bounds given
+/// as a native parameter or a point (#304) refuses a path with one for.
+pub const PATH_PIECE_BOUND_UNSUPPORTED: &str =
+    "a curve path piece bounded by a native parameter or a point: this provider reads spans \
+     stated as distances only";
+
+/// The input a point bound of a curve path piece (#304) is refused for
+/// when it does not lie on the piece's curve within the joint tolerance
+/// `1e-9 * max(1, |p|)`: a provider never projects it onto the curve.
+pub const PATH_POINT_OFF_CURVE: &str =
+    "a curve path piece bounded by a point that does not lie on its curve within the joint \
+     tolerance";
+
+/// The input a point bound of a curve path piece (#304) is refused for
+/// when several parameters of the curve name it: a curve that passes
+/// through it more than once, or the seam of a closed curve other than a
+/// circle or an ellipse (whose angle runs round).
+pub const PATH_POINT_AMBIGUOUS: &str =
+    "a curve path piece bounded by a point that several parameters of its curve name (the curve \
+     passes through it more than once, or it is the seam of a closed curve other than a circle \
+     or an ellipse)";
 
 /// The input a provider that does not implement curve paths refuses, in
 /// the [`GeomError::UnsupportedInput`] its default `path_*` queries return.
