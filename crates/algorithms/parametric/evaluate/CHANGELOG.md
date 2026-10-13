@@ -28,6 +28,25 @@ caret rule for `0.x` versions.
   window's test of an interval against a window is
   `DistanceInterval::meets`, shared with it.
 
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `StationPiece::from_path_piece`, and so
+  `CompositeBasis::from_path` and every `path_*` query of
+  `ReferenceCurveEvaluator`, resolves a `PathPiece::start_bound` or
+  `end_bound`. A point is resolved to the one parameter naming it
+  (`StationCurve::parameter_at_bound`, module `station::path_bound`): in
+  closed form on a line, a circle or an ellipse, by projection onto each
+  segment of a polyline, by sampling and Newton on a B-spline, within the
+  joint tolerance (`point_bound_tolerance`); a point off the curve, one
+  several parameters name (a self-crossing, a closed polyline's or
+  B-spline's seam) and one on a curve it does not invert are refused by
+  name (`PATH_POINT_OFF_CURVE`, `PATH_POINT_AMBIGUOUS`,
+  `POINT_BOUND_UNSUPPORTED`). A parameter is resolved to the measure
+  `StationPiece::between_parameters` reads; a piece bounded at both ends IS
+  that piece, a closed conic's span running round as a graph trim in its
+  sense does, so it reads bitwise as the path `station::curve_path`
+  flattens such a trim into, and its joints are certified by
+  `joint_intervals` as before. An end both open and bounded is refused.
+
 ## [0.3.12] - 2026-10-12
 
 ### Added

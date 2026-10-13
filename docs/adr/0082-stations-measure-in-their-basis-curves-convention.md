@@ -148,6 +148,13 @@ resolve them in `axiolid-evaluate` (`station`) and `axiolid-mesh-compile`
   `crates/algorithms/parametric/evaluate/tests/station_certify.rs`,
   `crates/algorithms/parametric/evaluate/tests/curve_evaluate_path.rs` and
   `scripts/probe_joint_window_mutants.py` (#305).
+- `crates/representations/analytic/curve/src/path.rs` (`PathBound`),
+  `crates/algorithms/parametric/evaluate/src/station/path_bound.rs`,
+  `crates/algorithms/parametric/evaluate/src/station/composite.rs`
+  (`StationPiece::from_path_piece`),
+  `crates/algorithms/parametric/evaluate/tests/curve_path_bounds.rs`,
+  `crates/execution/compile/tests/station_curve_path.rs` and
+  `scripts/probe_curve_path_bound_mutants.py` (#304).
 
 ## Amendment 2026-10-03: explicit orientation and tag matching (#246)
 
@@ -1112,3 +1119,75 @@ Still open: a run station at the basis's ends on sectioned runs
 (`SectionAtStation`), and on an `OffsetsAtStations` along an offset basis
 flattened as a path or a station basis (an offset of an offset, refused as
 before; swept as a directrix it reads).
+
+## Amendment 2026-10-13: curve-path piece bounds at a parameter or a point (#304)
+
+After #298 a caller with no provider (openbimrs/ifc#436) could leave a
+piece's end open, but a trim of an ellipse or a B-spline at an interior
+native parameter, or at a point, starts (or ends) at a station-measure
+distance that is itself a quadrature: it still could not state the piece,
+nor any span between stations along a relation containing one.
+
+- **The representation, additively.** `PathPiece` is `#[non_exhaustive]`, so
+  it gains two fields, `start_bound` and `end_bound: Option<PathBound>`, and
+  a new `#[non_exhaustive]` `PathBound { Parameter(Scalar), Point(Point3) }`
+  (a point in the curve's own coordinates, before the piece's placement,
+  `z = 0` on a 2D curve). `PathPiece::between_parameters`,
+  `PathPiece::bounded`, `with_start` and `with_end` set them; the stated
+  `start` or `end` beside a bound holds `-INFINITY` or `INFINITY`, not read,
+  as an open end's does, so `PathPiece::length` is infinite and `is_stated`
+  false until an evaluator resolves it. A stated distance keeps its meaning
+  and its checks; an end both open and bounded is refused by name. Both
+  bounds lie in the curve's direction, so a reversed piece is bounded as a
+  forward one. `CurvePath` is not in the wire format, so no version changes.
+- **Points.** The evaluator resolves a point to the one parameter naming it
+  (`StationCurve::parameter_at_bound`), within the joint tolerance `1e-9 *
+  max(1, |p|)`, the tolerance within which pieces meet and a compiler
+  accepts a trim point: in closed form on a line, a circle or an ellipse
+  (`invert2`/`invert3`, a closed conic's angle in `[0, 2 pi)`, so its seam
+  is one parameter), by projection onto each segment of a polyline, and on a
+  B-spline by sampling (64 per control point, and every knot) and Newton
+  from each local minimum within its neighbours. Places are merged where the
+  curve stays within tolerance between two parameters. None within
+  tolerance is refused naming `PATH_POINT_OFF_CURVE` (never projected);
+  several naming `PATH_POINT_AMBIGUOUS` (a self-crossing, a closed polyline's
+  or B-spline's seam); a point on any other family (intrinsic curves, chains,
+  elevated and banked curves, offsets) naming `POINT_BOUND_UNSUPPORTED`.
+- **Distances: the measure `between_parameters` reads.** A parameter is
+  resolved to the curve's measure there: exact where it is read from stored
+  data (a line's `t |d|`, a circle's `r t`, a polyline's, a curve
+  parameterised by its measure), otherwise the arc-length quadrature of an
+  ellipse or a B-spline. A piece bounded at both ends IS
+  `StationPiece::between_parameters` of its parameters; a closed conic's
+  span runs round as a graph compiler's trim in its sense does, with its
+  arithmetic (from `t0` by `t1 - t0` within one turn, else wrapped, whole
+  turns apart a whole turn), so the bounded path reads BITWISE as the path
+  `station::curve_path` flattens the trim into, at parameters and at points
+  (checked against the compiler). One bound beside a stated or open other
+  end is folded into a closed conic's first turn, an end not after the start
+  lying a turn further. An offset takes no bound of its own (its parameter
+  is its base's; its base piece may carry one).
+- **Certification is unchanged.** `joint_intervals` and the contract's
+  `path_joint_distances` bound each numerical piece's length between the
+  points the kernel reads as its ends, which for a bounded piece are the
+  curve's at the resolved measures (the parameters up to the rounding of the
+  arc-length inverse); the tests check that they contain an adaptive
+  quadrature of the curves written out independently.
+- **The contract** documents bounds in the path queries, names the three
+  refusals and `PATH_PIECE_BOUND_UNSUPPORTED` for a provider that reads
+  stated spans only; the conformance suite reads a line from a parameter to
+  a point and a circle from it round its seam to a parameter, forwards and
+  reversed, certifies its joint, and requires an off-curve point and a closed
+  polyline's seam to be refused.
+
+| Option | Why not |
+| --- | --- |
+| A `SpanEnd { Distance, Parameter, Point, CurveEnd }` replacing `start`/`end` | Changing the type of public fields breaks semver (#298's reasoning). |
+| Fold `open_end` into the bound | `open_end` is released; a `CurveEnd` bound would be a second way to say it. |
+| Project an off-curve point onto the curve | A guessed bound; the rules forbid substitute geometry, and a compiler refuses such a trim point too. |
+| Take the first of several parameters | Which one is a guess; the caller states the parameter it means. |
+| A point's tolerance carried by the bound | A second tolerance policy beside the joint tolerance the compiler already applies to trim points; addable later as a variant. |
+| `between_parameters` semantics (refuse `t1 <= t0`) on a closed conic | A path would not read as the compiler's trim of the same conic, at points across the seam in particular. |
+
+Still open: a point bound on a curve with no inversion here (it is refused,
+not iterated), a tolerance per point, and a point on an offset.

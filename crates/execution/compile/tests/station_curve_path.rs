@@ -8,7 +8,10 @@
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
-use axiolid_curve::{Circle2, Curve2, CurvePath, Line2, PathCurve, SeamSide};
+use axiolid_curve::{
+    BSplineCurve, Circle2, Curve2, CurvePath, Ellipse2, KnotSpec, Line2, PathBound, PathCurve,
+    PathPiece, SeamSide,
+};
 use axiolid_mesh_compile::station::{curve_path, resolve};
 use axiolid_model::{
     CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
@@ -258,6 +261,88 @@ fn an_atomic_curve_is_one_whole_piece_and_other_relations_are_refused() {
         .unwrap();
     let graph = b.finish(vec![offset]).unwrap();
     refused(curve_path(&graph, offset), "a curve relation other than");
+}
+
+/// A caller without the graph or a provider bounds its pieces at the
+/// trims' parameters or points (#304), and reads exactly the path the
+/// compiler flattens the trims into: an ellipse trimmed at parameters and
+/// at points across its seam, and a B-spline trimmed at parameters with
+/// and against its sense.
+#[test]
+fn trims_at_parameters_and_points_read_as_bounded_pieces() {
+    let ellipse = Curve2::Ellipse(Ellipse2 {
+        frame: Frame2 {
+            origin: Point2::new(3.0, -2.0),
+            x: Vec2::X,
+            y: Vec2::Y,
+        },
+        semi_axis_x: 20.0,
+        semi_axis_y: 10.0,
+    });
+    let on = |t: Scalar| Point2::new(3.0 + 20.0 * t.cos(), -2.0 + 10.0 * t.sin());
+    let spline = Curve2::BSpline(BSplineCurve {
+        degree: 3,
+        control_points: vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(30.0, 0.0),
+            Point2::new(60.0, 20.0),
+            Point2::new(90.0, 20.0),
+        ],
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![4, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    });
+    let mut b = GeometryGraphBuilder::new();
+    let oval = b.push_value(ellipse.clone()).unwrap();
+    let curve = b.push_value(spline.clone()).unwrap();
+    let by_parameters = trimmed(&mut b, oval, 0.3, 1.9, true);
+    let by_points = b
+        .push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
+            basis: oval,
+            start: vec![TrimSelector::Point2(on(5.5))],
+            end: vec![TrimSelector::Point2(on(0.7))],
+            sense_agreement: true,
+            preference: TrimmingPreference::Cartesian,
+        }))
+        .unwrap();
+    let forwards = trimmed(&mut b, curve, 0.2, 0.7, true);
+    let backwards = trimmed(&mut b, curve, 0.2, 0.7, false);
+    let graph = b
+        .finish(vec![by_parameters, by_points, forwards, backwards])
+        .unwrap();
+    let point = |t: Scalar| {
+        let p = on(t);
+        PathBound::Point(Point3::new(p.x, p.y, 0.0))
+    };
+    for (id, piece, what) in [
+        (
+            by_parameters,
+            PathPiece::between_parameters(PathCurve::Two(ellipse.clone()), 0.3, 1.9),
+            "ellipse at parameters",
+        ),
+        (
+            by_points,
+            PathPiece::bounded(PathCurve::Two(ellipse.clone()), point(5.5), point(0.7)),
+            "ellipse at points across its seam",
+        ),
+        (
+            forwards,
+            PathPiece::between_parameters(PathCurve::Two(spline.clone()), 0.2, 0.7),
+            "B-spline",
+        ),
+        (
+            backwards,
+            PathPiece::between_parameters(PathCurve::Two(spline.clone()), 0.2, 0.7).reversed(),
+            "B-spline against its sense",
+        ),
+    ] {
+        let bounded = CurvePath::from(piece);
+        let resolved = CompositeBasis::from_path(&bounded).unwrap().path();
+        assert_eq!(resolved, curve_path(&graph, id).unwrap(), "{what}");
+    }
 }
 
 fn refused<T: core::fmt::Debug>(result: GeomResult<T>, needle: &str) {

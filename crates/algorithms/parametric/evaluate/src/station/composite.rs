@@ -113,6 +113,33 @@
 //! for falling within it: a caller who must know a side certifies the
 //! joint, or snaps by a window).
 //!
+//! # Bounds at a parameter or a point (#304)
+//!
+//! A [`PathPiece`] may start or end at a [`PathBound`]: a native parameter
+//! of its curve, or a point on it in the curve's own coordinates, since
+//! the distance to an interior parameter of an ellipse or a B-spline is a
+//! quadrature a caller with no provider cannot state. A point is resolved
+//! to the one parameter naming it, or refused by name when it is off the
+//! curve or several parameters name it ([the path-bound
+//! module](super::path_bound)). A parameter is resolved to the curve's
+//! measure there, the number [`StationPiece::between_parameters`] measures
+//! by: exact where the arc length to it is read from stored data (a line,
+//! a circle, a polyline, a curve parameterised by its measure), the
+//! arc-length quadrature of an ellipse or a B-spline otherwise. A piece
+//! bounded at both ends IS the piece between those parameters, so it reads
+//! bitwise as the composite a graph compiler builds for a trim between
+//! them in the curve's sense. A closed conic's angle runs round, as in
+//! such a trim: from the start's angle forwards by `t1 - t0` where that is
+//! within one turn, else by it wrapped into one turn (a point's angle lies
+//! in `[0, 2 pi)`, so an end before the start crosses the seam; the same
+//! place at both ends is the whole turn). One bound beside a stated or
+//! open other end is folded into the first turn, `[0, 2 pi)`, and an end
+//! not after the start lies a turn further. Offsets take
+//! no bound of their own (their base piece may carry one). Certification
+//! is unchanged: [`CompositeBasis::joint_intervals`] bounds each numerical
+//! piece's length between the points the kernel reads as its ends, which
+//! for a bounded piece are the curve's at its resolved measures.
+//!
 //! # Exactness
 //!
 //! A station frame on a composite is exact, rounding aside, only where
@@ -125,7 +152,9 @@
 
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Point3, Scalar, Transform3};
-use axiolid_curve::{Curve2, Curve3, CurvePath, PathCurve, PathOffset, PathPiece, SeamSide};
+use axiolid_curve::{
+    Curve2, Curve3, CurvePath, PathBound, PathCurve, PathOffset, PathPiece, SeamSide,
+};
 use axiolid_curve_evaluate_contract::{window_span, DistanceConvention};
 
 use super::certify::{
@@ -156,6 +185,12 @@ pub const JOINT_TOLERANCE: Scalar = 1e-9;
 /// lower bound [`super::certify`] certifies, whose chords carry that
 /// rounding once each.
 const CHORD_ROUNDING: Scalar = 100.0 * POINT_ROUNDING;
+
+/// Relative slack within which a closed conic's piece bounded at two
+/// parameters (#304) still spans `t1 - t0` rather than that wrapped into
+/// one turn: a graph compiler's slack for a periodic trim, so both read
+/// the same span.
+const TURN_SLACK: Scalar = 1e-9;
 
 /// The arc-length tolerance around a distance: what counts as ON a seam or
 /// a joint.
@@ -305,6 +340,65 @@ impl StationCurve<'_> {
             Self::Three(Curve3::Line(line)) => Some(line.direction.length()),
             _ => None,
         }
+    }
+
+    /// A closed conic's angle folded into the turn from its seam, `[0, 2
+    /// pi)`; any other curve's parameter as it is.
+    fn turned(self, t: Scalar) -> Scalar {
+        if self.is_closed_conic() {
+            t.rem_euclid(core::f64::consts::TAU)
+        } else {
+            t
+        }
+    }
+
+    /// The parameters a piece bounded at both ends spans (#304): as given,
+    /// except on a closed conic, whose angle runs round: from `t0` forwards
+    /// by `t1 - t0` where that is within one turn (to [`TURN_SLACK`]),
+    /// else by `t1 - t0` wrapped into one turn, a whole turn where the two
+    /// are whole turns apart. That is the span a graph compiler reads for
+    /// a trim of the conic in its sense, with the same arithmetic.
+    fn wound(self, t0: Scalar, t1: Scalar) -> (Scalar, Scalar) {
+        if !self.is_closed_conic() {
+            return (t0, t1);
+        }
+        let turn = core::f64::consts::TAU;
+        let travelled = t1 - t0;
+        let span = if travelled > 0.0 && travelled <= turn * (1.0 + TURN_SLACK) {
+            travelled
+        } else {
+            match travelled.rem_euclid(turn) {
+                0.0 => turn,
+                wrapped => wrapped,
+            }
+        };
+        (t0, t0 + span)
+    }
+
+    /// The measure an end bounded at parameter `t` stands at after a span
+    /// starting at measure `start` (#304): the measure at `t`; on a closed
+    /// conic at its angle in `[0, 2 pi)`, a turn further where that is not
+    /// after `start` (the span crosses the seam, ends on it, or is the
+    /// whole turn).
+    fn measure_after(self, t: Scalar, start: Scalar) -> GeomResult<Scalar> {
+        let m = self.measure_at(self.turned(t))?;
+        if self.is_closed_conic() && m <= start {
+            return Ok(self.length()?.unwrap_or(Scalar::INFINITY) + m);
+        }
+        Ok(m)
+    }
+
+    /// The native parameter a path piece bound names on the curve (#304):
+    /// a parameter as it is, a point the one parameter naming it (see
+    /// [the path-bound module](super::path_bound)).
+    ///
+    /// # Errors
+    ///
+    /// A bound that is not finite; a point off the curve, named by several
+    /// parameters, or on a curve this evaluator does not invert; each by
+    /// name.
+    pub fn parameter_at_bound(self, bound: PathBound) -> GeomResult<Scalar> {
+        super::path_bound::bound_parameter(self, bound)
     }
 
     /// A closed conic's measure `m` folded into one turn `[0, L]`.
@@ -571,24 +665,62 @@ impl<'c> StationPiece<'c> {
     /// the path piece is. An open end ([`PathPiece::open_end`], #298) is
     /// resolved first to where the curve ends by this evaluator's own
     /// length, the end [`Self::whole`] reads (see the
-    /// [module documentation](self#open-ends-298)).
+    /// [module documentation](self#open-ends-298)). A bound at a parameter
+    /// or a point ([`PathPiece::start_bound`], [`PathPiece::end_bound`],
+    /// #304) is resolved to the curve's parameter there
+    /// ([`StationCurve::parameter_at_bound`]) and that to its measure: a
+    /// piece bounded at both ends is [`Self::between_parameters`] (see the
+    /// [module documentation](self#bounds-at-a-parameter-or-a-point-304)).
     ///
     /// # Errors
     ///
-    /// As [`Self::between`], an open end on a curve with no bounded length,
-    /// and a piece kind this evaluator does not know, by name.
+    /// As [`Self::between`] and [`Self::between_parameters`], an open end on
+    /// a curve with no bounded length, an end both open and bounded, a
+    /// bound's refusals ([`StationCurve::parameter_at_bound`]), and a piece
+    /// kind this evaluator does not know, by name.
     pub fn from_path_piece(piece: &'c PathPiece) -> GeomResult<Self> {
         let curve = StationCurve::from_path_curve(&piece.curve)?;
-        let end = if piece.open_end {
-            curve.end()?
-        } else {
-            piece.end
+        if piece.open_end && piece.end_bound.is_some() {
+            return Err(invalid(
+                "station: a curve path piece whose end is both open and bounded by a parameter \
+                 or a point"
+                    .into(),
+            ));
+        }
+        let t0 = piece
+            .start_bound
+            .map(|bound| curve.parameter_at_bound(bound))
+            .transpose()?;
+        let t1 = piece
+            .end_bound
+            .map(|bound| curve.parameter_at_bound(bound))
+            .transpose()?;
+        let span = match (t0, t1) {
+            // Both ends at parameters: the piece between them, bitwise.
+            (Some(t0), Some(t1)) => {
+                let (t0, t1) = curve.wound(t0, t1);
+                Self::between_parameters(curve, t0, t1)?
+            }
+            _ => {
+                let start = match t0 {
+                    Some(t) => curve.measure_at(curve.turned(t))?,
+                    None => piece.start,
+                };
+                let end = if piece.open_end {
+                    curve.end()?
+                } else if let Some(t) = t1 {
+                    curve.measure_after(t, start)?
+                } else {
+                    piece.end
+                };
+                Self::between(curve, start, end)?
+            }
         };
         Ok(Self {
             reversed: piece.reversed,
             placement: piece.placement,
             placement_exact: piece.placement_exact,
-            ..Self::between(curve, piece.start, end)?
+            ..span
         })
     }
 

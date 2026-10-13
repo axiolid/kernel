@@ -150,12 +150,16 @@ pub use axiolid_curve_evaluate_contract::DistanceConvention;
 pub mod certify;
 pub mod composite;
 pub mod offset;
+pub mod path_bound;
 pub mod seam;
 pub mod window;
 
 pub use certify::{DistanceInterval, MAX_CERTIFIED_PANELS, POINT_ROUNDING, UNCERTIFIED_LENGTH};
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
 pub use offset::{offset_pieces, StationOffset, CUSP_TOLERANCE, OFFSET_TOLERANCE};
+pub use path_bound::{
+    point_bound_tolerance, PATH_POINT_AMBIGUOUS, PATH_POINT_OFF_CURVE, POINT_BOUND_UNSUPPORTED,
+};
 pub use seam::{
     exact_station_seams2, exact_station_seams3, station_seams2, station_seams3, Mitre, StationSeam,
     MITRE_TOLERANCE, SEAM_TANGENT_TOLERANCE,
