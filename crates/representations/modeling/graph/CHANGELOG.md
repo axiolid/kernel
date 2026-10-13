@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-13
+
 ### Fixed
 
 - JSON wire payloads (ADR 0085) now read every real back bit for bit, as the

@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.12 (2026-10-13) |
+| Latest release | 0.3.13 (2026-10-13) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,27 +54,16 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.12 (2026-10-13):
+Latest release, 0.3.13 (2026-10-13):
 
-### Added
+### Fixed
 
-- Run stations at their basis's start or end, measured by the kernel
-  (#303, ADR 0082 amendment): `RunStation` gains `basis_end:
-  Option<BasisEnd>` (a new `#[non_exhaustive]` enum, `Start` or `End`),
-  set by the constructors `RunStation::at_basis_start(offsets)` and
-  `RunStation::at_basis_end(offsets)`; `None`, the default, is the stated
-  `station.distance` as before. Such a station states the distance `0`,
-  which is not read; a resolver reads the start as `0` and the end as the
-  basis's length by the kernel's own measure. The graph refuses, as
-  `GraphError::InvalidStation` when the node is pushed, a start station
-  that is not the run's first, an end station that is not its last, and
-  either stating a distance other than `0`; the stated distances still
-  increase strictly, and whether the end comes after them is the
-  resolver's check.
-- Wire format 1.3 (ADR 0085 note): `RunStation.basis_end`, written only
-  when it is set. A graph using it is labelled 1.3; one not using it is
-  written exactly as before, as 1.0, 1.1 or 1.2. A 1.2 payload holding it
-  is refused as `UnknownField` `basis_end`, by the same test the writer
-  labels by. Golden payload `tests/wire/v1.3/every-kind.json`.
+- JSON wire payloads (ADR 0085) now read every real back bit for bit, as the
+  ADR promises. `serde_json` was used without its `float_roundtrip` feature,
+  whose fast parser lands one ulp off for about a quarter of ordinary
+  doubles (12.838242182209141 read back as its lower neighbour), in every
+  format version. CBOR was unaffected. A test now sweeps 6,000 doubles across
+  twenty magnitudes through both encodings. The fix is in parsing only, so
+  payloads already written are unchanged and now read back exactly.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

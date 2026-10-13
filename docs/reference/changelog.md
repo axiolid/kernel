@@ -3762,6 +3762,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.13 - 2026-10-13
+
+### Fixed
+
+- JSON wire payloads (ADR 0085) now read every real back bit for bit, as the
+  ADR promises. `serde_json` was used without its `float_roundtrip` feature,
+  whose fast parser lands one ulp off for about a quarter of ordinary
+  doubles (12.838242182209141 read back as its lower neighbour), in every
+  format version. CBOR was unaffected. A test now sweeps 6,000 doubles across
+  twenty magnitudes through both encodings. The fix is in parsing only, so
+  payloads already written are unchanged and now read back exactly.
+
 ### 0.3.12 - 2026-10-13
 
 ### Added

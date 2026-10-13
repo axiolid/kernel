@@ -24,7 +24,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-fixtures`](./crates/axiolid-fixtures) | `representation.fixtures` | 0.3.1 | Shared adversarial and degenerate geometry fixtures with provenance |
 | [`axiolid-linear`](./crates/axiolid-linear) | `representation.atomic` | 0.3.2 | Format-neutral line, ray, segment, and polyline representations |
 | [`axiolid-mesh`](./crates/axiolid-mesh) | `representation.discrete` | 0.3.3 | Triangle meshes: the discrete representation every backend consumes. |
-| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.12 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
+| [`axiolid-model`](./crates/axiolid-model) | `representation.graph` | 0.3.13 | Format-neutral geometry item tree. The currency between a format reader and a kernel. |
 | [`axiolid-pointcloud`](./crates/axiolid-pointcloud) | `representation.discrete` | 0.3.1 | Portable point-sampled geometry values with optional per-point channels. |
 | [`axiolid-primitive`](./crates/axiolid-primitive) | `representation.atomic` | 0.3.3 | Exact parametric primitive solids used as CSG leaves |
 | [`axiolid-profile`](./crates/axiolid-profile) | `representation.region` | 0.3.2 | Exact 2D profile representations for sweeps and sectioned solids |

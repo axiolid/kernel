@@ -82,7 +82,7 @@ axiolid = { path = "crates/facade/axiolid", version = "0.4.1", default-features 
 axiolid-core = { path = "crates/foundation/core", version = "0.3.2" }
 axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.3" }
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.1" }
-axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.12" }
+axiolid-model = { path = "crates/representations/modeling/graph", version = "0.3.13" }
 axiolid-primitive = { path = "crates/representations/analytic/primitive", version = "0.3.3" }
 axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.1" }
 axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.3.2" }

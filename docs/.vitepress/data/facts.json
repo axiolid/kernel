@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.12",
+      "released": "0.3.13",
       "released_date": "2026-10-13",
       "role": "representation.graph",
-      "version": "0.3.12"
+      "version": "0.3.13"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
