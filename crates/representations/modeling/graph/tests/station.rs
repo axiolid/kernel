@@ -822,3 +822,82 @@ fn a_station_along_a_composite_of_placed_segments_round_trips() {
     assert_eq!(graph.get(placed).unwrap().references(), vec![source, base]);
     assert_eq!(graph.get(base).unwrap().references(), vec![first, second]);
 }
+
+/// A run station at its basis's start or end (#303): built by its
+/// constructors with the distance `0`, kept as pushed; the graph refuses
+/// one out of place, one stating a distance, and stated distances out of
+/// order, but leaves the end's order to the resolver, which measures it.
+#[test]
+fn a_run_station_at_the_basis_s_ends_is_kept_and_refused_out_of_place() {
+    use axiolid_model::{BasisEnd, RunStation, SeamSide};
+    let offsets = StationOffsets::new(1.5, 0.0, 0.0);
+    let end = RunStation::at_basis_end(offsets);
+    let start = RunStation::at_basis_start(offsets);
+    assert_eq!(end.basis_end, Some(BasisEnd::End));
+    assert_eq!(start.basis_end, Some(BasisEnd::Start));
+    for station in [end, start] {
+        assert_eq!(station.station, Station::new(0.0, offsets));
+        assert_eq!(
+            (station.seam, station.seam_window),
+            (SeamSide::Outgoing, 0.0)
+        );
+    }
+    assert_eq!(RunStation::new(Station::at(1.0)).basis_end, None);
+    let windowed = end.with_seam_window(1e-3);
+    assert_eq!(windowed.basis_end, Some(BasisEnd::End));
+
+    let run = |stations: Vec<RunStation>| {
+        let mut b = GeometryGraphBuilder::new();
+        let basis = line(&mut b);
+        let relation = CurveRelation::OffsetsAtStations {
+            basis,
+            stations,
+            frame: StationFrame::Section,
+        };
+        b.push(GeometryNode::CurveRelation(relation.clone()))
+            .map(|id| (b.finish(vec![id]).unwrap(), id, relation))
+    };
+    // Kept as pushed: the end with only a start before it, a stated
+    // station far past any basis length (the resolver measures that), a
+    // windowed end.
+    for stations in [
+        vec![start, end],
+        vec![RunStation::new(Station::at(2.0)), windowed],
+        vec![start, RunStation::new(Station::at(1e9)), end],
+    ] {
+        let (graph, id, relation) = run(stations).unwrap();
+        assert_eq!(graph.get(id), Some(&GeometryNode::CurveRelation(relation)));
+    }
+    let stated = |d: Scalar| RunStation::new(Station::new(d, offsets));
+    let at = |mut station: RunStation, d: Scalar| {
+        station.station.distance = d;
+        station
+    };
+    for (stations, needle) in [
+        (
+            vec![stated(1.0), start, end],
+            "start is not the run's first",
+        ),
+        (vec![start, end, stated(2.0)], "end is not the run's last"),
+        (vec![end, end], "end is not the run's last"),
+        (vec![start, start], "start is not the run's first"),
+        (vec![stated(1.0), at(end, 5.0)], "other than 0"),
+        (vec![at(start, 1.0), stated(2.0)], "other than 0"),
+        (vec![stated(1.0), at(end, -0.5)], "other than 0"),
+        (vec![stated(1.0), at(end, Scalar::NAN)], "other than 0"),
+        (vec![start, stated(0.0), end], "increase strictly"),
+        (vec![stated(2.0), stated(1.0), end], "increase strictly"),
+        (vec![end], "at least two"),
+    ] {
+        invalid(run(stations).map(|(_, id, _)| id), needle);
+    }
+    // The end's offsets are checked like any station's.
+    let mut bad = end;
+    bad.station.offsets.lateral = Scalar::INFINITY;
+    invalid(
+        run(vec![stated(1.0), bad]).map(|(_, id, _)| id),
+        "offset is not finite",
+    );
+    // `-0.0` is a distance of `0`.
+    assert!(run(vec![stated(1.0), at(end, -0.0)]).is_ok());
+}

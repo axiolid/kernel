@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Run stations at their basis's start or end, measured by the kernel
+  (#303, ADR 0082 amendment): `RunStation` gains `basis_end:
+  Option<BasisEnd>` (a new `#[non_exhaustive]` enum, `Start` or `End`),
+  set by the constructors `RunStation::at_basis_start(offsets)` and
+  `RunStation::at_basis_end(offsets)`; `None`, the default, is the stated
+  `station.distance` as before. Such a station states the distance `0`,
+  which is not read; a resolver reads the start as `0` and the end as the
+  basis's length by the kernel's own measure. The graph refuses, as
+  `GraphError::InvalidStation` when the node is pushed, a start station
+  that is not the run's first, an end station that is not its last, and
+  either stating a distance other than `0`; the stated distances still
+  increase strictly, and whether the end comes after them is the
+  resolver's check.
+- Wire format 1.3 (ADR 0085 note): `RunStation.basis_end`, written only
+  when it is set. A graph using it is labelled 1.3; one not using it is
+  written exactly as before, as 1.0, 1.1 or 1.2. A 1.2 payload holding it
+  is refused as `UnknownField` `basis_end`, by the same test the writer
+  labels by. Golden payload `tests/wire/v1.3/every-kind.json`.
+
 ## [0.3.11] - 2026-10-12
 
 ### Added

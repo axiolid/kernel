@@ -107,8 +107,10 @@ MUTANTS = [
      '        if previous.is_some_and(|before| station.distance <= before) {',
      '        if previous.is_some_and(|before| station.distance < before) {', [MODEL]),
     ('one station accepted', V,
-     '    if stations.len() < 2 {',
-     '    if stations.len() < 1 {', [MODEL]),
+     '    stations: impl ExactSizeIterator<Item = &\'a Station>,\n'
+     ') -> Result<(), GraphError> {\n    if stations.len() < 2 {',
+     '    stations: impl ExactSizeIterator<Item = &\'a Station>,\n'
+     ') -> Result<(), GraphError> {\n    if stations.len() < 1 {', [MODEL]),
     ('non-finite offsets accepted', V,
      '    if !station.offsets.is_finite() {',
      '    if false {', [MODEL]),

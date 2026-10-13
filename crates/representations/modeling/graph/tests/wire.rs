@@ -20,9 +20,9 @@ use axiolid_curve::{
 use axiolid_mesh::{AttributeChannel, Blend, NormalAttribute, PolygonFace, PolygonMesh, TriMesh};
 use axiolid_model::wire::{self, FormatVersion, WireError, FORMAT_NAME, FORMAT_VERSION};
 use axiolid_model::{
-    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
-    GraphError, Instance, InstanceAtStation, MasterRepresentation, NodeId, OpenProfile,
-    OrientedCurveStation, PointOnCurve, PointOnSurface, RunStation, SeamSide, Section,
+    BasisEnd, CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder,
+    GeometryNode, GraphError, Instance, InstanceAtStation, MasterRepresentation, NodeId,
+    OpenProfile, OrientedCurveStation, PointOnCurve, PointOnSurface, RunStation, SeamSide, Section,
     SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets, StationOrientation,
     StationedOpenSection, StationedSection, SurfaceRelation, SurfaceSides, Transition,
     TrimSelector, TrimmingPreference,
@@ -944,6 +944,25 @@ fn fixture() -> (GeometryGraph, Coverage) {
                 frame,
             }),
     );
+    // Format 1.3: an offset whose first and last stations stand at its
+    // basis's start and end, measured by the kernel (#303).
+    let ends = vec![
+        RunStation::at_basis_start(StationOffsets::new(0.5, 0.0, 0.0)),
+        RunStation::new(Station::new(1.0, StationOffsets::new(0.5, 0.0, 0.0))),
+        RunStation::at_basis_end(StationOffsets::new(0.75, 0.0, 0.0)).with_seam_window(0.001),
+    ];
+    coverage.all(
+        "BasisEnd",
+        &ends
+            .iter()
+            .filter_map(|station| station.basis_end)
+            .collect::<Vec<_>>(),
+    );
+    relations.push(CurveRelation::OffsetsAtStations {
+        basis: line_3d,
+        stations: ends,
+        frame: StationFrame::Section,
+    });
     coverage.all("CurveRelation", &relations);
     let relations: Vec<NodeId> = relations
         .into_iter()
@@ -1289,6 +1308,7 @@ fn every_enum() -> Vec<(&'static str, BTreeSet<String>)> {
         ("SurfaceRelation", variants_of::<SurfaceRelation>()),
         ("StationFrame", variants_of::<StationFrame>()),
         ("SeamSide", variants_of::<SeamSide>()),
+        ("BasisEnd", variants_of::<BasisEnd>()),
         ("BooleanOperator", variants_of::<BooleanOperator>()),
         ("Curve2", variants_of::<Curve2>()),
         ("Curve3", variants_of::<Curve3>()),
@@ -1577,7 +1597,7 @@ fn every_golden_payload_is_written_back_identically_under_its_version() {
         written.push(label);
     }
     written.sort();
-    assert_eq!(written, ["1.0", "1.1", "1.2"]);
+    assert_eq!(written, ["1.0", "1.1", "1.2", "1.3"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1702,7 +1722,7 @@ fn an_unknown_field_is_refused_by_name() {
 
 #[test]
 fn a_version_this_reader_does_not_read_is_refused_before_the_graph() {
-    for found in ["2.0", "1.3", "0.9", "1", "one", "1.0.0", ""] {
+    for found in ["2.0", "1.4", "0.9", "1", "one", "1.0.0", ""] {
         let mut payload = small_payload();
         payload["version"] = json!(found);
         // Even with content this reader does not know: the version is
@@ -2093,8 +2113,8 @@ fn a_node_reference_does_not_deserialise_outside_a_graph_payload() {
 
 #[test]
 fn the_format_version_is_named_in_every_payload() {
-    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 2));
-    assert_eq!(FORMAT_VERSION.to_string(), "1.2");
+    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 3));
+    assert_eq!(FORMAT_VERSION.to_string(), "1.3");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
     // A graph without windows is labelled 1.0, the lowest version that
@@ -2378,11 +2398,44 @@ fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
 // Format 1.2: seam sides and windows on run stations (#301)
 // ---------------------------------------------------------------------------
 
-/// `value` with what format 1.2 added taken out: every
+/// `value` with what format 1.3 added taken out (#303): every run station
+/// at its basis's start stated at `0`, which it is, and every one at its
+/// basis's end stated one past its predecessor. The fixture's 1.2 content
+/// stays as it is.
+fn without_basis_ends(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(stations) = object
+                .get_mut("OffsetsAtStations")
+                .and_then(|offsets| offsets["stations"].as_array_mut())
+            {
+                let mut previous = 0.0;
+                for station in stations {
+                    let station = station.as_object_mut().unwrap();
+                    if station.remove("basis_end") == Some(json!("End")) {
+                        station["station"]["distance"] = json!(previous + 1.0);
+                    }
+                    previous = station["station"]["distance"].as_f64().unwrap();
+                }
+            }
+            object.values_mut().for_each(without_basis_ends);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_basis_ends),
+        _ => {}
+    }
+}
+
+/// `value` with what formats 1.2 and 1.3 added taken out: every
 /// `OffsetsAtStations` written as the `OffsetByStations` of its plain
-/// stations, and every section at a station without its side and window.
-/// The fixture's 1.1 content stays as it is.
+/// stations (its basis's ends stated, [`without_basis_ends`]), and every
+/// section at a station without its side and window. The fixture's 1.1
+/// content stays as it is.
 fn without_run_seams(value: &mut Value) {
+    without_basis_ends(value);
+    without_side_or_window(value);
+}
+
+fn without_side_or_window(value: &mut Value) {
     match value {
         Value::Object(object) => {
             if let Some(mut offsets) = object.remove("OffsetsAtStations") {
@@ -2399,9 +2452,9 @@ fn without_run_seams(value: &mut Value) {
                 object.remove("seam");
                 object.remove("seam_window");
             }
-            object.values_mut().for_each(without_run_seams);
+            object.values_mut().for_each(without_side_or_window);
         }
-        Value::Array(items) => items.iter_mut().for_each(without_run_seams),
+        Value::Array(items) => items.iter_mut().for_each(without_side_or_window),
         _ => {}
     }
 }
@@ -2463,7 +2516,7 @@ fn plain_station_pointers(value: &Value, at: &str, found: &mut Vec<String>) {
 fn a_side_or_window_on_any_run_station_and_only_that_selects_one_two() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.2", "the fixture uses 1.2");
+    assert_eq!(payload["version"], "1.3", "the fixture uses 1.3");
     without_run_seams(&mut payload);
     payload["version"] = json!("1.1");
 
@@ -2732,4 +2785,229 @@ fn run_station_sides_and_windows_round_trip_and_defaults_are_not_written() {
             "{path}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Format 1.3: run stations at their basis's ends (#303)
+// ---------------------------------------------------------------------------
+
+/// The node kinds holding a plain station that refuse a field of a run
+/// station, as the 1.2 carrier test lists them.
+fn plain_station_kinds() -> BTreeSet<String> {
+    [
+        "CurveRelation::OffsetByStations",
+        "CurveRelation::OffsetsAtStations",
+        "CurveStation",
+        "InstanceAtStation",
+        "OrientedCurveStation",
+        "SolidOperation::SectionsAtStations",
+        "SolidOperation::StationedSpine",
+        "SurfaceRelation::OpenSectionsAtStations",
+        "SurfaceRelation::SectionedSurface",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+/// A graph whose run stations all state their distance is labelled as
+/// before 1.3; one run station at its basis's start or end lifts it to
+/// 1.3, and a 1.2 reader refuses that payload by the field's name. Every
+/// plain station of the every-kind fixture, and every object holding one,
+/// is given `basis_end` (`"Start"` and `"End"`, its distance set to `0`)
+/// in turn, alone: exactly the run stations of `OffsetsAtStations` carry
+/// it (where its place in the run is wrong, validation refuses it), and
+/// every other station refuses it as an unknown field.
+#[test]
+fn a_basis_end_on_any_run_station_and_only_that_selects_one_three() {
+    let (graph, _) = fixture();
+    let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    assert_eq!(payload["version"], "1.3", "the fixture uses 1.3");
+    without_basis_ends(&mut payload);
+    payload["version"] = json!("1.2");
+    assert!(!payload.to_string().contains("basis_end"));
+
+    let plain = read_json(&payload).unwrap();
+    assert_eq!(
+        version_of(&plain.to_json().unwrap()),
+        "1.2",
+        "the fixture's run seams"
+    );
+    assert_eq!(cbor_version_of(&plain.to_cbor().unwrap()), "1.2");
+
+    let mut pointers = Vec::new();
+    plain_station_pointers(&payload["graph"]["nodes"], "", &mut pointers);
+    let mut carriers = BTreeSet::new();
+    let mut lifted_kinds = BTreeSet::new();
+    let mut others = BTreeSet::new();
+    for pointer in &pointers {
+        let index: usize = pointer.split('/').nth(1).unwrap().parse().unwrap();
+        let kind = kind_of(&payload["graph"]["nodes"][index]);
+        for end in ["Start", "End"] {
+            let mut lifted = payload.clone();
+            lifted["version"] = json!("1.3");
+            let object = lifted["graph"]["nodes"]
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap();
+            object.insert("basis_end".into(), json!(end));
+            match object.get_mut("station") {
+                Some(station) if station.get("distance").is_some() => {
+                    station["distance"] = json!(0.0);
+                }
+                _ => {
+                    object.insert("distance".into(), json!(0.0));
+                }
+            }
+            let what = format!("basis_end {end} at {pointer}");
+            match read_json(&lifted) {
+                Ok(graph) => {
+                    carriers.insert(kind.clone());
+                    lifted_kinds.insert(kind.clone());
+                    assert_eq!(version_of(&graph.to_json().unwrap()), "1.3", "{what}");
+                    assert_eq!(
+                        cbor_version_of(&graph.to_cbor().unwrap()),
+                        "1.3",
+                        "CBOR: {what}"
+                    );
+                    lifted["version"] = json!("1.2");
+                    refused(
+                        &lifted,
+                        &WireError::UnknownField {
+                            field: "basis_end".into(),
+                            version: FormatVersion::new(1, 2),
+                        },
+                    );
+                }
+                Err(WireError::InvalidGraph {
+                    error: GraphError::InvalidStation { .. },
+                    ..
+                }) => {
+                    carriers.insert(kind.clone());
+                }
+                Err(WireError::UnknownField { field, .. }) => {
+                    assert_eq!(field, "basis_end", "{what}");
+                    others.insert(kind.clone());
+                }
+                Err(other) => panic!("{what}: {other}"),
+            }
+        }
+    }
+    let offsets = BTreeSet::from(["CurveRelation::OffsetsAtStations".to_owned()]);
+    assert_eq!(
+        carriers, offsets,
+        "every node kind whose run stations stand at a basis end"
+    );
+    assert_eq!(lifted_kinds, offsets, "and each one reads in place");
+    assert_eq!(
+        others,
+        plain_station_kinds(),
+        "every node kind holding a plain station (a run station's own \
+         station refuses the field too: it belongs to the run station)"
+    );
+}
+
+/// Run stations at their basis's ends round-trip through both encodings;
+/// a stated station writes no `basis_end`, so a run of them stays 1.2; a
+/// basis end it does not know is refused by name, one stating a distance
+/// by validation, and every one in a 1.2 payload as an unknown field.
+#[test]
+fn run_station_basis_ends_round_trip_and_a_stated_station_writes_none() {
+    let offsets = StationOffsets::new(1.5, -0.25, 0.0);
+    let stations = vec![
+        RunStation::at_basis_start(offsets),
+        RunStation::new(Station::new(4.0, offsets)).with_seam_side(SeamSide::Incoming),
+        RunStation::at_basis_end(offsets).with_seam_window(1e-3),
+    ];
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let offset = builder
+        .push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis: line,
+                stations: stations.clone(),
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let graph = builder.finish(vec![offset]).unwrap();
+    let text = graph.to_json().unwrap();
+    assert_eq!(version_of(&text), "1.3");
+    assert_eq!(text.matches("\"basis_end\":\"Start\"").count(), 1, "{text}");
+    assert_eq!(text.matches("\"basis_end\":\"End\"").count(), 1, "{text}");
+    assert_eq!(text.matches("basis_end").count(), 2, "{text}");
+    for read in [
+        GeometryGraph::from_json(&text).unwrap(),
+        GeometryGraph::from_cbor(&graph.to_cbor().unwrap()).unwrap(),
+    ] {
+        let Some(GeometryNode::CurveRelation(CurveRelation::OffsetsAtStations {
+            stations: got,
+            ..
+        })) = read.get(read.roots()[0])
+        else {
+            panic!("not an offset at run stations");
+        };
+        assert_eq!(*got, stations);
+        assert_eq!(read.to_json().unwrap(), text);
+    }
+    let payload: Value = serde_json::from_str(&text).unwrap();
+    let relation = payload["graph"]["nodes"][1].clone();
+    refused(
+        &relation_payload("1.2", &relation),
+        &WireError::UnknownField {
+            field: "basis_end".into(),
+            version: FormatVersion::new(1, 2),
+        },
+    );
+    for version in ["1.0", "1.1"] {
+        refused(
+            &relation_payload(version, &relation),
+            &WireError::UnknownKind {
+                kind: "OffsetsAtStations".into(),
+                version: FormatVersion::parse(version).unwrap(),
+            },
+        );
+    }
+    // An unknown end, and an end that states a distance.
+    let pointer = "/CurveRelation/OffsetsAtStations/stations/2";
+    let mut unknown = relation.clone();
+    unknown.pointer_mut(pointer).unwrap()["basis_end"] = json!("Middle");
+    refused(
+        &relation_payload("1.3", &unknown),
+        &WireError::UnknownKind {
+            kind: "Middle".into(),
+            version: FormatVersion::new(1, 3),
+        },
+    );
+    let mut stated = relation.clone();
+    stated.pointer_mut(pointer).unwrap()["station"]["distance"] = json!(9.0);
+    assert!(
+        matches!(
+            read_json(&relation_payload("1.3", &stated)),
+            Err(WireError::InvalidGraph {
+                node: Some(1),
+                error: GraphError::InvalidStation { .. },
+            })
+        ),
+        "an end stating a distance"
+    );
+    // A run of stated stations writes no basis end: the 1.2 graph.
+    let mut builder = GeometryGraphBuilder::new();
+    let line = builder.push(GeometryNode::Curve3(line3())).unwrap();
+    let offset = builder
+        .push(GeometryNode::CurveRelation(
+            CurveRelation::OffsetsAtStations {
+                basis: line,
+                stations: vec![
+                    RunStation::new(Station::at(0.0)),
+                    RunStation::new(Station::at(2.0)),
+                ],
+                frame: StationFrame::Section,
+            },
+        ))
+        .unwrap();
+    let plain = builder.finish(vec![offset]).unwrap().to_json().unwrap();
+    assert_eq!(version_of(&plain), "1.2");
+    assert!(!plain.contains("basis_end"), "{plain}");
 }

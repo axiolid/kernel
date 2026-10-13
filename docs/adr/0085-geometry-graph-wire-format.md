@@ -327,3 +327,35 @@ rules above.
   `scripts/probe_seam_window_mutants.py` breaks the 1.2 refusal, the label,
   the variant's test, a section's side, a `-0.0` window and each carrier;
   each is caught.
+
+## Note 2026-10-13: format 1.3 (#303)
+
+Format 1.3 adds run stations at their basis's ends (ADR 0082's #303
+amendment), so `FORMAT_VERSION` is `1.3`, a minor change under the version
+rules above.
+
+- **What it adds.** One optional field on `RunStation` (the stations of
+  `CurveRelation::OffsetsAtStations`), `basis_end`, `"Start"` or `"End"`,
+  omitted when absent (a stated distance) and read so. Such a station
+  writes its distance `0`, which validation requires.
+- **Its feature test** (#297's rule). `wire::required_version` raises the
+  version to 1.3 when a run station writes `basis_end`. The run stations
+  are found by one match naming every node kind and every variant of the
+  curve relations, so a new carrier cannot be added without deciding. The
+  reader refuses the same test in a 1.2 payload as `UnknownField { field:
+  "basis_end" }` (an older payload refuses `OffsetsAtStations` itself by
+  kind). A graph that uses nothing 1.3 added is written exactly as before,
+  labelled 1.0, 1.1 or 1.2.
+- **Golden payloads.** `tests/wire/v1.0/` to `v1.2/` are read and written
+  back byte for byte under their own versions; `tests/wire/v1.3/every-kind.json`
+  adds an `OffsetsAtStations` from its basis's start to its end (the end
+  with a window), and is what today's writer writes.
+- **Guards.** A test gives every plain station of the every-kind fixture,
+  and every object holding one, `basis_end` (`"Start"`, `"End"`) in turn,
+  found by shape in the payload: exactly the run stations of
+  `OffsetsAtStations` accept it (refused by validation where their place
+  in the run is wrong), each placement that validates lifting the payload
+  to 1.3 (JSON and CBOR) and refused in a 1.2 payload; every other station
+  refuses it as an unknown field. `scripts/probe_run_basis_end_mutants.py`
+  writes an absent end, reads one in a 1.2 payload, never labels 1.3 and
+  ignores the carrier; each is caught.

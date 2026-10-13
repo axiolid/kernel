@@ -11,8 +11,9 @@ use std::collections::HashSet;
 use axiolid_curve::{BSplineCurve2, Curve2};
 
 use crate::{
-    CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId, OrientedCurveStation,
-    SolidOperation, Station, StationOrientation, SurfaceRelation, TrimSelector, TrimmingPreference,
+    BasisEnd, CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId,
+    OrientedCurveStation, RunStation, SolidOperation, Station, StationOrientation, SurfaceRelation,
+    TrimSelector, TrimmingPreference,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -575,6 +576,13 @@ fn validate_station_run<'a>(
             detail: "at least two stations are required",
         });
     }
+    validate_station_order(stations)
+}
+
+/// Well-formed stations, strictly increasing in distance.
+fn validate_station_order<'a>(
+    stations: impl Iterator<Item = &'a Station>,
+) -> Result<(), GraphError> {
     let mut previous: Option<f64> = None;
     for station in stations {
         validate_station(station)?;
@@ -584,6 +592,45 @@ fn validate_station_run<'a>(
             });
         }
         previous = Some(station.distance);
+    }
+    Ok(())
+}
+
+/// An offset run's stations at its basis's ends (#303): at least two
+/// stations; one at the start is the run's first and one at the end its
+/// last, each stating the distance `0`, which is not read. The end
+/// station's offsets are checked here, since it has no distance to order
+/// the others by.
+fn validate_run_ends(stations: &[RunStation]) -> Result<(), GraphError> {
+    if stations.len() < 2 {
+        return Err(GraphError::InvalidStation {
+            detail: "at least two stations are required",
+        });
+    }
+    let last = stations.len() - 1;
+    for (index, station) in stations.iter().enumerate() {
+        let Some(end) = station.basis_end else {
+            continue;
+        };
+        if station.station.distance != 0.0 {
+            return Err(GraphError::InvalidStation {
+                detail: "a station at the basis's start or end states a distance other than 0",
+            });
+        }
+        match end {
+            BasisEnd::Start if index != 0 => {
+                return Err(GraphError::InvalidStation {
+                    detail: "a station at the basis's start is not the run's first",
+                });
+            }
+            BasisEnd::End if index != last => {
+                return Err(GraphError::InvalidStation {
+                    detail: "a station at the basis's end is not the run's last",
+                });
+            }
+            BasisEnd::Start | BasisEnd::End => {}
+        }
+        validate_station(&station.station)?;
     }
     Ok(())
 }
@@ -757,7 +804,13 @@ fn validate_curve_relation(
             for station in stations {
                 validate_seam_window(station.seam_window)?;
             }
-            validate_station_run(stations.iter().map(|station| &station.station))
+            validate_run_ends(stations)?;
+            // A station at the basis's end has no distance to order by; the
+            // resolver checks the order once it has measured the end.
+            let stated = stations
+                .iter()
+                .filter(|station| station.basis_end != Some(BasisEnd::End));
+            validate_station_order(stated.map(|station| &station.station))
         }
     }
 }

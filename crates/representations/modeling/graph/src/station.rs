@@ -157,6 +157,41 @@
 //!   jump (a banked curve's roll) is placed in the frame of the piece its
 //!   side names.
 //!
+//! # Run stations at the basis's ends (#303)
+//!
+//! An offset by distances often continues its first and last offsets
+//! unchanged out to its basis's ends (IFC 4.3 ADD2 8.9.3.42.3), so its
+//! run needs a station AT the basis's end. Where the basis's length has
+//! no closed form (an offset beside a gradient curve, a clothoid or a
+//! B-spline, a B-spline itself), a caller without a provider cannot state
+//! that distance. A [`RunStation`] may therefore stand at the basis's
+//! start or end without stating it ([`RunStation::at_basis_start`],
+//! [`RunStation::at_basis_end`]): its [`RunStation::basis_end`] names
+//! which, and its stated distance is `0` and not read.
+//!
+//! - **Resolution.** A resolver reads the start as distance `0`, where the
+//!   station measure starts on every curve, and the end as the basis's
+//!   length by the kernel's own measure of it, the number a curve path's
+//!   open end resolves to (#298): the length of the flattened basis
+//!   (`axiolid-mesh-compile`'s `station::curve_path`) as
+//!   `axiolid-evaluate`'s `CompositeBasis` measures it, bitwise; on an
+//!   unbounded line its parameter domain end, `|direction|`, as inside a
+//!   composite. A station at the end is then the same station stated at
+//!   that number.
+//! - **Order.** The graph refuses, when the node is pushed, a station at
+//!   the start that is not the run's first, one at the end that is not its
+//!   last, and either stating a distance other than `0`; the stated
+//!   distances must increase strictly from a start station's `0`. Whether
+//!   the end comes after the last stated station needs the length, so a
+//!   resolver refuses by name a run whose resolved distances do not
+//!   increase strictly (a stated station at or past the basis's end).
+//! - **Windows.** Snapping (#301) applies after resolution: a station at
+//!   the end with a window snaps onto the one seam within the window of
+//!   the resolved end, by the #294 rule.
+//!
+//! Only the stations of a [`CurveRelation::OffsetsAtStations`] carry it;
+//! a [`SectionAtStation`] states its distance.
+//!
 //! [`SolidOperation::SectionsAtStations`]: crate::SolidOperation::SectionsAtStations
 //! [`SolidOperation::StationedSpine`]: crate::SolidOperation::StationedSpine
 //! [`SurfaceRelation::OpenSectionsAtStations`]: crate::SurfaceRelation::OpenSectionsAtStations
@@ -681,15 +716,36 @@ impl From<StationedOpenSection> for SectionAtStation {
     }
 }
 
+/// Which end of its basis a [`RunStation`] stands at, measured by the
+/// kernel (#303; see the
+/// [module documentation](self#run-stations-at-the-basiss-ends-303)).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub enum BasisEnd {
+    /// The basis's start: distance `0`.
+    Start,
+    /// The basis's end: its length, by the kernel's own measure.
+    End,
+}
+
 /// A station of an offset run with the side of a seam it reads and its
 /// seam-snapping window (#301): the general form of the plain [`Station`]
 /// a [`CurveRelation::OffsetByStations`] takes, used by
-/// [`CurveRelation::OffsetsAtStations`].
+/// [`CurveRelation::OffsetsAtStations`]. It may also stand at its basis's
+/// start or end, its distance measured by the kernel (#303).
 ///
-/// Built with [`RunStation::new`] and the `with_` methods, so that fields
-/// can be added without breaking callers. See the
+/// Built with [`RunStation::new`], [`RunStation::at_basis_start`],
+/// [`RunStation::at_basis_end`] and the `with_` methods, so that fields can
+/// be added without breaking callers. See the
 /// [module documentation](self#seam-windows-on-run-stations-301) for how a
-/// run reads the side and the window.
+/// run reads the side and the window, and
+/// [its #303 section](self#run-stations-at-the-basiss-ends-303) for the
+/// basis's ends.
 ///
 /// [`CurveRelation::OffsetByStations`]: crate::CurveRelation::OffsetByStations
 /// [`CurveRelation::OffsetsAtStations`]: crate::CurveRelation::OffsetsAtStations
@@ -715,6 +771,19 @@ pub struct RunStation {
     /// `+0.0`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "no_window"))]
     pub seam_window: Scalar,
+    /// The end of the basis the station stands at, its distance measured
+    /// by the kernel (#303): `None`, the default, for the stated
+    /// `station.distance`; otherwise that distance is `0` and not read
+    /// (see the
+    /// [module documentation](self#run-stations-at-the-basiss-ends-303)).
+    ///
+    /// Format 1.3 of the graph's wire format (ADR 0085): omitted when it
+    /// is `None`, and an absent end reads as `None`.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub basis_end: Option<BasisEnd>,
 }
 
 impl RunStation {
@@ -725,7 +794,28 @@ impl RunStation {
             station,
             seam: SeamSide::Outgoing,
             seam_window: 0.0,
+            basis_end: None,
         }
+    }
+
+    /// A station at the basis's start with `offsets` (#303): distance `0`,
+    /// reading the outgoing piece, with no window.
+    #[must_use]
+    pub const fn at_basis_start(offsets: StationOffsets) -> Self {
+        let mut station = Self::new(Station::new(0.0, offsets));
+        station.basis_end = Some(BasisEnd::Start);
+        station
+    }
+
+    /// A station at the basis's end with `offsets` (#303), reading the
+    /// outgoing piece, with no window: its distance is the basis's length
+    /// by the kernel's own measure, which the caller need not know (see
+    /// the [module documentation](self#run-stations-at-the-basiss-ends-303)).
+    #[must_use]
+    pub const fn at_basis_end(offsets: StationOffsets) -> Self {
+        let mut station = Self::new(Station::new(0.0, offsets));
+        station.basis_end = Some(BasisEnd::End);
+        station
     }
 
     /// The same station reading `side` of a seam it stands on, where its
