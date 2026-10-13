@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
+  amendment): `PathBound { Parameter, Point }` and the fields
+  `PathPiece::start_bound` and `PathPiece::end_bound`, set by
+  `PathPiece::between_parameters(curve, t0, t1)`,
+  `PathPiece::bounded(curve, start, end)`, `PathPiece::with_start` and
+  `PathPiece::with_end`, leave a span's start or end distance to the
+  evaluator, which resolves a point to its parameter and a parameter to its
+  distance in the curve's station measure; so a caller without a provider
+  can build a trim of an ellipse or a B-spline at interior parameters or
+  points. The `start` or `end` beside a bound holds an infinity, which
+  nothing reads; `PathPiece::length` is infinite and `PathPiece::is_stated`
+  false for a bounded piece (an offset over a bounded base included).
+
 ## [0.3.8] - 2026-10-12
 
 ### Added

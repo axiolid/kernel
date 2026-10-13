@@ -50,6 +50,28 @@
 //! evaluator has resolved it, an open piece has no length here:
 //! [`PathPiece::length`] and [`CurvePath::length`] are infinite.
 //!
+//! # Bounds at a parameter or a point (#304)
+//!
+//! A trim of an ellipse or a B-spline at an interior native parameter, or
+//! at a point, has a station-measure distance that is itself a
+//! quadrature, so a caller without a provider cannot state it either. A
+//! piece's start and end may therefore be given as a [`PathBound`]
+//! ([`PathPiece::between_parameters`], [`PathPiece::bounded`],
+//! [`PathPiece::with_start`], [`PathPiece::with_end`]): a native
+//! parameter of the curve, or a point on it in the curve's own
+//! coordinates (before the piece's placement; a 2D curve's points lie in
+//! `z = 0`). The bound is held in [`start_bound`](PathPiece::start_bound)
+//! or [`end_bound`](PathPiece::end_bound), and the stated `start` or `end`
+//! beside it holds an infinity, which nothing reads. The evaluator
+//! resolves a point to the one parameter naming it, refusing a point off
+//! the curve or one several parameters name, and a parameter to its
+//! distance in the station measure: exact where the curve's arc length to
+//! it is read from stored data, the same numerical estimate a piece
+//! between parameters is measured by otherwise. As both ends lie in the
+//! curve's direction, a reversed piece is bounded as a forward one is.
+//! Until an evaluator has resolved them, a bounded piece has no length
+//! here, as an open one has none.
+//!
 //! # Exactness
 //!
 //! A frame read on a piece is exact, rounding aside, only on a line placed,
@@ -71,11 +93,11 @@
 //!
 //! # Growth
 //!
-//! [`PathCurve`], [`PathPiece`], [`PathOffset`] and [`OffsetLaw`] are
-//! `#[non_exhaustive]`: a later piece kind is a new variant an evaluator
+//! [`PathCurve`], [`PathPiece`], [`PathBound`], [`PathOffset`] and
+//! [`OffsetLaw`] are `#[non_exhaustive]`: a later piece kind is a new variant an evaluator
 //! that does not know it refuses by name.
 
-use axiolid_core::{Scalar, Transform3, Vec3};
+use axiolid_core::{Point3, Scalar, Transform3, Vec3};
 
 use crate::{Curve2, Curve3};
 
@@ -230,6 +252,23 @@ impl PathOffset {
     }
 }
 
+/// Where a [`PathPiece`] starts or ends when its distance is not stated
+/// (#304): the evaluator resolves it to a distance in the curve's station
+/// measure; see the
+/// [module documentation](self#bounds-at-a-parameter-or-a-point-304).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PathBound {
+    /// At the curve's native parameter (a closed conic's angle, a
+    /// B-spline's knot-domain parameter, a polyline's segment index plus
+    /// fraction, a line's `t` along its direction).
+    Parameter(Scalar),
+    /// At the point of the curve, in the curve's own coordinates (before
+    /// the piece's placement; `z = 0` on a 2D curve). It must lie on the
+    /// curve, and only one parameter may name it.
+    Point(Point3),
+}
+
 /// One piece of a [`CurvePath`]: the span `[start, end]` of a curve in its
 /// station measure, traversed forwards or backwards, optionally carried by
 /// a rigid placement; see the [module documentation](self).
@@ -255,6 +294,15 @@ pub struct PathPiece {
     /// resolves with its own length (#298; see the
     /// [module documentation](self#open-ends-298)); `end` is then not read.
     pub open_end: bool,
+    /// Where the span starts when that is given as a parameter or a point
+    /// rather than a distance (#304; see the
+    /// [module documentation](self#bounds-at-a-parameter-or-a-point-304));
+    /// `start` is then not read.
+    pub start_bound: Option<PathBound>,
+    /// Where the span ends when that is given as a parameter or a point
+    /// (#304); `end` is then not read. An end is bounded or open, not
+    /// both: an evaluator refuses a piece whose end is both.
+    pub end_bound: Option<PathBound>,
 }
 
 impl PathPiece {
@@ -272,6 +320,8 @@ impl PathPiece {
             placement: None,
             placement_exact: true,
             open_end: false,
+            start_bound: None,
+            end_bound: None,
         }
     }
 
@@ -304,6 +354,54 @@ impl PathPiece {
         Self::to_end(curve, 0.0)
     }
 
+    /// The span of `curve` from its native parameter `t0` to `t1`, `t0 <
+    /// t1` (except on a closed conic, below), forwards and unplaced, no distance stated (#304; see the
+    /// [module documentation](self#bounds-at-a-parameter-or-a-point-304)).
+    /// A closed conic's angle runs round: its span runs from `t0` forwards
+    /// to `t1` within one turn, across its parameter seam where `t1` comes
+    /// before `t0`, as a trim of it in its sense does.
+    ///
+    /// Nothing is checked here: an evaluator refuses parameters that are
+    /// not finite, not increasing or outside the curve when it reads the
+    /// path.
+    #[must_use]
+    pub fn between_parameters(curve: PathCurve, t0: Scalar, t1: Scalar) -> Self {
+        Self::bounded(curve, PathBound::Parameter(t0), PathBound::Parameter(t1))
+    }
+
+    /// The span of `curve` from `start` to `end`, each a parameter or a
+    /// point, forwards and unplaced, no distance stated (#304). Both lie
+    /// in the curve's direction; on a closed conic the span runs from the
+    /// start forwards to the end within one turn.
+    ///
+    /// Nothing is checked here: an evaluator refuses a point off the
+    /// curve or named by several parameters, and an empty span, when it
+    /// reads the path.
+    #[must_use]
+    pub fn bounded(curve: PathCurve, start: PathBound, end: PathBound) -> Self {
+        Self::new(curve, 0.0, 0.0).with_start(start).with_end(end)
+    }
+
+    /// The same piece starting at `bound` rather than at a stated distance
+    /// (#304): `start` then holds `-Scalar::INFINITY`, which nothing reads.
+    #[must_use]
+    pub fn with_start(mut self, bound: PathBound) -> Self {
+        self.start = -Scalar::INFINITY;
+        self.start_bound = Some(bound);
+        self
+    }
+
+    /// The same piece ending at `bound` rather than at a stated distance
+    /// or at its curve's end (#304): `end` then holds `Scalar::INFINITY`,
+    /// which nothing reads, and the end is no longer open.
+    #[must_use]
+    pub fn with_end(mut self, bound: PathBound) -> Self {
+        self.end = Scalar::INFINITY;
+        self.open_end = false;
+        self.end_bound = Some(bound);
+        self
+    }
+
     /// The same span traversed the other way.
     #[must_use]
     pub fn reversed(mut self) -> Self {
@@ -324,20 +422,28 @@ impl PathPiece {
     }
 
     /// The span's length in its curve's station measure, `end - start`;
-    /// infinite where the end is open, which only an evaluator resolves.
+    /// infinite where the end is open or an end is bounded by a parameter
+    /// or a point, which only an evaluator resolves.
     #[must_use]
     pub fn length(&self) -> Scalar {
-        if self.open_end {
+        if !self.ends_stated() {
             return Scalar::INFINITY;
         }
         self.end - self.start
     }
 
-    /// Whether every length the piece spans is stated: its own end, and its
-    /// offset's base piece's (#298).
+    /// Whether both of its own ends are stated distances: neither open
+    /// (#298) nor bounded by a parameter or a point (#304).
+    fn ends_stated(&self) -> bool {
+        !self.open_end && self.start_bound.is_none() && self.end_bound.is_none()
+    }
+
+    /// Whether every length the piece spans is stated: its own ends (not
+    /// open, #298, nor bounded by a parameter or a point, #304), and its
+    /// offset's base piece's.
     #[must_use]
     pub fn is_stated(&self) -> bool {
-        !self.open_end
+        self.ends_stated()
             && match &self.curve {
                 PathCurve::Offset(offset) => offset.base.is_stated(),
                 _ => true,
@@ -540,5 +646,53 @@ mod tests {
         )));
         let piece = PathPiece::new(offset, 0.0, 1.0);
         assert!(!piece.open_end && !piece.is_stated());
+    }
+
+    #[test]
+    fn a_bound_is_left_to_the_evaluator_and_survives_composition() {
+        let line = PathCurve::Three(Curve3::Line(Line3 {
+            origin: Point3::ZERO,
+            direction: Vec3::X,
+        }));
+        let between = PathPiece::between_parameters(line.clone(), 0.5, 2.0);
+        assert_eq!(between.start_bound, Some(PathBound::Parameter(0.5)));
+        assert_eq!(between.end_bound, Some(PathBound::Parameter(2.0)));
+        assert!(!between.open_end && !between.is_stated());
+        assert_eq!(
+            (between.start, between.end),
+            (-Scalar::INFINITY, Scalar::INFINITY)
+        );
+        assert_eq!(between.length(), Scalar::INFINITY);
+        assert_eq!(between, between.clone());
+        // One bound is enough to leave the length unstated.
+        let point = PathBound::Point(Point3::new(3.0, 0.0, 0.0));
+        let start = PathPiece::new(line.clone(), 0.0, 4.0).with_start(point);
+        assert!(!start.is_stated() && start.end_bound.is_none());
+        assert_eq!((start.end, start.length()), (4.0, Scalar::INFINITY));
+        let end = PathPiece::new(line.clone(), 0.0, 4.0).with_end(point);
+        assert!(!end.is_stated() && end.start_bound.is_none());
+        assert_eq!((end.start, end.length()), (0.0, Scalar::INFINITY));
+        // A bound end closes an open one; an open end keeps a bound start.
+        let closed = PathPiece::whole(line.clone()).with_end(point);
+        assert!(!closed.open_end && closed.end_bound == Some(point));
+        let open = PathPiece::whole(line.clone()).with_start(point);
+        assert!(open.open_end && open.start_bound == Some(point));
+        // Reversing and placing keep the bounds, in the curve's direction.
+        let path = CurvePath::new(vec![between.clone(), open])
+            .reversed()
+            .placed(Transform3::from_rotation_z(0.5), true);
+        assert_eq!(path.pieces()[1].start_bound, between.start_bound);
+        assert_eq!(path.pieces()[1].end_bound, between.end_bound);
+        assert!(path.pieces()[1].reversed && path.pieces()[0].open_end);
+        assert_eq!(path.length(), Scalar::INFINITY);
+        // A stated offset over a bounded base is not stated.
+        let offset = PathCurve::Offset(Box::new(PathOffset::new(
+            between,
+            OffsetLaw::Planar { distance: 1.0 },
+        )));
+        assert!(!PathPiece::new(offset, 0.0, 1.0).is_stated());
+        let bounded = PathPiece::bounded(line, PathBound::Parameter(1.0), point);
+        assert_eq!(bounded.start_bound, Some(PathBound::Parameter(1.0)));
+        assert_eq!(bounded.end_bound, Some(point));
     }
 }
