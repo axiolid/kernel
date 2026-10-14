@@ -70,3 +70,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0083](./0083-profile-caps-use-a-certified-ear-clipper.md) | Profile caps use a certified ear clipper |
 | [0084](./0084-bounded-half-space-boundaries-are-profiles.md) | Bounded half-space boundaries may be profiles |
 | [0085](./0085-geometry-graph-wire-format.md) | The geometry graph has a versioned wire format |
+| [0086](./0086-curved-faces-invert-their-edges-without-pcurves.md) | Curved faces without pcurves invert their shared edge samples |

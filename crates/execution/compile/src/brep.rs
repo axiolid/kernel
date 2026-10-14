@@ -73,7 +73,9 @@
 //!   ([`axiolid_reference::bound::chord_bound2`]), which is an edge of a
 //!   triangle, so its surface point is within `G d` of that triangle's
 //!   bound, `G = sqrt(|S_u|^2 + |S_v|^2)` over the lens. A gap between
-//!   consecutive pcurves adds the same way.
+//!   consecutive pcurves adds the same way. An edge use without a pcurve
+//!   takes its parameters from its shared 3D samples inverted onto the
+//!   surface, and its lens is bounded as [`inversion`] describes (#310).
 //!
 //! A triangle the mesh drops because two of its corners share a vertex (a
 //! pole) still covers its parameter triangle; its bound counts only if the
@@ -103,6 +105,8 @@ use crate::planar::{
     clip_projected, clip_shell_face, edge_touches, newell_normal, plane_axes, Projection,
 };
 use crate::weld::EdgeSplits;
+
+mod inversion;
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -895,19 +899,38 @@ fn seed_grid_vertices(
     Ok(Some((grid, next_local)))
 }
 
-/// Tessellate a face whose support surface is curved.
-///
-/// The face's boundary must be stated in the surface's parameter domain:
-/// every edge use needs a pcurve. Without them the trim is unknown, and
-/// guessing it by inverting the surface is not generally solvable. A
-/// missing pcurve is therefore refused, not approximated.
-///
-/// The parameter-space boundary gives a `(u, v)` polygon. Its bounding box
-/// is the patch actually sampled, so a half-cylinder costs half a cylinder
-/// rather than a full revolution clipped afterwards.
-// Shared boundary samples, keyed canonically in the topological edge's
-// start-to-end direction. Interior refinement is deliberately face-local.
-type EdgeSamples = HashMap<axiolid_topology::EdgeId, (Vec<u32>, Orientation)>;
+/// Shared boundary samples, keyed by edge. Interior refinement is
+/// deliberately face-local.
+type EdgeSamples = HashMap<axiolid_topology::EdgeId, SharedEdge>;
+
+/// One edge's samples, as the first face to reach it stored them.
+struct SharedEdge {
+    /// Mesh indices, both endpoints included, in the direction of `sense`.
+    indices: Vec<u32>,
+    /// The direction of the edge use that sampled it.
+    sense: Orientation,
+    /// The certified bounds of each span on the edge's 3D curve, in the
+    /// same direction, when the samples were taken from that curve (#310);
+    /// `None` for samples taken through a pcurve.
+    spans: Option<Vec<inversion::SpanBound>>,
+}
+
+impl SharedEdge {
+    /// The indices and span bounds in the direction of a use with `sense`.
+    /// The COMPLETE endpoint-inclusive sequence is reversed: reversing an
+    /// endpoint-excluding one shifts every sample by one segment.
+    fn in_direction(&self, sense: Orientation) -> (Vec<u32>, Option<Vec<inversion::SpanBound>>) {
+        let mut indices = self.indices.clone();
+        let mut spans = self.spans.clone();
+        if self.sense != sense {
+            indices.reverse();
+            if let Some(spans) = spans.as_mut() {
+                spans.reverse();
+            }
+        }
+        (indices, spans)
+    }
+}
 type WeldedVertices = HashMap<axiolid_topology::VertexId, u32>;
 type LocalEdgeKey = (u32, u32);
 
@@ -1363,6 +1386,8 @@ fn curved_boundary(
         winding_reversed: false,
     };
     let mut rings: Vec<CurvedRing> = Vec::with_capacity(face.bounds.len());
+    // Built at the first edge use without a pcurve (#310).
+    let mut inverter: Option<inversion::SurfaceInverter<'_>> = None;
     for face_bound in &face.bounds {
         let ring_start = out.uv.len();
         let wire = brep
@@ -1375,10 +1400,25 @@ fn curved_boundary(
         let mut ring_first: Option<Point2> = None;
         for use_ in &wire.edges {
             let Some(pcurve) = use_.pcurve else {
-                return Err(GeomError::Unsupported {
-                    backend: crate::BACKEND_ID,
-                    operation: axiolid_contracts::Operation::Tessellation,
-                });
+                // No pcurve: the edge's shared 3D samples are inverted onto
+                // the surface instead ([`inversion`]).
+                let inverter = match inverter.as_mut() {
+                    Some(inverter) => inverter,
+                    None => {
+                        inverter.insert(inversion::SurfaceInverter::new(surface, ctx.tolerance)?)
+                    }
+                };
+                let (params, shared) =
+                    inversion::inverted_edge_use(state, ctx, use_, inverter, bound, previous_end)?;
+                let n = params.len() - 1;
+                if let (Some(end), Some(&start)) = (previous_end, params.first()) {
+                    bound.gap(end, start, surface);
+                }
+                ring_first = ring_first.or_else(|| params.first().copied());
+                previous_end = params.last().copied();
+                out.uv.extend(params.into_iter().take(n));
+                out.shared.extend(shared.into_iter().take(n));
+                continue;
             };
             let Some(axiolid_model::GeometryNode::Curve2(trim)) = graph.get(pcurve) else {
                 return Err(GeomError::InvalidInput(
@@ -1386,7 +1426,7 @@ fn curved_boundary(
                 ));
             };
             let n = match state.edge_samples.get(&use_.edge) {
-                Some((vertices, _)) => vertices.len().checked_sub(1).ok_or_else(|| {
+                Some(cached) => cached.indices.len().checked_sub(1).ok_or_else(|| {
                     GeomError::Degenerate("cached edge has no segments".to_owned())
                 })?,
                 None => edge_sample_count(trim, surface, ctx.chord_error)?,
@@ -1421,6 +1461,7 @@ fn curved_boundary(
                 start_vertex,
                 end_vertex,
                 &points,
+                None,
             )?;
             // The next edge contributes this edge's final junction.
             out.uv.extend(params.into_iter().take(n));
@@ -1468,7 +1509,8 @@ fn curved_boundary(
 ///
 /// Interning is keyed by EDGE, not by face. Whichever face reaches a seam
 /// first creates the vertices; every later face reuses the identical
-/// indices, so the seam is shared rather than merely coincident.
+/// indices, so the seam is shared rather than merely coincident. `spans`
+/// is stored with new samples taken from the edge's 3D curve (#310).
 fn edge_samples(
     state: &mut CurvedMeshState<'_>,
     edge: axiolid_topology::EdgeId,
@@ -1476,14 +1518,10 @@ fn edge_samples(
     start_vertex: axiolid_topology::VertexId,
     end_vertex: axiolid_topology::VertexId,
     points: &[Vec3],
+    spans: Option<Vec<inversion::SpanBound>>,
 ) -> GeomResult<Vec<u32>> {
-    if let Some((existing, stored)) = state.edge_samples.get(&edge) {
-        let mut out = existing.clone();
-        // Reverse the COMPLETE endpoint-inclusive sequence. Reversing an
-        // endpoint-excluding sequence shifts every sample by one segment.
-        if *stored != sense {
-            out.reverse();
-        }
+    if let Some(cached) = state.edge_samples.get(&edge) {
+        let (out, _) = cached.in_direction(sense);
         if out.len() != points.len() {
             return Err(GeomError::Degenerate(
                 "shared edge pcurves produced different sample counts".to_owned(),
@@ -1517,7 +1555,14 @@ fn edge_samples(
         indices.push(index);
     }
 
-    state.edge_samples.insert(edge, (indices.clone(), sense));
+    state.edge_samples.insert(
+        edge,
+        SharedEdge {
+            indices: indices.clone(),
+            sense,
+            spans,
+        },
+    );
     state.new_edge_samples.push(edge);
     Ok(indices)
 }
@@ -2261,6 +2306,7 @@ fn planar_face_bound(
 
 /// The bound of one curved face, gathered while it is meshed (#232).
 struct FaceBound<'s> {
+    surface: &'s axiolid_surface::Surface,
     oracle: Option<SurfaceBoundOracle<'s>>,
     /// The worst triangle bound: interpolation plus vertex offsets.
     interior: Scalar,
@@ -2273,6 +2319,7 @@ impl<'s> FaceBound<'s> {
     fn new(surface: &'s axiolid_surface::Surface) -> Self {
         let oracle = SurfaceBoundOracle::new(surface);
         Self {
+            surface,
             unbounded: oracle
                 .is_none()
                 .then_some("curved face whose surface has no derivative bound"),

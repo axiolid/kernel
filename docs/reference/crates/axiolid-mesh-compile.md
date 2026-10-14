@@ -68,6 +68,7 @@ owns graph traversal and dispatch; the construction algorithms themselves
 - [`axiolid-mesh-compile-contract`](./axiolid-mesh-compile-contract)
 - [`axiolid-mesh-contracts`](./axiolid-mesh-contracts)
 - [`axiolid-model`](./axiolid-model)
+- [`axiolid-nurbs`](./axiolid-nurbs)
 - [`axiolid-primitive`](./axiolid-primitive)
 - [`axiolid-profile`](./axiolid-profile)
 - [`axiolid-reference`](./axiolid-reference)

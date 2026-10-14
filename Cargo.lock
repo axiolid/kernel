@@ -544,6 +544,7 @@ dependencies = [
  "axiolid-mesh-contracts",
  "axiolid-mesh-section-contract",
  "axiolid-model",
+ "axiolid-nurbs",
  "axiolid-primitive",
  "axiolid-profile",
  "axiolid-reference",

@@ -48,6 +48,23 @@ caret rule for `0.x` versions.
   `deviation::BUDGET_BELOW_PLACEMENT_ROUNDING` (#295): the rounding of
   placing an instance's vertices, named in the report, and the input
   family a budget below it is refused with.
+- Curved B-rep faces whose edges carry only 3D curves compile (#310,
+  ADR 0086); they were refused with `Unsupported { Tessellation }`. As
+  IFC writes them (`IfcEdgeCurve` without an `IfcPcurve`), the face's
+  parameter boundary comes from inverting the edge's shared 3D samples
+  onto its surface: in closed form on planes, cylinders, elliptical
+  cylinders, cones, spheres and tori, and by `axiolid-nurbs`'s certified
+  inversion on B-spline surfaces. Shared edges keep one set of vertices,
+  periodic parameters unwrap along the ring, and the deviation report adds
+  each span's chord bound, the surface image of its parameter chord and
+  the lens between them. Refused by name: a sample at or within tolerance
+  of a cone apex or sphere pole, an edge that turns a quarter period
+  between samples, a sample off the surface or without unique B-spline
+  parameters, and an edge curve whose domain does not run between its
+  vertices. Edges with pcurves keep their path. As on the pcurve path, a
+  face's report adds its triangle bound and its trim terms, so the report
+  may exceed the request; check `meets_requested`. The crate now depends
+  on `axiolid-nurbs`.
 
 ### Fixed
 

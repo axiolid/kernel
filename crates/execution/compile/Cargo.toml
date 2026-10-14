@@ -29,6 +29,7 @@ axiolid-brep.workspace = true
 axiolid-brep-boolean.workspace = true
 axiolid-reference.workspace = true
 axiolid-surface.workspace = true
+axiolid-nurbs.workspace = true
 
 [dev-dependencies]
 # The measurement oracle. `volume_properties` audits closed-two-manifoldness
@@ -50,4 +51,4 @@ role = "execution.orchestration"
 domain = "graph.compile"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-inspect", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]
+allowed-internal-dependencies = ["axiolid-mesh-boolean-boolmesh", "axiolid-core", "axiolid-curve", "axiolid-construct", "axiolid-contracts", "axiolid-dispatch", "axiolid-guarantees", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-exact-compile-contract", "axiolid-brep", "axiolid-brep-audit", "axiolid-inspect", "axiolid-brep-boolean", "axiolid-mesh-contracts", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-primitive", "axiolid-profile", "axiolid-reference", "axiolid-surface", "axiolid-topology"]

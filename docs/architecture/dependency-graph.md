@@ -295,6 +295,7 @@ graph TD
     axiolid_mesh_compile --> axiolid_mesh_contracts
     axiolid_mesh_compile --> axiolid_mesh_section_contract
     axiolid_mesh_compile --> axiolid_model
+    axiolid_mesh_compile --> axiolid_nurbs
     axiolid_mesh_compile --> axiolid_primitive
     axiolid_mesh_compile --> axiolid_profile
     axiolid_mesh_compile --> axiolid_reference
