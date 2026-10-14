@@ -21,36 +21,34 @@ POINT = "exact_arc/point.rs"
 MUTANTS = [
     # Simple stops: one crossing, interior to both segments, met once.
     ("every crossing taken as simple", ARR,
-     [("add(&mut cuts[index], x, simple.then_some(near));",
-       "add(&mut cuts[index], x, Some(near));"),
-      ("add(&mut cuts[near], x, simple.then_some(index));",
-       "add(&mut cuts[near], x, Some(index));")], TESTS[0]),
+     [("cuts[index].push((x.clone(), simple.then_some(near), Some(other)));",
+       "cuts[index].push((x.clone(), Some(near), Some(other)));"),
+      ("cuts[near].push((x.clone(), simple.then_some(index), Some(ring)));",
+       "cuts[near].push((x.clone(), Some(index), Some(ring)));")], TESTS[0]),
     # Not listed: a check that the point is at no end of either segment.
     # It is implied: such a point is met again (the end is a stop, or the
     # next edge of that ring meets it too), which clears the tag; checked,
     # removing it survives.
     ("a stop met twice keeps its crossing", ARR,
-     "            Some(held) => held.1 = None,",
-     "            Some(_) => {}"),
+     "                    held.1 = None;\n",
+     ""),
     # Lone segments: carried by their own ring alone.
     ("overlapping segments taken as lone", ARR,
-     "            if straight && xs.len() > 1 {",
-     "            if false {"),
+     "                if straight {\n                    overlapped[index] = true;",
+     "                if false {\n                    overlapped[index] = true;"),
     ("arcs taken as lone", ARR,
      "        let lone = !edge.is_arc() && !overlapped[index];",
      "        let lone = !overlapped[index];"),
     # Rings carried across a stop.
     ("ring left but kept", ARR,
-     "                            inside.remove(at);\n",
+     "                                inside.remove(at);\n",
      ""),
     ("ring entered but not added", ARR,
-     "                        Err(at) => inside.insert(at, other),",
-     "                        Err(_) => {}"),
+     "                            Err(at) => inside.insert(at, other),",
+     "                            Err(_) => {}"),
     ("rings carried across every stop", ARR,
-     "            let carried = match (&before, w[0].1) {\n"
-     "                (Some(previous), Some(crossing)) => {",
-     "            let carried = match (&before, w[0].1.or(Some(0))) {\n"
-     "                (Some(previous), Some(crossing)) => {"),
+     "                match w[0].1 {\n",
+     "                match w[0].1.or(Some(0)) {\n"),
     # Identity of copies.
     ("box-overlapping points taken as copies", POINT,
      "    if Arc::ptr_eq(&a.exact, &b.exact) {",

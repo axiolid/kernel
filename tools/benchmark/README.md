@@ -27,6 +27,7 @@ so it stays out of the release.
 | `benches/certified_length.rs` | Certified joint distances along an offset by distances beside an ellipse at window tolerances, `1e-6` to `1e-9` (#307) |
 | `benches/overlay_soup.rs` | The exact union of soups whose rings share no edges (2,000 random triangles, two 1000-gons) and of two meshes given as soups, against the grid backend `i_overlay` (#218) |
 | `benches/boolean_deviation.rs` | A boolean's mesh with and without its measured deviation report, for an all-planar wall less two doors and a wall with a round window (#314) |
+| `benches/overlay_slender.rs` | The plan footprint of `k` = 100, 200, 400 overlapping slender boxes: the soup's union with itself and its intersection with a 5 cm square, against `k` (#315) |
 | `tests/scaling.rs` | Growth rate asserted from operation counts, run by `cargo test` |
 | `examples/filter_probe.rs` | Which `orient3d` inputs actually escalate past the floating-point filter |
 | `examples/grouping_probe.rs` | How much independent work the grouped wall subtraction exposes |
@@ -41,6 +42,7 @@ cargo bench -p axiolid-benchmark --bench boundary_distance  # touching elements
 cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time and peak memory
 cargo bench -p axiolid-benchmark --bench triangulate_points  # planar triangulation against point count
 cargo bench -p axiolid-benchmark --bench overlay_soup  # exact soup unions against the grid backend
+cargo bench -p axiolid-benchmark --bench overlay_slender  # overlapping slender parts against their count
 cargo bench -p axiolid-benchmark --bench certified_length  # certified lengths at window tolerances
 cargo bench -p axiolid-benchmark --bench boolean_deviation  # a boolean's measured deviation report
 scripts/bench-regression.sh                         # instruction counts

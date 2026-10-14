@@ -45,12 +45,14 @@
 //!   built only when a question gets past the boxes. Copies of one point
 //!   share an identity (`XPoint::id`), which proves equality; distinct
 //!   identities prove nothing.
-//! - The subdivision's shortcuts (#218, `arrangement.rs`) are topological,
-//!   not numeric: a segment no other boundary runs along is carried by its
-//!   own ring only, and across a stop where exactly one other segment
-//!   crosses, the rings containing the pieces differ by that segment's
-//!   ring. Any other stop counts windings afresh from a sample. Debug
-//!   builds check both against the full search and count.
+//! - The subdivision's shortcuts (#218, #315, `arrangement.rs`) are
+//!   topological, not numeric: a segment no other boundary runs along is
+//!   carried by its own ring only; any edge is carried only by edges it
+//!   shares two or more points with; across a stop where exactly one other
+//!   segment crosses, the rings containing the pieces differ by that
+//!   segment's ring, and across any other stop only the rings met there
+//!   are counted afresh from a sample. Debug builds check them against the
+//!   full search and count.
 //! - Output vertices are rounded once (`XPoint::rounded`, correctly rounded
 //!   for rational points). Rounded output must never be fed back into a
 //!   decision.
@@ -69,10 +71,16 @@
 //! `tests/soup_membership.rs` checks unions of grid-snapped and random
 //! soups by point membership, and `scripts/probe_overlay_soup_mutants.py`
 //! lists the faults in the #218 shortcuts the suite must catch.
+//! `tests/soup_snapshots.rs` pins the outputs on plan-footprint soups bit
+//! for bit, and `scripts/probe_overlay_slender_mutants.py` lists the
+//! faults in the #315 shortcuts and the intersection cull it and the
+//! suite must catch.
 //! `cargo bench -p axiolid-overlay --bench arc_overlay` measures per-call
 //! cost, and `SCALE=1` runs the edge-count scaling scenes instead;
 //! `cargo bench -p axiolid-benchmark --bench overlay_soup` times soups
-//! against the grid backend. Quote them when claiming a speed change.
+//! against the grid backend, and `--bench overlay_slender` soups of
+//! overlapping slender parts against their count. Quote them when claiming
+//! a speed change.
 
 pub(crate) mod arrangement;
 mod boxes;

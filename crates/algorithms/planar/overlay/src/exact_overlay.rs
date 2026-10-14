@@ -33,6 +33,39 @@
 //! Past that it enters no decision. It validates operands, and
 //! the result is settled like every other output ([`crate::settle`]), which
 //! merges edges that rounding left shorter than the tolerance.
+//!
+//! # Culling an intersection (#315)
+//!
+//! An intersection of a small operand with a large soup need not cut the
+//! whole soup. Just before step 1, a ring whose box misses the box of the
+//! other operand's rings (both closed, compared on the vertices' doubles,
+//! which are exact) is left out ([`cull`]). The output is the same, bit
+//! for bit:
+//!
+//! - **Membership.** Write `S` and `C` for the boxes of the subject's and
+//!   the clip's rings. Every point outside `S` has subject winding number
+//!   zero, which no fill rule fills, so the intersection lies in `S`, and
+//!   likewise in `C`. A clip ring whose box misses `S` has winding number
+//!   zero all over `S` (a ring encloses nothing outside its box), so
+//!   leaving it out changes no clip winding number there; the same holds
+//!   for a subject ring and `C`. Inside `S` and `C` every count is as
+//!   before, and outside them the result is empty either way.
+//! - **Pieces.** The result's boundary lies in `S` and `C`, and a left-out
+//!   ring's boundary meets neither, so no stop on a piece of that boundary
+//!   comes from a left-out ring, and no left-out ring carries one. The
+//!   kept pieces are the same pieces between the same exact points, met
+//!   in the same order (left-out rings only remove items from the
+//!   subdivision's ordered loops), so linking, the dropped straight-on
+//!   vertices, hole ownership and rounding come out the same.
+//! - **Snap and merge.** The cull runs after [`snap_within`] and the chain
+//!   reduction, on the rings they produced from every ring of both
+//!   operands, so no snap or merge chain through a left-out ring is lost:
+//!   each was already applied. It adds no distance of its own. Settling
+//!   ([`crate::settle`]) reads only the output, which is unchanged.
+//!
+//! Only the intersection is culled. A union, difference or xor keeps the
+//! parts of an operand away from the other, so no ring can be left out on
+//! box grounds alone.
 
 use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
@@ -79,10 +112,32 @@ pub(crate) fn boolean(
     fill: FillRule,
     snap: f64,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
-    boolean_reduced(subject, clip, operation, fill, snap, true)
+    boolean_with(
+        subject,
+        clip,
+        operation,
+        fill,
+        snap,
+        Steps {
+            reduce: true,
+            cull: true,
+        },
+    )
+}
+
+/// Which of the boolean's shortcuts run: none changes the output, which
+/// the tests check by turning each off.
+#[derive(Clone, Copy)]
+struct Steps {
+    /// Cancel edges given both ways within an operand ([`reduce`]).
+    reduce: bool,
+    /// Leave out an intersection's rings that cannot meet the other
+    /// operand ([`cull`]).
+    cull: bool,
 }
 
 /// [`boolean`], with the chain reduction on or off.
+#[cfg(test)]
 fn boolean_reduced(
     subject: &[Polygon],
     clip: &[Polygon],
@@ -90,6 +145,22 @@ fn boolean_reduced(
     fill: FillRule,
     snap: f64,
     reduced: bool,
+) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
+    let steps = Steps {
+        reduce: reduced,
+        cull: true,
+    };
+    boolean_with(subject, clip, operation, fill, snap, steps)
+}
+
+/// [`boolean`], with the shortcuts in `steps`.
+fn boolean_with(
+    subject: &[Polygon],
+    clip: &[Polygon],
+    operation: OverlayOperation,
+    fill: FillRule,
+    snap: f64,
+    steps: Steps,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
     let mut all: Vec<(bool, Vec<Point2>)> = Vec::new();
     for (is_clip, polygons) in [(false, subject), (true, clip)] {
@@ -112,7 +183,7 @@ fn boolean_reduced(
             // encloses nothing and changes no winding number (#219).
             .filter(|points| points.len() >= 3 && !on_one_line(points))
             .collect();
-        let rings_of = if reduced { reduce(given) } else { given };
+        let rings_of = if steps.reduce { reduce(given) } else { given };
         for mut points in rings_of {
             // Exact, so a sliver far from the origin keeps its winding
             // (#274).
@@ -128,6 +199,9 @@ fn boolean_reduced(
                 weight: if positive { 1 } else { -1 },
             });
         }
+    }
+    if steps.cull && operation == OverlayOperation::Intersection {
+        cull(&mut rings, &mut counted);
     }
     if rings.is_empty() {
         return Ok(Vec::new());
@@ -189,6 +263,63 @@ fn boolean_reduced(
         .iter()
         .map(|(outer, holes)| (to_ring(outer), holes.iter().map(to_ring).collect()))
         .collect())
+}
+
+/// Leave out of an intersection the rings that cannot meet the other
+/// operand (#315): those whose box misses the box of the other operand's
+/// rings, both closed. The module docs say why the output stays the same
+/// bit for bit.
+fn cull(rings: &mut Vec<ArcRing>, counted: &mut Vec<Counted>) {
+    let boxes: Vec<[f64; 4]> = rings.iter().map(ring_box).collect();
+    let hull = |clip: bool| {
+        boxes
+            .iter()
+            .zip(counted.iter())
+            .filter(|(_, count)| count.clip == clip)
+            .map(|(b, _)| *b)
+            .reduce(|a, b| {
+                [
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[2].max(b[2]),
+                    a[3].max(b[3]),
+                ]
+            })
+    };
+    let (subject, clip) = (hull(false), hull(true));
+    let kept: Vec<bool> = boxes
+        .iter()
+        .zip(counted.iter())
+        .map(|(b, count)| {
+            let other = if count.clip { subject } else { clip };
+            other.is_some_and(|other| boxes_meet(b, &other))
+        })
+        .collect();
+    let mut flags = kept.iter();
+    rings.retain(|_| *flags.next().expect("a flag per ring"));
+    let mut flags = kept.iter();
+    counted.retain(|_| *flags.next().expect("a flag per ring"));
+}
+
+/// A straight ring's box, `[x0, y0, x1, y1]`: its vertices' extremes.
+fn ring_box(ring: &ArcRing) -> [f64; 4] {
+    ring.vertices.iter().fold(
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ],
+        |b, v| {
+            let p = v.point;
+            [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)]
+        },
+    )
+}
+
+/// Whether two closed boxes `[x0, y0, x1, y1]` share a point.
+fn boxes_meet(a: &[f64; 4], b: &[f64; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
 }
 
 /// Take features closer than `tolerance` as touching (#222): a vertex that
@@ -942,6 +1073,173 @@ mod tests {
             false,
         );
         assert_eq!(format!("{with:?}"), format!("{without:?}"));
+    }
+
+    /// A counter-clockwise box ring.
+    fn box_ring(x0: f64, y0: f64, x1: f64, y1: f64) -> Ring {
+        let p = Point2::new;
+        Ring {
+            points: vec![p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)],
+        }
+    }
+
+    /// Which of `subject` then `clip` the cull keeps.
+    fn culled(subject: &[Ring], clip: &[Ring]) -> Vec<bool> {
+        let mut rings = Vec::new();
+        let mut counted = Vec::new();
+        for (is_clip, operand) in [(false, subject), (true, clip)] {
+            for ring in operand {
+                rings.push(ArcRing {
+                    vertices: ring
+                        .points
+                        .iter()
+                        .copied()
+                        .map(ArcVertex::straight)
+                        .collect(),
+                });
+                counted.push(Counted {
+                    clip: is_clip,
+                    weight: 1,
+                });
+            }
+        }
+        let all: Vec<ArcRing> = rings.clone();
+        cull(&mut rings, &mut counted);
+        let mut kept = rings.iter().peekable();
+        all.iter()
+            .map(|ring| {
+                let same = kept
+                    .peek()
+                    .is_some_and(|k| format!("{k:?}") == format!("{ring:?}"));
+                if same {
+                    kept.next();
+                }
+                same
+            })
+            .collect()
+    }
+
+    /// The cull keeps a ring whose closed box meets the other operand's,
+    /// one only touching it at a corner and one enclosing it with no edge
+    /// near included; it leaves out rings apart from it on any side, by
+    /// as little as an ulp, on either operand, and every ring when the
+    /// other operand has none.
+    #[test]
+    fn the_cull_keeps_what_may_meet_the_other_operand() {
+        let square = box_ring(0.0, 0.0, 1.0, 1.0);
+        let clip = [
+            // Enclosing the square, every edge far from it.
+            box_ring(-10.0, -10.0, 10.0, 10.0),
+            // Touching at the corner (1, 1).
+            box_ring(1.0, 1.0, 2.0, 2.0),
+            // Right, by an ulp.
+            box_ring(1.0f64.next_up(), 0.2, 2.0, 0.8),
+            // Left, below, above.
+            box_ring(-3.0, 0.2, -2.0, 0.8),
+            box_ring(0.2, -3.0, 0.8, -2.0),
+            box_ring(0.2, 1.0f64.next_up(), 0.8, 3.0),
+        ];
+        assert_eq!(
+            culled(std::slice::from_ref(&square), &clip),
+            [true, true, true, false, false, false, false]
+        );
+        // A subject ring apart from the clip's box goes too, measured
+        // against the clip's box, not its own operand's.
+        let far = box_ring(30.0, 0.0, 31.0, 1.0);
+        assert_eq!(
+            culled(&[square.clone(), far], &clip[..1]),
+            [true, false, true]
+        );
+        assert_eq!(culled(&[square], &[]), [false]);
+    }
+
+    /// Culling changes no output: every operation and fill rule on small
+    /// subjects against clips spread far around them, with a ring around
+    /// the subject whose edges are all far away and a polygon whose hole
+    /// holds the subject, gives the same polygons, bit for bit, culled or
+    /// not -- and the cull leaves rings out.
+    #[test]
+    fn the_cull_changes_nothing() {
+        let mut rng = Lcg(315);
+        let operations = [
+            OverlayOperation::Intersection,
+            OverlayOperation::Union,
+            OverlayOperation::Difference,
+            OverlayOperation::Xor,
+        ];
+        let fills = [
+            FillRule::EvenOdd,
+            FillRule::NonZero,
+            FillRule::Positive,
+            FillRule::Negative,
+        ];
+        let polygon = |outer: Ring| Polygon {
+            outer,
+            holes: Vec::new(),
+        };
+        let mut dropped = 0;
+        for case in 0..48 {
+            let subject: Vec<Polygon> = (0..1 + case % 3)
+                .map(|_| {
+                    let (cx, cy, cw) = (rng.next(), rng.next(), rng.next() < 0.3);
+                    polygon(star(&mut rng, cx, cy, 3 + case % 5, cw))
+                })
+                .collect();
+            let mut clip: Vec<Polygon> = (0..12)
+                .map(|_| {
+                    let (cx, cy) = (8.0 * rng.next() - 4.0, 8.0 * rng.next() - 4.0);
+                    let n = 3 + (rng.next() * 6.0) as usize;
+                    polygon(star(&mut rng, cx, cy, n, false))
+                })
+                .collect();
+            if case % 2 == 0 {
+                clip.push(polygon(box_ring(-20.0, -20.0, 20.0, 20.0)));
+            } else {
+                clip.push(Polygon {
+                    outer: box_ring(-30.0, -30.0, 30.0, 30.0),
+                    holes: vec![{
+                        let mut hole = box_ring(-2.0, -2.0, 3.0, 3.0);
+                        hole.points.reverse();
+                        hole
+                    }],
+                });
+            }
+            let rings = |polygons: &[Polygon]| -> Vec<Ring> {
+                polygons
+                    .iter()
+                    .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+                    .cloned()
+                    .collect()
+            };
+            dropped += culled(&rings(&subject), &rings(&clip))
+                .iter()
+                .filter(|kept| !**kept)
+                .count();
+            let operation = operations[case % 4];
+            let fill = fills[(case / 4) % 4];
+            for (a, b) in [(&subject, &clip), (&clip, &subject)] {
+                let run = |cull| {
+                    let steps = Steps { reduce: true, cull };
+                    let rings = boolean_with(a, b, operation, fill, 1e-9, steps).unwrap();
+                    crate::canonical_polygons(rings)
+                        .into_iter()
+                        .map(|p| {
+                            std::iter::once(p.outer)
+                                .chain(p.holes)
+                                .map(|r| {
+                                    r.points
+                                        .iter()
+                                        .map(|q| (q.x.to_bits(), q.y.to_bits()))
+                                        .collect::<Vec<_>>()
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(run(true), run(false), "case {case}: {operation:?} {fill:?}");
+            }
+        }
+        assert!(dropped > 100, "{dropped}");
     }
 
     #[test]

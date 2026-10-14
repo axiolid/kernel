@@ -9,6 +9,35 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Exact straight-edge booleans of soups of overlapping slender parts,
+  the plan footprint of an assembly, take time in proportion to their
+  crossings, and an intersection with a small operand in proportion to the
+  parts near it, with results bit for bit the same (#315). On `k`
+  slender boxes (1 m by 4 cm by 2 cm) over a square metre, the union of
+  the soup with itself took 0.92 s, 6.3 s and 39 s at `k` = 100, 200
+  and 400 and now takes 0.23 s, 0.94 s and 3.9 s, growing as the
+  crossings do (about `k^2`), and its intersection with a 5 cm square
+  took 0.32 s, 2.1 s and 13 s and now 5 ms, 19 ms and 62 ms. Measured with `cargo bench -p axiolid-benchmark
+  --bench overlay_slender`, interleaved runs against 0.3.14 on a shared
+  machine. The time had grown about `k^2.65`, because the turned edges'
+  boxes hold much of the soup and every piece of the subdivision searched
+  `O(k)` of them for its carriers and counted `O(k)` rings' windings. A
+  piece's carriers are now searched only among the edges sharing two or
+  more points with its edge, and across any stop only the rings met there
+  are counted again, the others carried over; the points met along an
+  edge are merged by one sort, and the crossings of a segment given more
+  than once are computed once per pair and shared. An intersection leaves
+  out, before the subdivision and after the snap, every ring whose box
+  misses the other operand's: the module docs of `exact_overlay` give the
+  argument that this changes no output. Debug builds check the carriers
+  and the rings carried across a stop against the full search and count.
+  `tests/soup_snapshots.rs` pins the outputs on the consumer's soups, a
+  torus, a cylinder, random triangles and an arc subdivision against
+  0.3.14 by hash, and `scripts/probe_overlay_slender_mutants.py` lists
+  the faults it and the suite must catch.
+
 ## [0.3.14] - 2026-10-13
 
 ### Added

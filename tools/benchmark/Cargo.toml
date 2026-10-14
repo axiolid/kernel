@@ -40,7 +40,8 @@ axiolid-mesh-compile-contract.workspace = true
 axiolid-model.workspace = true
 # The plan Minkowski benchmark (#292) sums and erodes a floor's walls.
 axiolid-overlay.workspace = true
-# The soup overlay benchmark (#218) times the grid backend beside it.
+# The soup overlay benchmark (#218) times the grid backend beside it; the
+# slender-soup one (#315) checks its areas against it.
 i_overlay.workspace = true
 axiolid-profile.workspace = true
 # The point triangulation benchmark (#268) times the planar Delaunay build.
@@ -117,4 +118,8 @@ harness = false
 
 [[bench]]
 name = "boolean_deviation"
+harness = false
+
+[[bench]]
+name = "overlay_slender"
 harness = false
