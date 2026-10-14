@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-14
+
 ### Fixed
 
 - `intersection_volume` and `difference_volume` (#313) no longer collapse

@@ -58,11 +58,11 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.18 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.2 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.1 | Convex decomposition of a solid, exact or approximate and always labelled |
-| [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.14 | Analytic and spline curve/surface evaluation, jets, and inversion |
+| [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.15 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.2 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.1 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.1 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.5 | Mesh queries: clearance, containment, ray casting, and genus |
+| [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.6 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.1 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.1 | Portable, deterministic intersections for linear geometry |
 | [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.10 | Metric properties: area, volume, centroid, moments of inertia. |
@@ -84,7 +84,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.5 | boolmesh-backed MeshBoolean provider |
+| [`axiolid-mesh-boolean-boolmesh`](./crates/axiolid-mesh-boolean-boolmesh) | `provider.mesh` | 0.3.6 | boolmesh-backed MeshBoolean provider |
 | [`axiolid-pointcloud-reconstruction-sdf`](./crates/axiolid-pointcloud-reconstruction-sdf) | `provider.pointcloud` | 0.3.1 | Reference pointcloud reconstruction: signed-distance field from samples, extracted as a level set. |
 
 ## Execution
@@ -94,7 +94,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.2 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.1 | GPU executor adapter contract for batched Axiolid geometry |
 | [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.3 | Provider registration, ordering, fallback, and execution policy |
-| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.24 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
+| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.25 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 

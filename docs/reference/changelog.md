@@ -1704,6 +1704,41 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.15 - 2026-10-14
+
+### Added
+
+- Certified lengths of offsets by distances along an ellipse or a
+  B-spline (#307, ADR 0082 amendment), which `station::certify` refused
+  naming `UNCERTIFIED_LENGTH`. The law runs in the base's arc length, a
+  quadrature, so the base is measured by chords first and the law at a
+  native parameter is read through that certified length, a sub-panel to
+  the point included; the measured curve is the offset whose law runs
+  linearly in the base's true arc length between the points the kernel
+  reads as the piece's ends, and a point's error from the table is
+  carried by the chain of chords like rounding. `P''` and `P'''` are
+  bounded from the base's derivative suprema to `|B''''|` and the law's
+  derivatives along the base. So the windowed stations of an offset by
+  distances beside an ellipse (openbimrs/ifc#443) resolve.
+
+### Changed
+
+- Certified chord panels are refined adaptively, the widest first, until
+  their widths sum to an eighth of the tolerance, instead of each being
+  halved until within a uniform share (#307); the midpoint rule beside
+  plan-parameterised bases too. Each chord panel bounds its deficit from
+  both sides through the velocity across the chord: with `|P''|` alone,
+  `M2^2 h^3 / 12` over the speed (three times tighter than the turning
+  bound, kept as a ceiling), and with `|P'''|` and the panel's own
+  velocities to within `h^4`, so an ellipse, a B-spline and their offsets
+  certify to `1e-8` relative and below within the unchanged budget of
+  `MAX_CERTIFIED_PANELS`. A station 30 along the deck's offset certifies
+  at a `1e-5` window's `1e-8` (refused before), and every
+  interval the existing tests certify is narrower than before (by up to
+  four times).
+- `UNCERTIFIED_LENGTH` no longer names an offset by distances along an
+  ellipse or a B-spline.
+
 ### 0.3.14 - 2026-10-13
 
 ### Added
@@ -2271,6 +2306,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
+### 0.3.6 - 2026-10-14
+
+### Fixed
+
+- `intersection_volume` and `difference_volume` (#313) no longer collapse
+  to the trivial `[0, V]` for bodies that touch flush within rounding. A
+  face that is vertical but for a rounding residue casts a sliver of
+  shadow whose plane has a slope near `1e30`, and its term's enclosure
+  spanned more than either solid. Each term is now also intersected with
+  the a priori bound `[0, min(area f', area g') * (min(zmax_f, zmax_g) -
+  base)]`, which holds however the arithmetic is conditioned. On a sink
+  cabinet standing in its room, from the public buildingSMART IFC4
+  building-architecture sample, the shared volume goes from
+  `[0, 0.8008000000000190]` to a bracket `5.9e-14` wide, and the
+  difference from `[0, 0.8008]` to `[0, 5.9e-14]`.
+
 ### 0.3.5 - 2026-09-30
 
 ### Added
@@ -2724,6 +2775,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-boolean-boolmesh
 
+### 0.3.6 - 2026-10-14
+
+### Fixed
+
+- A memory budget holds for a boolean whose result is much larger than its
+  operands (#308). The declared bound counts input triangles only, and two
+  crossing combs of 32 teeth (1,048 triangles) peaked at 8.8x it in their
+  union and 31x in their symmetric difference. The declaration stays the
+  admission bound on the operands; with a budget, the solve now counts the
+  result's half-edges exactly once the intersection pass has found the
+  crossings and refuses with `BudgetExceeded` before allocating the result
+  when the declaration plus 448 bytes per half-edge beyond three per input
+  triangle does not fit. The intersection pass stops as soon as its
+  crossings alone could not fit. Results within three half-edges per input
+  triangle, which ordinary booleans are, cost nothing beyond the
+  declaration.
+- A composed `SymmetricDifference` charges each step the union and
+  intersection it holds, instead of passing every step the whole budget.
+- `union_many` and `subtract_many` give each boolean the budget the batch
+  does not hold, split evenly between the pairs of a `parallel-batch` level,
+  so booleans running at once cannot together charge their results against
+  the same bytes.
+
+### Changed
+
+- A budget that admits the declared bound can now be refused inside the
+  solve, for a single boolean as already for a batch: the check before
+  dispatch is necessary, not sufficient.
+- `scratch_probe` measures crossing combs, slab soups and pierced slabs
+  (`scratch_probe combs` with no budget, `scratch_probe crossing` against
+  budgets), and `tests/scratch_bound.rs` checks them.
+
 ### 0.3.5 - 2026-10-13
 
 ### Fixed
@@ -2903,6 +2986,35 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.25 - 2026-10-14
+
+### Added
+
+- A test of the deck of openbimrs/ifc#443 (#307): rectangles at stations
+  0 and 5 along an offset by distances beside an ellipse, windowed by
+  `1e-5`, compile to the window-free deck bitwise (about 10 by Pappus),
+  and stations 30 along and within the window of the joint after the
+  varying piece resolve, through `axiolid-evaluate`'s certified lengths
+  of varying offsets.
+
+### Fixed
+
+- A boolean cut in its host's own frame and placed far from the origin
+  no longer keeps a skin its placement folds (#312, ADR 0080 amendment).
+  The snap closed residues only up to `16 f64::EPSILON` of the operands'
+  own coordinates (about `1.3e-14` for a 3.67 m wall), so doors `2e-14` to
+  `1e-10` short of a wall's face left a skin that thin, and once an
+  `Instance` placed the wall 5600 km out its faces crossed and
+  `enclosed_volume` refused the mesh as self-intersecting. The reach now
+  covers the coordinates the result is placed at: `Instance` and
+  `InstanceAtStation` carry the placed coordinate scale down to their
+  source with the tolerance and the chord budget, and the snap reaches
+  `16 f64::EPSILON` of it (about `2e-8` there), still capped at the
+  tolerance and still landing only exactly; a micrometre skin stays. The
+  compile cache keys on that scale, rounded up to three significant bits,
+  so a source placed near and far compiles once per scale. The move is
+  reported under `deviation::SNAPPED_OPERANDS` as before.
 
 ### 0.3.24 - 2026-10-13
 

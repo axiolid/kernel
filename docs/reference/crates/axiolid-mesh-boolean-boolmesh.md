@@ -8,7 +8,7 @@ boolmesh-backed MeshBoolean provider.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-13) |
+| Latest release | 0.3.6 (2026-10-14) |
 | crates.io | [`axiolid-mesh-boolean-boolmesh`](https://crates.io/crates/axiolid-mesh-boolean-boolmesh) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | providers (`provider.mesh`) |
@@ -56,49 +56,36 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-13):
+Latest release, 0.3.6 (2026-10-14):
 
 ### Fixed
 
-- A memory budget holds for `union_many` and `subtract_many` (#259). The
-  declared bound covers one boolean in its operands' triangles; a batch has
-  no such bound in its input, because union intermediates outgrow their
-  operands and a cut subject grows with every group, and with
-  `parallel-batch` a worker waiting inside one boolean's join steals other
-  pairs, so every pair of a level can be in flight on fewer workers (5 on
-  4 workers was observed). Each step is now charged when its operands
-  exist: the declared bound for every boolean that can be live (all pairs
-  of a `parallel-batch` level at once, one otherwise, the per-worker term
-  once), plus what the batch holds (its copies, the previous level's
-  results, the cut subject, a fused tool, its node and index lists). The
-  first step that does not fit is refused with `BudgetExceeded` before it
-  starts. Before, `union_many` was charged once for its input triangles
-  and `subtract_many` not at all beyond each boolean's own check, which
-  only ran with `parallel`.
-- A boolean given a budget directly, without dispatch, is checked in every
-  build, not only with `parallel`.
+- A memory budget holds for a boolean whose result is much larger than its
+  operands (#308). The declared bound counts input triangles only, and two
+  crossing combs of 32 teeth (1,048 triangles) peaked at 8.8x it in their
+  union and 31x in their symmetric difference. The declaration stays the
+  admission bound on the operands; with a budget, the solve now counts the
+  result's half-edges exactly once the intersection pass has found the
+  crossings and refuses with `BudgetExceeded` before allocating the result
+  when the declaration plus 448 bytes per half-edge beyond three per input
+  triangle does not fit. The intersection pass stops as soon as its
+  crossings alone could not fit. Results within three half-edges per input
+  triangle, which ordinary booleans are, cost nothing beyond the
+  declaration.
+- A composed `SymmetricDifference` charges each step the union and
+  intersection it holds, instead of passing every step the whole budget.
+- `union_many` and `subtract_many` give each boolean the budget the batch
+  does not hold, split evenly between the pairs of a `parallel-batch` level,
+  so booleans running at once cannot together charge their results against
+  the same bytes.
 
 ### Changed
 
-- `union_many` borrows the solids that need no channel conformance and
-  moves an odd trailing solid to the next level instead of copying it, and
-  `subtract_many` borrows the subject until the first group cuts it: each
-  copy was scratch held through the batch.
-- The per-worker term no longer includes the 64 KiB base with
-  `parallel-batch`. That was the batch's concurrency charged per worker,
-  which stolen work can exceed; the batch now charges it per pair. With
-  `parallel-batch` alone the term is the 16 KiB of a worker's bookkeeping.
-- The `scratch_bound` test and the `scratch_probe` binary measure both
-  batch paths at 14 workloads that grow (overlapping boxes, a slab cut by
-  overlapping tools, at several sizes, with and without an attribute
-  channel) on 1 to 64 workers under the forced schedule: each run at the
-  smallest budget it admits stays within it (at most 73% of it), the run a
-  byte below is refused within it, and a 1 KiB budget is refused before
-  any copy is made. A window now counts only its own allocations: memory
-  of an earlier pool freed inside it (rayon retires deque buffers through
-  an epoch collector) hid up to 7 KB of a peak.
-- `tests/batch_budget.rs` pins what each step is charged, and
-  `scripts/probe_scratch_bound_mutants.py` kills a charge that drops any
-  of its terms.
+- A budget that admits the declared bound can now be refused inside the
+  solve, for a single boolean as already for a batch: the check before
+  dispatch is necessary, not sufficient.
+- `scratch_probe` measures crossing combs, slab soups and pierced slabs
+  (`scratch_probe combs` with no budget, `scratch_probe crossing` against
+  budgets), and `tests/scratch_bound.rs` checks them.
 
 Full history: [`crates/providers/mesh/boolmesh/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/mesh/boolmesh/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.25] - 2026-10-14
+
 ### Added
 
 - A test of the deck of openbimrs/ifc#443 (#307): rectangles at stations

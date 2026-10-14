@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-10-14
+
 ### Added
 
 - Certified lengths of offsets by distances along an ellipse or a

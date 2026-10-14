@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-09-30) |
+| Latest release | 0.3.6 (2026-10-14) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,18 +30,20 @@ Queries over triangle meshes: clearance between meshes, point containment and wi
 
 ## Changes
 
-Latest release, 0.3.5 (2026-09-30):
+Latest release, 0.3.6 (2026-10-14):
 
-### Added
+### Fixed
 
-- `topology` (#144): `ComponentTopology::homology_basis` now also covers a
-  closed non-orientable component and any component with boundary,
-  orientable or not, not only the closed orientable case -- `k` generators
-  for `k` crosscaps, and `2g + (b - 1)` or `k + (b - 1)` with `b >= 1`
-  boundary loops, all with `Z2` (GF(2)) coefficients. Built by the same
-  tree-cotree construction, generalised: it never needed orientability,
-  and boundary edges now attach to a virtual dual node per boundary loop
-  so every edge has a well-defined dual side. Still not provided: homotopy
-  questions.
+- `intersection_volume` and `difference_volume` (#313) no longer collapse
+  to the trivial `[0, V]` for bodies that touch flush within rounding. A
+  face that is vertical but for a rounding residue casts a sliver of
+  shadow whose plane has a slope near `1e30`, and its term's enclosure
+  spanned more than either solid. Each term is now also intersected with
+  the a priori bound `[0, min(area f', area g') * (min(zmax_f, zmax_g) -
+  base)]`, which holds however the arithmetic is conditioned. On a sink
+  cabinet standing in its room, from the public buildingSMART IFC4
+  building-architecture sample, the shared volume goes from
+  `[0, 0.8008000000000190]` to a bracket `5.9e-14` wide, and the
+  difference from `[0, 0.8008]` to `[0, 5.9e-14]`.
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

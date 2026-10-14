@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-14
+
 ### Fixed
 
 - A memory budget holds for a boolean whose result is much larger than its
