@@ -7,7 +7,7 @@ pub mod kernel03;
 pub mod kernel11;
 pub mod kernel12;
 use crate::csg::boolean03::kernel03::winding03;
-use crate::csg::boolean03::kernel12::intersect12;
+use crate::csg::boolean03::kernel12::{intersect12, CrossingCap};
 use crate::csg::common::{OpType, Vec3};
 use crate::csg::manifold::Manifold;
 
@@ -22,7 +22,18 @@ pub struct Boolean03 {
     pub v21: Vec<Vec3>,
 }
 
-pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
+/// The intersection pass: every crossing and every vertex's winding.
+///
+/// `None` when the operands cross more often than `cap` allows (#308); the
+/// caller refuses for memory.
+pub fn boolean03(
+    mp: &Manifold,
+    mq: &Manifold,
+    op: &OpType,
+    cap: Option<usize>,
+) -> Option<Boolean03> {
+    let cap = cap.map(CrossingCap::new);
+    let cap = cap.as_ref();
     let e = if op == &OpType::Add { 1. } else { -1. };
     let mut p1q2 = vec![];
     let mut p2q1 = vec![];
@@ -38,13 +49,13 @@ pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
         (((x12, v12), w03), ((x21, v21), w30)) = rayon::join(
             || {
                 rayon::join(
-                    || intersect12(mp, mq, &mut p1q2, e, true),
+                    || intersect12(mp, mq, &mut p1q2, e, true, cap),
                     || winding03(mp, mq, e, true),
                 )
             },
             || {
                 rayon::join(
-                    || intersect12(mp, mq, &mut p2q1, e, false),
+                    || intersect12(mp, mq, &mut p2q1, e, false, cap),
                     || winding03(mp, mq, e, false),
                 )
             },
@@ -54,16 +65,19 @@ pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
     #[cfg(not(feature = "parallel"))]
     {
         ((x12, v12), w03) = (
-            intersect12(mp, mq, &mut p1q2, e, true),
+            intersect12(mp, mq, &mut p1q2, e, true, cap),
             winding03(mp, mq, e, true),
         );
         ((x21, v21), w30) = (
-            intersect12(mp, mq, &mut p2q1, e, false),
+            intersect12(mp, mq, &mut p2q1, e, false, cap),
             winding03(mp, mq, e, false),
         );
     }
 
-    Boolean03 {
+    if cap.is_some_and(CrossingCap::exceeded) {
+        return None;
+    }
+    Some(Boolean03 {
         p1q2,
         p2q1,
         x12,
@@ -72,7 +86,7 @@ pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
         w30,
         v12,
         v21,
-    }
+    })
 }
 
 /// Alternative to [`boolean03`] using [`kernel03::winding03_fast`] for the
@@ -82,7 +96,14 @@ pub fn boolean03(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
 /// needs `intersect12`'s `p1q2` before it can start, so this sequences
 /// where `boolean03` parallelised. The two `fwd` directions (`p1q2` vs
 /// `p2q1`) are still independent of each other and stay parallel.
-pub fn boolean03_fast(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
+pub fn boolean03_fast(
+    mp: &Manifold,
+    mq: &Manifold,
+    op: &OpType,
+    cap: Option<usize>,
+) -> Option<Boolean03> {
+    let cap = cap.map(CrossingCap::new);
+    let cap = cap.as_ref();
     let e = if op == &OpType::Add { 1. } else { -1. };
     let mut p1q2 = vec![];
     let mut p2q1 = vec![];
@@ -90,12 +111,12 @@ pub fn boolean03_fast(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
     #[cfg(feature = "parallel")]
     let (((x12, v12), w03), ((x21, v21), w30)) = rayon::join(
         || {
-            let r = intersect12(mp, mq, &mut p1q2, e, true);
+            let r = intersect12(mp, mq, &mut p1q2, e, true, cap);
             let w = kernel03::winding03_fast(mp, mq, e, true, &p1q2);
             (r, w)
         },
         || {
-            let r = intersect12(mp, mq, &mut p2q1, e, false);
+            let r = intersect12(mp, mq, &mut p2q1, e, false, cap);
             let w = kernel03::winding03_fast(mp, mq, e, false, &p2q1);
             (r, w)
         },
@@ -104,19 +125,22 @@ pub fn boolean03_fast(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
     #[cfg(not(feature = "parallel"))]
     let (((x12, v12), w03), ((x21, v21), w30)) = {
         let a = {
-            let r = intersect12(mp, mq, &mut p1q2, e, true);
+            let r = intersect12(mp, mq, &mut p1q2, e, true, cap);
             let w = kernel03::winding03_fast(mp, mq, e, true, &p1q2);
             (r, w)
         };
         let b = {
-            let r = intersect12(mp, mq, &mut p2q1, e, false);
+            let r = intersect12(mp, mq, &mut p2q1, e, false, cap);
             let w = kernel03::winding03_fast(mp, mq, e, false, &p2q1);
             (r, w)
         };
         (a, b)
     };
 
-    Boolean03 {
+    if cap.is_some_and(CrossingCap::exceeded) {
+        return None;
+    }
+    Some(Boolean03 {
         p1q2,
         p2q1,
         x12,
@@ -125,5 +149,5 @@ pub fn boolean03_fast(mp: &Manifold, mq: &Manifold, op: &OpType) -> Boolean03 {
         w30,
         v12,
         v21,
-    }
+    })
 }

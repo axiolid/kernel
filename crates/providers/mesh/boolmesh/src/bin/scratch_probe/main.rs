@@ -7,15 +7,28 @@
 //! Each row of the first table is the worst of the four operations at one
 //! size and worker count, measured under the forced worst-case schedule of
 //! `scratch.rs`. The second table measures the batch paths against the
-//! smallest budget each admits (`batch.rs`, #259).
+//! smallest budget each admits (`batch.rs`, #259). The third measures
+//! booleans whose result outgrows their operands (`crossing.rs`, #308):
+//! with no budget, peak against the operands' declared bound; with one, the
+//! smallest budget each admits and what a budget of the declared bound does.
+//!
+//! `scratch_probe combs` prints only the crossing workloads with no budget,
+//! the table of #308; `scratch_probe crossing` only the third table.
 
 mod batch;
+mod crossing;
 mod scratch;
+mod shapes;
 
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::MeshBoolean;
 
 fn main() {
+    match std::env::args().nth(1).as_deref() {
+        Some("combs") => return crossing_unbudgeted(),
+        Some("crossing") => return crossing_budgeted(),
+        _ => {}
+    }
     let requirement = BoolmeshBoolean::new().scratch_requirement();
     println!("declared: {requirement:?}");
     println!(
@@ -75,4 +88,80 @@ fn main() {
         "worst batch peak / smallest admitted budget: {:.0}%",
         worst_batch * 100.0
     );
+    println!();
+    crossing_budgeted();
+}
+
+/// Booleans whose result outgrows their operands, against the smallest
+/// budget each admits and against their operands' declared bound (#308).
+fn crossing_budgeted() {
+    println!(
+        "{:>8}  {:>10}  {:>12}  {:>12}  {:>6}  {:>12}  {:>12}  {:>12}  workload",
+        "workers",
+        "triangles",
+        "peak bytes",
+        "admitted",
+        "used",
+        "refused peak",
+        "declared",
+        "at declared"
+    );
+    let workloads = crossing::workloads();
+    let mut worst = 0.0f64;
+    for schedule in scratch::Schedule::all() {
+        for sample in crossing::budgeted(&workloads, schedule) {
+            let used = sample.peak as f64 / sample.admitted as f64;
+            worst = worst.max(used);
+            let at_declared = if sample.declared_refused {
+                format!("refused {}", sample.declared_peak)
+            } else {
+                format!("{}", sample.declared_peak)
+            };
+            println!(
+                "{:>8}  {:>10}  {:>12}  {:>12}  {:>5.0}%  {:>12}  {:>12}  {:>12}  {}",
+                schedule.workers(),
+                sample.elements,
+                sample.peak,
+                sample.admitted,
+                used * 100.0,
+                sample.refused_peak,
+                sample.declared,
+                at_declared,
+                sample.name
+            );
+        }
+    }
+    println!();
+    println!(
+        "worst crossing peak / smallest admitted budget: {:.0}%",
+        worst * 100.0
+    );
+}
+
+/// The table of #308: peak with no budget against the operands' declared
+/// bound.
+fn crossing_unbudgeted() {
+    let requirement = BoolmeshBoolean::new().scratch_requirement();
+    println!(
+        "{:>8}  {:>10}  {:>10}  {:>12}  {:>12}  {:>7}  workload",
+        "workers", "triangles", "output", "peak bytes", "declared", "ratio"
+    );
+    let workloads = crossing::workloads();
+    for schedule in scratch::Schedule::all() {
+        for sample in crossing::unbudgeted(&workloads, schedule) {
+            let declared = requirement
+                .upper_bound_bytes_on(sample.elements, schedule.workers())
+                .expect("boolmesh declares a finite bound");
+            println!(
+                "{:>8}  {:>10}  {:>10}  {:>12}  {:>12}  {:>6.2}x  {}",
+                schedule.workers(),
+                sample.elements,
+                sample.output,
+                sample.peak,
+                declared,
+                sample.peak as f64 / declared as f64,
+                sample.name
+            );
+        }
+    }
 }

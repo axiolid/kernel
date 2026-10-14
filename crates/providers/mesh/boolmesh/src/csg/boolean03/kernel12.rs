@@ -6,6 +6,35 @@ use super::kernel02::Kernel02;
 use super::kernel11::Kernel11;
 use crate::csg::bounds::BBox;
 use crate::csg::{Half, Manifold, Real, Vec3};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// A limit on the crossings both directions of the intersection pass
+/// record together (#308).
+#[derive(Debug)]
+pub struct CrossingCap {
+    limit: usize,
+    seen: AtomicUsize,
+}
+
+impl CrossingCap {
+    /// Allow at most `limit` crossings.
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            seen: AtomicUsize::new(0),
+        }
+    }
+
+    /// Whether more crossings were found than the limit allows.
+    pub fn exceeded(&self) -> bool {
+        self.seen.load(Ordering::Relaxed) > self.limit
+    }
+
+    /// Count one crossing; `true` when it is one too many.
+    fn count(&self) -> bool {
+        self.seen.fetch_add(1, Ordering::Relaxed) >= self.limit
+    }
+}
 
 pub struct Kernel12<'a> {
     pub hs_p: &'a [Half],
@@ -80,12 +109,20 @@ impl<'a> Kernel12<'a> {
     }
 }
 
+/// Every crossing of an edge of one operand with a face of the other.
+///
+/// With `cap`, crossings are counted across both directions, and once the
+/// count passes the cap nothing more is tested or recorded (#308): the
+/// result would not fit the memory budget, and the tables recorded here
+/// grow with the crossings. The caller checks [`CrossingCap::exceeded`]
+/// and refuses; what this returned is then incomplete.
 pub fn intersect12(
     mp: &Manifold,
     mq: &Manifold,
     p1q2: &mut Vec<[usize; 2]>,
     expand: Real,
     fwd: bool,
+    cap: Option<&CrossingCap>,
 ) -> (Vec<i32>, Vec<Vec3>) {
     let ma = if fwd { mp } else { mq };
     let mb = if fwd { mq } else { mp };
@@ -137,7 +174,13 @@ pub fn intersect12(
     let mut x12 = vec![];
     let mut v12 = vec![];
     let mut rec = |a, b| {
+        if cap.is_some_and(CrossingCap::exceeded) {
+            return;
+        }
         if let Some((x, v)) = k12.op(a, b) {
+            if cap.is_some_and(CrossingCap::count) {
+                return;
+            }
             if fwd {
                 p1q2_.push([a, b]);
             } else {

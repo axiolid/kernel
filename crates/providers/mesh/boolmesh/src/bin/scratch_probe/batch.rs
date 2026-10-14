@@ -25,7 +25,8 @@ use axiolid_mesh_boolean_contract::{BooleanOutcome, MeshBoolean};
 
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 
-use crate::scratch::{box_at, scheduled, subdivide, Schedule};
+use crate::scratch::{scheduled, Schedule};
+use crate::shapes::{box_at, subdivide};
 
 /// Which batch path a workload runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

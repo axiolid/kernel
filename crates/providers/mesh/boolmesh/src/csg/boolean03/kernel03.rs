@@ -250,7 +250,7 @@ mod tests {
         case: &str,
     ) {
         let mut p1q2 = vec![];
-        intersect12(mp, mq, &mut p1q2, expand, fwd);
+        intersect12(mp, mq, &mut p1q2, expand, fwd, None);
         let slow = winding03(mp, mq, expand, fwd);
         let fast = winding03_fast(mp, mq, expand, fwd, &p1q2);
         assert_eq!(slow, fast, "{case}: fwd={fwd}");

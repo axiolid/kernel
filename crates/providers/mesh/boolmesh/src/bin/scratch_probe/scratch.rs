@@ -50,11 +50,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{BooleanOperator, Point3, Tolerance};
-use axiolid_mesh::TriMesh;
+use axiolid_core::{BooleanOperator, Tolerance};
 use axiolid_mesh_boolean_contract::MeshBoolean;
 
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+
+use crate::shapes::{box_at, subdivide};
 
 /// Bytes allocated in the current window and not yet freed.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -131,54 +132,6 @@ unsafe impl GlobalAlloc for Counting {
 
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
-
-pub(crate) fn box_at(min: [f64; 3], max: [f64; 3]) -> TriMesh {
-    let [x0, y0, z0] = min;
-    let [x1, y1, z1] = max;
-    let positions: Vec<Point3> = vec![
-        [x0, y0, z0].into(),
-        [x1, y0, z0].into(),
-        [x1, y1, z0].into(),
-        [x0, y1, z0].into(),
-        [x0, y0, z1].into(),
-        [x1, y0, z1].into(),
-        [x1, y1, z1].into(),
-        [x0, y1, z1].into(),
-    ];
-    let indices = vec![
-        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6,
-        3, 0, 4, 3, 4, 7,
-    ];
-    TriMesh::new(positions, indices)
-}
-
-/// Subdivide each triangle four ways, `levels` times, to grow triangle count.
-pub(crate) fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
-    let mut current = mesh.clone();
-    for _ in 0..levels {
-        let mut positions = current.positions.clone();
-        let mut indices = Vec::new();
-        for triangle in current.indices.chunks_exact(3) {
-            let [ia, ib, ic] = [triangle[0], triangle[1], triangle[2]];
-            let (a, b, c) = (
-                current.positions[ia as usize],
-                current.positions[ib as usize],
-                current.positions[ic as usize],
-            );
-            let base = positions.len() as u32;
-            positions.push((a + b) * 0.5);
-            positions.push((b + c) * 0.5);
-            positions.push((c + a) * 0.5);
-            let (ab, bc, ca) = (base, base + 1, base + 2);
-            indices.extend_from_slice(&[ia, ab, ca]);
-            indices.extend_from_slice(&[ab, ib, bc]);
-            indices.extend_from_slice(&[ca, bc, ic]);
-            indices.extend_from_slice(&[ab, bc, ca]);
-        }
-        current = TriMesh::new(positions, indices);
-    }
-    current
-}
 
 /// How a measured boolean is scheduled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

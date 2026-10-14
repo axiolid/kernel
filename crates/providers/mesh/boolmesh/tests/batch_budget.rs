@@ -8,8 +8,18 @@
 //! would admit a budget below the one computed here.
 //!
 //! Disjoint boxes keep the arithmetic exact: their unions concatenate, so
-//! the triangle counts of every level are known in advance.
+//! the triangle counts of every level are known in advance, and their faces
+//! pass through whole, so no result outgrows what the declaration covers.
+//!
+//! Every boolean also charges its own result inside the solve (#308). Where
+//! the operands cross, that charge depends on the result's size, which only
+//! the solve knows, so those tests measure it: the smallest budget the same
+//! boolean admits when called directly. A batch step must then need exactly
+//! what it holds on top of that.
 
+#[allow(dead_code)]
+#[path = "../src/bin/scratch_probe/shapes.rs"]
+mod shapes;
 mod support;
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, ScratchRequirement};
@@ -82,6 +92,57 @@ fn refused(outcome: GeomResult<BooleanOutcome>, what: &str) {
     }
 }
 
+/// The smallest budget `run` admits, by bisection; any failure other than
+/// a memory refusal is a broken fixture.
+fn smallest_admitted(run: impl Fn(usize) -> GeomResult<BooleanOutcome>) -> usize {
+    let admits = |bytes| match run(bytes) {
+        Ok(_) => true,
+        Err(GeomError::BudgetExceeded { resource: "memory" }) => false,
+        Err(other) => panic!("the fixture failed: {other:?}"),
+    };
+    let mut high = 1usize << 20;
+    while !admits(high) {
+        high *= 2;
+    }
+    let mut low = 0;
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        if admits(middle) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    high
+}
+
+/// `meshes` concatenated, as `subtract_many` fuses disjoint tools.
+fn fused(meshes: &[TriMesh]) -> TriMesh {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for mesh in meshes {
+        let base = positions.len() as u32;
+        positions.extend_from_slice(&mesh.positions);
+        indices.extend(mesh.indices.iter().map(|i| i + base));
+    }
+    TriMesh::new(positions, indices)
+}
+
+/// The smallest budget that one difference admits, called directly: its
+/// declaration and its result's charge, with nothing held around it.
+fn one_difference(subject: &TriMesh, tool: &TriMesh) -> usize {
+    smallest_admitted(|bytes| {
+        on_workers(|| {
+            BoolmeshBoolean::new().boolean(
+                subject,
+                tool,
+                BooleanOperator::Difference,
+                &budget(bytes),
+            )
+        })
+    })
+}
+
 fn union_many(solids: &[TriMesh], bytes: usize) -> GeomResult<BooleanOutcome> {
     on_workers(|| BoolmeshBoolean::new().union_many(solids, &budget(bytes)))
 }
@@ -132,8 +193,9 @@ fn union_many_of_one_solid_runs_no_boolean() {
 
 /// `subtract_many` fuses disjoint tools into one, and that copy is held
 /// through the boolean: eight tools of eight vertices and 36 corners make
-/// 8 * (8 * 24 + 36 * 4) = 2,688 bytes beyond the boolean's own bound and
-/// the batch's bookkeeping.
+/// 8 * (8 * 24 + 36 * 4) = 2,688 bytes beyond the boolean's own budget and
+/// the batch's bookkeeping. The tools cut through the subject, so the
+/// boolean's own budget includes its result's charge (#308).
 #[test]
 fn subtract_many_charges_the_fused_tool() {
     let subject = boxx(8.0, 0.5, 0.0, 20.0, 3.0, 1.0, 0.0);
@@ -143,7 +205,11 @@ fn subtract_many_charges_the_fused_tool() {
     let subtract = |bytes| {
         on_workers(|| BoolmeshBoolean::new().subtract_many(&subject, &tools, &budget(bytes)))
     };
-    let step = one_boolean(12 + 8 * 12);
+    let step = one_difference(&subject, &fused(&tools));
+    assert!(
+        step > one_boolean(12 + 8 * 12),
+        "the result outgrows the declaration, so it is charged"
+    );
     refused(subtract(step + 2_687), "the boolean without its fused tool");
     let outcome = subtract(step + 2_688 + BOOKKEEPING).expect("the boolean and its fused tool");
     assert_eq!(outcome.evidence.sub_operations, 1, "one fused group");
@@ -195,9 +261,10 @@ fn subtract_many_charges_the_subject_it_has_cut() {
         cut.triangle_count() > subject.triangle_count(),
         "the cut subject grew"
     );
-    // Four tools of eight vertices and 36 corners, fused.
-    let fused = 4 * (8 * 24 + 36 * 4);
-    let second_step = one_boolean(cut.triangle_count() + 4 * 12) + fused;
+    // Four tools of eight vertices and 36 corners, fused, and the second
+    // group's difference with its result's charge (#308).
+    let fused_bytes = 4 * (8 * 24 + 36 * 4);
+    let second_step = one_difference(&cut, &fused(&second)) + fused_bytes;
     refused(
         subtract(&tools, second_step + BOOKKEEPING),
         "the second step without the cut subject it holds",
@@ -215,11 +282,12 @@ fn subtract_many_charges_the_subject_it_has_cut() {
 }
 
 /// A budget given to the provider directly, without dispatch, is enforced in
-/// every build, not only with `parallel` (#259).
+/// every build, not only with `parallel` (#259). Disjoint operands pass
+/// their faces through whole, so the declaration covers the result.
 #[test]
 fn a_direct_boolean_honours_its_budget() {
     let subject = boxx(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0);
-    let tool = boxx(0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 0.0);
+    let tool = boxx(2.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0);
     let run = |bytes| {
         on_workers(|| {
             BoolmeshBoolean::new().boolean(&subject, &tool, BooleanOperator::Union, &budget(bytes))
@@ -228,4 +296,98 @@ fn a_direct_boolean_honours_its_budget() {
     let bound = one_boolean(24);
     refused(run(bound - 1), "one byte under the declared bound");
     run(bound).expect("the declared bound");
+}
+
+/// A boolean admitted on its declaration whose result outgrows it is
+/// refused by name inside the solve, and admitted once the budget covers
+/// its result (#308). Two crossing combs of eight teeth, 280 triangles,
+/// have a union of 1,572.
+#[test]
+fn a_result_beyond_the_declaration_is_charged() {
+    let (subject, tool) = shapes::combs(8);
+    let run = |bytes| {
+        on_workers(|| {
+            BoolmeshBoolean::new().boolean(&subject, &tool, BooleanOperator::Union, &budget(bytes))
+        })
+    };
+    let bound = one_boolean(subject.triangle_count() + tool.triangle_count());
+    refused(
+        run(bound),
+        "the declared bound, which does not cover the result",
+    );
+    let admitted = smallest_admitted(run);
+    assert!(admitted > bound, "{admitted} admits what {bound} refused");
+    let outcome = run(admitted).expect("the budget it admits");
+    assert!(
+        outcome.mesh.triangle_count() > 5 * 280,
+        "the result outgrew its operands"
+    );
+}
+
+/// A union in a batch gets the budget less what the batch holds and charges
+/// its result against that (#308): crossing combs need what their union
+/// needs alone plus the batch's bookkeeping, so what it needs alone is
+/// refused.
+#[test]
+fn union_many_gives_a_union_what_the_batch_does_not_hold() {
+    let (subject, tool) = shapes::combs(4);
+    let alone = smallest_admitted(|bytes| {
+        on_workers(|| {
+            BoolmeshBoolean::new().boolean(&subject, &tool, BooleanOperator::Union, &budget(bytes))
+        })
+    });
+    assert!(
+        alone > one_boolean(subject.triangle_count() + tool.triangle_count()),
+        "the result outgrows the declaration, so it is charged"
+    );
+    let solids = [subject, tool];
+    refused(
+        union_many(&solids, alone),
+        "the union without the batch's bookkeeping",
+    );
+    union_many(&solids, alone + BOOKKEEPING).expect("the union and the bookkeeping");
+}
+
+/// Heap bytes of a mesh with no normals or channels, by length: at most
+/// what the provider charges for holding it, which counts capacity.
+fn held_at_least(mesh: &TriMesh) -> usize {
+    mesh.positions.len() * std::mem::size_of_val(&mesh.positions[0])
+        + mesh.indices.len() * std::mem::size_of::<u32>()
+}
+
+/// A symmetric difference is the difference of the union and the
+/// intersection, and holds both while it runs: its last step is charged
+/// them on top of its own budget (#308). Crossing combs make the union far
+/// larger than the operands, so the step without them is refused.
+#[test]
+fn a_symmetric_difference_is_charged_the_intermediates_it_holds() {
+    let (subject, tool) = shapes::combs(4);
+    let unbudgeted = ExecutionOptions::new(Tolerance::METRE);
+    let provider = BoolmeshBoolean::new();
+    let union = provider
+        .boolean(&subject, &tool, BooleanOperator::Union, &unbudgeted)
+        .expect("union")
+        .mesh;
+    let intersection = provider
+        .boolean(&subject, &tool, BooleanOperator::Intersection, &unbudgeted)
+        .expect("intersection")
+        .mesh;
+    let last_step = one_difference(&union, &intersection);
+    let held = held_at_least(&union) + held_at_least(&intersection);
+    let run = |bytes| {
+        on_workers(|| {
+            provider.boolean(
+                &subject,
+                &tool,
+                BooleanOperator::SymmetricDifference,
+                &budget(bytes),
+            )
+        })
+    };
+    refused(
+        run(last_step + held - 1),
+        "the last step without the union and intersection it holds",
+    );
+    let outcome = run(last_step + 2 * held).expect("the last step and what it holds");
+    assert_eq!(outcome.evidence.sub_operations, 3, "composed from three");
 }

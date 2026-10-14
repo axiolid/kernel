@@ -48,6 +48,8 @@ use triangulation::triangulate;
 pub(crate) use common::{OpType, Vec3u};
 pub(crate) use manifold::Manifold;
 
+use crate::budget::ResultBudget;
+
 /// The boolean's result as plain geometry.
 ///
 /// `compute_boolean` used to end by feeding its result back through
@@ -66,6 +68,21 @@ pub(crate) struct BooleanMesh {
     /// (`0` = P, `1` = Q) and the triangle's index in the mesh the caller
     /// passed to `Manifold::new`.
     pub src: Vec<(u8, usize)>,
+}
+
+/// Why the solve produced no result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SolveError {
+    /// The result does not fit the memory budget (#308).
+    OverBudget,
+    /// The solve failed, or its result is empty; the message says which.
+    Failed(String),
+}
+
+impl From<String> for SolveError {
+    fn from(reason: String) -> Self {
+        Self::Failed(reason)
+    }
 }
 
 /// Boolean of two closed, oriented manifolds.
@@ -92,20 +109,28 @@ pub(crate) struct BooleanMesh {
 /// winding-number classification -- see `kernel03::winding03_fast`'s doc
 /// comment for the guarantee and the trade-off. `false` reproduces exactly
 /// what this function did before the fast path existed.
+///
+/// With `budget`, the solve refuses with [`SolveError::OverBudget`] as soon
+/// as the result is known not to fit (#308): during the intersection pass
+/// once its crossings alone are too many, and in `boolean45` once the
+/// result's half-edges are counted, before the result is allocated.
 pub(crate) fn compute_boolean(
     mp: &Manifold,
     mq: &Manifold,
     op: OpType,
     fast_winding: bool,
-) -> Result<BooleanMesh, String> {
+    budget: Option<&ResultBudget>,
+) -> Result<BooleanMesh, SolveError> {
     let eps = mp.eps.max(mq.eps);
 
+    let cap = budget.map(ResultBudget::crossing_limit);
     let b03 = if fast_winding {
-        boolean03_fast(mp, mq, &op)
+        boolean03_fast(mp, mq, &op, cap)
     } else {
-        boolean03(mp, mq, &op)
-    };
-    let mut b45 = boolean45(mp, mq, &b03, &op)?;
+        boolean03(mp, mq, &op, cap)
+    }
+    .ok_or(SolveError::OverBudget)?;
+    let mut b45 = boolean45(mp, mq, &b03, &op, budget)?;
     let mut trg = triangulate(mp, mq, &b45, eps)?;
 
     simplify_topology(
@@ -127,7 +152,7 @@ pub(crate) fn compute_boolean(
     // never hit that because it validated a freshly rebuilt half-edge mesh;
     // here the check has to happen while the indices are still coherent.
     if !halfedges_are_two_manifold(&trg.hs) {
-        return Err("The input mesh is not manifold".into());
+        return Err(SolveError::Failed("The input mesh is not manifold".into()));
     }
 
     cleanup_unused_verts(&mut b45.ps, &mut trg.hs, &mut trg.rs);
@@ -135,10 +160,10 @@ pub(crate) fn compute_boolean(
     // Preserves the signal the provider matches on: upstream reached this
     // through `edge_topology`, which refuses an empty position matrix.
     if b45.ps.is_empty() {
-        return Err("empty pos matrix".into());
+        return Err(SolveError::Failed("empty pos matrix".into()));
     }
     if trg.hs.is_empty() {
-        return Err("empty idx matrix".into());
+        return Err(SolveError::Failed("empty idx matrix".into()));
     }
 
     Ok(BooleanMesh {

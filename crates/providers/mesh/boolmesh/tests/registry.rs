@@ -60,9 +60,10 @@ fn a_bounded_memory_budget_refuses_this_provider() {
 /// The per-worker scratch term is charged for the pool the boolean actually
 /// runs on, not the width the budget check before dispatch assumed (#226).
 ///
-/// The budget fits the declared bound for one worker exactly. Asked for
-/// `Serial`, the registry admits the call; run inside a two-worker pool the
-/// provider must refuse, because there the bound is one worker's term larger.
+/// The budget is the smallest one worker admits: the declared bound for one
+/// worker and the result's charge (#308). Asked for `Serial`, the registry
+/// admits the call; run inside a two-worker pool the provider must refuse,
+/// because there the bound is one worker's term larger.
 #[cfg(feature = "parallel")]
 #[test]
 fn a_pool_wider_than_the_budget_allows_is_refused() {
@@ -77,23 +78,46 @@ fn a_pool_wider_than_the_budget_allows_is_refused() {
         requirement,
         ScratchRequirement::Affine { bytes_per_worker, .. } if bytes_per_worker > 0
     ));
-    let one_worker = requirement
+    let declared = requirement
         .upper_bound_bytes_on(elements, 1)
         .expect("finite bound");
-    let options = ExecutionOptions::new(Tolerance::METRE)
-        .with_memory_budget(one_worker)
-        .with_parallelism(Parallelism::Serial)
-        .expect("serial");
-    let run_on = |workers| {
+    let options = |budget| {
+        ExecutionOptions::new(Tolerance::METRE)
+            .with_memory_budget(budget)
+            .with_parallelism(Parallelism::Serial)
+            .expect("serial")
+    };
+    let run_on = |workers, budget| {
         rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
             .build()
             .expect("pool")
-            .install(|| registry().boolean(&subject, &tool, BooleanOperator::Difference, &options))
+            .install(|| {
+                registry().boolean(
+                    &subject,
+                    &tool,
+                    BooleanOperator::Difference,
+                    &options(budget),
+                )
+            })
     };
+    // Smallest budget one worker admits, by bisection from the declaration.
+    let (mut low, mut high) = (declared - 1, declared);
+    while run_on(1, high).is_err() {
+        high *= 2;
+    }
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        if run_on(1, middle).is_ok() {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let one_worker = high;
 
-    run_on(1).expect("one worker fits the budget exactly");
-    let error = run_on(2).expect_err("two workers do not fit");
+    run_on(1, one_worker).expect("one worker fits the budget exactly");
+    let error = run_on(2, one_worker).expect_err("two workers do not fit");
     assert!(
         matches!(error, axiolid_contracts::GeomError::BudgetExceeded { .. }),
         "expected BudgetExceeded, got {error:?}"

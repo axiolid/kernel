@@ -24,13 +24,27 @@
 //! booleans that can be live: stolen work can put more of them in flight
 //! than there are workers, never more than there are pairs.
 //!
+//! A single boolean is admitted on its declaration and charges its result
+//! inside the solve (#308). Booleans whose result outgrows their operands
+//! (crossing combs of 2 to 32 teeth, crossing slab soups, pierced slabs)
+//! must stay within the smallest budget each admits, be refused a byte
+//! below it before exceeding it, and either fit their operands' declared
+//! bound or be refused within it. The combs with more than two teeth must
+//! be refused there: that is the case the declaration alone missed.
+//!
 //! No test harness (`harness = false`): the counting allocator is global, and
 //! the harness's own threads would allocate while a boolean is measured.
 
 #[path = "../src/bin/scratch_probe/batch.rs"]
 mod batch;
+// The table with no budget is the probe's alone.
+#[allow(dead_code)]
+#[path = "../src/bin/scratch_probe/crossing.rs"]
+mod crossing;
 #[path = "../src/bin/scratch_probe/scratch.rs"]
 mod scratch;
+#[path = "../src/bin/scratch_probe/shapes.rs"]
+mod shapes;
 
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::MeshBoolean;
@@ -107,8 +121,75 @@ fn main() {
             batches += 1;
         }
     }
+    let mut crossings = 0;
+    // Every workload on the calling thread (a build without rayon). The
+    // forced schedule stalls every allocation, which makes the largest
+    // results take minutes per pool, so on rayon pools this runs the combs
+    // up to 8 teeth and a few soups and slabs; `scratch_probe crossing`
+    // measures every workload on every pool (`src/budget.rs`).
+    let all = crossing::workloads();
+    let forced: Vec<crossing::Crossing> = crossing::workloads()
+        .into_iter()
+        .filter(|w| {
+            [
+                "combs of 2 ",
+                "combs of 4 ",
+                "combs of 8 ",
+                "soup 0,",
+                "soup 1,",
+                "slab pierced by 4x4",
+            ]
+            .iter()
+            .any(|prefix| w.name.starts_with(prefix))
+        })
+        .collect();
+    for schedule in scratch::Schedule::all() {
+        let workers = schedule.workers();
+        let workloads = match schedule {
+            scratch::Schedule::Inline => &all,
+            scratch::Schedule::ColdPool { .. } => &forced,
+        };
+        for sample in crossing::budgeted(workloads, schedule) {
+            assert!(
+                sample.peak <= sample.admitted,
+                "{} ({} triangles) on {workers} workers peaked at {} bytes, above the {} it \
+                 admitted",
+                sample.name,
+                sample.elements,
+                sample.peak,
+                sample.admitted
+            );
+            assert!(
+                sample.refused_peak < sample.admitted,
+                "{} on {workers} workers was refused {} bytes only after allocating {}",
+                sample.name,
+                sample.admitted - 1,
+                sample.refused_peak
+            );
+            assert!(
+                sample.declared_peak <= sample.declared,
+                "{} on {workers} workers {} its declared {} bytes after allocating {}",
+                sample.name,
+                if sample.declared_refused {
+                    "was refused"
+                } else {
+                    "ran within"
+                },
+                sample.declared,
+                sample.declared_peak
+            );
+            if sample.name.starts_with("combs of") && !sample.name.starts_with("combs of 2 ") {
+                assert!(
+                    sample.declared_refused,
+                    "{} on {workers} workers fit its operands' declared bound",
+                    sample.name
+                );
+            }
+            crossings += 1;
+        }
+    }
     println!(
         "scratch_bound: {measured} booleans within {requirement:?}; {batches} batches within \
-         the budgets they admit"
+         the budgets they admit; {crossings} crossing booleans within the budgets they admit"
     );
 }

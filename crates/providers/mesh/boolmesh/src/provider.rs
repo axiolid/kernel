@@ -14,16 +14,14 @@
 
 use std::borrow::Cow;
 
-use crate::csg::{compute_boolean, OpType};
+use crate::csg::{compute_boolean, OpType, SolveError};
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, Determinism, ExecutionOptions,
     ExecutionTarget, GeomError, GeomResult, ScratchRequirement,
 };
 use axiolid_core::BooleanOperator;
 use axiolid_mesh::{AttributeChannel, AttributeFate, Blend, DropReason, TriMesh};
-use axiolid_mesh_boolean_contract::{
-    merge_fates, symmetric_difference_via_composition, BooleanEvidence, BooleanOutcome, MeshBoolean,
-};
+use axiolid_mesh_boolean_contract::{merge_fates, BooleanEvidence, BooleanOutcome, MeshBoolean};
 
 use crate::attributes::{carry, sources_by_plane, FaceSource};
 use crate::convert::{from_boolean_mesh, six_signed_volume, to_manifold};
@@ -236,6 +234,26 @@ impl MeshBoolean for BoolmeshBoolean {
     ///   either feature nothing runs off the calling thread and the term is
     ///   zero.
     ///
+    /// # The result is charged in the solve (#308)
+    ///
+    /// This counts input triangles only, so it is the admission bound on
+    /// the operands, not a bound on the call. Operands that cross many
+    /// times have a far larger result: two perpendicular combs of 32 teeth,
+    /// 1,048 triangles, cross 17,716 times, and their union peaked at 14.7
+    /// MB, 8.8x this declaration (52.9 MB, 31x, for the symmetric
+    /// difference). With a memory budget the solve therefore charges the
+    /// result once its size is known: after the intersection pass,
+    /// `boolean45` counts the result's half-edges exactly and refuses with
+    /// `BudgetExceeded` before allocating the result when this declaration
+    /// plus 448 bytes per half-edge beyond three per input triangle does not
+    /// fit. Ordinary results stay within the three and are charged nothing
+    /// more; the intersection pass stops as soon as its crossings alone
+    /// could not fit. A budget that admits this declaration can still be
+    /// refused, so, as for batches, the check before dispatch is a
+    /// necessary condition, not a sufficient one. A composed
+    /// `SymmetricDifference` charges each step the union and intersection
+    /// it holds. `src/budget.rs` gives the measurements.
+    ///
     /// # Batches
     ///
     /// The bound covers each boolean of [`MeshBoolean::subtract_many`] and
@@ -247,8 +265,11 @@ impl MeshBoolean for BoolmeshBoolean {
     /// this bound for every boolean that can be live) and refuses with
     /// `BudgetExceeded` before the first step that does not fit, so the
     /// check before dispatch is a necessary condition for a batch, not a
-    /// sufficient one. `tests/scratch_bound.rs` holds the peak of both
-    /// batches under forced schedules to the smallest budget they admit.
+    /// sufficient one. Each boolean then gets the budget the batch does not
+    /// hold (split evenly between the pairs of a `parallel-batch` level)
+    /// and charges its result against it (#308). `tests/scratch_bound.rs`
+    /// holds the peak of both batches under forced schedules to the
+    /// smallest budget they admit.
     ///
     /// The old `PerElement { bytes_per_element: 4096 }` was 2x the large-input
     /// slope but no bound at all for small inputs on a pool: 24 triangles
@@ -311,7 +332,14 @@ impl MeshBoolean for BoolmeshBoolean {
         operation: BooleanOperator,
         options: &ExecutionOptions,
     ) -> GeomResult<BooleanOutcome> {
-        self.boolean_impl(subject, tool, operation, options, false)
+        self.boolean_within(
+            subject,
+            tool,
+            operation,
+            options,
+            false,
+            options.memory_budget_bytes(),
+        )
     }
 }
 
@@ -341,46 +369,38 @@ impl BoolmeshBoolean {
                 operation: axiolid_contracts::Operation::MeshBoolean,
             });
         }
-        self.boolean_impl(subject, tool, operation, options, true)
+        self.boolean_within(
+            subject,
+            tool,
+            operation,
+            options,
+            true,
+            options.memory_budget_bytes(),
+        )
     }
 
-    /// Refuse when the declared scratch, charged for the pool this call runs
-    /// on, exceeds the caller's memory budget (#226).
+    /// One boolean with `budget` bytes for it alone (the caller's budget
+    /// less whatever the caller holds), or none.
     ///
-    /// The budget check before dispatch charges the per-worker term for the
-    /// width the options or the dispatcher name; rayon runs this call on
-    /// whatever pool it is in, which can be wider (a larger global pool, a
-    /// caller's own pool). Only here is the real width known. Without a
-    /// budget nothing is asked, so an unbudgeted call does not start rayon's
-    /// global pool early.
-    fn fits_current_pool(&self, elements: usize, options: &ExecutionOptions) -> GeomResult<()> {
-        if options.memory_budget_bytes().is_some()
-            && !self.scratch_requirement().fits_budget_on(
-                options,
-                elements,
-                crate::budget::running_workers(),
-            )
-        {
-            return Err(GeomError::BudgetExceeded { resource: "memory" });
-        }
-        Ok(())
-    }
-
-    fn boolean_impl(
+    /// Admitted on the declaration for the pool this call runs on (#226),
+    /// then charged for its result inside the solve (#308, `budget.rs`).
+    fn boolean_within(
         &self,
         subject: &TriMesh,
         tool: &TriMesh,
         operation: BooleanOperator,
         options: &ExecutionOptions,
         fast_winding: bool,
+        budget: Option<usize>,
     ) -> GeomResult<BooleanOutcome> {
-        self.fits_current_pool(subject.triangle_count() + tool.triangle_count(), options)?;
+        let elements = subject.triangle_count() + tool.triangle_count();
+        let result_budget = crate::budget::ResultBudget::admit(budget, elements)?;
         // `SymmetricDifference` has no `boolmesh` counterpart. Compose it from
         // the three primitives rather than pretending the backend's operation
         // set is the contract's; `sub_operations` in the evidence records that
         // the caller got a composed result.
         if operation == BooleanOperator::SymmetricDifference {
-            return symmetric_difference_via_composition(self, subject, tool, options);
+            return self.symmetric_difference(subject, tool, options, budget);
         }
 
         let op = match operation {
@@ -401,14 +421,23 @@ impl BoolmeshBoolean {
         let subject_manifold = to_manifold(subject, "subject")?;
         let tool_manifold = to_manifold(tool, "tool")?;
 
-        let output = match compute_boolean(&subject_manifold, &tool_manifold, op, fast_winding) {
+        let output = match compute_boolean(
+            &subject_manifold,
+            &tool_manifold,
+            op,
+            fast_winding,
+            result_budget.as_ref(),
+        ) {
             Ok(output) => output,
+            Err(SolveError::OverBudget) => {
+                return Err(GeomError::BudgetExceeded { resource: "memory" })
+            }
             // An empty result is a legitimate value under the contract: the
             // intersection of disjoint solids is nothing. `boolmesh` signals
             // that by failing to build a mesh from an empty vertex matrix, so
             // translate it back into the empty solid the contract specifies
             // rather than surfacing a backend quirk as a geometry error.
-            Err(reason) if is_empty_result(&reason) => {
+            Err(SolveError::Failed(reason)) if is_empty_result(&reason) => {
                 let mut empty = TriMesh::new(Vec::new(), Vec::new());
                 // Zero faces carry every channel vacuously: nothing lost,
                 // nothing derived. Keeps a union/fold over it consistent.
@@ -417,7 +446,7 @@ impl BoolmeshBoolean {
                     evidence_for(subject, &[tool], &empty, 1).with_attribute_fates(fates);
                 return Ok(BooleanOutcome::new(empty, evidence));
             }
-            Err(reason) => return Err(solve_refusal(operation, &reason)),
+            Err(SolveError::Failed(reason)) => return Err(solve_refusal(operation, &reason)),
         };
 
         let mut result = from_boolean_mesh(&output);
@@ -430,6 +459,81 @@ impl BoolmeshBoolean {
         let fates = carry(subject, tool, &mut result, &sources);
         let evidence = evidence_for(subject, &[tool], &result, 1).with_attribute_fates(fates);
         Ok(BooleanOutcome::new(result, evidence))
+    }
+
+    /// `A △ B = (A ∪ B) \ (A ∩ B)`, charging each step what the earlier
+    /// steps leave alive (#308).
+    ///
+    /// The same composition as the contract's
+    /// `symmetric_difference_via_composition`, with the same evidence, but
+    /// that helper passes every step the whole budget while the union is
+    /// held through the intersection and both through the difference. A
+    /// union of crossing operands can be larger than either, so here each
+    /// step gets the budget less the results it holds.
+    fn symmetric_difference(
+        &self,
+        subject: &TriMesh,
+        tool: &TriMesh,
+        options: &ExecutionOptions,
+        budget: Option<usize>,
+    ) -> GeomResult<BooleanOutcome> {
+        let held = |outcome: &BooleanOutcome| {
+            crate::budget::heap_bytes(&outcome.mesh)
+                + crate::budget::fates_bytes(&outcome.evidence.attribute_fates)
+        };
+        let less = |budget: Option<usize>, bytes: usize| budget.map(|b| b.saturating_sub(bytes));
+        options.check_cancelled()?;
+        let union = self.boolean_within(
+            subject,
+            tool,
+            BooleanOperator::Union,
+            options,
+            false,
+            budget,
+        )?;
+        options.check_cancelled()?;
+        let budget = less(budget, held(&union));
+        let intersection = self.boolean_within(
+            subject,
+            tool,
+            BooleanOperator::Intersection,
+            options,
+            false,
+            budget,
+        )?;
+
+        // A ∩ B empty means the operands are disjoint, so A △ B == A ∪ B,
+        // and subtracting an empty solid is a degenerate operand.
+        if intersection.mesh.indices.is_empty() {
+            let mut evidence = union.evidence;
+            evidence.sub_operations = 2;
+            evidence.coincident_faces_encountered |=
+                intersection.evidence.coincident_faces_encountered;
+            return Ok(BooleanOutcome::new(union.mesh, evidence));
+        }
+
+        options.check_cancelled()?;
+        let budget = less(budget, held(&intersection));
+        let difference = self.boolean_within(
+            &union.mesh,
+            &intersection.mesh,
+            BooleanOperator::Difference,
+            options,
+            false,
+            budget,
+        )?;
+
+        let mut evidence = difference.evidence;
+        // The result's channels came through union then difference: compose
+        // those fates.
+        evidence.attribute_fates =
+            merge_fates(&union.evidence.attribute_fates, evidence.attribute_fates);
+        evidence.subject_triangles = subject.triangle_count();
+        evidence.tool_triangles = tool.triangle_count();
+        evidence.sub_operations = 3;
+        evidence.coincident_faces_encountered |= union.evidence.coincident_faces_encountered
+            || intersection.evidence.coincident_faces_encountered;
+        Ok(BooleanOutcome::new(difference.mesh, evidence))
     }
 }
 
@@ -718,11 +822,14 @@ impl BoolmeshBoolean {
             let elements = current.triangle_count()
                 + members.iter().map(|m| m.triangle_count()).sum::<usize>();
             crate::budget::charge_step(options, held, 1, elements)?;
+            // The boolean gets what the batch does not hold, and charges its
+            // own result against that (#308).
+            let budget = crate::budget::remaining(options, held);
             let step = if let [only] = members.as_slice() {
-                self.difference(&current, only, options)?
+                self.difference(&current, only, options, budget)?
             } else {
                 let fused = crate::grouping::fuse_with_channels(&members, &subject.attributes);
-                self.difference(&current, &fused, options)?
+                self.difference(&current, &fused, options, budget)?
             };
             fates = merge_fates(&fates, step.evidence.attribute_fates);
             current = Cow::Owned(step.mesh);
@@ -789,7 +896,10 @@ impl BoolmeshBoolean {
     /// the nodes it holds, and the declared bound of every pair that can be
     /// live. With `parallel-batch` that is all of them at once, since a
     /// worker waiting in one boolean's join can steal another pair; without
-    /// it, one pair at a time on top of the results so far. See `budget.rs`.
+    /// it, one pair at a time on top of the results so far. Each union gets
+    /// the budget the level does not hold, shared evenly between pairs that
+    /// run at once, and charges its result against it (#308). See
+    /// `budget.rs`.
     ///
     /// Union is associative and commutative, so any reduction order yields
     /// the same solid; unlike `subtract_grouped` this needs no disjointness
@@ -867,8 +977,8 @@ impl BoolmeshBoolean {
             // cannot pay for itself -- there is no coordination inside the
             // level, only a join at the end of it.
             let pairs = level.chunks_exact(2);
-            let step = |pair: &[Node<'_>]| -> GeomResult<(TriMesh, Fates)> {
-                let out = self.union(&pair[0].0, &pair[1].0, options)?;
+            let step = |pair: &[Node<'_>], budget: Option<usize>| -> GeomResult<(TriMesh, Fates)> {
+                let out = self.union(&pair[0].0, &pair[1].0, options, budget)?;
                 // Both halves' histories, then this union.
                 let history = merge_fates(&pair[0].1, pair[1].1.clone());
                 Ok((
@@ -898,6 +1008,18 @@ impl BoolmeshBoolean {
                 let chunks: Vec<&[Node<'_>]> = pairs.collect();
                 let elements = chunks.iter().map(|pair| triangles(pair)).sum();
                 crate::budget::charge_step(options, held, chunks.len(), elements)?;
+                // Each pair charges its result against its own share of the
+                // budget (#308), so pairs running at once cannot together
+                // overrun it.
+                let share = |pair: &[Node<'_>]| {
+                    crate::budget::concurrent_share(
+                        options,
+                        held,
+                        chunks.len(),
+                        elements,
+                        triangles(pair),
+                    )
+                };
                 // `par_iter` over an indexed slice, NOT `par_bridge`: the
                 // bridge does not preserve order, which would permute the
                 // level and silently change the tree's shape from run to
@@ -905,7 +1027,9 @@ impl BoolmeshBoolean {
                 // so the output is identical to the sequential path.
                 let merged: Result<Vec<Node<'_>>, GeomError> = chunks
                     .par_iter()
-                    .map(|pair| step(pair).map(|(mesh, fates)| (Cow::Owned(mesh), fates)))
+                    .map(|pair| {
+                        step(pair, share(pair)).map(|(mesh, fates)| (Cow::Owned(mesh), fates))
+                    })
                     .collect();
                 merged?
             };
@@ -918,7 +1042,10 @@ impl BoolmeshBoolean {
                     // results so far.
                     let done: usize = acc.iter().map(node_bytes).sum();
                     crate::budget::charge_step(options, held + done, 1, triangles(pair))?;
-                    let (mesh, fates) = step(pair)?;
+                    // The union gets what the batch does not hold, and
+                    // charges its own result against that (#308).
+                    let budget = crate::budget::remaining(options, held + done);
+                    let (mesh, fates) = step(pair, budget)?;
                     acc.push((Cow::Owned(mesh), fates));
                 }
                 acc
@@ -944,24 +1071,42 @@ impl BoolmeshBoolean {
         Ok(BooleanOutcome::new(result, evidence))
     }
 
-    /// One union, routed through the same validation as `boolean`.
+    /// One union, routed through the same validation as `boolean`, with
+    /// `budget` bytes for it alone.
     fn union(
         &self,
         subject: &TriMesh,
         tool: &TriMesh,
         options: &ExecutionOptions,
+        budget: Option<usize>,
     ) -> GeomResult<BooleanOutcome> {
-        self.boolean(subject, tool, BooleanOperator::Union, options)
+        self.boolean_within(
+            subject,
+            tool,
+            BooleanOperator::Union,
+            options,
+            false,
+            budget,
+        )
     }
 
-    /// One difference, routed through the same validation as `boolean`.
+    /// One difference, routed through the same validation as `boolean`,
+    /// with `budget` bytes for it alone.
     fn difference(
         &self,
         subject: &TriMesh,
         tool: &TriMesh,
         options: &ExecutionOptions,
+        budget: Option<usize>,
     ) -> GeomResult<BooleanOutcome> {
-        self.boolean(subject, tool, BooleanOperator::Difference, options)
+        self.boolean_within(
+            subject,
+            tool,
+            BooleanOperator::Difference,
+            options,
+            false,
+            budget,
+        )
     }
 }
 

@@ -9,6 +9,36 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A memory budget holds for a boolean whose result is much larger than its
+  operands (#308). The declared bound counts input triangles only, and two
+  crossing combs of 32 teeth (1,048 triangles) peaked at 8.8x it in their
+  union and 31x in their symmetric difference. The declaration stays the
+  admission bound on the operands; with a budget, the solve now counts the
+  result's half-edges exactly once the intersection pass has found the
+  crossings and refuses with `BudgetExceeded` before allocating the result
+  when the declaration plus 448 bytes per half-edge beyond three per input
+  triangle does not fit. The intersection pass stops as soon as its
+  crossings alone could not fit. Results within three half-edges per input
+  triangle, which ordinary booleans are, cost nothing beyond the
+  declaration.
+- A composed `SymmetricDifference` charges each step the union and
+  intersection it holds, instead of passing every step the whole budget.
+- `union_many` and `subtract_many` give each boolean the budget the batch
+  does not hold, split evenly between the pairs of a `parallel-batch` level,
+  so booleans running at once cannot together charge their results against
+  the same bytes.
+
+### Changed
+
+- A budget that admits the declared bound can now be refused inside the
+  solve, for a single boolean as already for a batch: the check before
+  dispatch is necessary, not sufficient.
+- `scratch_probe` measures crossing combs, slab soups and pierced slabs
+  (`scratch_probe combs` with no budget, `scratch_probe crossing` against
+  budgets), and `tests/scratch_bound.rs` checks them.
+
 ## [0.3.5] - 2026-10-13
 
 ### Fixed

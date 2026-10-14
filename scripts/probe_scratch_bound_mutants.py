@@ -68,9 +68,9 @@ MUTANTS = [
     ("boolmesh: per-worker term dropped", P,
      "const WORKER_BYTES: usize = 16 * 1024;",
      "const WORKER_BYTES: usize = 0;"),
-    ("boolmesh: running pool width ignored", P,
-     "                crate::budget::running_workers(),",
-     "                1,"),
+    ("boolmesh: running pool width ignored", B,
+     "        match concurrent_bound(1, elements, running_workers()) {",
+     "        match concurrent_bound(1, elements, 1) {"),
     ("boolmesh: old flat 4096 B/triangle declaration", P,
      "        ScratchRequirement::Affine {\n"
      "            base_bytes: SCRATCH_BASE_BYTES,\n"
@@ -94,9 +94,14 @@ MUTANTS = [
      "                crate::budget::charge_step(options, held, chunks.len(), elements)?;",
      "                let _: (usize, usize) = (held, elements);",
      BATCH_BUDGET_PARALLEL),
+    # Both places: since #308 the union's own budget leaves out what the
+    # level holds too, so dropping it from the step's charge alone changes
+    # nothing (the union is refused at its own admission instead).
     ("boolmesh: a sequential union is not charged the level it holds", P,
-     "charge_step(options, held + done, 1, triangles(pair))?;",
-     "charge_step(options, done, 1, triangles(pair))?;",
+     [("charge_step(options, held + done, 1, triangles(pair))?;",
+       "charge_step(options, done, 1, triangles(pair))?;"),
+      ("let budget = crate::budget::remaining(options, held + done);",
+       "let budget = crate::budget::remaining(options, done);")],
      BATCH_BUDGET),
     ("boolmesh: subtract_many is not charged its fused tool", P,
      "                _ => crate::budget::fused_bound(&members, &subject.attributes),",
@@ -121,9 +126,11 @@ MUTANTS = [
      "        let bookkeeping = tools.len() * SUBTRACT_BOOKKEEPING_PER_TOOL * 0;",
      SCRATCH_BOUND),
     ("boolmesh: a direct boolean is budgeted only with parallel", P,
-     "        self.fits_current_pool(subject.triangle_count() + tool.triangle_count(), options)?;",
+     "        let result_budget = crate::budget::ResultBudget::admit(budget, elements)?;",
+     "        #[cfg(not(feature = \"parallel\"))]\n"
+     "        let result_budget = None;\n"
      "        #[cfg(feature = \"parallel\")]\n"
-     "        self.fits_current_pool(subject.triangle_count() + tool.triangle_count(), options)?;",
+     "        let result_budget = crate::budget::ResultBudget::admit(budget, elements)?;",
      BATCH_BUDGET),
     ("boolmesh: no boolean still pays the per-worker term", B,
      "    if booleans == 0 {\n        return Some(0);\n    }\n",

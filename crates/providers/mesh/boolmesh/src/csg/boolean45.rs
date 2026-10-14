@@ -1,10 +1,11 @@
 //--- Copyright (C) 2025 Saki Komikado <komietty@gmail.com>,
 //--- This Source Code Form is subject to the terms of the Mozilla Public License v.2.0.
 
+use crate::budget::ResultBudget;
 use crate::csg::boolean03::Boolean03;
 use crate::csg::bounds::BBox;
-use crate::csg::OpType;
 use crate::csg::{face_of, Half, Manifold, Real, Tref, Vec3};
+use crate::csg::{OpType, SolveError};
 use std::collections::BTreeMap;
 use std::mem;
 
@@ -500,16 +501,31 @@ pub struct Boolean45 {
     pub nv_from_q: usize,
 }
 
+/// Build the result's vertices and polygon faces from the intersection pass.
+///
+/// With `budget`, the result is refused with [`SolveError::OverBudget`]
+/// before any of it is allocated when its half-edges do not fit (#308).
+/// `size_output` counts them exactly from the windings alone, so it runs
+/// first.
 pub fn boolean45(
     mp: &Manifold,
     mq: &Manifold,
     b03: &Boolean03,
     op: &OpType,
-) -> Result<Boolean45, String> {
+    budget: Option<&ResultBudget>,
+) -> Result<Boolean45, SolveError> {
     let c1 = if op == &OpType::Intersect { 0 } else { 1 };
     let c2 = if op == &OpType::Add { 1 } else { 0 };
     let c3 = if op == &OpType::Intersect { 1 } else { -1 };
     let w = Windings::new(b03, c1, c2, c3);
+
+    let mut ns_r = vec![];
+    let inv = op == &OpType::Subtract;
+    let (hid_per_f, fid_pq2r) = size_output(mp, mq, &w, b03, &mut ns_r, inv);
+    let nh = *hid_per_f.last().unwrap() as usize;
+    if budget.is_some_and(|budget| !budget.fits(nh)) {
+        return Err(SolveError::OverBudget);
+    }
     let mut nv = 0;
     let mut vid_p2r = vec![0; mp.nv];
     let mut vid_q2r = vec![0; mq.nv];
@@ -608,11 +624,6 @@ pub fn boolean45(
         b03.p1q2.len(),
     );
 
-    let mut ns_r = vec![];
-    let inv = op == &OpType::Subtract;
-    let (hid_per_f, fid_pq2r) = size_output(mp, mq, &w, b03, &mut ns_r, inv);
-
-    let nh = *hid_per_f.last().unwrap() as usize;
     let mut face_ptr_r = hid_per_f.clone();
     let mut whole_flag_p = vec![true; mp.nh];
     let mut whole_flag_q = vec![true; mq.nh];
