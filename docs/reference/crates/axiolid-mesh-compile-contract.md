@@ -8,7 +8,7 @@ Portable graph-to-mesh compilation contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-09) |
+| Latest release | 0.3.4 (2026-10-14) |
 | crates.io | [`axiolid-mesh-compile-contract`](https://crates.io/crates/axiolid-mesh-compile-contract) |
 | Facade | [`axiolid`](./axiolid) feature `graph-compile` |
 | Layer | contracts (`contract.operation`) |
@@ -34,15 +34,19 @@ is the exact counterpart.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-09):
+Latest release, 0.3.4 (2026-10-14):
 
 ### Added
 
-- `MeshClosure::OpenSolid` (#265): the source declared a solid, but the
-  compiled mesh is not closed (some edge is not shared by exactly two
-  triangles running it in opposite directions). A compiler reports it
-  instead of claiming `Solid` for a mesh with boundary edges;
-  `CompileOutcome::solid_mesh` refuses it by name. `MeshClosure` is
-  `#[non_exhaustive]`, so the new variant is additive.
+- `PolylineCompiler::compile_polyline` (#311): a curve node compiled to a
+  3D polyline, a separate operation rather than a second output kind of
+  `compile_mesh`, whose signature stays as it is. `PolylineOutcome`
+  carries the vertices, whether the curve closes, and a `ChordDeviation`
+  reported the way a mesh's deviation is: the requested chord budget and
+  a certified upper bound on the distance from every point of the exact
+  curve to the polyline, with `meets_requested`. The bound is never
+  absent: a curve a compiler cannot bound is refused by name.
+- A direct dependency on `axiolid-core` for `Point3` and `Scalar`; it was
+  already in this crate's closure through `axiolid-mesh`.
 
 Full history: [`crates/contracts/operations/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/compile/CHANGELOG.md)

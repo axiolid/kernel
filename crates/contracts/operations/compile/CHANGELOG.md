@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-14
+
 ### Added
 
 - `PolylineCompiler::compile_polyline` (#311): a curve node compiled to a

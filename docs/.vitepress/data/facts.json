@@ -157,19 +157,19 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.3",
-      "released_date": "2026-10-13",
+      "released": "0.3.4",
+      "released_date": "2026-10-14",
       "role": "execution.dispatch",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.15",
+      "released": "0.3.16",
       "released_date": "2026-10-14",
       "role": "algorithm.parametric",
-      "version": "0.3.15"
+      "version": "0.3.16"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -310,19 +310,19 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.25",
+      "released": "0.3.26",
       "released_date": "2026-10-14",
       "role": "execution.orchestration",
-      "version": "0.3.25"
+      "version": "0.3.26"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/compile",
-      "released": "0.3.3",
-      "released_date": "2026-10-09",
+      "released": "0.3.4",
+      "released_date": "2026-10-14",
       "role": "contract.operation",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-mesh-contracts": {
       "description": "Shared mesh admissibility contracts",
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.14",
-      "released_date": "2026-10-13",
+      "released": "0.3.15",
+      "released_date": "2026-10-14",
       "role": "algorithm.planar",
-      "version": "0.3.14"
+      "version": "0.3.15"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

@@ -1672,6 +1672,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.4 - 2026-10-14
+
+### Fixed
+
+- The mesh-section registry uses the shared device matching instead of its
+  own copy, so a build with only the `mesh-section` feature no longer warns
+  that the shared one is unused, and the routing rules cannot drift apart.
+
 ### 0.3.3 - 2026-10-13
 
 ### Fixed
@@ -1703,6 +1711,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-evaluate
+
+### 0.3.16 - 2026-10-14
+
+### Added
+
+- Certified lengths of offsets beside a planar 3D intrinsic curve (#302,
+  ADR 0082 amendment), which `station::certify` refused naming
+  `UNCERTIFIED_LENGTH` for every `Curve3::Intrinsic`. One whose torsion
+  law is identically zero (`Intrinsic3::is_planar`, a structural test on
+  the stored law) and whose start tangent and normal have no `z`
+  component (compared with `0.0`) is a 2D intrinsic curve lifted to a
+  level plane: its offsets are certified by the midpoint rule on their
+  speed in closed form, as beside a 2D intrinsic curve, measured in 3D.
+  So the joints of a path of offsets beside a stand-alone composite with
+  a clothoid lowered to 3D are certified. A torsion law not identically
+  zero and a tilted plane are still refused by name; the message of
+  `UNCERTIFIED_LENGTH` now says so.
 
 ### 0.3.15 - 2026-10-14
 
@@ -2987,6 +3012,128 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.26 - 2026-10-14
+
+### Added
+
+- `ReferenceMeshCompiler` implements `PolylineCompiler` (#311): a `Curve3`,
+  a `Curve2` (lifted to `z = 0`), an `OpenProfile` and an `Instance` of
+  any of them, or an `InstanceAtStation` on a line basis, compile to a 3D
+  polyline. Each smooth piece of the curve (cut where it may not be `C^1`)
+  is bisected until every span's certified chord bound, the exact sagitta
+  of a circular arc or `h^2 / 8 sup |c''|` from certified derivative
+  bounds, fits the chord budget; the largest is the reported bound, so a
+  dense sampling of the exact curve never lies farther from the polyline.
+  A placement compiles its source to the budget shrunk by its stretch and
+  grows the bound by it, as an instance's mesh deviation does. Refused by
+  name: unbounded lines, families whose flattening is not certified
+  (intrinsic, implicit, banked), curve relations, collections, and curves
+  at numerically resolved stations. `compile_mesh` still refuses curve
+  nodes with `CurveEvaluation`.
+- Surfaces trimmed by a parameter rectangle
+  (`SurfaceRelation::RectangularTrimmed` over a plane, cylinder, elliptical
+  cylinder, cone, sphere, torus or B-spline surface) compile through
+  `compile_mesh` as sheets reported `MeshClosure::Surface` (#311),
+  facing the trimmed surface's normal (turned round when exactly one sense
+  runs against the basis), wrapping past the seam of a periodic
+  parameter. A uniform grid of exact surface
+  points, each cell within `1/8 ((A + B) h_u^2 + (C + B) h_v^2)` of its
+  triangles from the surface's certified interpolation bounds over it,
+  sized to the chord budget; `compile_mesh_with_deviation` reports it under
+  `DeviationPath::TrimmedSurface` (new), the surface family as the detail,
+  and a cell a B-spline crease crosses as unbounded by name. Refused by
+  name: a trim of a surface relation, an empty range, one longer than a
+  period, one against its sense on a parameter that does not wrap. An
+  atomic `Surface` node is unbounded and still refused.
+- A B-rep of faces that belong to no shell or solid compiles as one
+  surface model (#311, `MeshClosure::Surface`), each face as authored; a
+  B-rep with no face at all is still refused.
+- `DeviationPath::Placement`, `deviation::PLACEMENT_ROUNDING`,
+  `deviation::PLACEMENT_EPSILONS` and
+  `deviation::BUDGET_BELOW_PLACEMENT_ROUNDING` (#295): the rounding of
+  placing an instance's vertices, named in the report, and the input
+  family a budget below it is refused with.
+- Curved B-rep faces whose edges carry only 3D curves compile (#310,
+  ADR 0086); they were refused with `Unsupported { Tessellation }`. As
+  IFC writes them (`IfcEdgeCurve` without an `IfcPcurve`), the face's
+  parameter boundary comes from inverting the edge's shared 3D samples
+  onto its surface: in closed form on planes, cylinders, elliptical
+  cylinders, cones, spheres and tori, and by `axiolid-nurbs`'s certified
+  inversion on B-spline surfaces. Shared edges keep one set of vertices,
+  periodic parameters unwrap along the ring, and the deviation report adds
+  each span's chord bound, the surface image of its parameter chord and
+  the lens between them. Refused by name: a sample at or within tolerance
+  of a cone apex or sphere pole, an edge that turns a quarter period
+  between samples, a sample off the surface or without unique B-spline
+  parameters, and an edge curve whose domain does not run between its
+  vertices. Edges with pcurves keep their path. As on the pcurve path, a
+  face's report adds its triangle bound and its trim terms, so the report
+  may exceed the request; check `meets_requested`. The crate now depends
+  on `axiolid-nurbs`.
+- Planar B-rep faces bounded by curved edges without pcurves compile
+  (#310): a face on a declared plane with an edge that follows a curve
+  (an IFC cap bounded by a circle or an ellipse) is meshed as a curved
+  face on its plane, its boundary the edges' shared samples inverted onto
+  the plane with a residual check, so a cap and the wall across its rim
+  share the rim's vertices by index. Its report is the edges' chord
+  bounds plus each sample's distance from the plane, where it was chorded
+  vertex to vertex and unbounded (or refused, for a rim of one vertex).
+  A closed cylinder written as an IFC advanced B-rep (a seamed wall and
+  two capped rims, no pcurve anywhere) now compiles as a watertight
+  `MeshClosure::Solid`.
+
+### Changed
+
+- An all-planar boolean's measured deviation is reported near rounding,
+  not near the request (#314). The search over the exact result stopped
+  once its worst cell was within the budget, and a cell across a trim
+  edge was bounded whole, overhang past the edge included, so the bound
+  only shrank with the cell's size: the wall `3.65 x 0.25 x 3.67` less two
+  doors reported `9.96e-4` at a `1e-3` request for a mesh whose certified
+  volume is exact to `1e-14`. On a plane, a boundary cell is now bounded
+  over its part within the slack of the face (the cell clipped by the
+  mitred offset of the one edge or corner it meets, as convex pieces), the
+  slack is the chord bound the trim flattening actually reached (rounding,
+  for straight trims), and when every face of the result is a plane the
+  search runs to within 10% of the sampled maximum or to 1024 ulps of the
+  mesh's scale, with no budget to stop at. That wall now reports
+  `1.18e-12` (sampled `3.9e-14`), and its report costs no more than
+  before (`benches/boolean_deviation.rs`, mesh and report: 378 ms before,
+  358 ms after). Curved patches are bounded and searched as before; a
+  curved boolean's planar faces are clipped too, which only tightens
+  their cells (the wall with a round window: 488 ms before, 392 ms
+  after). The budget still settles an all-planar search once a real
+  deviation is shown, a sampled lower bound or a flattened warped
+  operand's slab width (#266) above 1000 times the rounding, so a mesh
+  that is off its exact result costs no more than before (a wall with a
+  moved mesh corner: 0.39 s before, 0.10 s after; the #266 tests at or
+  under their times), and one at rounding is never stopped by the budget.
+
+### Fixed
+
+- Deviation bounds of instanced bodies include the rounding of applying
+  the `f64` transform (#295, ADR 0080 amendment). An instance moved its
+  source's vertices by a few ulps of their coordinates, about `1e-9` at
+  `6e6`, and the bound grew only by the relative stretch, so a mesh
+  placed far from the origin could lie further from the exact surface
+  than its `Proven` or `Certified` bound. Every bound of an `Instance` or
+  `InstanceAtStation` now adds `4 f64::EPSILON M`, `M` the largest
+  magnitude a placed coordinate sums (derived in
+  `deviation::placement_rounding`; an identity or a mirror adds nothing),
+  and names it under `DeviationPath::Placement`. The source is meshed
+  with room for it (the floor at the translation's scale plus a `2^-20`
+  share of the budget, and once more with room for what its mesh showed
+  where that was not enough), so a request above the rounding is still
+  met; one at or below it is refused with
+  `BUDGET_BELOW_PLACEMENT_ROUNDING`. A torus at `(6e6, 6e6, 100)` with
+  a `1e-9` budget is refused; with `2e-8` it reports within the budget,
+  about a quarter of it the rounding, and dense samples of the exact
+  torus against the `f64` mesh stay within the bound. Instanced bounds
+  are now up to a `2^-20` share below the budget rather than at it.
+  `compile_polyline` through an `Instance` or `InstanceAtStation` follows
+  the same rule (term, room, refusal): a polyline placed at `6e6` reports
+  `4 eps (6e6 + 4)` where it reported `0`.
+
 ### 0.3.25 - 2026-10-14
 
 ### Added
@@ -4093,6 +4240,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile-contract
 
+### 0.3.4 - 2026-10-14
+
+### Added
+
+- `PolylineCompiler::compile_polyline` (#311): a curve node compiled to a
+  3D polyline, a separate operation rather than a second output kind of
+  `compile_mesh`, whose signature stays as it is. `PolylineOutcome`
+  carries the vertices, whether the curve closes, and a `ChordDeviation`
+  reported the way a mesh's deviation is: the requested chord budget and
+  a certified upper bound on the distance from every point of the exact
+  curve to the polyline, with `meets_requested`. The bound is never
+  absent: a curve a compiler cannot bound is refused by name.
+- A direct dependency on `axiolid-core` for `Point3` and `Scalar`; it was
+  already in this crate's closure through `axiolid-mesh`.
+
 ### 0.3.3 - 2026-10-09
 
 ### Added
@@ -4711,6 +4873,49 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.15 - 2026-10-14
+
+### Changed
+
+- Exact straight-edge booleans of soups of overlapping slender parts,
+  the plan footprint of an assembly, take time in proportion to their
+  crossings, and an intersection with a small operand in proportion to the
+  parts near it, with results bit for bit the same (#315). On `k`
+  slender boxes (1 m by 4 cm by 2 cm) over a square metre, the union of
+  the soup with itself took 0.92 s, 6.3 s and 39 s at `k` = 100, 200
+  and 400 and now takes 0.23 s, 0.94 s and 3.9 s, growing as the
+  crossings do (about `k^2`), and its intersection with a 5 cm square
+  took 0.32 s, 2.1 s and 13 s and now 5 ms, 19 ms and 62 ms. Measured with `cargo bench -p axiolid-benchmark
+  --bench overlay_slender`, interleaved runs against 0.3.14 on a shared
+  machine. The time had grown about `k^2.65`, because the turned edges'
+  boxes hold much of the soup and every piece of the subdivision searched
+  `O(k)` of them for its carriers and counted `O(k)` rings' windings. A
+  piece's carriers are now searched only among the edges sharing two or
+  more points with its edge, and across any stop only the rings met there
+  are counted again, the others carried over; the points met along an
+  edge are merged by one sort, and the crossings of a segment given more
+  than once are computed once per pair and shared. An intersection leaves
+  out, before the subdivision and after the snap, every ring whose box
+  misses the other operand's: the module docs of `exact_overlay` give the
+  argument that this changes no output. Debug builds check the carriers
+  and the rings carried across a stop against the full search and count.
+  `tests/soup_snapshots.rs` pins the outputs on the consumer's soups, a
+  torus, a cylinder, random triangles and an arc subdivision against
+  0.3.14 by hash, and `scripts/probe_overlay_slender_mutants.py` lists
+  the faults it and the suite must catch.
+
+### Fixed
+
+- The crate's internal exact booleans refuse a ring with a repeated
+  vertex as `RepeatedVertex` instead of hanging on it (#309). Every
+  public entry validates first, so no caller could reach it: a piece of
+  no length had no point strictly inside, and the exact bisection for
+  its sample never ended. The sample now refuses such a piece by name,
+  and the straight-edge boolean checks for equal consecutive vertices
+  before it starts. Tests call both with a ten-second limit, and
+  `scripts/probe_repeated_vertex_mutants.py` lists the faults they must
+  catch.
 
 ### 0.3.14 - 2026-10-13
 

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.26] - 2026-10-14
+
 ### Added
 
 - `ReferenceMeshCompiler` implements `PolylineCompiler` (#311): a `Curve3`,

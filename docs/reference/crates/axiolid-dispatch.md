@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-13) |
+| Latest release | 0.3.4 (2026-10-14) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -50,13 +50,12 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-13):
+Latest release, 0.3.4 (2026-10-14):
 
 ### Fixed
 
-- A one-thread context from `with_execution` is charged one worker and
-  runs the provider on a pool of one (#259). It installed no pool, so the
-  call ran on whatever pool the caller was in, and the budget fell back to
-  the options' `Parallelism`.
+- The mesh-section registry uses the shared device matching instead of its
+  own copy, so a build with only the `mesh-section` feature no longer warns
+  that the shared one is unused, and the routing rules cannot drift apart.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

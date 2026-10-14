@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-14
+
 ### Fixed
 
 - The mesh-section registry uses the shared device matching instead of its
