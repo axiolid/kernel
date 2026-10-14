@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A boolean cut in its host's own frame and placed far from the origin
+  no longer keeps a skin its placement folds (#312, ADR 0080 amendment).
+  The snap closed residues only up to `16 f64::EPSILON` of the operands'
+  own coordinates (about `1.3e-14` for a 3.67 m wall), so doors `2e-14` to
+  `1e-10` short of a wall's face left a skin that thin, and once an
+  `Instance` placed the wall 5600 km out its faces crossed and
+  `enclosed_volume` refused the mesh as self-intersecting. The reach now
+  covers the coordinates the result is placed at: `Instance` and
+  `InstanceAtStation` carry the placed coordinate scale down to their
+  source with the tolerance and the chord budget, and the snap reaches
+  `16 f64::EPSILON` of it (about `2e-8` there), still capped at the
+  tolerance and still landing only exactly; a micrometre skin stays. The
+  compile cache keys on that scale, rounded up to three significant bits,
+  so a source placed near and far compiles once per scale. The move is
+  reported under `deviation::SNAPPED_OPERANDS` as before.
+
 ## [0.3.24] - 2026-10-13
 
 ### Added

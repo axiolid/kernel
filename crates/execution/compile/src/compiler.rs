@@ -63,15 +63,23 @@ struct EvalKey {
     /// key because an instance scales it with its transform, and two
     /// budgets tessellate one node differently.
     chord_bits: u64,
+    /// The placed coordinate scale (#312): part of the key because a
+    /// boolean's snap reaches the rounding of the coordinates its result is
+    /// placed at, so a source placed near and far compiles once per scale.
+    placed_bits: u64,
 }
 
 /// The evaluation budgets that vary per node: the tolerance, and the chord
 /// budget curved geometry is flattened to (#165). Both rescale together
-/// through an instance transform.
+/// through an instance transform. And the placed coordinate scale a
+/// boolean's snap reaches (#312, [`crate::snap::placed_scale`]): `0` where
+/// nothing places the node, else the world coordinate magnitude its
+/// placement adds, in the node's own units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Budget {
     tolerance: Tolerance,
     chord: Scalar,
+    placed: Scalar,
 }
 
 impl Budget {
@@ -80,6 +88,7 @@ impl Budget {
         Self {
             tolerance,
             chord: options.chord_error().unwrap_or(tolerance.linear()),
+            placed: 0.0,
         }
     }
 }
@@ -92,6 +101,7 @@ impl EvalKey {
             linear_bits: bits(budget.tolerance.linear()),
             angular_bits: bits(budget.tolerance.angular()),
             chord_bits: bits(budget.chord),
+            placed_bits: bits(budget.placed),
         }
     }
 
@@ -99,6 +109,7 @@ impl EvalKey {
         Budget {
             tolerance: self.tolerance(),
             chord: Scalar::from_bits(self.chord_bits),
+            placed: Scalar::from_bits(self.placed_bits),
         }
     }
 
@@ -394,6 +405,9 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         measure: Measure<'_>,
     ) -> GeomResult<Built> {
         let id = key.id;
+        // The key's budget, placed scale included: what the dependencies
+        // were evaluated at (`mesh_dependencies`).
+        let budget = key.budget();
         let node = self.node(graph, id)?;
         match node {
             GeometryNode::TriMesh(mesh) => Ok(authored_mesh(mesh.clone(), options)),
@@ -417,7 +431,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 })
             }
             GeometryNode::Instance(instance) => {
-                let source_budget = instance_local_budget(instance.transform, Budget::of(options))?;
+                let source_budget = instance_local_budget(instance.transform, budget)?;
                 let source = self.cached(cache, instance.source, source_budget)?;
                 Ok(channels::transform(source, instance.transform))
             }
@@ -425,8 +439,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             // otherwise its placement is named unbounded.
             GeometryNode::InstanceAtStation(placed) => {
                 let placement = crate::station::placement(graph, id)?;
-                let source_budget =
-                    instance_local_budget(placement.transform, Budget::of(options))?;
+                let source_budget = instance_local_budget(placement.transform, budget)?;
                 let source = self.cached(cache, placed.source, source_budget)?;
                 let mut built = channels::transform(source, placement.transform);
                 if !placement.exact {
@@ -443,7 +456,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             GeometryNode::Collection(members) => {
                 let members = members
                     .iter()
-                    .map(|&member| self.cached(cache, member, Budget::of(options)))
+                    .map(|&member| self.cached(cache, member, budget))
                     .collect::<GeomResult<Vec<_>>>()?;
                 Ok(channels::merge(&members))
             }
@@ -452,7 +465,8 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 right,
                 operator,
             }) => {
-                let built = self.build_boolean(graph, *left, *right, *operator, options, cache)?;
+                let built =
+                    self.build_boolean(graph, (*left, *right), *operator, options, budget, cache)?;
                 Ok(match measure {
                     // Measured against the exact result only when a report
                     // asks for it: it compiles the exact boolean (#235).
@@ -554,16 +568,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 
     /// A boolean, with the operands' channel fates composed onto the
     /// provider's (#115): a channel lost upstream stays reported lost.
+    /// `budget` is the boolean's own, the placed scale included (#312).
     fn build_boolean(
         &self,
         graph: &GeometryGraph,
-        left: NodeId,
-        right: NodeId,
+        (left, right): (NodeId, NodeId),
         operator: axiolid_core::BooleanOperator,
         options: &ExecutionOptions,
+        budget: Budget,
         cache: &Cache,
     ) -> GeomResult<Built> {
-        let subject = self.cached(cache, left, Budget::of(options))?;
+        let subject = self.cached(cache, left, budget)?;
         refuse_surface_operand(subject, "subject")?;
         let bounded_tool = match self.node(graph, right)? {
             GeometryNode::HalfSpace(hs) => Some(axiolid_construct::half_space::for_subject(
@@ -578,15 +593,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let (tool, tool_fates, tool_deviation) = match bounded_tool.as_ref() {
             Some(tool) => (tool, None, None),
             None => {
-                let built = self.cached(cache, right, Budget::of(options))?;
+                let built = self.cached(cache, right, budget)?;
                 refuse_surface_operand(built, "tool")?;
                 (&built.mesh, Some(&built.fates), Some(&built.deviation))
             }
         };
         // Faces of the two operands a rounding residue apart are moved
         // together first, so a skin or sliver that thin is not cut as one
-        // (#276, narrowed to rounding in #291; `crate::snap`).
-        let settled = crate::snap::settle(&subject.mesh, tool, options.tolerance());
+        // (#276, narrowed to rounding in #291; `crate::snap`): the rounding
+        // of the operands' coordinates, or of the coordinates the result is
+        // placed at, whichever is coarser (#312).
+        let settled = crate::snap::settle(&subject.mesh, tool, options.tolerance(), budget.placed);
         let snapped = if settled.moved > 0.0 {
             // A snap never turns a working boolean into a refusal (#291):
             // where the snapped operands are refused, or their result touches
@@ -989,12 +1006,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 /// the curve in local space is within `stretch * c` of it in world space.
 /// The chord budget is shrunk until that product, rounded, is within the
 /// world budget ([`crate::deviation::shrunk_budget`]), so a source meshed
-/// to its local budget reports at most the world one (#258).
+/// to its local budget reports at most the world one (#258). The placed
+/// coordinate scale grows by the translation, in the source's units
+/// ([`crate::snap::placed_scale`], #312).
 fn instance_local_budget(transform: Transform3, budget: Budget) -> GeomResult<Budget> {
     let (tolerance, stretch) = instance_local_tolerance(transform, budget.tolerance)?;
     Ok(Budget {
         tolerance,
         chord: crate::deviation::shrunk_budget(budget.chord, stretch),
+        placed: crate::snap::placed_scale(transform, budget.placed).ok_or_else(|| {
+            GeomError::InvalidInput("instance translation has no finite magnitude".into())
+        })?,
     })
 }
 

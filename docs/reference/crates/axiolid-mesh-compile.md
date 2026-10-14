@@ -40,11 +40,13 @@ owns graph traversal and dispatch; the construction algorithms themselves
   consistently wound two-manifold; a declared solid that tessellates open
   is `MeshClosure::OpenSolid`, and `solid_mesh` refuses it.
 - Before a mesh boolean, operand coordinates a rounding residue from the
-  other operand's axis-aligned faces (16 `f64::EPSILON` of the operands'
-  largest coordinate, about `2e-8` at georeferenced coordinates) are set
+  other operand's axis-aligned faces (16 `f64::EPSILON` of the largest
+  coordinate the operands reach, or their result reaches once an
+  `Instance` places it, about `2e-8` at georeferenced coordinates) are set
   onto them exactly, so a tool a rounding error short of its host's face
-  leaves no skin that thin (#276); a thicker skin is authored and kept
-  whatever the tolerance (#291). The move is at most the tolerance, none
+  leaves no skin that thin, near the origin or placed far from it (#276,
+  #312); a thicker skin is authored and kept whatever the tolerance
+  (#291). The move is at most the tolerance, none
   at zero, and the deviation report names it
   (`deviation::SNAPPED_OPERANDS`). A boolean whose snapped operands are
   refused is cut as given, with no snap reported.

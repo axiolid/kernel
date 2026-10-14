@@ -1,10 +1,11 @@
-"""Mutation probe for skins at the rounding scale (#276, #291).
+"""Mutation probe for skins at the rounding scale (#276, #291, #312).
 
 A difference whose tool stops a rounding error short of its host's face
 (or reaches that far past it) leaves a skin or sliver that thin. The mesh
 compiler sets the operands' coordinates onto each other's axis-aligned
 faces before the mesh boolean, by at most a rounding residue of their
-coordinates, exactly, and reports the move; where the snapped boolean is
+coordinates (or of the coordinates an instance places the result at,
+#312), exactly, and reports the move; where the snapped boolean is
 refused it cuts the operands as given
 (`crates/execution/compile/src/snap.rs`, `build_boolean` in `compiler.rs`).
 The exact boolean cuts an imprinted edge at its own end where the other
@@ -33,6 +34,11 @@ Equivalent mutants, deliberately not listed:
   left unsewn; now masked by the retry, which cuts that door with ends
   merged only within the rounding floor, as before #276. The retry itself
   is pinned by the three `exact ...` mutants below.
+- Keying the compile cache without the placed scale (`placed_bits: 0`):
+  the key is where a node's budget is read back from, so that mutant is
+  "the snap ignores the placed scale" below; a cache that conflated two
+  scales is pinned by `one_source_placed_near_and_far_compiles_once_per_scale`
+  through the operand lookups (`build` reading the key's budget).
 - The pinch check on the snapped result alone: `cut` checks both results
   the same way, so a pinch is a refusal on either path (the pinch itself
   is pinned by `tests/tangent_void.rs`).
@@ -49,6 +55,7 @@ BB_LIB = "crates/algorithms/construction/brep-boolean/src/lib.rs"
 BB_REPORT = "crates/algorithms/construction/brep-boolean/src/report.rs"
 MESH = ["-p", "axiolid-mesh-compile", "--lib", "--test", "thin_skin"]
 FLUSH = ["-p", "axiolid-mesh-compile", "--test", "flush_through_cut"]
+PLACED = ["-p", "axiolid-mesh-compile", "--lib", "--test", "placed_skin"]
 EXACT = ["-p", "axiolid-brep-boolean", "--test", "openings"]
 
 MUTANTS = [
@@ -85,14 +92,44 @@ MUTANTS = [
      'pub(crate) const REACH_EPSILONS: Scalar = 16.0;',
      'pub(crate) const REACH_EPSILONS: Scalar = 4.0;', [MESH, FLUSH]),
     ('the reach ignores the coordinates\' magnitude', SNAP,
-     '        .fold(0.0, Scalar::max);\n    (REACH_EPSILONS',
-     '        .fold(1.0, Scalar::min);\n    (REACH_EPSILONS', [MESH, FLUSH]),
+     '        .fold(0.0, Scalar::max);\n    let placed = if',
+     '        .fold(1.0, Scalar::min);\n    let placed = if', [MESH, FLUSH]),
     ('the reach is not capped by the tolerance', SNAP,
      '    (REACH_EPSILONS * Scalar::EPSILON * scale).min(eps / 3.0_f64.sqrt())',
      '    REACH_EPSILONS * Scalar::EPSILON * scale', [MESH]),
     ('the snap has a floor at zero tolerance', SNAP,
      '    let eps = tolerance.linear();\n    if eps <= 0.0',
      '    let eps = tolerance.linear().max(1e-9);\n    if eps <= 0.0', [MESH]),
+    # Reach: the coordinates the result is placed at (#312).
+    ('the snap ignores the placed scale', COMPILER,
+     'crate::snap::settle(&subject.mesh, tool, options.tolerance(), budget.placed);',
+     'crate::snap::settle(&subject.mesh, tool, options.tolerance(), 0.0);', [PLACED]),
+    ('the reach ignores the placed scale', SNAP,
+     '    let scale = operands.max(placed);',
+     '    let scale = operands;', [PLACED]),
+    ('the placed reach leaves out the operands', SNAP,
+     '        placed + operands\n',
+     '        placed.min(operands)\n', [PLACED]),
+    ('an instance does not carry the placed scale', COMPILER,
+     '        placed: crate::snap::placed_scale(transform, budget.placed).ok_or_else(|| {',
+     '        placed: crate::snap::placed_scale(transform, budget.placed).map(|_| 0.0).ok_or_else(|| {',
+     [PLACED]),
+    ('a nested instance drops its parent\'s placed scale', SNAP,
+     '    let offset = parent + transform.translation.abs().max_element();',
+     '    let offset = transform.translation.abs().max_element();', [PLACED]),
+    ('the placed scale is read through the largest column', SNAP,
+     '    let smallest = columns.into_iter().fold(Scalar::INFINITY, Scalar::min);',
+     '    let smallest = columns.into_iter().fold(0.0, Scalar::max);', [PLACED]),
+    ('the placed scale is rounded down', SNAP,
+     '        Scalar::from_bits((bits | mask) + 1)',
+     '        Scalar::from_bits(bits & !mask)', [PLACED]),
+    ('the placed scale is not rounded', SNAP,
+     '    let rounded = if bits & mask == 0 {',
+     '    let rounded = if true {', [PLACED]),
+    ('a boolean reads its operands unplaced', COMPILER,
+     '        let subject = self.cached(cache, left, budget)?;',
+     '        let subject = self.cached(cache, left, Budget { placed: 0.0, ..budget })?;',
+     [PLACED]),
     # Landing: exactly, on exactly axis-aligned faces, a face whole.
     ('a face axis-aligned only within rounding is landed on', SNAP,
      '    (0..3).find(|&k| corners[0][k] == corners[1][k] && corners[1][k] == corners[2][k])',

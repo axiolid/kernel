@@ -556,3 +556,54 @@ unioned with and cut by a planar box, and as the tool; at budgets of
 instance; a refusal by name), the polyhedron's unit tests in
 `crates/execution/compile/src/exact/polyhedral.rs`; probe
 `scripts/probe_polygon_faces_mutants.py` (#266 mutants).
+
+## Amendment 2026-10-14: the snap reaches the placement's rounding (#312)
+
+The #291 reach is the rounding of the operands' own coordinates. A host
+cut in its own frame and placed by an `Instance` at georeferenced
+coordinates is cut where a coordinate rounds to `1e-15` and measured
+where it rounds to `1e-9`: a wall `3.65 x 0.25 x 3.67` whose doors stop
+`2e-14` to `1e-10` short of one face kept a skin that thin (the #291
+amendment's "residue the snap does not see"), and once placed 5600 km
+out and turned to grid north its faces crossed and the volume was
+refused as self-intersecting. At the origin every case measured.
+
+- **Decision: the reach covers the scale the result is placed at.**
+  `S = max(S_operands, S_placed)`, with `S_placed = P + S_operands`: `P`
+  is the world coordinate magnitude the instances above the boolean add,
+  in the operands' units. `Instance` and `InstanceAtStation` carry it
+  down to their source with the tolerance and the chord budget
+  (`instance_local_budget`): a source's `P` is its instance's `P` plus
+  the largest component of the instance's translation, divided by the
+  smallest column length of its linear part (a world residue is never
+  read smaller than it is), rounded up to three significant bits. A
+  turn's growth of a box's largest coordinate (at most `sqrt 3`) is left
+  to the sixteen epsilons. Nothing placed, `P = 0` and the reach is the
+  #291 one.
+- **Unchanged.** The reach stays capped at `eps / sqrt 3`; only exactly
+  axis-aligned faces are landed on, exactly; a snapped boolean that is
+  refused is cut as given (never worse); the move is reported under
+  `deviation::SNAPPED_OPERANDS`. At `5.6e6` the reach is about `2e-8`,
+  so every rounding residue of the host's frame closes there and a
+  micrometre skin (fifty reaches) stays authored.
+- **Decision: the cache keys on `P`.** A source placed near and far is
+  compiled once per scale, and the three-bit rounding lets instances at
+  similar distances share one entry; a nested placement grows `P` by at
+  most a quarter per level.
+- **Rejected: collapsing slivers after placement.** That is mesh surgery
+  after the boolean, with nothing to certify it against, where the snap
+  already has a proven exact landing.
+
+This supersedes the #291 amendment's note that a skin computed near the
+origin and placed far may cross itself again, wherever an instance does
+the placing. The #276 amendment's known limit stands: a boolean computed
+in a rotated frame far from the origin meets faces axis-aligned only
+within rounding, which no snap lands on.
+
+Tests: `crates/execution/compile/tests/placed_skin.rs` (the reproduction:
+residues `0` to `1e-10` placed and at the origin, volumes agreeing within
+the residue, the reported snaps and the placement's rounding; a
+micrometre skin kept placed; the placement split over nested instances;
+one source compiled unplaced and placed in one batch), the snap's unit
+tests (`placed_scale`, the placed reach); probe
+`scripts/probe_thin_skin_mutants.py` (#312 mutants).

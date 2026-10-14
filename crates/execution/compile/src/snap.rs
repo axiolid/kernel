@@ -1,5 +1,6 @@
 //! A boolean's operands moved onto each other's faces by a rounding
-//! residue before the mesh boolean cuts them (#276, narrowed in #291).
+//! residue before the mesh boolean cuts them (#276, narrowed in #291,
+//! reaching the placement's rounding in #312).
 //!
 //! # Why
 //!
@@ -14,24 +15,45 @@
 //!
 //! # Reach: rounding, not the tolerance
 //!
-//! Only a residue at the rounding scale of the operands' coordinates is
-//! closed. With `S` the largest coordinate magnitude of either operand,
-//! a coordinate moves by at most
+//! Only a residue at the rounding scale of the coordinates is closed: of
+//! the operands' own, or of those their result is placed at, whichever is
+//! coarser. A coordinate moves by at most
 //!
 //! ```text
 //! reach = min(eps / sqrt 3, REACH_EPSILONS * f64::EPSILON * S),   REACH_EPSILONS = 16
+//! S     = max(S_operands, S_placed),   S_placed = P + S_operands  (P > 0)
 //! ```
 //!
 //! where `eps` is the linear tolerance, so a vertex moves by at most
-//! `sqrt 3 * reach <= eps`. Sixteen relative epsilons are about 8 to 16
+//! `sqrt 3 * reach <= eps`. `S_operands` is the largest coordinate
+//! magnitude of either operand. `P` is the placed scale ([`placed_scale`],
+//! `0` where nothing places the boolean): the world coordinate magnitude
+//! the instances above it add, in the operands' own units, so `S_placed`
+//! bounds the largest world coordinate magnitude the result reaches once
+//! placed, in those units (up to the factor, at most `sqrt 3`, by which a
+//! turn grows a box's largest coordinate, which the sixteen epsilons
+//! absorb).
+//!
+//! A boolean computed in its host's own frame (`S_operands` about `3.67`
+//! for a wall) and placed by an `Instance` `5.6e6` out is cut where a
+//! coordinate rounds to `1e-15`, but measured where it rounds to `1e-9`:
+//! a skin of `1e-12` is far above its operands' rounding and far below its
+//! placement's, so it is kept, and its two faces cross once placed, and
+//! the volume is refused as self-intersecting (#312). The reach is
+//! therefore that of the placed coordinates. The compiler carries `P` down
+//! through every `Instance` and `InstanceAtStation` with the tolerance and
+//! the chord budget (`instance_local_budget`), and keys its cache on it,
+//! so a source placed near and far is compiled once per scale. Sixteen relative epsilons are about 8 to 16
 //! units in the last place of `S`: the rounding a coordinate accrues
 //! through a few composed placements (each affine step at most about
 //! `3 f64::EPSILON * S`) and a 15-significant-digit export (about
 //! `4.5 f64::EPSILON` relative). The #276 skin, `4.5e-15` in a wall whose
 //! coordinates reach `3.67`, is `5.5 f64::EPSILON * S`, inside the reach
-//! (`1.3e-14`); at georeferenced coordinates (`S` about `6e6`) the reach
-//! is about `2e-8`, so a residue of an ulp or a few there (`1e-9`) closes,
-//! and a skin of `1e-6` (fifty times the reach) is kept. A skin or sliver
+//! (`1.3e-14`); at georeferenced coordinates (`S` about `6e6`, the
+//! operands' own or their placement's) the reach is about `2e-8`, so a
+//! residue of an ulp or a few there (`1e-9`) closes, and so does any
+//! residue up to that of a wall cut in its own frame and placed there;
+//! a skin of `1e-6` (fifty times the reach) is kept. A skin or sliver
 //! above the reach is authored geometry: a `0.1`-`1 mm` skin under a
 //! `1 mm` tolerance stays in the mesh (#291), however thin its tolerance
 //! would allow it to be read.
@@ -88,7 +110,7 @@
 
 use std::collections::HashMap;
 
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
+use axiolid_core::{Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_mesh::TriMesh;
 
 /// The reach in relative epsilons of the largest coordinate magnitude
@@ -107,29 +129,83 @@ pub(crate) struct Settled {
     pub moved: Scalar,
 }
 
+/// Significant bits [`placed_scale`] keeps (the leading one and two more):
+/// a placed scale is rounded up to `1`, `1.25`, `1.5` or `1.75` times a
+/// power of two, so a nested placement grows it by at most a quarter per
+/// level, and instances at similar distances share a cache entry.
+const PLACED_BITS: u32 = 3;
+
+/// The placed scale of an instance's source: the world coordinate
+/// magnitude `parent`, the placed scale of the instance itself, and
+/// `transform`'s translation add, in the source's units (divided by the
+/// transform's smallest column length, so a world rounding residue is never
+/// read smaller than it is), rounded up to [`PLACED_BITS`] significant
+/// bits. `None` when it is not finite. See the module notes (#312).
+pub(crate) fn placed_scale(transform: Transform3, parent: Scalar) -> Option<Scalar> {
+    let m = transform.matrix3;
+    let columns = [m.x_axis, m.y_axis, m.z_axis].map(Vec3::length);
+    let smallest = columns.into_iter().fold(Scalar::INFINITY, Scalar::min);
+    let unit = if smallest > 0.0 {
+        smallest
+    } else {
+        crate::deviation::stretch(transform)
+    };
+    let offset = parent + transform.translation.abs().max_element();
+    let placed = offset / unit;
+    if !placed.is_finite() || placed < 0.0 {
+        return None;
+    }
+    let mask = (1_u64 << (52 - (PLACED_BITS - 1))) - 1;
+    let bits = placed.to_bits();
+    let rounded = if bits & mask == 0 {
+        placed
+    } else {
+        Scalar::from_bits((bits | mask) + 1)
+    };
+    rounded.is_finite().then_some(rounded)
+}
+
 /// How far a coordinate of `subject` or `tool` may move: the rounding scale
-/// of their coordinates, capped so that a vertex moves by at most the
-/// linear tolerance, `0` at zero tolerance (see the module notes).
-pub(crate) fn reach(subject: &TriMesh, tool: &TriMesh, tolerance: Tolerance) -> Scalar {
+/// of their coordinates, or of those their result is placed at (`placed`,
+/// [`placed_scale`]), whichever is coarser, capped so that a vertex moves
+/// by at most the linear tolerance, `0` at zero tolerance (see the module
+/// notes).
+pub(crate) fn reach(
+    subject: &TriMesh,
+    tool: &TriMesh,
+    tolerance: Tolerance,
+    placed: Scalar,
+) -> Scalar {
     let eps = tolerance.linear();
     if eps <= 0.0 || !eps.is_finite() {
         return 0.0;
     }
-    let scale = subject
+    let operands = subject
         .positions
         .iter()
         .chain(&tool.positions)
         .map(|p| p.abs().max_element())
         .filter(|m| m.is_finite())
         .fold(0.0, Scalar::max);
+    let placed = if placed > 0.0 && placed.is_finite() {
+        placed + operands
+    } else {
+        0.0
+    };
+    let scale = operands.max(placed);
     (REACH_EPSILONS * Scalar::EPSILON * scale).min(eps / 3.0_f64.sqrt())
 }
 
 /// Move the tool's coordinates onto the subject's axis-aligned faces, then
 /// the subject's onto the moved tool's, each by at most [`reach`] (see the
-/// module notes).
-pub(crate) fn settle(subject: &TriMesh, tool: &TriMesh, tolerance: Tolerance) -> Settled {
-    let reach = reach(subject, tool, tolerance);
+/// module notes); `placed` is the boolean's placed scale.
+pub(crate) fn settle(
+    subject: &TriMesh,
+    tool: &TriMesh,
+    tolerance: Tolerance,
+    placed: Scalar,
+) -> Settled {
+    let reach = reach(subject, tool, tolerance, placed);
     let mut out = Settled {
         subject: None,
         tool: None,
@@ -372,7 +448,7 @@ mod tests {
     fn the_reach_is_the_rounding_of_the_coordinates_capped_by_the_tolerance() {
         let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
         let tool = cube(Point3::new(1.0, 0.1, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let near = reach(&host, &tool, Tolerance::MILLIMETRE);
+        let near = reach(&host, &tool, Tolerance::MILLIMETRE, 0.0);
         assert_eq!(near, REACH_EPSILONS * Scalar::EPSILON * 4.0);
         let far = Vec3::new(6.0e5, 5.6e6, 0.0);
         let placed = |m: &TriMesh| {
@@ -380,20 +456,70 @@ mod tests {
             m.positions.iter_mut().for_each(|p| *p += far);
             m
         };
-        let georeferenced = reach(&placed(&host), &placed(&tool), Tolerance::MILLIMETRE);
+        let georeferenced = reach(&placed(&host), &placed(&tool), Tolerance::MILLIMETRE, 0.0);
         // A few ulps there, about 2e-8: well under a micrometre.
         assert!((1e-9..1e-7).contains(&georeferenced), "{georeferenced}");
         // Never above the tolerance, nothing at zero.
-        let tiny = reach(&host, &tool, Tolerance::new(1e-16, 1e-9).unwrap());
+        let tiny = reach(&host, &tool, Tolerance::new(1e-16, 1e-9).unwrap(), 0.0);
         assert_eq!(tiny, 1e-16 / 3.0_f64.sqrt());
-        assert_eq!(reach(&host, &tool, Tolerance::ZERO), 0.0);
+        assert_eq!(reach(&host, &tool, Tolerance::ZERO, 0.0), 0.0);
+    }
+
+    #[test]
+    fn the_reach_covers_the_coordinates_the_result_is_placed_at() {
+        // A wall cut in its own frame and placed 5.6e6 out (#312): the
+        // reach is that of the placed coordinates, about 2e-8.
+        let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
+        let tool = cube(Point3::new(1.0, 0.1, 0.5), Point3::new(2.0, 0.35, 2.5));
+        let site = Transform3::from_translation(Vec3::new(6.0e5, 5.6e6, 204.3));
+        let placed = placed_scale(site, 0.0).expect("finite");
+        // Rounded up to 1.5 * 2^22, never below the translation.
+        assert_eq!(placed, 1.5 * 4_194_304.0);
+        let far = reach(&host, &tool, Tolerance::MILLIMETRE, placed);
+        assert_eq!(far, REACH_EPSILONS * Scalar::EPSILON * (placed + 4.0));
+        assert!((1e-8..3e-8).contains(&far), "{far}");
+        // Unplaced, or placed near: the operands' own rounding.
+        let near = reach(&host, &tool, Tolerance::MILLIMETRE, 0.0);
+        assert_eq!(near, REACH_EPSILONS * Scalar::EPSILON * 4.0);
+        // Still capped by the tolerance, and nothing at zero.
+        let tiny = Tolerance::new(1e-10, 1e-9).unwrap();
+        assert_eq!(reach(&host, &tool, tiny, placed), 1e-10 / 3.0_f64.sqrt());
+        assert_eq!(reach(&host, &tool, Tolerance::ZERO, placed), 0.0);
+    }
+
+    #[test]
+    fn the_placed_scale_composes_in_the_sources_units() {
+        let at = |x: Scalar| Transform3::from_translation(Vec3::new(x, -2.0 * x, 0.5));
+        // The largest translation component (here twice `x`), exact at a
+        // value of three significant bits, rounded up otherwise.
+        assert_eq!(placed_scale(at(3.0), 0.0), Some(6.0));
+        assert_eq!(placed_scale(at(5.0), 0.0), Some(10.0));
+        assert_eq!(placed_scale(at(4.5), 0.0), Some(10.0));
+        assert_eq!(placed_scale(Transform3::IDENTITY, 0.0), Some(0.0));
+        // A nested placement adds its translation to its parent's scale.
+        assert_eq!(placed_scale(at(0.5), 6.0), Some(7.0));
+        // A source scaled up is placed at a smaller scale in its own units,
+        // read through its smallest column so a world residue is never read
+        // smaller than it is: 6e6 / 2, rounded up to 1.5 * 2^21.
+        let scaled = Transform3::from_cols(
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(0.0, 0.0, 8.0),
+            Vec3::new(6.0e6, 0.0, 0.0),
+        );
+        assert_eq!(placed_scale(scaled, 0.0), Some(1.5 * 2_097_152.0));
+        // Instances at similar distances share one scale.
+        let a = placed_scale(at(5.61e6), 0.0);
+        let b = placed_scale(at(5.89e6), 0.0);
+        assert_eq!(a, b);
+        assert_eq!(placed_scale(at(Scalar::INFINITY), 0.0), None);
     }
 
     #[test]
     fn a_tool_short_of_a_face_lands_on_it_exactly() {
         let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
         let tool = cube(Point3::new(1.0, 4.5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.iter().any(|p| p.y == 0.0));
         assert!(moved.positions.iter().all(|p| p.y == 0.0 || p.y == 0.35));
@@ -407,7 +533,7 @@ mod tests {
         // Bottom just above the host's floor face, end short of its front:
         // the corner near both lands on their common edge.
         let tool = cube(Point3::new(1.0, 4e-15, 4e-15), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved
             .positions
@@ -427,7 +553,7 @@ mod tests {
             (5e-4, Tolerance::MILLIMETRE),
         ] {
             let tool = cube(Point3::new(1.0, gap, 0.5), Point3::new(2.0, 0.35, 2.5));
-            let s = settle(&host, &tool, tolerance);
+            let s = settle(&host, &tool, tolerance, 0.0);
             assert!(s.tool.is_none() && s.subject.is_none(), "{gap}");
             assert_eq!(s.moved, 0.0);
         }
@@ -437,7 +563,7 @@ mod tests {
     fn nothing_moves_at_zero_tolerance() {
         let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
         let tool = cube(Point3::new(1.0, 4.5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, Tolerance::ZERO);
+        let s = settle(&host, &tool, Tolerance::ZERO, 0.0);
         assert!(s.tool.is_none() && s.subject.is_none());
     }
 
@@ -447,7 +573,7 @@ mod tests {
         // Cuts the top half off all but a skin a rounding error thick.
         let top = 1.0 - 4.0 * Scalar::EPSILON;
         let tool = cube(Point3::new(-1.0, -1.0, 0.5), Point3::new(2.0, 2.0, top));
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
         let subject = s.subject.expect("the subject moves");
         assert!(subject.positions.iter().all(|p| p.z == 0.0 || p.z == top));
@@ -457,10 +583,10 @@ mod tests {
     fn a_corner_near_three_faces_lands_on_their_corner() {
         let host = cube(Point3::ZERO, Point3::splat(2.0));
         let tool = cube(Point3::splat(4.5e-15), Point3::ONE);
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.contains(&Point3::ZERO));
-        assert!(s.moved <= 3.0_f64.sqrt() * reach(&host, &tool, metre()));
+        assert!(s.moved <= 3.0_f64.sqrt() * reach(&host, &tool, metre(), 0.0));
     }
 
     #[test]
@@ -474,7 +600,7 @@ mod tests {
             Point3::new(1.0, 4.5e-15, -1e-6),
             Point3::new(2.0, 0.35, 2.5),
         );
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.iter().all(|p| p.y == 0.0 || p.y == 0.35));
         assert!(moved.positions.iter().any(|p| p.z == -1e-6));
@@ -486,7 +612,7 @@ mod tests {
         // Both of its faces lie within the reach of the host's face:
         // moving both onto it would fold the tool flat.
         let tool = cube(Point3::new(1.0, -6e-15, 0.5), Point3::new(2.0, -2e-15, 2.5));
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
     }
 
@@ -495,7 +621,7 @@ mod tests {
         // A subject slab thinner than the reach: no single plane to land on.
         let host = cube(Point3::ZERO, Point3::new(4.0, 1e-14, 3.0));
         let tool = cube(Point3::new(1.0, 5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre());
+        let s = settle(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
     }
 
@@ -513,7 +639,7 @@ mod tests {
         }
         for y in [0.0, 2e-15, -2e-15] {
             let tool = cube(Point3::new(1.0, y, 0.5), Point3::new(2.0, 0.35, 2.5));
-            let s = settle(&host, &tool, metre());
+            let s = settle(&host, &tool, metre(), 0.0);
             assert!(s.tool.is_none() && s.subject.is_none(), "{y}");
         }
     }
