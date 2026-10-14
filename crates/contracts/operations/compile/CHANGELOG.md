@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `PolylineCompiler::compile_polyline` (#311): a curve node compiled to a
+  3D polyline, a separate operation rather than a second output kind of
+  `compile_mesh`, whose signature stays as it is. `PolylineOutcome`
+  carries the vertices, whether the curve closes, and a `ChordDeviation`
+  reported the way a mesh's deviation is: the requested chord budget and
+  a certified upper bound on the distance from every point of the exact
+  curve to the polyline, with `meets_requested`. The bound is never
+  absent: a curve a compiler cannot bound is refused by name.
+- A direct dependency on `axiolid-core` for `Point3` and `Scalar`; it was
+  already in this crate's closure through `axiolid-mesh`.
+
 ## [0.3.3] - 2026-10-09
 
 ### Added

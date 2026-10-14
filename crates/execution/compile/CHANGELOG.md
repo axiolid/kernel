@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ReferenceMeshCompiler` implements `PolylineCompiler` (#311): a `Curve3`,
+  a `Curve2` (lifted to `z = 0`), an `OpenProfile` and an `Instance` of
+  any of them, or an `InstanceAtStation` on a line basis, compile to a 3D
+  polyline. Each smooth piece of the curve (cut where it may not be `C^1`)
+  is bisected until every span's certified chord bound, the exact sagitta
+  of a circular arc or `h^2 / 8 sup |c''|` from certified derivative
+  bounds, fits the chord budget; the largest is the reported bound, so a
+  dense sampling of the exact curve never lies farther from the polyline.
+  A placement compiles its source to the budget shrunk by its stretch and
+  grows the bound by it, as an instance's mesh deviation does. Refused by
+  name: unbounded lines, families whose flattening is not certified
+  (intrinsic, implicit, banked), curve relations, collections, and curves
+  at numerically resolved stations. `compile_mesh` still refuses curve
+  nodes with `CurveEvaluation`.
+
 ## [0.3.25] - 2026-10-14
 
 ### Added

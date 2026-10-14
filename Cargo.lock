@@ -556,6 +556,7 @@ name = "axiolid-mesh-compile-contract"
 version = "0.3.3"
 dependencies = [
  "axiolid-contracts",
+ "axiolid-core",
  "axiolid-mesh",
  "axiolid-model",
 ]

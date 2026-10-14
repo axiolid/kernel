@@ -301,6 +301,7 @@ graph TD
     axiolid_mesh_compile --> axiolid_surface
     axiolid_mesh_compile --> axiolid_topology
     axiolid_mesh_compile_contract --> axiolid_contracts
+    axiolid_mesh_compile_contract --> axiolid_core
     axiolid_mesh_compile_contract --> axiolid_mesh
     axiolid_mesh_compile_contract --> axiolid_model
     axiolid_mesh_contracts --> axiolid_contracts

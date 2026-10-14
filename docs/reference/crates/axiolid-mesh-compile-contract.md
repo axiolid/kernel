@@ -19,13 +19,16 @@ Portable graph-to-mesh compilation contract.
 
 The contract for compiling an `axiolid-model` geometry graph into a
 triangle mesh. The outcome says whether the mesh is closed, and the
-contract never claims to preserve an exact B-rep. It is a contract only:
+contract never claims to preserve an exact B-rep. Curve nodes, which have
+no area, compile through the separate `PolylineCompiler` operation to a 3D
+polyline with a certified chord bound. It is a contract only:
 `axiolid-mesh-compile` implements it, and `axiolid-exact-compile-contract`
 is the exact counterpart.
 
 ## Depends on
 
 - [`axiolid-contracts`](./axiolid-contracts)
+- [`axiolid-core`](./axiolid-core)
 - [`axiolid-mesh`](./axiolid-mesh)
 - [`axiolid-model`](./axiolid-model)
 

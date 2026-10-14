@@ -11,6 +11,7 @@ readme = "README.md"
 
 [dependencies]
 axiolid-contracts.workspace = true
+axiolid-core.workspace = true
 axiolid-mesh.workspace = true
 axiolid-model.workspace = true
 
@@ -21,4 +22,4 @@ role = "contract.operation"
 domain = "mesh.compile"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-contracts", "axiolid-mesh", "axiolid-model"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-mesh", "axiolid-model"]

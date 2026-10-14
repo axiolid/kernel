@@ -11,7 +11,9 @@ use axiolid_contracts::{
 use axiolid_core::{PlaneFrame, Point3, Scalar, Tolerance, Transform3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::MeshBoolean;
-use axiolid_mesh_compile_contract::{CompileOutcome, MeshCompiler};
+use axiolid_mesh_compile_contract::{
+    CompileOutcome, MeshCompiler, PolylineCompiler, PolylineOutcome,
+};
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
 use axiolid_construct::extrude::extrude_profile;
@@ -1020,7 +1022,7 @@ fn instance_local_budget(transform: Transform3, budget: Budget) -> GeomResult<Bu
     })
 }
 
-fn instance_local_tolerance(
+pub(crate) fn instance_local_tolerance(
     transform: Transform3,
     tolerance: Tolerance,
 ) -> GeomResult<(Tolerance, Scalar)> {
@@ -1167,6 +1169,21 @@ impl<B: MeshBoolean> MeshCompiler for ReferenceMeshCompiler<B> {
             );
         }
         Ok(())
+    }
+}
+
+/// Curve nodes to polylines (#311): `Curve2` (lifted to `z = 0`),
+/// `Curve3` and `OpenProfile`, and their placements, each bisected until
+/// every span's certified chord bound fits the budget. See
+/// `crate::polyline` for what is bounded how and what is refused.
+impl<B: MeshBoolean> PolylineCompiler for ReferenceMeshCompiler<B> {
+    fn compile_polyline(
+        &self,
+        graph: &GeometryGraph,
+        root: NodeId,
+        options: &ExecutionOptions,
+    ) -> GeomResult<PolylineOutcome> {
+        crate::polyline::compile(graph, root, options)
     }
 }
 

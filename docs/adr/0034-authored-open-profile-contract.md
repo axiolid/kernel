@@ -73,3 +73,29 @@ We will represent an authored bounded open profile as `axiolid_model::OpenProfil
 - `crates/representations/modeling/graph/src/value.rs` provides sealed builder insertion.
 - `crates/execution/compile/src/compiler.rs` classifies evaluation without manufacturing a mesh.
 - ADR 0009 defines the graph layering; ADR 0033 separates authored geometry from mesh-derived section contours.
+
+## Amendment 2026-10-14: open profiles compile to polylines (#311)
+
+A consumer that needs an open profile's points no longer has to evaluate
+the curve itself. `axiolid-mesh-compile-contract` gains a separate
+operation, `PolylineCompiler::compile_polyline`, that compiles a curve node
+to a 3D polyline and reports a certified chord bound the way a mesh's
+deviation is reported: the requested budget and an upper bound on the
+distance from every point of the exact curve to the polyline. The bound is
+never absent; a curve that cannot be bounded is refused by name.
+
+- It is a second operation, not an output enum on `MeshCompiler`: changing
+  `compile_mesh`'s return type would break every consumer to serve one node
+  family. `compile_mesh` keeps refusing curve nodes, open profiles
+  included, with `CurveEvaluation`; it still never triangulates or closes
+  the path.
+- The reference compiler compiles `Curve2` (in `z = 0`), `Curve3` and
+  `OpenProfile` over atomic curves, and their placements, by bisecting each
+  smooth piece until every span's certified chord bound fits the budget.
+  Curve relations (trims, composites, offsets) are refused by name for
+  now, so an open profile whose path is a relation is too.
+- A polyline carries no area or width, as the declaration does not.
+
+Relation to code: `crates/contracts/operations/compile/src/polyline.rs`
+owns the contract, `crates/execution/compile/src/polyline.rs` the
+reference implementation.
