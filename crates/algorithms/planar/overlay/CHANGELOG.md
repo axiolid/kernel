@@ -38,6 +38,18 @@ caret rule for `0.x` versions.
   0.3.14 by hash, and `scripts/probe_overlay_slender_mutants.py` lists
   the faults it and the suite must catch.
 
+### Fixed
+
+- The crate's internal exact booleans refuse a ring with a repeated
+  vertex as `RepeatedVertex` instead of hanging on it (#309). Every
+  public entry validates first, so no caller could reach it: a piece of
+  no length had no point strictly inside, and the exact bisection for
+  its sample never ended. The sample now refuses such a piece by name,
+  and the straight-edge boolean checks for equal consecutive vertices
+  before it starts. Tests call both with a ten-second limit, and
+  `scripts/probe_repeated_vertex_mutants.py` lists the faults they must
+  catch.
+
 ## [0.3.14] - 2026-10-13
 
 ### Added

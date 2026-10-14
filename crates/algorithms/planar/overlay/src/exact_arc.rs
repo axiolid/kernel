@@ -407,7 +407,17 @@ fn approx_param(edge: &Edge, p: Point2) -> f64 {
 /// to a short dyadic so the sample stays cheap in every later predicate;
 /// verified exactly, with exact bisection over the whole edge as the
 /// fallback when the seed is not strictly inside.
-fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> XPoint {
+///
+/// # Errors
+///
+/// [`OverlayError::RepeatedVertex`] when `from` and `to` are one point
+/// (#309): no point lies strictly between them, and the bisection would
+/// never end. Only an edge between two equal vertices, which validation
+/// refuses, yields such a piece.
+fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> Result<XPoint, OverlayError> {
+    if same_point(from, to) {
+        return Err(OverlayError::RepeatedVertex);
+    }
     let inside =
         |p: &XPoint| edge.order(p, from) == Sign::Positive && edge.order(p, to) == Sign::Negative;
     let (a, b) = (
@@ -421,7 +431,7 @@ fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> XPoint {
         if u > 0.0 && u < 1.0 {
             let p = edge.point_at_f64(u);
             if inside(&p) {
-                return p;
+                return Ok(p);
             }
         }
     }
@@ -463,13 +473,14 @@ fn sample(edge: &Edge, from: &XPoint, to: &XPoint) -> XPoint {
         } else if edge.order(&p, to) != Sign::Negative {
             hi = mid;
         } else {
-            return p;
+            return Ok(p);
         }
     }
 }
 
-/// Split both operands' edges and return their pieces.
-fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
+/// Split both operands' edges and return their pieces; a piece no longer
+/// than a point is refused (see [`sample`]).
+fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Result<Vec<Piece>, OverlayError> {
     let mut out = Vec::new();
     for (index, edge) in own.iter().enumerate() {
         let mut stops = vec![edge.p0.clone(), edge.p1.clone()];
@@ -493,7 +504,7 @@ fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
         };
         for w in stops.windows(2) {
             out.push(Piece {
-                sample: sample(edge, &w[0], &w[1]),
+                sample: sample(edge, &w[0], &w[1])?,
                 from: w[0].clone(),
                 to: w[1].clone(),
                 tangent: tangent_of(edge),
@@ -504,7 +515,7 @@ fn pieces(own: &[Edge], other: &[Edge], ring: &ArcRing) -> Vec<Piece> {
             });
         }
     }
-    out
+    Ok(out)
 }
 
 fn classify(piece: &Piece, other: &[Edge], parts: &[Mono]) -> Status {
@@ -757,7 +768,7 @@ pub(crate) fn boolean(
         (Side::Subject, &a_edges, &b_edges, &b_parts, subject),
         (Side::Clip, &b_edges, &a_edges, &a_parts, clip),
     ] {
-        for piece in pieces(own, other, ring) {
+        for piece in pieces(own, other, ring)? {
             let status = classify(&piece, other, parts);
             if let Some(reverse) = keep(operation, side, status) {
                 kept.push(if reverse { piece.reversed() } else { piece });

@@ -156,7 +156,7 @@ impl ArcArrangement {
             });
             reversed.push(flip);
         }
-        let mut raw = arrangement::build(&oriented);
+        let mut raw = arrangement::build(&oriented)?;
         let counts: Vec<usize> = rings.iter().map(|ring| ring.vertices.len()).collect();
         let edges = raw
             .edges

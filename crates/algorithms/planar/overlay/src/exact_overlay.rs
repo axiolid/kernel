@@ -105,6 +105,13 @@ fn combined(operation: OverlayOperation, subject: bool, clip: bool) -> bool {
 ///
 /// Returns the result's rings as `(outer, holes)`, before canonical
 /// orientation and settling.
+///
+/// # Errors
+///
+/// [`OverlayError::RepeatedVertex`] for a ring with two equal consecutive
+/// vertices (#309). Every public entry validates first, which refuses
+/// them; a caller that skips validation gets this refusal instead of a
+/// subdivision cut by an edge of no length.
 pub(crate) fn boolean(
     subject: &[Polygon],
     clip: &[Polygon],
@@ -112,6 +119,18 @@ pub(crate) fn boolean(
     fill: FillRule,
     snap: f64,
 ) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
+    let repeats = |ring: &Ring| {
+        let n = ring.points.len();
+        (0..n).any(|i| ring.points[i] == ring.points[(i + 1) % n])
+    };
+    if subject
+        .iter()
+        .chain(clip)
+        .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+        .any(repeats)
+    {
+        return Err(OverlayError::RepeatedVertex);
+    }
     boolean_with(
         subject,
         clip,
@@ -207,7 +226,7 @@ fn boolean_with(
         return Ok(Vec::new());
     }
 
-    let raw = arrangement::build(&rings);
+    let raw = arrangement::build(&rings)?;
     // Whether the result holds the region on one side of a piece: the
     // rings containing that side are the ones containing the piece, and
     // each carrier whose inside faces that side.
@@ -1073,6 +1092,92 @@ mod tests {
             false,
         );
         assert_eq!(format!("{with:?}"), format!("{without:?}"));
+    }
+
+    /// `run`'s answer, or a panic when it takes longer than ten seconds:
+    /// the regression tests of #309 must end, not hang the suite.
+    fn within<T: Send + 'static>(run: impl FnOnce() -> T + Send + 'static) -> T {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(run());
+        });
+        receive
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("finishes within ten seconds")
+    }
+
+    /// An unvalidated ring with a repeated vertex is refused by name, in
+    /// either operand, as an outer ring or a hole, inside the ring or
+    /// across its closing edge, by every operation (#309). Before, the
+    /// subdivision cut a piece of no length and its sample's bisection
+    /// never ended.
+    #[test]
+    fn a_repeated_vertex_is_refused_by_name() {
+        let p = Point2::new;
+        let square = box_ring(0.0, 0.0, 1.0, 1.0);
+        let middle = Ring {
+            points: vec![
+                p(0.5, 0.5),
+                p(2.0, 0.5),
+                p(2.0, 0.5),
+                p(2.0, 2.0),
+                p(0.5, 2.0),
+            ],
+        };
+        let closing = Ring {
+            points: vec![p(0.5, 0.5), p(2.0, 0.5), p(2.0, 2.0), p(0.5, 0.5)],
+        };
+        let polygon = |outer: &Ring| Polygon {
+            outer: outer.clone(),
+            holes: Vec::new(),
+        };
+        let mut hole = middle.clone();
+        hole.points.reverse();
+        let holed = Polygon {
+            outer: box_ring(-5.0, -5.0, 5.0, 5.0),
+            holes: vec![hole],
+        };
+        let cases = [
+            (vec![polygon(&middle)], vec![polygon(&square)]),
+            (vec![polygon(&square)], vec![polygon(&middle)]),
+            (vec![polygon(&closing)], vec![polygon(&square)]),
+            (vec![holed], vec![polygon(&square)]),
+        ];
+        for (subject, clip) in cases {
+            for operation in [
+                OverlayOperation::Intersection,
+                OverlayOperation::Union,
+                OverlayOperation::Difference,
+                OverlayOperation::Xor,
+            ] {
+                let (s, c) = (subject.clone(), clip.clone());
+                let result = within(move || boolean(&s, &c, operation, FillRule::NonZero, 1e-9));
+                assert_eq!(result, Err(OverlayError::RepeatedVertex), "{operation:?}");
+            }
+        }
+    }
+
+    /// A piece whose ends are one point is refused by name where its
+    /// sample is taken (#309): the two-operand arc boolean, which splits
+    /// edges itself, reaches it with an unvalidated repeated vertex.
+    #[test]
+    fn a_piece_of_no_length_is_refused_by_name() {
+        let p = Point2::new;
+        let ring = |points: &[Point2]| ArcRing {
+            vertices: points.iter().copied().map(ArcVertex::straight).collect(),
+        };
+        let subject = ring(&[
+            p(0.5, 0.5),
+            p(2.0, 0.5),
+            p(2.0, 0.5),
+            p(2.0, 2.0),
+            p(0.5, 2.0),
+        ]);
+        let clip = ring(&[p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)]);
+        let result = within(move || {
+            crate::exact_arc::boolean(&subject, &clip, OverlayOperation::Union).map(|_| ())
+        });
+        assert_eq!(result, Err(OverlayError::RepeatedVertex));
     }
 
     /// A counter-clockwise box ring.

@@ -210,7 +210,12 @@ impl Winder {
 }
 
 /// Subdivide the plane by `rings`, each simple and counter-clockwise.
-pub(crate) fn build(rings: &[ArcRing]) -> Raw {
+///
+/// # Errors
+///
+/// [`OverlayError::RepeatedVertex`] for a piece whose ends are one point
+/// (#309), which only unvalidated rings give.
+pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
     let edges: Vec<Vec<Edge>> = rings.iter().map(edges_of).collect();
 
     // Broad phase over every edge and every monotone part of every ring
@@ -417,7 +422,7 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         let mut before: Option<(Vec<usize>, Vec<usize>)> = None;
         for w in stops.windows(2) {
             let piece = Piece {
-                sample: sample(edge, &w[0].0, &w[1].0),
+                sample: sample(edge, &w[0].0, &w[1].0)?,
                 from: w[0].0.clone(),
                 to: w[1].0.clone(),
                 tangent: tangent_of(edge),
@@ -645,9 +650,9 @@ pub(crate) fn build(rings: &[ArcRing]) -> Raw {
         edge.from = intern(&piece.from);
         edge.to = intern(&piece.to);
     }
-    Raw {
+    Ok(Raw {
         pieces,
         vertices,
         edges: out,
-    }
+    })
 }
