@@ -558,3 +558,46 @@ fn implicit_chord_bounds_cover_the_sampled_deviation_cell_by_cell() {
         assert!(previous < 1e-3, "{lo}: {previous}");
     }
 }
+
+/// The fourth-derivative bound (#307) covers second differences of the
+/// exact second derivative, away from knots, on the ellipse, a cubic, a
+/// rational quadratic and a rational 3D cubic.
+#[test]
+fn fourth_derivative_bounds_cover_sampled_fourth_derivatives() {
+    let h = 1e-3;
+    let near_knot = |curve: &Curve2, t: Scalar| match curve {
+        Curve2::BSpline(spline) => spline.knots.iter().any(|k| (t - k).abs() <= 2.0 * h),
+        _ => false,
+    };
+    let mut curves = vec![ellipse2()];
+    curves.extend(splines2());
+    for curve in &curves {
+        let domain = crate::curve::domain2(curve);
+        let fourth = curve_fourth_bound2(curve, domain.start, domain.end).unwrap();
+        assert!(fourth.is_finite());
+        for i in 0..=400 {
+            let t = domain.start + (domain.end - domain.start) * i as Scalar / 400.0;
+            if near_knot(curve, t) {
+                continue;
+            }
+            let second = |t: Scalar| crate::curve::second_derivative2(curve, t).unwrap();
+            let d4 = (second(t + h) - 2.0 * second(t) + second(t - h)) / (h * h);
+            assert!(
+                d4.length() <= fourth * (1.0 + 1e-3) + 1e-6,
+                "{curve:?} c'''' {} > {fourth}",
+                d4.length()
+            );
+        }
+    }
+    let curve = spline3();
+    let fourth = curve_fourth_bound3(&curve, 0.0, 1.0).unwrap();
+    for i in 0..=400 {
+        let t = i as Scalar / 400.0;
+        if t < 2.0 * h || t > 1.0 - 2.0 * h || (t - 0.5).abs() <= 2.0 * h {
+            continue;
+        }
+        let second = |t: Scalar| second_derivative3(&curve, t).unwrap();
+        let d4 = (second(t + h) - 2.0 * second(t) + second(t - h)) / (h * h);
+        assert!(d4.length() <= fourth * (1.0 + 1e-3) + 1e-6);
+    }
+}

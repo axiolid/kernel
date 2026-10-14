@@ -15,7 +15,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-axiolid = { workspace = true, features = ["application", "dispatch-mesh-section"] }
+axiolid = { workspace = true, features = ["application", "dispatch-mesh-section", "evaluate"] }
 axiolid-core.workspace = true
 axiolid-mesh.workspace = true
 axiolid-curve.workspace = true
@@ -100,6 +100,10 @@ harness = false
 
 [[bench]]
 name = "triangulate_points"
+harness = false
+
+[[bench]]
+name = "certified_length"
 harness = false
 
 [[bench]]

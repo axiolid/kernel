@@ -12,31 +12,42 @@
 //! a [`DistanceInterval`] that CONTAINS the true sum of the lengths before
 //! it, measured between the points the kernel reads as each piece's ends.
 //!
-//! # Chords and turning
+//! # Chords and their deficit
 //!
 //! Where the measured curve `P(t)` is evaluated in closed form at its
 //! native parameter -- a line, a circle, an ellipse or a B-spline, and any
 //! offset of one, 2D or 3D, measured by arc length -- each panel `[a, b]`,
-//! `h = b - a`, is bounded by its chord `c = |P(b) - P(a)|` and a bound `M`
-//! on `|P''|` there:
+//! `h = b - a`, is bounded by its chord `c = |P(b) - P(a)|` and certified
+//! bounds `M2`, `M3` on `|P''|`, `|P'''|` there:
 //!
 //! - `c` is a lower bound of the arc length (a chord is never longer);
-//! - `|P'(v)| >= m = c / h - M h / 2` everywhere on the panel, since
-//!   `|c - h P'(v)| <= M h^2 / 2`;
-//! - so the tangent turns by at most `beta = h M / m` over the panel, the
-//!   chord direction lies within `beta` of every tangent, and the arc
-//!   length is at most `c / cos(beta)`.
+//! - `|P'(v)| >= m = |P'(mid)| - M2 h / 2` everywhere on the panel, so the
+//!   tangent turns by at most `beta = h M2 / (2 m)` from the midpoint's and
+//!   the arc length is at most `c / cos(beta)`;
+//! - the deficit `L - c` is bounded from both sides through the velocity
+//!   across the chord, a zero-mean function whose square integral `M2`
+//!   bounds as `h^3`, and `M3` with the panel's own velocities to within
+//!   `h^4` (#307; see [`panels`]), so a panel's width falls as `h^4`.
 //!
-//! The width `c (1 / cos(beta) - 1)` falls as `h^2`; panels are halved
-//! until each is within its share of the tolerance. `M` comes from the
-//! certified derivative suprema of [`crate::bound`] (`|B''|`, `|B'''|` of
-//! the base) and, for an offset, the frame's: a unit vector `w / |w|` has
-//! `|u'| <= |w'| / r` and `|u''| <= 2 |w''| / r + 6 |w'|^2 / r^2` where `r`
-//! bounds `|w|` from below (`|B'|` for the tangent, `|B'_xy|` for the
-//! reference-up lateral, `|V x B'|` for a 3D offset's direction), and
-//! `(a e)'' = 2 a' e' + a e''` for a displacement `a` linear in the
-//! parameter. Each point carries a rounding error of [`POINT_ROUNDING`]
-//! relative to its largest coordinate, which widens every chord.
+//! The panels are refined adaptively: the widest is halved first, until
+//! their widths sum to an eighth of the tolerance ([`panels::adapt`]), so
+//! an ordinary curve certifies to `1e-8` relative and below within the
+//! budget. `M2` and `M3` come from the certified derivative suprema of
+//! [`crate::bound`] (`|B''|` to `|B''''|` of the base) and, for an offset,
+//! the frame's: a unit vector `w / |w|` has `|u'| <= |w'| / r`, `|u''| <=
+//! |w''| / r + 3 |w'|^2 / r^2` and `|u'''| <= |w'''| / r + 9 |w'| |w''| /
+//! r^2 + 15 |w'|^3 / r^3` where `r` bounds `|w|` from below (`|B'|` for the
+//! tangent, `|B'_xy|` for the reference-up lateral, `|V x B'|` for a 3D
+//! offset's direction), and Leibniz for each law component times its axis.
+//! Each point carries a rounding error of [`POINT_ROUNDING`] relative to
+//! its largest coordinate, which widens the chain of chords.
+//!
+//! An offset by distances along an ellipse or a B-spline (#307) reads its
+//! law in the base's arc length, a quadrature: the base is measured by
+//! chords first, and the law at a native parameter is read through that
+//! certified length (see [`beside`]), the measured curve being the offset
+//! whose law runs linearly in the base's true arc length between the
+//! points the kernel reads as the piece's ends.
 //!
 //! # Midpoints of a speed in closed form
 //!
@@ -57,19 +68,18 @@
 //! 24 sup |f''|`; `sup |f''|` is assembled from suprema of `k`, `k'`,
 //! `k''` (the law and its derivatives) and of `z'` to `z''''` (the
 //! profile's) by the Leibniz and chain rules, with `f >= inf (1 + b' -
-//! a k) > 0` (a cusp is refused).
+//! a k) > 0` (a cusp is refused). Its panels are refined adaptively too.
 //!
 //! # Refusals
 //!
 //! By a typed [`GeomError::UnsupportedInput`] naming
 //! [`UNCERTIFIED_LENGTH`]: an offset of a banked curve, of a 3D intrinsic
 //! curve, of a chain's parametric piece or of an elevated curve with an
-//! intrinsic profile in a leaning frame; an offset by distances (a law that
-//! varies) along an ellipse or a B-spline, whose law runs in the base's
-//! numerical arc length; a 3D offset direction that is not vertical beside
-//! a plan-parameterised base; a base placed in a frame that tilts `+Z`
-//! there; a skewed frame; and a tolerance the rounding of the points
-//! already exceeds. A panel budget of [`MAX_CERTIFIED_PANELS`] is
+//! intrinsic profile in a leaning frame; a 3D offset direction that is not
+//! vertical beside a plan-parameterised base; a base placed in a frame
+//! that tilts `+Z` there; a skewed frame; and a tolerance the rounding of
+//! the points already exceeds. A tolerance the budget of
+//! [`MAX_CERTIFIED_PANELS`] panels does not reach is
 //! [`GeomError::BudgetExceeded`].
 
 use std::borrow::Cow;
@@ -83,28 +93,31 @@ pub use axiolid_curve_evaluate_contract::DistanceInterval;
 
 use super::composite::{StationCurve, StationPiece};
 use super::offset::{OffsetTable, StationOffset};
-use super::{
-    reference_up_frame, station_length2, station_length3, StationSeam, KEEPS_UP_TOLERANCE,
-};
+use super::{station_length2, station_length3, StationSeam, KEEPS_UP_TOLERANCE};
 use crate::arc_parameter::{
     parameter_at_arc_length2, parameter_at_arc_length3, ARC_LENGTH_TOLERANCE,
 };
 use crate::bound::{
     continuity_breaks2, continuity_breaks3, curve_derivative_bounds2, curve_derivative_bounds3,
-    CurveDerivativeBounds,
+    curve_fourth_bound2, curve_fourth_bound3, CurveDerivativeBounds,
 };
 use crate::curve::{
     derivative2, derivative3, domain2, domain3, evaluate2, evaluate3, second_derivative2,
     second_derivative3,
 };
+use beside::chord_offset_length;
+use panels::{adapt, finish, product, Compensated, Jet, Measured, PANEL_SHARE, VELOCITY_ROUNDING};
+
+mod beside;
+mod panels;
 
 /// The input a length no certified bound here reaches is refused for.
 pub const UNCERTIFIED_LENGTH: &str =
     "a certified length of a station piece no bound here reaches: an offset of a banked curve, a \
      3D intrinsic curve, a chain's parametric piece or an elevated curve with an intrinsic \
-     profile in a leaning frame; an offset by distances along an ellipse or a B-spline; a 3D \
-     offset direction that is not vertical beside a plan-measured or intrinsic base; a base \
-     placed in a frame that tilts +Z; a skewed frame; or a tolerance below the points' rounding";
+     profile in a leaning frame; a 3D offset direction that is not vertical beside a \
+     plan-measured or intrinsic base; a base placed in a frame that tilts +Z; a skewed frame; or \
+     a tolerance below the points' rounding";
 
 /// The rounding error of a point evaluated in closed form, relative to the
 /// largest coordinate magnitude of the curve's data, the point and the
@@ -255,19 +268,10 @@ pub(crate) fn curve_span(
     }
     let native = Native::of(curve, m0, m1)?;
     let (t0, t1) = (native.parameter(m0)?, native.parameter(m1)?);
-    let breaks = native.breaks(1);
-    chord_turning(
-        t0.min(t1),
-        t0.max(t1),
-        &breaks,
-        tolerance,
-        &Measured {
-            point: &|t| native.point(t),
-            velocity: &|t| native.derivative(t),
-            second: &|a, b| Ok(native.bounds(a, b)?.second),
-            scale: native.extent(),
-        },
-    )
+    // `P''` continuous on every panel, for its third-derivative bound.
+    let mut breaks = native.breaks(2);
+    breaks.extend(native.breaks(1));
+    native.measured(|measured| measured.chord_turning(t0.min(t1), t0.max(t1), &breaks, tolerance))
 }
 
 /// The certified length of `offset` between its base measures `va <= vb`
@@ -419,6 +423,35 @@ impl<'c> Native<'c> {
         .ok_or_else(uncertified)
     }
 
+    /// A certified supremum of `|B''''|` over `[a, b]`, where one is known.
+    fn fourth(&self, a: Scalar, b: Scalar) -> Option<Scalar> {
+        match self {
+            Self::Two(curve) => curve_fourth_bound2(curve, a, b),
+            Self::Three(curve) => curve_fourth_bound3(curve, a, b),
+        }
+        .filter(|d| d.is_finite())
+    }
+
+    /// `run` given the curve measured by chords: its points exact but for
+    /// rounding, `P''` and `P'''` bounded by its own suprema.
+    fn measured<R>(&self, run: impl FnOnce(&Measured<'_>) -> GeomResult<R>) -> GeomResult<R> {
+        let point = |t: Scalar| Ok((self.point(t)?, 0.0));
+        let velocity = |t: Scalar| {
+            let d = self.derivative(t)?;
+            Ok((d, VELOCITY_ROUNDING * d.length()))
+        };
+        let bounds = |a: Scalar, b: Scalar| {
+            let d = self.bounds(a, b)?;
+            Ok((d.second, Some(d.third)))
+        };
+        run(&Measured {
+            point: &point,
+            velocity: &velocity,
+            bounds: &bounds,
+            scale: self.extent(),
+        })
+    }
+
     /// Where the curve may fail to be `C^k`.
     fn breaks(&self, k: usize) -> Vec<Scalar> {
         match self {
@@ -534,409 +567,7 @@ fn segment<P: Copy>(
     Ok((start - unit * at, unit))
 }
 
-/// `|u'|` and `|u''|` of a unit vector `u = w / |w|`, from a lower bound
-/// `r` of `|w|` and suprema of `|w'|`, `|w''|`: `|w'| / r` and `|w''| / r +
-/// 3 |w'|^2 / r^2`; infinite where `r` is not positive.
-fn unit_bounds(r: Scalar, w1: Scalar, w2: Scalar) -> (Scalar, Scalar) {
-    if r.is_nan() || r <= 0.0 {
-        return (Scalar::INFINITY, Scalar::INFINITY);
-    }
-    (w1 / r, w2 / r + 3.0 * w1 * w1 / (r * r))
-}
-
-/// A unit vector `w / |w|` and its derivative, from `w` and `w'`.
-fn unit_rate(w: Vec3, dw: Vec3) -> GeomResult<(Vec3, Vec3)> {
-    let r = w.length();
-    if r.is_nan() || r <= 0.0 {
-        return Err(uncertified());
-    }
-    let u = w / r;
-    Ok((u, (dw - u * u.dot(dw)) / r))
-}
-
-/// The certified length of an offset of a closed-form base between its
-/// base measures `va < vb`, by chords and turning.
-fn chord_offset_length(
-    offset: &StationOffset<'_>,
-    va: Scalar,
-    vb: Scalar,
-    tolerance: Scalar,
-) -> GeomResult<DistanceInterval> {
-    let base = offset.base();
-    let measure = |v: Scalar| {
-        if base.reversed {
-            base.end - v
-        } else {
-            base.start + v
-        }
-    };
-    let (ma, mb) = (measure(va), measure(vb));
-    let native = Native::of(base.curve, ma.min(mb), ma.max(mb))?;
-    let law = offset.law();
-    let rate = native.rate();
-    if !law.is_constant() && rate.is_none() {
-        return Err(uncertified());
-    }
-    let travel = if base.reversed { -1.0 } else { 1.0 };
-    let placement = base.placement;
-    let length = offset.base_length();
-    // The base distance into the piece at a native parameter, and its rate;
-    // read only by a law that varies, which needs a line or a circle.
-    let into = |t: Scalar| match rate {
-        Some(rate) => {
-            let m = t * rate;
-            if base.reversed {
-                base.end - m
-            } else {
-                m - base.start
-            }
-        }
-        None => 0.0,
-    };
-    let into_rate = travel * rate.unwrap_or(0.0);
-    let move_point = |p: Point3| placement.map_or(p, |rigid| rigid.transform_point3(p));
-    let move_vector = |v: Vec3| placement.map_or(v, |rigid| rigid.transform_vector3(v));
-    let point = |t: Scalar| -> GeomResult<Point3> {
-        let p = move_point(native.point(t)?);
-        let d = move_vector(native.derivative(t)?);
-        let section = reference_up_frame(p, travel * d)?;
-        Ok(section.point + offset.displacement(&section, into(t))?)
-    };
-    // `P' = B' + D'`, the displacement's frame differentiated through the
-    // unit vectors it is built of.
-    let velocity = |t: Scalar| -> GeomResult<Vec3> {
-        let d = move_vector(native.derivative(t)?);
-        let (w, dw) = (
-            travel * d,
-            travel * move_vector(native.second_derivative(t)?),
-        );
-        let (tangent, dtangent) = unit_rate(w, dw)?;
-        let (lateral, dlateral) = unit_rate(Vec3::Z.cross(w), Vec3::Z.cross(dw))?;
-        let up = (
-            tangent.cross(lateral),
-            dtangent.cross(lateral) + tangent.cross(dlateral),
-        );
-        let displacement = match law {
-            OffsetLaw::Planar { distance } => distance * dlateral,
-            OffsetLaw::Directed {
-                distance,
-                reference_direction,
-            } => {
-                let v = reference_direction.normalize();
-                distance * unit_rate(v.cross(w), v.cross(dw))?.1
-            }
-            OffsetLaw::Linear { start, end, frame } => {
-                let axes = match frame {
-                    OffsetFrame::Section => [(lateral, dlateral), up, (tangent, dtangent)],
-                    OffsetFrame::Plan => {
-                        let flat = |v: Vec3| Vec3::new(v.x, v.y, 0.0);
-                        let (along, dalong) = unit_rate(flat(w), flat(dw))?;
-                        [
-                            (Vec3::Z.cross(along), Vec3::Z.cross(dalong)),
-                            (Vec3::Z, Vec3::ZERO),
-                            (along, dalong),
-                        ]
-                    }
-                    _ => return Err(uncertified()),
-                };
-                let u = (into(t) / length).clamp(0.0, 1.0);
-                let pairs = [
-                    (start.lateral, end.lateral),
-                    (start.vertical, end.vertical),
-                    (start.longitudinal, end.longitudinal),
-                ];
-                pairs
-                    .iter()
-                    .zip(axes)
-                    .map(|(&(a, b), (axis, daxis))| {
-                        (b - a) / length * into_rate * axis + (a + (b - a) * u) * daxis
-                    })
-                    .fold(Vec3::ZERO, |acc, v| acc + v)
-            }
-            _ => return Err(uncertified()),
-        };
-        Ok(d + displacement)
-    };
-    let (dv, sizes) = law_rates(law, rate.unwrap_or(0.0) / length)?;
-    let second = |a: Scalar, b: Scalar| -> GeomResult<Scalar> {
-        let bounds = native.bounds(a, b)?;
-        let h = b - a;
-        let d = move_vector(native.derivative(0.5 * (a + b))?);
-        let reach = 0.5 * h * bounds.second;
-        let flat = Vec3::new(d.x, d.y, 0.0).length();
-        let tangent = unit_bounds(d.length() - reach, bounds.second, bounds.third);
-        let lateral = unit_bounds(flat - reach, bounds.second, bounds.third);
-        let up = (
-            tangent.0 + lateral.0,
-            tangent.1 + 2.0 * tangent.0 * lateral.0 + lateral.1,
-        );
-        let displacement = match law {
-            OffsetLaw::Planar { distance } => distance.abs() * lateral.1,
-            OffsetLaw::Directed {
-                distance,
-                reference_direction,
-            } => {
-                let v = reference_direction.normalize();
-                let r = v.cross(d).length() - reach;
-                distance.abs() * unit_bounds(r, bounds.second, bounds.third).1
-            }
-            OffsetLaw::Linear { frame, .. } => {
-                let axes = match frame {
-                    OffsetFrame::Section => [lateral, up, tangent],
-                    OffsetFrame::Plan => [lateral, (0.0, 0.0), lateral],
-                    _ => return Err(uncertified()),
-                };
-                (0..3)
-                    .map(|k| 2.0 * dv[k] * axes[k].0 + sizes[k] * axes[k].1)
-                    .sum()
-            }
-            _ => return Err(uncertified()),
-        };
-        Ok(bounds.second + displacement)
-    };
-    let mut breaks = native.breaks(2);
-    breaks.extend(native.breaks(1));
-    let reach = sizes.iter().sum::<Scalar>()
-        + match law {
-            OffsetLaw::Planar { distance } | OffsetLaw::Directed { distance, .. } => distance.abs(),
-            _ => 0.0,
-        };
-    let shift = placement.map_or(0.0, |rigid| rigid.translation.abs().max_element());
-    let (ta, tb) = (native.parameter(ma)?, native.parameter(mb)?);
-    chord_turning(
-        ta.min(tb),
-        ta.max(tb),
-        &breaks,
-        tolerance,
-        &Measured {
-            point: &point,
-            velocity: &velocity,
-            second: &second,
-            scale: native.extent() + reach + shift,
-        },
-    )
-}
-
-/// A law's components `(lateral, vertical, longitudinal)`: their rates in
-/// the native parameter (`rate` the base distance per parameter, divided
-/// by the base length) and their largest sizes.
-fn law_rates(law: OffsetLaw, rate: Scalar) -> GeomResult<([Scalar; 3], [Scalar; 3])> {
-    Ok(match law {
-        OffsetLaw::Linear { start, end, .. } => {
-            let pairs = [
-                (start.lateral, end.lateral),
-                (start.vertical, end.vertical),
-                (start.longitudinal, end.longitudinal),
-            ];
-            (
-                pairs.map(|(a, b)| (b - a).abs() * rate.abs()),
-                pairs.map(|(a, b)| a.abs().max(b.abs())),
-            )
-        }
-        OffsetLaw::Planar { .. } | OffsetLaw::Directed { .. } => ([0.0; 3], [0.0; 3]),
-        _ => return Err(uncertified()),
-    })
-}
-
-/// A curve measured by chords: its point, its velocity and a bound on its
-/// second derivative over a parameter interval, all in the native
-/// parameter, and the coordinate magnitude a point's rounding is relative
-/// to.
-struct Measured<'a> {
-    point: &'a dyn Fn(Scalar) -> GeomResult<Point3>,
-    velocity: &'a dyn Fn(Scalar) -> GeomResult<Vec3>,
-    second: &'a dyn Fn(Scalar, Scalar) -> GeomResult<Scalar>,
-    scale: Scalar,
-}
-
-/// A sum of many positive terms, compensated (Neumaier): its error is a
-/// few units in the last place of the sum, whatever the number of terms.
-#[derive(Debug, Clone, Copy, Default)]
-struct Compensated {
-    sum: Scalar,
-    carry: Scalar,
-}
-
-impl Compensated {
-    fn add(&mut self, value: Scalar) {
-        let total = self.sum + value;
-        self.carry += if self.sum.abs() >= value.abs() {
-            (self.sum - total) + value
-        } else {
-            (value - total) + self.sum
-        };
-        self.sum = total;
-    }
-
-    fn value(self) -> Scalar {
-        self.sum + self.carry
-    }
-}
-
-/// The certified length of `P` over the native parameters `[t0, t1]`, by
-/// chords and turning (see the [module documentation](self)), split at
-/// `breaks` (where `P'` may not be continuous) and halved until each panel
-/// is within its share of `tolerance`.
-fn chord_turning(
-    t0: Scalar,
-    t1: Scalar,
-    breaks: &[Scalar],
-    tolerance: Scalar,
-    curve: &Measured<'_>,
-) -> GeomResult<DistanceInterval> {
-    let span = t1 - t0;
-    if span.is_nan() || span <= 0.0 {
-        return Ok(DistanceInterval::point(0.0));
-    }
-    let mut cuts = vec![t0];
-    let mut inside: Vec<Scalar> = breaks
-        .iter()
-        .copied()
-        .filter(|&t| t > t0 && t < t1)
-        .collect();
-    inside.sort_by(Scalar::total_cmp);
-    inside.dedup();
-    cuts.extend(inside);
-    cuts.push(t1);
-    let (mut chords, mut excesses) = (Compensated::default(), Compensated::default());
-    let mut rounding = Rounding::new(curve.scale);
-    let mut panels = 0_usize;
-    for pair in cuts.windows(2) {
-        let (a0, b0) = (pair[0], pair[1]);
-        // Depth first, left half first: panels are accepted in order along
-        // the curve, each starting where the last ended.
-        let mut stack = vec![(a0, b0, (curve.point)(a0)?, (curve.point)(b0)?)];
-        while let Some((a, b, pa, pb)) = stack.pop() {
-            panels += 1;
-            if panels > MAX_CERTIFIED_PANELS {
-                return Err(budget());
-            }
-            let h = b - a;
-            let mid = 0.5 * (a + b);
-            let chord = (pb - pa).length();
-            // Every tangent on the panel lies within `turn` of the
-            // midpoint's, so the chord is at least `cos(turn)` of the arc.
-            let bound = (curve.second)(a, b)?;
-            let speed = (curve.velocity)(mid)?.length() - 0.5 * h * bound;
-            let turn = if speed > 0.0 {
-                0.5 * h * bound / speed + 1e-12
-            } else {
-                Scalar::INFINITY
-            };
-            // `c / cos(turn) - c`, without cancellation.
-            let excess = if turn < 1.0 {
-                let half = (0.5 * turn).sin();
-                chord * (1.0 + 4.0 * Scalar::EPSILON) * 2.0 * half * half / turn.cos()
-            } else {
-                Scalar::INFINITY
-            };
-            if excess <= 0.5 * tolerance * h / span {
-                chords.add(chord);
-                excesses.add(excess);
-                rounding.panel(pa, pb, chord);
-                continue;
-            }
-            if !(mid > a && mid < b) {
-                return Err(uncertified());
-            }
-            let pm = (curve.point)(mid)?;
-            stack.push((mid, b, pm, pb));
-            stack.push((a, mid, pa, pm));
-        }
-    }
-    let error = rounding.bound();
-    let sum = chords.value();
-    finish(sum - error, sum + excesses.value() + error, tolerance)
-}
-
-/// The rounding of a chain of chords between computed points (#294).
-///
-/// Each point is off its curve by at most `e = POINT_ROUNDING * scale`.
-/// Writing a chord `|D + d|`, `D` the true one and `d` the difference of
-/// its ends' errors (`|d| <= 2e`): `|D + d| - |D| = d.u + q`, `u = D /
-/// |D|`, with `0 <= q <= |d|^2 / (2 |D|)`. The parts `d.u` telescope along
-/// the chain: their sum is at most `e (2 + sum |u_i - u_(i-1)|)`, the
-/// directions' total variation, which the chords themselves bound. So the
-/// rounding of the whole chain stays a few `e`, however many chords it has;
-/// each chord's own norm adds `4 eps |c|`.
-#[derive(Debug, Clone, Copy)]
-struct Rounding {
-    scale: Scalar,
-    previous: Option<Vec3>,
-    variation: Scalar,
-    quadratic: Scalar,
-    norms: Scalar,
-}
-
-impl Rounding {
-    fn new(scale: Scalar) -> Self {
-        Self {
-            scale: scale.max(1.0),
-            previous: None,
-            variation: 0.0,
-            quadratic: 0.0,
-            norms: 0.0,
-        }
-    }
-
-    /// An accepted panel from `pa` to `pb`, its computed chord `chord`.
-    fn panel(&mut self, pa: Point3, pb: Point3, chord: Scalar) {
-        self.scale = self
-            .scale
-            .max(pa.abs().max_element())
-            .max(pb.abs().max_element());
-        let e = POINT_ROUNDING * self.scale;
-        if chord > 4.0 * e {
-            let direction = (pb - pa) / chord;
-            if let Some(previous) = self.previous {
-                self.variation += (direction - previous).length();
-            }
-            self.previous = Some(direction);
-            // The chord's second-order part, and the error of the computed
-            // direction against the true one (at most `4 e / |D|`, twice).
-            self.quadratic += 10.0 * e * e / (chord - 2.0 * e);
-        } else {
-            // Too short to have a direction: count its whole error.
-            self.variation += 4.0;
-            self.previous = None;
-        }
-        self.norms += 4.0 * Scalar::EPSILON * chord;
-    }
-
-    /// A bound on the difference of the computed and the true chord sums.
-    fn bound(&self) -> Scalar {
-        let e = POINT_ROUNDING * self.scale;
-        e * (2.0 + self.variation) + self.quadratic + self.norms
-    }
-}
-
-/// A compensated sum of panel bounds as an interval, widened for its own
-/// rounding; refused when wider than `tolerance`.
-fn finish(lower: Scalar, upper: Scalar, tolerance: Scalar) -> GeomResult<DistanceInterval> {
-    let rounding = 4.0 * Scalar::EPSILON;
-    let out = DistanceInterval::new(
-        (lower * (1.0 - rounding)).max(0.0),
-        upper * (1.0 + rounding),
-    );
-    if !(out.lower.is_finite() && out.upper.is_finite()) || out.width() > tolerance {
-        return Err(uncertified());
-    }
-    Ok(out)
-}
-
 // --- speeds in closed form ------------------------------------------------------
-
-/// Suprema of a function and its derivatives over a panel, `[|f|, |f'|,
-/// ...]`.
-type Jet<const N: usize> = [Scalar; N];
-
-/// Leibniz: suprema of `(f g)^(k)`.
-fn product<const N: usize>(f: Jet<N>, g: Jet<N>) -> Jet<N> {
-    let binomial = |n: usize, k: usize| -> Scalar {
-        (0..k).fold(1.0, |acc, i| acc * (n - i) as Scalar / (i + 1) as Scalar)
-    };
-    core::array::from_fn(|k| (0..=k).map(|j| binomial(k, j) * f[j] * g[k - j]).sum())
-}
 
 fn sum<const N: usize>(f: Jet<N>, g: Jet<N>) -> Jet<N> {
     core::array::from_fn(|k| f[k] + g[k])
@@ -1231,47 +862,61 @@ impl<'a> PlanModel<'a> {
         Ok((forward[1], forward, across))
     }
 
-    /// The certified length between the base distances `va < vb`.
-    fn length(&self, va: Scalar, vb: Scalar, tolerance: Scalar) -> GeomResult<DistanceInterval> {
-        let span = vb - va;
-        let (mut lower, mut upper) = (Compensated::default(), Compensated::default());
-        let mut panels = 0_usize;
-        let mut stack = vec![(va, vb)];
-        while let Some((a, b)) = stack.pop() {
-            panels += 1;
-            if panels > MAX_CERTIFIED_PANELS {
-                return Err(budget());
-            }
-            let h = b - a;
-            let mid = 0.5 * (a + b);
-            let (forward_mid, speed_mid) = self.speed(mid)?;
-            let (rate, forward, across) = self.bounds(a, b)?;
-            let floor = forward_mid - 0.5 * h * rate;
-            let error = if floor > 0.0 {
-                let g1 = 2.0 * (forward[0] * forward[1] + across[0] * across[1]);
-                let g2 = 2.0
-                    * (forward[1] * forward[1]
-                        + forward[0] * forward[2]
-                        + across[1] * across[1]
-                        + across[0] * across[2]);
-                let gmin = floor * floor;
-                let bend = g2 / (2.0 * floor) + g1 * g1 / (4.0 * gmin * floor);
-                h * h * h / 24.0 * bend + VALUE_ROUNDING * h * speed_mid
-            } else {
-                Scalar::INFINITY
-            };
-            if error.is_finite() && 2.0 * error <= 0.5 * tolerance * h / span {
-                lower.add(h * speed_mid - error);
-                upper.add(h * speed_mid + error);
-                continue;
-            }
-            if !(mid > a && mid < b) {
-                return Err(uncertified());
-            }
-            stack.push((mid, b));
-            stack.push((a, mid));
+    /// The midpoint rule over the base distances `[a, b]`: the panel's
+    /// bounds `(a, b, lower, upper)`, unbounded where its forward speed
+    /// may vanish.
+    fn panel(&self, a: Scalar, b: Scalar) -> GeomResult<(Scalar, Scalar, Scalar, Scalar)> {
+        let h = b - a;
+        let mid = 0.5 * (a + b);
+        let (forward_mid, speed_mid) = self.speed(mid)?;
+        let (rate, forward, across) = self.bounds(a, b)?;
+        let floor = forward_mid - 0.5 * h * rate;
+        let error = if floor > 0.0 {
+            let g1 = 2.0 * (forward[0] * forward[1] + across[0] * across[1]);
+            let g2 = 2.0
+                * (forward[1] * forward[1]
+                    + forward[0] * forward[2]
+                    + across[1] * across[1]
+                    + across[0] * across[2]);
+            let gmin = floor * floor;
+            let bend = g2 / (2.0 * floor) + g1 * g1 / (4.0 * gmin * floor);
+            h * h * h / 24.0 * bend + VALUE_ROUNDING * h * speed_mid
+        } else {
+            Scalar::INFINITY
+        };
+        if !error.is_finite() {
+            return Ok((a, b, Scalar::NEG_INFINITY, Scalar::INFINITY));
         }
-        finish(lower.value(), upper.value(), tolerance)
+        Ok((a, b, h * speed_mid - error, h * speed_mid + error))
+    }
+
+    /// The certified length between the base distances `va < vb`, its
+    /// panels refined where they are widest ([`panels::adapt`]).
+    fn length(&self, va: Scalar, vb: Scalar, tolerance: Scalar) -> GeomResult<DistanceInterval> {
+        let refined = adapt(
+            vec![self.panel(va, vb)?],
+            PANEL_SHARE * tolerance,
+            |p| p.3 - p.2,
+            |&(a, b, ..)| {
+                let mid = 0.5 * (a + b);
+                if !(mid > a && mid < b) {
+                    return Err(uncertified());
+                }
+                Ok((self.panel(a, mid)?, self.panel(mid, b)?))
+            },
+        )?;
+        let (mut lower, mut upper) = (Compensated::default(), Compensated::default());
+        for &(_, _, lo, hi) in &refined.panels {
+            lower.add(lo);
+            upper.add(hi);
+        }
+        finish(lower.value(), upper.value(), tolerance).map_err(|error| {
+            if refined.exhausted {
+                budget()
+            } else {
+                error
+            }
+        })
     }
 }
 
@@ -1360,33 +1005,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    /// A unit vector's derivative bounds hold for a curve whose `|w|` dips.
-    #[test]
-    fn the_unit_vector_bounds_hold() {
-        let w = |t: Scalar| Vec3::new(1.0 + 0.5 * t.cos(), 0.8 * t.sin(), 0.3 * t);
-        let dw = |t: Scalar| Vec3::new(-0.5 * t.sin(), 0.8 * t.cos(), 0.3);
-        let (w1, w2) = (1.0, 1.0);
-        let r = 0.45;
-        let (u1, u2) = unit_bounds(r, w1, w2);
-        let h = 1e-4;
-        for i in 0..2000 {
-            let t = Scalar::from(i) * 3e-3;
-            let (_, d) = unit_rate(w(t), dw(t)).unwrap();
-            assert!(d.length() <= u1);
-            let (_, up) = unit_rate(w(t + h), dw(t + h)).unwrap();
-            let (_, down) = unit_rate(w(t - h), dw(t - h)).unwrap();
-            assert!(((up - down) / (2.0 * h)).length() <= u2);
-        }
-    }
-
-    #[test]
-    fn a_compensated_sum_of_many_terms_stays_exact() {
-        let mut sum = Compensated::default();
-        for _ in 0..1_000_000 {
-            sum.add(0.1);
-        }
-        assert!((sum.value() - 100_000.0).abs() <= 1e-9);
     }
 }

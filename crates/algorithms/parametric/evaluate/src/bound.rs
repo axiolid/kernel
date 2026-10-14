@@ -236,18 +236,23 @@ fn norm<const N: usize>(p: &[Scalar; N]) -> Scalar {
 }
 
 /// Rational derivative bounds from homogeneous ones: `A = w c`, so
-/// `c' = (A' - w' c) / w`, `c'' = (A'' - 2 w' c' - w'' c) / w` and
-/// `c''' = (A''' - 3 w'' c' - 3 w' c'' - w''' c) / w`.
-fn quotient_bounds(a: [Scalar; 4], w: [Scalar; 4], radius: Scalar, w_min: Scalar) -> [Scalar; 3] {
+/// `c' = (A' - w' c) / w`, `c'' = (A'' - 2 w' c' - w'' c) / w`,
+/// `c''' = (A''' - 3 w'' c' - 3 w' c'' - w''' c) / w` and `c'''' = (A'''' -
+/// 4 w''' c' - 6 w'' c'' - 4 w' c''' - w'''' c) / w`.
+fn quotient_bounds(a: [Scalar; 5], w: [Scalar; 5], radius: Scalar, w_min: Scalar) -> [Scalar; 4] {
     let first = (a[1] + w[1] * radius) / w_min;
     let second = (a[2] + 2.0 * w[1] * first + w[2] * radius) / w_min;
     let third = (a[3] + 3.0 * w[2] * first + 3.0 * w[1] * second + w[3] * radius) / w_min;
-    [first, second, third]
+    let fourth =
+        (a[4] + 4.0 * w[3] * first + 6.0 * w[2] * second + 4.0 * w[1] * third + w[4] * radius)
+            / w_min;
+    [first, second, third, fourth]
 }
 
-/// `sup |c^(k)|`, `k = 1, 2, 3`, of a B-spline over `[a, b]`, and its
-/// chord coefficient `K`: every point of the arc is within `(b - a)^2 / 8
-/// K` of the chord. `None` for invalid data or a non-positive weight.
+/// `sup |c^(k)|`, `k = 1, 2, 3`, of a B-spline over `[a, b]`, its chord
+/// coefficient `K` (every point of the arc is within `(b - a)^2 / 8 K` of
+/// the chord) and `sup |c''''|` (#307). `None` for invalid data or a
+/// non-positive weight.
 ///
 /// The chord coefficient is not `sup |c''|` for a rational spline. With
 /// the centred homogeneous numerator `A = w c` and the linear
@@ -262,7 +267,7 @@ fn bspline_bounds<P, const N: usize>(
     to: impl Fn(&P) -> [Scalar; N],
     a: Scalar,
     b: Scalar,
-) -> Option<(CurveDerivativeBounds, Scalar)> {
+) -> Option<(CurveDerivativeBounds, Scalar, Scalar)> {
     let count = curve.control_points.len();
     let axis = SplineAxis::new(
         &curve.knots,
@@ -317,9 +322,9 @@ fn bspline_bounds<P, const N: usize>(
         .collect();
     let mut hw = weights.clone();
     let mut knots: &[Scalar] = &axis.knots;
-    let mut a_sup = [0.0; 4];
-    let mut w_sup = [0.0; 4];
-    for order in 1..=3 {
+    let mut a_sup = [0.0; 5];
+    let mut w_sup = [0.0; 5];
+    for order in 1..=4 {
         let current_degree = degree + 1 - order;
         if current_degree == 0 || hom.len() < 2 {
             break;
@@ -336,7 +341,7 @@ fn bspline_bounds<P, const N: usize>(
         hom = next;
         hw = next_w;
     }
-    let [first, second, third] = quotient_bounds(a_sup, w_sup, radius, w_min);
+    let [first, second, third, fourth] = quotient_bounds(a_sup, w_sup, radius, w_min);
     let bounds = CurveDerivativeBounds {
         first: inflate(first),
         second: inflate(second),
@@ -347,7 +352,7 @@ fn bspline_bounds<P, const N: usize>(
         && bounds.second.is_finite()
         && bounds.third.is_finite()
         && chord.is_finite())
-    .then_some((bounds, chord))
+    .then_some((bounds, chord, inflate(fourth)))
 }
 
 /// Interior knots of a B-spline where it may fail to be `C^k`: those of
@@ -442,7 +447,9 @@ pub fn curve_derivative_bounds3(
             a,
             b,
         )),
-        Curve3::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b).map(|b| b.0),
+        Curve3::BSpline(spline) => {
+            bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b).map(|(bounds, ..)| bounds)
+        }
         // In plan distance, plan and profile combined (#252).
         Curve3::Elevated(e) => crate::elevated::elevated_derivative_bounds(e, a, b),
         Curve3::Banked(banked) => crate::elevated::banked_derivative_bounds(banked, a, b),
@@ -483,7 +490,9 @@ pub fn curve_derivative_bounds2(
             a,
             b,
         )),
-        Curve2::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y], a, b).map(|b| b.0),
+        Curve2::BSpline(spline) => {
+            bspline_bounds(spline, |p| [p.x, p.y], a, b).map(|(bounds, ..)| bounds)
+        }
         // `(t, mean + a cos t + b sin t)`: every derivative's wave has
         // amplitude `sqrt(a^2 + b^2)`.
         Curve2::Sinusoid(w) => {
@@ -493,6 +502,66 @@ pub fn curve_derivative_bounds2(
                 second: inflate(amplitude),
                 third: inflate(amplitude),
             })
+        }
+        _ => None,
+    }
+}
+
+/// `sup |c''''|` of a 3D curve over `[a, b]` (#307), over the pieces
+/// between its [`continuity_breaks3`] as [`curve_derivative_bounds3`]'s
+/// are: zero on a line, the bound of `|c''|` on a conic (`c'''' = -c''`),
+/// the fourth hodograph on a B-spline. `None` for every other family.
+#[must_use]
+pub(crate) fn curve_fourth_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
+    if !(a.is_finite() && b.is_finite()) {
+        return None;
+    }
+    match curve {
+        Curve3::Line(_) => Some(0.0),
+        Curve3::Circle(c) => Some(inflate(conic_second(
+            c.radius, c.radius, c.frame.x, c.frame.y, a, b,
+        ))),
+        Curve3::Ellipse(e) => Some(inflate(conic_second(
+            e.semi_axis_x,
+            e.semi_axis_y,
+            e.frame.x,
+            e.frame.y,
+            a,
+            b,
+        ))),
+        Curve3::BSpline(spline) => {
+            bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b).map(|(.., fourth)| fourth)
+        }
+        _ => None,
+    }
+}
+
+/// [`curve_fourth_bound3`] for a 2D curve.
+#[must_use]
+pub(crate) fn curve_fourth_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
+    if !(a.is_finite() && b.is_finite()) {
+        return None;
+    }
+    match curve {
+        Curve2::Line(_) => Some(0.0),
+        Curve2::Circle(c) => Some(inflate(conic_second(
+            c.radius,
+            c.radius,
+            lift2(c.frame.x),
+            lift2(c.frame.y),
+            a,
+            b,
+        ))),
+        Curve2::Ellipse(e) => Some(inflate(conic_second(
+            e.semi_axis_x,
+            e.semi_axis_y,
+            lift2(e.frame.x),
+            lift2(e.frame.y),
+            a,
+            b,
+        ))),
+        Curve2::BSpline(spline) => {
+            bspline_bounds(spline, |p| [p.x, p.y], a, b).map(|(.., fourth)| fourth)
         }
         _ => None,
     }
@@ -550,7 +619,7 @@ pub fn chord_bound2(curve: &Curve2, a: Scalar, b: Scalar) -> Option<Scalar> {
             ),
         )),
         Curve2::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y], a, b)
-            .map(|(_, chord)| inflate(taylor(b - a, chord))),
+            .map(|(_, chord, _)| inflate(taylor(b - a, chord))),
         Curve2::Chain(chain) => crate::chain::chain_chord_bound(chain, a, b),
         Curve2::Implicit(c) => {
             let (lo, hi) = ordered(a, b);
@@ -583,7 +652,7 @@ pub fn chord_bound3(curve: &Curve3, a: Scalar, b: Scalar) -> Option<Scalar> {
             }),
         )),
         Curve3::BSpline(spline) => bspline_bounds(spline, |p| [p.x, p.y, p.z], a, b)
-            .map(|(_, chord)| inflate(taylor(b - a, chord))),
+            .map(|(_, chord, _)| inflate(taylor(b - a, chord))),
         // Plan and profile chord bounds at equal plan distance, composed
         // in quadrature (#252; `crate::elevated`).
         Curve3::Elevated(e) => crate::elevated::elevated_chord_bound(e, a, b),

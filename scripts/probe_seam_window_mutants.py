@@ -41,6 +41,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TIMEOUT = 1800
 W = "crates/algorithms/parametric/evaluate/src/station/window.rs"
 C = "crates/algorithms/parametric/evaluate/src/station/certify.rs"
+CP = "crates/algorithms/parametric/evaluate/src/station/certify/panels.rs"
 K = "crates/algorithms/parametric/evaluate/src/station/composite.rs"
 P = "crates/algorithms/parametric/evaluate/src/provider.rs"
 T = "crates/contracts/operations/curve-evaluate/src/contract.rs"
@@ -82,12 +83,12 @@ MUTANTS = [
      '    let distance = basis.snapped_distance(station.distance, *seam_window)?;',
      '    let distance = station.distance + 0.0 * *seam_window;', [COMP]),
     # The certificate.
-    ('a chord is taken for its arc', C,
-     '                chord * (1.0 + 4.0 * Scalar::EPSILON) * 2.0 * half * half / turn.cos()',
-     '                0.0 * half', [CERT]),
+    ('a chord is taken for its arc', CP,
+     '            chord * (1.0 + 4.0 * Scalar::EPSILON) * 2.0 * half * half / turn.cos()',
+     '            0.0 * half', [CERT]),
     ('the midpoint rule claims no error', C,
-     '                h * h * h / 24.0 * bend + VALUE_ROUNDING * h * speed_mid',
-     '                0.0 * bend + VALUE_ROUNDING * h * speed_mid', [CERT]),
+     '            h * h * h / 24.0 * bend + VALUE_ROUNDING * h * speed_mid',
+     '            0.0 * bend + VALUE_ROUNDING * h * speed_mid', [CERT]),
     ('a numerical offset\'s length is read as exact', C,
      '            if offset.measure_is_exact() {\n                return Ok(DistanceInterval::point(piece.length()));',
      '            if true {\n                return Ok(DistanceInterval::point(piece.length()));',

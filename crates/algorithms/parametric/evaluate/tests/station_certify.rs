@@ -9,9 +9,9 @@
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    BSplineCurve, Circle2, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3, ElevationLaw,
-    Intrinsic2, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset, PathOffsets,
-    PathPiece, Polyline2, SeamSide,
+    BSplineCurve, Chain2, ChainPiece2, Circle2, CurvatureLaw, Curve2, Curve3, CurvePath, Elevated3,
+    ElevationLaw, Intrinsic2, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve,
+    PathOffset, PathOffsets, PathPiece, Polyline2, SeamSide,
 };
 use axiolid_curve_evaluate_contract::{CurveEvaluator, CurveMeasure, DistanceInterval};
 use axiolid_evaluate::station::{
@@ -398,12 +398,11 @@ fn exact_lengths_are_point_intervals() {
 
 #[test]
 fn an_uncertifiable_length_and_a_bad_tolerance_are_refused_by_name() {
-    let (_, spline) = bezier();
-    let whole = StationPiece::whole(StationCurve::Two(&spline)).unwrap();
+    let chain = parametric_chain(Vec2::ZERO);
+    let whole = StationPiece::whole(StationCurve::Two(&chain)).unwrap();
     let tail = line2(Point2::new(90.0, 20.0), Vec2::X);
     let next = StationPiece::between(StationCurve::Two(&tail), 0.0, 10.0).unwrap();
-    // An offset by distances along a B-spline: its law runs in the
-    // spline's numerical arc length.
+    // An offset by distances along a chain's parametric piece.
     let widening = OffsetLaw::Linear {
         start: PathOffsets::new(1.0, 0.0, 0.0),
         end: PathOffsets::new(2.0, 0.0, 0.0),
@@ -827,6 +826,21 @@ fn bezier_at(shift: Vec2) -> ([Point2; 4], Curve2) {
     (p, curve)
 }
 
+/// The Bezier of [`bezier`] moved by `shift`, read as the one parametric
+/// piece of an arc-length chain: an offset of it has no certified length,
+/// so it stands in for a piece that cannot be certified.
+fn parametric_chain(shift: Vec2) -> Curve2 {
+    let (p, curve) = bezier();
+    Curve2::Chain(Chain2::new(
+        frame(Point2::new(shift.x, shift.y), Vec2::X, Vec2::Y),
+        vec![ChainPiece2::Parametric {
+            curve,
+            start: 0.0,
+            length: bezier_offset_length(p, 0.0),
+        }],
+    ))
+}
+
 /// The arc length of the offset by `distance` of the Bezier with control
 /// points `p`, written out and integrated independently.
 fn bezier_offset_length(p: [Point2; 4], distance: Scalar) -> Scalar {
@@ -856,17 +870,19 @@ fn open_offset(base: PathCurve, law: OffsetLaw) -> PathPiece {
 /// Four pieces, each the offset of a whole curve, no length stated: beside
 /// a Bezier by 1 (certified by chords), beside a line by 1 over 10, beside
 /// a second Bezier by `middle` (`(1, 1)`: by 1, certified; `(1, 2)`: by
-/// distances widening from 1 to 2, a law in the spline's numerical arc
-/// length, so its length is not certified), beside a line by `middle.1`
-/// over 10. The Beziers' ends run along `+x`, so the offsets meet.
+/// distances widening from 1 to 2 along the Bezier read as a chain's
+/// parametric piece, whose length is not certified), beside a line by
+/// `middle.1` over 10. The Beziers' ends run along `+x`, so the offsets
+/// meet.
 fn four_offsets(middle: (Scalar, Scalar)) -> CurvePath {
     let (_, first) = bezier();
-    let (_, second) = bezier_at(Vec2::new(100.0, 20.0));
+    let (_, mut second) = bezier_at(Vec2::new(100.0, 20.0));
     let line = |x: Scalar, y: Scalar| line2(Point2::new(x, y), Vec2::new(10.0, 0.0));
     let by = |distance| OffsetLaw::Planar { distance };
     let law = if middle.0 == middle.1 {
         by(middle.0)
     } else {
+        second = parametric_chain(Vec2::new(100.0, 20.0));
         OffsetLaw::Linear {
             start: PathOffsets::new(middle.0, 0.0, 0.0),
             end: PathOffsets::new(middle.1, 0.0, 0.0),

@@ -14,9 +14,9 @@ use axiolid_contracts::{
 };
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    BSplineCurve, BankConvention, Banked3, CantLaw, CantPiece, Circle2, Curve2, Curve3, CurvePath,
-    Elevated3, ElevationLaw, KnotSpec, Line2, Line3, OffsetFrame, OffsetLaw, PathCurve, PathOffset,
-    PathOffsets, PathPiece, SeamSide,
+    BSplineCurve, BankConvention, Banked3, CantLaw, CantPiece, Chain2, ChainPiece2, Circle2,
+    Curve2, Curve3, CurvePath, Elevated3, ElevationLaw, KnotSpec, Line2, Line3, OffsetFrame,
+    OffsetLaw, PathCurve, PathOffset, PathOffsets, PathPiece, SeamSide,
 };
 use axiolid_curve_evaluate_contract::{
     conformance, CurveEvaluator, CurveMeasure, DistanceConvention, DistanceInterval,
@@ -989,8 +989,8 @@ impl CurveEvaluator for WholePathOnly {
 }
 
 /// A line along `+x` over `[-10, 0]` offset by 1, then the offset of a
-/// cubic Bezier from the origin widening from 1 to 2: a law in the
-/// spline's numerical arc length, so its length is not certified.
+/// cubic Bezier from the origin, read as an arc-length chain's parametric
+/// piece, widening from 1 to 2: its length is not certified.
 fn line_then_widening() -> CurvePath {
     let spline = Curve2::BSpline(BSplineCurve {
         degree: 3,
@@ -1007,6 +1007,21 @@ fn line_then_widening() -> CurvePath {
         self_intersect: None,
         knot_spec: KnotSpec::Unspecified,
     });
+    let length = StationPiece::whole(StationCurve::Two(&spline))
+        .unwrap()
+        .length();
+    let chain = Curve2::Chain(Chain2::new(
+        Frame2 {
+            origin: Point2::ZERO,
+            x: Vec2::X,
+            y: Vec2::Y,
+        },
+        vec![ChainPiece2::Parametric {
+            curve: spline,
+            start: 0.0,
+            length,
+        }],
+    ));
     let line = PathPiece::new(
         PathCurve::Two(Curve2::Line(Line2 {
             origin: Point2::new(-10.0, 0.0),
@@ -1026,7 +1041,7 @@ fn line_then_widening() -> CurvePath {
             OffsetLaw::Planar { distance: 1.0 },
         )))),
         PathPiece::whole(PathCurve::Offset(Box::new(PathOffset::new(
-            PathPiece::whole(PathCurve::Two(spline.clone())),
+            PathPiece::whole(PathCurve::Two(chain)),
             widening,
         )))),
         PathPiece::new(

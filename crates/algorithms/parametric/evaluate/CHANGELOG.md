@@ -9,6 +9,39 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Certified lengths of offsets by distances along an ellipse or a
+  B-spline (#307, ADR 0082 amendment), which `station::certify` refused
+  naming `UNCERTIFIED_LENGTH`. The law runs in the base's arc length, a
+  quadrature, so the base is measured by chords first and the law at a
+  native parameter is read through that certified length, a sub-panel to
+  the point included; the measured curve is the offset whose law runs
+  linearly in the base's true arc length between the points the kernel
+  reads as the piece's ends, and a point's error from the table is
+  carried by the chain of chords like rounding. `P''` and `P'''` are
+  bounded from the base's derivative suprema to `|B''''|` and the law's
+  derivatives along the base. So the windowed stations of an offset by
+  distances beside an ellipse (openbimrs/ifc#443) resolve.
+
+### Changed
+
+- Certified chord panels are refined adaptively, the widest first, until
+  their widths sum to an eighth of the tolerance, instead of each being
+  halved until within a uniform share (#307); the midpoint rule beside
+  plan-parameterised bases too. Each chord panel bounds its deficit from
+  both sides through the velocity across the chord: with `|P''|` alone,
+  `M2^2 h^3 / 12` over the speed (three times tighter than the turning
+  bound, kept as a ceiling), and with `|P'''|` and the panel's own
+  velocities to within `h^4`, so an ellipse, a B-spline and their offsets
+  certify to `1e-8` relative and below within the unchanged budget of
+  `MAX_CERTIFIED_PANELS`. A station 30 along the deck's offset certifies
+  at a `1e-5` window's `1e-8` (refused before), and every
+  interval the existing tests certify is narrower than before (by up to
+  four times).
+- `UNCERTIFIED_LENGTH` no longer names an offset by distances along an
+  ellipse or a B-spline.
+
 ## [0.3.14] - 2026-10-13
 
 ### Added

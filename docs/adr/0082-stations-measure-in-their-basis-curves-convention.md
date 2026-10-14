@@ -1328,3 +1328,68 @@ Still open: cells beside a mitre on curved pieces or with a changing
 section; numerically framed bases (their frame needs a certified
 arc-length inverse); exact bodies along a circle with a changing section
 (not ruled by lines) and with a turned section, and warped tapers.
+
+## Amendment 2026-10-14: varying offset laws along ellipses and B-splines, and adaptive certified panels (#307)
+
+The #294 certificate left two gaps a real deck found (openbimrs/ifc#443:
+a sectioned solid along an offset by distances beside an ellipse, its
+offsets 0.5 to 0.75 between stations 2 and 20, its sections windowed).
+An offset by distances along an ellipse or a B-spline was refused naming
+`UNCERTIFIED_LENGTH`, so every windowed station after its start was
+refused; and uniform refinement ran out of panels at a window's
+certification (`1e-3` of a `1e-5` window, `1e-8`) on ordinary curves.
+
+- **The law read through a certified length.** The law runs linearly in
+  the base's measure, on an ellipse or a B-spline its arc length, a
+  quadrature. The base is measured by chords first; its arc length
+  `lambda(t)` from the piece's first end to a native parameter `t` is then
+  known to an interval (the panels before `t` and a sub-panel to it). The
+  measured curve is the offset whose law runs linearly in the base's true
+  arc length between the points the kernel reads as the piece's ends,
+  `v(t) = va + (vb - va) lambda(t) / Lambda`, so it passes exactly
+  through both ends; a point read at the interval's middle is off it by
+  at most the law's rate times `(vb - va)` times the ratio's half-width,
+  an error the chain of chords carries as it carries rounding (its
+  first-order parts telescope). The table is made fine enough that this
+  takes a small share of the tolerance. `P''` and `P'''` take the law's
+  derivatives along the base, `v' = (vb - va) |B'| / Lambda` and its next
+  two, and the frame's unit vectors' third derivative, `|u'''| <= |w'''| /
+  r + 9 |w'| |w''| / r^2 + 15 |w'|^3 / r^3`, which needs `|B''''|`:
+  `bound::curve_fourth_bound*` (a conic's is its `|B''|` bound, a
+  B-spline's the fourth hodograph through the quotient rule).
+- **A higher-order deficit.** A chord panel's deficit `L - c` is the
+  integral of `|g|^2 / (|P'| (1 + cos theta))`, `g` the velocity across
+  the chord, which has zero mean over the panel. So `int |g|^2 <= M2^2 h^3
+  / 12` (three times tighter than the turning bound `c / cos(beta)`, which
+  is kept as a ceiling), and with `M3 >= |P'''|` and `G = (P'(b) - P'(a))
+  / h` (within `M3 h / 4` of `P''(mid)`), `int |g|^2` is known from both
+  sides to within `h^4`, with no further derivative evaluated. The panel's
+  width falls as `h^4`; panels are cut where `P''` may jump.
+- **Adaptive panels.** The panels sit in a queue by width and the widest
+  is halved first until the widths sum to an eighth of the tolerance
+  (`PANEL_SHARE`), the rest left to the points' rounding; the midpoint
+  rule beside plan-parameterised bases is refined the same way. The
+  budget `MAX_CERTIFIED_PANELS` is unchanged: the deck's offset certifies
+  to `1e-8` at a station 30 along in about 4,400 panels, a whole turn of
+  the ellipse's offset by distances (47 long) to `1e-9` in 21,000. The
+  committed benchmark `tools/benchmark/benches/certified_length.rs`
+  measures the cost of the deck's joints and of a windowed station 30
+  along it: about 6 ms at `1e-6`, 17 ms at `1e-8`, 34 ms at `1e-9`.
+- **No interval got wider.** Every interval the #294 tests certify was
+  logged before and after: each is 0.26 to 0.79 times its old width, or
+  unchanged where it is exact or rounding alone.
+
+| Option | Why not |
+| --- | --- |
+| Refuse the varying law and certify only constant offsets | The deck's windowed stations stay refused, and the law's dependence on the base's length is boundable. |
+| Raise the panel budget for the uniform refinement | A panel's width falls only as `h^3`, so the panels grow as the tolerance to the `-1/2` rather than the `-1/3`, a cost paid in every windowed station; and a uniform share wastes the budget where the bound is already tight. |
+| Richardson extrapolation of chord sums | Its remainder needs a derivative bound one order higher than the deficit bound here, for the same order. |
+| Read the law at the kernel's own arc-length estimate | An estimate, not a bound: a point would be off the measured curve by an unknown amount. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/certify/`
+(`panels.rs`, `beside.rs`), `crates/algorithms/parametric/evaluate/src/bound.rs`
+(`curve_fourth_bound*`),
+`crates/algorithms/parametric/evaluate/tests/station_certify_varying.rs`
+(references by a Runge-Kutta integration in the native parameter),
+`crates/execution/compile/tests/station_window_varying_offset.rs` and
+`scripts/probe_varying_offset_certify_mutants.py`.

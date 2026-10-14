@@ -24,6 +24,7 @@ so it stays out of the release.
 | `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273) |
 | `benches/minkowski_plan.rs` | Time and peak memory of the exact Minkowski sum and erosion of a floor's walls by a 0.9 m square, against corner count (#292) |
 | `benches/triangulate_points.rs` | Planar Delaunay triangulation of 1k to 16k random points, whose growth shows the adjacency is maintained locally (#268) |
+| `benches/certified_length.rs` | Certified joint distances along an offset by distances beside an ellipse at window tolerances, `1e-6` to `1e-9` (#307) |
 | `benches/overlay_soup.rs` | The exact union of soups whose rings share no edges (2,000 random triangles, two 1000-gons) and of two meshes given as soups, against the grid backend `i_overlay` (#218) |
 | `tests/scaling.rs` | Growth rate asserted from operation counts, run by `cargo test` |
 | `examples/filter_probe.rs` | Which `orient3d` inputs actually escalate past the floating-point filter |
@@ -39,6 +40,7 @@ cargo bench -p axiolid-benchmark --bench boundary_distance  # touching elements
 cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time and peak memory
 cargo bench -p axiolid-benchmark --bench triangulate_points  # planar triangulation against point count
 cargo bench -p axiolid-benchmark --bench overlay_soup  # exact soup unions against the grid backend
+cargo bench -p axiolid-benchmark --bench certified_length  # certified lengths at window tolerances
 scripts/bench-regression.sh                         # instruction counts
 cargo test -p axiolid-benchmark                     # scaling assertions
 ```

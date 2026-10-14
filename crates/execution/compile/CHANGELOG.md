@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A test of the deck of openbimrs/ifc#443 (#307): rectangles at stations
+  0 and 5 along an offset by distances beside an ellipse, windowed by
+  `1e-5`, compile to the window-free deck bitwise (about 10 by Pappus),
+  and stations 30 along and within the window of the joint after the
+  varying piece resolve, through `axiolid-evaluate`'s certified lengths
+  of varying offsets.
+
 ### Fixed
 
 - A boolean cut in its host's own frame and placed far from the origin
