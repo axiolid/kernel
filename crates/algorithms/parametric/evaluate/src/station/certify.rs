@@ -27,10 +27,10 @@
 //! - the deficit `L - c` is bounded from both sides through the velocity
 //!   across the chord, a zero-mean function whose square integral `M2`
 //!   bounds as `h^3`, and `M3` with the panel's own velocities to within
-//!   `h^4` (#307; see [`panels`]), so a panel's width falls as `h^4`.
+//!   `h^4` (#307; see the `panels` module), so a panel's width falls as `h^4`.
 //!
 //! The panels are refined adaptively: the widest is halved first, until
-//! their widths sum to an eighth of the tolerance ([`panels::adapt`]), so
+//! their widths sum to an eighth of the tolerance (`panels::adapt`), so
 //! an ordinary curve certifies to `1e-8` relative and below within the
 //! budget. `M2` and `M3` come from the certified derivative suprema of
 //! [`crate::bound`] (`|B''|` to `|B''''|` of the base) and, for an offset,
@@ -45,7 +45,7 @@
 //! An offset by distances along an ellipse or a B-spline (#307) reads its
 //! law in the base's arc length, a quadrature: the base is measured by
 //! chords first, and the law at a native parameter is read through that
-//! certified length (see [`beside`]), the measured curve being the offset
+//! certified length (see the `beside` module), the measured curve being the offset
 //! whose law runs linearly in the base's true arc length between the
 //! points the kernel reads as the piece's ends.
 //!
