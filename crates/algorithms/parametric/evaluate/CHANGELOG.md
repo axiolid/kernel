@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Certified lengths of offsets beside a planar 3D intrinsic curve (#302,
+  ADR 0082 amendment), which `station::certify` refused naming
+  `UNCERTIFIED_LENGTH` for every `Curve3::Intrinsic`. One whose torsion
+  law is identically zero (`Intrinsic3::is_planar`, a structural test on
+  the stored law) and whose start tangent and normal have no `z`
+  component (compared with `0.0`) is a 2D intrinsic curve lifted to a
+  level plane: its offsets are certified by the midpoint rule on their
+  speed in closed form, as beside a 2D intrinsic curve, measured in 3D.
+  So the joints of a path of offsets beside a stand-alone composite with
+  a clothoid lowered to 3D are certified. A torsion law not identically
+  zero and a tilted plane are still refused by name; the message of
+  `UNCERTIFIED_LENGTH` now says so.
+
 ## [0.3.15] - 2026-10-14
 
 ### Added

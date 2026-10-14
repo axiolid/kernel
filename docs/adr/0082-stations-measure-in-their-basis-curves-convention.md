@@ -1393,3 +1393,38 @@ Evidence: `crates/algorithms/parametric/evaluate/src/station/certify/`
 (references by a Runge-Kutta integration in the native parameter),
 `crates/execution/compile/tests/station_window_varying_offset.rs` and
 `scripts/probe_varying_offset_certify_mutants.py`.
+
+## Amendment 2026-10-14: offsets beside planar 3D intrinsic curves (#302)
+
+An offset beside a `Curve3::Intrinsic` was refused naming
+`UNCERTIFIED_LENGTH`, every one of them, though a stand-alone composite of
+segments with a clothoid lowers to one that is a 2D intrinsic curve lifted
+to a level plane. Such a curve is now certified as the 2D case is, by the
+midpoint rule on the offset's speed in closed form (the #294 bullet above),
+measured in 3D so that a vertical rate lengthens it.
+
+- **Recognised from the stored data, exactly.** The torsion law is
+  identically zero by `Intrinsic3::is_planar` (a structural test on the
+  stored coefficients; a law zero only once evaluated, such as a frozen
+  sine cancelling its mean, is not read as zero), and the start tangent
+  and normal have no `z` component, compared with `0.0`, not to a
+  tolerance. Then every tangent is horizontal, the reference-up frame is
+  the 2D frame lifted (`lateral` the left normal, `up` `+Z`), and the
+  curvature to the left is the law times the start frame's handedness in
+  plan.
+- **Still refused by name**: a torsion law not identically zero, and a
+  planar curve in a tilted plane, whose reference-up lateral leaves the
+  plane, so the offset is not the 2D case in that plane. The stations and
+  joints of the planar curve itself were already exact (its stored length).
+
+| Option | Why not |
+| --- | --- |
+| Test planarity numerically (sampled torsion, or the points' distance from a plane) | An estimate decides which bound applies: a nearly planar curve would be certified with a model it does not satisfy. |
+| Accept a start frame tilted within a tolerance | The reference-up lateral then leaves the plane by that tilt, and the closed-form speed no longer bounds the offset's. |
+| Certify planar curves in any plane | Beside a tilted plane the lateral turns out of it with the tangent, a different closed form for a case no consumer has. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/certify.rs`
+(`level_curvature`),
+`crates/algorithms/parametric/evaluate/tests/station_certify_planar_intrinsic.rs`
+(references by RK4 on the heading and chords Richardson-extrapolated) and
+`scripts/probe_planar_intrinsic_certify_mutants.py`.

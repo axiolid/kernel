@@ -52,8 +52,9 @@
 //! # Midpoints of a speed in closed form
 //!
 //! Where the base is parameterised by its own arc length in the plan and
-//! its curvature is a law -- an intrinsic curve or a chain (2D), the plan
-//! of an elevated curve (measured by plan length) -- the offset's speed is
+//! its curvature is a law -- an intrinsic curve or a chain (2D), a 3D
+//! intrinsic curve with no torsion in a level plane (#302), the plan of an
+//! elevated curve (measured by plan length) -- the offset's speed is
 //! a closed form in the base's curvature `k` and, in a section frame that
 //! leans with the grade, the grade `p = z'`: for a displacement `a` along
 //! the left normal, `b` along the plan tangent and `c` vertical, all
@@ -61,7 +62,8 @@
 //!
 //! `f = sqrt((1 + b' - a k)^2 + (a' + b k)^2 + c'^2)`
 //!
-//! (`c'` only where the offset is measured in 3D, beside a 2D base), with
+//! (`c'` only where the offset is measured in 3D, beside a 2D base or a
+//! level 3D intrinsic curve), with
 //! `b = longitudinal * cos g - vertical * sin g`, `tan g = p`, in a
 //! section frame beside an elevated curve and `b = longitudinal`
 //! otherwise. Each panel is the midpoint rule, `h f(mid)`, within `h^3 /
@@ -74,7 +76,9 @@
 //!
 //! By a typed [`GeomError::UnsupportedInput`] naming
 //! [`UNCERTIFIED_LENGTH`]: an offset of a banked curve, of a 3D intrinsic
-//! curve, of a chain's parametric piece or of an elevated curve with an
+//! curve with a torsion law not identically zero or out of a level plane
+//! (a start tangent or normal with a `z` component), of a chain's
+//! parametric piece or of an elevated curve with an
 //! intrinsic profile in a leaning frame; a 3D offset direction that is not
 //! vertical beside a plan-parameterised base; a base placed in a frame
 //! that tilts `+Z` there; a skewed frame; and a tolerance the rounding of
@@ -87,7 +91,8 @@ use std::borrow::Cow;
 use axiolid_contracts::{BackendId, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::{
-    ChainPiece2, CurvatureLaw, Curve2, Curve3, ElevationLaw, Line2, Line3, OffsetFrame, OffsetLaw,
+    ChainPiece2, CurvatureLaw, Curve2, Curve3, ElevationLaw, Intrinsic3, Line2, Line3, OffsetFrame,
+    OffsetLaw,
 };
 pub use axiolid_curve_evaluate_contract::DistanceInterval;
 
@@ -114,10 +119,10 @@ mod panels;
 /// The input a length no certified bound here reaches is refused for.
 pub const UNCERTIFIED_LENGTH: &str =
     "a certified length of a station piece no bound here reaches: an offset of a banked curve, a \
-     3D intrinsic curve, a chain's parametric piece or an elevated curve with an intrinsic \
-     profile in a leaning frame; a 3D offset direction that is not vertical beside a \
-     plan-measured or intrinsic base; a base placed in a frame that tilts +Z; a skewed frame; or \
-     a tolerance below the points' rounding";
+     3D intrinsic curve with torsion or out of a level plane, a chain's parametric piece or an \
+     elevated curve with an intrinsic profile in a leaning frame; a 3D offset direction that is \
+     not vertical beside a plan-measured or intrinsic base; a base placed in a frame that tilts \
+     +Z; a skewed frame; or a tolerance below the points' rounding";
 
 /// The rounding error of a point evaluated in closed form, relative to the
 /// largest coordinate magnitude of the curve's data, the point and the
@@ -689,6 +694,36 @@ fn plan_curvature(plan: &Curve2, lo: Scalar, hi: Scalar) -> GeomResult<Curvature
     }
 }
 
+/// The curvature of a 3D intrinsic curve that is a 2D one lifted: planar
+/// (its torsion law identically zero, read structurally from the stored
+/// law by [`Intrinsic3::is_planar`]) in a level plane (its start tangent
+/// and normal stored with no `z` component, so every tangent is
+/// horizontal). There its reference-up frame is the 2D curve's frame
+/// lifted: `lateral` the left normal, `up` `+Z`, and its curvature to the
+/// left the law times the start frame's handedness in plan (#302).
+///
+/// # Errors
+///
+/// A torsion law not identically zero, a start frame whose tangent or
+/// normal has a `z` component (the plane tilts, and the lateral leaves
+/// it), or a start frame not orthonormal in plan, as uncertified.
+fn level_curvature(intrinsic: &Intrinsic3) -> GeomResult<Curvature<'_>> {
+    let (x, y) = (intrinsic.start.x, intrinsic.start.y);
+    if !intrinsic.is_planar() || x.z != 0.0 || y.z != 0.0 {
+        return Err(uncertified());
+    }
+    let plan = Frame2 {
+        origin: Point2::new(intrinsic.start.origin.x, intrinsic.start.origin.y),
+        x: Vec2::new(x.x, x.y),
+        y: Vec2::new(y.x, y.y),
+    };
+    Ok(Curvature::Law {
+        law: &intrinsic.curvature,
+        shift: 0.0,
+        sign: handedness(&plan)?,
+    })
+}
+
 /// An offset beside a base parameterised by its plan arc length, its speed
 /// in closed form (see the [module documentation](self)).
 struct PlanModel<'a> {
@@ -710,7 +745,7 @@ struct PlanModel<'a> {
 impl<'a> PlanModel<'a> {
     /// The model of `offset`, `None` where its base is not parameterised by
     /// its plan arc length with a curvature law (an intrinsic curve or a
-    /// chain, or an elevated curve).
+    /// chain, a level planar 3D intrinsic curve, or an elevated curve).
     fn of(offset: &StationOffset<'a>) -> GeomResult<Option<Self>> {
         let base = offset.base();
         let (lo, hi) = (base.start, base.end);
@@ -723,9 +758,10 @@ impl<'a> PlanModel<'a> {
                 Some(&elevated.elevation),
                 false,
             ),
-            StationCurve::Three(Curve3::Banked(_) | Curve3::Intrinsic(_)) => {
-                return Err(uncertified())
+            StationCurve::Three(Curve3::Intrinsic(intrinsic)) => {
+                (level_curvature(intrinsic)?, None, true)
             }
+            StationCurve::Three(Curve3::Banked(_)) => return Err(uncertified()),
             _ => return Ok(None),
         };
         if let Some(rigid) = base.placement {
