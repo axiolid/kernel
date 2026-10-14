@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- The mesh-section registry uses the shared device matching instead of its
+  own copy, so a build with only the `mesh-section` feature no longer warns
+  that the shared one is unused, and the routing rules cannot drift apart.
+
 ## [0.3.3] - 2026-10-13
 
 ### Fixed

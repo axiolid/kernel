@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use axiolid_contracts::{
-    BackendId, DevicePreference, ExecutionOptions, ExecutionTarget, GeomError, GeomResult,
-    Operation, ScratchRequirement,
+    BackendId, ExecutionOptions, GeomError, GeomResult, Operation, ScratchRequirement,
 };
 use axiolid_core::{Frame3, SpaceFrame, Tolerance};
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh, TriMesh};
@@ -13,6 +12,8 @@ use axiolid_mesh_section_contract::{
     conformance::{ConformanceReport, ConformanceSuite},
     MeshPlaneSection, SectionLimits, SectionOutcome,
 };
+
+use crate::device::matches_device;
 
 #[derive(Debug, Clone)]
 struct RegisteredSection {
@@ -270,16 +271,4 @@ fn validate_outcome(
         ));
     }
     Ok(())
-}
-
-fn matches_device(preference: DevicePreference, id: BackendId, target: ExecutionTarget) -> bool {
-    match preference {
-        DevicePreference::Auto => true,
-        DevicePreference::Cpu => matches!(
-            target,
-            ExecutionTarget::PortableCpu | ExecutionTarget::OptimizedCpu
-        ),
-        DevicePreference::Gpu => matches!(target, ExecutionTarget::Gpu),
-        DevicePreference::Backend(required) => required == id,
-    }
 }
