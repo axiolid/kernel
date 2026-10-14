@@ -111,9 +111,8 @@
 //!   reports at most the requested budget, nested instances included
 //!   (#258). Uniform, non-uniform and sheared instances grow the bound by
 //!   their full stretch and stay sound. The rounding of moving each vertex
-//!   (a few ulps of its coordinates, so of the placement's distance from
-//!   the origin) is not part of the bound, as the rounding of computing a
-//!   construction's own vertices is not.
+//!   is added on top (#295, "Placement rounding" below). The rounding of
+//!   computing a construction's own vertices is not part of any bound.
 //!   Collections take the worst member.
 //! - Runs of sections at stations (#247): stationed spines and sectioned
 //!   surfaces are bounded cell by cell as they are sampled
@@ -184,9 +183,40 @@
 //!   measured like any exact operand, against the exact boolean of the
 //!   operands as given when no decision within tolerance fired.
 //!
+//! # Placement rounding
+//!
+//! An `Instance` or an `InstanceAtStation` moves its source's vertices by
+//! applying its transform in `f64`, which rounds each coordinate by a few
+//! ulps of its magnitude: an *absolute* error, about `1e-9` at
+//! georeferenced coordinates of `6e6`, that no relative factor covers
+//! (#295). Every reported bound therefore carries, for each transform
+//! applied, the term `r = 4 eps M` ([`PLACEMENT_EPSILONS`],
+//! `placement_rounding`): `M` is the largest magnitude a placed coordinate
+//! sums, `sum_j |a_ij| |p_j| + |t_i|` over the source's vertices `p`
+//! (the coordinate's own magnitude where nothing cancels), and the
+//! constant covers `sqrt 3 gamma_4 < 3.47 eps`: four rounded operations
+//! per coordinate, three coordinates per point. A source bound `d` placed
+//! with stretch `s` reports `s d + r`, its kind kept; a nested instance
+//! grows the inner `r` by the outer stretch and adds its own. The term is
+//! named under [`DeviationPath::Placement`] / [`PLACEMENT_ROUNDING`]. A
+//! row that copies a coordinate (one coefficient `+-1`, no translation)
+//! rounds nothing, so an identity or a mirror adds nothing.
+//!
+//! The source's budget leaves room for it: the source is meshed to the
+//! budget less a room, shrunk by the stretch, so `s b + room` rounds to
+//! within the budget (`shrunk_budget_within`). The room starts at the
+//! floor `r` reaches at the translation's scale (the term at the origin)
+//! plus a `2^-20` share of what is left, for the source's own
+//! coordinates; where the source's mesh then rounds by more than that and
+//! its bound would carry the instance over the budget, it is meshed once
+//! more with room for an eighth more than it showed. A budget at or below
+//! the floor at the translation's scale, or below the rounding of the
+//! placed vertices themselves, is refused with
+//! [`BUDGET_BELOW_PLACEMENT_ROUNDING`] rather than reported as met.
+//!
 //! [`ReferenceMeshCompiler::compile_mesh_with_deviation`]: crate::ReferenceMeshCompiler::compile_mesh_with_deviation
 
-use axiolid_core::{Scalar, Transform3};
+use axiolid_core::{Point3, Scalar, Transform3};
 
 mod boolean;
 mod mitre;
@@ -228,9 +258,25 @@ pub(crate) const WARPED_BREP_FACE: &str = "non-planar face without a surface";
 /// tolerance, before the mesh boolean cut them (#276, #291): its bound is
 /// the largest distance any operand vertex moved, so the mesh is the
 /// boolean of operands perturbed by at most that much. It travels with the boolean's result through
-/// instances (scaled) and enclosing booleans, also where an enclosing
+/// instances (scaled, plus the placement's rounding, #295) and enclosing booleans, also where an enclosing
 /// boolean is measured against its exact result.
 pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tolerance";
+
+/// The [`DeviationContribution::detail`] of [`DeviationPath::Placement`]:
+/// the rounding of applying an instance's transform to its source's
+/// vertices in `f64` (#295), [`PLACEMENT_EPSILONS`] `f64::EPSILON` of the
+/// largest coordinate magnitude the placement sums (see the module's
+/// "Placement rounding"). Every other contribution of the instance is
+/// grown by it too.
+pub const PLACEMENT_ROUNDING: &str = "rounding of applying the transform in f64";
+
+/// The input family a compilation is refused with when its chord budget,
+/// in an instance's frame, is at or below the rounding of placing the
+/// instance's vertices (#295): at the translation's scale before the
+/// source is meshed, at the placed vertices' scale after. No mesh placed
+/// in `f64` there is within the budget, so none is reported as meeting it.
+pub const BUDGET_BELOW_PLACEMENT_ROUNDING: &str =
+    "chord budget at or below the rounding of placing an instance's vertices in f64";
 
 /// The construction path a part of the mesh came from.
 #[non_exhaustive]
@@ -282,6 +328,11 @@ pub enum DeviationPath {
     StationPlacement,
     /// A surface trimmed by a parameter rectangle (#311).
     TrimmedSurface,
+    /// The rounding of moving an instance's vertices with its `f64`
+    /// transform (#295), an `Instance` or an `InstanceAtStation`: an
+    /// absolute term every other contribution of the instance also
+    /// carries, named under [`PLACEMENT_ROUNDING`] so the report shows it.
+    Placement,
 }
 
 /// A bound on how far the exact surface may lie from the mesh.
@@ -325,10 +376,12 @@ impl DeviationBound {
         }
     }
 
-    fn scaled(self, factor: Scalar) -> Self {
+    /// The bound after a placement: grown by the stretch `factor`, plus the
+    /// placement's absolute `rounding` ([`grown`]), keeping its kind.
+    fn placed(self, factor: Scalar, rounding: Scalar) -> Self {
         match self {
-            Self::Proven(value) => Self::Proven(value * factor),
-            Self::Certified(value) => Self::Certified(value * factor),
+            Self::Proven(value) => Self::Proven(grown(value, factor, rounding)),
+            Self::Certified(value) => Self::Certified(grown(value, factor, rounding)),
             unbounded => unbounded,
         }
     }
@@ -480,19 +533,41 @@ impl Deviation {
             })
     }
 
-    /// The same contributions after a transform: lengths grow by at most
-    /// its largest stretch.
-    pub(crate) fn transformed(&self, transform: Transform3) -> Self {
+    /// The same contributions after a transform whose application rounded
+    /// each vertex by at most `rounding` ([`placement_rounding`], #295):
+    /// lengths grow by at most its largest stretch, and every bound by the
+    /// rounding on top, which is also named under [`PLACEMENT_ROUNDING`]
+    /// when it is not zero.
+    pub(crate) fn transformed(&self, transform: Transform3, rounding: Scalar) -> Self {
         let factor = stretch(transform);
-        Self(
+        let mut placed = Self(
             self.0
                 .iter()
                 .map(|c| DeviationContribution {
-                    bound: c.bound.scaled(factor),
+                    bound: c.bound.placed(factor, rounding),
                     ..*c
                 })
                 .collect(),
-        )
+        );
+        if rounding > 0.0 {
+            placed.add(
+                DeviationPath::Placement,
+                PLACEMENT_ROUNDING,
+                DeviationBound::Certified(rounding),
+            );
+        }
+        placed
+    }
+
+    /// The worst bound over every contribution, `None` when any is
+    /// unbounded or there is none.
+    pub(crate) fn bound(&self) -> Option<Scalar> {
+        if self.0.is_empty() {
+            return None;
+        }
+        self.0.iter().try_fold(0.0, |worst: Scalar, c| {
+            c.bound.value().map(|value| worst.max(value))
+        })
     }
 
     /// The worst certified bound above `budget`, if any: what a mesh
@@ -509,16 +584,9 @@ impl Deviation {
     }
 
     pub(crate) fn report(&self, requested: Scalar) -> DeviationReport {
-        let bound = if self.0.is_empty() {
-            None
-        } else {
-            self.0.iter().try_fold(0.0, |worst: Scalar, c| {
-                c.bound.value().map(|value| worst.max(value))
-            })
-        };
         DeviationReport {
             requested,
-            bound,
+            bound: self.bound(),
             contributions: self.0.clone(),
         }
     }
@@ -552,6 +620,74 @@ pub(crate) fn stretch(transform: Transform3) -> Scalar {
     }
 }
 
+/// A bound `value` after a placement that stretches by at most `factor`
+/// and rounds each vertex by at most `rounding` (#295), rounded as
+/// [`Deviation::transformed`] rounds it: every point of a source triangle
+/// moves with its corners' barycentric combination, so a vertex rounding
+/// of `r` moves no point of the mesh further than `r`.
+pub(crate) fn grown(value: Scalar, factor: Scalar, rounding: Scalar) -> Scalar {
+    value * factor + rounding
+}
+
+/// How many `f64::EPSILON` of the largest summed coordinate magnitude
+/// bound the rounding of applying a transform to a point (#295): a
+/// coordinate sums four terms, each rounded at most four times, so it is
+/// off by at most `gamma_4 < 2.000_001 eps` of its summed magnitude, and a
+/// point by `sqrt 3` of that, below `3.47 eps`; `4` also covers computing
+/// the magnitude itself in `f64` (see the module's "Placement rounding").
+pub const PLACEMENT_EPSILONS: Scalar = 4.0;
+
+/// An upper bound on how far applying `transform` to `positions` in `f64`
+/// moves any of them from its exact image (#295), the absolute term
+/// [`Deviation::transformed`] adds to an instance's bounds.
+///
+/// Each image coordinate `q_i = a_i1 p_1 + a_i2 p_2 + a_i3 p_3 + t_i` is
+/// four terms, each rounded at most four times (one product, at most three
+/// sums, in any order, with or without a fused multiply-add), so it is off
+/// by at most `gamma_4 S_i`, `S_i = sum_j |a_ij| |p_j| + |t_i|` and
+/// `gamma_4 = 4u / (1 - 4u) < 2.000_001 eps` (`u = eps / 2`). Over three
+/// coordinates the point is off by at most `sqrt 3 gamma_4 max S_i <
+/// 3.47 eps max S_i`, and `S_i` computed in `f64` is low by at most a
+/// factor `1 + gamma_4`, so [`PLACEMENT_EPSILONS`] `eps M`, `M` the
+/// largest computed `S_i` over every position, covers it with room (and
+/// multiplying by `4 eps`, a power of two, is exact). `S_i` is the
+/// coordinate's own magnitude where nothing cancels, so the term is
+/// `4 eps max|coordinate|`: about `5.3e-9` at `6e6`. A row that copies one
+/// coordinate (a single coefficient `+-1` and no translation) moves
+/// nothing and adds nothing, so an identity or a mirror is exact.
+///
+/// At the origin (`positions = [0]`) it is the floor every placement by
+/// `transform` reaches at least: `4 eps` times its largest translation
+/// component in a row that rounds.
+pub(crate) fn placement_rounding(positions: &[Point3], transform: Transform3) -> Scalar {
+    let m = transform.matrix3;
+    let t = transform.translation;
+    let rows = [
+        ([m.x_axis.x, m.y_axis.x, m.z_axis.x], t.x),
+        ([m.x_axis.y, m.y_axis.y, m.z_axis.y], t.y),
+        ([m.x_axis.z, m.y_axis.z, m.z_axis.z], t.z),
+    ];
+    let mut largest: Scalar = 0.0;
+    for (coefficients, offset) in rows {
+        let nonzero = coefficients.iter().filter(|&&a| a != 0.0).count();
+        let copies = offset == 0.0
+            && nonzero <= 1
+            && coefficients.iter().all(|&a| a == 0.0 || a.abs() == 1.0);
+        if copies {
+            continue;
+        }
+        let a = coefficients.map(Scalar::abs);
+        for p in positions {
+            let sum = a[0] * p.x.abs() + a[1] * p.y.abs() + a[2] * p.z.abs() + offset.abs();
+            if sum.is_nan() {
+                return Scalar::INFINITY;
+            }
+            largest = largest.max(sum);
+        }
+    }
+    PLACEMENT_EPSILONS * Scalar::EPSILON * largest
+}
+
 /// The largest budget `b` from `budget / stretch` down whose product with
 /// `stretch`, rounded as [`Deviation::transformed`] rounds it, is within
 /// `budget` (#255, #258).
@@ -566,17 +702,27 @@ pub(crate) fn stretch(transform: Transform3) -> Scalar {
 /// callers refuse those first), and the plain quotient when no positive
 /// value fits (a quotient in the subnormal range, which no mesh reaches).
 pub(crate) fn shrunk_budget(budget: Scalar, stretch: Scalar) -> Scalar {
+    shrunk_budget_within(budget, stretch, 0.0)
+}
+
+/// [`shrunk_budget`] leaving `room` for a placement's rounding (#295): the
+/// largest `b` from `(budget - room) / stretch` down with
+/// [`grown`]`(b, stretch, room) <= budget`, so a source bound `d <= b`
+/// placed with a rounding `r <= room` reports within `budget` (rounded
+/// addition and multiplication are monotone). The callers refuse a `room`
+/// at or above `budget` first ([`BUDGET_BELOW_PLACEMENT_ROUNDING`]).
+pub(crate) fn shrunk_budget_within(budget: Scalar, stretch: Scalar, room: Scalar) -> Scalar {
     if !(stretch.is_finite() && stretch > 0.0) {
         return budget;
     }
-    let mut shrunk = budget / stretch;
-    while shrunk > 0.0 && shrunk * stretch > budget {
+    let mut shrunk = (budget - room) / stretch;
+    while shrunk > 0.0 && grown(shrunk, stretch, room) > budget {
         shrunk = shrunk.next_down();
     }
     if shrunk > 0.0 {
         shrunk
     } else {
-        budget / stretch
+        (budget - room) / stretch
     }
 }
 
@@ -602,6 +748,85 @@ mod tests {
         assert!(stretch(Transform3::IDENTITY) > 1.0);
     }
 
+    /// The placement's rounding is `4 eps` of the largest summed magnitude
+    /// of a row that rounds, nothing for a row that copies a coordinate,
+    /// and covers the rounding `transform_point3` actually makes (#295),
+    /// measured against an error-free evaluation of the same sums.
+    #[test]
+    fn the_placement_rounding_covers_applying_the_transform() {
+        let eps = Scalar::EPSILON;
+        let site = Transform3::from_translation(Vec3::new(6e6, -6e6, 100.0));
+        assert_eq!(placement_rounding(&[Point3::ZERO], site), 4.0 * eps * 6e6);
+        let p = Point3::new(0.25, -0.5, 2.0);
+        assert_eq!(placement_rounding(&[p], site), 4.0 * eps * (6e6 + 0.5));
+        let mirror = Transform3::from_scale(Vec3::new(-1.0, 1.0, 1.0));
+        assert_eq!(placement_rounding(&[p], Transform3::IDENTITY), 0.0);
+        assert_eq!(placement_rounding(&[p], mirror), 0.0);
+        // A turn about z rounds x and y, not z.
+        let turn = Transform3::from_rotation_z(0.3);
+        let (c, s) = (0.3_f64.cos().abs(), 0.3_f64.sin().abs());
+        let sums = [c * 0.25 + s * 0.5, s * 0.25 + c * 0.5];
+        let largest = sums[0].max(sums[1]);
+        let r = placement_rounding(&[p], turn);
+        assert!((r - 4.0 * eps * largest).abs() <= 4.0 * eps * largest * 4.0 * eps);
+
+        // The actual rounding, from exact products (fused) and exact sums.
+        let exact = |t: Transform3, p: Point3| -> [Scalar; 3] {
+            let m = t.matrix3;
+            let rows = [
+                ([m.x_axis.x, m.y_axis.x, m.z_axis.x], t.translation.x),
+                ([m.x_axis.y, m.y_axis.y, m.z_axis.y], t.translation.y),
+                ([m.x_axis.z, m.y_axis.z, m.z_axis.z], t.translation.z),
+            ];
+            rows.map(|(a, offset)| {
+                // Each term as a high and a low part, summed from the
+                // smallest magnitude up in a running double-double.
+                let mut parts = Vec::new();
+                for (coefficient, x) in a.into_iter().zip([p.x, p.y, p.z]) {
+                    let high = coefficient * x;
+                    parts.push(high);
+                    parts.push(coefficient.mul_add(x, -high));
+                }
+                parts.push(offset);
+                parts.sort_by(|u, v| u.abs().total_cmp(&v.abs()));
+                let (mut high, mut low) = (0.0, 0.0);
+                for part in parts {
+                    let sum = high + part;
+                    let bb = sum - high;
+                    low += (high - (sum - bb)) + (part - bb);
+                    high = sum;
+                }
+                high + low
+            })
+        };
+        let placements = [
+            site,
+            Transform3::from_translation(Vec3::new(5.61e6, 3.3e5, -71.25))
+                * Transform3::from_rotation_z(1.1),
+            Transform3::from_axis_angle(Vec3::new(1.0, 2.0, 3.0).normalize(), 0.7)
+                * Transform3::from_scale(Vec3::new(1.5, 0.75, 2.0)),
+        ];
+        for t in placements {
+            let points: Vec<Point3> = (0..200)
+                .map(|i| {
+                    let k = i as Scalar;
+                    Point3::new((k * 0.37).sin() * 3e3, (k * 0.91).cos() * 7.0, k * 1.3e-3)
+                })
+                .collect();
+            let bound = placement_rounding(&points, t);
+            for &p in &points {
+                let placed = t.transform_point3(p);
+                let truth = exact(t, p);
+                let error = Vec3::new(
+                    placed.x - truth[0],
+                    placed.y - truth[1],
+                    placed.z - truth[2],
+                );
+                assert!(error.length() <= bound, "{error:?} over {bound:e}");
+            }
+        }
+    }
+
     /// The shrunk budget times the stretch is within the budget, and the
     /// next value up would not be (unless the quotient already fit).
     #[test]
@@ -613,6 +838,15 @@ mod tests {
                 assert!(b * s <= budget, "{budget} {factor}");
                 assert!(b <= budget / s);
                 assert!(b == budget / s || b.next_up() * s > budget);
+            }
+        }
+        // With room for a placement's rounding (#295): the grown bound fits.
+        for room in [5.3e-9, 1e-5, 9.9e-5] {
+            for factor in [0.33, 1.0, 1.19, 2.38] {
+                let s = factor * (1.0 + 96.0 * f64::EPSILON);
+                let b = shrunk_budget_within(1e-4, s, room);
+                assert!(b > 0.0 && grown(b, s, room) <= 1e-4, "{room} {factor}");
+                assert!(grown(b.next_up(), s, room) > 1e-4 || b == (1e-4 - room) / s);
             }
         }
         // The quotient alone rounds over at this factor.

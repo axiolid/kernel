@@ -30,7 +30,7 @@ use axiolid_measure::exact_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_boolean_contract::{BooleanOutcome, MeshBoolean};
-use axiolid_mesh_compile::deviation::SNAPPED_OPERANDS;
+use axiolid_mesh_compile::deviation::{PLACEMENT_ROUNDING, SNAPPED_OPERANDS};
 use axiolid_mesh_compile::{
     BooleanReport, DeviationBound, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
@@ -254,7 +254,15 @@ fn an_inner_booleans_snap_stays_reported_under_the_outer_one() {
     let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
         .compile_mesh_with_deviation(&graph, root, &options(Tolerance::METRE))
         .expect("the wall compiles");
-    let moved = snapped(&report).unwrap_or_else(|| panic!("{report:?}"));
+    // Placed, every bound carries the placement's rounding (#295), the
+    // snap's included: what is left is the snap's own move.
+    let placing = report
+        .contributions
+        .iter()
+        .find(|c| c.detail == PLACEMENT_ROUNDING)
+        .and_then(|c| c.bound.value())
+        .unwrap_or_else(|| panic!("the placement's rounding is named: {report:?}"));
+    let moved = snapped(&report).unwrap_or_else(|| panic!("{report:?}")) - placing;
     assert!((2e-15..=1e-14).contains(&moved), "{moved}");
     let volume = enclosed_volume(&outcome.mesh).expect("a valid placed solid");
     assert_volume(volume, net(), AREA * (moved + 4.0 * ulp(5.7e6)), "placed");

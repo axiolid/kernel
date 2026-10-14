@@ -25,10 +25,10 @@ TIMEOUT = 1200
 
 MUTANTS = [
     ('local budget the plain quotient, not shrunk to fit', D,
-     '    while shrunk > 0.0 && shrunk * stretch > budget {',
-     '    while false && shrunk * stretch > budget {', TESTS),
+     '    while shrunk > 0.0 && grown(shrunk, stretch, room) > budget {',
+     '    while false && grown(shrunk, stretch, room) > budget {', TESTS),
     ('instance source meshed to the world budget', C,
-     '        chord: crate::deviation::shrunk_budget(budget.chord, stretch),',
+     '        chord: crate::deviation::shrunk_budget_within(budget.chord, stretch, room),',
      '        chord: budget.chord,', TESTS),
     ('instance source budget divided by the column length only', C,
      '    let stretch = crate::deviation::stretch(transform);',

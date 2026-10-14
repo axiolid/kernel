@@ -489,3 +489,108 @@ fn compile_mesh_still_refuses_curves() {
         })
     ));
 }
+
+// --- placed far from the origin (#295) ----------------------------------------
+
+/// The issue's georeferenced placement.
+const SITE: Vec3 = Vec3::new(6e6, 6e6, 100.0);
+
+fn options_at(chord: Scalar) -> ExecutionOptions {
+    ExecutionOptions::new(Tolerance::new(chord, 1e-9).unwrap())
+        .with_chord_error(chord)
+        .expect("positive chord budget")
+}
+
+fn refused_below_rounding<T: core::fmt::Debug>(result: GeomResult<T>) {
+    match result {
+        Err(GeomError::UnsupportedInput { input, .. }) => {
+            assert_eq!(
+                input,
+                axiolid_mesh_compile::deviation::BUDGET_BELOW_PLACEMENT_ROUNDING
+            );
+        }
+        other => panic!("expected the placement rounding refusal, got {other:?}"),
+    }
+}
+
+/// A polyline is its own curve, so placed far out its whole bound is the
+/// rounding of applying the transform: `4 eps` of the largest placed
+/// coordinate's summed magnitude, never `0`.
+#[test]
+fn a_polyline_placed_far_out_reports_the_rounding_of_placing_it() {
+    let points = vec![
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(4.0, 0.0, 1.0),
+        Point3::new(4.0, 3.0, 1.0),
+    ];
+    let (graph, root) = graph_of(|b| {
+        let source = b
+            .push_value(Curve3::Polyline(Polyline3 {
+                points: points.clone(),
+                closed: false,
+            }))
+            .unwrap();
+        b.push(GeometryNode::Instance(Instance {
+            source,
+            transform: Transform3::from_translation(SITE),
+        }))
+        .unwrap()
+    });
+    let outcome = compiler()
+        .compile_polyline(&graph, root, &options_at(1e-7))
+        .unwrap();
+    let expected = 4.0 * Scalar::EPSILON * (6e6 + 4.0);
+    assert_eq!(outcome.deviation.bound, expected);
+    assert!(outcome.deviation.meets_requested());
+    // Below the floor at the site (about 5.3e-9), refused by name.
+    refused_below_rounding(compiler().compile_polyline(&graph, root, &options_at(1e-9)));
+}
+
+/// A small circle placed at the site with a budget a few times the
+/// rounding: within the budget, and dense samples of the exact circle
+/// against the f64 polyline moved back exactly (Sterbenz) within the bound.
+#[test]
+fn a_circle_placed_far_out_holds_its_bound_in_f64() {
+    let circle = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
+        },
+        radius: 1e-3,
+    });
+    let (graph, root) = graph_of(|b| {
+        let source = b.push_value(circle.clone()).unwrap();
+        b.push(GeometryNode::Instance(Instance {
+            source,
+            transform: Transform3::from_translation(SITE),
+        }))
+        .unwrap()
+    });
+    let chord = 2e-8;
+    let outcome = compiler()
+        .compile_polyline(&graph, root, &options_at(chord))
+        .unwrap();
+    let bound = outcome.deviation.bound;
+    assert!(outcome.deviation.meets_requested(), "{bound:e}");
+    assert!(bound >= 4.0 * Scalar::EPSILON * 6e6, "{bound:e}");
+    let back: Vec<Point3> = outcome
+        .points
+        .iter()
+        .map(|&p| {
+            let q = p - SITE;
+            assert_eq!(q + SITE, p, "the subtraction is exact");
+            q
+        })
+        .collect();
+    let mut worst: Scalar = 0.0;
+    for i in 0..20_000 {
+        let s = (i as Scalar + 0.5) / 20_000.0 * core::f64::consts::TAU;
+        let p = axiolid_reference::curve::evaluate3(&circle, s).unwrap();
+        worst = worst.max(distance_to(&back, p));
+    }
+    assert!(worst <= bound, "{worst:e} over {bound:e}");
+    assert!(worst > 0.0);
+    refused_below_rounding(compiler().compile_polyline(&graph, root, &options_at(1e-9)));
+}

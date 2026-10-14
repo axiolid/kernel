@@ -319,17 +319,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<Vec<EvalKey>> {
         let budget = key.budget();
         let same = |id| EvalKey::new(id, budget);
+        // Placed by a transform, or in a station's frame (#264): a rigid
+        // motion resolved from the graph. The source is meshed with the
+        // initial room for the placement's rounding (#295); a retry with
+        // more is scheduled by `evaluate`.
+        if let Some((source, transform)) = placed_source(graph, node, key.id)? {
+            return Ok(vec![EvalKey::new(
+                source,
+                instance_local_budget(transform, budget, 0.0)?,
+            )]);
+        }
         Ok(match node {
-            GeometryNode::Instance(instance) => vec![EvalKey::new(
-                instance.source,
-                instance_local_budget(instance.transform, budget)?,
-            )],
-            // Placed in a station's frame (#264): a rigid motion resolved
-            // from the graph.
-            GeometryNode::InstanceAtStation(placed) => vec![EvalKey::new(
-                placed.source,
-                instance_local_budget(crate::station::placement(graph, key.id)?.transform, budget)?,
-            )],
             GeometryNode::Collection(members) => members.iter().copied().map(same).collect(),
             GeometryNode::SolidOperation(
                 operation @ SolidOperation::Boolean { left, right, .. },
@@ -355,6 +355,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<Built> {
         let root_key = EvalKey::new(root, Budget::of(options));
         let mut stack = vec![Step::Enter(root_key)];
+        // The room an instance's source was re-meshed with for its
+        // placement's rounding (#295), once its first mesh rounded by more
+        // than the initial room left.
+        let mut rooms: std::collections::HashMap<EvalKey, Scalar> =
+            std::collections::HashMap::new();
         while let Some(step) = stack.pop() {
             match step {
                 Step::Enter(key) => {
@@ -376,6 +381,21 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                         continue;
                     }
                     let budget = key.budget();
+                    let node = self.node(graph, key.id)?;
+                    if let std::collections::hash_map::Entry::Vacant(slot) = rooms.entry(key) {
+                        if let Some((source, transform, room)) =
+                            self.placement_retry(graph, node, key, cache)?
+                        {
+                            slot.insert(room);
+                            stack.push(Step::Exit(key));
+                            stack.push(Step::Enter(EvalKey::new(
+                                source,
+                                instance_local_budget(transform, budget, room)?,
+                            )));
+                            continue;
+                        }
+                    }
+                    let room = rooms.get(&key).copied().unwrap_or(0.0);
                     let local_options = options
                         .clone()
                         .with_tolerance(budget.tolerance)
@@ -386,7 +406,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                                 budget.chord
                             ))
                         })?;
-                    let built = self.build(graph, key, &local_options, cache, measure)?;
+                    let built = self.build(graph, key, room, &local_options, cache, measure)?;
                     cache.insert(key, built);
                 }
             }
@@ -397,11 +417,55 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             .ok_or_else(|| GeomError::InvalidInput(format!("root {root:?} produced no mesh")))
     }
 
+    /// The room for its placement's rounding an instance's source needs
+    /// beyond the initial one (#295), with the source and the transform:
+    /// `Some` when the source, meshed with the initial room
+    /// ([`placement_room`]), rounds by more once placed and its bound would
+    /// carry the instance over the chord budget. The room is an eighth more
+    /// than the rounding shown, kept below the budget: a mesh finer by
+    /// that little has nearly the same coordinates. `None` for any other
+    /// node, an unbounded source, or one that fits. A source whose placed
+    /// vertices round by the whole budget is refused
+    /// ([`placed_rounding`]).
+    fn placement_retry(
+        &self,
+        graph: &GeometryGraph,
+        node: &GeometryNode,
+        key: EvalKey,
+        cache: &Cache,
+    ) -> GeomResult<Option<(NodeId, Transform3, Scalar)>> {
+        let Some((source_id, transform)) = placed_source(graph, node, key.id)? else {
+            return Ok(None);
+        };
+        let budget = key.budget();
+        let source = self.cached(
+            cache,
+            source_id,
+            instance_local_budget(transform, budget, 0.0)?,
+        )?;
+        let rounding = placed_rounding(&source.mesh, transform, budget.chord)?;
+        if rounding <= placement_room(transform, budget.chord, 0.0)? {
+            return Ok(None);
+        }
+        let Some(bound) = source.deviation.bound() else {
+            return Ok(None);
+        };
+        let factor = crate::deviation::stretch(transform);
+        if crate::deviation::grown(bound, factor, rounding) <= budget.chord {
+            return Ok(None);
+        }
+        let room = (rounding * 1.125).min(rounding + (budget.chord - rounding) * 0.5);
+        Ok(Some((source_id, transform, room)))
+    }
+
     /// Build one node, assuming its mesh dependencies are already cached.
+    /// `room` is the room an instance's source was re-meshed with for its
+    /// placement's rounding (#295), `0` for the initial one.
     fn build(
         &self,
         graph: &GeometryGraph,
         key: EvalKey,
+        room: Scalar,
         options: &ExecutionOptions,
         cache: &Cache,
         measure: Measure<'_>,
@@ -433,17 +497,19 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 })
             }
             GeometryNode::Instance(instance) => {
-                let source_budget = instance_local_budget(instance.transform, budget)?;
+                let source_budget = instance_local_budget(instance.transform, budget, room)?;
                 let source = self.cached(cache, instance.source, source_budget)?;
-                Ok(channels::transform(source, instance.transform))
+                let rounding = placed_rounding(&source.mesh, instance.transform, budget.chord)?;
+                Ok(channels::transform(source, instance.transform, rounding))
             }
             // An instance in a station's frame (#264): exact on a line,
             // otherwise its placement is named unbounded.
             GeometryNode::InstanceAtStation(placed) => {
                 let placement = crate::station::placement(graph, id)?;
-                let source_budget = instance_local_budget(placement.transform, budget)?;
+                let source_budget = instance_local_budget(placement.transform, budget, room)?;
                 let source = self.cached(cache, placed.source, source_budget)?;
-                let mut built = channels::transform(source, placement.transform);
+                let rounding = placed_rounding(&source.mesh, placement.transform, budget.chord)?;
+                let mut built = channels::transform(source, placement.transform, rounding);
                 if !placement.exact {
                     built.deviation.add(
                         crate::deviation::DeviationPath::StationPlacement,
@@ -1034,17 +1100,88 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
 /// the curve in local space is within `stretch * c` of it in world space.
 /// The chord budget is shrunk until that product, rounded, is within the
 /// world budget ([`crate::deviation::shrunk_budget`]), so a source meshed
-/// to its local budget reports at most the world one (#258). The placed
-/// coordinate scale grows by the translation, in the source's units
-/// ([`crate::snap::placed_scale`], #312).
-fn instance_local_budget(transform: Transform3, budget: Budget) -> GeomResult<Budget> {
+/// to its local budget reports at most the world one (#258). The chord
+/// budget also leaves room for the rounding of placing the source's
+/// vertices ([`placement_room`], at least `room`), which the instance's
+/// bound adds (#295), and a budget at or below the floor at the
+/// translation's scale is refused. The placed coordinate scale grows by
+/// the translation, in the source's units ([`crate::snap::placed_scale`],
+/// #312).
+fn instance_local_budget(
+    transform: Transform3,
+    budget: Budget,
+    room: Scalar,
+) -> GeomResult<Budget> {
     let (tolerance, stretch) = instance_local_tolerance(transform, budget.tolerance)?;
+    let room = placement_room(transform, budget.chord, room)?;
     Ok(Budget {
         tolerance,
-        chord: crate::deviation::shrunk_budget(budget.chord, stretch),
+        chord: crate::deviation::shrunk_budget_within(budget.chord, stretch, room),
         placed: crate::snap::placed_scale(transform, budget.placed).ok_or_else(|| {
             GeomError::InvalidInput("instance translation has no finite magnitude".into())
         })?,
+    })
+}
+
+/// The share of what the floor leaves of a chord budget an instance's
+/// source first leaves for the rounding of its own coordinates once placed
+/// (#295): `2^-20`, enough for a source within about `10^9` budgets of the
+/// origin, so most sources are meshed once.
+const ROOM_SHARE: Scalar = 1.0 / 1_048_576.0;
+
+/// The room an instance's source leaves in `chord` for its placement's
+/// rounding (#295): the floor every placement by `transform` reaches, the
+/// rounding at the origin ([`crate::deviation::placement_rounding`]), plus
+/// [`ROOM_SHARE`] of what it leaves, and at least `shown`, the rounding a
+/// first mesh of the source showed. A `chord` at or below the floor is
+/// refused by name.
+pub(crate) fn placement_room(
+    transform: Transform3,
+    chord: Scalar,
+    shown: Scalar,
+) -> GeomResult<Scalar> {
+    let floor = crate::deviation::placement_rounding(&[Point3::ZERO], transform);
+    refuse_below_rounding(chord, floor)?;
+    Ok((floor + (chord - floor) * ROOM_SHARE).max(shown))
+}
+
+/// The rounding of placing `source`'s vertices with `transform` (#295),
+/// refused by name when it reaches the chord budget: no mesh placed there
+/// is within it.
+fn placed_rounding(source: &TriMesh, transform: Transform3, chord: Scalar) -> GeomResult<Scalar> {
+    let rounding = crate::deviation::placement_rounding(&source.positions, transform);
+    refuse_below_rounding(chord, rounding)?;
+    Ok(rounding)
+}
+
+/// [`crate::deviation::BUDGET_BELOW_PLACEMENT_ROUNDING`] unless `rounding`
+/// is below `chord`.
+pub(crate) fn refuse_below_rounding(chord: Scalar, rounding: Scalar) -> GeomResult<()> {
+    if rounding < chord {
+        return Ok(());
+    }
+    Err(GeomError::UnsupportedInput {
+        backend: BackendId::new("scalar-compile"),
+        operation: Operation::GraphCompilation,
+        input: crate::deviation::BUDGET_BELOW_PLACEMENT_ROUNDING,
+    })
+}
+
+/// The source and the transform of a node that places one: an `Instance`,
+/// or an `InstanceAtStation` with its placement resolved (#264). `None` for
+/// any other node.
+fn placed_source(
+    graph: &GeometryGraph,
+    node: &GeometryNode,
+    id: NodeId,
+) -> GeomResult<Option<(NodeId, Transform3)>> {
+    Ok(match node {
+        GeometryNode::Instance(instance) => Some((instance.source, instance.transform)),
+        GeometryNode::InstanceAtStation(placed) => Some((
+            placed.source,
+            crate::station::placement(graph, id)?.transform,
+        )),
+        _ => None,
     })
 }
 

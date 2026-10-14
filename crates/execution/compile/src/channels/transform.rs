@@ -1,6 +1,6 @@
 //! `Instance`: move the triangles, keep every value.
 
-use axiolid_core::Transform3;
+use axiolid_core::{Scalar, Transform3};
 use axiolid_mesh::{NormalAttribute, TriMesh};
 
 use super::Built;
@@ -17,7 +17,11 @@ use super::Built;
 /// 2 are swapped to keep the result outward. Everything addressed per corner
 /// (corner-indexed channels and normals) is swapped with them, or corner 1
 /// would read corner 2's value.
-pub(crate) fn transform(built: &Built, transform: Transform3) -> Built {
+///
+/// `rounding` bounds how far the point transform rounded any position
+/// ([`crate::deviation::placement_rounding`] of the source's positions,
+/// #295); every deviation bound grows by it.
+pub(crate) fn transform(built: &Built, transform: Transform3, rounding: Scalar) -> Built {
     let source = &built.mesh;
     let positions = source
         .positions
@@ -55,7 +59,7 @@ pub(crate) fn transform(built: &Built, transform: Transform3) -> Built {
         mesh,
         fates: built.fates.clone(),
         closure: built.closure,
-        deviation: built.deviation.transformed(transform),
+        deviation: built.deviation.transformed(transform, rounding),
     }
 }
 

@@ -1235,9 +1235,14 @@ fn an_instance_scales_the_bound_and_a_boolean_is_unbounded() {
         },
         &options(budget),
     );
-    // The local budget shrinks by the stretch, the bound grows back by it.
+    // The local budget shrinks by the stretch, the bound grows back by it;
+    // the source leaves a 2^-20 share of the budget for the placement's
+    // rounding (#295).
     let bound = bound_of(&report);
-    assert!((bound - budget).abs() <= 1e-15, "{bound}");
+    assert!(
+        bound <= budget && budget - bound <= budget * 1e-6,
+        "{bound}"
+    );
 
     let (_, report) = compile(
         |g| {

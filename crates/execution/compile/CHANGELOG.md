@@ -43,6 +43,36 @@ caret rule for `0.x` versions.
 - A B-rep of faces that belong to no shell or solid compiles as one
   surface model (#311, `MeshClosure::Surface`), each face as authored; a
   B-rep with no face at all is still refused.
+- `DeviationPath::Placement`, `deviation::PLACEMENT_ROUNDING`,
+  `deviation::PLACEMENT_EPSILONS` and
+  `deviation::BUDGET_BELOW_PLACEMENT_ROUNDING` (#295): the rounding of
+  placing an instance's vertices, named in the report, and the input
+  family a budget below it is refused with.
+
+### Fixed
+
+- Deviation bounds of instanced bodies include the rounding of applying
+  the `f64` transform (#295, ADR 0080 amendment). An instance moved its
+  source's vertices by a few ulps of their coordinates, about `1e-9` at
+  `6e6`, and the bound grew only by the relative stretch, so a mesh
+  placed far from the origin could lie further from the exact surface
+  than its `Proven` or `Certified` bound. Every bound of an `Instance` or
+  `InstanceAtStation` now adds `4 f64::EPSILON M`, `M` the largest
+  magnitude a placed coordinate sums (derived in
+  `deviation::placement_rounding`; an identity or a mirror adds nothing),
+  and names it under `DeviationPath::Placement`. The source is meshed
+  with room for it (the floor at the translation's scale plus a `2^-20`
+  share of the budget, and once more with room for what its mesh showed
+  where that was not enough), so a request above the rounding is still
+  met; one at or below it is refused with
+  `BUDGET_BELOW_PLACEMENT_ROUNDING`. A torus at `(6e6, 6e6, 100)` with
+  a `1e-9` budget is refused; with `2e-8` it reports within the budget,
+  about a quarter of it the rounding, and dense samples of the exact
+  torus against the `f64` mesh stay within the bound. Instanced bounds
+  are now up to a `2^-20` share below the budget rather than at it.
+  `compile_polyline` through an `Instance` or `InstanceAtStation` follows
+  the same rule (term, room, refusal): a polyline placed at `6e6` reports
+  `4 eps (6e6 + 4)` where it reported `0`.
 
 ## [0.3.25] - 2026-10-14
 

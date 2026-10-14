@@ -607,3 +607,66 @@ micrometre skin kept placed; the placement split over nested instances;
 one source compiled unplaced and placed in one batch), the snap's unit
 tests (`placed_scale`, the placed reach); probe
 `scripts/probe_thin_skin_mutants.py` (#312 mutants).
+
+## Amendment 2026-10-14: a placement's rounding is part of every bound (#295)
+
+An instance's bound was its source's grown by the transform's stretch
+(#258), a relative factor. Applying the `f64` transform rounds each
+vertex by a few ulps of its coordinates: an absolute error, about `1e-9`
+at georeferenced coordinates of `6e6`, that no relative factor covers.
+A mesh placed far from the origin could lie further from the exact
+surface than its `Proven` or `Certified` bound, by that rounding. The
+rule this ADR states for a boolean's guarantee (the mesh against the
+exact result of operands perturbed within the reported deviation) needs
+the reported deviation to cover how the operands were placed.
+
+- **Decision: every bound carries the rounding of each transform
+  applied.** An `Instance` or `InstanceAtStation` reports `s d + r` for
+  each source bound `d` (kind kept), `s` the stretch bound, and `r =
+  4 eps M`: `M` the largest `sum_j |a_ij| |p_j| + |t_i|` over the
+  source's vertices, the magnitude a placed coordinate sums (its own
+  where nothing cancels). The constant is derived: a coordinate is four
+  terms each rounded at most four times in any order, so it is off by at
+  most `gamma_4 S_i < 2.000_001 eps S_i`; over three coordinates `sqrt 3`
+  of that, below `3.47 eps M`, with `M` itself computed low by at most
+  `1 + gamma_4`. A row that copies a coordinate (one coefficient `+-1`,
+  no translation) adds nothing, so an identity or a mirror is exact.
+  Nested instances grow the inner `r` by the outer stretch and add their
+  own. The term is named under `DeviationPath::Placement`
+  (`deviation::PLACEMENT_ROUNDING`).
+- **Decision: the source's budget leaves room for it.** The source is
+  meshed to the budget less a room, shrunk by the stretch so that
+  `s b + room` rounds to within the budget. The room is the floor at the
+  translation's scale (`r` at the origin) plus a `2^-20` share of what is
+  left, for the source's own coordinates; where the first mesh rounds by
+  more and its bound would carry the instance over the budget, the source
+  is meshed once more with room for an eighth more than it showed.
+- **Decision: a budget at or below the rounding is refused by name.**
+  Below the floor at the translation's scale before meshing, or below the
+  rounding of the placed vertices after, the compilation is refused with
+  `UnsupportedInput` `deviation::BUDGET_BELOW_PLACEMENT_ROUNDING`, in the
+  reported and the plain compile paths alike, rather than reported as
+  met. A torus at `(6e6, 6e6, 100)` with a `1e-9` budget is refused (the
+  floor is about `5.3e-9`).
+- **Decision: polylines follow the same rule.** `compile_polyline`
+  (#311) through an `Instance` or `InstanceAtStation` scales its chord
+  bound by the same stretch and moves its vertices by the same `f64`
+  transform, so its bound adds the same term, its source leaves the same
+  room, and a budget at or below the rounding is refused by the same name.
+- **Rejected: exact-arithmetic bounds that exclude vertex rounding,
+  left to consumers.** The rounding of placing is known to the compiler
+  and is the dominant error at georeferenced scale; a bound that leaves
+  it out is not a bound on the mesh delivered.
+- **Unchanged.** The rounding of computing a construction's own vertices
+  is not part of any bound; the exact compiler places exactly
+  (`ExactBRep::transformed`) and is unaffected.
+
+Tests: `crates/execution/compile/tests/placement_rounding.rs` (the
+torus at `(6e6, 6e6, 100)`: a `2e-8` budget met, about a quarter of it
+the rounding, and dense samples of the exact torus against the `f64` mesh
+moved back exactly within the bound; `1e-9` and the floor refused by
+name in both paths; a source far out turned about the origin, meshed
+once more; an identity and a mirror adding nothing; a torus at a station
+of a far line), `crates/execution/compile/tests/polyline.rs` (a polyline
+and a circle placed at the site); the unit tests of `deviation::placement_rounding`; probe
+`scripts/probe_placement_rounding_mutants.py` (#295 mutants).

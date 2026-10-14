@@ -30,7 +30,11 @@
 //! A placement moves the source's polyline rigidly or scales it: the source
 //! is compiled to the budget shrunk by an upper bound on the transform's
 //! stretch ([`crate::deviation::shrunk_budget`]), and its bound grows by
-//! that stretch, exactly as an instance's mesh deviation does (#258).
+//! that stretch, exactly as an instance's mesh deviation does (#258). It
+//! also carries the rounding of applying the transform in `f64` (#295,
+//! [`crate::deviation`]'s "Placement rounding"): the source leaves room for
+//! it, the bound adds it, and a budget at or below it is refused with
+//! [`crate::deviation::BUDGET_BELOW_PLACEMENT_ROUNDING`].
 //!
 //! # What is refused, by name
 //!
@@ -124,7 +128,13 @@ fn resolve(
 }
 
 /// The source's polyline moved by `transform`, compiled to the budget
-/// shrunk by its stretch so the grown bound stays within `chord`.
+/// shrunk by its stretch, less room for the rounding of applying the
+/// transform in `f64` (#295), so the grown bound stays within `chord`.
+/// As for a mesh (`crate::compiler`): the room starts at the floor at the
+/// translation's scale plus a share for the source's own coordinates, and
+/// the source is compiled once more with room for an eighth more than its
+/// polyline rounded by where that carried the bound over `chord`; a
+/// `chord` at or below the rounding is refused by name.
 fn placed(
     graph: &GeometryGraph,
     source: NodeId,
@@ -134,15 +144,24 @@ fn placed(
     depth: usize,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
     let (_, stretch) = crate::compiler::instance_local_tolerance(transform, options.tolerance())?;
-    let local = crate::deviation::shrunk_budget(chord, stretch);
-    let (points, bound) = resolve(graph, source, local, options, depth + 1)?;
-    Ok((
-        points
-            .into_iter()
-            .map(|point| transform.transform_point3(point))
-            .collect(),
-        bound * stretch,
-    ))
+    let mut room = crate::compiler::placement_room(transform, chord, 0.0)?;
+    let mut retried = false;
+    loop {
+        let local = crate::deviation::shrunk_budget_within(chord, stretch, room);
+        let (points, bound) = resolve(graph, source, local, options, depth + 1)?;
+        let rounding = crate::deviation::placement_rounding(&points, transform);
+        crate::compiler::refuse_below_rounding(chord, rounding)?;
+        let grown = crate::deviation::grown(bound, stretch, rounding);
+        if retried || rounding <= room || grown <= chord {
+            let points = points
+                .into_iter()
+                .map(|point| transform.transform_point3(point))
+                .collect();
+            return Ok((points, grown));
+        }
+        room = room.max((rounding * 1.125).min(rounding + (chord - rounding) * 0.5));
+        retried = true;
+    }
 }
 
 fn refused(input: &'static str) -> GeomError {

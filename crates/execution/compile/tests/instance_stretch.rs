@@ -375,6 +375,15 @@ fn disk_samples() -> Vec<Point3> {
     out
 }
 
+/// Uninstanced, the plane's own frame stretch (a hair above one) is all
+/// that grows its boundary's bound: an instance's source leaves a share of
+/// its budget for the placement's rounding (#295), which would hide it.
+#[test]
+fn the_bare_curve_bounded_plane_meets_its_budget() {
+    let (mesh, report) = compile(disk);
+    assert_meets("disk", &mesh, &report, &disk_samples());
+}
+
 #[test]
 fn rigid_and_nested_instances_of_a_curve_bounded_plane_meet_their_budget() {
     let samples = disk_samples();
