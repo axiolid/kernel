@@ -14,6 +14,7 @@ mod planar;
 mod polyline;
 mod snap;
 pub mod station;
+mod trimmed;
 mod weld;
 
 use axiolid_contracts::BackendId;

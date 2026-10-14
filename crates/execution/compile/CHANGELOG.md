@@ -25,6 +25,24 @@ caret rule for `0.x` versions.
   (intrinsic, implicit, banked), curve relations, collections, and curves
   at numerically resolved stations. `compile_mesh` still refuses curve
   nodes with `CurveEvaluation`.
+- Surfaces trimmed by a parameter rectangle
+  (`SurfaceRelation::RectangularTrimmed` over a plane, cylinder, elliptical
+  cylinder, cone, sphere, torus or B-spline surface) compile through
+  `compile_mesh` as sheets reported `MeshClosure::Surface` (#311),
+  facing the trimmed surface's normal (turned round when exactly one sense
+  runs against the basis), wrapping past the seam of a periodic
+  parameter. A uniform grid of exact surface
+  points, each cell within `1/8 ((A + B) h_u^2 + (C + B) h_v^2)` of its
+  triangles from the surface's certified interpolation bounds over it,
+  sized to the chord budget; `compile_mesh_with_deviation` reports it under
+  `DeviationPath::TrimmedSurface` (new), the surface family as the detail,
+  and a cell a B-spline crease crosses as unbounded by name. Refused by
+  name: a trim of a surface relation, an empty range, one longer than a
+  period, one against its sense on a parameter that does not wrap. An
+  atomic `Surface` node is unbounded and still refused.
+- A B-rep of faces that belong to no shell or solid compiles as one
+  surface model (#311, `MeshClosure::Surface`), each face as authored; a
+  B-rep with no face at all is still refused.
 
 ## [0.3.25] - 2026-10-14
 

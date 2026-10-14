@@ -92,6 +92,13 @@
 //! bound), and cuts each cell the way that lowers its halves more, so a
 //! long tube's long, thin quads do not force every cell down to the width
 //! of their diagonals.
+//! - Surfaces trimmed by a parameter rectangle (#311): a uniform grid of
+//!   cells whose corners are exact surface points, each cell within
+//!   `1/8 ((A + B) h_u^2 + (C + B) h_v^2)` of its two triangles from the
+//!   surface's certified interpolation bounds over the cell
+//!   (`crate::trimmed`), [`DeviationBound::Certified`]; a cell a B-spline
+//!   knot line of full multiplicity crosses is
+//!   [`DeviationBound::Unbounded`] by name.
 //! - Instances scale the bound by an upper bound on their transform's
 //!   largest stretch (`stretch`): the largest column length grown by
 //!   `1 + 96 eps` when the columns are orthogonal, else the Frobenius
@@ -273,6 +280,8 @@ pub enum DeviationPath {
     /// A node placed in the frame of a curve station (#264), on a basis
     /// whose frame is not exact.
     StationPlacement,
+    /// A surface trimmed by a parameter rectangle (#311).
+    TrimmedSurface,
 }
 
 /// A bound on how far the exact surface may lie from the mesh.

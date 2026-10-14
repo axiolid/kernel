@@ -18,8 +18,9 @@ pub enum MeshClosure {
     /// volume is meaningful.
     Solid,
     /// At least one part is a surface with no solid behind it: an open
-    /// shell, or a closed shell the source never declared a solid. Area is
-    /// meaningful; volume is not.
+    /// shell, a face or a trimmed surface patch (#311), or a closed shell
+    /// the source never declared a solid. Area is meaningful; volume is
+    /// not.
     Surface,
     /// The compiler did not report it.
     Unknown,

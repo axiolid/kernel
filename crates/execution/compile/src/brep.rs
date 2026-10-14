@@ -248,7 +248,9 @@ fn check_mesh_budget(mesh: &TriMesh) -> GeomResult<()> {
 /// -- every shell is tessellated as authored and the result is
 /// [`MeshClosure::Surface`], open or closed alike (#161). Promoting a shell
 /// to a solid here would claim a volume the source never declared, so the
-/// flag travels with the mesh and volume readers refuse it.
+/// flag travels with the mesh and volume readers refuse it. Faces that
+/// belong to no shell (a B-rep of loose faces, #311) are tessellated as
+/// one surface model, each face as authored.
 pub fn tessellate(
     brep: &BRep<NodeId>,
     graph: &axiolid_model::GeometryGraph,
@@ -269,17 +271,30 @@ pub fn tessellate(
     // Each shell with whether it is a void. Every solid contributes: a
     // B-rep of several disjoint solids (a composite profile whose members
     // do not touch) meshes all of them.
+    // Loose faces (#311): no shell gathers them, so one is made here, each
+    // face as authored.
+    let loose = axiolid_topology::Shell {
+        faces: (0..brep.faces().len())
+            .filter_map(|index| brep.face_id_at(index))
+            .map(|face| (face, Orientation::Forward))
+            .collect(),
+        closed: false,
+    };
     let (shells, closure): (Vec<(&axiolid_topology::Shell, bool)>, MeshClosure) =
         if brep.solids().is_empty() {
             if brep.shells().is_empty() {
-                return Err(GeomError::InvalidInput(
-                    "brep has neither a solid nor a shell".to_string(),
-                ));
+                if loose.faces.is_empty() {
+                    return Err(GeomError::InvalidInput(
+                        "brep has neither a solid nor a shell".to_string(),
+                    ));
+                }
+                (vec![(&loose, false)], MeshClosure::Surface)
+            } else {
+                (
+                    brep.shells().iter().map(|shell| (shell, false)).collect(),
+                    MeshClosure::Surface,
+                )
             }
-            (
-                brep.shells().iter().map(|shell| (shell, false)).collect(),
-                MeshClosure::Surface,
-            )
         } else {
             let mut shells = Vec::new();
             for solid in brep.solids() {
@@ -2019,7 +2034,9 @@ fn take_local_vertex(next: &mut u32) -> GeomResult<u32> {
     Ok(current)
 }
 
-fn surface_periods(surface: &axiolid_surface::Surface) -> (Option<Scalar>, Option<Scalar>) {
+pub(crate) fn surface_periods(
+    surface: &axiolid_surface::Surface,
+) -> (Option<Scalar>, Option<Scalar>) {
     let tau = core::f64::consts::TAU;
     match surface {
         axiolid_surface::Surface::Cylinder(_)
@@ -2162,7 +2179,7 @@ fn refinement_midpoint(
 }
 
 /// The surface family's name, for a report.
-fn surface_family(surface: &axiolid_surface::Surface) -> &'static str {
+pub(crate) fn surface_family(surface: &axiolid_surface::Surface) -> &'static str {
     match surface {
         axiolid_surface::Surface::Plane(_) => "plane",
         axiolid_surface::Surface::Cylinder(_) => "cylinder",

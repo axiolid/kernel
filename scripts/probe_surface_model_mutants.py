@@ -22,14 +22,14 @@ T = ["-p", "axiolid-mesh-compile", "--test", "surface_models"]
 
 MUTANTS = [
     ("solid-less shells labelled solid", B,
-     "                brep.shells().iter().map(|shell| (shell, false)).collect(),\n                MeshClosure::Surface,",
-     "                brep.shells().iter().map(|shell| (shell, false)).collect(),\n                MeshClosure::Solid,"),
+     "                    brep.shells().iter().map(|shell| (shell, false)).collect(),\n                    MeshClosure::Surface,",
+     "                    brep.shells().iter().map(|shell| (shell, false)).collect(),\n                    MeshClosure::Solid,"),
     ("only the first shell tessellated", B,
      "                brep.shells().iter().map(|shell| (shell, false)).collect(),",
      "                brep.shells().iter().take(1).map(|shell| (shell, false)).collect(),"),
     ("solid-less brep still refused", B,
-     "            if brep.shells().is_empty() {\n                return Err(GeomError::InvalidInput(\n                    \"brep has neither a solid nor a shell\"",
-     "            if true {\n                return Err(GeomError::InvalidInput(\n                    \"brep has neither a solid nor a shell\""),
+     "            if brep.shells().is_empty() {\n                if loose.faces.is_empty() {",
+     "            if true {\n                if true {"),
     ("declared solid labelled surface", B,
      "            (shells, MeshClosure::Solid)",
      "            (shells, MeshClosure::Surface)"),

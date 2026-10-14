@@ -540,6 +540,32 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
                         .with_deviation(crate::deviation::of_sectioned_surface(bound))
                 }),
+            // A surface bounded by a parameter rectangle: a sheet (#311).
+            GeometryNode::SurfaceRelation(axiolid_model::SurfaceRelation::RectangularTrimmed {
+                basis,
+                u,
+                v,
+                u_sense,
+                v_sense,
+            }) => crate::trimmed::rectangular(
+                graph,
+                *basis,
+                crate::trimmed::Trim {
+                    u: *u,
+                    v: *v,
+                    u_sense: *u_sense,
+                    v_sense: *v_sense,
+                },
+                options,
+            )
+            .map(|(mesh, family, bound)| {
+                Built::with_closure(mesh, axiolid_mesh_compile_contract::MeshClosure::Surface)
+                    .with_deviation(crate::deviation::Deviation::one(
+                        crate::deviation::DeviationPath::TrimmedSurface,
+                        family,
+                        bound,
+                    ))
+            }),
             // CSG primitives are analytic solids: no surface evaluation,
             // no trim curves, just a closed mesh at the caller's tolerance.
             GeometryNode::Primitive(primitive) => {
