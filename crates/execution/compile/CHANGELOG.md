@@ -77,6 +77,33 @@ caret rule for `0.x` versions.
   two capped rims, no pcurve anywhere) now compiles as a watertight
   `MeshClosure::Solid`.
 
+### Changed
+
+- An all-planar boolean's measured deviation is reported near rounding,
+  not near the request (#314). The search over the exact result stopped
+  once its worst cell was within the budget, and a cell across a trim
+  edge was bounded whole, overhang past the edge included, so the bound
+  only shrank with the cell's size: the wall `3.65 x 0.25 x 3.67` less two
+  doors reported `9.96e-4` at a `1e-3` request for a mesh whose certified
+  volume is exact to `1e-14`. On a plane, a boundary cell is now bounded
+  over its part within the slack of the face (the cell clipped by the
+  mitred offset of the one edge or corner it meets, as convex pieces), the
+  slack is the chord bound the trim flattening actually reached (rounding,
+  for straight trims), and when every face of the result is a plane the
+  search runs to within 10% of the sampled maximum or to 1024 ulps of the
+  mesh's scale, with no budget to stop at. That wall now reports
+  `1.18e-12` (sampled `3.9e-14`), and its report costs no more than
+  before (`benches/boolean_deviation.rs`, mesh and report: 378 ms before,
+  358 ms after). Curved patches are bounded and searched as before; a
+  curved boolean's planar faces are clipped too, which only tightens
+  their cells (the wall with a round window: 488 ms before, 392 ms
+  after). The budget still settles an all-planar search once a real
+  deviation is shown, a sampled lower bound or a flattened warped
+  operand's slab width (#266) above 1000 times the rounding, so a mesh
+  that is off its exact result costs no more than before (a wall with a
+  moved mesh corner: 0.39 s before, 0.10 s after; the #266 tests at or
+  under their times), and one at rounding is never stopped by the budget.
+
 ### Fixed
 
 - Deviation bounds of instanced bodies include the rounding of applying

@@ -205,12 +205,7 @@ impl Flat {
     /// The best region bound over the convex piece with corners `corners`
     /// (in order around it), from the regions of the `candidates`
     /// triangles, if any beats `best`.
-    pub(super) fn bound(
-        &self,
-        corners: &[Point3; 4],
-        candidates: &[usize],
-        best: Scalar,
-    ) -> Scalar {
+    pub(super) fn bound(&self, corners: &[Point3], candidates: &[usize], best: Scalar) -> Scalar {
         let mut best = best;
         let mut seen: Vec<u32> = Vec::new();
         for &t in candidates {
@@ -228,11 +223,17 @@ impl Flat {
             if bound >= best {
                 continue;
             }
-            let quad = corners.map(|c| {
-                let d = c - region.origin;
-                Point2::new(d.dot(region.e1), d.dot(region.e2))
-            });
-            let centre = (quad[0] + quad[1] + quad[2] + quad[3]) * 0.25;
+            if corners.is_empty() {
+                continue;
+            }
+            let quad: Vec<Point2> = corners
+                .iter()
+                .map(|&c| {
+                    let d = c - region.origin;
+                    Point2::new(d.dot(region.e1), d.dot(region.e2))
+                })
+                .collect();
+            let centre = quad.iter().fold(Point2::ZERO, |sum, &p| sum + p) / quad.len() as Scalar;
             let inside = candidates
                 .iter()
                 .any(|&u| self.region_of[u] == r && in_triangle(centre, &self.projected[u]));
@@ -267,10 +268,17 @@ fn in_triangle(p: Point2, [a, b, c]: &[Point2; 3]) -> bool {
         && (*a - *c).perp_dot(p - *c) >= slack
 }
 
-/// Whether any boundary edge comes within `margin` of the convex `quad`.
-fn touches(quad: &[Point2; 4], boundary: &[[Point2; 2]], margin: Scalar) -> bool {
-    let lo = quad[0].min(quad[1]).min(quad[2]).min(quad[3]) - Point2::splat(margin);
-    let hi = quad[0].max(quad[1]).max(quad[2]).max(quad[3]) + Point2::splat(margin);
+/// Whether any boundary edge comes within `margin` of the convex polygon
+/// `quad`.
+fn touches(quad: &[Point2], boundary: &[[Point2; 2]], margin: Scalar) -> bool {
+    let lo = quad
+        .iter()
+        .fold(Point2::splat(Scalar::INFINITY), |m, &p| m.min(p))
+        - Point2::splat(margin);
+    let hi = quad
+        .iter()
+        .fold(Point2::splat(Scalar::NEG_INFINITY), |m, &p| m.max(p))
+        + Point2::splat(margin);
     boundary.iter().any(|&[a, b]| {
         let (slo, shi) = (a.min(b), a.max(b));
         if shi.x < lo.x || shi.y < lo.y || slo.x > hi.x || slo.y > hi.y {
@@ -280,16 +288,17 @@ fn touches(quad: &[Point2; 4], boundary: &[[Point2; 2]], margin: Scalar) -> bool
     })
 }
 
-/// Distance between segment `ab` and the convex quadrilateral `quad`: zero
-/// when they meet, else the least distance between a vertex of one and the
+/// Distance between segment `ab` and the convex polygon `quad`: zero when
+/// they meet, else the least distance between a vertex of one and the
 /// other's boundary.
-fn segment_quad_distance(a: Point2, b: Point2, quad: &[Point2; 4]) -> Scalar {
+fn segment_quad_distance(a: Point2, b: Point2, quad: &[Point2]) -> Scalar {
     if in_convex(a, quad) || in_convex(b, quad) {
         return 0.0;
     }
+    let n = quad.len();
     let mut best = Scalar::INFINITY;
-    for k in 0..4 {
-        let (p, q) = (quad[k], quad[(k + 1) % 4]);
+    for k in 0..n {
+        let (p, q) = (quad[k], quad[(k + 1) % n]);
         if segments_meet(a, b, p, q) {
             return 0.0;
         }
@@ -303,11 +312,12 @@ fn segment_quad_distance(a: Point2, b: Point2, quad: &[Point2; 4]) -> Scalar {
 
 /// Inside a convex polygon (either winding), boundary included; a polygon
 /// with no area contains nothing (its edges are tested separately).
-fn in_convex(p: Point2, quad: &[Point2; 4]) -> bool {
+fn in_convex(p: Point2, quad: &[Point2]) -> bool {
+    let n = quad.len();
     let mut positive = false;
     let mut negative = false;
-    for k in 0..4 {
-        let s = (quad[(k + 1) % 4] - quad[k]).perp_dot(p - quad[k]);
+    for k in 0..n {
+        let s = (quad[(k + 1) % n] - quad[k]).perp_dot(p - quad[k]);
         positive |= s > 0.0;
         negative |= s < 0.0;
     }

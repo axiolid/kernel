@@ -42,6 +42,18 @@
 //! whole, which covers its part inside, but its centre does not raise the
 //! lower bound, since it may lie off the face.
 //!
+//! Bounded whole, a boundary cell counts its overhang past the trim, so
+//! the bound shrinks only with the cells' size. Where the patch is affine
+//! (second-derivative bounds exactly zero, a plane, #314) it may instead
+//! give convex pieces holding the cell's part in the domain
+//! ([`Patch::clip`]); the image of a piece is the piece mapped by the jet,
+//! and the distance to one triangle is convex, so the corners' largest
+//! distance bounds it, as for the parallelogram's pieces. When every patch
+//! is affine ([`certify_affine`]) the search has no target: it stops
+//! within 10% of the best lower bound, at the mesh's rounding, or at the
+//! work cap, and at the budget only once the lower bound shows a real
+//! deviation (far above the rounding).
+//!
 //! Besides single triangles, a piece may be covered by a flat region of
 //! the mesh (edge-connected coplanar triangles, [`flat`]): without that,
 //! every edge inside a planar face or a cylinder facet would have to be
@@ -50,7 +62,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use axiolid_core::{Point3, Scalar, Vec3};
+use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_mesh::TriMesh;
 
 mod flat;
@@ -67,6 +79,15 @@ pub(crate) trait Patch {
     /// certainly outside.
     fn coverage(&self, _x: (Scalar, Scalar), _y: (Scalar, Scalar)) -> Coverage {
         Coverage::Inside
+    }
+    /// Convex polygons in parameters whose union holds every point of the
+    /// box that may lie in the patch's domain (#314), or `None` (the
+    /// default) to bound the box whole. Asked only of a
+    /// [`Coverage::Boundary`] cell whose second-derivative bounds are
+    /// exactly zero: the patch is affine there, so its image is the
+    /// polygons mapped by its jet, with no Taylor remainder.
+    fn clip(&self, _x: (Scalar, Scalar), _y: (Scalar, Scalar)) -> Option<Vec<Vec<Point2>>> {
+        None
     }
 }
 
@@ -165,9 +186,47 @@ pub(crate) fn certify_thin_quads(
     let search = Search {
         flatness,
         best_split: true,
+        ..Search::default()
     };
     certify_with(patches, cells, mesh, target, enough, search)
 }
+
+/// [`certify`] for patches that are all affine over their domains (an
+/// exact result whose faces are all planes, #314): boundary cells are
+/// bounded over their [`Patch::clip`] pieces, so the bound converges to the
+/// measured distance, and the search runs to within [`TIGHT`] of the
+/// sampled maximum or to the mesh's rounding; [`MAX_CELLS`] still caps it.
+///
+/// `enough` settles it too, but only once a real deviation is shown,
+/// above [`DEVIATING`] times the rounding: by the sampled lower bound, or
+/// by `shown`, one the caller adds to the result anyway (a warped
+/// operand's slab width, #266). A mesh off the exact result stops once it
+/// fits the budget, as [`certify_within`] does, while one at rounding is
+/// never stopped by the budget, which would report just under it.
+pub(crate) fn certify_affine(
+    patches: &[&dyn Patch],
+    cells: Vec<Cell>,
+    mesh: &TriMesh,
+    enough: Scalar,
+    shown: Scalar,
+) -> Option<Scalar> {
+    let search = Search {
+        affine: true,
+        shown,
+        ..Search::default()
+    };
+    certify_with(patches, cells, mesh, 0.0, enough, search)
+}
+
+/// How many times the rounding an affine search's sampled lower bound must
+/// exceed before the budget may settle it ([`certify_affine`]). A sample is
+/// an exact point-to-triangle distance from a point evaluated on the exact
+/// surface, so a mesh that is the exact result samples within a few ulps of
+/// its scale (`2e-14` for the 3.67 m wall of #314, where the rounding is
+/// `1.2e-12`): three decades above the rounding is no rounding, and still
+/// six below a millimetre budget at that scale, so every deviation a
+/// budget could be met with is seen as one.
+const DEVIATING: Scalar = 1e3;
 
 fn certify_with(
     patches: &[&dyn Patch],
@@ -187,27 +246,36 @@ fn certify_with(
         if coverage == Coverage::Outside {
             continue;
         }
-        let (upper, sample) = evaluate(patch, &cell, &index)?;
+        let (upper, sample) = evaluate(patch, &cell, coverage, &index)?;
         if coverage == Coverage::Inside {
             lower = lower.max(sample);
         }
         heap.push(Scored { upper, cell });
         work += 1;
     }
+    // An affine search (#314) has no budget or target to stop at: it
+    // tightens to the sampled maximum, or to the rounding of the mesh's
+    // coordinates, below which neither bound nor sample means anything.
+    let (stop, smallest) = if search.affine {
+        (index.rounding, index.rounding)
+    } else {
+        ((0.1 * target).max(enough), SMALLEST * target)
+    };
     while let Some(top) = heap.pop() {
-        let settled = top.upper <= (TIGHT * lower).max(0.1 * target).max(enough);
+        let settled = top.upper <= (TIGHT * lower).max(stop)
+            || (search.affine && top.upper <= enough && lower.max(search.shown) > DEVIATING * stop);
         let cell = top.cell;
         let patch = patches[cell.patch];
         let (_, du, dv) = patch.jet(mid(cell.x), mid(cell.y))?;
         let extent_x = du.length() * (cell.x.1 - cell.x.0);
         let extent_y = dv.length() * (cell.y.1 - cell.y.0);
-        let tiny = extent_x.max(extent_y) <= SMALLEST * target;
+        let tiny = extent_x.max(extent_y) <= smallest;
         if settled || tiny || work >= MAX_CELLS {
             return Some(top.upper * (1.0 + 1e-9));
         }
         let along_x = split(&cell, true);
         let along_y = split(&cell, false);
-        let floor = SMALLEST * target;
+        let floor = smallest;
         let halves = if !search.best_split || extent_x <= floor || extent_y <= floor {
             // One side is already at the resolution floor: cut the other.
             let across_x = if search.best_split {
@@ -264,6 +332,13 @@ struct Search {
     /// Split each cell both ways and keep the better pair, instead of
     /// across its longer side.
     best_split: bool,
+    /// Every patch is affine ([`certify_affine`]): stop within [`TIGHT`]
+    /// of the sampled maximum or at the mesh's rounding, and at the budget
+    /// only once a real deviation is shown.
+    affine: bool,
+    /// A deviation the caller adds to the bound anyway: shown, like a
+    /// sampled one.
+    shown: Scalar,
 }
 
 /// The two halves of `cell`, cut across `x` or across `y`.
@@ -307,7 +382,7 @@ fn scored(patch: &dyn Patch, halves: [Cell; 2], index: &TriangleIndex) -> Option
         if coverage == Coverage::Outside {
             continue;
         }
-        let (upper, sample) = evaluate(patch, &half, index)?;
+        let (upper, sample) = evaluate(patch, &half, coverage, index)?;
         *slot = Some((upper, sample, half, coverage));
     }
     Some(out)
@@ -321,7 +396,12 @@ fn mid(range: (Scalar, Scalar)) -> Scalar {
 const PIECES: usize = 2;
 
 /// `(upper bound over the cell, exact distance at its centre)`.
-fn evaluate(patch: &dyn Patch, cell: &Cell, index: &TriangleIndex) -> Option<(Scalar, Scalar)> {
+fn evaluate(
+    patch: &dyn Patch,
+    cell: &Cell,
+    coverage: Coverage,
+    index: &TriangleIndex,
+) -> Option<(Scalar, Scalar)> {
     let (q, du, dv) = patch.jet(mid(cell.x), mid(cell.y))?;
     let [a, b, c] = patch.second(cell.x, cell.y)?;
     let (hx, hy) = (0.5 * (cell.x.1 - cell.x.0), 0.5 * (cell.y.1 - cell.y.0));
@@ -332,6 +412,25 @@ fn evaluate(patch: &dyn Patch, cell: &Cell, index: &TriangleIndex) -> Option<(Sc
         return None;
     }
     let candidates = index.within(q, centre + 2.0 * reach);
+    // An affine cell across its domain's boundary (#314): only its part in
+    // the domain is bounded, so the overhang past a trim edge does not
+    // count.
+    if coverage == Coverage::Boundary && [a, b, c] == [0.0; 3] {
+        if let Some(pieces) = patch.clip(cell.x, cell.y) {
+            let origin = Point2::new(mid(cell.x), mid(cell.y));
+            let image = |p: Point2| q + du * (p.x - origin.x) + dv * (p.y - origin.y);
+            let mut worst: Scalar = 0.0;
+            for piece in &pieces {
+                let corners: Vec<Point3> = piece.iter().map(|&p| image(p)).collect();
+                worst = worst.max(piece_bound(&corners, &candidates, index));
+            }
+            // The image is the jet's, evaluated in floating point: its
+            // rounding at the cell's coordinates.
+            let rounding = 8.0 * Scalar::EPSILON * (q.abs().max_element() + reach);
+            let upper = worst + rounding;
+            return upper.is_finite().then_some((upper, centre));
+        }
+    }
     // Distances from the lattice of piece corners to each candidate.
     let side = PIECES + 1;
     let mut lattice = Vec::with_capacity(side * side);
@@ -377,6 +476,22 @@ fn evaluate(patch: &dyn Patch, cell: &Cell, index: &TriangleIndex) -> Option<(Sc
     upper.is_finite().then_some((upper, centre))
 }
 
+/// A bound on the distance to the mesh over the convex polygon `corners`
+/// (in order around it): the best one triangle by its corners' largest
+/// distance (the distance to one triangle is convex), or a flat region.
+fn piece_bound(corners: &[Point3], candidates: &[usize], index: &TriangleIndex) -> Scalar {
+    let best = candidates
+        .iter()
+        .map(|&t| {
+            corners
+                .iter()
+                .map(|&p| index.distance(p, t))
+                .fold(0.0, Scalar::max)
+        })
+        .fold(Scalar::INFINITY, Scalar::min);
+    index.flat.bound(corners, candidates, best)
+}
+
 /// Triangles of a mesh in a bounding-volume hierarchy, for exact nearest
 /// distances and range queries.
 pub(crate) struct TriangleIndex {
@@ -384,7 +499,15 @@ pub(crate) struct TriangleIndex {
     nodes: Vec<Node>,
     order: Vec<usize>,
     flat: flat::Flat,
+    /// The rounding of the mesh's coordinates, [`ROUNDING_ULPS`] of its
+    /// scale: an affine search ([`certify_affine`]) stops there.
+    rounding: Scalar,
 }
+
+/// Ulps of the mesh's scale an affine search settles at: above the flat
+/// regions' own rounding (`64` ulps, [`flat`]), so a piece a region covers
+/// settles at once.
+const ROUNDING_ULPS: Scalar = 1024.0;
 
 struct Node {
     lo: Vec3,
@@ -421,11 +544,23 @@ impl TriangleIndex {
             return None;
         }
         let flat = flat::Flat::with_flatness(&triangles, &ids, flatness);
+        let (lo, hi) = triangles.iter().flatten().fold(
+            (
+                Vec3::splat(Scalar::INFINITY),
+                Vec3::splat(Scalar::NEG_INFINITY),
+            ),
+            |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+        );
+        let scale = (hi - lo)
+            .length()
+            .max(lo.abs().max_element())
+            .max(hi.abs().max_element());
         let mut index = Self {
             order: (0..triangles.len()).collect(),
             triangles,
             nodes: Vec::new(),
             flat,
+            rounding: ROUNDING_ULPS * Scalar::EPSILON * scale,
         };
         let count = index.order.len();
         index.build(0, count);

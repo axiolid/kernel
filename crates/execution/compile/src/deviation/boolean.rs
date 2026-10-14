@@ -97,6 +97,18 @@
 //! tightens as before, so a miss is reported as close to the truth as the
 //! search gets.
 //!
+//! An exact result whose faces are all planes is the exception (#314): its
+//! search runs to within 10% of the sampled maximum or to the rounding of
+//! the mesh ([`crate::certify`]'s `certify_affine`), so a mesh that is the
+//! exact result reports a bound near rounding instead of just under the
+//! request. Once a real deviation is shown (far above rounding), by the
+//! samples or by the slab width a flattened warped operand adds to the
+//! report (#266), the budget settles it again, so such a boolean costs
+//! what it did. That needs the boundary cells to converge too: on a plane, a
+//! cell the trim crosses is bounded over its pieces in the face
+//! ([`Domain::clip`]), and the slack is the chord bound the flattening
+//! reached (`0` for a straight trim) rather than the `delta` it allowed.
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (a union or intersection of placed
@@ -113,7 +125,7 @@
 
 use axiolid_brep::ExactBRep;
 use axiolid_contracts::{ExecutionOptions, GeomError};
-use axiolid_core::{Point2, Point3, Scalar, Vec3};
+use axiolid_core::{Point2, Point3, Scalar, Vec2, Vec3};
 use axiolid_curve::Curve2;
 use axiolid_mesh::TriMesh;
 use std::collections::HashSet;
@@ -123,7 +135,7 @@ use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOra
 use axiolid_surface::Surface;
 
 use super::{Deviation, DeviationBound, DeviationPath};
-use crate::certify::{certify_within, Cell, Coverage, Patch};
+use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
 use crate::ReferenceExactCompiler;
 
 /// The detail of a boolean measured against the exact compiler's result:
@@ -186,11 +198,13 @@ pub(crate) fn of_boolean(
     // operands' slab widths fit the budget still reports within it. One
     // that does not fit cannot meet it whatever the search finds, so it
     // settles within the budget too rather than tightening further.
+    // The slab width is a deviation the report already carries: like a
+    // sampled one, it lets the budget settle an all-planar search (#314).
     let measured = if flattened < budget {
         let left = budget - flattened;
-        measure(&exact, mesh, left, left)
+        measure(&exact, mesh, left, left, flattened)
     } else {
-        measure(&exact, mesh, budget, budget)
+        measure(&exact, mesh, budget, budget, flattened)
     };
     let bound = match measured {
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
@@ -250,12 +264,14 @@ fn refusal(error: &GeomError) -> &'static str {
 
 /// A certified bound on the distance from every point of `exact`'s faces
 /// to `mesh`, or why there is none; the search settles once it is within
-/// `enough` (see the module's "When to stop").
+/// `enough` (see the module's "When to stop"), an all-planar one only once
+/// a deviation is shown, sampled or the `shown` one the report adds.
 fn measure(
     exact: &ExactBRep,
     mesh: &TriMesh,
     target: Scalar,
     enough: Scalar,
+    shown: Scalar,
 ) -> Result<Scalar, &'static str> {
     let topology = exact.topology();
     let mut faces = Vec::with_capacity(topology.faces().len());
@@ -278,8 +294,13 @@ fn measure(
         face.seed(k, &mut cells)?;
     }
     let patches: Vec<&dyn Patch> = faces.iter().map(|f| f as &dyn Patch).collect();
-    certify_within(&patches, cells, mesh, target, enough)
-        .ok_or("boolean: an exact face could not be bounded against the mesh")
+    // All faces planar (#314): the search runs to the measured distance.
+    let bound = if faces.iter().all(|f| f.domain.affine) {
+        certify_affine(&patches, cells, mesh, enough, shown)
+    } else {
+        certify_within(&patches, cells, mesh, target, enough)
+    };
+    bound.ok_or("boolean: an exact face could not be bounded against the mesh")
 }
 
 /// One face of the exact result: its surface over its trimmed domain.
@@ -343,6 +364,10 @@ impl Patch for ExactFace<'_> {
     fn coverage(&self, x: (Scalar, Scalar), y: (Scalar, Scalar)) -> Coverage {
         self.domain.coverage(x, y)
     }
+
+    fn clip(&self, x: (Scalar, Scalar), y: (Scalar, Scalar)) -> Option<Vec<Vec<Point2>>> {
+        self.domain.clip(x, y)
+    }
 }
 
 /// A face's domain in its surface parameters: the polygon of its loops'
@@ -352,6 +377,13 @@ struct Domain {
     slack: Scalar,
     lo: Point2,
     hi: Point2,
+    /// The surface is affine over the domain's box (a plane, #314): its
+    /// boundary cells are clipped ([`Self::clip`]), with each segment's
+    /// unit normal into the domain in `inward`.
+    affine: bool,
+    inward: Vec<Vec2>,
+    /// Rounding of the parameters' coordinates.
+    rounding: Scalar,
 }
 
 impl Domain {
@@ -407,32 +439,26 @@ impl Domain {
             .ok_or("boolean: an exact face's surface cannot be bounded over its domain")?;
         let g = bounds.du.max(bounds.dv).max(Scalar::MIN_POSITIVE);
         let delta = 0.01 * target / g;
+        let affine = bounds.smooth && [bounds.duu, bounds.duv, bounds.dvv] == [0.0; 3];
         let mut count = 0_usize;
+        let mut chord: Scalar = 0.0;
         for spans in &uses {
             let mut ring = Vec::new();
             for &(curve, a, b) in spans {
-                flatten(curve, a, b, delta, &mut ring, &mut count)?;
+                flatten(curve, a, b, delta, &mut ring, &mut count, &mut chord)?;
             }
             rings.push(ring);
         }
+        // A plane's slack is the chord bounds the flattening reached, not
+        // what it allowed (#314): zero for straight trims.
+        let delta = if affine { chord } else { delta };
         let scale = (hi - lo).length().max(lo.length()).max(hi.length());
         let closing = 1e-9 * scale.max(1.0);
         let mut gap: Scalar = 0.0;
-        let mut segments = Vec::new();
-        for ring in &rings {
-            // Each span contributes its own points, so consecutive spans
-            // repeat (within rounding) the point they share; the closing
-            // pair is the last point and the first.
-            for pair in ring.windows(2) {
-                segments.push([pair[0], pair[1]]);
-            }
-            if let (Some(&first), Some(&last)) = (ring.first(), ring.last()) {
-                segments.push([last, first]);
-            }
-        }
-        // The gaps between consecutive spans (and the ring's close) are
-        // already segments above; measure them to refuse a loop that does
-        // not close and to fold the rounding into the slack.
+        // Consecutive spans repeat (within rounding) the point they share,
+        // and the ring closes from its last point to its first: measure
+        // those gaps to refuse a loop that does not close and to fold the
+        // rounding into the slack.
         for spans in &uses {
             let ends: Vec<(Point2, Point2)> = spans
                 .iter()
@@ -453,10 +479,46 @@ impl Domain {
         if gap > closing {
             return Err("boolean: an exact face's loops do not close in its parameters");
         }
+        Ok(Self::from_rings(&rings, delta, gap, scale, affine))
+    }
+
+    /// The domain of `rings`, each exact boundary point within `delta` of
+    /// a chord and every gap between consecutive chords within `gap`.
+    fn from_rings(
+        rings: &[Vec<Point2>],
+        delta: Scalar,
+        gap: Scalar,
+        scale: Scalar,
+        affine: bool,
+    ) -> Self {
+        let mut segments = Vec::new();
+        for ring in rings {
+            // A plane's boundary cells are clipped, which needs each corner
+            // as one vertex (#314): the repeats of consecutive spans'
+            // shared points (and the close) are dropped. Each dropped point
+            // is within `gap` of the one kept, so the polygon moves by at
+            // most `gap`, which the slack holds as it held the gap
+            // segments. Otherwise the gaps stay segments of their own.
+            let mut kept: Vec<Point2> = Vec::with_capacity(ring.len());
+            for &p in ring {
+                if !affine || kept.last().is_none_or(|&q| (p - q).length() > gap) {
+                    kept.push(p);
+                }
+            }
+            while affine && kept.len() > 1 && (kept[kept.len() - 1] - kept[0]).length() <= gap {
+                kept.pop();
+            }
+            for pair in kept.windows(2) {
+                segments.push([pair[0], pair[1]]);
+            }
+            if let (Some(&first), Some(&last)) = (kept.first(), kept.last()) {
+                segments.push([last, first]);
+            }
+        }
         let slack = (delta + gap) * (1.0 + 1e-9) + 4.0 * Scalar::EPSILON * scale;
         // The domain lies inside its boundary's box, and the boundary
         // within `slack` of the polygon: the polygon's box, grown, holds
-        // it (the box above only sized `delta`).
+        // it.
         let (lo, hi) = rings.iter().flatten().fold(
             (
                 Point2::splat(Scalar::INFINITY),
@@ -464,25 +526,99 @@ impl Domain {
             ),
             |(lo, hi), p| (lo.min(*p), hi.max(*p)),
         );
-        Ok(Self {
+        let inward = if affine {
+            (0..segments.len())
+                .map(|k| inward_normal(&segments, k))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
             segments,
             slack,
             lo: lo - Point2::splat(slack),
             hi: hi + Point2::splat(slack),
-        })
+            affine,
+            inward,
+            rounding: 16.0 * Scalar::EPSILON * scale,
+        }
+    }
+
+    /// The segments within `slack` of the box `[lo, hi]`.
+    fn near(&self, lo: Point2, hi: Point2) -> impl Iterator<Item = usize> + '_ {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(move |(_, &[a, b])| {
+                let (slo, shi) = (a.min(b), a.max(b));
+                let apart = (lo - shi).max(slo - hi);
+                if apart.x > self.slack || apart.y > self.slack {
+                    return false;
+                }
+                segment_box_distance(a, b, lo, hi) <= self.slack
+            })
+            .map(|(k, _)| k)
+    }
+
+    /// The cell's part within `slack` of the domain, as convex pieces
+    /// (#314), when one segment or two at a shared corner come within
+    /// `slack` of it; `None` (bound the cell whole) otherwise.
+    ///
+    /// No other segment comes within `slack` of the cell, so a near
+    /// segment's ends lie further than `slack` from it, and its line meets
+    /// the cell (grown by `slack`) only along the segment: the distance to
+    /// the cell is convex along the line, and above `slack` at the ends.
+    /// So in the cell the domain is one half-plane `H` (one segment), or
+    /// near a corner `H1 ∩ H2` (the domain turns inward there) or
+    /// `H1 ∪ H2` (it turns outward). The points within `slack` of it lie in
+    /// the same of the half-planes moved out by `slack`: a mitred offset,
+    /// which holds the rounded one. Each piece is the cell clipped by
+    /// them, and a union gives one piece per half-plane.
+    fn clip(&self, x: (Scalar, Scalar), y: (Scalar, Scalar)) -> Option<Vec<Vec<Point2>>> {
+        if !self.affine {
+            return None;
+        }
+        let (lo, hi) = (Point2::new(x.0, y.0), Point2::new(x.1, y.1));
+        let mut near = self.near(lo, hi);
+        let first = near.next()?;
+        let second = near.next();
+        if near.next().is_some() {
+            return None;
+        }
+        let cell = vec![lo, Point2::new(hi.x, lo.y), hi, Point2::new(lo.x, hi.y)];
+        // Moved out by the slack, and by the rounding of the clip itself.
+        let shift = self.slack + self.rounding;
+        let half = |polygon: &[Point2], k: usize| {
+            clip_half(polygon, self.segments[k][0], self.inward[k], shift)
+        };
+        let pieces = match second {
+            None => vec![half(&cell, first)],
+            Some(second) => {
+                // The corner, from `a` through `v` to `b`.
+                let (i, j) = if self.segments[first][1] == self.segments[second][0] {
+                    (first, second)
+                } else if self.segments[second][1] == self.segments[first][0] {
+                    (second, first)
+                } else {
+                    return None;
+                };
+                let (v, b) = (self.segments[j][0], self.segments[j][1]);
+                // Inward only when clearly so: the union holds the
+                // intersection, so a doubtful corner takes it.
+                let turn = (b - v).dot(self.inward[i]);
+                if turn > 1e-9 * (b - v).length() {
+                    vec![half(&half(&cell, i), j)]
+                } else {
+                    vec![half(&cell, i), half(&cell, j)]
+                }
+            }
+        };
+        Some(pieces.into_iter().filter(|p| !p.is_empty()).collect())
     }
 
     fn coverage(&self, x: (Scalar, Scalar), y: (Scalar, Scalar)) -> Coverage {
         let (lo, hi) = (Point2::new(x.0, y.0), Point2::new(x.1, y.1));
-        let near = self.segments.iter().any(|&[a, b]| {
-            let (slo, shi) = (a.min(b), a.max(b));
-            let apart = (lo - shi).max(slo - hi);
-            if apart.x > self.slack || apart.y > self.slack {
-                return false;
-            }
-            segment_box_distance(a, b, lo, hi) <= self.slack
-        });
-        if near {
+        if self.near(lo, hi).next().is_some() {
             return Coverage::Boundary;
         }
         let centre = Point2::new(0.5 * (x.0 + x.1), 0.5 * (y.0 + y.1));
@@ -509,7 +645,8 @@ impl Domain {
 }
 
 /// Points of `curve` from `a` to `b` whose chords are certified within
-/// `delta` of it, appended to `out`.
+/// `delta` of it, appended to `out`; `chord` is raised to the largest
+/// chord bound used.
 fn flatten(
     curve: &Curve2,
     a: Scalar,
@@ -517,6 +654,7 @@ fn flatten(
     delta: Scalar,
     out: &mut Vec<Point2>,
     count: &mut usize,
+    chord: &mut Scalar,
 ) -> Result<(), &'static str> {
     let (lo, hi) = (a.min(b), a.max(b));
     let mut cuts: Vec<Scalar> = continuity_breaks2(curve, 1)
@@ -530,7 +668,7 @@ fn flatten(
     let mut params = vec![a];
     let mut from = a;
     for to in cuts.into_iter().chain(core::iter::once(b)) {
-        split(curve, from, to, delta, 0, &mut params)?;
+        split(curve, from, to, delta, 0, &mut params, chord)?;
         from = to;
     }
     *count += params.len();
@@ -547,7 +685,7 @@ fn flatten(
 }
 
 /// Halve `[a, b]` until each piece's chord bound fits, pushing each piece's
-/// end parameter in order.
+/// end parameter in order and raising `chord` to the bounds that fit.
 fn split(
     curve: &Curve2,
     a: Scalar,
@@ -555,10 +693,11 @@ fn split(
     delta: Scalar,
     depth: u32,
     params: &mut Vec<Scalar>,
+    chord: &mut Scalar,
 ) -> Result<(), &'static str> {
     let (lo, hi) = (a.min(b), a.max(b));
-    let fits = chord_bound2(curve, lo, hi).is_some_and(|d| d <= delta);
-    if fits {
+    if let Some(d) = chord_bound2(curve, lo, hi).filter(|&d| d <= delta) {
+        *chord = chord.max(d);
         params.push(b);
         return Ok(());
     }
@@ -566,8 +705,60 @@ fn split(
         return Err("boolean: an exact face's pcurve family has no certified chord bound");
     }
     let m = 0.5 * (a + b);
-    split(curve, a, m, delta, depth + 1, params)?;
-    split(curve, m, b, delta, depth + 1, params)
+    split(curve, a, m, delta, depth + 1, params, chord)?;
+    split(curve, m, b, delta, depth + 1, params, chord)
+}
+
+/// The unit normal of segment `k` into the domain: its left normal when
+/// the ray along it from the segment's middle crosses the other segments
+/// an odd number of times (even-odd, as [`Domain::inside`]), else the
+/// right. A segment with no length has none (zero), and clips nothing.
+fn inward_normal(segments: &[[Point2; 2]], k: usize) -> Vec2 {
+    let [a, b] = segments[k];
+    let along = b - a;
+    let length = along.length();
+    if length.is_nan() || length <= 0.0 {
+        return Vec2::ZERO;
+    }
+    let n = Vec2::new(-along.y, along.x) / length;
+    let m = (a + b) * 0.5;
+    let mut odd = false;
+    for (j, &[p, q]) in segments.iter().enumerate() {
+        if j == k {
+            continue;
+        }
+        // `s` across the ray, `t` along it.
+        let (sp, sq) = (n.perp_dot(p - m), n.perp_dot(q - m));
+        if (sp > 0.0) != (sq > 0.0) {
+            let (tp, tq) = (n.dot(p - m), n.dot(q - m));
+            if tp + (tq - tp) * (sp / (sp - sq)) > 0.0 {
+                odd = !odd;
+            }
+        }
+    }
+    if odd {
+        n
+    } else {
+        -n
+    }
+}
+
+/// The convex `polygon` clipped to `{p : (p - a) . n >= -shift}`
+/// (Sutherland-Hodgman); empty when nothing is left.
+fn clip_half(polygon: &[Point2], a: Point2, n: Vec2, shift: Scalar) -> Vec<Point2> {
+    let level = |p: Point2| (p - a).dot(n) + shift;
+    let mut out = Vec::with_capacity(polygon.len() + 1);
+    for k in 0..polygon.len() {
+        let (p, q) = (polygon[k], polygon[(k + 1) % polygon.len()]);
+        let (lp, lq) = (level(p), level(q));
+        if lp >= 0.0 {
+            out.push(p);
+        }
+        if (lp >= 0.0) != (lq >= 0.0) {
+            out.push(p + (q - p) * (lp / (lp - lq)));
+        }
+    }
+    out
 }
 
 /// Distance from segment `ab` to the box `[lo, hi]`: zero when they meet,
@@ -695,7 +886,7 @@ mod tests {
         let exact = ReferenceExactCompiler::new()
             .compile_exact(&graph, cut, &options)
             .unwrap();
-        let bound = measure(&exact, &mesh, budget, 0.0).unwrap();
+        let bound = measure(&exact, &mesh, budget, 0.0, 0.0).unwrap();
         let index = crate::certify::TriangleIndex::new(&mesh).unwrap();
         let topology = exact.topology();
         let mut worst: Scalar = 0.0;
@@ -768,5 +959,331 @@ mod tests {
             emitted_booleans(&graph, both),
             HashSet::from([third, first])
         );
+    }
+
+    fn square(lo: (Scalar, Scalar), hi: (Scalar, Scalar)) -> Vec<Point2> {
+        vec![
+            Point2::new(lo.0, lo.1),
+            Point2::new(hi.0, lo.1),
+            Point2::new(hi.0, hi.1),
+            Point2::new(lo.0, hi.1),
+        ]
+    }
+
+    fn to_polygon(p: Point2, domain: &Domain) -> Scalar {
+        domain
+            .segments
+            .iter()
+            .map(|&[a, b]| {
+                let ab = b - a;
+                let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+                (p - (a + ab * t)).length()
+            })
+            .fold(Scalar::INFINITY, Scalar::min)
+    }
+
+    /// In a convex polygon of either winding, up to `tolerance`.
+    fn in_piece(p: Point2, piece: &[Point2], tolerance: Scalar) -> bool {
+        let n = piece.len();
+        let sides: Vec<Scalar> = (0..n)
+            .map(|k| {
+                let edge = piece[(k + 1) % n] - piece[k];
+                edge.perp_dot(p - piece[k]) / edge.length().max(Scalar::MIN_POSITIVE)
+            })
+            .collect();
+        sides.iter().all(|&s| s >= -tolerance) || sides.iter().all(|&s| s <= tolerance)
+    }
+
+    /// The clipped pieces of a plane's boundary cells (#314) hold every
+    /// point the face may have in the cell (in the polygon, or within the
+    /// slack of it), and reach no further than the slack: at straight
+    /// edges, at the outward corners of an outer loop and at the inward
+    /// corners of a hole and of an L.
+    #[test]
+    fn clipped_pieces_hold_the_domain_near_its_boundary_and_no_more() {
+        let delta = 0.02;
+        let l_shape = vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(4.0, 0.0),
+            Point2::new(4.0, 1.5),
+            Point2::new(1.5, 1.5),
+            Point2::new(1.5, 4.0),
+            Point2::new(0.0, 4.0),
+        ];
+        let cases = [
+            vec![
+                square((0.0, 0.0), (4.0, 4.0)),
+                square((1.0, 1.0), (2.5, 2.0)).into_iter().rev().collect(),
+            ],
+            vec![l_shape],
+        ];
+        for rings in cases {
+            let domain = Domain::from_rings(&rings, delta, 0.0, 4.0, true);
+            let reach = domain.slack + domain.rounding;
+            let (mut clipped, mut corners) = (0, 0);
+            for offset in [0.0, 0.07, 0.13] {
+                for i in 0..20 {
+                    for j in 0..20 {
+                        let x0 = -0.5 + offset + 0.25 * Scalar::from(i);
+                        let y0 = -0.5 + offset * 0.7 + 0.25 * Scalar::from(j);
+                        let (x, y) = ((x0, x0 + 0.25), (y0, y0 + 0.25));
+                        if domain.coverage(x, y) != Coverage::Boundary {
+                            continue;
+                        }
+                        let Some(pieces) = domain.clip(x, y) else {
+                            continue;
+                        };
+                        clipped += 1;
+                        corners += usize::from(
+                            domain
+                                .near(Point2::new(x.0, y.0), Point2::new(x.1, y.1))
+                                .count()
+                                == 2,
+                        );
+                        for s in 0..=24 {
+                            for t in 0..=24 {
+                                let p = Point2::new(
+                                    x.0 + (x.1 - x.0) * Scalar::from(s) / 24.0,
+                                    y.0 + (y.1 - y.0) * Scalar::from(t) / 24.0,
+                                );
+                                let may = domain.inside(p) || to_polygon(p, &domain) <= delta;
+                                if may {
+                                    assert!(
+                                        pieces.iter().any(|piece| in_piece(p, piece, 1e-12)),
+                                        "{p:?} of the cell {x:?} x {y:?} is in no piece: {pieces:?}"
+                                    );
+                                }
+                            }
+                        }
+                        for &v in pieces.iter().flatten() {
+                            // A mitred corner reaches `sqrt 2` of the
+                            // slack out at a right angle.
+                            assert!(
+                                domain.inside(v)
+                                    || to_polygon(v, &domain) <= 2f64.sqrt() * reach + 1e-12,
+                                "{v:?} lies {} outside the domain",
+                                to_polygon(v, &domain)
+                            );
+                        }
+                    }
+                }
+            }
+            assert!(
+                clipped > 100 && corners > 4,
+                "{clipped} cells, {corners} at corners"
+            );
+        }
+    }
+
+    /// A plane's slack is the chord bound its flattening reached (#314):
+    /// every point of a curved trim lies within it of the polygon, and a
+    /// face with straight trims only has a slack at rounding.
+    #[test]
+    fn a_plane_slack_holds_its_trims() {
+        let mut g = GeometryGraphBuilder::new();
+        let rectangle = g
+            .push(GeometryNode::Profile(Profile::Rectangle(
+                RectangleProfile {
+                    x: 6.0,
+                    y: 0.3,
+                    thickness: None,
+                    outer_radius: None,
+                    inner_radius: None,
+                },
+            )))
+            .unwrap();
+        let wall = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile: rectangle,
+                direction: Vec3::Z,
+                depth: 3.0,
+            }))
+            .unwrap();
+        let disk = g
+            .push(GeometryNode::Profile(Profile::Circle(CircleProfile {
+                radius: 0.4,
+                thickness: None,
+            })))
+            .unwrap();
+        let window = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile: disk,
+                direction: Vec3::Z,
+                depth: 1.0,
+            }))
+            .unwrap();
+        let across = g
+            .push(GeometryNode::Instance(Instance {
+                source: window,
+                transform: Transform3::from_translation(Vec3::new(0.8, 0.5, 1.5))
+                    * Transform3::from_rotation_x(core::f64::consts::FRAC_PI_2),
+            }))
+            .unwrap();
+        let cut = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: wall,
+                right: across,
+                operator: BooleanOperator::Difference,
+            }))
+            .unwrap();
+        let graph = g.finish(vec![cut]).unwrap();
+        let target = 1e-3;
+        let options = ExecutionOptions::new(Tolerance::new(target, 1e-9).unwrap())
+            .with_chord_error(target)
+            .unwrap();
+        let exact = ReferenceExactCompiler::new()
+            .compile_exact(&graph, cut, &options)
+            .unwrap();
+        let topology = exact.topology();
+        let (mut curved, mut straight) = (0, 0);
+        for face in topology.faces() {
+            let surface = &exact.surfaces()[face.surface.unwrap().index()];
+            let domain = Domain::new(&exact, face, surface, target).unwrap();
+            if !domain.affine {
+                continue;
+            }
+            let mut worst: Scalar = 0.0;
+            let mut trims = 0;
+            for bound in &face.bounds {
+                let wire = &topology.loops()[bound.loop_id.index()];
+                for (k, edge_use) in wire.edges.iter().enumerate() {
+                    let curve = &exact.curves2()[edge_use.pcurve.unwrap().index()];
+                    trims += usize::from(!matches!(curve, Curve2::Line(_)));
+                    let span = exact.pcurve_interval(bound.loop_id, k).unwrap();
+                    for s in 0..=4000 {
+                        let t = span.start + (span.end - span.start) * Scalar::from(s) / 4000.0;
+                        let uv = axiolid_reference::evaluate2(curve, t).unwrap();
+                        worst = worst.max(to_polygon(uv, &domain));
+                    }
+                }
+            }
+            assert!(worst <= domain.slack, "{worst:e} beyond {:e}", domain.slack);
+            if trims == 0 {
+                straight += 1;
+                assert!(domain.slack <= 1e-12, "{:e}", domain.slack);
+            } else {
+                curved += 1;
+                assert!(worst > 1e-9, "a flattened circle: {worst:e}");
+            }
+        }
+        assert!(
+            curved >= 2 && straight >= 2,
+            "{curved} curved, {straight} straight"
+        );
+    }
+
+    /// The bound of an all-planar boolean still holds its exact result
+    /// when the mesh is off it (#314): one corner of the wall's mesh is
+    /// moved, and every exact point, its corners included, is within the
+    /// bound. The samples show the deviation, so the search settles at
+    /// the budget as for a curved result; without a budget it tightens to
+    /// near the sampled worst.
+    #[test]
+    fn a_planar_bound_holds_a_moved_corner() {
+        let mut g = GeometryGraphBuilder::new();
+        let rectangle = |g: &mut GeometryGraphBuilder, x, y| {
+            g.push(GeometryNode::Profile(Profile::Rectangle(
+                RectangleProfile {
+                    x,
+                    y,
+                    thickness: None,
+                    outer_radius: None,
+                    inner_radius: None,
+                },
+            )))
+            .unwrap()
+        };
+        let extrude = |g: &mut GeometryGraphBuilder, profile, depth| {
+            g.push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                profile,
+                direction: Vec3::Z,
+                depth,
+            }))
+            .unwrap()
+        };
+        let profile = rectangle(&mut g, 3.0, 0.25);
+        let wall = extrude(&mut g, profile, 3.0);
+        let profile = rectangle(&mut g, 1.0, 2.0);
+        let door = extrude(&mut g, profile, 1.0);
+        let door = g
+            .push(GeometryNode::Instance(Instance {
+                source: door,
+                transform: Transform3::from_translation(Vec3::new(0.3, 0.5, 0.0))
+                    * Transform3::from_rotation_x(core::f64::consts::FRAC_PI_2),
+            }))
+            .unwrap();
+        let cut = g
+            .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                left: wall,
+                right: door,
+                operator: BooleanOperator::Difference,
+            }))
+            .unwrap();
+        let graph = g.finish(vec![cut]).unwrap();
+        let options = ExecutionOptions::new(Tolerance::MILLIMETRE);
+        let mut mesh = crate::ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+            .compile_mesh_reported(&graph, cut, &options)
+            .unwrap()
+            .mesh;
+        let exact = ReferenceExactCompiler::new()
+            .compile_exact(&graph, cut, &options)
+            .unwrap();
+        // Every face is a plane: the search runs to the floor.
+        let untouched = measure(&exact, &mesh, 1e-3, 1e-3, 0.0).unwrap();
+        assert!(untouched <= 1e-11, "{untouched:e}");
+        // A deviation the report adds anyway (a slab width, #266) lets the
+        // budget settle it, as a sampled one does.
+        let shown = measure(&exact, &mesh, 1e-3, 1e-3, 1e-6).unwrap();
+        assert!(shown > 1e-6 && shown <= 1e-3, "{shown:e}");
+        // Three mesh corners in turn, each moved off every face it is on.
+        let corners = mesh.positions.len();
+        for k in [0, corners / 3, 2 * corners / 3] {
+            let original = mesh.positions[k];
+            mesh.positions[k] = original + Vec3::new(1.0, -2.0, 1.5) * 1e-5;
+            let budget = 1e-3;
+            let bound = measure(&exact, &mesh, budget, budget, 0.0).unwrap();
+            let index = crate::certify::TriangleIndex::new(&mesh).unwrap();
+            let topology = exact.topology();
+            let mut worst: Scalar = 0.0;
+            for face in topology.faces() {
+                let surface = &exact.surfaces()[face.surface.unwrap().index()];
+                for bound in &face.bounds {
+                    let wire = &topology.loops()[bound.loop_id.index()];
+                    for (e, edge_use) in wire.edges.iter().enumerate() {
+                        let curve = &exact.curves2()[edge_use.pcurve.unwrap().index()];
+                        let span = exact.pcurve_interval(bound.loop_id, e).unwrap();
+                        for s in 0..=200 {
+                            let t = span.start + (span.end - span.start) * Scalar::from(s) / 200.0;
+                            let uv = axiolid_reference::evaluate2(curve, t).unwrap();
+                            let p =
+                                axiolid_reference::surface::evaluate(surface, uv.x, uv.y).unwrap();
+                            worst = worst.max(index.nearest(p));
+                        }
+                    }
+                }
+            }
+            assert!(
+                worst <= bound && bound <= budget,
+                "corner {k}: {worst:e} sampled, the bound {bound:e}"
+            );
+            // The corner's old place is on the exact surface (within
+            // rounding): it shows the deviation.
+            let moved = index.nearest(original);
+            assert!(moved > 1e-6, "corner {k}: moved by {moved:e}");
+            // Settled at the budget, not searched on towards the samples.
+            assert!(
+                bound > 10.0 * worst.max(moved),
+                "corner {k}: {bound:e} for {worst:e} sampled, {moved:e} at the corner"
+            );
+            // Without a budget it tightens towards them.
+            if k == 0 {
+                let tight = measure(&exact, &mesh, budget, 0.0, 0.0).unwrap();
+                assert!(
+                    worst <= tight && tight <= 3.0 * worst.max(moved),
+                    "corner {k}: {tight:e} for {worst:e} sampled, {moved:e} at the corner"
+                );
+            }
+            mesh.positions[k] = original;
+        }
     }
 }

@@ -23,7 +23,9 @@ use std::time::Instant;
 
 use axiolid_brep::ExactBRep;
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{BooleanOperator, Plane3, Point2, Point3, Scalar, Tolerance, Transform3, Vec3};
+use axiolid_core::{
+    BooleanOperator, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3, Vec2, Vec3,
+};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::FaceDomain;
@@ -290,6 +292,58 @@ fn a_wall_with_a_round_window_is_certified_against_its_exact_result() {
         let case = compile(wall_with_round_window, &options);
         let (bound, _) = assert_measured("wall, round window", case, &options, 2.0);
         assert!(bound <= 2.0 * budget, "{bound} for a budget of {budget}");
+    }
+}
+
+/// The wall `3.65 x 0.25 x 3.67` less two door openings `1.01 x 2.26`
+/// cut through it (#314, the construction of #312), each operand placed
+/// by `world`.
+fn wall_with_two_doors(g: &mut Graph, world: Transform3) -> NodeId {
+    let derived = |x: Scalar, y: Scalar, transform: Transform2| Profile::Derived {
+        basis: Box::new(rect(x, y)),
+        transform,
+    };
+    let wall = derived(
+        3.65,
+        0.25,
+        Transform2::from_cols(Vec2::NEG_X, Vec2::NEG_Y, Vec2::new(1.825, 0.0)),
+    );
+    let wall = g.extrusion(wall, 3.67);
+    let mut net = g.place(wall, world);
+    for x in [3.325, 1.35] {
+        let door = derived(
+            1.01,
+            2.26,
+            Transform2::from_cols(Vec2::Y, Vec2::NEG_X, Vec2::new(1.13, 0.505)),
+        );
+        let door = g.extrusion(door, 0.25);
+        let door = g.place(
+            door,
+            world
+                * Transform3::from_cols(
+                    Vec3::Z,
+                    Vec3::NEG_X,
+                    Vec3::NEG_Y,
+                    Vec3::new(x, 0.125, 0.2),
+                ),
+        );
+        net = g.boolean(net, door, BooleanOperator::Difference);
+    }
+    net
+}
+
+#[test]
+fn an_all_planar_boolean_is_bounded_near_rounding() {
+    // Every face is a plane: the search runs to the measured distance, not
+    // to the budget (#314), which reported 9.96e-4 of a 1e-3 request.
+    for (name, world) in [
+        ("two doors", Transform3::IDENTITY),
+        ("two doors, placed", building()),
+    ] {
+        let options = options(1e-3);
+        let case = compile(|g| wall_with_two_doors(g, world), &options);
+        let (bound, _) = assert_measured(name, case, &options, Scalar::INFINITY);
+        assert!(bound <= 1e-11, "{name}: {bound:e}");
     }
 }
 

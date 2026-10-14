@@ -26,6 +26,7 @@ so it stays out of the release.
 | `benches/triangulate_points.rs` | Planar Delaunay triangulation of 1k to 16k random points, whose growth shows the adjacency is maintained locally (#268) |
 | `benches/certified_length.rs` | Certified joint distances along an offset by distances beside an ellipse at window tolerances, `1e-6` to `1e-9` (#307) |
 | `benches/overlay_soup.rs` | The exact union of soups whose rings share no edges (2,000 random triangles, two 1000-gons) and of two meshes given as soups, against the grid backend `i_overlay` (#218) |
+| `benches/boolean_deviation.rs` | A boolean's mesh with and without its measured deviation report, for an all-planar wall less two doors and a wall with a round window (#314) |
 | `tests/scaling.rs` | Growth rate asserted from operation counts, run by `cargo test` |
 | `examples/filter_probe.rs` | Which `orient3d` inputs actually escalate past the floating-point filter |
 | `examples/grouping_probe.rs` | How much independent work the grouped wall subtraction exposes |
@@ -41,6 +42,7 @@ cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time
 cargo bench -p axiolid-benchmark --bench triangulate_points  # planar triangulation against point count
 cargo bench -p axiolid-benchmark --bench overlay_soup  # exact soup unions against the grid backend
 cargo bench -p axiolid-benchmark --bench certified_length  # certified lengths at window tolerances
+cargo bench -p axiolid-benchmark --bench boolean_deviation  # a boolean's measured deviation report
 scripts/bench-regression.sh                         # instruction counts
 cargo test -p axiolid-benchmark                     # scaling assertions
 ```

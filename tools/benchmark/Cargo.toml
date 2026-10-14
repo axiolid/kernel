@@ -34,6 +34,9 @@ axiolid-contracts.workspace = true
 axiolid-exact-compile-contract.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-compile.workspace = true
+# The boolean deviation benchmark (#314) compiles meshes with boolmesh.
+axiolid-mesh-boolean-boolmesh.workspace = true
+axiolid-mesh-compile-contract.workspace = true
 axiolid-model.workspace = true
 # The plan Minkowski benchmark (#292) sums and erodes a floor's walls.
 axiolid-overlay.workspace = true
@@ -64,6 +67,8 @@ allowed-internal-dependencies = [
     "axiolid-contracts",
     "axiolid-exact-compile-contract",
     "axiolid-mesh-compile",
+    "axiolid-mesh-boolean-boolmesh",
+    "axiolid-mesh-compile-contract",
     "axiolid-model",
     "axiolid-overlay",
     "axiolid-profile",
@@ -108,4 +113,8 @@ harness = false
 
 [[bench]]
 name = "overlay_soup"
+harness = false
+
+[[bench]]
+name = "boolean_deviation"
 harness = false
