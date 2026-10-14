@@ -1,9 +1,14 @@
-"""Mutation probe for certified overlap volumes (#183).
+"""Mutation probe for certified overlap volumes (#183, #313).
 
 Each mutant narrows or skews the interval -- drops the outward rounding,
 misjudges which plane is lower or which side of a line a vertex is on,
 double-counts coplanar faces, loses the sign of a face -- and must fail an
-exact containment test.
+exact containment test. The #313 mutants drop or weaken the a priori bound
+on each term, which near-vertical slivers and the exported cabinet in its
+room need to stay tight, or make it unsound, which containment catches.
+Taking the higher of the two tops instead of the lower is left out: it is
+still sound, and on a sliver it loosens the bound by under 1e-15, below
+what any width test can tell apart.
 """
 import pathlib
 
@@ -25,6 +30,11 @@ MUTANTS = [
     ('inward meshes not turned', O, '        if volume.hi < 0.0 {\n            volume', '        if false && volume.hi < 0.0 {\n            volume', TESTS),
     ('self-intersection not refused', O, '        if let Some(pair) = self_intersections(mesh).first() {', '        if let Some(pair) = self_intersections(mesh).first().filter(|_| false) {', TESTS),
     ('result not clamped at zero', O, '    clamp(total, 0.0, a.volume.hi.min(b.volume.hi))', '    clamp(total, f64::NEG_INFINITY, a.volume.hi.min(b.volume.hi))', TESTS),
+    ('term bound dropped', O, '            let term = overlap(f, g, a.base).within(0.0, cap(f, g, a.base));', '            let term = overlap(f, g, a.base);', TESTS),
+    ('term bound from the larger shadow', O, '    let area = f.area().hi.min(g.area().hi);', '    let area = f.area().hi.max(g.area().hi);', TESTS),
+    ('term bound from the lowest corner', O, '        self.p[0].z.max(self.p[1].z).max(self.p[2].z)', '        self.p[0].z.min(self.p[1].z).min(self.p[2].z)', TESTS),
+    ('term bound ignores the base', O, '    Iv::point(area).mul(Iv::point(top).sub(Iv::point(base))).hi', '    Iv::point(area).mul(Iv::point(top)).hi', TESTS),
+    ('term not clamped at zero', O, '.within(0.0, cap(f, g, a.base));', '.within(f64::NEG_INFINITY, cap(f, g, a.base));', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)

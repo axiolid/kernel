@@ -36,6 +36,28 @@
 //! contains the true volume. Touching bodies and shared faces cancel
 //! exactly in the decisions; their volume comes out as a small interval
 //! around zero, and is clamped to be no less than zero.
+//!
+//! # A priori bound per term (#313)
+//!
+//! A face that is vertical but for rounding -- corners that differ by
+//! about `1e-15` across, as exported building models have -- still casts a
+//! shadow, a sliver. Its plane's slope is then near `1e30`, so its height
+//! at a crossing point enclosed to `1e-15` spans `±1e15`, and the sliver's
+//! term, though its true value is tiny, comes out wider than either solid.
+//! So each term is also intersected with a bound that does not depend on
+//! how well its arithmetic is conditioned. Over its own shadow a face's
+//! plane is the triangle itself, so its height lies between its lowest and
+//! highest corner; the term's region lies inside both shadows; and `z0` is
+//! no higher than any corner of either mesh. Hence
+//!
+//! ```text
+//! 0 <= term <= min(area f', area g') * (min(zmax_f, zmax_g) - z0)
+//! ```
+//!
+//! computed outward-rounded. A sliver's term is then no wider than the
+//! sliver's area times its height, and the bound only ever narrows an
+//! interval that already holds the true value, so exactly coplanar faces
+//! cancel as before.
 
 use axiolid_core::{Aabb, Point2, Point3, Tolerance};
 use axiolid_exact::{certify, Arith, SignExpr};
@@ -177,7 +199,7 @@ fn shared(a: &Solid, b: &Solid) -> VolumeInterval {
     for f in &a.faces {
         bvh.visit_aabb(&f.shadow(), &mut |j: &u32| {
             let g = &b.faces[*j as usize];
-            let term = overlap(f, g, a.base);
+            let term = overlap(f, g, a.base).within(0.0, cap(f, g, a.base));
             total = if f.up == g.up {
                 total.add(term)
             } else {
@@ -211,6 +233,14 @@ struct Face {
     up: bool,
 }
 
+/// No less than any term of `f` and `g`: the smaller shadow's area times
+/// the lower of the two highest corners, above the base.
+fn cap(f: &Face, g: &Face, base: f64) -> f64 {
+    let area = f.area().hi.min(g.area().hi);
+    let top = f.top().min(g.top());
+    Iv::point(area).mul(Iv::point(top).sub(Iv::point(base))).hi
+}
+
 impl Face {
     fn shadow(&self) -> Aabb {
         let mut b = Aabb::from_point(Point3::new(self.p[0].x, self.p[0].y, 0.0));
@@ -218,6 +248,16 @@ impl Face {
             b.extend(Point3::new(q.x, q.y, 0.0));
         }
         b
+    }
+
+    /// The shadow's area, enclosed.
+    fn area(&self) -> Iv {
+        triangle_area(self.flat(0), self.flat(1), self.flat(2))
+    }
+
+    /// The highest corner.
+    fn top(&self) -> f64 {
+        self.p[0].z.max(self.p[1].z).max(self.p[2].z)
     }
 
     fn flat(&self, i: usize) -> Point2 {
@@ -301,7 +341,7 @@ impl Solid {
         // Volume: each shadow's area times the mean height above the base.
         let mut volume = Iv::point(0.0);
         for f in &faces {
-            let area = triangle_area(f.flat(0), f.flat(1), f.flat(2));
+            let area = f.area();
             let rise = [0, 1, 2]
                 .map(|i| Iv::point(f.p[i].z).sub(Iv::point(base)))
                 .into_iter()

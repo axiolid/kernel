@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `intersection_volume` and `difference_volume` (#313) no longer collapse
+  to the trivial `[0, V]` for bodies that touch flush within rounding. A
+  face that is vertical but for a rounding residue casts a sliver of
+  shadow whose plane has a slope near `1e30`, and its term's enclosure
+  spanned more than either solid. Each term is now also intersected with
+  the a priori bound `[0, min(area f', area g') * (min(zmax_f, zmax_g) -
+  base)]`, which holds however the arithmetic is conditioned. On a sink
+  cabinet standing in its room, from the public buildingSMART IFC4
+  building-architecture sample, the shared volume goes from
+  `[0, 0.8008000000000190]` to a bracket `5.9e-14` wide, and the
+  difference from `[0, 0.8008]` to `[0, 5.9e-14]`.
+
 ## [0.3.5] - 2026-09-30
 
 ### Added

@@ -2,7 +2,8 @@
 //!
 //! Every expected volume is a rational closed form; containment is checked
 //! exactly (in dyadics), so a bracket that misses the true value by an ulp
-//! fails.
+//! fails. The one exception is the exported cabinet in its room (#313),
+//! whose volume is pinned by its own certified bracket.
 
 use axiolid_core::Point3;
 use axiolid_exact::{Arith, Dyadic};
@@ -328,4 +329,224 @@ fn two_slanted_solids() {
     let b = moved(&a, [0.25, 0.25, 0.25]);
     brackets(intersection_volume(&a, &b).unwrap(), 1.0, 384.0);
     brackets(difference_volume(&a, &b).unwrap(), 63.0, 384.0);
+}
+
+// Flush contact within rounding (#313).
+
+/// `v` holds the dyadic `exact` and is no wider than `width`.
+fn holds(v: VolumeInterval, exact: &Dyadic, width: f64) {
+    holds_sixth(v, &exact.mul(&d(6.0)), width);
+}
+
+fn d(v: f64) -> Dyadic {
+    Dyadic::from_f64(v)
+}
+
+/// Six times the volume a closed, outward-wound mesh encloses, exactly:
+/// the sum of its triangles' determinants.
+fn six_volume(m: &TriMesh) -> Dyadic {
+    m.indices.chunks_exact(3).fold(d(0.0), |sum, t| {
+        let [a, b, c] = [0, 1, 2].map(|k| m.positions[t[k] as usize]);
+        let (a, b, c) = (
+            [d(a.x), d(a.y), d(a.z)],
+            [d(b.x), d(b.y), d(b.z)],
+            [d(c.x), d(c.y), d(c.z)],
+        );
+        let cross = [
+            b[1].mul(&c[2]).sub(&b[2].mul(&c[1])),
+            b[2].mul(&c[0]).sub(&b[0].mul(&c[2])),
+            b[0].mul(&c[1]).sub(&b[1].mul(&c[0])),
+        ];
+        sum.add(
+            &a[0]
+                .mul(&cross[0])
+                .add(&a[1].mul(&cross[1]))
+                .add(&a[2].mul(&cross[2])),
+        )
+    })
+}
+
+/// `v` holds `six / 6` and is no wider than `width`.
+fn holds_sixth(v: VolumeInterval, six: &Dyadic, width: f64) {
+    let below = d(v.lower).mul(&d(6.0)).sub(six).sign();
+    let above = d(v.upper).mul(&d(6.0)).sub(six).sign();
+    assert!(
+        below != Some(Sign::Positive),
+        "{v:?} lower above the volume"
+    );
+    assert!(
+        above != Some(Sign::Negative),
+        "{v:?} upper below the volume"
+    );
+    assert!(v.lower >= 0.0, "{v:?} negative");
+    assert!(v.width() <= width, "{v:?} wider than {width:e}");
+}
+
+/// Moved by `steps` floats along each axis.
+fn nudged(q: Point3, steps: [i32; 3]) -> Point3 {
+    let step = |mut v: f64, n: i32| {
+        for _ in 0..n.unsigned_abs() {
+            v = if n > 0 { v.next_up() } else { v.next_down() };
+        }
+        v
+    };
+    p(
+        step(q.x, steps[0]),
+        step(q.y, steps[1]),
+        step(q.z, steps[2]),
+    )
+}
+
+fn box_volume(min: [f64; 3], max: [f64; 3]) -> Dyadic {
+    (0..3).fold(d(1.0), |v, k| v.mul(&d(max[k]).sub(&d(min[k]))))
+}
+
+#[test]
+fn exactly_coplanar_contact_is_tight() {
+    // A cabinet on the floor and against the wall of a room.
+    let room = cuboid([3.2, 5.0, 0.05], [8.15, 8.8, 2.25]);
+    let (min, max) = ([7.55, 5.5, 0.05], [8.15, 7.1, 0.95]);
+    let cabinet = cuboid(min, max);
+    let v = box_volume(min, max);
+    holds(intersection_volume(&cabinet, &room).unwrap(), &v, 1e-12);
+    holds(difference_volume(&cabinet, &room).unwrap(), &d(0.0), 1e-12);
+}
+
+#[test]
+fn contact_within_a_small_gap_is_tight() {
+    let room = cuboid([3.2, 5.0, 0.05], [8.15, 8.8, 2.25]);
+    for eps in [1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9] {
+        // Lifted off the floor and drawn back from the wall: inside.
+        let (min, max) = ([7.55 - eps, 5.5, 0.05 + eps], [8.15 - eps, 7.1, 0.95]);
+        let cabinet = cuboid(min, max);
+        let v = box_volume(min, max);
+        holds(intersection_volume(&cabinet, &room).unwrap(), &v, 1e-12);
+        holds(difference_volume(&cabinet, &room).unwrap(), &d(0.0), 1e-12);
+        // Sunk into the floor: the part below it is outside.
+        let (min, max) = ([7.55, 5.5, 0.05 - eps], [8.15, 7.1, 0.95]);
+        let cabinet = cuboid(min, max);
+        let below = box_volume(min, [max[0], max[1], 0.05]);
+        let whole = box_volume(min, max);
+        holds(
+            intersection_volume(&cabinet, &room).unwrap(),
+            &whole.sub(&below),
+            1e-12,
+        );
+        holds(difference_volume(&cabinet, &room).unwrap(), &below, 1e-12);
+    }
+}
+
+#[test]
+fn near_vertical_slivers_stay_tight() {
+    // The cabinet's corners at x1 are off by a few floats, as exported
+    // vertical faces are, so its face there casts a needle of shadow --
+    // a plane of slope near 1e30 -- which the floor's diagonal, from
+    // (3.2, 5) to (9, 8.8), crosses near y = 8.24.
+    let room = cuboid([3.2, 5.0, 0.05], [9.0, 8.8, 2.25]);
+    for nudge in [
+        [[-1, 0, 0], [0, 0, 0], [0, 0, 0], [0, 1, 0]],
+        [[-2, 0, 0], [0, 0, 0], [0, 0, 0], [0, -1, 0]],
+        [[1, 0, 0], [0, 0, 0], [0, 0, 0], [0, 1, 0]],
+        [[0, 0, 0], [1, 0, 0], [0, 0, 0], [1, 1, 0]],
+        [[0, 0, 0], [0, 1, 0], [-1, 0, 0], [0, 0, 0]],
+    ] {
+        let mut cabinet = cuboid([7.55, 7.6, 0.05], [8.15, 8.6, 0.95]);
+        // Corners 1 and 2 at the bottom, 5 and 6 at the top.
+        for (corner, steps) in [1, 2, 5, 6].into_iter().zip(nudge) {
+            cabinet.positions[corner] = nudged(cabinet.positions[corner], steps);
+        }
+        let six = six_volume(&cabinet);
+        holds_sixth(enclosed_volume(&cabinet).unwrap(), &six, 1e-12);
+        holds_sixth(intersection_volume(&cabinet, &room).unwrap(), &six, 1e-12);
+        holds_sixth(intersection_volume(&room, &cabinet).unwrap(), &six, 1e-12);
+        holds(difference_volume(&cabinet, &room).unwrap(), &d(0.0), 1e-12);
+    }
+}
+
+// A sink cabinet standing in a room, from the public buildingSMART IFC4
+// building-architecture sample (IfcFurniture #176 in IfcSpace #89), as
+// meshed by ifc-geometry. Its back lies within about 5e-14 of the room's
+// wall, its feet within about 3e-15 of the floor, and its vertical faces
+// lean by rounding residues of about 1e-15.
+const CABINET_POSITIONS: &[[f64; 3]] = &[
+    [8.000000000000096, 6.374999999999978, 0.9000000000000488],
+    [8.000000000000098, 6.824999999999976, 0.7000000000000488],
+    [8.000000000000096, 6.374999999999978, 0.7000000000000488],
+    [8.000000000000098, 6.824999999999976, 0.9000000000000486],
+    [8.150000000000098, 7.099999999999977, 0.9000000000000482],
+    [8.150000000000096, 5.499999999999945, 4.92527347391429e-14],
+    [8.150000000000098, 7.0999999999999766, 4.818758725377847e-14],
+    [8.150000000000096, 5.499999999999945, 0.9000000000000488],
+    [7.600000000000097, 6.374999999999979, 0.7000000000000487],
+    [7.600000000000098, 6.824999999999977, 0.7000000000000486],
+    [7.550000000000098, 7.099999999999978, 0.8500000000000483],
+    [7.550000000000098, 7.099999999999978, 0.9000000000000483],
+    [7.5700000000001, 7.099999999999978, 0.8500000000000483],
+    [7.5700000000001, 7.099999999999977, 4.8363654576841063e-14],
+    [7.550000000000097, 5.499999999999946, 0.900000000000048],
+    [7.550000000000097, 5.499999999999946, 0.8500000000000485],
+    [7.570000000000098, 5.499999999999946, 4.849199783150134e-14],
+    [7.600000000000097, 6.374999999999979, 0.9000000000000486],
+    [7.600000000000098, 6.824999999999977, 0.9000000000000484],
+    [7.570000000000094, 5.499999999999946, 0.8500000000000485],
+];
+const CABINET_INDICES: &[u32] = &[
+    0, 1, 2, 1, 0, 3, 4, 5, 6, 5, 4, 7, 8, 1, 9, 1, 8, 2, 4, 10, 11, 10, 4, 12, 12, 4, 13, 13, 4,
+    6, 14, 10, 15, 10, 14, 11, 5, 13, 6, 13, 5, 16, 0, 8, 17, 8, 0, 2, 1, 18, 9, 18, 1, 3, 11, 18,
+    4, 18, 11, 14, 18, 14, 17, 17, 14, 0, 4, 3, 7, 3, 4, 18, 7, 3, 0, 7, 0, 14, 19, 13, 16, 13, 19,
+    12, 9, 17, 8, 17, 9, 18, 19, 14, 15, 14, 19, 7, 7, 19, 16, 7, 16, 5, 19, 10, 12, 10, 19, 15,
+];
+const ROOM_POSITIONS: &[[f64; 3]] = &[
+    [7.70000000000012, 7.599999999999978, 5.0624038294699857e-14],
+    [7.70000000000012, 8.29999999999998, 5.0624038294699857e-14],
+    [8.150000000000073, 8.29999999999998, 5.0624038294699857e-14],
+    [8.150000000000148, 8.800000000000098, 5.0624038294699857e-14],
+    [3.200000000000032, 8.8000000000001, 5.0624038294699857e-14],
+    [
+        3.2000000000000317,
+        4.999999999999939,
+        5.0624038294699857e-14,
+    ],
+    [8.150000000000148, 4.999999999999938, 5.0624038294699857e-14],
+    [8.150000000000073, 7.599999999999978, 5.0624038294699857e-14],
+    [7.700000000000079, 7.599999999999906, 2.2000000000000934],
+    [7.700000000000079, 8.299999999999907, 2.2000000000000934],
+    [8.150000000000032, 8.299999999999907, 2.2000000000000934],
+    [8.150000000000107, 8.800000000000026, 2.2000000000000934],
+    [3.1999999999999913, 8.800000000000027, 2.2000000000000934],
+    [3.1999999999999913, 4.999999999999867, 2.2000000000000934],
+    [8.150000000000107, 4.999999999999867, 2.2000000000000934],
+    [8.150000000000032, 7.599999999999906, 2.2000000000000934],
+];
+const ROOM_INDICES: &[u32] = &[
+    9, 10, 11, 1, 3, 2, 11, 12, 13, 3, 5, 4, 13, 14, 15, 5, 7, 6, 9, 11, 13, 1, 5, 3, 13, 15, 8, 5,
+    0, 7, 8, 9, 13, 0, 5, 1, 0, 1, 9, 0, 9, 8, 1, 2, 10, 1, 10, 9, 2, 3, 11, 2, 11, 10, 3, 4, 12,
+    3, 12, 11, 4, 5, 13, 4, 13, 12, 5, 6, 14, 5, 14, 13, 6, 7, 15, 6, 15, 14, 7, 0, 8, 7, 8, 15,
+];
+
+fn sample(positions: &[[f64; 3]], indices: &[u32], shift: [f64; 3]) -> TriMesh {
+    TriMesh::new(
+        positions
+            .iter()
+            .map(|q| p(q[0] + shift[0], q[1] + shift[1], q[2] + shift[2]))
+            .collect(),
+        indices.to_vec(),
+    )
+}
+
+#[test]
+fn a_cabinet_flush_in_its_room_is_tight() {
+    let room = sample(ROOM_POSITIONS, ROOM_INDICES, [0.0; 3]);
+    // As exported, and a micrometre clear of the wall and the floor.
+    for shift in [[0.0; 3], [-1e-6, 0.0, 1e-6]] {
+        let cabinet = sample(CABINET_POSITIONS, CABINET_INDICES, shift);
+        let whole = enclosed_volume(&cabinet).unwrap();
+        let both = intersection_volume(&cabinet, &room).unwrap();
+        let rest = difference_volume(&cabinet, &room).unwrap();
+        assert!(both.width() < 1e-12, "{both:?}");
+        assert!(both.lower > whole.lower - 1e-12, "{both:?} {whole:?}");
+        assert!(both.upper <= whole.upper, "{both:?} {whole:?}");
+        assert!((both.lower - 0.8008).abs() < 1e-12, "{both:?}");
+        assert!(rest.upper < 1e-12, "{rest:?}");
+    }
 }
