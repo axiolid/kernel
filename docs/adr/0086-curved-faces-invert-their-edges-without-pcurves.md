@@ -51,6 +51,15 @@ no pcurve, by inverting the 3D samples every face sharing the edge uses
   box the preimage provably stays in. Where that bound cannot be had the
   face is reported unbounded by name.
 
+A face on a declared plane with an edge that follows a curve takes the
+same path with the plane as its surface. The planar path triangulates a
+face's vertices only, so a cap bounded by one closed circle had no
+polygon at all; through the shared samples it meets the wall across its
+rim by index, and its bound is the edges' chord bounds plus each
+sample's distance from the plane (the plane bends nowhere, so the image
+and lens terms are zero). A face with no declared surface keeps the
+planar path.
+
 `axiolid-mesh-compile` gains a direct dependency on `axiolid-nurbs`
 (`allowed-internal-dependencies`). `axiolid-evaluate` was already in its
 closure through `axiolid-reference`. No closure profile in

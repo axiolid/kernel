@@ -36,9 +36,12 @@
 //!
 //! - A planar face with straight edges is its own polygon: the bound is
 //!   how far its vertices sit off its declared plane, which is its exact
-//!   surface. A curved edge on a planar face is chorded vertex to vertex
-//!   here, so it is unbounded by name, as is a face skipped for having no
-//!   area.
+//!   surface. A face on a declared plane with an edge that follows a
+//!   curve (an IFC cap bounded by a circle) is meshed as a curved face
+//!   whose surface is the plane (#310): its boundary is the edges' shared
+//!   samples, the same vertices as the wall across each edge, and its bound
+//!   is their chord bounds plus each sample's distance from the plane. A
+//!   face skipped for having no area is unbounded by name.
 //! - A face that declares no surface (#257) is its boundary polygon and
 //!   nothing else. Within the linear tolerance of its fit plane it is
 //!   planar and exact, `0`, as before. Warped beyond it, it has no single
@@ -471,7 +474,7 @@ fn append_face(
     // cheap, a wrong wall corrupts every downstream quantity.
     let support = face_surface(graph, face)?;
     if let Some(surface) = support {
-        if !surface_is_planar(surface) {
+        if !surface_is_planar(surface) || curved_plane(brep, graph, face) {
             let mut bound = FaceBound::new(surface);
             with_curved_face_transaction(
                 mesh,
@@ -668,7 +671,8 @@ fn shared_edge_splits(
         };
         match face_surface(graph, face) {
             Ok(None) => {}
-            Ok(Some(surface)) if surface_is_planar(surface) => {}
+            Ok(Some(surface)) if surface_is_planar(surface) && !curved_plane(brep, graph, face) => {
+            }
             _ => continue,
         }
         let Ok(rings) = planar_rings(brep, face) else {
@@ -806,6 +810,30 @@ fn loop_points(
 /// silent modelling error.
 fn surface_is_planar(surface: &axiolid_surface::Surface) -> bool {
     matches!(surface, axiolid_surface::Surface::Plane(_))
+}
+
+/// Whether a face on a declared plane has an edge that follows a curve
+/// (#310): an IFC cap bounded by a circle. Its vertices alone do not bound
+/// it, so it takes the curved path with the plane as its surface: the
+/// edge's shared 3D samples, inverted onto the plane, are its boundary,
+/// shared by index with the wall across the edge, and its report is the
+/// edges' chord bounds plus each sample's distance from the plane. A face
+/// that declares no surface keeps the planar path.
+fn curved_plane(
+    brep: &BRep<NodeId>,
+    graph: &axiolid_model::GeometryGraph,
+    face: &axiolid_topology::Face<NodeId>,
+) -> bool {
+    face.bounds
+        .iter()
+        .filter_map(|bound| brep.loops().get(bound.loop_id.index()))
+        .flat_map(|wire| wire.edges.iter())
+        .filter_map(|use_| brep.edges().get(use_.edge.index()))
+        .filter_map(|edge| edge.curve)
+        .any(|id| match graph.get(id) {
+            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve),
+            _ => false,
+        })
 }
 
 /// Resolve a face's support surface from the graph, if it declares one.

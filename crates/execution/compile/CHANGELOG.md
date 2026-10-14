@@ -65,6 +65,17 @@ caret rule for `0.x` versions.
   face's report adds its triangle bound and its trim terms, so the report
   may exceed the request; check `meets_requested`. The crate now depends
   on `axiolid-nurbs`.
+- Planar B-rep faces bounded by curved edges without pcurves compile
+  (#310): a face on a declared plane with an edge that follows a curve
+  (an IFC cap bounded by a circle or an ellipse) is meshed as a curved
+  face on its plane, its boundary the edges' shared samples inverted onto
+  the plane with a residual check, so a cap and the wall across its rim
+  share the rim's vertices by index. Its report is the edges' chord
+  bounds plus each sample's distance from the plane, where it was chorded
+  vertex to vertex and unbounded (or refused, for a rim of one vertex).
+  A closed cylinder written as an IFC advanced B-rep (a seamed wall and
+  two capped rims, no pcurve anywhere) now compiles as a watertight
+  `MeshClosure::Solid`.
 
 ### Fixed
 

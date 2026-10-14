@@ -21,12 +21,19 @@ Not listed, as equivalent at test resolution:
   The containment check that sizes it is listed.
 - `align` and the B-spline parameter check: both act only on a periodic
   B-spline face, which no fixture has.
+- the #265 weld pre-pass skipping planar faces bounded by curved edges:
+  such a face takes the curved path, which does not take recorded
+  corners, so the skip keeps it from recording any. Its corners touch one
+  of its own chords only in a cap whose vertex polygon folds onto itself,
+  which no fixture builds; a recorded corner would leave the shell
+  `OpenSolid`, never a wrong solid.
 
 First run: 8 / 13. The survivors were the two mutants above, the
 quarter-turn guard, the polish and the span terms; the guard and the
 polish got unit tests, and the flat patch trimmed by a 3D circle (whose
 bound is its trim terms alone) was added for the span terms. 11 / 11
-killed after.
+killed after. The planar caps (closed cylinders, #310 follow-up) added two
+mutants: 13 / 13.
 """
 import probe_lib
 
@@ -73,6 +80,13 @@ MUTANTS = [
     ("lens containment not checked", I,
      "            if on_box >= sigma {",
      "            if true {"),
+    # Planar caps bounded by curved edges.
+    ("caps bounded by curved edges keep the planar path", B,
+     "        if !surface_is_planar(surface) || curved_plane(brep, graph, face) {",
+     "        if !surface_is_planar(surface) {"),
+    ("every edge curve reads as straight", B,
+     "            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve),",
+     "            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve) && false,"),
     ("sampling ignores the certified terms", I,
      "            if certified.is_none_or(|worst| worst <= budget) {",
      "            if certified.is_none_or(|worst| worst <= budget) || true {"),

@@ -653,7 +653,7 @@ fn edge_trace<'g>(
     Ok(EdgeTrace::Curve(curve, domain))
 }
 
-fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {
+pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {
     match curve {
         axiolid_curve::Curve3::Line(_) => true,
         axiolid_curve::Curve3::Polyline(p) => p.points.len() == 2 && !p.closed,

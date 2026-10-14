@@ -14,13 +14,14 @@ use std::f64::consts::TAU;
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame3, Point3, Scalar, Tolerance, Vec3};
-use axiolid_curve::{BSplineCurve3, Circle3, Curve3, KnotSpec};
+use axiolid_curve::{BSplineCurve3, Circle3, Curve3, Ellipse3, KnotSpec};
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationReport, ReferenceMeshCompiler};
+use axiolid_mesh_compile_contract::MeshClosure;
 use axiolid_model::{GeometryGraphBuilder, GeometryNode, NodeId};
-use axiolid_surface::{BSplineSurface, Cone, Cylinder, Sphere, Surface};
+use axiolid_surface::{BSplineSurface, Cone, Cylinder, Plane, Sphere, Surface};
 use axiolid_topology::{
     BRep, Edge, EdgeId, EdgeUse, Face, FaceBound, Loop, Orientation, Shell, Solid, Vertex, VertexId,
 };
@@ -61,6 +62,12 @@ impl OneFace {
     }
 
     fn close_face(&mut self, surface: &Surface) {
+        self.close_oriented_face(surface, Orientation::Forward);
+    }
+
+    /// Close the ring as a face whose normal runs with (`Forward`) or
+    /// against (`Reversed`) its surface's.
+    fn close_oriented_face(&mut self, surface: &Surface, orientation: Orientation) {
         let surface = self
             .builder
             .push(GeometryNode::Surface(surface.clone()))
@@ -75,7 +82,7 @@ impl OneFace {
                 orientation: Orientation::Forward,
                 outer: true,
             }],
-            orientation: Orientation::Forward,
+            orientation,
         }));
     }
 
@@ -104,13 +111,23 @@ impl OneFace {
         if !self.uses.is_empty() {
             self.close_face(surface);
         }
+        self.compile_shell(false, options)
+            .map(|(mesh, _, report)| (mesh, report))
+    }
+
+    /// Compile the closed faces as one solid's shell, `closed` as declared.
+    fn compile_shell(
+        mut self,
+        closed: bool,
+        options: &ExecutionOptions,
+    ) -> axiolid_contracts::GeomResult<(TriMesh, MeshClosure, DeviationReport)> {
         let shell = self.brep.add_shell(Shell {
             faces: self
                 .faces
                 .iter()
                 .map(|&face| (face, Orientation::Forward))
                 .collect(),
-            closed: false,
+            closed,
         });
         self.brep.add_solid(Solid {
             outer: shell,
@@ -120,7 +137,7 @@ impl OneFace {
         let graph = self.builder.finish(vec![root]).unwrap();
         let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
             .compile_mesh_with_deviation(&graph, root, options)?;
-        Ok((outcome.mesh, report))
+        Ok((outcome.mesh, outcome.closure, report))
     }
 }
 
@@ -720,4 +737,179 @@ fn the_edge_terms_are_carried_by_the_report() {
         .expect("a flat patch trimmed by a 3D circle compiles");
     let samples = curve_samples(&rim, 200_000);
     assert_bounded("rim on a flat patch", &mesh, &samples, &report, 4.0);
+}
+
+/// A closed cylinder the way an IFC advanced B-rep writes it: a wall with
+/// one straight seam and two planar caps bounded by the wall's rims, no
+/// pcurve anywhere. The bottom rim is `bottom` on the plane `floor`, the
+/// top a circle at `height`; both start on the seam at `u = 0`.
+fn capped_cylinder(
+    radius: Scalar,
+    height: Scalar,
+    floor: Frame3,
+    bottom: Curve3,
+    budget: Scalar,
+    caps_first: bool,
+) -> (TriMesh, MeshClosure, DeviationReport) {
+    let wall = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let start = axiolid_reference::curve::evaluate3(&bottom, 0.0).unwrap();
+    let mut solid = OneFace::new();
+    let low = solid.vertex(start);
+    let high = solid.vertex(Point3::new(radius, 0.0, height));
+    let rim0 = solid.edge(low, low, Some(bottom));
+    let rim1 = solid.edge(high, high, Some(circle(height, radius)));
+    let seam = solid.edge(low, high, None);
+    solid.use_edge(rim0, Orientation::Forward);
+    solid.use_edge(seam, Orientation::Forward);
+    solid.use_edge(rim1, Orientation::Reversed);
+    solid.use_edge(seam, Orientation::Reversed);
+    solid.close_face(&wall);
+    // The floor's frame normal points into the solid: the face runs
+    // against it, and its loop runs clockwise about it.
+    solid.use_edge(rim0, Orientation::Reversed);
+    solid.close_oriented_face(
+        &Surface::Plane(Plane { frame: floor }),
+        Orientation::Reversed,
+    );
+    solid.use_edge(rim1, Orientation::Forward);
+    solid.close_face(&Surface::Plane(Plane {
+        frame: frame_at(height),
+    }));
+    if caps_first {
+        // The caps then sample the rims, and the wall inverts their samples.
+        solid.faces.rotate_left(1);
+    }
+    solid
+        .compile_shell(true, &options(budget))
+        .expect("a capped cylinder with only 3D edges compiles")
+}
+
+/// Every mesh edge is used by exactly two triangles, once each way.
+fn assert_watertight(name: &str, mesh: &TriMesh) {
+    let mut directed: HashMap<(u32, u32), usize> = HashMap::new();
+    for t in mesh.indices.chunks_exact(3) {
+        for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            *directed.entry((x, y)).or_default() += 1;
+        }
+    }
+    for (&(x, y), &count) in &directed {
+        assert_eq!(
+            count, 1,
+            "{name}: edge {x}-{y} is used {count} times one way"
+        );
+        assert_eq!(
+            directed.get(&(y, x)),
+            Some(&1),
+            "{name}: edge {x}-{y} has no opposite use: the mesh is open there"
+        );
+    }
+}
+
+/// The enclosed volume is within the bound's effect, the bound times the
+/// surface's area, of the exact one.
+fn assert_volume(
+    name: &str,
+    mesh: &TriMesh,
+    report: &DeviationReport,
+    exact: Scalar,
+    area: Scalar,
+) {
+    let bound = report
+        .bound
+        .unwrap_or_else(|| panic!("{name}: expected a certified bound, got {report:?}"));
+    let volume = axiolid_inspect::enclosed_volume(mesh).expect("a closed mesh");
+    let slack = bound * area;
+    eprintln!(
+        "{name}: volume in [{:e}, {:e}], exact {exact:e}, bound {bound:e}, slack {slack:e}",
+        volume.lower, volume.upper
+    );
+    assert!(
+        volume.lower - slack <= exact && exact <= volume.upper + slack,
+        "{name}: exact volume {exact} outside [{}, {}] grown by {slack}",
+        volume.lower,
+        volume.upper
+    );
+}
+
+#[test]
+fn a_closed_cylinder_with_circular_caps_compiles_as_a_watertight_solid() {
+    let (radius, height) = (0.3, 0.5);
+    for (budget, caps_first) in [(1e-3, false), (1e-4, false), (1e-3, true)] {
+        let (mesh, closure, report) = capped_cylinder(
+            radius,
+            height,
+            frame_at(0.0),
+            circle(0.0, radius),
+            budget,
+            caps_first,
+        );
+        let name = format!("capped cylinder at {budget:e}, caps first {caps_first}");
+        assert_eq!(closure, MeshClosure::Solid, "{name}");
+        assert_watertight(&name, &mesh);
+        let area = TAU * radius * height + TAU * radius * radius;
+        assert_volume(
+            &name,
+            &mesh,
+            &report,
+            0.5 * TAU * radius * radius * height,
+            area,
+        );
+        let wall = Surface::Cylinder(Cylinder {
+            frame: frame_at(0.0),
+            radius,
+        });
+        let mut samples = surface_samples(&wall, (0.0, TAU), (0.0, height), 300);
+        for z in [0.0, height] {
+            for rr in span(0.0, radius, 60) {
+                for t in span(0.0, TAU, 240) {
+                    samples.push(Point3::new(rr * t.cos(), rr * t.sin(), z));
+                }
+            }
+        }
+        assert_bounded(&name, &mesh, &samples, &report, 6.0);
+    }
+}
+
+/// The floor cut obliquely: the plane `z = k x` meets the wall in an
+/// ellipse, the floor cap's only edge. The volume is still `pi r^2 h`,
+/// `k x` averaging to zero over the disk.
+#[test]
+fn a_cylinder_cut_by_an_oblique_plane_compiles_as_a_watertight_solid() {
+    let (radius, height, k) = (0.3, 0.5, 0.5);
+    let tilt = Vec3::new(1.0, 0.0, k).normalize();
+    let floor = Frame3 {
+        origin: Point3::ZERO,
+        x: tilt,
+        y: Vec3::Y,
+        z: tilt.cross(Vec3::Y),
+    };
+    let ellipse = Curve3::Ellipse(Ellipse3 {
+        frame: floor,
+        semi_axis_x: radius * (1.0 + k * k).sqrt(),
+        semi_axis_y: radius,
+    });
+    let (mesh, closure, report) =
+        capped_cylinder(radius, height, floor, ellipse.clone(), 1e-4, false);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert_watertight("oblique cylinder", &mesh);
+    let floor_area = 0.5 * TAU * radius * radius * (1.0 + k * k).sqrt();
+    let area = TAU * radius * height + 0.5 * TAU * radius * radius + floor_area;
+    assert_volume(
+        "oblique cylinder",
+        &mesh,
+        &report,
+        0.5 * TAU * radius * radius * height,
+        area,
+    );
+    let mut samples = curve_samples(&ellipse, 20_000);
+    for rr in span(0.0, 1.0, 60) {
+        for t in span(0.0, TAU, 240) {
+            let (x, y) = (radius * rr * t.cos(), radius * rr * t.sin());
+            samples.push(Point3::new(x, y, k * x));
+        }
+    }
+    assert_bounded("oblique cylinder", &mesh, &samples, &report, 6.0);
 }
