@@ -556,6 +556,7 @@ pub(crate) fn solid_operation_family(operation: &SolidOperation) -> &'static str
         }
         SolidOperation::Boolean { .. } => "boolean",
         SolidOperation::BoundedHalfSpace { .. } => "bounded half-space",
+        SolidOperation::BoundedHalfSpaceAlongZ { .. } => "bounded half-space along z",
         _ => "unknown solid operation",
     }
 }
@@ -577,7 +578,7 @@ mod family_name_tests {
     fn the_exported_table_matches_the_naming_function() {
         assert_eq!(
             SOLID_FAMILY_NAMES.len(),
-            11,
+            12,
             "the declared family count changed; update the table"
         );
         for name in SOLID_FAMILY_NAMES {
@@ -671,4 +672,5 @@ pub const SOLID_FAMILY_NAMES: &[&str] = &[
     "station-placed spine",
     "boolean",
     "bounded half-space",
+    "bounded half-space along z",
 ];

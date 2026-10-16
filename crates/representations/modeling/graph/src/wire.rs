@@ -33,7 +33,8 @@
 //! features. A graph with no seam-snapping window is a 1.0 payload, one
 //! whose run stations carry no seam side or window a 1.0 or 1.1 payload,
 //! one with no run station at its basis's start or end at most a 1.2
-//! payload.
+//! payload, and one with no half-space bounded along its placement's `z` at
+//! most a 1.3 payload.
 //!
 //! | Version | Added |
 //! | --- | --- |
@@ -41,6 +42,7 @@
 //! | 1.1 | `OrientedCurveStation.seam_window` (#294), a real omitted at its default `+0.0`; absent, as in every 1.0 payload, it reads as `0`, which is what a 1.0 station meant. |
 //! | 1.2 | Seam sides and windows on run stations (#301): `SectionAtStation.seam` and `.seam_window`, omitted at `Outgoing` and `+0.0` and read so when absent; the variant `CurveRelation::OffsetsAtStations`, whose `RunStation`s carry the same two fields. |
 //! | 1.3 | Run stations at their basis's ends (#303): `RunStation.basis_end`, `"Start"` or `"End"`, omitted when absent (a stated distance) and read so. |
+//! | 1.4 | A half-space bounded along its placement's `z` (#321): the variant `SolidOperation::BoundedHalfSpaceAlongZ`, fields as `BoundedHalfSpace`'s. |
 //!
 //! # Refusals
 //!
@@ -86,7 +88,7 @@ pub const FORMAT_NAME: &str = "axiolid-geometry-graph";
 /// labelled with the lowest version that represents it, which is this one
 /// only when the graph uses what this version added (see the
 /// [module documentation](self#versions)).
-pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 3);
+pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 4);
 
 /// A `MAJOR.MINOR` wire format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -395,6 +397,10 @@ const RUN_SEAMS_SINCE: FormatVersion = FormatVersion::new(1, 2);
 /// The version that introduced run stations at their basis's ends (#303).
 const BASIS_END_SINCE: FormatVersion = FormatVersion::new(1, 3);
 
+/// The version that introduced `SolidOperation::BoundedHalfSpaceAlongZ`
+/// (#321).
+const ALONG_Z_SINCE: FormatVersion = FormatVersion::new(1, 4);
+
 /// The lowest version that represents `nodes` (#297): the version every
 /// payload is labelled with, so an older reader reads every graph that
 /// uses nothing newer than it knows.
@@ -412,6 +418,9 @@ fn required_version(nodes: &[GeometryNode]) -> FormatVersion {
     }
     if nodes.iter().any(uses_basis_end) {
         version = version.max(BASIS_END_SINCE);
+    }
+    if nodes.iter().any(is_along_z) {
+        version = version.max(ALONG_Z_SINCE);
     }
     version
 }
@@ -495,6 +504,7 @@ fn run_sections(node: &GeometryNode) -> &[SectionAtStation] {
             | SolidOperation::SectionedSpine { .. }
             | SolidOperation::Boolean { .. }
             | SolidOperation::BoundedHalfSpace { .. }
+            | SolidOperation::BoundedHalfSpaceAlongZ { .. }
             | SolidOperation::StationedSpine { .. } => &[],
         },
         GeometryNode::SurfaceRelation(relation) => match relation {
@@ -621,13 +631,23 @@ fn uses_basis_end(node: &GeometryNode) -> bool {
         .any(|station| station.basis_end.is_some())
 }
 
+/// Whether `node` is what format 1.4 added (#321): a half-space bounded
+/// along its placement's `z`.
+fn is_along_z(node: &GeometryNode) -> bool {
+    matches!(
+        node,
+        GeometryNode::SolidOperation(SolidOperation::BoundedHalfSpaceAlongZ { .. })
+    )
+}
+
 /// What `node` holds that `version` does not have, refused as an older
 /// reader would refuse it: a seam-snapping window on an oriented station
 /// in a 1.0 payload; a seam side or window on a run station, or an
 /// `OffsetsAtStations`, in a payload older than 1.2; a run station at its
-/// basis's start or end in a payload older than 1.3. No writer of those
-/// versions wrote them. (A default is what its absence means, so it is not
-/// told apart.)
+/// basis's start or end in a payload older than 1.3; a half-space bounded
+/// along its placement's `z` in a payload older than 1.4.
+/// No writer of those versions wrote them. (A default is what its absence
+/// means, so it is not told apart.)
 fn newer_feature(node: &GeometryNode, version: FormatVersion) -> Option<WireError> {
     if version < SEAM_WINDOW_SINCE && uses_seam_window(node) {
         return Some(WireError::UnknownField {
@@ -652,6 +672,12 @@ fn newer_feature(node: &GeometryNode, version: FormatVersion) -> Option<WireErro
     if version < BASIS_END_SINCE && uses_basis_end(node) {
         return Some(WireError::UnknownField {
             field: "basis_end".to_owned(),
+            version,
+        });
+    }
+    if version < ALONG_Z_SINCE && is_along_z(node) {
+        return Some(WireError::UnknownKind {
+            kind: "BoundedHalfSpaceAlongZ".to_owned(),
             version,
         });
     }

@@ -156,6 +156,33 @@ pub enum SolidOperation {
         sections: Vec<SectionAtStation>,
         frame: StationFrame,
     },
+    // Added after every earlier variant, so their implicit discriminants
+    // stay as they were (#321).
+    /// A half-space bounded by the prism of a boundary along its
+    /// placement's `z` (#321): the side of the plane that `half_space`
+    /// keeps, within the lines through the boundary's region parallel to
+    /// `placement`'s `z`, infinite both ways and at any angle to the plane.
+    ///
+    /// This is how IFC's `IfcPolygonalBoundedHalfSpace` is bounded, by its
+    /// `Position`: a vertical prism under a sloped roof plane, the common
+    /// gable clip, which [`SolidOperation::BoundedHalfSpace`] (its prism
+    /// always along the plane normal) cannot state. The boundary's point
+    /// `(u, v)` lies at `placement * (u, v, 0)`, the frame read as written:
+    /// its scale, shear and handedness all shape the prism. Only the
+    /// direction of `z` counts, not its length or sign. A `z` within the
+    /// angular tolerance of the plane never crosses it, and a placement
+    /// whose axes are parallel or zero has no prism: both are refused by
+    /// name when compiled.
+    BoundedHalfSpaceAlongZ {
+        half_space: NodeId,
+        /// The boundary in `placement`'s XY plane, as for
+        /// [`SolidOperation::BoundedHalfSpace`]: a closed 2D curve, or a
+        /// `Profile` node whose region it is. An arc segment bounds the
+        /// half-space by the cylinder of lines through it along `z`.
+        boundary: NodeId,
+        /// The boundary's frame, its `z` the prism's axis.
+        placement: Transform3,
+    },
 }
 
 impl SolidOperation {
@@ -206,6 +233,11 @@ impl SolidOperation {
             }
             Self::Boolean { left, right, .. } => out.extend([*left, *right]),
             Self::BoundedHalfSpace {
+                half_space,
+                boundary,
+                ..
+            }
+            | Self::BoundedHalfSpaceAlongZ {
                 half_space,
                 boundary,
                 ..

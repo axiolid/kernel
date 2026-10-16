@@ -16,6 +16,23 @@ caret rule for `0.x` versions.
   how far that reading moved an operand, as a certified contribution of
   the boolean path next to its measured one, as a snap's move is
   reported. Such booleans now carry two contributions instead of one.
+- Bounded half-spaces along their placement's `z` (#321,
+  `SolidOperation::BoundedHalfSpaceAlongZ`), in both compilers: the kept
+  side of the plane within the prism of the boundary along the placement's
+  `z`, at any angle to the plane, the boundary at `placement * (u, v, 0)` as
+  written. The mesh compiler builds the oblique slab (its boundary chorded
+  within the budget over the frame's longest axis); the exact compiler builds the
+  prism in the boundary's own plane, a margin past the subject's envelope
+  both ways, and intersects it with the plane's side over the envelope, so
+  an arc is a cylinder wall the plane cuts in an ellipse, and the mesh's
+  deviation is certified against it. The IFC2X3 gable wall of
+  openbimrs/ifc#515 (four sloped planes over vertical prisms) is
+  49.999912042537 m³ exactly, IfcOpenShell's volume
+  (`tests/bounded_half_space_prism_axis.rs`). An axis within the angular
+  tolerance of the plane and a degenerate placement are refused by name in
+  both. Under a sheared placement, whose `z` leans off the boundary's
+  plane, a boundary with arcs sweeps elliptical cylinders, which the exact
+  general boolean may refuse to sew, by name.
 
 ### Fixed
 

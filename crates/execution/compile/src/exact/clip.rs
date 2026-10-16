@@ -9,7 +9,25 @@
 //! selects the normal side of the plane as the half-space; a bounded one is
 //! that side intersected with the infinite prism of its boundary, swept
 //! along the plane normal, the boundary framed by the operation's placement
-//! projected into the plane.
+//! projected into the plane, or along the placement's `z` (#321, see
+//! below).
+//!
+//! # Prisms along the placement's `z` (#321)
+//!
+//! `SolidOperation::BoundedHalfSpaceAlongZ` sweeps the boundary, as written in the
+//! placement's `xy` plane, along the placement's `z`, at any angle to the
+//! clip plane. Its tool is built in two steps
+//! (`ExactCompilation::placement_z_tool`): the prism in the boundary's own
+//! plane, the boundary as authored there (an arc a circle; a scaled or
+//! sheared frame applied as a derived profile, which keeps a similarity's
+//! arcs arcs and refuses the ellipses of any other map by name), extruded
+//! along the axis from twice the margin below the envelope to twice the
+//! margin above it; then its intersection with the unbounded half-space's
+//! prism over the envelope, through the general boolean, whose report is
+//! merged into the clip's. A vertical prism under a sloped plane, the IFC
+//! gable, keeps right cylinder walls, each cut by the plane in an ellipse.
+//! A `z` leaning off the boundary's plane sweeps elliptical cylinders
+//! (#287), which the general boolean may refuse to sew, by name.
 //!
 //! # Boundaries with arcs (#277)
 //!
@@ -77,18 +95,22 @@
 //! A union with a half-space (unbounded), a half-space as the subject, a
 //! subject not built from placed extrusions, a bounded half-space whose
 //! boundary curve is not a polyline, whose profile does not bound a region
-//! or cannot be extruded exactly, or whose plane is placed by an instance, a
-//! scaled or sheared placement, an envelope with an edge family it cannot
-//! bound, and every refusal of the general boolean. An emptied subject is
-//! `GeomError::Degenerate`. The model's half-space carries a plane, so a
-//! curved base surface cannot reach this path.
+//! or cannot be extruded exactly, or whose plane is placed by an instance,
+//! one along its placement's `z` whose axis lies within the angular
+//! tolerance of the plane or whose placement is degenerate, a scaled or
+//! sheared placement above the half-space, an envelope with an edge family
+//! it cannot bound, and every refusal of the general boolean. An emptied
+//! subject is `GeomError::Degenerate`. The model's half-space carries a
+//! plane, so a curved base surface cannot reach this path.
 
 use axiolid_brep::{ExactBRep, TransformError};
-use axiolid_brep_boolean::{boolean_with_report, BooleanError};
+use axiolid_brep_boolean::{boolean_with_report, BooleanError, BooleanReport};
 use axiolid_construct::extrude::extrude_profile_exact;
+use axiolid_construct::half_space::BoundaryPrism;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{
-    BooleanOperator, Interval, Mat3, PlaneFrame, Point2, Point3, Scalar, Transform3, Vec2, Vec3,
+    BooleanOperator, Interval, Mat3, PlaneFrame, Point2, Point3, Scalar, Transform2, Transform3,
+    Vec2, Vec3,
 };
 use axiolid_curve::{Curve2, Curve3, Line2};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
@@ -97,6 +119,7 @@ use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment, Rectangl
 
 use super::boolean::remap_boolean_error;
 use super::{remap_construction_error, unsupported, ExactCompilation};
+use crate::half_space_boundary::PrismAxis;
 
 /// A boolean tool that is a half-space, read through its placements.
 #[derive(Debug, Clone)]
@@ -116,6 +139,8 @@ enum Clip {
         boundary: NodeId,
         /// The boundary's own frame.
         frame: Transform3,
+        /// Which way its prism runs (#321).
+        axis: PrismAxis,
     },
 }
 
@@ -201,12 +226,13 @@ impl ExactCompilation<'_> {
                     continue;
                 }
                 GeometryNode::HalfSpace(half_space) => Clip::Unbounded(*half_space),
-                GeometryNode::SolidOperation(SolidOperation::BoundedHalfSpace {
-                    half_space,
-                    boundary,
-                    placement: frame,
-                }) => {
-                    let Some(GeometryNode::HalfSpace(half_space)) = self.graph.get(*half_space)
+                GeometryNode::SolidOperation(operation) => {
+                    let Some((half_space, boundary, frame, axis)) =
+                        crate::half_space_boundary::bounded(operation)
+                    else {
+                        return Ok(None);
+                    };
+                    let Some(GeometryNode::HalfSpace(half_space)) = self.graph.get(half_space)
                     else {
                         return Err(unsupported(
                             "exact bounded half-space whose plane is placed by an instance",
@@ -214,8 +240,9 @@ impl ExactCompilation<'_> {
                     };
                     Clip::Bounded {
                         half_space: *half_space,
-                        boundary: *boundary,
-                        frame: *frame,
+                        boundary,
+                        frame,
+                        axis,
                     }
                 }
                 _ => return Ok(None),
@@ -251,9 +278,10 @@ impl ExactCompilation<'_> {
                 half_space,
                 boundary,
                 frame,
-            } => (half_space, Some((self.boundary(boundary)?, frame))),
+                axis,
+            } => (half_space, Some((self.boundary(boundary)?, frame, axis))),
         };
-        let solid = match self.clip_solid(
+        let (solid, tool_report) = match self.clip_solid(
             &half_space,
             footprint.as_ref(),
             &tool.placement,
@@ -270,21 +298,27 @@ impl ExactCompilation<'_> {
                 error => remap_boolean_error(error),
             },
         )?;
-        // What it read within tolerance, for the compiler's report (#236).
+        // What it read within tolerance, for the compiler's report (#236),
+        // building the tool included.
+        let report = match tool_report {
+            Some(tool) => tool.merged(&report),
+            None => report,
+        };
         self.boolean_report = Some(report);
         Ok(body)
     }
 
     /// The finite prism standing in for the half-space over `envelope`, or
-    /// what the envelope decides alone.
+    /// what the envelope decides alone; with what building it read within
+    /// tolerance, when that took a boolean.
     fn clip_solid(
         &self,
         half_space: &HalfSpace,
-        footprint: Option<&(Footprint, Transform3)>,
+        footprint: Option<&(Footprint, Transform3, PrismAxis)>,
         placement: &Transform3,
         envelope: Envelope,
         operator: BooleanOperator,
-    ) -> GeomResult<Result<ExactBRep, Decided>> {
+    ) -> GeomResult<Result<(ExactBRep, Option<BooleanReport>), Decided>> {
         let tolerance = self.options.tolerance();
         let origin = half_space.boundary.origin;
         let normal = half_space.boundary.normal.normalize_or_zero();
@@ -332,6 +366,19 @@ impl ExactCompilation<'_> {
             }));
         }
         let margin = 0.25 * (envelope.hi - envelope.lo).length() + 4.0 * tolerance.linear();
+        let footprint = match footprint {
+            Some((footprint, frame, PrismAxis::PlacementZ)) => {
+                return self.placement_z_tool(
+                    half_space,
+                    (footprint, *frame),
+                    placement,
+                    envelope.mapped(&inverse),
+                    operator,
+                );
+            }
+            Some((footprint, frame, PrismAxis::PlaneNormal)) => Some((footprint, frame)),
+            None => None,
+        };
 
         // The in-plane frame: `x` and `y = normal x x` as the mesh compiler
         // frames the boundary, then `y` turned with the kept side so that
@@ -345,7 +392,7 @@ impl ExactCompilation<'_> {
                 };
                 (origin, reference - normal * normal.dot(reference))
             }
-            Some((_, frame)) => {
+            Some((_, &frame)) => {
                 let frame = PlaneFrame::new(
                     frame.translation,
                     frame.matrix3.x_axis.normalize_or_zero(),
@@ -418,14 +465,122 @@ impl ExactCompilation<'_> {
         };
         prism
             .transformed(&(*placement * turned))
-            .map(Ok)
-            .map_err(|error| match error {
-                TransformError::NotRigid => {
-                    unsupported("exact half-space under a scaled or sheared transform")
+            .map(|solid| Ok((solid, None)))
+            .map_err(transform_error)
+    }
+
+    /// The tool of a half-space bounded along its placement's `z` (#321),
+    /// built in the half-space's own frame over `local`, the envelope
+    /// brought into it, then placed.
+    ///
+    /// The prism need not stand perpendicular to the plane, so it is not
+    /// stood on the plane: its cap there would be the boundary carried
+    /// obliquely onto the plane, each arc an ellipse no exact extrusion
+    /// sweeps along a leaning axis. It is built instead in the boundary's
+    /// own plane, the boundary as authored (an arc a circle), extruded
+    /// along the axis -- a right prism, or an oblique one under a sheared
+    /// placement, arcs sweeping its elliptical cylinders (#287) -- from a
+    /// margin below the envelope to a margin above it, measured across that
+    /// plane. Its intersection with the unbounded half-space's tool over
+    /// the same envelope is then the tool: on the envelope, the side of the
+    /// plane within the prism. The margin argument of the module docs holds
+    /// for every face either adds. Where the envelope lies wholly in the
+    /// half-space, the prism alone is the tool; where the prism misses the
+    /// side within the margin, the envelope decides.
+    fn placement_z_tool(
+        &self,
+        half_space: &HalfSpace,
+        (footprint, frame): (&Footprint, Transform3),
+        placement: &Transform3,
+        local: Envelope,
+        operator: BooleanOperator,
+    ) -> GeomResult<Result<(ExactBRep, Option<BooleanReport>), Decided>> {
+        let tolerance = self.options.tolerance();
+        let prism = BoundaryPrism::along_placement_z(frame, tolerance)?;
+        prism.crossing(half_space.boundary, tolerance)?;
+        // A rigid frame on the boundary's plane, `z` across it on the side
+        // `x` and `y` turn to, so a mirrored frame keeps its boundary
+        // unmirrored in the plane and the frame a rotation.
+        let x = prism.x.normalize();
+        let z = prism.x.cross(prism.y).normalize();
+        let y = z.cross(x);
+        // The boundary in that frame: scaled, sheared, never reflected.
+        let shape = Transform2::from_cols(
+            Vec2::new(prism.x.dot(x), 0.0),
+            Vec2::new(prism.y.dot(x), prism.y.dot(y)),
+            Vec2::ZERO,
+        );
+        let profile = match footprint {
+            Footprint::Polygon(points) => polygon(
+                &points
+                    .iter()
+                    .map(|&p| shape.transform_point2(p))
+                    .collect::<Vec<_>>(),
+            ),
+            // An arc stays an arc under a similarity; under any other map
+            // it is an ellipse, which the exact extruder refuses by name.
+            Footprint::Profile(profile) if is_identity(&shape) => profile.clone(),
+            Footprint::Profile(profile) => Profile::Derived {
+                basis: Box::new(profile.clone()),
+                transform: shape,
+            },
+        };
+        // The axis in that frame, turned across the plane to `+z`; a lean
+        // below the rounding of the frame's own axes is none.
+        let axis = prism.axis.normalize();
+        let mut along = Vec3::new(axis.dot(x), axis.dot(y), axis.dot(z));
+        if along.z < 0.0 {
+            along = -along;
+        }
+        if along.truncate().length() <= 8.0 * Scalar::EPSILON {
+            along = Vec3::Z;
+        }
+        // Twice the side's margin, so the prism's caps pass the side's far
+        // cap and sides rather than meet them in one plane, a coincidence
+        // the boolean would have to read for nothing.
+        let margin = 0.5 * (local.hi - local.lo).length() + 8.0 * tolerance.linear();
+        let (lo, hi) = local.corners().iter().fold(
+            (Scalar::INFINITY, Scalar::NEG_INFINITY),
+            |(lo, hi), &corner| {
+                let height = (corner - prism.origin).dot(z);
+                (lo.min(height), hi.max(height))
+            },
+        );
+        let (lo, hi) = (lo - margin, hi + margin);
+        let long = extrude_profile_exact(&profile, along, (hi - lo) / along.z, tolerance)
+            .map_err(remap_construction_error)?;
+        let start = prism.origin + (x * along.x + y * along.y + z * along.z) * (lo / along.z);
+        let long = long
+            .transformed(&Transform3::from_cols(x, y, z, start))
+            .map_err(transform_error)?;
+        // The side of the plane over the same envelope, unless it holds the
+        // envelope whole.
+        let side =
+            match self.clip_solid(half_space, None, &Transform3::IDENTITY, local, operator)? {
+                Ok((side, _)) => side,
+                Err(_) => {
+                    return long
+                        .transformed(placement)
+                        .map(|solid| Ok((solid, None)))
+                        .map_err(transform_error)
                 }
-                TransformError::Unsupported(what) => unsupported(what),
-                other => GeomError::InvalidInput(format!("half-space transform: {other}")),
-            })
+            };
+        let (tool, report) =
+            match boolean_with_report(&long, &side, BooleanOperator::Intersection, tolerance) {
+                Ok(tool) => tool,
+                // The prism misses the plane's side over the envelope.
+                Err(BooleanError::EmptyResult) => {
+                    return Ok(Err(if operator == BooleanOperator::Intersection {
+                        Decided::Empty
+                    } else {
+                        Decided::Subject
+                    }))
+                }
+                Err(error) => return Err(remap_boolean_error(error)),
+            };
+        tool.transformed(placement)
+            .map(|solid| Ok((solid, Some(report))))
+            .map_err(transform_error)
     }
 
     /// A bounded half-space's boundary, read as the mesh compiler reads it.
@@ -579,6 +734,24 @@ fn polygon(points: &[Point2]) -> Profile {
         outer: Contour::new(segments),
         holes: Vec::new(),
     })
+}
+
+/// A placement's refusal, named.
+fn transform_error(error: TransformError) -> GeomError {
+    match error {
+        TransformError::NotRigid => {
+            unsupported("exact half-space under a scaled or sheared transform")
+        }
+        TransformError::Unsupported(what) => unsupported(what),
+        other => GeomError::InvalidInput(format!("half-space transform: {other}")),
+    }
+}
+
+/// Whether a boundary map is the identity to the rounding of its entries.
+fn is_identity(map: &Transform2) -> bool {
+    let floor = 8.0 * Scalar::EPSILON;
+    (map.matrix2.x_axis - Vec2::X).abs().max_element() <= floor
+        && (map.matrix2.y_axis - Vec2::Y).abs().max_element() <= floor
 }
 
 fn emptied() -> GeomError {

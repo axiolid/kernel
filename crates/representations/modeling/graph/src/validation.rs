@@ -949,6 +949,11 @@ fn validate_solid_operation(
             half_space,
             boundary,
             ..
+        }
+        | SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            ..
         } => {
             expect_reference(nodes, *half_space, ExpectedReference::HalfSpace)?;
             // The boundary is authored in the placement frame's XY plane, so

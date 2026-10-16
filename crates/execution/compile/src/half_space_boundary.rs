@@ -35,9 +35,40 @@
 
 use axiolid_construct::contour_lower::contour_to_arc_ring;
 use axiolid_contracts::{GeomError, GeomResult};
-use axiolid_core::{Point2, Scalar, Tolerance, Vec2};
+use axiolid_core::{Point2, Scalar, Tolerance, Transform3, Vec2};
 use axiolid_curve::Curve2;
+use axiolid_model::{NodeId, SolidOperation};
 use axiolid_profile::{Contour, Profile};
+
+/// Which way a bounded half-space's prism runs: the plane's normal, for
+/// `SolidOperation::BoundedHalfSpace`, or the placement's `z`, for
+/// `SolidOperation::BoundedHalfSpaceAlongZ` (#321). Both compilers read
+/// the two variants alike apart from this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrismAxis {
+    PlaneNormal,
+    PlacementZ,
+}
+
+/// A bounded half-space's plane, boundary, placement and prism axis, or
+/// `None` for any other operation.
+pub(crate) fn bounded(
+    operation: &SolidOperation,
+) -> Option<(NodeId, NodeId, Transform3, PrismAxis)> {
+    match operation {
+        SolidOperation::BoundedHalfSpace {
+            half_space,
+            boundary,
+            placement,
+        } => Some((*half_space, *boundary, *placement, PrismAxis::PlaneNormal)),
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            placement,
+        } => Some((*half_space, *boundary, *placement, PrismAxis::PlacementZ)),
+        _ => None,
+    }
+}
 
 /// The rounding of the closed-form meetings, per unit of the magnitudes
 /// they are computed from.

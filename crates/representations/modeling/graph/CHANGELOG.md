@@ -9,6 +9,22 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SolidOperation::BoundedHalfSpaceAlongZ` (#321), a new variant with
+  `BoundedHalfSpace`'s fields: the kept side of the plane within the prism
+  of the boundary along the placement's `z`, infinite both ways and at any
+  angle to the plane, the boundary at `placement * (u, v, 0)` as written.
+  This is how IFC's `IfcPolygonalBoundedHalfSpace` bounds its half-space,
+  by its `Position`. `BoundedHalfSpace` keeps its fields and meaning. The
+  builder validates the new variant's references as the old one's.
+  `SolidOperation` is `#[non_exhaustive]`, so the variant is additive.
+- Wire format 1.4 (ADR 0085): the variant lifts a payload to 1.4, and a
+  1.3 or older payload holding it is refused as
+  `WireError::UnknownKind { kind: "BoundedHalfSpaceAlongZ" }`. A graph
+  without it is written byte for byte as before, labelled 1.0 to 1.3.
+  Golden `tests/wire/v1.4/every-kind.json`.
+
 ## [0.3.13] - 2026-10-13
 
 ### Fixed

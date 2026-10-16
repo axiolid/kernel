@@ -65,8 +65,8 @@ MUTANTS = [
      "        if operator == BooleanOperator::Union {",
      "        if false {"),
     ("a scaled half-space not named", C,
-     "                TransformError::NotRigid => {",
-     "                TransformError::NotRigid if false => {"),
+     "        TransformError::NotRigid => {",
+     "        TransformError::NotRigid if false => {"),
 ]
 
 probe_lib.main(MUTANTS, tests=TESTS, timeout=1800)

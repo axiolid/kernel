@@ -9,6 +9,29 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `half_space::bounded_half_space_prism` (#321): the slab of a half-space
+  bounded by the prism of a boundary along any axis that crosses the
+  plane, oblique to it allowed. The near cap is the boundary carried along
+  the axis onto the plane, the far cap the same at the depth: a
+  `SlabDepth`, `Relative` to the boundary's extent (as before) or the
+  `Reach` of a subject. `BoundaryPrism` states where the boundary stands
+  (`origin`, `x`, `y`, used as given) and the `axis`;
+  `BoundaryPrism::along_placement_z` reads it from a placement, IFC's
+  `IfcPolygonalBoundedHalfSpace.Position`, `BoundaryPrism::along_normal`
+  from a plane frame as `bounded_half_space_in_frame` does, and
+  `BoundaryPrism::crossing` the cosine of the axis against the plane.
+  Refused by name: an axis within the angular tolerance of the plane
+  (`"parallel to the clip plane"`), a degenerate placement (axes parallel
+  or zero) and a depth that is not positive and finite.
+
+### Fixed
+
+- A bounded half-space whose boundary ring runs clockwise is built
+  outward-facing, the ring read reversed (the same region); it came out
+  inside-out before.
+
 ## [0.3.18] - 2026-10-13
 
 ### Added

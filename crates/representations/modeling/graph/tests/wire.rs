@@ -1122,6 +1122,12 @@ fn fixture() -> (GeometryGraph, Coverage) {
             boundary: profiles[3],
             placement: Transform3::IDENTITY,
         },
+        // Format 1.4: a half-space bounded along its placement's z (#321).
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary: closed_path,
+            placement: transform(),
+        },
         SolidOperation::StationedSpine {
             directrix: line_3d,
             sections: vec![
@@ -1654,7 +1660,7 @@ fn every_golden_payload_is_written_back_identically_under_its_version() {
         written.push(label);
     }
     written.sort();
-    assert_eq!(written, ["1.0", "1.1", "1.2", "1.3"]);
+    assert_eq!(written, ["1.0", "1.1", "1.2", "1.3", "1.4"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1779,7 +1785,7 @@ fn an_unknown_field_is_refused_by_name() {
 
 #[test]
 fn a_version_this_reader_does_not_read_is_refused_before_the_graph() {
-    for found in ["2.0", "1.4", "0.9", "1", "one", "1.0.0", ""] {
+    for found in ["2.0", "1.5", "0.9", "1", "one", "1.0.0", ""] {
         let mut payload = small_payload();
         payload["version"] = json!(found);
         // Even with content this reader does not know: the version is
@@ -2170,8 +2176,8 @@ fn a_node_reference_does_not_deserialise_outside_a_graph_payload() {
 
 #[test]
 fn the_format_version_is_named_in_every_payload() {
-    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 3));
-    assert_eq!(FORMAT_VERSION.to_string(), "1.3");
+    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 4));
+    assert_eq!(FORMAT_VERSION.to_string(), "1.4");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
     // A graph without windows is labelled 1.0, the lowest version that
@@ -2455,11 +2461,34 @@ fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
 // Format 1.2: seam sides and windows on run stations (#301)
 // ---------------------------------------------------------------------------
 
-/// `value` with what format 1.3 added taken out (#303): every run station
-/// at its basis's start stated at `0`, which it is, and every one at its
-/// basis's end stated one past its predecessor. The fixture's 1.2 content
-/// stays as it is.
+/// `value` with what formats 1.3 and 1.4 added taken out: every run
+/// station at its basis's start stated at `0`, which it is, and every one
+/// at its basis's end stated one past its predecessor (#303); and every
+/// half-space bounded along its placement's `z` as one bounded along its
+/// plane's normal ([`without_along_z`]). The fixture's 1.2 content stays as
+/// it is.
 fn without_basis_ends(value: &mut Value) {
+    without_along_z(value);
+    without_stated_ends(value);
+}
+
+/// `value` with what format 1.4 added taken out (#321): every
+/// `BoundedHalfSpaceAlongZ` written as the `BoundedHalfSpace` of the same
+/// fields.
+fn without_along_z(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(along) = object.remove("BoundedHalfSpaceAlongZ") {
+                object.insert("BoundedHalfSpace".into(), along);
+            }
+            object.values_mut().for_each(without_along_z);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_along_z),
+        _ => {}
+    }
+}
+
+fn without_stated_ends(value: &mut Value) {
     match value {
         Value::Object(object) => {
             if let Some(stations) = object
@@ -2475,14 +2504,14 @@ fn without_basis_ends(value: &mut Value) {
                     previous = station["station"]["distance"].as_f64().unwrap();
                 }
             }
-            object.values_mut().for_each(without_basis_ends);
+            object.values_mut().for_each(without_stated_ends);
         }
-        Value::Array(items) => items.iter_mut().for_each(without_basis_ends),
+        Value::Array(items) => items.iter_mut().for_each(without_stated_ends),
         _ => {}
     }
 }
 
-/// `value` with what formats 1.2 and 1.3 added taken out: every
+/// `value` with what formats 1.2 to 1.4 added taken out: every
 /// `OffsetsAtStations` written as the `OffsetByStations` of its plain
 /// stations (its basis's ends stated, [`without_basis_ends`]), and every
 /// section at a station without its side and window. The fixture's 1.1
@@ -2573,7 +2602,7 @@ fn plain_station_pointers(value: &Value, at: &str, found: &mut Vec<String>) {
 fn a_side_or_window_on_any_run_station_and_only_that_selects_one_two() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.3", "the fixture uses 1.3");
+    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
     without_run_seams(&mut payload);
     payload["version"] = json!("1.1");
 
@@ -2879,7 +2908,7 @@ fn plain_station_kinds() -> BTreeSet<String> {
 fn a_basis_end_on_any_run_station_and_only_that_selects_one_three() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.3", "the fixture uses 1.3");
+    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
     without_basis_ends(&mut payload);
     payload["version"] = json!("1.2");
     assert!(!payload.to_string().contains("basis_end"));
@@ -3067,4 +3096,151 @@ fn run_station_basis_ends_round_trip_and_a_stated_station_writes_none() {
     let plain = builder.finish(vec![offset]).unwrap().to_json().unwrap();
     assert_eq!(version_of(&plain), "1.2");
     assert!(!plain.contains("basis_end"), "{plain}");
+}
+
+// ---------------------------------------------------------------------------
+// Format 1.4: a half-space bounded along its placement's z (#321)
+// ---------------------------------------------------------------------------
+
+/// A graph without a half-space bounded along its placement's `z` is
+/// labelled as before 1.4; any one of them lifts it to 1.4, and a 1.3
+/// reader refuses that payload by the variant's name. Every
+/// `BoundedHalfSpace` of the every-kind fixture, its 1.4 content taken
+/// out, is restated along `z` in turn, alone, and reads in place.
+#[test]
+fn a_half_space_bounded_along_z_and_only_that_selects_one_four() {
+    let (graph, _) = fixture();
+    let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
+    without_along_z(&mut payload);
+    payload["version"] = json!("1.3");
+    assert!(!payload.to_string().contains("BoundedHalfSpaceAlongZ"));
+    let plain = read_json(&payload).unwrap();
+    assert_eq!(
+        version_of(&plain.to_json().unwrap()),
+        "1.3",
+        "the fixture's basis ends"
+    );
+    assert_eq!(cbor_version_of(&plain.to_cbor().unwrap()), "1.3");
+
+    let nodes = payload["graph"]["nodes"].as_array().unwrap().len();
+    let mut lifted_nodes = 0;
+    for index in 0..nodes {
+        if kind_of(&payload["graph"]["nodes"][index]) != "SolidOperation::BoundedHalfSpace" {
+            continue;
+        }
+        let mut lifted = payload.clone();
+        lifted["version"] = json!("1.4");
+        let operation = lifted["graph"]["nodes"][index]["SolidOperation"]
+            .as_object_mut()
+            .unwrap();
+        let fields = operation.remove("BoundedHalfSpace").unwrap();
+        operation.insert("BoundedHalfSpaceAlongZ".into(), fields);
+        let what = format!("node {index} along z");
+        let graph = read_json(&lifted).unwrap_or_else(|error| panic!("{what}: {error}"));
+        assert_eq!(version_of(&graph.to_json().unwrap()), "1.4", "{what}");
+        assert_eq!(
+            cbor_version_of(&graph.to_cbor().unwrap()),
+            "1.4",
+            "CBOR: {what}"
+        );
+        lifted["version"] = json!("1.3");
+        refused(
+            &lifted,
+            &WireError::UnknownKind {
+                kind: "BoundedHalfSpaceAlongZ".into(),
+                version: FormatVersion::new(1, 3),
+            },
+        );
+        lifted_nodes += 1;
+    }
+    assert!(
+        lifted_nodes >= 3,
+        "the fixture's bounded half-spaces: {lifted_nodes}"
+    );
+}
+
+/// A bounded half-space, along its plane's normal or its placement's `z`,
+/// on its own.
+fn bounded_half_space_graph(along_z: bool) -> GeometryGraph {
+    let mut builder = GeometryGraphBuilder::new();
+    let half_space = builder
+        .push(GeometryNode::HalfSpace(HalfSpace {
+            boundary: Plane3 {
+                origin: Vec3::ZERO,
+                normal: Vec3::new(0.6, 0.0, 0.8),
+            },
+            agreement: true,
+        }))
+        .unwrap();
+    let boundary = builder
+        .push(GeometryNode::Curve2(closed_polyline2()))
+        .unwrap();
+    let operation = if along_z {
+        SolidOperation::BoundedHalfSpaceAlongZ {
+            half_space,
+            boundary,
+            placement: transform(),
+        }
+    } else {
+        SolidOperation::BoundedHalfSpace {
+            half_space,
+            boundary,
+            placement: transform(),
+        }
+    };
+    let bounded = builder
+        .push(GeometryNode::SolidOperation(operation))
+        .unwrap();
+    builder.finish(vec![bounded]).unwrap()
+}
+
+/// A half-space bounded along `z` round-trips through both encodings under
+/// 1.4, and is the plane-normal one's payload under its own name; the
+/// plane-normal one is still the 1.0 graph, byte for byte; a 1.3 payload
+/// holding the new variant is refused by its name, and a node pointing at
+/// the wrong family is refused by validation, as for the old variant.
+#[test]
+fn a_half_space_bounded_along_z_round_trips_and_is_validated() {
+    let normal = bounded_half_space_graph(false).to_json().unwrap();
+    assert_eq!(version_of(&normal), "1.0");
+    let graph = bounded_half_space_graph(true);
+    let text = graph.to_json().unwrap();
+    assert_eq!(version_of(&text), "1.4");
+    assert_eq!(
+        text.replace("BoundedHalfSpaceAlongZ", "BoundedHalfSpace")
+            .replace("\"version\":\"1.4\"", "\"version\":\"1.0\""),
+        normal
+    );
+    for read in [
+        GeometryGraph::from_json(&text).unwrap(),
+        GeometryGraph::from_cbor(&graph.to_cbor().unwrap()).unwrap(),
+    ] {
+        assert!(matches!(
+            read.get(read.roots()[0]),
+            Some(GeometryNode::SolidOperation(
+                SolidOperation::BoundedHalfSpaceAlongZ { .. }
+            ))
+        ));
+        assert_eq!(read.to_json().unwrap(), text);
+    }
+    let mut older: Value = serde_json::from_str(&text).unwrap();
+    older["version"] = json!("1.3");
+    refused(
+        &older,
+        &WireError::UnknownKind {
+            kind: "BoundedHalfSpaceAlongZ".into(),
+            version: FormatVersion::new(1, 3),
+        },
+    );
+    // Its boundary must be a 2D curve or a profile, its plane a half-space.
+    let mut wrong: Value = serde_json::from_str(&text).unwrap();
+    wrong["graph"]["nodes"][2]["SolidOperation"]["BoundedHalfSpaceAlongZ"]["boundary"] = json!(0);
+    assert!(
+        matches!(
+            read_json(&wrong),
+            Err(WireError::InvalidGraph { node: Some(2), .. })
+        ),
+        "a half-space as the boundary"
+    );
 }

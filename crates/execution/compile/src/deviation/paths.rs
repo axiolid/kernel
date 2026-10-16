@@ -211,13 +211,15 @@ pub(crate) fn of_solid(
                 None => Ok(Deviation::default()),
             };
         }
-        SolidOperation::BoundedHalfSpace { .. } => (
-            DeviationPath::BoundedHalfSpace,
-            "",
-            DeviationBound::Unbounded(
-                "bounded half-space: a finite stand-in for an unbounded solid",
-            ),
-        ),
+        SolidOperation::BoundedHalfSpace { .. } | SolidOperation::BoundedHalfSpaceAlongZ { .. } => {
+            (
+                DeviationPath::BoundedHalfSpace,
+                "",
+                DeviationBound::Unbounded(
+                    "bounded half-space: a finite stand-in for an unbounded solid",
+                ),
+            )
+        }
         _ => (
             DeviationPath::Unreported,
             "",

@@ -371,3 +371,34 @@ payloads in another language needs a correctly rounded decimal parser (most
 standard libraries have one, such as JavaScript's `Number` or Python's
 `float`).
 
+## Note 2026-10-16: format 1.4 (#321)
+
+Format 1.4 adds a half-space bounded along its placement's `z`, so
+`FORMAT_VERSION` is `1.4`, a minor change under the version rules above.
+The triage first chose a field on `BoundedHalfSpace`; the maintainer then
+chose a new variant instead (#321's triage update), because a field on a
+public struct variant breaks the Rust API and would have forced
+`axiolid-model` 0.4.0. `SolidOperation` is `#[non_exhaustive]`, so a
+variant is additive. Every graph written before keeps its meaning.
+
+- **What it adds.** One variant, `SolidOperation::BoundedHalfSpaceAlongZ`,
+  with `BoundedHalfSpace`'s fields (`half_space`, `boundary`,
+  `placement`): the boundary's prism runs along the placement's `z`,
+  oblique to the plane allowed, as IFC's `IfcPolygonalBoundedHalfSpace`
+  does, where `BoundedHalfSpace`'s runs along the plane's normal.
+- **Its feature test** (#297's rule). `wire::required_version` raises the
+  version to 1.4 when a node is a `BoundedHalfSpaceAlongZ`. The reader
+  refuses the same test in a 1.3 or older payload as `UnknownKind { kind:
+  "BoundedHalfSpaceAlongZ" }`, as such a reader would. A graph without the
+  variant is written exactly as before, labelled 1.0 to 1.3.
+- **Golden payloads.** `tests/wire/v1.0/` to `v1.3/` are read and written
+  back byte for byte under their own versions;
+  `tests/wire/v1.4/every-kind.json` adds a `BoundedHalfSpaceAlongZ`, and is
+  what today's writer writes.
+- **Guards.** A test restates every `BoundedHalfSpace` of the every-kind
+  fixture, its 1.4 content taken out, as `BoundedHalfSpaceAlongZ` in turn:
+  each reads in place, lifts the payload to 1.4 (JSON and CBOR), and is
+  refused in a 1.3 payload. The builder validates the new variant's
+  references as the old one's. `scripts/probe_prism_axis_mutants.py`
+  reads the variant in a 1.3 payload, never labels 1.4 and skips its
+  references; each is caught.

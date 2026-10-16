@@ -16,6 +16,8 @@ use axiolid_mesh_compile_contract::{
 };
 use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 
+use crate::half_space_boundary::PrismAxis;
+
 use axiolid_construct::extrude::extrude_profile;
 use axiolid_construct::profile::profile_rings;
 
@@ -202,6 +204,62 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 operation: Operation::CurveEvaluation,
             }),
         }
+    }
+
+    /// The slab of a bounded half-space, `depth` deep on its kept side.
+    ///
+    /// `placement` is the boundary's OWN frame, independent of the clip
+    /// plane: the profile is authored in it, so it orients the profile
+    /// before the slab is built. Applying it only to the finished mesh
+    /// cannot express an in-plane rotation, because by then the boundary has
+    /// already been framed against the plane normal. Along the plane normal
+    /// the frame is projected into the plane; along the placement's `z`
+    /// (#321) it is read as written ([`BoundaryPrism::along_placement_z`]),
+    /// the prism at any angle to the plane, and the boundary chorded within
+    /// the budget over the frame's longest axis, so the chords stay within
+    /// it once placed.
+    ///
+    /// [`BoundaryPrism::along_placement_z`]: axiolid_construct::half_space::BoundaryPrism::along_placement_z
+    fn bounded_half_space(
+        &self,
+        graph: &GeometryGraph,
+        (half_space, boundary): (NodeId, NodeId),
+        placement: Transform3,
+        prism_axis: PrismAxis,
+        depth: axiolid_construct::half_space::SlabDepth,
+        options: &ExecutionOptions,
+    ) -> GeomResult<TriMesh> {
+        use axiolid_construct::half_space::{bounded_half_space_prism, BoundaryPrism};
+        let node = self.node(graph, half_space)?;
+        let GeometryNode::HalfSpace(hs) = node else {
+            return Err(GeomError::InvalidInput(format!(
+                "half-space {half_space:?} is not a HalfSpace node"
+            )));
+        };
+        let tolerance = options.tolerance();
+        let (prism, stretch) = match prism_axis {
+            PrismAxis::PlaneNormal => {
+                let frame = PlaneFrame::new(
+                    placement.translation,
+                    placement.matrix3.x_axis.normalize_or_zero(),
+                    placement.matrix3.y_axis.normalize_or_zero(),
+                    tolerance,
+                )
+                .map_err(|error| {
+                    GeomError::InvalidInput(format!(
+                        "bounded half-space placement is not a usable boundary frame: {error}"
+                    ))
+                })?;
+                (BoundaryPrism::along_normal(frame, hs.boundary)?, 1.0)
+            }
+            PrismAxis::PlacementZ => {
+                let prism = BoundaryPrism::along_placement_z(placement, tolerance)?;
+                (prism, prism.x.length().max(prism.y.length()))
+            }
+        };
+        let chord = chord_error(options) / stretch.max(1.0);
+        let rings = self.boundary_rings(graph, boundary, chord, options)?;
+        bounded_half_space_prism(&rings, hs.boundary, prism, hs.agreement, depth, tolerance)
     }
 
     /// Resolve a node that must be a profile, into flattened rings.
@@ -1029,48 +1087,23 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 sections,
                 frame,
             } => crate::station::stationed_spine(graph, *directrix, sections, *frame, options),
-            SolidOperation::BoundedHalfSpace {
-                half_space,
-                boundary,
-                placement,
-            } => {
-                let node = self.node(graph, *half_space)?;
-                let GeometryNode::HalfSpace(hs) = node else {
-                    return Err(GeomError::InvalidInput(format!(
-                        "half-space {half_space:?} is not a HalfSpace node"
-                    )));
-                };
-                let rings = self.boundary_rings(graph, *boundary, chord_error(options), options)?;
+            SolidOperation::BoundedHalfSpace { .. }
+            | SolidOperation::BoundedHalfSpaceAlongZ { .. } => {
+                let (half_space, boundary, placement, prism_axis) =
+                    crate::half_space_boundary::bounded(operation)
+                        .expect("the arm matches a bounded half-space");
                 // The declared margin is the contract's own knob for how far
                 // an unbounded half-space extends before it can be meshed.
                 let margin = axiolid_primitive::ClipMargin::new(2.0)
                     .expect("2.0 is a valid positive clip margin");
-                // `placement` is the boundary's OWN frame, independent of the
-                // clip plane: the profile is authored in it, so it has to
-                // orient the profile before the slab is built. Applying it
-                // only to the finished mesh cannot express an in-plane
-                // rotation, because by then the boundary has already been
-                // framed against the plane normal.
-                let frame = PlaneFrame::new(
-                    placement.translation,
-                    placement.matrix3.x_axis.normalize_or_zero(),
-                    placement.matrix3.y_axis.normalize_or_zero(),
-                    options.tolerance(),
+                self.bounded_half_space(
+                    graph,
+                    (half_space, boundary),
+                    placement,
+                    prism_axis,
+                    axiolid_construct::half_space::SlabDepth::Relative(margin),
+                    options,
                 )
-                .map_err(|error| {
-                    GeomError::InvalidInput(format!(
-                        "bounded half-space placement is not a usable boundary frame: {error}"
-                    ))
-                })?;
-                let mesh = axiolid_construct::half_space::bounded_half_space_in_frame(
-                    &rings,
-                    hs.boundary,
-                    frame,
-                    hs.agreement,
-                    margin,
-                    options.tolerance(),
-                )?;
-                Ok(mesh)
             }
             // Routed to `build_boolean` by `build`; unreachable here.
             SolidOperation::Boolean { .. } => Err(GeomError::InvalidInput(
