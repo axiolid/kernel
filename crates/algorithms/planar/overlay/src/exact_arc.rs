@@ -83,7 +83,7 @@
 //! a speed change.
 
 pub(crate) mod arrangement;
-mod boxes;
+pub(crate) mod boxes;
 mod edge;
 mod point;
 
@@ -97,6 +97,7 @@ use axiolid_guarantees::Sign;
 use crate::arc::{arc_orientation, arc_ring_area, ArcRing, ArcVertex};
 use crate::{OverlayError, OverlayOperation};
 
+pub(crate) use edge::Bounds;
 use edge::{crossings, orient_f64, Carrier, Edge};
 
 /// The exact orientation of three doubles: positive when `c` lies left

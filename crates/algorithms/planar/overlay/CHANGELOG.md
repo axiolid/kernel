@@ -9,6 +9,34 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Minkowski sums and erosions, and the disc morphology built on them
+  (`Region::erode_inner`, `erode_outer`, `dilate_inner`, `dilate_outer`),
+  no longer grow with the square of the corners along walls of many short
+  edges (#323). On the 4.5 m by 5 m room whose long walls carry 0.5 mm
+  teeth, eroded by a 0.75 m disc, 102, 602 and 1,202 corners took
+  0.045 s, 1.15 s and 4.4 s at 27 MB, 416 MB and 1.7 GB, and now take
+  9 ms, 68 ms and 0.23 s at 6 MB, 25 MB and 98 MB. With the corners
+  exactly collinear they took 0.050 s, 1.4 s and 5.7 s and now take
+  2 ms, 8 ms and 12 ms, the rectangle's 2 ms plus reading the corners.
+  Measured with `cargo bench -p axiolid-benchmark --bench disc_erosion`,
+  interleaved runs against 0.3.15 on a shared machine. Each boundary edge
+  gave one hull, each overlapping hundreds of its neighbours. Now a vertex
+  exactly between its neighbours on one line (an exact orientation, no
+  tolerance) is merged away before the hulls are built, and a chord
+  between two vertices of a ring, proved exactly to lie in the summed set,
+  gives one hull that covers nearly all of each edge hull it spans; those
+  keep only what it does not hold, a sliver about the depth of the teeth.
+  The union of the terms is the same set, so the results are too: bit for
+  bit on the toothed room and on every sum and erosion of the crate's
+  tests but two, whose results lose vertices lying exactly on the line
+  between their neighbours, as the merged edges no longer split there.
+  `tests/minkowski.rs` pins the toothed room's erosions against 0.3.15
+  by hash, a unit test compares every route with the untrimmed hulls
+  bit for bit, and `scripts/probe_minkowski_cover_mutants.py` lists the
+  faults they must catch.
+
 ## [0.3.15] - 2026-10-14
 
 ### Changed

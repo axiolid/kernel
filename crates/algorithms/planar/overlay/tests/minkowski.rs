@@ -748,3 +748,59 @@ fn the_convex_path_is_unchanged_bit_for_bit() {
     out.push(r.minkowski_erosion(&about, tol()).unwrap());
     assert_eq!(digest(&out), 13_114_369_021_911_355_074);
 }
+
+/// The room of #323: 4.5 m by 5 m, its two long walls carrying `teeth`
+/// teeth of `depth` each.
+fn toothed_room(teeth: u32, depth: f64, t: Tolerance) -> Region {
+    let (w, h) = (4.5, 5.0);
+    let n = 2 * teeth;
+    let at = |k: u32| w * f64::from(k) / f64::from(n);
+    let tooth = |k: u32| if k % 2 == 1 { depth } else { 0.0 };
+    let mut points: Vec<Point2> = (0..=n).map(|k| Point2::new(at(k), tooth(k))).collect();
+    points.extend((0..=n).map(|k| Point2::new(w - at(k), h - tooth(k))));
+    Region::new(
+        vec![Polygon {
+            outer: Ring { points },
+            holes: vec![],
+        }],
+        t,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_toothed_room_erodes_as_before_and_within_the_bracket() {
+    // Erosions of the room of #323, 102 corners, by a 0.75 m disc: the
+    // digest is that of axiolid-overlay 0.3.15, before the edge hulls were
+    // merged and trimmed, and the results bracket the exact erosion.
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let room = toothed_room(25, 5e-4, t);
+    let inner = room.erode_inner(0.75, t).unwrap();
+    let outer = room.erode_outer(0.75, t).unwrap();
+    assert_eq!(
+        digest(&[inner.clone(), outer.clone()]),
+        13_049_825_630_976_000_310
+    );
+    for p in samples(Point2::new(0.0, 0.0), Point2::new(4.5, 5.0), 4000) {
+        if in_region(&inner, p) {
+            assert!(in_exact_erosion(&room, p, 0.75), "erode_inner {p:?}");
+        }
+        if in_exact_erosion(&room, p, 0.75) {
+            assert!(in_region(&outer, p), "erode_outer {p:?}");
+        }
+    }
+    // With the corners exactly collinear the room is the plain rectangle.
+    let flat = toothed_room(25, 0.0, t);
+    let plain = Region::new(
+        vec![Polygon {
+            outer: ring(&[(0.0, 0.0), (4.5, 0.0), (4.5, 5.0), (0.0, 5.0)]),
+            holes: vec![],
+        }],
+        t,
+    )
+    .unwrap();
+    assert_eq!(
+        flat.erode_inner(0.75, t).unwrap().polygons(),
+        plain.erode_inner(0.75, t).unwrap().polygons()
+    );
+}

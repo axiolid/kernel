@@ -73,7 +73,7 @@ pub(crate) struct Bounds {
 }
 
 impl Bounds {
-    fn around(points: &[Point2], grow: f64) -> Self {
+    pub(crate) fn around(points: &[Point2], grow: f64) -> Self {
         let mut b = Self {
             x0: f64::INFINITY,
             y0: f64::INFINITY,

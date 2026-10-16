@@ -53,6 +53,20 @@
 //! and peak memory against corner count; `scripts/probe_minkowski_mutants.py`
 //! lists the faults the tests must catch.
 //!
+//! # Walls of many short edges
+//!
+//! One hull per boundary edge overlaps hundreds of its neighbours along a
+//! wall of sub-millimetre teeth or exactly collinear corners, and their
+//! crossings grew with the square of the corners (#323). Before the hulls
+//! are built, exactly collinear corners are merged, and chords proved to
+//! lie in the summed set trim the hulls they span to slivers, the union
+//! unchanged ([`crate::cover`]). A part holding the origin is anchored
+//! there, so the set's copy is its own rings, which the subdivision
+//! shares. `cargo bench -p axiolid-benchmark --bench disc_erosion`
+//! measures time and peak memory against corner count;
+//! `scripts/probe_minkowski_cover_mutants.py` lists the faults the tests
+//! must catch.
+//!
 //! # Discs: inner and outer
 //!
 //! No polygon is a disc, so [`Region::dilate`] and [`Region::erode`] are
@@ -261,6 +275,11 @@ fn from(rings: &[usize], first: usize) -> &[usize] {
 /// A ring's points, with neighbours closer than the tolerance merged (a
 /// hull of two nearly equal translates has such pairs).
 fn tidy(points: Vec<Point2>, tolerance: Tolerance) -> Option<ArcRing> {
+    tidy_points(points, tolerance).map(|out| ArcRing::from_points(&out))
+}
+
+/// The points [`tidy`] keeps, when three or more remain.
+fn tidy_points(points: Vec<Point2>, tolerance: Tolerance) -> Option<Vec<Point2>> {
     let mut out: Vec<Point2> = Vec::with_capacity(points.len());
     for p in points {
         if out
@@ -273,7 +292,15 @@ fn tidy(points: Vec<Point2>, tolerance: Tolerance) -> Option<ArcRing> {
     while out.len() > 1 && (out[0] - out[out.len() - 1]).length() <= tolerance.linear() {
         out.pop();
     }
-    (out.len() >= 3).then(|| ArcRing::from_points(&out))
+    (out.len() >= 3).then_some(out)
+}
+
+/// A chord proved to lie in a summed set (#323), and its hull with each
+/// convex piece (`None` where tidying left too few points).
+#[derive(Debug, Clone)]
+struct Covering {
+    ends: (Point2, Point2),
+    hulls: Vec<Option<Vec<Point2>>>,
 }
 
 /// One polygon of a structuring shape, as the sum takes it.
@@ -296,9 +323,12 @@ impl Part {
         }
     }
 
-    /// A point of the part, by which the other operand is translated.
+    /// A point of the part, by which the other operand is translated: the
+    /// origin when a piece holds it, so that the copy is the operand's own
+    /// rings, which the subdivision shares (#323); else its first vertex.
     fn anchor(&self) -> Point2 {
         match self {
+            _ if self.holds_origin() => Point2::new(0.0, 0.0),
             Self::Pieces(p) => p[0][0],
             Self::Rings(r) => r[0][0],
         }
@@ -358,6 +388,32 @@ enum Set {
 }
 
 impl Set {
+    /// For each of the set's `rings`, the side of its travel the set lies
+    /// on: `Positive` left, `Negative` right, `Zero` for a ring of zero
+    /// area. An outer ring of a polygon holds the set inside, a hole
+    /// outside; for [`Self::Outside`] the frame holds it inside and the
+    /// polygons' rings the other way round.
+    fn sides(&self, rings: &[Vec<Point2>]) -> Vec<Sign> {
+        let (offset, shape, outer_inside) = match self {
+            Self::Region(shape) => (0, shape, true),
+            Self::Outside(shape) => (1, shape, false),
+        };
+        rings
+            .iter()
+            .enumerate()
+            .map(|(i, ring)| {
+                let inside = i < offset
+                    || (shape.starts.binary_search(&(i - offset)).is_ok() == outer_inside);
+                let turn = crate::orientation(ring);
+                if inside {
+                    turn
+                } else {
+                    turn.flip()
+                }
+            })
+            .collect()
+    }
+
     /// The number of rings the set takes.
     fn span(&self) -> usize {
         match self {
@@ -461,7 +517,13 @@ impl Rule {
 /// ring of S)`, `dS + dB` the parallelograms of edge pairs: if the
 /// boundaries of `x - B` and `S` do not meet yet the two do, an outer ring
 /// of one lies inside the other.
-fn sum_terms(rings: &[Vec<Point2>], set: &Set, parts: &[Part], tolerance: Tolerance) -> Terms {
+fn sum_terms(
+    rings: &[Vec<Point2>],
+    set: &Set,
+    parts: &[Part],
+    covers: bool,
+    tolerance: Tolerance,
+) -> Terms {
     let shift = |p: Point2, by: Point2| Point2::new(p.x + by.x, p.y + by.y);
     let moved = |r: &[Point2], by: Point2| {
         ArcRing::from_points(&r.iter().map(|&p| shift(p, by)).collect::<Vec<_>>())
@@ -480,26 +542,89 @@ fn sum_terms(rings: &[Vec<Point2>], set: &Set, parts: &[Part], tolerance: Tolera
         }
     }
     let pieces = out.len();
-    for ring in rings {
-        for i in 0..ring.len() {
-            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+    // The convex pieces of all parts, and how far they reach: chords are
+    // taken within a sixteenth of that of the vertices they span (#323).
+    let convex: Vec<&Vec<Point2>> = parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Pieces(p) => Some(p),
+            Part::Rings(_) => None,
+        })
+        .flatten()
+        .collect();
+    let depth = parts
+        .iter()
+        .flat_map(Part::points)
+        .fold(0.0_f64, |m, q| m.max(q.x.abs()).max(q.y.abs()))
+        / 16.0;
+    let sweep = |k: &[Point2], a: Point2, b: Point2| -> Option<Vec<Point2>> {
+        let points: Vec<Point2> = k.iter().flat_map(|&q| [shift(a, q), shift(b, q)]).collect();
+        tidy_points(hull(points), tolerance)
+    };
+    let index = crate::cover::Index::new(rings);
+    let sides = set.sides(rings);
+    for (r, ring) in rings.iter().enumerate() {
+        // Exactly collinear edges merged: one hull per straight edge.
+        let boundary = crate::cover::merged(ring);
+        let edges = &boundary.points;
+        let n = edges.len();
+        // Each edge's chord hulls, one per convex piece, when a chord
+        // proved to lie in the set spans it.
+        let mut cover_of: Vec<Option<usize>> = vec![None; n];
+        let mut coverings: Vec<Covering> = Vec::new();
+        if covers && !convex.is_empty() {
+            for chord in crate::cover::chords(r, &boundary, sides[r], depth, &index) {
+                let (a, b) = (edges[chord.from], edges[(chord.from + chord.span) % n]);
+                let hulls: Vec<Option<Vec<Point2>>> =
+                    convex.iter().map(|k| sweep(k, a, b)).collect();
+                out.extend(hulls.iter().flatten().map(|h| ArcRing::from_points(h)));
+                for step in 0..chord.span {
+                    cover_of[(chord.from + step) % n] = Some(coverings.len());
+                }
+                coverings.push(Covering {
+                    ends: (a, b),
+                    hulls,
+                });
+            }
+        }
+        // Trimmed hulls already given: the two edges of a tooth often
+        // leave the same sliver, which one copy covers.
+        let mut given: std::collections::HashSet<Vec<(u64, u64)>> =
+            std::collections::HashSet::new();
+        for i in 0..n {
+            let (a, b) = (edges[i], edges[(i + 1) % n]);
+            for (j, k) in convex.iter().enumerate() {
+                let Some(h) = sweep(k, a, b) else {
+                    continue;
+                };
+                let cover = cover_of[i].and_then(|c| {
+                    let covering = &coverings[c];
+                    covering.hulls[j].as_ref().map(|g| (covering.ends, g))
+                });
+                let Some((chord, g)) = cover else {
+                    out.push(ArcRing::from_points(&h));
+                    continue;
+                };
+                let Some(kept) =
+                    crate::cover::trim(h, g, chord, |points| tidy_points(points, tolerance))
+                else {
+                    continue;
+                };
+                if given.insert(
+                    kept.iter()
+                        .map(|p| (p.x.to_bits(), p.y.to_bits()))
+                        .collect(),
+                ) {
+                    out.push(ArcRing::from_points(&kept));
+                }
+            }
             for part in parts {
-                match part {
-                    Part::Pieces(convex) => {
-                        for k in convex {
-                            let points: Vec<Point2> =
-                                k.iter().flat_map(|&q| [shift(a, q), shift(b, q)]).collect();
+                if let Part::Rings(own) = part {
+                    for r in own {
+                        for j in 0..r.len() {
+                            let (p, q) = (r[j], r[(j + 1) % r.len()]);
+                            let points = vec![shift(a, p), shift(a, q), shift(b, p), shift(b, q)];
                             out.extend(tidy(hull(points), tolerance));
-                        }
-                    }
-                    Part::Rings(own) => {
-                        for r in own {
-                            for j in 0..r.len() {
-                                let (p, q) = (r[j], r[(j + 1) % r.len()]);
-                                let points =
-                                    vec![shift(a, p), shift(a, q), shift(b, p), shift(b, q)];
-                                out.extend(tidy(hull(points), tolerance));
-                            }
                         }
                     }
                 }
@@ -661,17 +786,18 @@ impl Region {
         if self.is_empty() {
             return Ok(Self::empty());
         }
-        let (rings, rule) = self.sum_rule(parts, tolerance);
+        let (rings, rule) = self.sum_rule(parts, true, tolerance);
         let arrangement = ArcArrangement::new(&rings, tolerance)?;
         region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
     }
 
     /// The rings of a sum's arrangement and the rule that reads the sum
-    /// from them. The region must not be empty.
-    fn sum_rule(&self, parts: &[Part], tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
+    /// from them, with the edge hulls trimmed by chords when `covers`
+    /// (#323; the tests compare both). The region must not be empty.
+    fn sum_rule(&self, parts: &[Part], covers: bool, tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
         let shape = Layout::new(self.polygons());
-        let mut terms = sum_terms(&own, &Set::Region(shape), parts, tolerance);
+        let mut terms = sum_terms(&own, &Set::Region(shape), parts, covers, tolerance);
         (std::mem::take(&mut terms.rings), Rule::Sum(terms))
     }
 
@@ -683,14 +809,20 @@ impl Region {
         if self.is_empty() {
             return Ok(Self::empty());
         }
-        let (rings, rule) = self.erosion_rule(parts, tolerance);
+        let (rings, rule) = self.erosion_rule(parts, true, tolerance);
         let arrangement = ArcArrangement::new(&rings, tolerance)?;
         region_of(&arrangement, |rings| rule.holds(rings), true, tolerance)
     }
 
     /// The rings of an erosion's arrangement and the rule that reads the
-    /// erosion from them. The region must not be empty.
-    fn erosion_rule(&self, parts: &[Part], tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
+    /// erosion from them, the edge hulls trimmed as [`Self::sum_rule`]
+    /// trims them. The region must not be empty.
+    fn erosion_rule(
+        &self,
+        parts: &[Part],
+        covers: bool,
+        tolerance: Tolerance,
+    ) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
         let shape = Layout::new(self.polygons());
         // A box holding the region: its complement within the box, summed
@@ -717,7 +849,13 @@ impl Region {
         let mut outside = vec![frame];
         outside.extend(own.iter().cloned());
         let flipped: Vec<Part> = parts.iter().map(Part::flipped).collect();
-        let mut terms = sum_terms(&outside, &Set::Outside(shape.clone()), &flipped, tolerance);
+        let mut terms = sum_terms(
+            &outside,
+            &Set::Outside(shape.clone()),
+            &flipped,
+            covers,
+            tolerance,
+        );
         let m = own.len();
         let mut rings: Vec<ArcRing> = own.iter().map(|r| ArcRing::from_points(r)).collect();
         rings.append(&mut terms.rings);
@@ -998,8 +1136,8 @@ mod tests {
         let mut sides = 0;
         for part in &parts {
             for (rings, rule) in [
-                region.sum_rule(std::slice::from_ref(part), t),
-                region.erosion_rule(std::slice::from_ref(part), t),
+                region.sum_rule(std::slice::from_ref(part), true, t),
+                region.erosion_rule(std::slice::from_ref(part), true, t),
             ] {
                 let arrangement = ArcArrangement::new(&rings, t).unwrap();
                 let mut held = 0;
@@ -1078,6 +1216,185 @@ mod tests {
                 r.erode_parts(std::slice::from_ref(&whole), t).unwrap(),
             );
             assert!(!a.is_empty() && apart(&a, &b) < 1e-9, "{}", apart(&a, &b));
+        }
+    }
+
+    /// A wall from `a` to `b` with `teeth` teeth of `depth` to its left,
+    /// without its end `b`.
+    fn teeth(a: (f64, f64), b: (f64, f64), teeth: usize, depth: f64) -> Vec<(f64, f64)> {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = dx.hypot(dy);
+        let (nx, ny) = (-dy / len, dx / len);
+        (0..2 * teeth)
+            .map(|k| {
+                let t = k as f64 / (2 * teeth) as f64;
+                let d = if k % 2 == 1 { depth } else { 0.0 };
+                (a.0 + t * dx + d * nx, a.1 + t * dy + d * ny)
+            })
+            .collect()
+    }
+
+    /// Regions whose walls carry teeth, exactly collinear corners or a
+    /// tessellated column (#323), and shapes to sum and erode them by.
+    fn walls() -> Vec<(&'static str, Region)> {
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let region = |rings: Vec<Vec<(f64, f64)>>| {
+            Region::new(
+                vec![Polygon {
+                    outer: ring(&rings[0]),
+                    holes: rings[1..].iter().map(|h| ring(h)).collect(),
+                }],
+                t,
+            )
+            .unwrap()
+        };
+        let room = |depth: f64| {
+            let mut outer = teeth((0.0, 0.0), (4.0, 0.0), 30, depth);
+            outer.extend(teeth((4.0, 0.0), (4.0, 3.0), 2, 0.0));
+            outer.extend(teeth((4.0, 3.0), (0.0, 3.0), 30, depth));
+            outer.push((0.0, 3.0));
+            outer
+        };
+        let notch = {
+            // An L whose inner walls, in the notch, carry teeth.
+            let mut outer = vec![(0.0, 0.0), (4.0, 0.0)];
+            outer.extend(teeth((4.0, 1.5), (2.0, 1.5), 20, 5e-4));
+            outer.extend(teeth((2.0, 1.5), (2.0, 3.0), 15, 5e-4));
+            outer.extend([(2.0, 3.0), (0.0, 3.0)]);
+            outer
+        };
+        let column: Vec<(f64, f64)> = (0..40)
+            .map(|i| {
+                let a = -(i as f64) * std::f64::consts::TAU / 40.0;
+                (2.0 + 0.4 * a.cos(), 1.5 + 0.4 * a.sin())
+            })
+            .collect();
+        let mut pillar = teeth((1.0, 1.0), (1.0, 2.0), 10, -5e-4);
+        pillar.extend(teeth((1.0, 2.0), (1.4, 2.0), 4, -5e-4));
+        pillar.extend(teeth((1.4, 2.0), (1.4, 1.0), 10, -5e-4));
+        pillar.extend(teeth((1.4, 1.0), (1.0, 1.0), 4, -5e-4));
+        let (s, c) = 2.3f64.to_radians().sin_cos();
+        let placed: Vec<(f64, f64)> = room(5e-4)
+            .into_iter()
+            .map(|(x, y)| (640_000.0 + c * x - s * y, 5_650_000.0 + s * x + c * y))
+            .collect();
+        // A diamond of the region straddling the line through the valleys
+        // under a tooth: no chord may run along that line.
+        let peak = 4.0 * 21.0 / 60.0;
+        let island = Region::new(
+            vec![Polygon {
+                outer: ring(&[
+                    (peak, -1e-4),
+                    (peak + 2e-4, 0.0),
+                    (peak, 1e-4),
+                    (peak - 2e-4, 0.0),
+                ]),
+                holes: vec![],
+            }],
+            t,
+        )
+        .unwrap();
+        vec![
+            ("teeth in", region(vec![room(5e-4)])),
+            ("teeth out", region(vec![room(-5e-4)])),
+            ("collinear", region(vec![room(0.0)])),
+            ("notch", region(vec![notch])),
+            (
+                "column and pillar",
+                region(vec![room(5e-4), column, pillar]),
+            ),
+            ("placed", region(vec![placed])),
+            (
+                "island",
+                region(vec![room(5e-4)]).union(&island, t).unwrap(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn chord_covers_leave_sums_and_erosions_unchanged() {
+        // Trimming the edge hulls by chords proved to lie in the set keeps
+        // the union of the terms, so every result is the one built from
+        // the whole hulls (#323), bit for bit, while the terms shrink.
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let disc: Vec<Point2> = (0..64)
+            .map(|i| {
+                let a = i as f64 * std::f64::consts::TAU / 64.0;
+                Point2::new(0.3 * a.cos(), 0.3 * a.sin())
+            })
+            .collect();
+        let l_shape = polygon_part(&shapes()[0].0, &[], t).unwrap();
+        let size = |rings: &[ArcRing]| rings.iter().map(|r| r.vertices.len()).sum::<usize>();
+        for (name, region) in walls() {
+            for (round, part) in [
+                (true, Part::Pieces(vec![disc.clone()])),
+                (false, l_shape.clone()),
+            ] {
+                let parts = std::slice::from_ref(&part);
+                for erosion in [false, true] {
+                    let build = |covers: bool| {
+                        let (rings, rule) = if erosion {
+                            region.erosion_rule(parts, covers, t)
+                        } else {
+                            region.sum_rule(parts, covers, t)
+                        };
+                        let arrangement = ArcArrangement::new(&rings, t).unwrap();
+                        let out = region_of(&arrangement, |r| rule.holds(r), true, t).unwrap();
+                        (size(&rings), out)
+                    };
+                    let ((trimmed, a), (whole, b)) = (build(true), build(false));
+                    assert!(!a.is_empty(), "{name}");
+                    assert_eq!(a.polygons(), b.polygons(), "{name}, erosion {erosion}");
+                    // A disc's hulls lose most of their vertices, an L's
+                    // few pieces less.
+                    match name {
+                        "collinear" => {}
+                        _ if round && name != "island" => {
+                            assert!(2 * trimmed < whole, "{name}: {trimmed} of {whole}");
+                        }
+                        _ => assert!(trimmed < whole, "{name}: {trimmed} of {whole}"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exactly_collinear_corners_cost_and_give_what_the_plain_room_does() {
+        // Merged before the hulls are built (#323): the same rings as for
+        // the rectangle, so the same result bit for bit.
+        let t = Tolerance::new(1e-9, 1e-9).unwrap();
+        let walls = walls();
+        let collinear = &walls.iter().find(|(n, _)| *n == "collinear").unwrap().1;
+        let plain = Region::new(
+            vec![Polygon {
+                outer: ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0), (0.0, 3.0)]),
+                holes: vec![],
+            }],
+            t,
+        )
+        .unwrap();
+        for radius in [0.3, 0.75] {
+            for (a, b) in [
+                (
+                    collinear.erode_inner(radius, t),
+                    plain.erode_inner(radius, t),
+                ),
+                (
+                    collinear.erode_outer(radius, t),
+                    plain.erode_outer(radius, t),
+                ),
+                (
+                    collinear.dilate_inner(radius, t),
+                    plain.dilate_inner(radius, t),
+                ),
+                (
+                    collinear.dilate_outer(radius, t),
+                    plain.dilate_outer(radius, t),
+                ),
+            ] {
+                assert_eq!(a.unwrap().polygons(), b.unwrap().polygons());
+            }
         }
     }
 }

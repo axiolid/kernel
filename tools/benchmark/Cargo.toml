@@ -105,6 +105,10 @@ name = "minkowski_plan"
 harness = false
 
 [[bench]]
+name = "disc_erosion"
+harness = false
+
+[[bench]]
 name = "triangulate_points"
 harness = false
 

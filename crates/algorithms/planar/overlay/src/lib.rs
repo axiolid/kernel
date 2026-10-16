@@ -29,6 +29,7 @@ mod arrangement;
 mod circle;
 mod contact;
 mod convex_parts;
+mod cover;
 mod degenerate;
 mod exact_arc;
 mod exact_overlay;

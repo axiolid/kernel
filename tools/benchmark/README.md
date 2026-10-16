@@ -23,6 +23,7 @@ so it stays out of the release.
 | `benches/exact_openings.rs` | Cost per placed opening cut exactly from a placed wall, by openings already cut (#228) |
 | `benches/boundary_distance.rs` | Exact boundary distance between building elements that touch or cross, and a control pair apart (#273) |
 | `benches/minkowski_plan.rs` | Time and peak memory of the exact Minkowski sum and erosion of a floor's walls by a 0.9 m square, against corner count (#292) |
+| `benches/disc_erosion.rs` | Time and peak memory of the inner and outer disc erosions of a room whose walls carry 0.5 mm teeth or exactly collinear corners, at 102, 602 and 1,202 corners, beside the plain rectangle (#323) |
 | `benches/triangulate_points.rs` | Planar Delaunay triangulation of 1k to 16k random points, whose growth shows the adjacency is maintained locally (#268) |
 | `benches/certified_length.rs` | Certified joint distances along an offset by distances beside an ellipse at window tolerances, `1e-6` to `1e-9` (#307) |
 | `benches/overlay_soup.rs` | The exact union of soups whose rings share no edges (2,000 random triangles, two 1000-gons) and of two meshes given as soups, against the grid backend `i_overlay` (#218) |
@@ -40,6 +41,7 @@ cargo bench -p axiolid-benchmark --bench scenario   # end to end
 cargo bench -p axiolid-benchmark --bench exact_openings  # exact placed openings
 cargo bench -p axiolid-benchmark --bench boundary_distance  # touching elements
 cargo bench -p axiolid-benchmark --bench minkowski_plan  # plan morphology, time and peak memory
+cargo bench -p axiolid-benchmark --bench disc_erosion  # disc erosions of toothed walls, time and peak memory
 cargo bench -p axiolid-benchmark --bench triangulate_points  # planar triangulation against point count
 cargo bench -p axiolid-benchmark --bench overlay_soup  # exact soup unions against the grid backend
 cargo bench -p axiolid-benchmark --bench overlay_slender  # overlapping slender parts against their count
