@@ -58,10 +58,10 @@
       "description": "General exact B-rep booleans over analytic faces (ADR 0075)",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/brep-boolean",
-      "released": "0.1.9",
-      "released_date": "2026-10-10",
+      "released": "0.1.10",
+      "released_date": "2026-10-16",
       "role": "algorithm.construction",
-      "version": "0.1.9"
+      "version": "0.1.10"
     },
     "axiolid-capi": {
       "description": "Versioned, memory-safe C ABI for the Axiolid application facade.",
@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.18",
-      "released_date": "2026-10-13",
+      "released": "0.3.19",
+      "released_date": "2026-10-16",
       "role": "algorithm.construction",
-      "version": "0.3.18"
+      "version": "0.3.19"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -310,10 +310,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.26",
-      "released_date": "2026-10-14",
+      "released": "0.3.27",
+      "released_date": "2026-10-16",
       "role": "execution.orchestration",
-      "version": "0.3.26"
+      "version": "0.3.27"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",
@@ -355,10 +355,10 @@
       "description": "Format-neutral geometry item tree. The currency between a format reader and a kernel.",
       "layer": "representations",
       "path": "crates/representations/modeling/graph",
-      "released": "0.3.13",
-      "released_date": "2026-10-13",
+      "released": "0.3.14",
+      "released_date": "2026-10-16",
       "role": "representation.graph",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-numeric": {
       "description": "Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates",
@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.15",
-      "released_date": "2026-10-14",
+      "released": "0.3.16",
+      "released_date": "2026-10-16",
       "role": "algorithm.planar",
-      "version": "0.3.15"
+      "version": "0.3.16"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

@@ -141,6 +141,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.10 - 2026-10-16
+
+### Fixed
+
+- A face of one operand on a face of the other is read facing the right
+  way when the other face's loops wind clockwise (#324). A quarter-ring
+  wall less a niche whose inner arc lies on the wall's inner cylinder, or
+  one unit in the last place inside it, was refused as "the kept faces
+  did not sew into a valid exact B-rep": the two cylinders were read as
+  one surface and split along each other's boundaries, but the niche's
+  inner face (an extrusion's face on its profile's inner arc, whose loops
+  wind clockwise) was read with its outward normal turned round, so the
+  wall's patch on it seemed to face the other way and the difference kept
+  it. A region
+  on the other operand's face now reads that face's outward normal with
+  its winding, as a region of its own face already did. Both niches are
+  cut to the closed-form volume, the coincidence reported
+  (`CoincidentSupports`, at most `4e-15`).
+
 ### 0.1.9 - 2026-10-10
 
 ### Added
@@ -494,6 +513,48 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-construct
+
+### 0.3.19 - 2026-10-16
+
+### Added
+
+- `half_space::bounded_half_space_prism` (#321): the slab of a half-space
+  bounded by the prism of a boundary along any axis that crosses the
+  plane, oblique to it allowed. The near cap is the boundary carried along
+  the axis onto the plane, the far cap the same at the depth: a
+  `SlabDepth`, `Relative` to the boundary's extent (as before) or the
+  `Reach` of a subject. `BoundaryPrism` states where the boundary stands
+  (`origin`, `x`, `y`, used as given) and the `axis`;
+  `BoundaryPrism::along_placement_z` reads it from a placement, IFC's
+  `IfcPolygonalBoundedHalfSpace.Position`, `BoundaryPrism::along_normal`
+  from a plane frame as `bounded_half_space_in_frame` does, and
+  `BoundaryPrism::crossing` the cosine of the axis against the plane.
+  Refused by name: an axis within the angular tolerance of the plane
+  (`"parallel to the clip plane"`), a degenerate placement (axes parallel
+  or zero) and a depth that is not positive and finite.
+
+- `BoundaryPrism::along_plane_normal` (#322): a boundary placed by a whole
+  placement along the plane normal, the placement's `x` projected into the
+  plane, its scale, shear and handedness kept; a degenerate placement
+  (parallel or zero axes) is refused by name.
+
+### Changed
+
+- `bounded_half_space_in_frame` honours a frame mirrored about the plane
+  normal, whose `y` is `-(normal x x)` (#322): its boundary is built
+  mirrored, as written, still outward-facing. It used to rebuild `y` as
+  `normal x x` and build the mirror image. A frame standing perpendicular
+  to the plane has no handedness there and is refused by name.
+
+### Fixed
+
+- A bounded half-space whose boundary ring runs clockwise is built
+  outward-facing, the ring read reversed (the same region); it came out
+  inside-out before.
+- A derived contour's arcs under a scaling transform are scaled once
+  (#322): the scale went into the radius and into the arc's frame axes, so
+  every arc came out scaled twice, its contour open, and the extrusion
+  refused (`tests/derived_composite.rs`).
 
 ### 0.3.18 - 2026-10-13
 
@@ -3012,6 +3073,75 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.27 - 2026-10-16
+
+### Added
+
+- `deviation::COINCIDENT_OPERANDS` (#324): a boolean whose exact result
+  read faces of its two operands as one surface within tolerance reports
+  how far that reading moved an operand, as a certified contribution of
+  the boolean path next to its measured one, as a snap's move is
+  reported. Such booleans now carry two contributions instead of one.
+- Bounded half-spaces along their placement's `z` (#321,
+  `SolidOperation::BoundedHalfSpaceAlongZ`), in both compilers: the kept
+  side of the plane within the prism of the boundary along the placement's
+  `z`, at any angle to the plane, the boundary at `placement * (u, v, 0)` as
+  written. The mesh compiler builds the oblique slab (its boundary chorded
+  within the budget over the frame's longest axis); the exact compiler builds the
+  prism in the boundary's own plane, a margin past the subject's envelope
+  both ways, and intersects it with the plane's side over the envelope, so
+  an arc is a cylinder wall the plane cuts in an ellipse, and the mesh's
+  deviation is certified against it. The IFC2X3 gable wall of
+  openbimrs/ifc#515 (four sloped planes over vertical prisms) is
+  49.999912042537 m³ exactly, IfcOpenShell's volume
+  (`tests/bounded_half_space_prism_axis.rs`). An axis within the angular
+  tolerance of the plane and a degenerate placement are refused by name in
+  both. Under a sheared placement, whose `z` leans off the boundary's
+  plane, a boundary with arcs sweeps elliptical cylinders, which the exact
+  general boolean may refuse to sew, by name.
+
+### Fixed
+
+- The mesh compiler refuses a bounded half-space with no subject to size
+  it by (#325) -- a root, a union or exclusive-or operand, a collection
+  member -- as `GeomError::UnsupportedInput { input: "bounded half-space
+  without a subject to size it by: ..." }`, as the exact compiler already
+  did. It used to mesh a slab twice its boundary's extent deep, an
+  arbitrary stand-in for a solid unbounded on its kept side: silently
+  wrong output, now refused by name, as #295's refusal was.
+- A curved wall less a niche flush with its inner face, or one unit in
+  the last place inside it (#324), is certified: the general boolean's
+  refusal ("exact boolean whose kept faces do not sew into a solid") left
+  the deviation unbounded. A quarter ring of radii `4.8` to `5` less a
+  niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
+  niche placed well inside does, with the coincidence reported (at most
+  `4e-15`), and the exact result measures to the annular sectors' volume.
+- A bounded half-space's slab is sized by the subject it meets (#325),
+  along either axis: the tool of a difference or an intersection, read
+  through any instances above it (their placements composed, the subject
+  brought into the tool's frame), reaches past the subject's farthest
+  point on the kept side by a tenth of its span. It was a slab twice the
+  boundary's extent deep, so a small boundary over a tall subject (a
+  0.5 m square over a 20 m column) cut it too little, or kept too little,
+  with no error. An unbounded half-space's tool is now read through
+  instances too. The IFC2X3 gable wall compiles to 49.999912042537 m³ in
+  the mesh compiler as well, certified against the exact result
+  (`tests/bounded_half_space_subject_depth.rs`,
+  `tests/bounded_half_space_prism_axis.rs`).
+- A bounded half-space's placement is read whole (#322), in both
+  compilers and along either axis. Along the plane normal the mesh
+  compiler normalised the placement's axes and rebuilt `y` from the
+  normal, so a scaled frame cut its boundary at unit scale, a sheared one
+  unsheared and a left-handed (mirrored) one its mirror image, with no
+  error; the exact compiler did the same. Now the boundary keeps the
+  frame's scale, shear and handedness (`BoundaryPrism::along_plane_normal`),
+  and only a degenerate frame (parallel or zero axes) is refused by name. A
+  right-handed unit frame, even one whose `z` points against the normal,
+  reads as before. In the exact compiler a profile boundary under a scaling
+  or mirroring frame is a derived profile, its arcs exact under a
+  similarity and refused by name as ellipses otherwise
+  (`tests/bounded_half_space_whole_frame.rs`).
+
 ### 0.3.26 - 2026-10-14
 
 ### Added
@@ -4324,6 +4454,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.14 - 2026-10-16
+
+### Added
+
+- `SolidOperation::BoundedHalfSpaceAlongZ` (#321), a new variant with
+  `BoundedHalfSpace`'s fields: the kept side of the plane within the prism
+  of the boundary along the placement's `z`, infinite both ways and at any
+  angle to the plane, the boundary at `placement * (u, v, 0)` as written.
+  This is how IFC's `IfcPolygonalBoundedHalfSpace` bounds its half-space,
+  by its `Position`. `BoundedHalfSpace` keeps its fields and meaning. The
+  builder validates the new variant's references as the old one's.
+  `SolidOperation` is `#[non_exhaustive]`, so the variant is additive.
+- Wire format 1.4 (ADR 0085): the variant lifts a payload to 1.4, and a
+  1.3 or older payload holding it is refused as
+  `WireError::UnknownKind { kind: "BoundedHalfSpaceAlongZ" }`. A graph
+  without it is written byte for byte as before, labelled 1.0 to 1.3.
+  Golden `tests/wire/v1.4/every-kind.json`.
+
+### Changed
+
+- `BoundedHalfSpace.placement` is documented as read whole (#322): its
+  `x` projected into the plane fixes the rotation, and its scale, shear
+  and handedness shape the boundary; only a degenerate frame is refused.
+
 ### 0.3.13 - 2026-10-13
 
 ### Fixed
@@ -4873,6 +5027,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.16 - 2026-10-16
+
+### Changed
+
+- Minkowski sums and erosions, and the disc morphology built on them
+  (`Region::erode_inner`, `erode_outer`, `dilate_inner`, `dilate_outer`),
+  no longer grow with the square of the corners along walls of many short
+  edges (#323). On the 4.5 m by 5 m room whose long walls carry 0.5 mm
+  teeth, eroded by a 0.75 m disc, 102, 602 and 1,202 corners took
+  0.045 s, 1.15 s and 4.4 s at 27 MB, 416 MB and 1.7 GB, and now take
+  9 ms, 68 ms and 0.23 s at 6 MB, 25 MB and 98 MB. With the corners
+  exactly collinear they took 0.050 s, 1.4 s and 5.7 s and now take
+  2 ms, 8 ms and 12 ms, the rectangle's 2 ms plus reading the corners.
+  Measured with `cargo bench -p axiolid-benchmark --bench disc_erosion`,
+  interleaved runs against 0.3.15 on a shared machine. Each boundary edge
+  gave one hull, each overlapping hundreds of its neighbours. Now a vertex
+  exactly between its neighbours on one line (an exact orientation, no
+  tolerance) is merged away before the hulls are built, and a chord
+  between two vertices of a ring, proved exactly to lie in the summed set,
+  gives one hull that covers nearly all of each edge hull it spans; those
+  keep only what it does not hold, a sliver about the depth of the teeth.
+  The union of the terms is the same set, so the results are too: bit for
+  bit on the toothed room and on every sum and erosion of the crate's
+  tests but two, whose results lose vertices lying exactly on the line
+  between their neighbours, as the merged edges no longer split there.
+  `tests/minkowski.rs` pins the toothed room's erosions against 0.3.15
+  by hash, a unit test compares every route with the untrimmed hulls
+  bit for bit, and `scripts/probe_minkowski_cover_mutants.py` lists the
+  faults they must catch.
 
 ### 0.3.15 - 2026-10-14
 

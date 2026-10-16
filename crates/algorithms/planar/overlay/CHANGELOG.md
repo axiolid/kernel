@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-10-16
+
 ### Changed
 
 - Minkowski sums and erosions, and the disc morphology built on them

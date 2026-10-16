@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-10-16
+
 ### Fixed
 
 - A face of one operand on a face of the other is read facing the right

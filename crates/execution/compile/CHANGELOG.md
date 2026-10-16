@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.27] - 2026-10-16
+
 ### Added
 
 - `deviation::COINCIDENT_OPERANDS` (#324): a boolean whose exact result

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-10-16
+
 ### Added
 
 - `half_space::bounded_half_space_prism` (#321): the slab of a half-space

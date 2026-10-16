@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.13 (2026-10-13) |
+| Latest release | 0.3.14 (2026-10-16) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,16 +54,28 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.13 (2026-10-13):
+Latest release, 0.3.14 (2026-10-16):
 
-### Fixed
+### Added
 
-- JSON wire payloads (ADR 0085) now read every real back bit for bit, as the
-  ADR promises. `serde_json` was used without its `float_roundtrip` feature,
-  whose fast parser lands one ulp off for about a quarter of ordinary
-  doubles (12.838242182209141 read back as its lower neighbour), in every
-  format version. CBOR was unaffected. A test now sweeps 6,000 doubles across
-  twenty magnitudes through both encodings. The fix is in parsing only, so
-  payloads already written are unchanged and now read back exactly.
+- `SolidOperation::BoundedHalfSpaceAlongZ` (#321), a new variant with
+  `BoundedHalfSpace`'s fields: the kept side of the plane within the prism
+  of the boundary along the placement's `z`, infinite both ways and at any
+  angle to the plane, the boundary at `placement * (u, v, 0)` as written.
+  This is how IFC's `IfcPolygonalBoundedHalfSpace` bounds its half-space,
+  by its `Position`. `BoundedHalfSpace` keeps its fields and meaning. The
+  builder validates the new variant's references as the old one's.
+  `SolidOperation` is `#[non_exhaustive]`, so the variant is additive.
+- Wire format 1.4 (ADR 0085): the variant lifts a payload to 1.4, and a
+  1.3 or older payload holding it is refused as
+  `WireError::UnknownKind { kind: "BoundedHalfSpaceAlongZ" }`. A graph
+  without it is written byte for byte as before, labelled 1.0 to 1.3.
+  Golden `tests/wire/v1.4/every-kind.json`.
+
+### Changed
+
+- `BoundedHalfSpace.placement` is documented as read whole (#322): its
+  `x` projected into the plane fixes the rotation, and its scale, shear
+  and handedness shape the boundary; only a degenerate frame is refused.
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.15 (2026-10-14) |
+| Latest release | 0.3.16 (2026-10-16) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -54,47 +54,34 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.15 (2026-10-14):
+Latest release, 0.3.16 (2026-10-16):
 
 ### Changed
 
-- Exact straight-edge booleans of soups of overlapping slender parts,
-  the plan footprint of an assembly, take time in proportion to their
-  crossings, and an intersection with a small operand in proportion to the
-  parts near it, with results bit for bit the same (#315). On `k`
-  slender boxes (1 m by 4 cm by 2 cm) over a square metre, the union of
-  the soup with itself took 0.92 s, 6.3 s and 39 s at `k` = 100, 200
-  and 400 and now takes 0.23 s, 0.94 s and 3.9 s, growing as the
-  crossings do (about `k^2`), and its intersection with a 5 cm square
-  took 0.32 s, 2.1 s and 13 s and now 5 ms, 19 ms and 62 ms. Measured with `cargo bench -p axiolid-benchmark
-  --bench overlay_slender`, interleaved runs against 0.3.14 on a shared
-  machine. The time had grown about `k^2.65`, because the turned edges'
-  boxes hold much of the soup and every piece of the subdivision searched
-  `O(k)` of them for its carriers and counted `O(k)` rings' windings. A
-  piece's carriers are now searched only among the edges sharing two or
-  more points with its edge, and across any stop only the rings met there
-  are counted again, the others carried over; the points met along an
-  edge are merged by one sort, and the crossings of a segment given more
-  than once are computed once per pair and shared. An intersection leaves
-  out, before the subdivision and after the snap, every ring whose box
-  misses the other operand's: the module docs of `exact_overlay` give the
-  argument that this changes no output. Debug builds check the carriers
-  and the rings carried across a stop against the full search and count.
-  `tests/soup_snapshots.rs` pins the outputs on the consumer's soups, a
-  torus, a cylinder, random triangles and an arc subdivision against
-  0.3.14 by hash, and `scripts/probe_overlay_slender_mutants.py` lists
-  the faults it and the suite must catch.
-
-### Fixed
-
-- The crate's internal exact booleans refuse a ring with a repeated
-  vertex as `RepeatedVertex` instead of hanging on it (#309). Every
-  public entry validates first, so no caller could reach it: a piece of
-  no length had no point strictly inside, and the exact bisection for
-  its sample never ended. The sample now refuses such a piece by name,
-  and the straight-edge boolean checks for equal consecutive vertices
-  before it starts. Tests call both with a ten-second limit, and
-  `scripts/probe_repeated_vertex_mutants.py` lists the faults they must
-  catch.
+- Minkowski sums and erosions, and the disc morphology built on them
+  (`Region::erode_inner`, `erode_outer`, `dilate_inner`, `dilate_outer`),
+  no longer grow with the square of the corners along walls of many short
+  edges (#323). On the 4.5 m by 5 m room whose long walls carry 0.5 mm
+  teeth, eroded by a 0.75 m disc, 102, 602 and 1,202 corners took
+  0.045 s, 1.15 s and 4.4 s at 27 MB, 416 MB and 1.7 GB, and now take
+  9 ms, 68 ms and 0.23 s at 6 MB, 25 MB and 98 MB. With the corners
+  exactly collinear they took 0.050 s, 1.4 s and 5.7 s and now take
+  2 ms, 8 ms and 12 ms, the rectangle's 2 ms plus reading the corners.
+  Measured with `cargo bench -p axiolid-benchmark --bench disc_erosion`,
+  interleaved runs against 0.3.15 on a shared machine. Each boundary edge
+  gave one hull, each overlapping hundreds of its neighbours. Now a vertex
+  exactly between its neighbours on one line (an exact orientation, no
+  tolerance) is merged away before the hulls are built, and a chord
+  between two vertices of a ring, proved exactly to lie in the summed set,
+  gives one hull that covers nearly all of each edge hull it spans; those
+  keep only what it does not hold, a sliver about the depth of the teeth.
+  The union of the terms is the same set, so the results are too: bit for
+  bit on the toothed room and on every sum and erosion of the crate's
+  tests but two, whose results lose vertices lying exactly on the line
+  between their neighbours, as the merged edges no longer split there.
+  `tests/minkowski.rs` pins the toothed room's erosions against 0.3.15
+  by hash, a unit test compares every route with the untrimmed hulls
+  bit for bit, and `scripts/probe_minkowski_cover_mutants.py` lists the
+  faults they must catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

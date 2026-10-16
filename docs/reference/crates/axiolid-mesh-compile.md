@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.26 (2026-10-14) |
+| Latest release | 0.3.27 (2026-10-16) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -77,126 +77,73 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.26 (2026-10-14):
+Latest release, 0.3.27 (2026-10-16):
 
 ### Added
 
-- `ReferenceMeshCompiler` implements `PolylineCompiler` (#311): a `Curve3`,
-  a `Curve2` (lifted to `z = 0`), an `OpenProfile` and an `Instance` of
-  any of them, or an `InstanceAtStation` on a line basis, compile to a 3D
-  polyline. Each smooth piece of the curve (cut where it may not be `C^1`)
-  is bisected until every span's certified chord bound, the exact sagitta
-  of a circular arc or `h^2 / 8 sup |c''|` from certified derivative
-  bounds, fits the chord budget; the largest is the reported bound, so a
-  dense sampling of the exact curve never lies farther from the polyline.
-  A placement compiles its source to the budget shrunk by its stretch and
-  grows the bound by it, as an instance's mesh deviation does. Refused by
-  name: unbounded lines, families whose flattening is not certified
-  (intrinsic, implicit, banked), curve relations, collections, and curves
-  at numerically resolved stations. `compile_mesh` still refuses curve
-  nodes with `CurveEvaluation`.
-- Surfaces trimmed by a parameter rectangle
-  (`SurfaceRelation::RectangularTrimmed` over a plane, cylinder, elliptical
-  cylinder, cone, sphere, torus or B-spline surface) compile through
-  `compile_mesh` as sheets reported `MeshClosure::Surface` (#311),
-  facing the trimmed surface's normal (turned round when exactly one sense
-  runs against the basis), wrapping past the seam of a periodic
-  parameter. A uniform grid of exact surface
-  points, each cell within `1/8 ((A + B) h_u^2 + (C + B) h_v^2)` of its
-  triangles from the surface's certified interpolation bounds over it,
-  sized to the chord budget; `compile_mesh_with_deviation` reports it under
-  `DeviationPath::TrimmedSurface` (new), the surface family as the detail,
-  and a cell a B-spline crease crosses as unbounded by name. Refused by
-  name: a trim of a surface relation, an empty range, one longer than a
-  period, one against its sense on a parameter that does not wrap. An
-  atomic `Surface` node is unbounded and still refused.
-- A B-rep of faces that belong to no shell or solid compiles as one
-  surface model (#311, `MeshClosure::Surface`), each face as authored; a
-  B-rep with no face at all is still refused.
-- `DeviationPath::Placement`, `deviation::PLACEMENT_ROUNDING`,
-  `deviation::PLACEMENT_EPSILONS` and
-  `deviation::BUDGET_BELOW_PLACEMENT_ROUNDING` (#295): the rounding of
-  placing an instance's vertices, named in the report, and the input
-  family a budget below it is refused with.
-- Curved B-rep faces whose edges carry only 3D curves compile (#310,
-  ADR 0086); they were refused with `Unsupported { Tessellation }`. As
-  IFC writes them (`IfcEdgeCurve` without an `IfcPcurve`), the face's
-  parameter boundary comes from inverting the edge's shared 3D samples
-  onto its surface: in closed form on planes, cylinders, elliptical
-  cylinders, cones, spheres and tori, and by `axiolid-nurbs`'s certified
-  inversion on B-spline surfaces. Shared edges keep one set of vertices,
-  periodic parameters unwrap along the ring, and the deviation report adds
-  each span's chord bound, the surface image of its parameter chord and
-  the lens between them. Refused by name: a sample at or within tolerance
-  of a cone apex or sphere pole, an edge that turns a quarter period
-  between samples, a sample off the surface or without unique B-spline
-  parameters, and an edge curve whose domain does not run between its
-  vertices. Edges with pcurves keep their path. As on the pcurve path, a
-  face's report adds its triangle bound and its trim terms, so the report
-  may exceed the request; check `meets_requested`. The crate now depends
-  on `axiolid-nurbs`.
-- Planar B-rep faces bounded by curved edges without pcurves compile
-  (#310): a face on a declared plane with an edge that follows a curve
-  (an IFC cap bounded by a circle or an ellipse) is meshed as a curved
-  face on its plane, its boundary the edges' shared samples inverted onto
-  the plane with a residual check, so a cap and the wall across its rim
-  share the rim's vertices by index. Its report is the edges' chord
-  bounds plus each sample's distance from the plane, where it was chorded
-  vertex to vertex and unbounded (or refused, for a rim of one vertex).
-  A closed cylinder written as an IFC advanced B-rep (a seamed wall and
-  two capped rims, no pcurve anywhere) now compiles as a watertight
-  `MeshClosure::Solid`.
-
-### Changed
-
-- An all-planar boolean's measured deviation is reported near rounding,
-  not near the request (#314). The search over the exact result stopped
-  once its worst cell was within the budget, and a cell across a trim
-  edge was bounded whole, overhang past the edge included, so the bound
-  only shrank with the cell's size: the wall `3.65 x 0.25 x 3.67` less two
-  doors reported `9.96e-4` at a `1e-3` request for a mesh whose certified
-  volume is exact to `1e-14`. On a plane, a boundary cell is now bounded
-  over its part within the slack of the face (the cell clipped by the
-  mitred offset of the one edge or corner it meets, as convex pieces), the
-  slack is the chord bound the trim flattening actually reached (rounding,
-  for straight trims), and when every face of the result is a plane the
-  search runs to within 10% of the sampled maximum or to 1024 ulps of the
-  mesh's scale, with no budget to stop at. That wall now reports
-  `1.18e-12` (sampled `3.9e-14`), and its report costs no more than
-  before (`benches/boolean_deviation.rs`, mesh and report: 378 ms before,
-  358 ms after). Curved patches are bounded and searched as before; a
-  curved boolean's planar faces are clipped too, which only tightens
-  their cells (the wall with a round window: 488 ms before, 392 ms
-  after). The budget still settles an all-planar search once a real
-  deviation is shown, a sampled lower bound or a flattened warped
-  operand's slab width (#266) above 1000 times the rounding, so a mesh
-  that is off its exact result costs no more than before (a wall with a
-  moved mesh corner: 0.39 s before, 0.10 s after; the #266 tests at or
-  under their times), and one at rounding is never stopped by the budget.
+- `deviation::COINCIDENT_OPERANDS` (#324): a boolean whose exact result
+  read faces of its two operands as one surface within tolerance reports
+  how far that reading moved an operand, as a certified contribution of
+  the boolean path next to its measured one, as a snap's move is
+  reported. Such booleans now carry two contributions instead of one.
+- Bounded half-spaces along their placement's `z` (#321,
+  `SolidOperation::BoundedHalfSpaceAlongZ`), in both compilers: the kept
+  side of the plane within the prism of the boundary along the placement's
+  `z`, at any angle to the plane, the boundary at `placement * (u, v, 0)` as
+  written. The mesh compiler builds the oblique slab (its boundary chorded
+  within the budget over the frame's longest axis); the exact compiler builds the
+  prism in the boundary's own plane, a margin past the subject's envelope
+  both ways, and intersects it with the plane's side over the envelope, so
+  an arc is a cylinder wall the plane cuts in an ellipse, and the mesh's
+  deviation is certified against it. The IFC2X3 gable wall of
+  openbimrs/ifc#515 (four sloped planes over vertical prisms) is
+  49.999912042537 m³ exactly, IfcOpenShell's volume
+  (`tests/bounded_half_space_prism_axis.rs`). An axis within the angular
+  tolerance of the plane and a degenerate placement are refused by name in
+  both. Under a sheared placement, whose `z` leans off the boundary's
+  plane, a boundary with arcs sweeps elliptical cylinders, which the exact
+  general boolean may refuse to sew, by name.
 
 ### Fixed
 
-- Deviation bounds of instanced bodies include the rounding of applying
-  the `f64` transform (#295, ADR 0080 amendment). An instance moved its
-  source's vertices by a few ulps of their coordinates, about `1e-9` at
-  `6e6`, and the bound grew only by the relative stretch, so a mesh
-  placed far from the origin could lie further from the exact surface
-  than its `Proven` or `Certified` bound. Every bound of an `Instance` or
-  `InstanceAtStation` now adds `4 f64::EPSILON M`, `M` the largest
-  magnitude a placed coordinate sums (derived in
-  `deviation::placement_rounding`; an identity or a mirror adds nothing),
-  and names it under `DeviationPath::Placement`. The source is meshed
-  with room for it (the floor at the translation's scale plus a `2^-20`
-  share of the budget, and once more with room for what its mesh showed
-  where that was not enough), so a request above the rounding is still
-  met; one at or below it is refused with
-  `BUDGET_BELOW_PLACEMENT_ROUNDING`. A torus at `(6e6, 6e6, 100)` with
-  a `1e-9` budget is refused; with `2e-8` it reports within the budget,
-  about a quarter of it the rounding, and dense samples of the exact
-  torus against the `f64` mesh stay within the bound. Instanced bounds
-  are now up to a `2^-20` share below the budget rather than at it.
-  `compile_polyline` through an `Instance` or `InstanceAtStation` follows
-  the same rule (term, room, refusal): a polyline placed at `6e6` reports
-  `4 eps (6e6 + 4)` where it reported `0`.
+- The mesh compiler refuses a bounded half-space with no subject to size
+  it by (#325) -- a root, a union or exclusive-or operand, a collection
+  member -- as `GeomError::UnsupportedInput { input: "bounded half-space
+  without a subject to size it by: ..." }`, as the exact compiler already
+  did. It used to mesh a slab twice its boundary's extent deep, an
+  arbitrary stand-in for a solid unbounded on its kept side: silently
+  wrong output, now refused by name, as #295's refusal was.
+- A curved wall less a niche flush with its inner face, or one unit in
+  the last place inside it (#324), is certified: the general boolean's
+  refusal ("exact boolean whose kept faces do not sew into a solid") left
+  the deviation unbounded. A quarter ring of radii `4.8` to `5` less a
+  niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
+  niche placed well inside does, with the coincidence reported (at most
+  `4e-15`), and the exact result measures to the annular sectors' volume.
+- A bounded half-space's slab is sized by the subject it meets (#325),
+  along either axis: the tool of a difference or an intersection, read
+  through any instances above it (their placements composed, the subject
+  brought into the tool's frame), reaches past the subject's farthest
+  point on the kept side by a tenth of its span. It was a slab twice the
+  boundary's extent deep, so a small boundary over a tall subject (a
+  0.5 m square over a 20 m column) cut it too little, or kept too little,
+  with no error. An unbounded half-space's tool is now read through
+  instances too. The IFC2X3 gable wall compiles to 49.999912042537 m³ in
+  the mesh compiler as well, certified against the exact result
+  (`tests/bounded_half_space_subject_depth.rs`,
+  `tests/bounded_half_space_prism_axis.rs`).
+- A bounded half-space's placement is read whole (#322), in both
+  compilers and along either axis. Along the plane normal the mesh
+  compiler normalised the placement's axes and rebuilt `y` from the
+  normal, so a scaled frame cut its boundary at unit scale, a sheared one
+  unsheared and a left-handed (mirrored) one its mirror image, with no
+  error; the exact compiler did the same. Now the boundary keeps the
+  frame's scale, shear and handedness (`BoundaryPrism::along_plane_normal`),
+  and only a degenerate frame (parallel or zero axes) is refused by name. A
+  right-handed unit frame, even one whose `z` points against the normal,
+  reads as before. In the exact compiler a profile boundary under a scaling
+  or mirroring frame is a derived profile, its arcs exact under a
+  similarity and refused by name as ellipses otherwise
+  (`tests/bounded_half_space_whole_frame.rs`).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

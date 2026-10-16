@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-10-16
+
 ### Added
 
 - `SolidOperation::BoundedHalfSpaceAlongZ` (#321), a new variant with

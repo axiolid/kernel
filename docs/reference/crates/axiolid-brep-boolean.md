@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.9 (2026-10-10) |
+| Latest release | 0.1.10 (2026-10-16) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,18 +51,23 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.9 (2026-10-10):
+Latest release, 0.1.10 (2026-10-16):
 
-### Added
+### Fixed
 
-- Booleans cut tilted elliptical-cylinder walls, the round walls an
-  oblique exact extrusion sweeps from arcs and circles (#287), upward or
-  downward. A slab less an oblique round shaft or rounded opening was
-  refused as "a curve or surface could not be evaluated"; it is now
-  exact (an empty report, also at `Tolerance::ZERO`) with the volume
-  area x depth. A plane's cut, an ellipse or circle, gets the closed-form
-  `Sinusoid2` pcurve in the wall's angle, and a ruling a vertical line.
-  Whether a plane is parallel to such a wall's axis or touches it is
-  decided by exact predicates only, never read within tolerance.
+- A face of one operand on a face of the other is read facing the right
+  way when the other face's loops wind clockwise (#324). A quarter-ring
+  wall less a niche whose inner arc lies on the wall's inner cylinder, or
+  one unit in the last place inside it, was refused as "the kept faces
+  did not sew into a valid exact B-rep": the two cylinders were read as
+  one surface and split along each other's boundaries, but the niche's
+  inner face (an extrusion's face on its profile's inner arc, whose loops
+  wind clockwise) was read with its outward normal turned round, so the
+  wall's patch on it seemed to face the other way and the difference kept
+  it. A region
+  on the other operand's face now reads that face's outward normal with
+  its winding, as a region of its own face already did. Both niches are
+  cut to the closed-form volume, the coincidence reported
+  (`CoincidentSupports`, at most `4e-15`).
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)
