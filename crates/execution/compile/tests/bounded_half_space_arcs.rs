@@ -38,6 +38,7 @@ use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::{exact_properties, FaceDomain};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
 use axiolid_mesh_compile::{
     DeviationBound, DeviationPath, ReferenceExactCompiler, ReferenceMeshCompiler,
 };
@@ -423,8 +424,15 @@ fn the_mesh_deviation_is_certified_and_holds_under_dense_sampling() {
                 let (outcome, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
                     .compile_mesh_with_deviation(&graph, root, &options)
                     .expect("the clipped wall compiles");
-                assert_eq!(report.contributions.len(), 1, "{report:?}");
-                let contribution = report.contributions[0];
+                // Besides the measurement, at most how far faces read as
+                // one surface within tolerance moved an operand (#324).
+                let measured: Vec<_> = report
+                    .contributions
+                    .iter()
+                    .filter(|c| c.detail != COINCIDENT_OPERANDS)
+                    .collect();
+                assert_eq!(measured.len(), 1, "{report:?}");
+                let contribution = *measured[0];
                 assert_eq!(contribution.path, DeviationPath::Boolean);
                 let DeviationBound::Certified(bound) = contribution.bound else {
                     panic!("{profile} up {up}: expected a certified bound, got {report:?}");

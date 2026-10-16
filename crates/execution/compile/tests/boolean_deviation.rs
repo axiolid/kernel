@@ -31,8 +31,10 @@ use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
 use axiolid_mesh_compile::{
-    DeviationBound, DeviationPath, DeviationReport, ReferenceExactCompiler, ReferenceMeshCompiler,
+    DeviationBound, DeviationContribution, DeviationPath, DeviationReport, ReferenceExactCompiler,
+    ReferenceMeshCompiler,
 };
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
@@ -231,8 +233,21 @@ fn assert_measured(
     ceiling: Scalar,
 ) -> (Scalar, Scalar) {
     let (graph, root, mesh, report, seconds) = case;
-    assert_eq!(report.contributions.len(), 1, "{report:?}");
-    let contribution = report.contributions[0];
+    // Faces read as one surface within tolerance name how far that moved
+    // an operand (#324), within the tolerance; the rest is the boolean's
+    // own measurement.
+    let (coincident, measured): (Vec<&DeviationContribution>, Vec<_>) = report
+        .contributions
+        .iter()
+        .partition(|c| c.detail == COINCIDENT_OPERANDS);
+    for c in &coincident {
+        assert!(
+            matches!(c.bound, DeviationBound::Certified(moved) if moved <= options.tolerance().linear()),
+            "{name}: {report:?}"
+        );
+    }
+    assert_eq!(measured.len(), 1, "{report:?}");
+    let contribution = *measured[0];
     assert_eq!(contribution.path, DeviationPath::Boolean);
     // Within tolerance, or the exact boolean of the given operands (#236).
     assert!(

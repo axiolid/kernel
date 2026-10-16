@@ -61,6 +61,15 @@
 //! exact axis matrices, or crossing only transversally). Otherwise the
 //! detail keeps "operands within tolerance".
 //!
+//! One such decision is named on its own (#324): faces of the two operands
+//! read as one surface within tolerance (a niche's inner cylinder a unit
+//! in the last place off a curved wall's, a cap a rounding residue off a
+//! slab's face). The furthest that reading moved an operand is a
+//! [`DeviationBound::Certified`] contribution of [`DeviationPath::Boolean`]
+//! under the detail [`COINCIDENT_OPERANDS`], as a snap's move is: it says
+//! how far the operands the exact result is the boolean of lie from the
+//! given ones, not how far the mesh lies from that boolean.
+//!
 //! # Warped mesh operands (#266)
 //!
 //! The exact result is compiled with
@@ -134,7 +143,9 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOracle};
 use axiolid_surface::Surface;
 
-use super::{Deviation, DeviationBound, DeviationPath};
+use axiolid_brep_boolean::ToleranceDecisionKind;
+
+use super::{Deviation, DeviationBound, DeviationPath, COINCIDENT_OPERANDS};
 use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
 use crate::ReferenceExactCompiler;
 
@@ -210,7 +221,23 @@ pub(crate) fn of_boolean(
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
         Err(reason) => DeviationBound::Unbounded(reason),
     };
-    Deviation::one(DeviationPath::Boolean, detail, bound)
+    let mut deviation = Deviation::one(DeviationPath::Boolean, detail, bound);
+    // Faces of the operands read as one surface within tolerance (#324):
+    // the exact result is the boolean of operands moved by up to that much
+    // onto each other, and the move is named, as a snap's is.
+    if let Some(moved) = report
+        .decisions()
+        .iter()
+        .find(|d| d.kind == ToleranceDecisionKind::CoincidentSupports)
+        .map(|d| d.linear)
+    {
+        deviation.add(
+            DeviationPath::Boolean,
+            COINCIDENT_OPERANDS,
+            DeviationBound::Certified(moved),
+        );
+    }
+    deviation
 }
 
 /// The measured distance to the exact boolean of the flattened operands,

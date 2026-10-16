@@ -39,6 +39,9 @@ const DIRECTIONS: [[Scalar; 3]; 6] = [
 pub(crate) struct Solid<'a> {
     brep: &'a ExactBRep,
     domains: Vec<FaceDomain<'a>>,
+    /// Per face, whether its loops wind clockwise in its parameters, so it
+    /// faces opposite to its orientation flag (`split::face_against`).
+    against: Vec<bool>,
     /// A sound box around each face, enlarged by the tolerance: a ray that
     /// misses it cannot cross the face (#228).
     boxes: Vec<Option<Aabb>>,
@@ -50,10 +53,12 @@ impl<'a> Solid<'a> {
     pub(crate) fn new(brep: &'a ExactBRep, tolerance: Tolerance) -> Result<Self, BooleanError> {
         let topology = brep.topology();
         let mut domains = Vec::with_capacity(topology.faces().len());
+        let mut against = Vec::with_capacity(topology.faces().len());
         for index in 0..topology.faces().len() {
             let face = topology
                 .face_id_at(index)
                 .ok_or(BooleanError::DanglingReference)?;
+            against.push(crate::split::face_against(brep, face)?);
             domains.push(
                 FaceDomain::new(brep, face, tolerance)
                     .map_err(BooleanError::Measure)?
@@ -79,6 +84,7 @@ impl<'a> Solid<'a> {
         Ok(Self {
             brep,
             domains,
+            against,
             boxes,
             bounds,
         })
@@ -93,6 +99,13 @@ impl<'a> Solid<'a> {
 
     /// The first of `candidates` (faces on the point's own support) whose
     /// face contains `point`, with that face's outward normal there.
+    ///
+    /// The outward normal is the surface's turned by the face's flag and
+    /// by its winding: a face whose loops wind clockwise in its parameters
+    /// faces against its flag, as a split region of it does (#324: a
+    /// niche's inner face, an extrusion's face on its profile's inner arc,
+    /// read with its normal turned round where it lies on a curved wall's
+    /// inner face, so the difference kept the wall's patch on it).
     pub(crate) fn on_face(
         &self,
         point: Point3,
@@ -115,9 +128,12 @@ impl<'a> Solid<'a> {
             {
                 Some(true) => {
                     let n = normal(surface, u, v).map_err(|_| BooleanError::Evaluation)?;
-                    let sign = match self.brep.topology().faces()[face].orientation {
-                        Orientation::Forward => 1.0,
-                        Orientation::Reversed => -1.0,
+                    let sign = match (
+                        self.brep.topology().faces()[face].orientation,
+                        self.against[face],
+                    ) {
+                        (Orientation::Forward, false) | (Orientation::Reversed, true) => 1.0,
+                        _ => -1.0,
                     };
                     return Ok(Some(n * sign));
                 }

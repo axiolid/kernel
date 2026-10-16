@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A face of one operand on a face of the other is read facing the right
+  way when the other face's loops wind clockwise (#324). A quarter-ring
+  wall less a niche whose inner arc lies on the wall's inner cylinder, or
+  one unit in the last place inside it, was refused as "the kept faces
+  did not sew into a valid exact B-rep": the two cylinders were read as
+  one surface and split along each other's boundaries, but the niche's
+  inner face (an extrusion's face on its profile's inner arc, whose loops
+  wind clockwise) was read with its outward normal turned round, so the
+  wall's patch on it seemed to face the other way and the difference kept
+  it. A region
+  on the other operand's face now reads that face's outward normal with
+  its winding, as a region of its own face already did. Both niches are
+  cut to the closed-form volume, the coincidence reported
+  (`CoincidentSupports`, at most `4e-15`).
+
 ## [0.1.9] - 2026-10-10
 
 ### Added

@@ -43,7 +43,7 @@ use axiolid_evaluate::evaluate3;
 use axiolid_evaluate::surface::{evaluate as surface_point, locate};
 use axiolid_measure::FaceDomain;
 use axiolid_surface::Surface;
-use axiolid_topology::{EdgeId, FaceId, Orientation};
+use axiolid_topology::{EdgeId, FaceBound, FaceId, Orientation};
 use core::f64::consts::{PI, TAU};
 
 use crate::report::{self, ToleranceDecisionKind};
@@ -190,48 +190,7 @@ fn split_face_in_session(
 
     // Boundary uses, split where a section ends on them.
     for bound in &record.bounds {
-        let wire = topology
-            .loops()
-            .get(bound.loop_id.index())
-            .ok_or(BooleanError::DanglingReference)?;
-        let mut uses: Vec<Piece> = Vec::with_capacity(wire.edges.len());
-        for (index, use_) in wire.edges.iter().enumerate() {
-            let edge = &topology.edges()[use_.edge.index()];
-            let curve = edge
-                .curve
-                .and_then(|id| brep.curves3().get(id.index()))
-                .ok_or(BooleanError::DanglingReference)?
-                .clone();
-            let span = brep
-                .edge_interval(use_.edge)
-                .ok_or(BooleanError::DanglingReference)?;
-            let span = match use_.orientation {
-                Orientation::Forward => span,
-                Orientation::Reversed => Interval::new(span.end, span.start),
-            };
-            let pcurve = use_
-                .pcurve
-                .and_then(|id| brep.curves2().get(id.index()))
-                .ok_or(BooleanError::DanglingReference)?
-                .clone();
-            let pspan = brep
-                .pcurve_interval(bound.loop_id, index)
-                .ok_or(BooleanError::DanglingReference)?;
-            uses.push(Piece {
-                curve,
-                span,
-                pcurve,
-                pspan,
-                source: PieceSource::Boundary(use_.edge),
-            });
-        }
-        if bound.orientation == Orientation::Reversed {
-            uses.reverse();
-            for piece in &mut uses {
-                piece.span = Interval::new(piece.span.end, piece.span.start);
-                piece.pspan = Interval::new(piece.pspan.end, piece.pspan.start);
-            }
-        }
+        let uses = bound_uses(brep, bound)?;
         let closed = close_poles(surface, uses, tolerance)?;
         for piece in closed {
             for part in split_use(surface, piece, &ends, tolerance)? {
@@ -305,6 +264,85 @@ fn split_face_in_session(
         region.against = against;
     }
     Ok(regions)
+}
+
+/// A face bound's edge uses as pieces, in the direction the bound runs.
+fn bound_uses(brep: &ExactBRep, bound: &FaceBound) -> Result<Vec<Piece>, BooleanError> {
+    let topology = brep.topology();
+    let wire = topology
+        .loops()
+        .get(bound.loop_id.index())
+        .ok_or(BooleanError::DanglingReference)?;
+    let mut uses: Vec<Piece> = Vec::with_capacity(wire.edges.len());
+    for (index, use_) in wire.edges.iter().enumerate() {
+        let edge = &topology.edges()[use_.edge.index()];
+        let curve = edge
+            .curve
+            .and_then(|id| brep.curves3().get(id.index()))
+            .ok_or(BooleanError::DanglingReference)?
+            .clone();
+        let span = brep
+            .edge_interval(use_.edge)
+            .ok_or(BooleanError::DanglingReference)?;
+        let span = match use_.orientation {
+            Orientation::Forward => span,
+            Orientation::Reversed => Interval::new(span.end, span.start),
+        };
+        let pcurve = use_
+            .pcurve
+            .and_then(|id| brep.curves2().get(id.index()))
+            .ok_or(BooleanError::DanglingReference)?
+            .clone();
+        let pspan = brep
+            .pcurve_interval(bound.loop_id, index)
+            .ok_or(BooleanError::DanglingReference)?;
+        uses.push(Piece {
+            curve,
+            span,
+            pcurve,
+            pspan,
+            source: PieceSource::Boundary(use_.edge),
+        });
+    }
+    if bound.orientation == Orientation::Reversed {
+        uses.reverse();
+        for piece in &mut uses {
+            piece.span = Interval::new(piece.span.end, piece.span.start);
+            piece.pspan = Interval::new(piece.pspan.end, piece.pspan.start);
+        }
+    }
+    Ok(uses)
+}
+
+/// Whether a face's loops wind clockwise in its parameters, so that it
+/// faces opposite to its orientation flag: [`Region::against`] for the
+/// face as given (#324). An extrusion's face on the inner arc of its
+/// profile winds so, and a face of an earlier result turned over.
+///
+/// The winding is the sign of `1/2 int (u dv - v du)` over the loops, as
+/// [`split_face`] sums it, a gap between one use's end and the next one's
+/// start (at a pole) closed by its chord in parameters, as the collapsed
+/// piece [`close_poles`] lays there.
+pub(crate) fn face_against(brep: &ExactBRep, face: FaceId) -> Result<bool, BooleanError> {
+    let record = brep
+        .topology()
+        .faces()
+        .get(face.index())
+        .ok_or(BooleanError::DanglingReference)?;
+    let mut swept = 0.0;
+    for bound in &record.bounds {
+        let uses = bound_uses(brep, bound)?;
+        for (i, piece) in uses.iter().enumerate() {
+            swept += sweep(piece)?;
+            let next = &uses[(i + 1) % uses.len()];
+            let a =
+                evaluate2(&piece.pcurve, piece.pspan.end).map_err(|_| BooleanError::Evaluation)?;
+            let b =
+                evaluate2(&next.pcurve, next.pspan.start).map_err(|_| BooleanError::Evaluation)?;
+            swept += 0.5 * (a.x * b.y - b.x * a.y);
+        }
+    }
+    Ok(swept < 0.0)
 }
 
 /// `1/2 int (u dv - v du)` along a piece: summed over a face's loops, its

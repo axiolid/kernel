@@ -18,6 +18,7 @@
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{BooleanOperator, Tolerance, Transform2, Transform3, Vec2, Vec3};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
+use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_mesh_compile_contract::MeshCompiler;
 use axiolid_model::{
@@ -135,8 +136,15 @@ fn deviation_report(c: &mut Criterion) {
         let (_, report) = compiler
             .compile_mesh_with_deviation(&graph, root, &options)
             .expect("the boolean compiles");
-        let [contribution] = report.contributions.as_slice() else {
-            panic!("{name}: one contribution expected, got {report:?}");
+        // Besides the measurement, at most how far faces read as one
+        // surface within tolerance moved an operand (#324).
+        let measured: Vec<_> = report
+            .contributions
+            .iter()
+            .filter(|c| c.detail != COINCIDENT_OPERANDS)
+            .collect();
+        let [contribution] = measured.as_slice() else {
+            panic!("{name}: one measured contribution expected, got {report:?}");
         };
         assert_eq!(contribution.path, DeviationPath::Boolean, "{name}");
         let DeviationBound::Certified(bound) = contribution.bound else {

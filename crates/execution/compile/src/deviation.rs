@@ -182,6 +182,15 @@
 //!   and the warp is still named. An unwarped mesh operand (`w = 0`) is
 //!   measured like any exact operand, against the exact boolean of the
 //!   operands as given when no decision within tolerance fired.
+//! - Operand faces read as one surface (#324): where the general boolean
+//!   reads a face of one operand on a face of the other within tolerance
+//!   (a niche flush with a curved wall's inner face, or a unit in the last
+//!   place inside it), the furthest the reading moved an operand is a
+//!   [`DeviationBound::Certified`] contribution of
+//!   [`DeviationPath::Boolean`] under the detail [`COINCIDENT_OPERANDS`],
+//!   next to the boolean's measured one. Like a snap's move, it names the
+//!   perturbation the exact result stands for; it is not carried through
+//!   enclosing booleans, whose exact result merges the reading's report.
 //!
 //! # Placement rounding
 //!
@@ -261,6 +270,17 @@ pub(crate) const WARPED_BREP_FACE: &str = "non-planar face without a surface";
 /// instances (scaled, plus the placement's rounding, #295) and enclosing booleans, also where an enclosing
 /// boolean is measured against its exact result.
 pub const SNAPPED_OPERANDS: &str = "operands snapped onto each other within tolerance";
+
+/// The [`DeviationContribution::detail`] of a boolean measured against an
+/// exact result in which faces of the two operands were read as one
+/// surface within tolerance (#324: a niche's inner cylinder a unit in the
+/// last place off a curved wall's inner face): its bound is the furthest
+/// that reading moved an operand, so the exact result the mesh is measured
+/// against is the boolean of operands perturbed by at most that much
+/// (ADR 0080). It names the perturbation, as [`SNAPPED_OPERANDS`] does;
+/// the boolean's own contribution bounds the mesh's distance to that
+/// result.
+pub const COINCIDENT_OPERANDS: &str = "operand faces read as one surface within tolerance";
 
 /// The [`DeviationContribution::detail`] of [`DeviationPath::Placement`]:
 /// the rounding of applying an instance's transform to its source's

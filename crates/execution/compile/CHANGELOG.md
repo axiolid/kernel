@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `deviation::COINCIDENT_OPERANDS` (#324): a boolean whose exact result
+  read faces of its two operands as one surface within tolerance reports
+  how far that reading moved an operand, as a certified contribution of
+  the boolean path next to its measured one, as a snap's move is
+  reported. Such booleans now carry two contributions instead of one.
+
+### Fixed
+
+- A curved wall less a niche flush with its inner face, or one unit in
+  the last place inside it (#324), is certified: the general boolean's
+  refusal ("exact boolean whose kept faces do not sew into a solid") left
+  the deviation unbounded. A quarter ring of radii `4.8` to `5` less a
+  niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
+  niche placed well inside does, with the coincidence reported (at most
+  `4e-15`), and the exact result measures to the annular sectors' volume.
+
 ## [0.3.26] - 2026-10-14
 
 ### Added

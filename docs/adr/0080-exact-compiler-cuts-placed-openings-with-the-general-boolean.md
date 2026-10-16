@@ -670,3 +670,45 @@ once more; an identity and a mirror adding nothing; a torus at a station
 of a far line), `crates/execution/compile/tests/polyline.rs` (a polyline
 and a circle placed at the site); the unit tests of `deviation::placement_rounding`; probe
 `scripts/probe_placement_rounding_mutants.py` (#295 mutants).
+
+## Amendment 2026-10-16: a cutter face on a curved face of its host (#324)
+
+A quarter-ring wall less a niche whose inner arc lies on the wall's inner
+cylinder, or one unit in the last place inside it, was refused ("exact
+boolean whose kept faces do not sew into a solid"), so the boolean's
+deviation was unbounded. The general boolean already read the two
+cylinders as one surface (`same_support`: exact predicate first, else
+axis and radius within `eps`, reported as `CoincidentSupports`) and split
+each face along the other's boundary. The defect was the side: a region
+lying on the other operand's face takes that face's outward normal to
+decide whether the operation keeps it, and that normal ignored the
+face's winding. An extrusion's face on its profile's inner arc winds
+clockwise in its parameters and so faces against its flag, which the
+region's own normal accounted for and the other face's did not, so the
+difference kept the wall's patch under the niche.
+
+- **Decision: coincident curved faces are decided like coplanar ones.**
+  The same reading, split and keep-or-drop rule, with the other face's
+  outward normal read through its flag and its winding
+  (`split::face_against`).
+- **Decision: the reading's move is a deviation contribution.** Where
+  faces of the two operands were read as one surface within tolerance,
+  the furthest that moved an operand is a `Certified` contribution of the
+  boolean path under `deviation::COINCIDENT_OPERANDS`, next to the
+  measured one, as the snap's move is (#276). It names the perturbation
+  the exact result stands for; it does not bound the mesh's distance to
+  the boolean of the unperturbed operands. The 1-ulp niche is within
+  tolerance, so it is decided as flush, its move (about `4e-15`)
+  reported; the flush niche reports its rounding (`2.2e-15`), since the
+  two cylinders are each built from rounded profile points.
+- **Unchanged.** A box cutter tangent to the inner face (touching it
+  along one ruling) is a different configuration, refused by the general
+  boolean as a point too close to a face boundary, and by the mesh path as
+  a result touching itself; this amendment does not cover it.
+
+Tests: `crates/algorithms/construction/brep-boolean/tests/coincident_cylinders.rs`
+(the three niches, audited, closed, at the closed-form volume, the
+reading reported for the two flush ones only),
+`crates/execution/compile/tests/curved_flush_niche.rs` (the issue's
+reproducer: all three certified at `0.99973 mm` under a `1 mm` request);
+probe `scripts/probe_coincident_curved_faces_mutants.py`.
