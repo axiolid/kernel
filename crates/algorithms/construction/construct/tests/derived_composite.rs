@@ -248,3 +248,39 @@ fn a_doubly_derived_profile_composes_its_transforms() {
         "expected a corner at {want:?} from both shifts, got {found:?}"
     );
 }
+
+/// A scaled arc is scaled once (#322). Moved off the origin, a circle
+/// lowers to four quarter arcs of a contour, each placed by the transform;
+/// the scale went into both the radius and the arc's frame axes, so the
+/// arcs were twice scaled and left gaps between them.
+#[test]
+fn a_scaled_contour_arc_is_scaled_once() {
+    let circle = Profile::Circle(CircleProfile {
+        radius: 1.5,
+        thickness: None,
+    });
+    for (scale, mirror) in [(2.0, 1.0), (0.5, 1.0), (2.0, -1.0)] {
+        let transform = Transform2::from_cols(
+            Vec2::new(scale, 0.0),
+            Vec2::new(0.0, scale * mirror),
+            Vec2::new(3.0, -1.0),
+        );
+        let solid = extrude_profile_exact(
+            &derived(circle.clone(), transform),
+            Vec3::Z,
+            2.0,
+            Tolerance::METRE,
+        )
+        .unwrap_or_else(|error| panic!("scale {scale} mirror {mirror}: {error:?}"));
+        let radius = 1.5 * scale;
+        let volume = exact_properties(&solid, Tolerance::METRE)
+            .expect("volume")
+            .signed_volume;
+        let want = std::f64::consts::PI * radius * radius * 2.0;
+        assert!(
+            (volume - want).abs() < 1e-9 * want,
+            "scale {scale} mirror {mirror}: volume {volume}, expected {want}"
+        );
+        assert!(geometric_audit(&solid, Tolerance::METRE).is_consistent());
+    }
+}

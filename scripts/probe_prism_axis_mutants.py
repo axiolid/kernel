@@ -1,5 +1,5 @@
 """Mutation probe for bounded half-spaces along their placement's z (#321,
-ADR 0085 format 1.4).
+ADR 0085 format 1.4) and for their whole frame (#322).
 
 Each mutant breaks one decision a `BoundedHalfSpaceAlongZ` rests on: in
 `axiolid-model` the wire format (the variant read in a 1.3 payload, a
@@ -32,10 +32,14 @@ B = "crates/execution/compile/src/half_space_boundary.rs"
 G = "crates/representations/modeling/graph/src/wire.rs"
 H = "crates/algorithms/construction/construct/src/half_space.rs"
 C = "crates/execution/compile/src/exact/clip.rs"
+P = "crates/algorithms/construction/construct/src/profile_lower.rs"
+M = "crates/execution/compile/src/compiler.rs"
 
 WIRE = ["-p", "axiolid-model", "--all-features", "--test", "wire"]
 SLAB = ["-p", "axiolid-construct", "--test", "half_space"]
 AXIS = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "bounded_half_space_prism_axis"]
+WHOLE = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "bounded_half_space_whole_frame"]
+DERIVED = ["-p", "axiolid-construct", "--test", "derived_composite"]
 
 MUTANTS = [
     # The wire format (ADR 0085, format 1.4).
@@ -58,14 +62,14 @@ MUTANTS = [
      [AXIS]),
     # The prism.
     ("the placement's z is replaced by the normal", H,
-     "            axis: z,\n        })",
-     "            axis: x.cross(y),\n        })", [SLAB, AXIS]),
+     "            axis: placement.matrix3.z_axis,",
+     "            axis: x.cross(y),", [SLAB, AXIS]),
     ("an axis in the plane is let through", H,
      "        if crossing.abs() <= unit_floor(tolerance) {",
      "        if crossing == 0.0 {", [SLAB, AXIS]),
     ("a degenerate placement is let through", H,
-     "        if volume <= unit_floor(tolerance) * x.length() * y.length() * z.length() {",
-     "        if false {", [SLAB, AXIS]),
+     "    if volume.abs() <= unit_floor(tolerance) * x.length() * y.length() * z.length() {",
+     "    if false {", [SLAB, AXIS]),
     ("the boundary is carried along the normal", H,
      "    let carry = |v: Vec3| v - axis * (v.dot(normal) / crossing);",
      "    let carry = |v: Vec3| v - normal * v.dot(normal);", [SLAB, AXIS]),
@@ -103,6 +107,38 @@ MUTANTS = [
      "        let margin = 0.5 * (local.hi - local.lo).length() + 8.0 * tolerance.linear();",
      "        let margin = 0.25 * (local.hi - local.lo).length() + 4.0 * tolerance.linear();",
      [AXIS]),
+    # The whole frame (#322).
+    ("a left-handed placement is read right-handed", H,
+     "            handedness < 0.0,",
+     "            false,",
+     [SLAB, WHOLE]),
+    ("a frame mirrored about the normal is read unmirrored", H,
+     "            turn < 0.0,",
+     "            false,", [SLAB]),
+    ("a frame upright on the plane is let through", H,
+     "        if turn.abs() <= unit_floor(tolerance) {",
+     "        if false {", [SLAB]),
+    ("the frame's scale is dropped", H,
+     "            x: base.x * length,",
+     "            x: base.x,", [SLAB, WHOLE]),
+    ("the frame's shear is dropped", H,
+     "            y: base.x * shear + across * rise,",
+     "            y: across * rise,", [SLAB, WHOLE]),
+    ("the frame's y is read at unit length", H,
+     "            y: base.x * shear + across * rise,",
+     "            y: base.x * shear + across,", [SLAB, WHOLE]),
+    ("a derived arc is scaled twice", P,
+     "                        x: transform.matrix2 * circle.frame.x / scale,",
+     "                        x: transform.matrix2 * circle.frame.x,", [DERIVED, WHOLE]),
+    ("the boundary is chorded at its own scale", M,
+     "        let chord = chord_error(options) / stretch.max(1.0);",
+     "        let chord = chord_error(options);", [WHOLE]),
+    ("the exact compiler reads every frame as a unit one", C,
+     "                let shape = if is_identity(&shape) {",
+     "                let shape = if true {", [WHOLE]),
+    ("a reflecting boundary map is not reflected", C,
+     "        let reflects = into.matrix2.determinant() < 0.0;",
+     "        let reflects = false;", [WHOLE]),
 ]
 
 probe_lib.main(MUTANTS, timeout=TIMEOUT, reject_uncompiled=True)

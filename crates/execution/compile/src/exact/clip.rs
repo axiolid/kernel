@@ -9,8 +9,12 @@
 //! selects the normal side of the plane as the half-space; a bounded one is
 //! that side intersected with the infinite prism of its boundary, swept
 //! along the plane normal, the boundary framed by the operation's placement
-//! projected into the plane, or along the placement's `z` (#321, see
-//! below).
+//! projected into the plane, its scale, shear and handedness kept (#322), or
+//! along the placement's `z` (#321, see below). A frame that scales or
+//! mirrors a profile boundary is applied as a derived profile, the part of
+//! the map that keeps handedness, and the prism reflected where it does
+//! not, so a similarity's arcs stay exact cylinder walls; any other map
+//! makes them ellipses, refused by name.
 //!
 //! # Prisms along the placement's `z` (#321)
 //!
@@ -109,8 +113,7 @@ use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_construct::half_space::BoundaryPrism;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{
-    BooleanOperator, Interval, Mat3, PlaneFrame, Point2, Point3, Scalar, Transform2, Transform3,
-    Vec2, Vec3,
+    BooleanOperator, Interval, Mat3, Point2, Point3, Scalar, Transform2, Transform3, Vec2, Vec3,
 };
 use axiolid_curve::{Curve2, Curve3, Line2};
 use axiolid_model::{GeometryNode, NodeId, SolidOperation};
@@ -383,29 +386,37 @@ impl ExactCompilation<'_> {
         // The in-plane frame: `x` and `y = normal x x` as the mesh compiler
         // frames the boundary, then `y` turned with the kept side so that
         // `(x, y_side, side)` is a rotation and the prism runs along `+z`.
-        let (anchor, x) = match footprint {
+        // A bounded half-space's placement is read whole, as the mesh
+        // compiler reads it (#322): `shape` maps the boundary into
+        // `(x, normal x x)`, the placement's scale, shear and handedness kept.
+        let (anchor, x, shape) = match footprint {
             None => {
                 let reference = if normal.x.abs() < 0.9 {
                     Vec3::X
                 } else {
                     Vec3::Y
                 };
-                (origin, reference - normal * normal.dot(reference))
+                (
+                    origin,
+                    reference - normal * normal.dot(reference),
+                    Transform2::IDENTITY,
+                )
             }
             Some((_, &frame)) => {
-                let frame = PlaneFrame::new(
-                    frame.translation,
-                    frame.matrix3.x_axis.normalize_or_zero(),
-                    frame.matrix3.y_axis.normalize_or_zero(),
-                    tolerance,
-                )
-                .map_err(|error| {
-                    GeomError::InvalidInput(format!(
-                        "bounded half-space placement is not a usable boundary frame: {error}"
-                    ))
-                })?;
-                let anchor = frame.origin() - normal * (frame.origin() - origin).dot(normal);
-                (anchor, frame.x_axis() - normal * frame.x_axis().dot(normal))
+                let prism =
+                    BoundaryPrism::along_plane_normal(frame, half_space.boundary, tolerance)?;
+                let x = prism.x.normalize();
+                let shape = Transform2::from_cols(
+                    Vec2::new(prism.x.dot(x), 0.0),
+                    Vec2::new(prism.y.dot(x), prism.y.dot(normal.cross(x))),
+                    Vec2::ZERO,
+                );
+                let shape = if is_identity(&shape) {
+                    Transform2::IDENTITY
+                } else {
+                    shape
+                };
+                (prism.origin, x, shape)
             }
         };
         let x = x.normalize_or_zero();
@@ -418,6 +429,17 @@ impl ExactCompilation<'_> {
         }
         let flip = if half_space.agreement { 1.0 } else { -1.0 };
         let y = normal.cross(x) * flip;
+        // The boundary into `(x, y)`: its shape, then `y` turned with the
+        // side. A profile is extruded under the part of that map that keeps
+        // its handedness, and its prism reflected in the profile's `x` axis
+        // where the map reflects (#288), so its arcs stay arcs.
+        let into = Transform2::from_cols(Vec2::X, Vec2::new(0.0, flip), Vec2::ZERO) * shape;
+        let reflects = into.matrix2.determinant() < 0.0;
+        let kept = if reflects {
+            Transform2::from_cols(Vec2::X, -Vec2::Y, Vec2::ZERO) * into
+        } else {
+            into
+        };
         let (profile, centre) = match footprint {
             None => {
                 let (mut lo, mut hi) = (
@@ -442,14 +464,28 @@ impl ExactCompilation<'_> {
             Some((Footprint::Polygon(points), _)) => {
                 let points: Vec<Point2> = points
                     .iter()
-                    .map(|p| Point2::new(p.x, p.y * flip))
+                    .map(|&p| {
+                        let p = shape.transform_point2(p);
+                        Point2::new(p.x, p.y * flip)
+                    })
                     .collect();
                 (polygon(&points), Vec2::ZERO)
             }
-            // A profile (#277) is extruded as authored. Every arc of it
-            // becomes a right circular cylinder wall: the sweep is along
-            // the plane normal, never oblique.
-            Some((Footprint::Profile(profile), _)) => (profile.clone(), Vec2::ZERO),
+            // A profile (#277) is extruded as authored, under its kept map.
+            // Every arc of it becomes a right circular cylinder wall: the
+            // sweep is along the plane normal, never oblique. A similarity
+            // keeps it an arc; any other map makes it an ellipse, which the
+            // exact extruder refuses by name.
+            Some((Footprint::Profile(profile), _)) if is_identity(&kept) => {
+                (profile.clone(), Vec2::ZERO)
+            }
+            Some((Footprint::Profile(profile), _)) => (
+                Profile::Derived {
+                    basis: Box::new(profile.clone()),
+                    transform: kept,
+                },
+                Vec2::ZERO,
+            ),
         };
         let prism = extrude_profile_exact(&profile, Vec3::Z, far + margin, tolerance)
             .map_err(remap_construction_error)?;
@@ -458,7 +494,7 @@ impl ExactCompilation<'_> {
         // A profile turns over with `y` as the polygon does, by reflecting
         // its prism in the profile's `x` axis (#288).
         let turned = match footprint {
-            Some((Footprint::Profile(_), _)) if flip < 0.0 => {
+            Some((Footprint::Profile(_), _)) if reflects => {
                 frame * Transform3::from_mat3(Mat3::from_diagonal(Vec3::new(1.0, -1.0, 1.0)))
             }
             _ => frame,

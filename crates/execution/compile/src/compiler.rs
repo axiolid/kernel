@@ -8,7 +8,7 @@ use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, ExecutionOptions, ExecutionTarget, GeomError,
     GeomResult, Operation, ScratchRequirement,
 };
-use axiolid_core::{PlaneFrame, Point3, Scalar, Tolerance, Transform3};
+use axiolid_core::{Point3, Scalar, Tolerance, Transform3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::MeshBoolean;
 use axiolid_mesh_compile_contract::{
@@ -212,13 +212,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// plane: the profile is authored in it, so it orients the profile
     /// before the slab is built. Applying it only to the finished mesh
     /// cannot express an in-plane rotation, because by then the boundary has
-    /// already been framed against the plane normal. Along the plane normal
-    /// the frame is projected into the plane; along the placement's `z`
+    /// already been framed against the plane normal. The whole frame is
+    /// honoured (#322): along the plane normal its `x` is projected into the
+    /// plane and its scale, shear and handedness kept
+    /// ([`BoundaryPrism::along_plane_normal`]); along the placement's `z`
     /// (#321) it is read as written ([`BoundaryPrism::along_placement_z`]),
-    /// the prism at any angle to the plane, and the boundary chorded within
-    /// the budget over the frame's longest axis, so the chords stay within
-    /// it once placed.
+    /// the prism at any angle to the plane. Either way the boundary is
+    /// chorded within the budget over the frame's longest axis, so the
+    /// chords stay within it once placed.
     ///
+    /// [`BoundaryPrism::along_plane_normal`]: axiolid_construct::half_space::BoundaryPrism::along_plane_normal
     /// [`BoundaryPrism::along_placement_z`]: axiolid_construct::half_space::BoundaryPrism::along_placement_z
     fn bounded_half_space(
         &self,
@@ -237,26 +240,13 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             )));
         };
         let tolerance = options.tolerance();
-        let (prism, stretch) = match prism_axis {
+        let prism = match prism_axis {
             PrismAxis::PlaneNormal => {
-                let frame = PlaneFrame::new(
-                    placement.translation,
-                    placement.matrix3.x_axis.normalize_or_zero(),
-                    placement.matrix3.y_axis.normalize_or_zero(),
-                    tolerance,
-                )
-                .map_err(|error| {
-                    GeomError::InvalidInput(format!(
-                        "bounded half-space placement is not a usable boundary frame: {error}"
-                    ))
-                })?;
-                (BoundaryPrism::along_normal(frame, hs.boundary)?, 1.0)
+                BoundaryPrism::along_plane_normal(placement, hs.boundary, tolerance)?
             }
-            PrismAxis::PlacementZ => {
-                let prism = BoundaryPrism::along_placement_z(placement, tolerance)?;
-                (prism, prism.x.length().max(prism.y.length()))
-            }
+            PrismAxis::PlacementZ => BoundaryPrism::along_placement_z(placement, tolerance)?,
         };
+        let stretch = prism.x.length().max(prism.y.length());
         let chord = chord_error(options) / stretch.max(1.0);
         let rings = self.boundary_rings(graph, boundary, chord, options)?;
         bounded_half_space_prism(&rings, hs.boundary, prism, hs.agreement, depth, tolerance)

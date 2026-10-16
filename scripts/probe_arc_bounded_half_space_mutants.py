@@ -49,7 +49,7 @@ MUTANTS = [
      "                crate::half_space_boundary::check(profile, self.options.tolerance())?;",
      "                let _ = crate::half_space_boundary::check;"),
     ("the profile not reflected for the opposite side", C,
-     "            Some((Footprint::Profile(_), _)) if flip < 0.0 => {",
+     "            Some((Footprint::Profile(_), _)) if reflects => {",
      "            Some((Footprint::Profile(_), _)) if false => {"),
     ("the reflection is the identity", C,
      "Mat3::from_diagonal(Vec3::new(1.0, -1.0, 1.0))",

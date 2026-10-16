@@ -25,6 +25,12 @@ caret rule for `0.x` versions.
   without it is written byte for byte as before, labelled 1.0 to 1.3.
   Golden `tests/wire/v1.4/every-kind.json`.
 
+### Changed
+
+- `BoundedHalfSpace.placement` is documented as read whole (#322): its
+  `x` projected into the plane fixes the rotation, and its scale, shear
+  and handedness shape the boundary; only a degenerate frame is refused.
+
 ## [0.3.13] - 2026-10-13
 
 ### Fixed

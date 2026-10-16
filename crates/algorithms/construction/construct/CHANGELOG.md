@@ -26,11 +26,28 @@ caret rule for `0.x` versions.
   (`"parallel to the clip plane"`), a degenerate placement (axes parallel
   or zero) and a depth that is not positive and finite.
 
+- `BoundaryPrism::along_plane_normal` (#322): a boundary placed by a whole
+  placement along the plane normal, the placement's `x` projected into the
+  plane, its scale, shear and handedness kept; a degenerate placement
+  (parallel or zero axes) is refused by name.
+
+### Changed
+
+- `bounded_half_space_in_frame` honours a frame mirrored about the plane
+  normal, whose `y` is `-(normal x x)` (#322): its boundary is built
+  mirrored, as written, still outward-facing. It used to rebuild `y` as
+  `normal x x` and build the mirror image. A frame standing perpendicular
+  to the plane has no handedness there and is refused by name.
+
 ### Fixed
 
 - A bounded half-space whose boundary ring runs clockwise is built
   outward-facing, the ring read reversed (the same region); it came out
   inside-out before.
+- A derived contour's arcs under a scaling transform are scaled once
+  (#322): the scale went into the radius and into the arc's frame axes, so
+  every arc came out scaled twice, its contour open, and the extrusion
+  refused (`tests/derived_composite.rs`).
 
 ## [0.3.18] - 2026-10-13
 

@@ -52,19 +52,82 @@ impl BoundaryPrism {
     /// The prism along `plane`'s normal of a boundary authored in `frame`
     /// ([`bounded_half_space_in_frame`]): `frame`'s `x` projected into the
     /// plane fixes the boundary's rotation about the normal, its `y` is the
-    /// normal cross that `x`, and its origin is projected onto the plane.
+    /// normal cross that `x` -- or its opposite for a frame mirrored about
+    /// the normal, whose `x cross y` points against it (#322) -- and its
+    /// origin is projected onto the plane.
     ///
     /// # Errors
     ///
-    /// `InvalidInput`, by name, for a plane without a normal and for a
-    /// frame whose `x` is parallel to it.
-    pub fn along_normal(frame: PlaneFrame, plane: Plane3) -> GeomResult<Self> {
+    /// `InvalidInput`, by name, for a plane without a normal, a frame whose
+    /// `x` is parallel to it, and a frame standing perpendicular to the
+    /// plane (within the angular tolerance), which has no handedness there.
+    pub fn along_normal(
+        frame: PlaneFrame,
+        plane: Plane3,
+        tolerance: Tolerance,
+    ) -> GeomResult<Self> {
         let normal = plane_normal(plane)?;
-        // Project the authored axes into the clip plane and re-orthonormalise
-        // against the sweep normal. The authored frame fixes the rotation
-        // about the normal; the sweep direction is still the clip plane's.
-        let projected = frame.x_axis() - normal * frame.x_axis().dot(normal);
-        let reference = projected.normalize_or_zero();
+        let turn = frame.x_axis().cross(frame.y_axis()).dot(normal);
+        if turn.abs() <= unit_floor(tolerance) {
+            return Err(GeomError::InvalidInput(
+                "authored boundary frame stands perpendicular to the clip plane, so it \
+                 has no handedness there"
+                    .to_owned(),
+            ));
+        }
+        Self::laid_on(
+            (frame.origin(), frame.x_axis(), frame.y_axis()),
+            turn < 0.0,
+            normal,
+            plane,
+        )
+    }
+
+    /// The prism along `plane`'s normal of a boundary authored in
+    /// `placement`'s `xy` plane, the whole frame honoured (#322): the
+    /// boundary keeps the shape the placement gives it -- the length of its
+    /// `x`, the length and lean of its `y` against that `x` -- and the
+    /// placement's handedness, laid into the plane with its `x` along the
+    /// placement's `x` projected there and its `y` to the side the normal
+    /// cross that `x` points, or the other side for a left-handed
+    /// placement, whose `x`, `y` and `z` are mirrored. The origin is
+    /// projected onto the plane. For a right-handed placement with unit,
+    /// perpendicular `x` and `y` this is [`BoundaryPrism::along_normal`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput`, by name, for a plane without a normal, a non-finite
+    /// placement, a degenerate one, whose `x`, `y` and `z` columns do not
+    /// span space within the angular tolerance (parallel or zero axes), and
+    /// one whose `x` is parallel to the normal.
+    pub fn along_plane_normal(
+        placement: Transform3,
+        plane: Plane3,
+        tolerance: Tolerance,
+    ) -> GeomResult<Self> {
+        let normal = plane_normal(plane)?;
+        let (x, y, handedness) = placement_axes(placement, tolerance)?;
+        Self::laid_on(
+            (placement.translation, x, y),
+            handedness < 0.0,
+            normal,
+            plane,
+        )
+    }
+
+    /// `x` and `y` at `origin` laid into the plane along its `normal`:
+    /// `x`'s projection fixes the direction, the frame's own shape is kept,
+    /// and `mirrored` turns `y` to the side opposite `normal cross x`.
+    fn laid_on(
+        (origin, x, y): (Point3, Vec3, Vec3),
+        mirrored: bool,
+        normal: Vec3,
+        plane: Plane3,
+    ) -> GeomResult<Self> {
+        // Project the authored x into the clip plane. The authored frame
+        // fixes the rotation about the normal; the sweep direction is
+        // still the clip plane's.
+        let reference = (x - normal * x.dot(normal)).normalize_or_zero();
         if reference == Vec3::ZERO {
             return Err(GeomError::InvalidInput(
                 "authored boundary frame x axis is parallel to the clip plane normal, \
@@ -78,13 +141,18 @@ impl BoundaryPrism {
         // origin, which the frame's contract allows. Only the offset ALONG
         // the normal is dropped, exactly as for the axes: the sweep still
         // starts on the clip plane, so polarity and depth are unchanged.
-        let offset = frame.origin() - plane.origin;
-        let anchor = frame.origin() - normal * offset.dot(normal);
+        let anchor = origin - normal * (origin - plane.origin).dot(normal);
         let base = Frame::from_reference(anchor, normal, reference)?;
+        // The frame's own shape: `y` leans `shear` along `x` and rises
+        // `rise` across it.
+        let length = x.length();
+        let shear = y.dot(x) / length;
+        let rise = (y - x * (shear / length)).length();
+        let across = if mirrored { -base.y } else { base.y };
         Ok(Self {
             origin: base.origin,
-            x: base.x,
-            y: base.y,
+            x: base.x * length,
+            y: base.x * shear + across * rise,
             axis: normal,
         })
     }
@@ -102,28 +170,12 @@ impl BoundaryPrism {
     /// within the angular tolerance (parallel or zero axes): its boundary
     /// has no area, or its prism no direction off the boundary's plane.
     pub fn along_placement_z(placement: Transform3, tolerance: Tolerance) -> GeomResult<Self> {
-        let [x, y, z] = [
-            placement.matrix3.x_axis,
-            placement.matrix3.y_axis,
-            placement.matrix3.z_axis,
-        ];
-        if !(placement.translation.is_finite() && x.is_finite() && y.is_finite() && z.is_finite()) {
-            return Err(GeomError::InvalidInput(
-                "bounded half-space placement is not finite".to_owned(),
-            ));
-        }
-        let volume = x.cross(y).dot(z).abs();
-        if volume <= unit_floor(tolerance) * x.length() * y.length() * z.length() {
-            return Err(GeomError::InvalidInput(
-                "bounded half-space placement is degenerate: its axes are parallel or zero"
-                    .to_owned(),
-            ));
-        }
+        let (x, y, _) = placement_axes(placement, tolerance)?;
         Ok(Self {
             origin: placement.translation,
             x,
             y,
-            axis: z,
+            axis: placement.matrix3.z_axis,
         })
     }
 
@@ -205,7 +257,12 @@ pub fn bounded_half_space(
 /// match `plane.normal`: only the in-plane axes are taken from it, and the
 /// sweep still runs along the clip plane's normal, so an authored frame that
 /// is tilted relative to the clip plane still contributes only its rotation
-/// about that normal.
+/// about that normal -- and its handedness: a frame whose `y` is
+/// `-(normal x x)`, mirrored about the normal, builds its boundary
+/// mirrored, as written, still outward-facing (#322). A frame standing
+/// perpendicular to the plane has no handedness there and is refused by
+/// name. [`BoundaryPrism::along_plane_normal`] reads a whole placement,
+/// scale, shear and handedness included.
 ///
 /// The frame's origin anchors the boundary, projected onto the clip plane: an
 /// in-plane offset from `plane.origin` moves the footprint by exactly that
@@ -240,7 +297,7 @@ fn bounded_half_space_framed(
     // picked -- the least parallel of X and Y, so the cross product stays
     // well conditioned.
     let prism = match authored {
-        Some(frame) => BoundaryPrism::along_normal(frame, plane)?,
+        Some(frame) => BoundaryPrism::along_normal(frame, plane, tolerance)?,
         None => {
             let normal = plane_normal(plane)?;
             let reference = if normal.x.abs() < 0.9 {
@@ -371,6 +428,30 @@ pub fn bounded_half_space_prism(
         .map(|f| loft::place(&rings, |p| loft::at(f, p)))
         .collect();
     loft::loft(&rings, &stations, false)
+}
+
+/// A placement's `x` and `y` columns and the signed volume its three
+/// columns span, positive for a right-handed frame; refused by name when it
+/// is not finite or its columns do not span space within the angular
+/// tolerance.
+fn placement_axes(placement: Transform3, tolerance: Tolerance) -> GeomResult<(Vec3, Vec3, Scalar)> {
+    let [x, y, z] = [
+        placement.matrix3.x_axis,
+        placement.matrix3.y_axis,
+        placement.matrix3.z_axis,
+    ];
+    if !(placement.translation.is_finite() && x.is_finite() && y.is_finite() && z.is_finite()) {
+        return Err(GeomError::InvalidInput(
+            "bounded half-space placement is not finite".to_owned(),
+        ));
+    }
+    let volume = x.cross(y).dot(z);
+    if volume.abs() <= unit_floor(tolerance) * x.length() * y.length() * z.length() {
+        return Err(GeomError::InvalidInput(
+            "bounded half-space placement is degenerate: its axes are parallel or zero".to_owned(),
+        ));
+    }
+    Ok((x, y, volume))
 }
 
 /// The plane's unit normal, refused when it has none.

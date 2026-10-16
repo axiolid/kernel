@@ -246,12 +246,14 @@ fn lower_segment(
                     "derived contour arc under a non-conformal transform is elliptical",
                 ));
             };
+            // The scale goes into the radius once: the frame's axes stay
+            // unit, as a circle's are, or the arc would be scaled twice.
             Ok(ProfileSegment {
                 curve: Curve2::Circle(Circle2 {
                     frame: Frame2 {
                         origin: apply(transform, circle.frame.origin),
-                        x: transform.matrix2 * circle.frame.x,
-                        y: transform.matrix2 * circle.frame.y,
+                        x: transform.matrix2 * circle.frame.x / scale,
+                        y: transform.matrix2 * circle.frame.y / scale,
                     },
                     radius: circle.radius * scale,
                 }),

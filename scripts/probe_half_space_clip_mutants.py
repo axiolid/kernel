@@ -20,6 +20,7 @@ import probe_lib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 C = "crates/execution/compile/src/exact/clip.rs"
 D = "crates/execution/compile/src/exact/boolean.rs"
+H = "crates/algorithms/construction/construct/src/half_space.rs"
 TESTS = [
     ["-p", "axiolid-mesh-compile", "--test", "exact_half_space_clip"],
 ]
@@ -34,9 +35,9 @@ MUTANTS = [
     ("the in-plane y mirrored", C,
      "        let y = normal.cross(x) * flip;",
      "        let y = x.cross(normal) * flip;"),
-    ("the boundary anchored off the plane", C,
-     "                let anchor = frame.origin() - normal * (frame.origin() - origin).dot(normal);",
-     "                let anchor = frame.origin();"),
+    ("the boundary anchored off the plane", H,
+     "        let anchor = origin - normal * (origin - plane.origin).dot(normal);",
+     "        let anchor = origin;"),
     ("the operator dropped", C,
      "boolean_with_report(&subject, &solid, operator, tolerance)",
      "boolean_with_report(&subject, &solid, BooleanOperator::Difference, tolerance)"),

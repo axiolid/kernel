@@ -511,3 +511,98 @@ fn a_prism_parallel_to_the_plane_or_a_degenerate_frame_is_refused() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The whole frame along the plane normal (#322)
+// ---------------------------------------------------------------------------
+
+/// A frame mirrored about the normal, its `y` `-(normal x x)`, builds its
+/// boundary mirrored, as written, still outward-facing; before #322 its
+/// `y` was rebuilt as `normal x x` and the L came out unmirrored.
+#[test]
+fn a_frame_mirrored_about_the_normal_mirrors_its_boundary() {
+    let margin = ClipMargin::new(1.0).unwrap();
+    let mirrored = PlaneFrame::new(Point3::ZERO, Vec3::X, -Vec3::Y, tol()).expect("a frame");
+    for agreement in [true, false] {
+        let mesh =
+            bounded_half_space_in_frame(&l_shape(), plane_z(), mirrored, agreement, margin, tol())
+                .expect("clip");
+        assert!(volume(&mesh) > 0.0, "agreement {agreement}: inside-out");
+        // The L's arm (1, 3) lies at y = -3.
+        let near = |want: Point3| mesh.positions.iter().any(|p| (*p - want).length() < 1e-9);
+        assert!(near(Point3::new(1.0, -3.0, 0.0)), "{:?}", mesh.positions);
+        assert!(!near(Point3::new(1.0, 3.0, 0.0)));
+    }
+    // A frame standing upright on the plane has no handedness there.
+    let upright = PlaneFrame::new(Point3::ZERO, Vec3::X, Vec3::Z, tol()).expect("a frame");
+    let error = bounded_half_space_in_frame(&l_shape(), plane_z(), upright, true, margin, tol())
+        .expect_err("refused");
+    assert!(
+        matches!(&error, GeomError::InvalidInput(m) if m.contains("perpendicular")),
+        "{error:?}"
+    );
+}
+
+/// A placement's scale, shear and handedness shape its boundary along the
+/// plane normal; its `x` projected into the plane keeps the rotation, and a
+/// right-handed unit frame is the plane frame's reading.
+#[test]
+fn a_placement_along_the_normal_keeps_its_scale_shear_and_handedness() {
+    let sloped = Plane3 {
+        origin: Point3::ZERO,
+        normal: Vec3::new(0.0, 0.6, 0.8),
+    };
+    let n = sloped.normal;
+    let x_in = Vec3::X;
+    let across = n.cross(x_in);
+    for (name, y, z, want_y) in [
+        ("unit", Vec3::new(0.0, 0.8, -0.6), n, across),
+        ("mirrored", Vec3::new(0.0, -0.8, 0.6), n, -across),
+        ("turned over", Vec3::new(0.0, -0.8, 0.6), -n, across),
+        ("scaled", Vec3::new(0.0, 0.8, -0.6) * 2.5, n, across * 2.5),
+        ("sheared", Vec3::new(0.5, 0.8, -0.6), n, x_in * 0.5 + across),
+    ] {
+        let frame = Transform3::from_cols(x_in * 3.0, y, z, Point3::new(1.0, 0.0, 0.0));
+        let prism = BoundaryPrism::along_plane_normal(frame, sloped, tol()).expect(name);
+        assert!(
+            (prism.x - x_in * 3.0).length() < 1e-12,
+            "{name}: x {:?}",
+            prism.x
+        );
+        assert!(
+            (prism.y - want_y).length() < 1e-12,
+            "{name}: y {:?}",
+            prism.y
+        );
+        assert!((prism.axis - n).length() < 1e-12, "{name}");
+        // A unit right-handed frame reads as the plane frame does.
+        if name == "unit" {
+            let frame = PlaneFrame::new(Point3::new(1.0, 0.0, 0.0), x_in, y, tol()).unwrap();
+            let read = BoundaryPrism::along_normal(frame, sloped, tol()).unwrap();
+            assert!((read.y - prism.y).length() < 1e-12);
+            assert!((read.x - x_in).length() < 1e-12);
+        }
+        let mesh = bounded_half_space_prism(
+            &l_shape(),
+            sloped,
+            prism,
+            true,
+            SlabDepth::Reach(1.0),
+            tol(),
+        )
+        .expect(name);
+        // The L is 6 in its own units, its slab one unit across the plane.
+        let area = 6.0 * prism.x.cross(prism.y).length();
+        assert!(
+            (volume(&mesh) - area).abs() < 1e-9,
+            "{name}: {}",
+            volume(&mesh)
+        );
+    }
+    let degenerate = Transform3::from_cols(Vec3::X, Vec3::X, n, Point3::ZERO);
+    let error = BoundaryPrism::along_plane_normal(degenerate, sloped, tol()).expect_err("refused");
+    assert!(
+        matches!(&error, GeomError::InvalidInput(m) if m.contains("degenerate")),
+        "{error:?}"
+    );
+}

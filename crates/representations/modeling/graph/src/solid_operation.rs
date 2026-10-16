@@ -121,10 +121,14 @@ pub enum SolidOperation {
         /// The boundary profile is authored in this frame, so its rotation
         /// orients the profile itself rather than the finished solid. A
         /// source format may place the boundary independently of the base
-        /// surface, and only the rotation about the clip normal is
-        /// meaningful: the compiler projects this frame's axes into the
-        /// plane, so a component along the normal is dropped rather than
-        /// tilting the profile out of its own plane.
+        /// surface. The whole frame is read (#322): its `x` projected into
+        /// the plane fixes the boundary's rotation about the clip normal, so
+        /// a component along the normal is dropped rather than tilting the
+        /// profile out of its own plane, while the frame's own shape -- the
+        /// lengths of its `x` and `y`, the lean of `y` against `x`, and its
+        /// handedness -- is kept: `y` is laid to the side of `normal x x`,
+        /// the other side for a left-handed frame. Only a degenerate frame,
+        /// whose axes are parallel or zero, is refused.
         placement: Transform3,
     },
     /// Closed profiles standing at stations along a directrix (#241).

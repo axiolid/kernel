@@ -43,6 +43,19 @@ caret rule for `0.x` versions.
   niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
   niche placed well inside does, with the coincidence reported (at most
   `4e-15`), and the exact result measures to the annular sectors' volume.
+- A bounded half-space's placement is read whole (#322), in both
+  compilers and along either axis. Along the plane normal the mesh
+  compiler normalised the placement's axes and rebuilt `y` from the
+  normal, so a scaled frame cut its boundary at unit scale, a sheared one
+  unsheared and a left-handed (mirrored) one its mirror image, with no
+  error; the exact compiler did the same. Now the boundary keeps the
+  frame's scale, shear and handedness (`BoundaryPrism::along_plane_normal`),
+  and only a degenerate frame (parallel or zero axes) is refused by name. A
+  right-handed unit frame, even one whose `z` points against the normal,
+  reads as before. In the exact compiler a profile boundary under a scaling
+  or mirroring frame is a derived profile, its arcs exact under a
+  similarity and refused by name as ellipses otherwise
+  (`tests/bounded_half_space_whole_frame.rs`).
 
 ## [0.3.26] - 2026-10-14
 
