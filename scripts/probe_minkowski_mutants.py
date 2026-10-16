@@ -57,7 +57,7 @@ MUTANTS = [
     ('bracketing polygons swapped', M, '        let inscribed = (side == BoundSide::Inner) != erode;', '        let inscribed = (side == BoundSide::Inner) == erode;', TESTS),
     ('non-convex polygon taken as convex', M, '    if !on_hull || hull.len() < 3 {', '    if hull.len() < 3 {', TESTS),
     ('ring boxes miss edges to the left', E, '            x0: a.x0.min(b.x0),', '            x0: a.x0,', TESTS),
-    ('only the first convex piece summed', M, '            for (j, k) in convex.iter().enumerate() {', '            for (j, k) in convex.iter().enumerate().take(1) {', TESTS),
+    ('only the first convex piece summed', M, '            for term in terms {', '            for term in terms.into_iter().take(1) {', TESTS),
     ('erosion anchored on the region for any shape', M, '        let origin = parts.iter().any(Part::holds_origin);', '        let origin = true;', TESTS),
     ('ring orientation ignored', C, '    if (turn == Sign::Positive) != ccw {', '    if false {', UNIT),
     ('hole bridges cross edges', C, '            if walls.iter().any(|&(p, q)| blocks(h, v, p, q)) {', '            if false {', UNIT),

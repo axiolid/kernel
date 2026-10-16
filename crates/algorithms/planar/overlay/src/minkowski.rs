@@ -60,12 +60,15 @@
 //! crossings grew with the square of the corners (#323). Before the hulls
 //! are built, exactly collinear corners are merged, and chords proved to
 //! lie in the summed set trim the hulls they span to slivers, the union
-//! unchanged ([`crate::cover`]). A part holding the origin is anchored
-//! there, so the set's copy is its own rings, which the subdivision
-//! shares. `cargo bench -p axiolid-benchmark --bench disc_erosion`
-//! measures time and peak memory against corner count;
-//! `scripts/probe_minkowski_cover_mutants.py` lists the faults the tests
-//! must catch.
+//! unchanged ([`crate::cover`]). A chord whose hull, or any hull it
+//! trims, would be a ring of zero area is not used at all (#331). A part
+//! holding the origin is anchored there, so the set's copy is its own
+//! rings, which the subdivision shares.
+//! `cargo bench -p axiolid-benchmark --bench disc_erosion` measures time
+//! and peak memory against corner count;
+//! `scripts/probe_minkowski_cover_mutants.py` and
+//! `scripts/probe_minkowski_degenerate_mutants.py` list the faults the
+//! tests must catch.
 //!
 //! # Discs: inner and outer
 //!
@@ -295,12 +298,16 @@ fn tidy_points(points: Vec<Point2>, tolerance: Tolerance) -> Option<Vec<Point2>>
     (out.len() >= 3).then_some(out)
 }
 
-/// A chord proved to lie in a summed set (#323), and its hull with each
-/// convex piece (`None` where tidying left too few points).
+/// The term an edge gives with one convex piece (#323).
 #[derive(Debug, Clone)]
-struct Covering {
-    ends: (Point2, Point2),
-    hulls: Vec<Option<Vec<Point2>>>,
+enum EdgeTerm {
+    /// The edge's whole hull.
+    Whole(Vec<Point2>),
+    /// The hull trimmed by the hull of a chord spanning the edge.
+    Trimmed(Vec<Point2>),
+    /// No term: tidying left too few points, or the chord's hull holds
+    /// the whole hull.
+    Nothing,
 }
 
 /// One polygon of a structuring shape, as the sum takes it.
@@ -563,28 +570,53 @@ fn sum_terms(
     };
     let index = crate::cover::Index::new(rings);
     let sides = set.sides(rings);
+    // A ring the arrangement refuses (`ZeroArea`, #331).
+    let degenerate = |points: &[Point2]| crate::zero_area(points, tolerance.linear());
     for (r, ring) in rings.iter().enumerate() {
         // Exactly collinear edges merged: one hull per straight edge.
         let boundary = crate::cover::merged(ring);
         let edges = &boundary.points;
         let n = edges.len();
-        // Each edge's chord hulls, one per convex piece, when a chord
-        // proved to lie in the set spans it.
-        let mut cover_of: Vec<Option<usize>> = vec![None; n];
-        let mut coverings: Vec<Covering> = Vec::new();
+        let edge = |i: usize, k: &[Point2]| sweep(k, edges[i], edges[(i + 1) % n]);
+        // The terms of each edge spanned by a chord proved to lie in the
+        // set, one per convex piece.
+        let mut spanned: Vec<Option<Vec<EdgeTerm>>> = vec![None; n];
         if covers && !convex.is_empty() {
             for chord in crate::cover::chords(r, &boundary, sides[r], depth, &index) {
-                let (a, b) = (edges[chord.from], edges[(chord.from + chord.span) % n]);
+                let ends = (edges[chord.from], edges[(chord.from + chord.span) % n]);
                 let hulls: Vec<Option<Vec<Point2>>> =
-                    convex.iter().map(|k| sweep(k, a, b)).collect();
-                out.extend(hulls.iter().flatten().map(|h| ArcRing::from_points(h)));
-                for step in 0..chord.span {
-                    cover_of[(chord.from + step) % n] = Some(coverings.len());
+                    convex.iter().map(|k| sweep(k, ends.0, ends.1)).collect();
+                let terms: Vec<Vec<EdgeTerm>> = (0..chord.span)
+                    .map(|step| {
+                        let i = (chord.from + step) % n;
+                        convex
+                            .iter()
+                            .zip(&hulls)
+                            .map(|(k, g)| match (edge(i, k), g) {
+                                (None, _) => EdgeTerm::Nothing,
+                                (Some(h), None) => EdgeTerm::Whole(h),
+                                (Some(h), Some(g)) => crate::cover::trim(h, g, ends, |points| {
+                                    tidy_points(points, tolerance)
+                                })
+                                .map_or(EdgeTerm::Nothing, EdgeTerm::Trimmed),
+                            })
+                            .collect()
+                    })
+                    .collect();
+                // A chord whose hull, or any hull it trims, has degenerated
+                // is not used: its edges keep their whole hulls (#331).
+                if hulls.iter().flatten().any(|g| degenerate(g))
+                    || terms
+                        .iter()
+                        .flatten()
+                        .any(|term| matches!(term, EdgeTerm::Trimmed(kept) if degenerate(kept)))
+                {
+                    continue;
                 }
-                coverings.push(Covering {
-                    ends: (a, b),
-                    hulls,
-                });
+                out.extend(hulls.iter().flatten().map(|h| ArcRing::from_points(h)));
+                for (step, terms) in terms.into_iter().enumerate() {
+                    spanned[(chord.from + step) % n] = Some(terms);
+                }
             }
         }
         // Trimmed hulls already given: the two edges of a tooth often
@@ -593,29 +625,25 @@ fn sum_terms(
             std::collections::HashSet::new();
         for i in 0..n {
             let (a, b) = (edges[i], edges[(i + 1) % n]);
-            for (j, k) in convex.iter().enumerate() {
-                let Some(h) = sweep(k, a, b) else {
-                    continue;
-                };
-                let cover = cover_of[i].and_then(|c| {
-                    let covering = &coverings[c];
-                    covering.hulls[j].as_ref().map(|g| (covering.ends, g))
-                });
-                let Some((chord, g)) = cover else {
-                    out.push(ArcRing::from_points(&h));
-                    continue;
-                };
-                let Some(kept) =
-                    crate::cover::trim(h, g, chord, |points| tidy_points(points, tolerance))
-                else {
-                    continue;
-                };
-                if given.insert(
-                    kept.iter()
-                        .map(|p| (p.x.to_bits(), p.y.to_bits()))
-                        .collect(),
-                ) {
-                    out.push(ArcRing::from_points(&kept));
+            let terms = spanned[i].take().unwrap_or_else(|| {
+                convex
+                    .iter()
+                    .map(|k| edge(i, k).map_or(EdgeTerm::Nothing, EdgeTerm::Whole))
+                    .collect()
+            });
+            for term in terms {
+                match term {
+                    EdgeTerm::Whole(h) => out.push(ArcRing::from_points(&h)),
+                    EdgeTerm::Trimmed(kept) => {
+                        if given.insert(
+                            kept.iter()
+                                .map(|p| (p.x.to_bits(), p.y.to_bits()))
+                                .collect(),
+                        ) {
+                            out.push(ArcRing::from_points(&kept));
+                        }
+                    }
+                    EdgeTerm::Nothing => {}
                 }
             }
             for part in parts {

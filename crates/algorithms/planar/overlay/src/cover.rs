@@ -51,6 +51,21 @@
 //! hulls were: each vertex a vertex sum, rounded once, and containment in
 //! the chord's hull is decided by exact orientations of those rounded
 //! points. A trimmed hull that tidying would change keeps its full hull.
+//!
+//! # Degenerate slivers
+//!
+//! A chord is used whole or not at all (#331). Where an edge runs along a
+//! side of the convex piece -- a wall parallel to a side of the disc
+//! polygon, its middle corner an ulp off the chord -- the cut-off cap is
+//! all of the edge hull but a sliver of three nearly collinear vertices,
+//! with an area of at most the tolerance squared, which the arrangement
+//! refuses (`ZeroArea`). Such a sliver is not a term, and neither is a
+//! chord hull that small: [`crate::minkowski`] then drops the chord, its
+//! hull and all of its trimmed hulls, and the edges it spans keep their
+//! whole hulls, so the terms are those of the untrimmed route there.
+//! Dropping only the sliver would lose part of the set, and keeping one
+//! edge's whole hull under the chord would change the subdivision's
+//! rounding; either changes the result.
 
 use axiolid_core::Point2;
 use axiolid_exact::{certify, Arith, SignExpr};

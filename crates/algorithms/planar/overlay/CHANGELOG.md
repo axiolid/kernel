@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Minkowski sums and erosions, and the disc morphology built on them, no
+  longer refuse with `OverlayError::ZeroArea` footprints that 0.3.15
+  handled (#331, a regression of #323 in 0.3.16). Where a wall runs
+  parallel to a side of the convex piece -- a tessellated round body
+  against the 64-gon of `dilate_outer`, say -- with a corner an ulp off
+  the chord across it, trimming an edge hull by the chord's hull left a
+  sliver of three nearly collinear vertices, with an area under the
+  tolerance squared, and the arrangement refused it. A chord whose hull or
+  any trimmed hull would be such a ring is now not used: its hull and its
+  trimmed hulls are dropped and the edges it spans keep their whole hulls.
+  The consumer's footprints that failed now give 0.3.15's results bit for
+  bit; `tests/minkowski.rs` pins synthetic walls of that kind, 15 of whose
+  36 results 0.3.16 refused, against 0.3.15 by hash. Results 0.3.16 gave
+  are unchanged, and so is the cost. `scripts/probe_minkowski_degenerate_mutants.py`
+  lists the faults the tests must catch.
+
 ## [0.3.16] - 2026-10-16
 
 ### Changed

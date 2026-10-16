@@ -804,3 +804,60 @@ fn a_toothed_room_erodes_as_before_and_within_the_bracket() {
         plain.erode_inner(0.75, t).unwrap().polygons()
     );
 }
+
+/// Footprints of #331, synthetic: three corners of a wall along a side of
+/// the 64-gon the disc morphology works with, the middle one off the line
+/// through the others by an ulp -- outwards in the first two (the second
+/// along another side), inwards in the third. The chord across that corner
+/// is proved to lie in the set, and the edge hulls it spans trim to
+/// slivers of next to no area.
+const PARALLEL_WALLS: [[(f64, f64); 5]; 3] = [
+    [
+        (1.000_147_203_022_991_2, 1.997_003_613_631_385),
+        (1.0, 2.0),
+        (0.999_901_864_651_339_1, 2.001_997_590_912_41),
+        (-0.023_427_428_718_893_285, 2.452_327_644_684_508),
+        (0.001_351_746_817_966_015_3, 1.947_935_939_300_970_5),
+    ],
+    [
+        (0.998_212_902_086_515_5, 2.002_409_622_594_436_6),
+        (1.0, 2.0),
+        (1.001_191_398_608_989_8, 1.998_393_584_937_042_2),
+        (2.102_248_582_335_269_2, 2.192_489_123_692_456),
+        (1.801_420_433_565_373_6, 2.598_108_927_089_279),
+    ],
+    [
+        (1.000_147_203_022_973_2, 1.997_003_613_631_384),
+        (0.999_999_999_999_999_9, 2.0),
+        (0.999_901_864_651_351_1, 2.001_997_590_912_411),
+        (-0.023_427_428_716_179_297, 2.452_327_644_690_649),
+        (0.001_351_746_817_653_598_5, 1.947_935_939_306_962_4),
+    ],
+];
+
+#[test]
+fn a_wall_along_a_side_of_the_disc_polygon_dilates_and_erodes_as_before() {
+    // axiolid-overlay 0.3.16 refused 15 of these 36 results with
+    // `ZeroArea` (#331): a sliver the chord left was taken as a term. The
+    // digest is that of 0.3.15, before the edge hulls were merged and
+    // trimmed.
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let mut out = Vec::new();
+    for footprint in PARALLEL_WALLS {
+        let room = Region::new(
+            vec![Polygon {
+                outer: ring(&footprint),
+                holes: vec![],
+            }],
+            t,
+        )
+        .unwrap();
+        for radius in [0.0005, 0.001, 0.002] {
+            out.push(room.dilate_inner(radius, t).unwrap());
+            out.push(room.dilate_outer(radius, t).unwrap());
+            out.push(room.erode_inner(radius, t).unwrap());
+            out.push(room.erode_outer(radius, t).unwrap());
+        }
+    }
+    assert_eq!(digest(&out), 1_896_521_490_611_984_927);
+}

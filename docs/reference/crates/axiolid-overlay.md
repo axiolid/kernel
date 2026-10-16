@@ -44,7 +44,9 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   are merged first, and a chord proved exactly to lie in the summed set trims the hulls it
   spans to what its own hull does not hold, so a wall of many short edges costs about its
   teeth, not their square, and the union stays the same set (`src/cover.rs`, #323).
-  `scripts/probe_minkowski_cover_mutants.py` lists the faults its tests must catch.
+  A chord whose hull or any trimmed hull would be a ring of zero area is not used, so
+  trimming never adds a ring the arrangement refuses (#331). `scripts/probe_minkowski_cover_mutants.py`
+  and `scripts/probe_minkowski_degenerate_mutants.py` list the faults its tests must catch.
 
 ## Depends on
 
