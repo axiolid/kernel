@@ -304,10 +304,31 @@ fn millimetres() -> ExecutionOptions {
 fn the_gable_wall_is_clipped_to_its_gable_by_the_exact_compiler() {
     let (graph, root) = gable_wall(PrismAxis::PlacementZ);
     let volume = exact_volume(&graph, root, &millimetres()) * 1e-9;
+    eprintln!("gable, exact: {volume:.12} m³");
     assert!(
         (volume - GABLE).abs() < 1e-6,
         "exact volume {volume} m³, expected the gable's {GABLE}"
     );
+}
+
+/// The mesh compiler cuts the same gable, each slab sized past the wall
+/// (#325): sized by its boundary alone, the first clip's slab, 1.1 m deep
+/// for a 0.55 m boundary, ended 0.13 m short of the gable's top across the
+/// plane, and left a sliver. Its mesh is certified against the exact
+/// result.
+#[test]
+fn the_gable_wall_is_clipped_to_its_gable_by_the_mesh_compiler() {
+    let (graph, root) = gable_wall(PrismAxis::PlacementZ);
+    let (outcome, report) = mesh_compiler()
+        .compile_mesh_with_deviation(&graph, root, &millimetres())
+        .expect("the gable compiles");
+    let volume = mesh_volume(&outcome.mesh) * 1e-9;
+    eprintln!("gable, mesh: {volume:.12} m³");
+    assert!(
+        (volume - GABLE).abs() < 1e-6,
+        "mesh volume {volume} m³, expected the gable's {GABLE}"
+    );
+    assert!(report.meets_requested(), "{report:?}");
 }
 
 /// Along the plane normal the same clips are the strips IFC does not

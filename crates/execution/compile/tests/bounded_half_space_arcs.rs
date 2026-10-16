@@ -680,9 +680,13 @@ fn a_profile_boundary_alone_is_still_an_unbounded_half_space() {
         matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("half-space")),
         "{error:?}"
     );
-    // The mesh compiler bounds it by its slab, as a polygon's.
-    let mesh = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
+    // The mesh compiler too: with no subject to size it by, any slab would
+    // end at an arbitrary depth (#325).
+    let error = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
         .compile_mesh(&graph, bounded, &options(1e-3))
-        .expect("the slab meshes");
-    assert!(mesh_volume(&mesh) > 0.0);
+        .expect_err("refused");
+    assert!(
+        matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("without a subject")),
+        "{error:?}"
+    );
 }

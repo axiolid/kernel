@@ -1,14 +1,15 @@
 //! The boundary of a polygonally bounded half-space carries its own frame.
 
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{Plane3, Point2, Tolerance, Transform3, Vec3};
+use axiolid_core::{BooleanOperator, Plane3, Point2, Tolerance, Transform3, Vec3};
 use axiolid_curve::{Curve2, Polyline2};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::MeshCompiler;
-use axiolid_model::{GeometryGraphBuilder, GeometryNode, SolidOperation};
+use axiolid_model::{GeometryGraphBuilder, GeometryNode, Instance, SolidOperation};
 use axiolid_primitive::HalfSpace;
+use axiolid_profile::{Profile, RectangleProfile};
 
 fn compile_bounded_half_space(boundary: &[Point2], placement: Transform3) -> TriMesh {
     let mut builder = GeometryGraphBuilder::new();
@@ -41,9 +42,43 @@ fn compile_bounded_half_space(boundary: &[Point2], placement: Transform3) -> Tri
             },
         ))
         .expect("a bounded half-space is a valid operation");
-    let graph = builder.finish(vec![op]).expect("the graph is valid");
+    // A bounded half-space is unbounded on its kept side, so it compiles
+    // against a subject (#325): a box much larger than the boundary, whose
+    // intersection with it keeps the boundary's footprint on the plane.
+    let profile = builder
+        .push(GeometryNode::Profile(Profile::Rectangle(
+            RectangleProfile {
+                x: 40.0,
+                y: 40.0,
+                thickness: None,
+                outer_radius: None,
+                inner_radius: None,
+            },
+        )))
+        .expect("a profile");
+    let block = builder
+        .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 40.0,
+        }))
+        .expect("an extrusion");
+    let block = builder
+        .push(GeometryNode::Instance(Instance {
+            source: block,
+            transform: Transform3::from_translation(Vec3::new(0.0, 0.0, -20.0)),
+        }))
+        .expect("an instance");
+    let kept = builder
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: block,
+            right: op,
+            operator: BooleanOperator::Intersection,
+        }))
+        .expect("a boolean");
+    let graph = builder.finish(vec![kept]).expect("the graph is valid");
     ReferenceMeshCompiler::new(BoolmeshBoolean::new())
-        .compile_mesh(&graph, op, &ExecutionOptions::new(Tolerance::MILLIMETRE))
+        .compile_mesh(&graph, kept, &ExecutionOptions::new(Tolerance::MILLIMETRE))
         .expect("a bounded half-space compiles")
 }
 

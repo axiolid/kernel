@@ -8,7 +8,7 @@ use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, ExecutionOptions, ExecutionTarget, GeomError,
     GeomResult, Operation, ScratchRequirement,
 };
-use axiolid_core::{Point3, Scalar, Tolerance, Transform3};
+use axiolid_core::{Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_contract::MeshBoolean;
 use axiolid_mesh_compile_contract::{
@@ -250,6 +250,120 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         let chord = chord_error(options) / stretch.max(1.0);
         let rings = self.boundary_rings(graph, boundary, chord, options)?;
         bounded_half_space_prism(&rings, hs.boundary, prism, hs.agreement, depth, tolerance)
+    }
+
+    /// The finite stand-in for a half-space `tool`, placed by `placement`,
+    /// over `subject`: the tool is unbounded on its kept side, and a
+    /// difference or an intersection with it stays within the subject, so
+    /// a slab reaching past the subject is the half-space for them.
+    ///
+    /// The subject is brought into the tool's own frame. An unbounded
+    /// half-space covers it as before (`for_subject`); a bounded one is cut
+    /// off past the subject's farthest point on its kept side, by a tenth of
+    /// the subject's span plus the tolerance (#325): sized by its boundary
+    /// alone, a small boundary over a tall subject ended inside it and cut
+    /// it too little, with no error. The slab is placed back, its boundary
+    /// chorded within the budget over the placement's stretch.
+    fn clip_tool_mesh(
+        &self,
+        graph: &GeometryGraph,
+        tool: ClipTool,
+        placement: Transform3,
+        subject: &TriMesh,
+        options: &ExecutionOptions,
+    ) -> GeomResult<TriMesh> {
+        let tolerance = options.tolerance();
+        let placed = placement != Transform3::IDENTITY;
+        let inverse = placement.inverse();
+        if placed
+            && !(placement.matrix3.determinant() != 0.0
+                && inverse.matrix3.is_finite()
+                && inverse.translation.is_finite())
+        {
+            return Err(GeomError::InvalidInput(
+                "half-space placed by a singular transform".to_owned(),
+            ));
+        }
+        let local_subject;
+        let subject = if placed {
+            local_subject = TriMesh::new(
+                subject
+                    .positions
+                    .iter()
+                    .map(|&p| inverse.transform_point3(p))
+                    .collect(),
+                subject.indices.clone(),
+            );
+            &local_subject
+        } else {
+            subject
+        };
+        let local = match tool {
+            ClipTool::Unbounded(half_space) => {
+                axiolid_construct::half_space::for_subject(subject, half_space, tolerance)?
+            }
+            ClipTool::Bounded {
+                half_space,
+                boundary,
+                placement: frame,
+                prism_axis,
+            } => {
+                let Some(GeometryNode::HalfSpace(hs)) = graph.get(half_space) else {
+                    return Err(GeomError::InvalidInput(format!(
+                        "half-space {half_space:?} is not a HalfSpace node"
+                    )));
+                };
+                let normal = hs.boundary.normal.normalize_or_zero();
+                if normal == Vec3::ZERO || subject.positions.is_empty() {
+                    return Err(GeomError::InvalidInput(
+                        "bounded half-space boolean needs a plane and a subject with bounds".into(),
+                    ));
+                }
+                let kept = if hs.agreement { normal } else { -normal };
+                let (mut lo, mut hi) = (
+                    Vec3::splat(Scalar::INFINITY),
+                    Vec3::splat(Scalar::NEG_INFINITY),
+                );
+                let mut farthest = Scalar::NEG_INFINITY;
+                for &point in &subject.positions {
+                    if !point.is_finite() {
+                        return Err(GeomError::InvalidInput(
+                            "bounded half-space subject contains non-finite points".into(),
+                        ));
+                    }
+                    lo = lo.min(point);
+                    hi = hi.max(point);
+                    farthest = farthest.max((point - hs.boundary.origin).dot(kept));
+                }
+                let span = (hi - lo).max_element().max(tolerance.linear());
+                let reach = farthest.max(0.0) + 0.1 * span + tolerance.linear();
+                let local_options;
+                let options = if placed {
+                    let chord = chord_error(options) / crate::deviation::stretch(placement);
+                    local_options = options.clone().with_chord_error(chord).ok_or_else(|| {
+                        GeomError::InvalidInput(format!(
+                            "chord budget {chord} is not positive and finite"
+                        ))
+                    })?;
+                    &local_options
+                } else {
+                    options
+                };
+                self.bounded_half_space(
+                    graph,
+                    (half_space, boundary),
+                    frame,
+                    prism_axis,
+                    axiolid_construct::half_space::SlabDepth::Reach(reach),
+                    options,
+                )?
+            }
+        };
+        Ok(if placed {
+            channels::transform(&Built::leaf(local), placement, 0.0).mesh
+        } else {
+            local
+        })
     }
 
     /// Resolve a node that must be a profile, into flattened rings.
@@ -722,15 +836,17 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     ) -> GeomResult<Built> {
         let subject = self.cached(cache, left, budget)?;
         refuse_surface_operand(subject, "subject")?;
-        let bounded_tool = match self.node(graph, right)? {
-            GeometryNode::HalfSpace(hs) => Some(axiolid_construct::half_space::for_subject(
-                &subject.mesh,
-                *hs,
-                options.tolerance(),
-            )?),
+        let clipping = matches!(
+            operator,
+            axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
+        );
+        let bounded_tool = match clip_tool(graph, right) {
+            Some((tool, placement)) if clipping => {
+                Some(self.clip_tool_mesh(graph, tool, placement, &subject.mesh, options)?)
+            }
             _ => None,
         };
-        // A bounded half-space is built here from the subject, so it has no
+        // A half-space is built here from the subject, so it has no
         // upstream fates of its own.
         let (tool, tool_fates, tool_deviation) = match bounded_tool.as_ref() {
             Some(tool) => (tool, None, None),
@@ -1077,24 +1193,19 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 sections,
                 frame,
             } => crate::station::stationed_spine(graph, *directrix, sections, *frame, options),
+            // Unbounded on its kept side, a bounded half-space has a finite
+            // stand-in only against a subject (#325): a slab sized by its
+            // boundary alone ends wherever it ends, and a subject reaching
+            // further would be cut too little, silently. Its booleans are
+            // routed to `build_boolean`, which sizes it; here it has none.
             SolidOperation::BoundedHalfSpace { .. }
-            | SolidOperation::BoundedHalfSpaceAlongZ { .. } => {
-                let (half_space, boundary, placement, prism_axis) =
-                    crate::half_space_boundary::bounded(operation)
-                        .expect("the arm matches a bounded half-space");
-                // The declared margin is the contract's own knob for how far
-                // an unbounded half-space extends before it can be meshed.
-                let margin = axiolid_primitive::ClipMargin::new(2.0)
-                    .expect("2.0 is a valid positive clip margin");
-                self.bounded_half_space(
-                    graph,
-                    (half_space, boundary),
-                    placement,
-                    prism_axis,
-                    axiolid_construct::half_space::SlabDepth::Relative(margin),
-                    options,
-                )
-            }
+            | SolidOperation::BoundedHalfSpaceAlongZ { .. } => Err(GeomError::UnsupportedInput {
+                backend: self.descriptor().id,
+                operation: Operation::GraphCompilation,
+                input: "bounded half-space without a subject to size it by: it is unbounded \
+                        on its kept side, and is compiled only as the tool of a difference \
+                        or an intersection",
+            }),
             // Routed to `build_boolean` by `build`; unreachable here.
             SolidOperation::Boolean { .. } => Err(GeomError::InvalidInput(
                 "boolean must be built through build_boolean".into(),
@@ -1279,12 +1390,59 @@ fn is_subject_bounded_half_space_boolean(
         return false;
     };
     // These operators stay within the finite left-hand subject, so a prism
-    // covering its bounds is an exact finite stand-in for the half-space.
-    // Union and XOR are unbounded and must remain unsupported.
+    // covering its bounds is an exact finite stand-in for the half-space,
+    // bounded or not (#325). Union and XOR are unbounded and must remain
+    // unsupported.
     matches!(
         operator,
         axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
-    ) && matches!(graph.get(*right), Some(GeometryNode::HalfSpace(_)))
+    ) && clip_tool(graph, *right).is_some()
+}
+
+/// A boolean tool that is a half-space, bounded or not.
+#[derive(Debug, Clone, Copy)]
+enum ClipTool {
+    /// One side of a plane.
+    Unbounded(axiolid_primitive::HalfSpace),
+    /// One side of a plane within the prism of a boundary.
+    Bounded {
+        half_space: NodeId,
+        boundary: NodeId,
+        placement: Transform3,
+        prism_axis: PrismAxis,
+    },
+}
+
+/// The half-space `id` is, read through its instances, with their
+/// placements composed; `None` when it is none.
+fn clip_tool(graph: &GeometryGraph, mut id: NodeId) -> Option<(ClipTool, Transform3)> {
+    let mut placement = Transform3::IDENTITY;
+    // The graph is topologically ordered, so the chain ends; the bound
+    // only makes that visible.
+    for _ in 0..=graph.len() {
+        match graph.get(id)? {
+            GeometryNode::Instance(instance) => {
+                placement *= instance.transform;
+                id = instance.source;
+            }
+            GeometryNode::HalfSpace(half_space) => {
+                return Some((ClipTool::Unbounded(*half_space), placement))
+            }
+            GeometryNode::SolidOperation(operation) => {
+                let (half_space, boundary, frame, prism_axis) =
+                    crate::half_space_boundary::bounded(operation)?;
+                let tool = ClipTool::Bounded {
+                    half_space,
+                    boundary,
+                    placement: frame,
+                    prism_axis,
+                };
+                return Some((tool, placement));
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// Which capability a node family would need.

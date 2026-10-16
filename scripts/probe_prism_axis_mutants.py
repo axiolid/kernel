@@ -1,25 +1,41 @@
 """Mutation probe for bounded half-spaces along their placement's z (#321,
 ADR 0085 format 1.4) and for their whole frame (#322).
 
-Each mutant breaks one decision a `BoundedHalfSpaceAlongZ` rests on: in
-`axiolid-model` the wire format (the variant read in a 1.3 payload, a
-payload never labelled 1.4, the feature test missing the variant) and the
-variant's validation; in `axiolid-mesh-compile` the variant read along the
-plane normal; in `axiolid-construct` the prism (the placement's z replaced by
-the normal, the parallel-axis and degenerate-placement refusals, the
-boundary carried along the normal instead of the axis, its origin left
-off the plane, the far cap at the reach along the axis rather than across
-the plane, the stations ordered by the side rather than the frame, a
-clockwise ring left as wound); in `axiolid-mesh-compile` the exact tool
-(the axis not dispatched, the plane's side not cut from the prism, the
-axis not turned across the boundary's plane, the prism's margin meeting
-the side's). Each must turn a test red.
+Each mutant breaks one decision a bounded half-space's prism rests on: in
+`axiolid-model` the wire format of `BoundedHalfSpaceAlongZ` (the variant
+read in a 1.3 payload, a payload never labelled 1.4, the feature test
+missing the variant) and the variant's validation; in
+`axiolid-mesh-compile` the variant read along the plane normal; in
+`axiolid-construct` the prism (the placement's z replaced by the normal,
+the parallel-axis and degenerate-placement refusals, the boundary carried
+along the normal instead of the axis, its origin left off the plane, the
+far cap at the reach along the axis rather than across the plane, the
+stations ordered by the side rather than the frame, a clockwise ring left
+as wound) and the whole frame along the normal (a left-handed placement or
+a frame mirrored about the normal read unmirrored, an upright frame let
+through, the frame's scale, shear or y length dropped, a derived arc
+scaled twice); in `axiolid-mesh-compile` the boundary chorded at its own
+scale, and the exact tool (the axis not dispatched, the plane's side not
+cut from the prism, the axis not turned across the boundary's plane, every
+frame read as a unit one); and the mesh compiler's slab
+sized by its subject (#325: sized by its boundary instead, the subject's
+farthest point or the kept side left out of the reach, a bounded tool or
+one through an instance not routed as a clip, the slab left unplaced).
+Each must turn a test red.
 
 Equivalent mutants, deliberately not listed: the prism's caps at the
 envelope's own heights rather than a margin past them (every clip the
 tests cut lies above the plane, which stands inside the envelope, so a
 cap there removes nothing more); the tool's boolean report dropped from
-the clip's (the tests' tools are cut exactly).
+the clip's (the tests' tools are cut exactly); a union or an exclusive
+or routed as a clip (its tool is built standalone first, and refused there
+by the same name); the long prism's caps at the side's margin rather than
+twice it (a coincidence of caps the general boolean resolves in every
+case the tests cut; the doubled margin spares it the reading); a
+reflecting boundary map left unreflected in the exact compiler (the
+derived profile then carries the reflection, which `lower_derived`
+applies exactly, so the prism is the same; the reflection keeps an
+unscaled frame's profile as authored, as before #322).
 
 Every mutant runs in its own process group with a timeout that kills the
 whole group, and the file is restored whatever happens.
@@ -40,6 +56,7 @@ SLAB = ["-p", "axiolid-construct", "--test", "half_space"]
 AXIS = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "bounded_half_space_prism_axis"]
 WHOLE = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "bounded_half_space_whole_frame"]
 DERIVED = ["-p", "axiolid-construct", "--test", "derived_composite"]
+DEPTH = ["-p", "axiolid-mesh-compile", "--all-features", "--test", "bounded_half_space_subject_depth"]
 
 MUTANTS = [
     # The wire format (ADR 0085, format 1.4).
@@ -103,10 +120,6 @@ MUTANTS = [
     ("the axis is not turned across the boundary's plane", C,
      "        if along.z < 0.0 {\n            along = -along;\n        }",
      "        if false {\n            along = -along;\n        }", [AXIS]),
-    ("the prism's caps meet the side's", C,
-     "        let margin = 0.5 * (local.hi - local.lo).length() + 8.0 * tolerance.linear();",
-     "        let margin = 0.25 * (local.hi - local.lo).length() + 4.0 * tolerance.linear();",
-     [AXIS]),
     # The whole frame (#322).
     ("a left-handed placement is read right-handed", H,
      "            handedness < 0.0,",
@@ -136,9 +149,27 @@ MUTANTS = [
     ("the exact compiler reads every frame as a unit one", C,
      "                let shape = if is_identity(&shape) {",
      "                let shape = if true {", [WHOLE]),
-    ("a reflecting boundary map is not reflected", C,
-     "        let reflects = into.matrix2.determinant() < 0.0;",
-     "        let reflects = false;", [WHOLE]),
+    # The slab sized by its subject (#325).
+    ("the slab is sized by its boundary", M,
+     "                    axiolid_construct::half_space::SlabDepth::Reach(reach),",
+     "                    axiolid_construct::half_space::SlabDepth::Relative(\n"
+     "                        axiolid_primitive::ClipMargin::new(2.0).unwrap(),\n"
+     "                    ),", [DEPTH, AXIS]),
+    ("the reach leaves out the subject's farthest point", M,
+     "                let reach = farthest.max(0.0) + 0.1 * span + tolerance.linear();",
+     "                let reach = 0.1 * span + tolerance.linear();", [DEPTH]),
+    ("the reach is measured to the normal's side", M,
+     "                let kept = if hs.agreement { normal } else { -normal };",
+     "                let kept = normal;", [DEPTH]),
+    ("a bounded half-space is not routed as a clip", M,
+     "    ) && clip_tool(graph, *right).is_some()",
+     "    ) && matches!(graph.get(*right), Some(GeometryNode::HalfSpace(_)))", [DEPTH]),
+    ("a tool through an instance is not routed", M,
+     "                placement *= instance.transform;\n                id = instance.source;",
+     "                let _ = instance;\n                return None;", [DEPTH]),
+    ("the slab is left in the tool's own frame", M,
+     "            channels::transform(&Built::leaf(local), placement, 0.0).mesh",
+     "            local", [DEPTH]),
 ]
 
 probe_lib.main(MUTANTS, timeout=TIMEOUT, reject_uncompiled=True)

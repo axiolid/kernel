@@ -36,6 +36,13 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- The mesh compiler refuses a bounded half-space with no subject to size
+  it by (#325) -- a root, a union or exclusive-or operand, a collection
+  member -- as `GeomError::UnsupportedInput { input: "bounded half-space
+  without a subject to size it by: ..." }`, as the exact compiler already
+  did. It used to mesh a slab twice its boundary's extent deep, an
+  arbitrary stand-in for a solid unbounded on its kept side: silently
+  wrong output, now refused by name, as #295's refusal was.
 - A curved wall less a niche flush with its inner face, or one unit in
   the last place inside it (#324), is certified: the general boolean's
   refusal ("exact boolean whose kept faces do not sew into a solid") left
@@ -43,6 +50,18 @@ caret rule for `0.x` versions.
   niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
   niche placed well inside does, with the coincidence reported (at most
   `4e-15`), and the exact result measures to the annular sectors' volume.
+- A bounded half-space's slab is sized by the subject it meets (#325),
+  along either axis: the tool of a difference or an intersection, read
+  through any instances above it (their placements composed, the subject
+  brought into the tool's frame), reaches past the subject's farthest
+  point on the kept side by a tenth of its span. It was a slab twice the
+  boundary's extent deep, so a small boundary over a tall subject (a
+  0.5 m square over a 20 m column) cut it too little, or kept too little,
+  with no error. An unbounded half-space's tool is now read through
+  instances too. The IFC2X3 gable wall compiles to 49.999912042537 m³ in
+  the mesh compiler as well, certified against the exact result
+  (`tests/bounded_half_space_subject_depth.rs`,
+  `tests/bounded_half_space_prism_axis.rs`).
 - A bounded half-space's placement is read whole (#322), in both
   compilers and along either axis. Along the plane normal the mesh
   compiler normalised the placement's axes and rebuilt `y` from the
