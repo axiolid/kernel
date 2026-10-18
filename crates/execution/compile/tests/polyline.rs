@@ -12,15 +12,15 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::{Frame2, Frame3, Point2, Point3, Scalar, Tolerance, Transform3, Vec2, Vec3};
 use axiolid_curve::{
     BSplineCurve2, BSplineCurve3, Circle2, Circle3, CurvatureLaw, Curve2, Curve3, Ellipse2,
-    Intrinsic2, KnotSpec, Line2, Line3, Polyline2, Polyline3,
+    Intrinsic3, KnotSpec, Line2, Line3, Polyline2, Polyline3,
 };
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::ReferenceMeshCompiler;
 use axiolid_mesh_compile_contract::{MeshCompiler, PolylineCompiler, PolylineOutcome};
 use axiolid_model::{
-    CurveRelation, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance,
-    InstanceAtStation, NodeId, OpenProfile, Station, StationFrame, TrimSelector,
-    TrimmingPreference,
+    CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode,
+    Instance, InstanceAtStation, NodeId, OpenProfile, Station, StationFrame, Transition,
+    TrimSelector, TrimmingPreference,
 };
 
 const CHORD: Scalar = 1e-3;
@@ -374,19 +374,23 @@ fn a_curve_at_a_station_on_a_line_is_placed_exactly() {
 
 #[test]
 fn a_curve_with_no_certified_chord_bound_is_refused_by_name() {
+    // A space curve with torsion: its Frenet frame is a truncated Magnus
+    // series (#317 keeps it refused; a planar one compiles).
     let (graph, root) = graph_of(|b| {
-        b.push_value(Curve2::Intrinsic(Intrinsic2::new(
-            Frame2 {
-                origin: Point2::ZERO,
-                x: Vec2::X,
-                y: Vec2::Y,
+        b.push_value(Curve3::Intrinsic(Intrinsic3::new(
+            Frame3 {
+                origin: Point3::ZERO,
+                x: Vec3::X,
+                y: Vec3::Y,
+                z: Vec3::Z,
             },
-            CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
-            60.0,
+            CurvatureLaw::Constant { curvature: 0.5 },
+            CurvatureLaw::Constant { curvature: 0.1 },
+            10.0,
         )))
         .unwrap()
     });
-    refused(polyline(&graph, root), "intrinsic 2D curve");
+    refused(polyline(&graph, root), "intrinsic 3D curve with torsion");
 }
 
 #[test]
@@ -407,8 +411,17 @@ fn unbounded_relations_collections_and_solids_are_refused() {
                 radius: 1.0,
             }))
             .unwrap();
+        let chain = b
+            .push(GeometryNode::CurveRelation(CurveRelation::Composite {
+                segments: vec![CurveSegment {
+                    curve: basis,
+                    same_sense: true,
+                    transition: Transition::Continuous,
+                }],
+            }))
+            .unwrap();
         b.push(GeometryNode::CurveRelation(CurveRelation::Trimmed {
-            basis,
+            basis: chain,
             start: vec![TrimSelector::Parameter(0.0)],
             end: vec![TrimSelector::Parameter(1.0)],
             sense_agreement: true,
@@ -416,7 +429,7 @@ fn unbounded_relations_collections_and_solids_are_refused() {
         }))
         .unwrap()
     });
-    refused(polyline(&graph, root), "curve relation");
+    refused(polyline(&graph, root), "a trim of a curve relation");
 
     let (graph, root) = graph_of(|b| {
         let a = b

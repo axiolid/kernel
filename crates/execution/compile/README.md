@@ -9,8 +9,9 @@ families it supports to exact B-reps, places instances under rigid
 transforms, cuts placed openings from placed extrusions with the general
 exact boolean, clips them by half-spaces through the same boolean, and
 refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
-nodes (atomic 2D and 3D curves, open profiles, and their placements) to
-polylines within a certified chord bound (`PolylineCompiler`). This crate
+nodes (atomic 2D and 3D curves, their trims, composites and offsets,
+open profiles, and their placements) to polylines within a certified chord
+bound (`PolylineCompiler`). This crate
 owns graph traversal and dispatch; the construction algorithms themselves
 (profile flattening, extrusion, revolution, sweeps) belong to
 `axiolid-construct`.

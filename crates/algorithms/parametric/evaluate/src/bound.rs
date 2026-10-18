@@ -37,6 +37,12 @@
 //!   slope and bend through the implicit function theorem, with interval
 //!   bounds of the field's partials over the stretch's box; a bridge cell
 //!   by its cubic's control points (`implicit`, #249).
+//! - Intrinsic curves (#317): at unit speed `|c''| = |k|`, so the
+//!   curvature law's closed-form supremum, times the start frame's
+//!   stretch, bounds the chords ([`intrinsic_chord_bound2`]).
+//! - Constant offsets `B + d u` (#317): `|P''|` from the basis's suprema
+//!   through the unit-vector rule of the certified station lengths
+//!   ([`offset_chord_bound2`]).
 //!
 //! A B-spline is only as smooth as its knots allow. A knot of multiplicity
 //! `m` leaves a degree `d` spline `C^(d - m)` there, so a bound that needs a
@@ -57,6 +63,11 @@ use crate::curve::span_in;
 use crate::nurbs::SplineAxis;
 
 mod implicit;
+mod intrinsic;
+mod offset;
+
+pub use intrinsic::{intrinsic_chord_bound2, intrinsic_chord_bound3, intrinsic_derivative_bounds2};
+pub use offset::{offset_chord_bound2, offset_chord_bound3, offset_point2, offset_point3};
 
 /// Relative inflation applied to every returned bound, so the rounding of
 /// the bound's own arithmetic cannot make it undershoot.

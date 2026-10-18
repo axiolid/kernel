@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Chord bounds for constant offsets and intrinsic curves (#317), in
+  `bound`: `offset_point2`, `offset_point3`, `offset_chord_bound2` and
+  `offset_chord_bound3` evaluate and bound the offset `B + d u` of a curve
+  at its basis's parameter (`u` the left normal in 2D, `normalise(V x
+  B')` in 3D), `sup |P''|` from the basis's derivative suprema through the
+  unit-vector rule `station::certify` uses for offset lengths (#294,
+  #307), refusing a span across a break of the basis's `C^2` continuity;
+  `intrinsic_chord_bound2`, `intrinsic_chord_bound3` and
+  `intrinsic_derivative_bounds2` bound an intrinsic curve from its
+  curvature law (`|c''| = |k|` at unit speed, times the start frame's
+  stretch), the chord bound across seams of a piecewise law.
+  `certifies_flattening2` and `certifies_flattening3` are unchanged.
+
 ## [0.3.16] - 2026-10-14
 
 ### Added

@@ -6,8 +6,10 @@
 //! - A `Curve3` over its domain, and a `Curve2` over its domain lifted to
 //!   `z = 0` (the plane a 2D curve is placed from, as a curve placed at a
 //!   station is).
+//! - A trim, a composite or a constant offset of such curves (#317),
+//!   nested: see [Curve relations](#curve-relations).
 //! - An `OpenProfile`: its path, which graph validation keeps a bounded
-//!   open 2D curve.
+//!   open 2D curve, so a path that is a relation compiles too.
 //! - An `Instance` of any of these, and an `InstanceAtStation` whose frame
 //!   is exact (a line basis, #264): the source's polyline moved by the
 //!   placement.
@@ -27,6 +29,16 @@
 //! is not part of the bound, as the rounding of computing a mesh's own
 //! vertices is not (`crate::deviation`).
 //!
+//! An intrinsic curve (#317) is bounded by its curvature law: it runs at
+//! unit speed, so `|c''| = |k|`, and the law's closed-form supremum over a
+//! span ([`axiolid_reference::bound::intrinsic_chord_bound2`], `3`) gives
+//! `h^2 / 8 sup |k|`, across a seam of a piecewise law too. Its vertices
+//! are read by the evaluator's quadrature, whose error is its stated
+//! estimate, as an arc-length chain's intrinsic pieces' are. A 3D one
+//! compiles only with its torsion law identically zero
+//! (`Intrinsic3::is_planar`), as the certified station lengths take it
+//! (#302): with torsion its frame is a truncated Magnus series.
+//!
 //! A placement moves the source's polyline rigidly or scales it: the source
 //! is compiled to the budget shrunk by an upper bound on the transform's
 //! stretch ([`crate::deviation::shrunk_budget`]), and its bound grows by
@@ -36,22 +48,60 @@
 //! it, the bound adds it, and a budget at or below it is refused with
 //! [`crate::deviation::BUDGET_BELOW_PLACEMENT_ROUNDING`].
 //!
+//! # Curve relations
+//!
+//! - **A trim** of an atomic curve is that curve flattened between the trim
+//!   parameters, with its own chord bounds. The parameters are read as a
+//!   station basis reads them (`crate::station::trim_parameters`): a
+//!   parameter, an arc length, or a point inverted exactly onto the basis;
+//!   a closed conic wraps from the start selector by the trim's sense,
+//!   across its seam if it must. The trim runs in its sense.
+//! - **A composite** is each segment compiled to the budget, in its sense,
+//!   end to end: the earlier segment's last vertex is the later one's
+//!   first, one shared vertex, and so is the first vertex where the last
+//!   segment closes onto it. A joint whose ends differ by `g`, at most the
+//!   options' linear tolerance, moves that vertex by `g`, so the bound is
+//!   the worst segment's plus the largest such `g`; when that misses the
+//!   budget the segments are compiled once more within the budget less
+//!   `g`. Ends further apart are refused by name: a polyline is one
+//!   connected curve.
+//! - **A constant offset** `B + d u` (`u` the unit left normal of a 2D
+//!   basis, `normalise(V x B')` beside a 3D one with reference direction
+//!   `V`) takes its basis's parameter, so a trim or a composite under it is
+//!   offset span by span, the offset's left following the direction each
+//!   piece is traversed in. Its chord bound is `h^2 / 8 sup |P''|` from the
+//!   basis's derivative bounds through the unit-vector rule the certified
+//!   station lengths use (#294, #307;
+//!   [`axiolid_reference::bound::offset_chord_bound2`], `3`). Its pieces
+//!   are cut where the basis may not be `C^2`, and a span whose tangent the
+//!   bound cannot keep away from zero is halved.
+//!
 //! # What is refused, by name
 //!
 //! An unbounded curve (a line, an elevated curve over a line plan), a
 //! family whose flattening is not certified
-//! ([`axiolid_reference::bound::certifies_flattening2`]: intrinsic, implicit,
-//! banked and other numerically evaluated curves), a curve relation (trims,
-//! composites, offsets), a curve placed at a numerically resolved station,
-//! a collection, and any node that is not a curve.
+//! ([`axiolid_reference::bound::certifies_flattening2`]: implicit and banked
+//! curves, a 3D intrinsic curve with torsion, other numerically evaluated
+//! curves), a trim of anything but an atomic curve, a composite whose
+//! segments do not meet, an offset of an offset or of a placed curve, an
+//! offset across a corner of its basis or of a family it has no bound for,
+//! an offset by stations, a surface or parameter curve, a curve placed at a
+//! numerically resolved station, a collection, and any node that is not a
+//! curve.
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation};
-use axiolid_core::{Interval, Point3, Scalar, Transform3};
+use axiolid_core::{Interval, Point2, Point3, Scalar, Transform3, Vec3};
 use axiolid_curve::{Curve2, Curve3};
 use axiolid_mesh_compile_contract::{ChordDeviation, PolylineOutcome};
-use axiolid_model::{GeometryGraph, GeometryNode, NodeId};
+use axiolid_model::{
+    CurveRelation, CurveSegment, GeometryGraph, GeometryNode, NodeId, TrimSelector,
+    TrimmingPreference,
+};
+use axiolid_reference::bound;
+use axiolid_reference::curve::{domain2, domain3, evaluate2, evaluate3};
+use axiolid_reference::station::StationCurve;
 
-/// Nesting of placements and open profiles a root may hold.
+/// Nesting of placements, relations and open profiles a root may hold.
 const MAX_DEPTH: usize = 256;
 
 /// Bisections of one span before its bound must fit.
@@ -59,6 +109,22 @@ const MAX_SPLITS: u32 = 48;
 
 /// Vertices of one polyline.
 const MAX_POINTS: usize = 1 << 20;
+
+/// Relative slack within which a trim parameter just past its basis's
+/// domain (a point inverted onto an end) is read as the end.
+const DOMAIN_SLACK: Scalar = 1e-9;
+
+/// Why a composite whose segments do not meet is refused.
+const COMPOSITE_GAP: &str = "a composite curve whose consecutive segments do not meet within the \
+                             tolerance: a polyline is one connected curve";
+
+/// Why a trim of a relation or a placement is refused.
+const TRIM_OF_RELATION: &str = "a trim of a curve relation or of a placed curve: only an atomic \
+                                curve's parameters are trimmed to a polyline";
+
+/// Why an offset across a corner of its basis is refused.
+const OFFSET_ACROSS_CORNER: &str = "an offset curve across a vertex or corner of its basis: the \
+                                    offset is not continuous there";
 
 /// Compile `root` to a polyline within the options' chord budget.
 pub(crate) fn compile(
@@ -74,6 +140,35 @@ pub(crate) fn compile(
     ))
 }
 
+/// A constant offset carried down to the curve it offsets (#317): its
+/// distance, signed for the direction that curve is traversed in, and the
+/// reference direction of a 3D offset.
+#[derive(Debug, Clone, Copy)]
+struct Offset {
+    distance: Scalar,
+    reference: Option<Vec3>,
+}
+
+impl Offset {
+    /// The offset as the basis traversed backwards reads it: the left of
+    /// the reversed direction (and `V x -T`) is the other side.
+    fn reversed(self) -> Self {
+        Self {
+            distance: -self.distance,
+            ..self
+        }
+    }
+}
+
+/// `offset` as a piece traversed `forward` or backwards reads it.
+fn sensed(offset: Option<Offset>, forward: bool) -> Option<Offset> {
+    if forward {
+        offset
+    } else {
+        offset.map(Offset::reversed)
+    }
+}
+
 /// A node's polyline and its bound, within `chord` in its own units.
 fn resolve(
     graph: &GeometryGraph,
@@ -83,13 +178,11 @@ fn resolve(
     depth: usize,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
     if depth > MAX_DEPTH {
-        return Err(GeomError::BudgetExceeded {
-            resource: "polyline placement depth",
-        });
+        return Err(too_deep());
     }
     match graph.get(id) {
-        Some(GeometryNode::Curve3(curve)) => flatten3(curve, chord),
-        Some(GeometryNode::Curve2(curve)) => flatten2(curve, chord),
+        Some(GeometryNode::Curve3(curve)) => atomic3(curve, None, chord, None),
+        Some(GeometryNode::Curve2(curve)) => atomic2(curve, None, chord, None),
         Some(GeometryNode::OpenProfile(profile)) => {
             resolve(graph, profile.path, chord, options, depth + 1)
         }
@@ -111,19 +204,208 @@ fn resolve(
             }
             placed(graph, at.source, placement.transform, chord, options, depth)
         }
-        Some(GeometryNode::CurveRelation(_)) => Err(refused(
-            "a curve relation (trim, composite, offset): only atomic curves, open profiles \
-             of them and their placements compile to polylines",
-        )),
+        Some(GeometryNode::CurveRelation(relation)) => {
+            curve_relation(graph, relation, chord, options, depth, None)
+        }
         Some(GeometryNode::Collection(_)) => Err(refused(
             "a collection: a polyline is one curve, so compile each member on its own",
         )),
-        Some(_) => Err(GeomError::InvalidInput(format!(
-            "node {id:?} is not a curve: it has no polyline"
-        ))),
-        None => Err(GeomError::InvalidInput(format!(
-            "node {id:?} does not belong to this graph"
-        ))),
+        other => Err(not_a_curve(id, other.is_some())),
+    }
+}
+
+/// A child of a relation: resolved as any root, or, under an offset, an
+/// atomic curve or a relation of them offset piece by piece.
+fn under(
+    graph: &GeometryGraph,
+    id: NodeId,
+    chord: Scalar,
+    options: &ExecutionOptions,
+    depth: usize,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let Some(offset) = offset else {
+        return resolve(graph, id, chord, options, depth);
+    };
+    if depth > MAX_DEPTH {
+        return Err(too_deep());
+    }
+    match graph.get(id) {
+        Some(GeometryNode::Curve2(curve)) => atomic2(curve, None, chord, Some(offset)),
+        Some(GeometryNode::Curve3(curve)) => atomic3(curve, None, chord, Some(offset)),
+        Some(GeometryNode::CurveRelation(relation)) => {
+            curve_relation(graph, relation, chord, options, depth, Some(offset))
+        }
+        Some(GeometryNode::Instance(_) | GeometryNode::InstanceAtStation(_)) => Err(refused(
+            "an offset of a placed curve: only atomic curves and their trims and composites \
+             are offset to a polyline",
+        )),
+        other => Err(not_a_curve(id, other.is_some())),
+    }
+}
+
+/// A trim, a composite or an offset (#317), under `offset` when one of its
+/// ancestors is an offset.
+fn curve_relation(
+    graph: &GeometryGraph,
+    relation: &CurveRelation,
+    chord: Scalar,
+    options: &ExecutionOptions,
+    depth: usize,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    match relation {
+        CurveRelation::Trimmed {
+            basis,
+            start,
+            end,
+            sense_agreement,
+            preference,
+        } => trimmed(
+            graph,
+            *basis,
+            (start, end),
+            *sense_agreement,
+            *preference,
+            chord,
+            offset,
+        ),
+        CurveRelation::Composite { segments } => {
+            composite(graph, segments, chord, options, depth, offset)
+        }
+        CurveRelation::Offset {
+            basis,
+            distance,
+            reference_direction,
+        } => {
+            if offset.is_some() {
+                return Err(refused(
+                    "an offset of an offset curve: only atomic curves and their trims and \
+                     composites are offset to a polyline",
+                ));
+            }
+            if !distance.is_finite() {
+                return Err(GeomError::InvalidInput(
+                    "an offset curve's distance is not finite".into(),
+                ));
+            }
+            let offset = Offset {
+                distance: *distance,
+                reference: *reference_direction,
+            };
+            under(graph, *basis, chord, options, depth + 1, Some(offset))
+        }
+        CurveRelation::OffsetByStations { .. } | CurveRelation::OffsetsAtStations { .. } => {
+            Err(refused(
+                "an offset by stations: its law is read along its basis's length, which no \
+                 chord bound here reaches",
+            ))
+        }
+        _ => Err(refused(
+            "a surface curve or a parameter curve: only atomic curves and their trims, \
+             composites and offsets compile to polylines",
+        )),
+    }
+}
+
+/// A trim of an atomic curve: the basis flattened between the trim
+/// parameters, in the trim's sense.
+fn trimmed(
+    graph: &GeometryGraph,
+    basis: NodeId,
+    (start, end): (&[TrimSelector], &[TrimSelector]),
+    sense: bool,
+    preference: TrimmingPreference,
+    chord: Scalar,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let offset = sensed(offset, sense);
+    let (mut points, bound) = match graph.get(basis) {
+        Some(GeometryNode::Curve2(curve)) => {
+            let window = crate::station::trim_parameters(
+                StationCurve::Two(curve),
+                start,
+                end,
+                sense,
+                preference,
+            )?;
+            atomic2(curve, Some(window), chord, offset)?
+        }
+        Some(GeometryNode::Curve3(curve)) => {
+            let window = crate::station::trim_parameters(
+                StationCurve::Three(curve),
+                start,
+                end,
+                sense,
+                preference,
+            )?;
+            atomic3(curve, Some(window), chord, offset)?
+        }
+        Some(_) => return Err(refused(TRIM_OF_RELATION)),
+        None => return Err(not_a_curve(basis, false)),
+    };
+    if !sense {
+        points.reverse();
+    }
+    Ok((points, bound))
+}
+
+/// A composite: its segments end to end, each joint one shared vertex.
+fn composite(
+    graph: &GeometryGraph,
+    segments: &[CurveSegment],
+    chord: Scalar,
+    options: &ExecutionOptions,
+    depth: usize,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    if segments.is_empty() {
+        return Err(GeomError::InvalidInput(
+            "a composite curve has no segments".into(),
+        ));
+    }
+    let tolerance = options.tolerance().linear();
+    let mut budget = chord;
+    loop {
+        let mut points: Vec<Point3> = Vec::new();
+        let (mut worst, mut gap): (Scalar, Scalar) = (0.0, 0.0);
+        for segment in segments {
+            let law = sensed(offset, segment.same_sense);
+            let (mut child, bound) = under(graph, segment.curve, budget, options, depth + 1, law)?;
+            if !segment.same_sense {
+                child.reverse();
+            }
+            worst = worst.max(bound);
+            if let (Some(&last), Some(&first)) = (points.last(), child.first()) {
+                let joint = last.distance(first);
+                if joint.is_nan() || joint > tolerance {
+                    return Err(refused(COMPOSITE_GAP));
+                }
+                gap = gap.max(joint);
+                child.remove(0);
+            }
+            points.append(&mut child);
+            if points.len() > MAX_POINTS {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "polyline vertices",
+                });
+            }
+        }
+        if segments.len() > 1 && points.len() > 2 {
+            let (first, last) = (points[0], points[points.len() - 1]);
+            let closing = first.distance(last);
+            if closing > 0.0 && closing <= tolerance {
+                gap = gap.max(closing);
+                if let Some(end) = points.last_mut() {
+                    *end = first;
+                }
+            }
+        }
+        let bound = if gap > 0.0 { worst + gap } else { worst };
+        if bound <= chord || budget < chord || gap >= chord {
+            return Ok((points, bound));
+        }
+        budget = chord - gap;
     }
 }
 
@@ -172,55 +454,244 @@ fn refused(input: &'static str) -> GeomError {
     }
 }
 
-fn flatten2(curve: &Curve2, chord: Scalar) -> GeomResult<(Vec<Point3>, Scalar)> {
-    let lift = |p: axiolid_core::Point2| Point3::new(p.x, p.y, 0.0);
-    match curve {
-        Curve2::Polyline(polyline) => Ok((
-            own_vertices(polyline.points.iter().map(|&p| lift(p)), polyline.closed)?,
-            0.0,
-        )),
-        Curve2::Line(_) => Err(refused("an unbounded 2D line: it has no finite polyline")),
-        _ => {
-            if !axiolid_reference::bound::certifies_flattening2(curve) {
-                return Err(refused(uncertified2(curve)));
-            }
-            let domain = bounded_domain(axiolid_reference::curve::domain2(curve))?;
-            let full_turn = matches!(curve, Curve2::Circle(_) | Curve2::Ellipse(_));
-            bisected(
-                |t| axiolid_reference::curve::evaluate2(curve, t).map(lift),
-                |a, b| axiolid_reference::bound::chord_bound2(curve, a, b),
-                domain,
-                &axiolid_reference::bound::continuity_breaks2(curve, 1),
-                chord,
-                full_turn,
-            )
-        }
+fn too_deep() -> GeomError {
+    GeomError::BudgetExceeded {
+        resource: "polyline placement depth",
     }
 }
 
-fn flatten3(curve: &Curve3, chord: Scalar) -> GeomResult<(Vec<Point3>, Scalar)> {
-    match curve {
-        Curve3::Polyline(polyline) => Ok((
-            own_vertices(polyline.points.iter().copied(), polyline.closed)?,
-            0.0,
-        )),
-        Curve3::Line(_) => Err(refused("an unbounded 3D line: it has no finite polyline")),
-        _ => {
-            if !axiolid_reference::bound::certifies_flattening3(curve) {
+/// A node that is not a curve, or (`present` false) not in the graph.
+fn not_a_curve(id: NodeId, present: bool) -> GeomError {
+    GeomError::InvalidInput(if present {
+        format!("node {id:?} is not a curve: it has no polyline")
+    } else {
+        format!("node {id:?} does not belong to this graph")
+    })
+}
+
+fn lift(p: Point2) -> Point3 {
+    Point3::new(p.x, p.y, 0.0)
+}
+
+/// `breaks` and the seams of an intrinsic curve's law, if any.
+fn with_seams(mut breaks: Vec<Scalar>, seams: Option<Vec<Scalar>>) -> Vec<Scalar> {
+    breaks.extend(seams.unwrap_or_default());
+    breaks
+}
+
+/// A 2D curve over its domain or a trim's `window`, lifted to `z = 0`,
+/// offset when `offset` is given.
+fn atomic2(
+    curve: &Curve2,
+    window: Option<(Scalar, Scalar)>,
+    chord: Scalar,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let periodic = matches!(curve, Curve2::Circle(_) | Curve2::Ellipse(_));
+    match (curve, window, offset) {
+        (Curve2::Polyline(polyline), None, None) => {
+            return Ok((
+                own_vertices(polyline.points.iter().map(|&p| lift(p)), polyline.closed)?,
+                0.0,
+            ))
+        }
+        (Curve2::Line(_), None, _) => {
+            return Err(refused("an unbounded 2D line: it has no finite polyline"))
+        }
+        _ => {}
+    }
+    let unbounded = matches!(curve, Curve2::Line(_));
+    let span = span(domain2(curve), window, periodic, unbounded)?;
+    let full_turn = periodic && span.1 - span.0 >= core::f64::consts::TAU;
+    let Some(offset) = offset else {
+        if let Curve2::Intrinsic(intrinsic) = curve {
+            if bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_none() {
+                return Err(refused(uncertified2(curve)));
+            }
+            return bisected(
+                |t| evaluate2(curve, t).map(lift),
+                |a, b| bound::intrinsic_chord_bound2(intrinsic, a, b),
+                span,
+                &[],
+                chord,
+                false,
+            );
+        }
+        if !bound::certifies_flattening2(curve) {
+            return Err(refused(uncertified2(curve)));
+        }
+        return bisected(
+            |t| evaluate2(curve, t).map(lift),
+            |a, b| bound::chord_bound2(curve, a, b),
+            span,
+            &bound::continuity_breaks2(curve, 1),
+            chord,
+            full_turn,
+        );
+    };
+    if offset.reference.is_some() {
+        return Err(refused(
+            "a 2D curve offset along a reference direction: a 2D offset runs along the left \
+             normal",
+        ));
+    }
+    let seams = match curve {
+        Curve2::Intrinsic(intrinsic) => {
+            if bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_none() {
+                return Err(refused(uncertified2(curve)));
+            }
+            Some(intrinsic.curvature.seams_within(intrinsic.length))
+        }
+        Curve2::Chain(_) | Curve2::Implicit(_) => {
+            return Err(refused(
+                "an offset of an arc-length chain or an implicit 2D curve: its derivative \
+                 bounds are not composed with an offset's",
+            ))
+        }
+        _ if !bound::certifies_flattening2(curve) => return Err(refused(uncertified2(curve))),
+        _ => None,
+    };
+    if inside(&bound::continuity_breaks2(curve, 1), span) {
+        return Err(refused(OFFSET_ACROSS_CORNER));
+    }
+    let distance = offset.distance;
+    bisected(
+        |t| bound::offset_point2(curve, distance, t).map(lift),
+        |a, b| Some(bound::offset_chord_bound2(curve, distance, a, b).unwrap_or(Scalar::INFINITY)),
+        span,
+        &with_seams(bound::continuity_breaks2(curve, 2), seams),
+        chord,
+        full_turn,
+    )
+}
+
+/// [`atomic2`] for a 3D curve; an offset needs its reference direction.
+fn atomic3(
+    curve: &Curve3,
+    window: Option<(Scalar, Scalar)>,
+    chord: Scalar,
+    offset: Option<Offset>,
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
+    match (curve, window, offset) {
+        (Curve3::Polyline(polyline), None, None) => {
+            return Ok((
+                own_vertices(polyline.points.iter().copied(), polyline.closed)?,
+                0.0,
+            ))
+        }
+        (Curve3::Line(_), None, _) => {
+            return Err(refused("an unbounded 3D line: it has no finite polyline"))
+        }
+        _ => {}
+    }
+    let unbounded = matches!(curve, Curve3::Line(_));
+    let span = span(domain3(curve), window, periodic, unbounded)?;
+    let full_turn = periodic && span.1 - span.0 >= core::f64::consts::TAU;
+    let Some(offset) = offset else {
+        if let Curve3::Intrinsic(intrinsic) = curve {
+            if !intrinsic.is_planar()
+                || bound::intrinsic_chord_bound3(intrinsic, 0.0, intrinsic.length).is_none()
+            {
                 return Err(refused(uncertified3(curve)));
             }
-            let domain = bounded_domain(axiolid_reference::curve::domain3(curve))?;
-            let full_turn = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
-            bisected(
-                |t| axiolid_reference::curve::evaluate3(curve, t),
-                |a, b| axiolid_reference::bound::chord_bound3(curve, a, b),
-                domain,
-                &axiolid_reference::bound::continuity_breaks3(curve, 1),
+            return bisected(
+                |t| evaluate3(curve, t),
+                |a, b| bound::intrinsic_chord_bound3(intrinsic, a, b),
+                span,
+                &[],
                 chord,
-                full_turn,
-            )
+                false,
+            );
         }
+        if !bound::certifies_flattening3(curve) {
+            return Err(refused(uncertified3(curve)));
+        }
+        return bisected(
+            |t| evaluate3(curve, t),
+            |a, b| bound::chord_bound3(curve, a, b),
+            span,
+            &bound::continuity_breaks3(curve, 1),
+            chord,
+            full_turn,
+        );
+    };
+    let Some(reference) = offset.reference else {
+        return Err(refused(
+            "a 3D curve offset without a reference direction: a 3D offset runs along V x T",
+        ));
+    };
+    if matches!(curve, Curve3::Intrinsic(_)) {
+        return Err(refused(
+            "an offset of an intrinsic 3D curve: its derivative bounds are not composed with \
+             an offset's",
+        ));
     }
+    if !bound::certifies_flattening3(curve) {
+        return Err(refused(uncertified3(curve)));
+    }
+    if inside(&bound::continuity_breaks3(curve, 1), span) {
+        return Err(refused(OFFSET_ACROSS_CORNER));
+    }
+    let distance = offset.distance;
+    bisected(
+        |t| bound::offset_point3(curve, distance, reference, t),
+        |a, b| {
+            Some(
+                bound::offset_chord_bound3(curve, distance, reference, a, b)
+                    .unwrap_or(Scalar::INFINITY),
+            )
+        },
+        span,
+        &bound::continuity_breaks3(curve, 2),
+        chord,
+        full_turn,
+    )
+}
+
+/// Whether a break lies strictly inside `(lo, hi)`.
+fn inside(breaks: &[Scalar], (lo, hi): (Scalar, Scalar)) -> bool {
+    breaks.iter().any(|&t| t > lo && t < hi)
+}
+
+/// The parameters `lo < hi` a curve is flattened over: its whole domain,
+/// refused unless finite and not empty, or a trim's `window`, which must
+/// lie in the domain (to [`DOMAIN_SLACK`]) unless the curve is periodic
+/// (a trim may cross its seam) or `unbounded`.
+fn span(
+    domain: Interval,
+    window: Option<(Scalar, Scalar)>,
+    periodic: bool,
+    unbounded: bool,
+) -> GeomResult<(Scalar, Scalar)> {
+    let Some((lo, hi)) = window else {
+        let domain = bounded_domain(domain)?;
+        return Ok((domain.start.min(domain.end), domain.start.max(domain.end)));
+    };
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(GeomError::Degenerate(
+            "a trimmed curve has an empty or non-finite parameter interval".into(),
+        ));
+    }
+    if periodic || unbounded {
+        return Ok((lo, hi));
+    }
+    let (start, end) = (domain.start.min(domain.end), domain.start.max(domain.end));
+    let slack = |value: Scalar| DOMAIN_SLACK * value.abs().max(1.0);
+    if (start.is_finite() && lo < start - slack(start))
+        || (end.is_finite() && hi > end + slack(end))
+    {
+        return Err(GeomError::InvalidInput(
+            "a trim's parameters lie outside its basis curve's domain".into(),
+        ));
+    }
+    let (lo, hi) = (lo.max(start), hi.min(end));
+    if lo >= hi {
+        return Err(GeomError::Degenerate(
+            "a trimmed curve has an empty parameter interval".into(),
+        ));
+    }
+    Ok((lo, hi))
 }
 
 /// A polyline's own vertices, the first repeated last when it is closed.
@@ -257,22 +728,18 @@ fn bounded_domain(domain: Interval) -> GeomResult<Interval> {
     Ok(domain)
 }
 
-/// Bisect each smooth piece of `domain` until every span's certified chord
-/// bound fits `chord`; the polyline through the span ends and the largest
-/// span bound. A full turn of a conic ends on its first vertex exactly.
+/// Bisect each smooth piece of `[lo, hi]` until every span's certified
+/// chord bound fits `chord`; the polyline through the span ends and the
+/// largest span bound. A full turn of a conic ends on its first vertex
+/// exactly.
 fn bisected(
     eval: impl Fn(Scalar) -> GeomResult<Point3>,
     bound: impl Fn(Scalar, Scalar) -> Option<Scalar>,
-    domain: Interval,
+    (lo, hi): (Scalar, Scalar),
     breaks: &[Scalar],
     chord: Scalar,
     full_turn: bool,
 ) -> GeomResult<(Vec<Point3>, Scalar)> {
-    let (lo, hi) = if domain.start <= domain.end {
-        (domain.start, domain.end)
-    } else {
-        (domain.end, domain.start)
-    };
     let mut cuts: Vec<Scalar> = breaks
         .iter()
         .copied()
@@ -314,7 +781,7 @@ fn bisected(
             stack.push((a, mid, splits + 1));
         }
     }
-    if full_turn && hi - lo >= core::f64::consts::TAU {
+    if full_turn {
         let first = points[0];
         if let Some(last) = points.last_mut() {
             *last = first;
@@ -327,8 +794,8 @@ fn bisected(
 fn uncertified2(curve: &Curve2) -> &'static str {
     match curve {
         Curve2::Intrinsic(_) => {
-            "an intrinsic 2D curve: it is integrated numerically, so its chords have no \
-             certified bound"
+            "an intrinsic 2D curve whose curvature law has no closed-form bound: its chords \
+             have no certified bound"
         }
         Curve2::Implicit(_) => {
             "an implicit 2D curve outside a face: its chords have no certified bound"
@@ -344,8 +811,9 @@ fn uncertified2(curve: &Curve2) -> &'static str {
 fn uncertified3(curve: &Curve3) -> &'static str {
     match curve {
         Curve3::Intrinsic(_) => {
-            "an intrinsic 3D curve: it is integrated numerically, so its chords have no \
-             certified bound"
+            "an intrinsic 3D curve with torsion, or whose curvature law has no closed-form \
+             bound: its Frenet frame is integrated by a truncated series, so its chords have \
+             no certified bound"
         }
         Curve3::Banked(_) => "a banked 3D curve: its chords have no certified bound",
         Curve3::Elevated(_) => {

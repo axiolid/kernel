@@ -9,6 +9,35 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `PolylineCompiler` compiles trimmed, composite, offset and intrinsic
+  curves (#317), which it refused by name, so an `OpenProfile` whose path
+  is such a relation compiles too. A trim of an atomic 2D or 3D curve is
+  the basis flattened between the trim parameters with its own chord
+  bounds, the parameters read as a station basis reads them (a closed
+  conic wrapped from the start selector by the trim's sense, across its
+  seam), in the trim's sense; a parameter past a non-periodic basis's
+  domain is refused. A composite is its segments compiled to the budget in
+  their senses, each joint one shared vertex (the earlier segment's end,
+  and the first vertex where it closes), the bound the worst segment's
+  plus the largest joint gap within the linear tolerance (the segments
+  compiled once more within the budget less the gap when that misses it);
+  a larger gap is refused by name. A constant offset (2D: the left normal;
+  3D: `V x T`) of an atomic curve, a trim or a composite takes its basis's
+  parameter, offsets piece by piece on the side each piece's direction
+  gives, and is bounded by `h^2 / 8 sup |P''|` from the basis's derivative
+  bounds through the unit-vector rule of the certified station lengths
+  (#294, #307), cut where the basis is not `C^2`. A 2D intrinsic curve,
+  and a 3D one whose torsion law is identically zero, is bounded by its
+  curvature law (`h^2 / 8 sigma sup |k|`), across seams of a piecewise law;
+  an offset beside a 2D one is cut at its seams. Still refused by name:
+  implicit and banked curves, a 3D intrinsic curve with torsion, a trim of
+  a relation or a placed curve, an offset of an offset, of a placed curve,
+  of a chain, implicit or 3D intrinsic curve or across a corner of its
+  basis, a 3D offset without a reference direction, offsets by stations,
+  and surface and parameter curves.
+
 ### Fixed
 
 - An edge without a p-curve is bounded by its vertices, not by its

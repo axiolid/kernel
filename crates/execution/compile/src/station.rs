@@ -220,7 +220,7 @@ mod bound;
 mod exact;
 
 pub use basis::curve_path;
-pub(crate) use basis::Basis;
+pub(crate) use basis::{trim_parameters, Basis};
 pub(crate) use exact::stationed_spine_exact;
 
 /// Most sections one interval between two stations is bisected into.

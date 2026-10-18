@@ -594,7 +594,7 @@ fn point_tolerance(selectors: &[&[TrimSelector]]) -> Tolerance {
 /// composite directrix reads them: a closed conic from the start
 /// selector in the trim's sense (possibly across its parameter seam), any
 /// other curve between its two selectors.
-fn trim_parameters(
+pub(crate) fn trim_parameters(
     curve: StationCurve<'_>,
     start: &[TrimSelector],
     end: &[TrimSelector],
