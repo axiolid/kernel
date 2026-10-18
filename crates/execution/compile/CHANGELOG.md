@@ -40,6 +40,8 @@ caret rule for `0.x` versions.
   of a chain, implicit or 3D intrinsic curve or across a corner of its
   basis, a 3D offset without a reference direction, offsets by stations,
   and surface and parameter curves.
+- `FINER_FACTOR`, re-exported from `axiolid-brep-boolean` with the
+  report it describes (`BooleanReport::finer`, #332).
 
 ### Fixed
 
@@ -58,6 +60,19 @@ caret rule for `0.x` versions.
   sense from `Edge::start` to `Edge::end`: an exchange format's edge that
   runs against its curve (IFC `SameSense = .F.`) is that edge with its
   vertices swapped, used the other way.
+- Curved walls whose openings abut, one's side reaching a few
+  micrometres or just under the tolerance past its neighbour's, are
+  certified (#332): the general boolean refused the cut, so the deviation
+  report left the boolean unbounded; it now cuts it again at a finer
+  tolerance (`axiolid-brep-boolean`). A wall of radii `6` to `6.25` less
+  five wedge openings, abutting by `15 um` and `0.6 mm`, is certified
+  within the millimetre requested, its exact result at the closed-form
+  volume.
+- A box touching a curved wall's inner cylinder along a ruling compiles
+  exactly at the closed-form volume (#327). Its mesh, whose material is as
+  thin as nothing along the contact, stays refused as a result touching
+  itself (#194) on the tangent plane and a unit in the last place past
+  it; a unit short of it, the box is certified.
 
 ## [0.3.27] - 2026-10-16
 

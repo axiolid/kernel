@@ -23,8 +23,10 @@
 //!    that lands on the cut point: a face's angles may lie a turn away
 //!    from the surface inverse's (a reflected wall reads `2 pi - u`), and
 //!    a turn of a line pcurve's own parameter is another point (#288).
-//! 3. The pieces form a graph in `(u, v)`: boundary pieces are walked the
-//!    way their loop runs, section pieces both ways. Starting from each
+//! 3. The pieces form a graph in `(u, v)`, their ends welded where they
+//!    meet in parameters and lie within the tolerance on the surface
+//!    (#332): boundary pieces are walked the way their loop runs, section
+//!    pieces both ways. Starting from each
 //!    unused half-edge, the walk turns at every vertex to the first
 //!    outgoing half-edge clockwise from the one it arrived on, which keeps
 //!    one region on its left.
@@ -259,7 +261,7 @@ fn split_face_in_session(
             }
         }
     }
-    let mut regions = trace(&pieces)?;
+    let mut regions = trace(surface, &pieces, tolerance)?;
     for region in &mut regions {
         region.against = against;
     }
@@ -1272,23 +1274,37 @@ fn bend(piece: &Piece, at_start: bool) -> Result<Scalar, BooleanError> {
     Ok(sign * (d.x * dd.y - d.y * dd.x) / (speed * speed * speed))
 }
 
-fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
-    // Weld piece ends in parameters.
-    let mut vertices: Vec<Point2> = Vec::new();
-    let mut vertex = |p: Point2| -> usize {
+fn trace(
+    surface: &Surface,
+    pieces: &[(Piece, bool)],
+    tolerance: Tolerance,
+) -> Result<Vec<Region>, BooleanError> {
+    // Weld piece ends in parameters, where they also lie within the
+    // tolerance in space: the relative slack in parameters is bookkeeping
+    // for one vertex's evaluations, but across a long angle range it can
+    // reach further on the surface than the tolerance, and two vertices
+    // [`split_use`] keeps apart (cuts a few micrometres apart under a
+    // micrometre tolerance, #332) must stay apart here too.
+    let reach = report::floored(tolerance).linear();
+    let mut vertices: Vec<(Point2, Point3)> = Vec::new();
+    let mut vertex = |p: Point2| -> Result<usize, BooleanError> {
         let slack = 1e-7 * (1.0 + p.x.abs().max(p.y.abs()));
-        if let Some(i) = vertices.iter().position(|q| (*q - p).length() <= slack) {
-            return i;
+        let at = surface_point(surface, p.x, p.y).map_err(|_| BooleanError::Evaluation)?;
+        if let Some(i) = vertices
+            .iter()
+            .position(|(q, b)| (*q - p).length() <= slack && (*b - at).length() <= reach)
+        {
+            return Ok(i);
         }
-        vertices.push(p);
-        vertices.len() - 1
+        vertices.push((p, at));
+        Ok(vertices.len() - 1)
     };
     let mut halves = Vec::new();
     for (index, (piece, both_ways)) in pieces.iter().enumerate() {
         let a =
             evaluate2(&piece.pcurve, piece.pspan.start).map_err(|_| BooleanError::Evaluation)?;
         let b = evaluate2(&piece.pcurve, piece.pspan.end).map_err(|_| BooleanError::Evaluation)?;
-        let (va, vb) = (vertex(a), vertex(b));
+        let (va, vb) = (vertex(a)?, vertex(b)?);
         let leave = angle_of(tangent(piece, true)?);
         let arrive = angle_of(tangent(piece, false)?);
         let (bend_leave, bend_arrive) = (bend(piece, true)?, bend(piece, false)?);
@@ -1355,7 +1371,7 @@ fn trace(pieces: &[(Piece, bool)]) -> Result<Vec<Region>, BooleanError> {
             // left of another lies clockwise-first from `back`.
             let back = here.arrive + PI;
             let back_bend = -here.bend_arrive;
-            let at = vertices[here.to];
+            let at = vertices[here.to].0;
             // Third order: how far clockwise from the arriving piece's chord
             // a candidate's chord turns, a small way out.
             let chord_turns = |c: &Half| -> [Scalar; 3] {

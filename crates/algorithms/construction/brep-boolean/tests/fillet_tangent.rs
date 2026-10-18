@@ -24,14 +24,15 @@
 //! read as touching the hole (#243) and the double point is placed on the
 //! contact. A hole a fraction of the tolerance into or short of the
 //! flange meets each fillet in two arcs the contact would have to join:
-//! refused by name.
+//! the reading is refused by name, and the boolean is cut at the finer
+//! tolerance (#332), where the gap is decided exactly.
 
 use std::f64::consts::PI;
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
 use axiolid_brep_boolean::{
-    boolean_with_report, BooleanError, BooleanReport, ToleranceDecisionKind,
+    boolean_with_report, BooleanError, BooleanReport, ToleranceDecisionKind, FINER_FACTOR,
 };
 use axiolid_construct::extrude::extrude_profile_exact;
 use axiolid_core::{BooleanOperator, Mat3, Tolerance, Transform3, Vec3};
@@ -225,20 +226,23 @@ fn a_hole_touching_the_flange_and_its_fillets_under_a_general_placement() {
 }
 
 #[test]
-fn a_hole_a_fraction_of_the_tolerance_off_the_flange_is_refused_by_name() {
+fn a_hole_a_fraction_of_the_tolerance_off_the_flange_is_cut_at_the_finer_tolerance() {
     // Read as touching the flange, the hole would have to touch each
     // fillet too, where it meets it in two arcs `sqrt(2 R gap)` from the
-    // contact: no single move within the tolerance explains both.
+    // contact: no single move within the tolerance explains both, and the
+    // reading is refused (`BooleanError::UnsupportedContact`). At the
+    // finer tolerance (#332) the half-tolerance gap is no contact but a
+    // gap, decided by the exact predicates: the hole cuts a groove that
+    // shallow under the flange, or stops that short of it, at the
+    // reference volume.
+    let finer = EPS * FINER_FACTOR;
     for fraction in [0.5, -0.5] {
         for p in [Transform3::IDENTITY, general()] {
             for run in RUNS {
-                let error = cut(TOUCHING + fraction * EPS, run, p, Tolerance::METRE, 0.0)
-                    .expect_err("refused");
-                assert_eq!(
-                    error,
-                    BooleanError::UnsupportedContact,
-                    "{fraction} {run:?}"
-                );
+                let report = cut(TOUCHING + fraction * EPS, run, p, Tolerance::METRE, 0.0)
+                    .unwrap_or_else(|e| panic!("{fraction} {run:?}: {e}"));
+                assert!(report.finer(), "{fraction} {run:?}: {report:?}");
+                assert!(report.linear() <= finer, "{fraction} {run:?}: {report:?}");
             }
         }
     }

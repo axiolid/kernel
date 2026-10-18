@@ -99,11 +99,17 @@ pub struct ToleranceDecision {
 ///
 /// Either way, constructed points closer than [`Self::rounding_floor`]
 /// were read as one point without a decision, and are not reported (#244).
+///
+/// A boolean the caller's tolerance left refused is cut again at
+/// [`FINER_FACTOR`] times it (#332); its readings then lie within that
+/// finer tolerance, and [`Self::finer`] says so.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BooleanReport {
     decisions: Vec<ToleranceDecision>,
     /// The operands' extent the rounding floor was scaled from (#244).
     extent: Scalar,
+    /// Whether the boolean was cut at the finer tolerance (#332).
+    finer: bool,
 }
 
 impl BooleanReport {
@@ -191,13 +197,28 @@ impl BooleanReport {
     /// the chain: each one's floor is at most it. A rigid placement of a
     /// result leaves distances between its points unchanged, so a report
     /// carried through one keeps its floor as is (#244).
+    ///
+    /// The merged report is [`Self::finer`] when either is.
     #[must_use]
     pub fn merged(mut self, other: &BooleanReport) -> BooleanReport {
         for d in &other.decisions {
             self.add(d.kind, d.linear, d.angular);
         }
         self.extent = self.extent.max(other.extent);
+        self.finer |= other.finer;
         self
+    }
+
+    /// Whether the boolean was cut at [`FINER_FACTOR`] times the caller's
+    /// tolerance, its readings at the caller's own having left it refused
+    /// (#332): features of the operands closer than the caller's tolerance
+    /// but further apart than the finer one were then decided by the exact
+    /// predicates, and every reading in [`Self::decisions`] lies within
+    /// the finer tolerance. After [`Self::merged`], whether any boolean of
+    /// the chain was.
+    #[must_use]
+    pub fn finer(&self) -> bool {
+        self.finer
     }
 
     fn add(&mut self, kind: ToleranceDecisionKind, linear: Scalar, angular: Scalar) {
@@ -228,6 +249,20 @@ impl BooleanReport {
 /// floor of this factor itself, in radians, unscaled.
 pub const ROUNDING_FACTOR: Scalar = 1.0 / 1_099_511_627_776.0;
 
+/// The ratio of the tolerance a refused boolean is cut again at to the
+/// caller's (#332): `2^-10`, about a micrometre under a millimetre.
+///
+/// Readings within the caller's tolerance make features closer than it one
+/// (#228); two such features further apart than rounding (the sides of two
+/// abutting openings a few micrometres to just under a millimetre apart,
+/// a box tangent to a curved face) can leave no reading that every face
+/// pair agrees with, and the boolean is refused. At this fraction of the
+/// tolerance such features are apart, decided by the exact predicates,
+/// while the readings still cover what they exist for: the rounding of
+/// separately placed operands, orders of magnitude below it.
+/// [`BooleanReport::finer`] says when a result was cut so.
+pub const FINER_FACTOR: Scalar = 1.0 / 1024.0;
+
 /// The relative rounding floor ([`ROUNDING_FACTOR`]).
 pub(crate) const ROUNDING: Scalar = ROUNDING_FACTOR;
 
@@ -249,6 +284,8 @@ struct Session {
     ends_within_tolerance: bool,
     /// Whether such a merge above the rounding floor was made.
     merged_an_end: bool,
+    /// Whether the session was started over at the finer tolerance (#332).
+    finer: bool,
 }
 
 thread_local! {
@@ -280,6 +317,7 @@ impl Guard {
                     }
                     Ok(BooleanReport {
                         extent: s.extent,
+                        finer: s.finer,
                         ..std::mem::take(&mut s.report)
                     })
                 })
@@ -302,6 +340,27 @@ impl Guard {
     /// merge's ([`imprint_end_tolerance`]); `false` for a joined session.
     pub(crate) fn merged_an_end(&self) -> bool {
         self.owner && SESSION.with(|s| s.borrow().as_ref().is_some_and(|s| s.merged_an_end))
+    }
+
+    /// Start this guard's own session over at `tolerance`, its decisions
+    /// dropped and imprinted edges' ends merged within it again: the retry
+    /// of a boolean at a finer tolerance (#332). `false` for a joined
+    /// session, which cannot be retried.
+    pub(crate) fn retry_at(&self, tolerance: Tolerance) -> bool {
+        if !self.owner {
+            return false;
+        }
+        SESSION.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.tolerance = tolerance;
+                s.report = BooleanReport::default();
+                s.exceeded = false;
+                s.ends_within_tolerance = true;
+                s.merged_an_end = false;
+                s.finer = true;
+            }
+        });
+        true
     }
 
     /// Start this guard's own session over, its decisions dropped, with
@@ -357,6 +416,7 @@ pub(crate) fn open(operands: &[&ExactBRep], tolerance: Tolerance) -> Guard {
                 report: BooleanReport::default(),
                 ends_within_tolerance: true,
                 merged_an_end: false,
+                finer: false,
             });
         });
     }

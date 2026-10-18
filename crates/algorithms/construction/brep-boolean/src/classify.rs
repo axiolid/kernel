@@ -10,6 +10,21 @@
 //! hit), passes too close to a face boundary to decide, or starts on the
 //! other solid's boundary is not trusted: the next of a fixed set of
 //! directions is tried, and if all fail the region is refused.
+//!
+//! Where a ray starts is read in two ways ([`Start`]). First within the
+//! linear tolerance: a point that close to any face's support is not
+//! decided, since a reading within tolerance may have moved that face onto
+//! the point's own. Where no point of a region decides so, the point is
+//! read exactly (#332, #327): it lies on a support only within the
+//! rounding floor, but for the faces read as its own support, which keep
+//! the tolerance. A point micrometres off a surface its own support is not
+//! read as one with (a box's face tangent to a curved wall's inner
+//! cylinder, away from the contact ruling; a side face of one opening just
+//! inside its neighbour, their planes turned by more than the angular
+//! tolerance) is then off it, and the ray's crossing of it is an exact
+//! simple root that counts. Such a region lies within the tolerance of
+//! that surface wherever its points were taken, so either side is within
+//! the perturbation the readings already stand for.
 
 use axiolid_brep::ExactBRep;
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
@@ -144,10 +159,12 @@ impl<'a> Solid<'a> {
         Ok(None)
     }
 
-    /// Whether `point` lies inside the solid.
+    /// Whether `point` lies inside the solid, its ray's start read as
+    /// `start` says.
     pub(crate) fn contains(
         &self,
         point: Point3,
+        start: Start<'_>,
         tolerance: Tolerance,
     ) -> Result<bool, BooleanError> {
         // Outside the box around every face, the point is outside the solid.
@@ -178,15 +195,32 @@ impl<'a> Solid<'a> {
                 };
                 for hit in hits {
                     let t = hit.parameter.approx();
-                    // A hit at the ray's start: the point lies on this
-                    // face's support. Not a reading: it only skips a hit
-                    // outside the face or refuses the point.
-                    let at_start = t.abs() <= start_slack;
-                    if t < 0.0 && !at_start {
+                    let near = t.abs() <= start_slack;
+                    if t < 0.0 && !near {
                         continue;
                     }
                     let (u, v) = locate(surface, hit.point, crate::report::floored(tolerance))
                         .map_err(|_| BooleanError::Evaluation)?;
+                    // A hit at the ray's start: the point lies on this
+                    // face's support. Not a reading: it only skips a hit
+                    // outside the face or refuses the point.
+                    let at_start = near
+                        && match start {
+                            Start::Tolerance => true,
+                            Start::Exact(own) if own.contains(&face) => true,
+                            // Off the support by more than the rounding of
+                            // one exact point, measured along the normal,
+                            // not along a ray that may graze it.
+                            Start::Exact(_) => {
+                                let n =
+                                    normal(surface, u, v).map_err(|_| BooleanError::Evaluation)?;
+                                (t * direction.dot(n.normalize())).abs()
+                                    <= crate::report::rounding()
+                            }
+                        };
+                    if t < 0.0 && !at_start {
+                        continue;
+                    }
                     let on_face = self.domains[face]
                         .contains(Point2::new(u, v))
                         .map_err(BooleanError::Measure)?;
@@ -213,6 +247,19 @@ impl<'a> Solid<'a> {
         }
         Err(BooleanError::Undecided)
     }
+}
+
+/// How a ray's start is read in [`Solid::contains`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Start<'c> {
+    /// A hit within the linear tolerance of the start puts the point on
+    /// that face's support, which no direction settles.
+    Tolerance,
+    /// Only a hit within the rounding floor does (#332), but on the faces
+    /// listed (read as the point's own support within tolerance), which
+    /// keep the linear tolerance: the decision is exact for the operands
+    /// as given.
+    Exact(&'c [usize]),
 }
 
 /// Points strictly inside a region, on its face's surface, best first.

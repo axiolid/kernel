@@ -33,7 +33,9 @@ use axiolid_brep_audit::geometric_audit;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{BooleanOperator, Mat3, Plane3, Point3, Tolerance, Transform3, Vec3};
 use axiolid_measure::{boundary_distance, exact_properties};
-use axiolid_mesh_compile::{BooleanReport, ReferenceExactCompiler, ToleranceDecisionKind};
+use axiolid_mesh_compile::{
+    BooleanReport, ReferenceExactCompiler, ToleranceDecisionKind, FINER_FACTOR,
+};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
 };
@@ -540,25 +542,31 @@ fn a_web_hole_touching_the_flange_of_a_filleted_beam_under_a_general_placement()
 }
 
 #[test]
-fn a_filleted_beam_whose_hole_is_a_fraction_of_the_tolerance_off_the_flange_is_refused() {
+fn a_filleted_beam_whose_hole_is_a_fraction_of_the_tolerance_off_the_flange_is_cut_finer() {
     // Read as touching the flange, the hole would touch each fillet too,
     // where it meets it in two arcs about `sqrt(2 r gap)` from the
-    // contact: no single move within the tolerance explains both, so it
-    // is refused by name, never sewn inconsistently.
+    // contact: no single move within the tolerance explains both, so the
+    // reading is refused by name, never sewn inconsistently. The general
+    // boolean then cuts it at the finer tolerance (#332), where the
+    // half-tolerance gap is decided exactly: a groove that shallow under
+    // the flange, or a hole stopping that short of it.
     for fraction in [0.5, -0.5] {
-        let (graph, (body, _), _) = filleted_case(
-            DYADIC,
-            Run::PastFlanges,
-            fraction * EPS,
-            exact_onto_x(),
-            Transform3::IDENTITY,
-        );
-        let error = ReferenceExactCompiler::new()
-            .compile_exact_with_report(&graph, body, &ExecutionOptions::new(Tolerance::METRE))
-            .expect_err("refused");
+        let run = Run::PastFlanges;
+        let gap = fraction * EPS;
+        let (graph, roots, distance) =
+            filleted_case(DYADIC, run, gap, exact_onto_x(), Transform3::IDENTITY);
+        let report = checked(
+            &graph,
+            roots,
+            Tolerance::METRE,
+            (filleted_volume(DYADIC, run, gap), 1e-12),
+            distance,
+        )
+        .unwrap_or_else(|e| panic!("{fraction}: {e}"));
+        assert!(report.finer(), "{fraction}: {report:?}");
         assert!(
-            matches!(&error, GeomError::UnsupportedInput { input, .. } if input.contains("contact")),
-            "{fraction}: {error:?}"
+            report.linear() <= EPS * FINER_FACTOR,
+            "{fraction}: {report:?}"
         );
     }
 }

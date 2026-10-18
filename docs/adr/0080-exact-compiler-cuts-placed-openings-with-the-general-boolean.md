@@ -712,3 +712,76 @@ reading reported for the two flush ones only),
 `crates/execution/compile/tests/curved_flush_niche.rs` (the issue's
 reproducer: all three certified at `0.99973 mm` under a `1 mm` request);
 probe `scripts/probe_coincident_curved_faces_mutants.py`.
+
+## Amendment 2026-10-18: abutting openings in a curved wall, a box tangent to its face (#332, #327)
+
+Curved standard-case walls with openings were refused by the general
+boolean ("a point lies too close to a face boundary to classify"), so the
+boolean's deviation was unbounded. The undecided point lay on the side
+face of one opening, a few micrometres from the side plane of the
+opening next to it: delivered models give an opening in a curved wall
+radial sides, and the side of one reaches past its neighbour's by
+rounding of its authoring (tens of micrometres in the case reported,
+just under a millimetre in another pair). The two planes cross on the
+wall's axis, turned by far more than the angular tolerance, so they are
+not read as one surface; in the wall they lie within the linear one.
+Every point of such a region was refused, and where it was not, the
+sections' cuts at the two sides merged at their mean, on neither face's
+boundary, and the faces did not sew. The box of #327 was refused the same
+way: its back face touches the inner cylinder along a ruling and lies
+within the tolerance of it near the ruling.
+
+- **Decision: the start of a classifying ray is read exactly where the
+  tolerance decides nothing.** A point within `eps` of a face's support
+  is first not trusted, as before. Where no point of a region decides
+  so, its points are classified again with a point on a support only
+  within the rounding floor, but for the faces read as the point's own
+  support, which keep `eps`. The decision is exact for the operands as
+  given; the region lies within the tolerance of that support wherever
+  its points were taken. The tangent box is decided this way at the
+  caller's tolerance.
+- **Decision: a boolean refused at the caller's tolerance is cut again
+  at `FINER_FACTOR` (`2^-10`) times it.** Features closer than `eps` but
+  further apart than the finer tolerance are then apart, decided by the
+  exact predicates; the readings still cover what they exist for, the
+  rounding of separately placed operands (orders of magnitude below a
+  micrometre under a millimetre, and above the `2^-40` floor and the
+  `sqrt(f64::EPSILON)` split of a double root). The result is the exact
+  boolean of operands moved by at most the finer tolerance;
+  `BooleanReport::finer` says it was cut so, and its readings lie within
+  it. A boolean that succeeds at the caller's tolerance is never cut
+  again, and one refused at both returns the refusal at the caller's.
+  This amends "Source of the tolerance" above: the caller's tolerance is
+  passed through unchanged, and a fixed fraction of it is the only other
+  tolerance any decision uses.
+- **Decision: a split's vertices weld only within the tolerance on the
+  surface.** Piece ends of a split face weld in parameters within a
+  relative slack (`1e-7`), bookkeeping for one vertex's evaluations. On
+  an arc of radius `24` it spans `7 um`, more than the finer tolerance,
+  and welded two vertices the split had kept apart; they now also have to
+  lie within the tolerance in space.
+- **Not a new deviation contribution.** Both decisions are exact or
+  within the finer tolerance, reported by the boolean as before; the
+  measured contribution's detail still says when its result is the
+  boolean of operands within tolerance, and a coincidence the retry reads
+  is named under `deviation::COINCIDENT_OPERANDS` as before.
+- **Changed refusal.** A web hole half a tolerance off a filleted flange
+  (#249) was refused as `UnsupportedContact`: read as touching, the
+  contact could not join the fillet arcs. At the finer tolerance the gap
+  is a gap, and the boolean is cut at the reference volume.
+- **Known refusal.** The tangent box's exact result is right, but its
+  material is as thin as nothing along the contact, on the tangent plane
+  and a unit in the last place past it: the mesh compiler refuses that
+  mesh as a result touching itself (#194), so #327's mesh stays
+  uncertified there. A unit short of the tangent plane the box touches
+  nothing but material and is certified.
+
+Tests: `crates/algorithms/construction/brep-boolean/tests/curved_wall_openings.rs`
+(a wall of radii `6` to `6.25` less five wedge openings, abutting by
+`15 um` and `0.6 mm`, and one of radii `24` to `24.1` abutting by `7 um`,
+each step audited, closed and at the closed-form volume; the tangent box at the closed-form volume, decided at the
+caller's tolerance), `crates/execution/compile/tests/curved_wall_openings.rs`
+(the wall certified within the millimetre; the box exact, its mesh
+refused where it touches itself), `fillet_tangent.rs` and
+`exact_tangent_hole.rs` (the half-tolerance hole, cut finer); probe
+`scripts/probe_finer_boolean_mutants.py`.

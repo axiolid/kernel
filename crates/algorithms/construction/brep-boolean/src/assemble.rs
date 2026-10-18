@@ -306,7 +306,7 @@ pub(crate) fn assemble(kept: &[Kept], tolerance: Tolerance) -> Result<ExactBRep,
                 crate::classify::interior_points(&kept[face].region, &kept[face].surface)?[0];
             let mut owner: Option<usize> = None;
             for (slot, classifier) in classifiers.iter().enumerate() {
-                if classifier.contains(point, tolerance)?
+                if classifier.contains(point, crate::classify::Start::Tolerance, tolerance)?
                     && owner.is_none_or(|best| shells[outers[slot]].1 < shells[outers[best]].1)
                 {
                     owner = Some(slot);

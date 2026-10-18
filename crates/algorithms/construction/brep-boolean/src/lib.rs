@@ -68,7 +68,8 @@
 //! that contact ruling, not at their exact roots `2 sqrt(2 r d)` apart; and
 //! no point where the given and the moved plane disagree on a side decides
 //! a piece or a region. A curve whose meeting with the ruling cannot be
-//! placed is refused ([`BooleanError::UnsupportedContact`]). An exactly
+//! placed is refused ([`BooleanError::UnsupportedContact`]) at that
+//! tolerance (see the finer retry below). An exactly
 //! tangent pair is decided by the exact predicates instead.
 //!
 //! **Oblique round walls (#287).** An exact extrusion along a leaning
@@ -91,8 +92,10 @@
 //! through the crossing, a section is cut at a smooth edge where the edge
 //! crosses the other surface, and under a contact reading the crossing is
 //! placed on the contact; where the section misses the contact point by
-//! more than the tolerance it is refused
-//! ([`BooleanError::UnsupportedContact`]). See `tangency`.
+//! more than the tolerance the reading is refused
+//! ([`BooleanError::UnsupportedContact`]) and the boolean is cut again at
+//! the finer tolerance below, where a hole a fraction of the tolerance off
+//! the flange is no contact but a gap, decided exactly. See `tangency`.
 //!
 //! **Exact first (#236).** A reading about the operands' own surfaces --
 //! two supports are one, a plane is parallel or perpendicular to a
@@ -139,10 +142,39 @@
 //! Features further apart than the tolerance always go through the exact
 //! predicates: a gap of ten tolerances stays a gap.
 //!
+//! **Finer where the readings fail (#332).** Two features of the operands
+//! closer than `eps` but further apart than rounding are each read within
+//! the tolerance, and the readings need not agree: the sides of two
+//! abutting openings in a curved wall, one reaching a few micrometres (or
+//! just under a millimetre) past the other, their planes turned by more
+//! than `alpha`, leave cuts merged at a point on neither face's boundary,
+//! and the faces do not sew. A boolean refused at the caller's tolerance
+//! is cut again at [`FINER_FACTOR`] (`2^-10`) times it, where such
+//! features are apart and decided by the exact predicates, and the
+//! readings still cover the rounding of separately placed operands. The
+//! result is then the exact boolean of operands moved by at most the finer
+//! tolerance, and [`BooleanReport::finer`] says so; a boolean refused at
+//! both returns the refusal at the caller's tolerance. A boolean that
+//! succeeds at the caller's tolerance is never cut again.
+//!
+//! **A point near a support it is not read on (#332, #327).** A region is
+//! classified at a point inside it by ray parity, and a point within `eps`
+//! of any face's support is first not trusted: a reading may have moved
+//! that face onto the point's own. Where no point of a region is decided
+//! so, its points are classified again reading the ray's start exactly: a
+//! point is on a support only within the rounding floor, but for the faces
+//! read as its own support. A box whose face is tangent to a curved wall's
+//! inner cylinder (its face's points micrometres to millimetres from the
+//! cylinder, off the contact ruling) is then decided at the caller's
+//! tolerance, for the operands as given.
+//!
 //! Bookkeeping in a face's parameters (ordering pieces leaving a vertex,
 //! naming a point's parameters on the surface it was evaluated from) uses
-//! fixed relative slacks far below any tolerance. It never decides
-//! geometry: an order it cannot settle is refused
+//! fixed relative slacks far below any tolerance; two piece ends weld into
+//! one vertex of a split face only where they also lie within the
+//! tolerance on the surface (#332), so a slack spanning more of a long arc
+//! than a fine tolerance never joins what a split kept apart. It never
+//! decides geometry: an order it cannot settle is refused
 //! ([`BooleanError::TangentSplit`], [`BooleanError::UnclosedSplit`]).
 
 mod assemble;
@@ -157,7 +189,9 @@ mod split;
 mod support;
 mod tangency;
 
-pub use report::{BooleanReport, ToleranceDecision, ToleranceDecisionKind, ROUNDING_FACTOR};
+pub use report::{
+    BooleanReport, ToleranceDecision, ToleranceDecisionKind, FINER_FACTOR, ROUNDING_FACTOR,
+};
 pub use section::{section_edges, SectionEdge};
 pub use split::{split_face, Piece, PieceSource, Region};
 
@@ -198,6 +232,13 @@ pub fn boolean(
 /// matrices (entries `0` and `+-1`) meet in exactly coincident, parallel and
 /// perpendicular faces, which the exact predicates decide.
 ///
+/// A boolean refused at `tolerance` is cut again at [`FINER_FACTOR`] times
+/// it (#332): features closer than `tolerance` but further apart than the
+/// finer one are then decided exactly. The report says so
+/// ([`BooleanReport::finer`]), and its readings lie within the finer
+/// tolerance. Where that is refused too, the refusal at `tolerance` is
+/// returned.
+///
 /// # Errors
 ///
 /// As [`boolean`].
@@ -208,18 +249,47 @@ pub fn boolean_with_report(
     tolerance: Tolerance,
 ) -> Result<(ExactBRep, BooleanReport), BooleanError> {
     let session = report::open(&[a, b], tolerance);
-    let result = match run(a, b, operator, tolerance) {
-        Ok(result) => result,
-        // Never worse for the end merge (#291): a boolean refused after a
-        // cut was merged into an imprinted edge's end beyond the rounding
-        // floor (#276) is cut again with ends merged only within it.
+    let refused = match attempt(&session, a, b, operator, tolerance) {
+        Ok(result) => return Ok((result, session.finish()?)),
+        Err(refused) => refused,
+    };
+    // Finer where the tolerance's readings fail (#332): see
+    // [`FINER_FACTOR`]. Nothing is retried where nothing is left, at a
+    // tolerance with a zero part, or at or below the rounding floor.
+    let finer = Tolerance::new(tolerance.linear() * FINER_FACTOR, tolerance.angular());
+    match finer {
+        Ok(finer)
+            if refused != BooleanError::EmptyResult
+                && finer.linear() > report::rounding()
+                && finer.angular() > 0.0
+                && session.retry_at(finer) =>
+        {
+            attempt(&session, a, b, operator, finer)
+                .map_err(|_| refused)
+                .and_then(|result| Ok((result, session.finish()?)))
+        }
+        _ => Err(refused),
+    }
+}
+
+/// [`run`] in the open session, cut again with imprinted edges' ends
+/// merged only within the rounding floor where the wider merge left it
+/// refused (#291: never worse for the end merge).
+fn attempt(
+    session: &report::Guard,
+    a: &ExactBRep,
+    b: &ExactBRep,
+    operator: BooleanOperator,
+    tolerance: Tolerance,
+) -> Result<ExactBRep, BooleanError> {
+    match run(a, b, operator, tolerance) {
+        Ok(result) => Ok(result),
         Err(_) if session.merged_an_end() => {
             session.retry_with_rounding_ends();
-            run(a, b, operator, tolerance)?
+            run(a, b, operator, tolerance)
         }
-        Err(refused) => return Err(refused),
-    };
-    Ok((result, session.finish()?))
+        Err(refused) => Err(refused),
+    }
 }
 
 fn run(
@@ -308,6 +378,14 @@ fn run(
 /// A point within the tolerance of a surface its own is read as touching
 /// (`contacts`) does not decide: there the given operands and the moved
 /// ones the reading stands for can put it on different sides (#243).
+///
+/// The points are first classified with their ray's start read within
+/// tolerance; only where none decides so are they classified again with
+/// it read exactly ([`classify::Start::Exact`], #332). A region lying all
+/// over within the tolerance of a support it is not read as one with (a
+/// side face of one opening a few micrometres inside its neighbour, their
+/// planes turned by more than the angular tolerance) is decided by the
+/// exact crossing of that support, for the operands as given.
 #[allow(clippy::too_many_arguments)]
 fn decide(
     region: &Region,
@@ -320,26 +398,32 @@ fn decide(
     first: bool,
     tolerance: Tolerance,
 ) -> Result<(bool, bool), BooleanError> {
-    let mut last = BooleanError::Undecided;
-    for point in classify::interior_points(region, surface)? {
-        if contacts.disputed(surface, point) {
-            continue;
-        }
-        match classify_point(
-            point,
-            surface,
-            sign,
-            other_solid,
-            coincident,
-            operator,
-            first,
-            tolerance,
-        ) {
-            Err(BooleanError::Undecided) => last = BooleanError::Undecided,
-            other => return other,
+    let points = classify::interior_points(region, surface)?;
+    for start in [
+        classify::Start::Tolerance,
+        classify::Start::Exact(coincident),
+    ] {
+        for &point in &points {
+            if contacts.disputed(surface, point) {
+                continue;
+            }
+            match classify_point(
+                point,
+                surface,
+                sign,
+                other_solid,
+                coincident,
+                start,
+                operator,
+                first,
+                tolerance,
+            ) {
+                Err(BooleanError::Undecided) => {}
+                other => return other,
+            }
         }
     }
-    Err(last)
+    Err(BooleanError::Undecided)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -349,6 +433,7 @@ fn classify_point(
     sign: f64,
     other_solid: &classify::Solid<'_>,
     coincident: &[usize],
+    start: classify::Start<'_>,
     operator: BooleanOperator,
     first: bool,
     tolerance: Tolerance,
@@ -368,7 +453,7 @@ fn classify_point(
             };
         return Ok((keep, false));
     }
-    let inside = other_solid.contains(point, tolerance)?;
+    let inside = other_solid.contains(point, start, tolerance)?;
     Ok(match (operator, first) {
         (BooleanOperator::Union, _) => (!inside, false),
         (BooleanOperator::Intersection, _) => (inside, false),
