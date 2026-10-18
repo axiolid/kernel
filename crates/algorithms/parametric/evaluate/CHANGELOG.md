@@ -29,6 +29,27 @@ caret rule for `0.x` versions.
   from the law's bounds, panels split at seams, plus the heading's, the
   sums' and the placement's rounding; `MAX_POSITION_PANELS` caps the work.
   `certifies_flattening2` and `certifies_flattening3` are unchanged.
+- `station::FrameLaw` (#316, ADR 0082 amendment): certified frame-law
+  bounds along an atomic curve or a `CompositeBasis`
+  (`CompositeBasis::frame_law`), including pieces whose frames are read by
+  quadrature, which `piece_frame_bounds` leaves unbounded: an ellipse, a
+  B-spline, and an offset beside a line, a circle, an ellipse or a
+  B-spline (constant, or by distances). Each is bounded against its exact
+  frame law, the curve the length certificates measure, at its true arc
+  length: every read frame is compared at its native parameter with the
+  exact one, known in closed form to a certified error; the true arc
+  length to it is bounded by chord panels over the piece, measured once;
+  and over a span the law is bounded in its own arc length from the
+  certified suprema of `|P''|` and `|P'''|` (the base's `|B''|` to
+  `|B''''|` beside an offset, and the frame's unit vectors). A piece after
+  joints measured by quadrature adds its start's distance from the
+  certified joint to the measure. Intrinsic curves, chains, offsets beside
+  them or beside elevated and banked curves, skewed circles, steep
+  tangents, curves read by quadrature placed in a frame that tilts `+Z`,
+  and placed offset pieces stay unbounded (`None`).
+- `FrameLawBounds::point_error` and `FrameLawBounds::axis_error`: how far
+  a read frame's point and axes may lie from the exact frame law's, zero
+  where the frame is read in closed form.
 
 ## [0.3.16] - 2026-10-14
 

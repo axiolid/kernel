@@ -26,9 +26,12 @@
 //! certified bound fits the budget. The `bound` module states the exact
 //! surface and the bound: a sectioned spine or surface reports
 //! [`DeviationBound::Certified`] wherever the frame law along its basis has
-//! certified derivative bounds, and [`DeviationBound::Unbounded`] by name
-//! elsewhere (a numerically framed basis, a cell beside a mitre on a curved
-//! piece or with a changing section, different curved profiles).
+//! certified derivative bounds -- since #316 also where it reads its frame
+//! by quadrature, on an ellipse, a B-spline or an offset beside a curve in
+//! closed form -- and [`DeviationBound::Unbounded`] by name elsewhere (a
+//! frame on an intrinsic curve, a chain or an offset beside one, a cell
+//! beside a mitre on a curved piece or with a changing section, different
+//! curved profiles).
 //!
 //! The `exact` module builds the runs with a closed form exactly (#247):
 //! a constant section along a line or a straight polyline (an extrusion)
@@ -1123,6 +1126,7 @@ pub(crate) fn stationed_spine_bounded(
             })
             .collect(),
         &edges,
+        half,
     )?;
     let samples = sample_run(
         &knots,
@@ -1588,6 +1592,7 @@ pub(crate) fn sectioned_surface(
         sections.iter().map(|s| s.orientation).collect(),
         polylines.clone(),
         &edges,
+        chord,
     )?;
     let samples = sample_run(&knots, chord, &edges, placed, |lo, hi, at_lo, at_hi| {
         within(&law, true, chord, lo, hi, at_lo, at_hi)

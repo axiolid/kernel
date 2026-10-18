@@ -1428,3 +1428,66 @@ Evidence: `crates/algorithms/parametric/evaluate/src/station/certify.rs`
 `crates/algorithms/parametric/evaluate/tests/station_certify_planar_intrinsic.rs`
 (references by RK4 on the heading and chords Richardson-extrapolated) and
 `scripts/probe_planar_intrinsic_certify_mutants.py`.
+
+## Amendment 2026-10-18: certified frame laws for frames read by quadrature (#316)
+
+After #307 the openbimrs/ifc#443 deck compiled, but its deviation stayed
+`Unbounded(UNCERTIFIED_FRAMES)`: a frame on an ellipse, a B-spline or an
+offset is read through estimates (the arc-length inverse, an offset's own
+length table, an offset's tangent by a difference quotient), so
+`piece_frame_bounds` refused it. The #247 amendment left it open.
+
+- **The exact frame law.** The surface a run is bounded against is the
+  one on the curve the length certificates measure (#294, #307: for an
+  offset by distances, the law linear in the base's true arc length
+  between the points the kernel reads as the piece's ends), framed by its
+  own tangent at its true arc length from the piece's start. The kernel's
+  estimates are measured against it, never trusted.
+- **Each read, compared.** A frame read at `u` stands at a native
+  parameter `t`, where the exact point and velocity are known in closed
+  form to a certified error (`panels::Measured`, the reading the length
+  certificate rests on). The read point's and each read axis's distances
+  from the exact frame at `t` are computed and widened by that error
+  (`FrameLawBounds::point_error`, `axis_error`); the exact frame's true
+  arc length to `t`, bounded by chord panels over the piece measured once
+  (`beside::BaseTable`), gives the measure. At a B-spline's corner knot
+  the kernel reads the named side in closed form at the knot, so there the
+  read axes are the exact ones. On a composite, a piece after joints
+  measured by quadrature adds its start's distance from the certified
+  joint (`CompositeBasis::joint_intervals`) to the measure, which also
+  closes that gap for circle and polyline pieces after such joints.
+- **The law over a span.** From the certified suprema `M2 >= |P''|`, `M3
+  >= |P'''|` between two reads (the base's `|B''|` to `|B''''|` and the
+  frame's unit vectors beside an offset, #307's) and the speed's floor
+  `sigma`: `|O'| = 1`, `|T'| = |O''| <= M2 / sigma^2`, `|T''| <= (M3 /
+  sigma + 3 M2^2 / sigma^2) / sigma^2 + M2^2 / sigma^4`; the axes follow
+  from the tangent by the unit-vector rule as before.
+- **The cell.** `axiolid-mesh-compile`'s `station::bound` adds `e_p + e_a
+  (|lat| + |vert| + |long| + c (|x| + |y|))` per vertex, `c` one for the
+  base frame and `sqrt 3` for a turned one, beside `delta (S + 2 Q)`. A
+  run certifies its frames' quadratures to a thousandth of its budget; on
+  the deck the measure is about `1e-8`, the point error `1e-10` and the
+  axis error `2e-9`, against a `5e-4` budget.
+- **Still unbounded by name**: an intrinsic curve, a chain, offsets beside
+  them or beside elevated and banked curves, a skewed circle, a steep
+  tangent, a curve read by quadrature placed in a frame that tilts `+Z`,
+  a placed offset piece, and pieces after joints whose distances cannot
+  be certified. The deck's own run crosses the corner its widening law
+  makes at station 2 (its slope jumps from 0 to `0.25 / 18`), where it is
+  mitred on a curved piece: that cell stays `MITRED_SECTIONS`, the mitre
+  rule of the #247 amendment, which this amendment does not change. Runs
+  along the deck's offset that do not cross it are certified.
+
+| Option | Why not |
+| --- | --- |
+| Bound the estimates themselves (the arc-length inverse's and the difference quotient's errors from higher derivatives) | The difference quotient's truncation needs the displacement's fifth derivative, the base's sixth, and every estimate's error would need its own certificate; comparing each read with the exact frame needs none of them and is tight to rounding. |
+| Certify the arc length to every read from the curve's start | The cost grows with the distance and the number of cells; one table of chord panels per piece answers every read with one sub-panel. |
+| Reuse the kernel's own frame as the exact one | An estimate, not the exact law: the run would be bounded against a surface no one can state. |
+
+Evidence: `crates/algorithms/parametric/evaluate/src/station/certify/reading.rs`,
+`crates/algorithms/parametric/evaluate/src/station/frame_bound.rs`
+(`FrameLaw`), `crates/execution/compile/src/station/bound.rs`,
+`crates/algorithms/parametric/evaluate/tests/station_frame_law.rs`,
+`crates/execution/compile/tests/station_bound_quadrature.rs` (the exact
+solid framed independently, by a fine quadrature) and
+`scripts/probe_quadrature_frames_mutants.py`.

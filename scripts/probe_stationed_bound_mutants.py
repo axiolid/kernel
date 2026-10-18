@@ -68,7 +68,7 @@ MUTANTS = [
      '        point: [bounds.first, d2],',
      '        point: [bounds.first, 0.0],', [FRAMES, BOUND]),
     ('plan frame not normalised', FB,
-     '            let flat = normalised(k1, k2, horizontal()?);',
+     '            let flat = normalised(k1, k2, rho);',
      '            let flat = [k1, k2];', [FRAMES, BOUND]),
     # --- the bound per cell ------------------------------------------------
     ('chord term dropped', SB,

@@ -52,7 +52,7 @@ const TURNING: Scalar = 2.0 + 2.0 * core::f64::consts::PI;
 
 /// The base's certified arc length at every native parameter of the
 /// piece, from its chord panels.
-struct BaseTable {
+pub(super) struct BaseTable {
     panels: Vec<Panel>,
     /// Lower and upper bounds of the length at each panel's start, and at
     /// the last panel's end.
@@ -63,7 +63,7 @@ struct BaseTable {
 }
 
 impl BaseTable {
-    fn build(
+    pub(super) fn build(
         base: &Measured<'_>,
         t0: Scalar,
         t1: Scalar,
@@ -94,14 +94,14 @@ impl BaseTable {
     }
 
     /// Bounds of the base's whole length between the piece's ends.
-    fn total(&self) -> (Scalar, Scalar) {
+    pub(super) fn total(&self) -> (Scalar, Scalar) {
         let n = self.panels.len();
         (self.lower[n] - self.slack, self.upper[n] + self.slack)
     }
 
     /// Bounds of `lambda(t)`, the base's arc length from the first panel's
     /// start to `t`.
-    fn at(&self, base: &Measured<'_>, t: Scalar) -> GeomResult<(Scalar, Scalar)> {
+    pub(super) fn at(&self, base: &Measured<'_>, t: Scalar) -> GeomResult<(Scalar, Scalar)> {
         let n = self.panels.len();
         if t <= self.panels[0].a.t {
             return Ok((0.0, 0.0));
@@ -150,24 +150,59 @@ pub(super) fn chord_offset_length(
     vb: Scalar,
     tolerance: Scalar,
 ) -> GeomResult<DistanceInterval> {
-    let base = offset.base();
-    let measure = |v: Scalar| {
-        if base.reversed {
-            base.end - v
-        } else {
-            base.start + v
-        }
-    };
-    let (ma, mb) = (measure(va), measure(vb));
-    let native = Native::of(base.curve, ma.min(mb), ma.max(mb))?;
-    let (ta, tb) = (native.parameter(ma)?, native.parameter(mb)?);
-    let (t0, t1) = (ta.min(tb), ta.max(tb));
-    if t1.is_nan() || t1 <= t0 {
+    let Some(beside) = Beside::new(offset, va, vb, tolerance)? else {
         return Ok(DistanceInterval::point(0.0));
-    }
-    let mut breaks = native.breaks(3);
-    breaks.extend(native.breaks(1));
-    native.measured(|base_curve| {
+    };
+    beside.measured(|curve| curve.chord_turning(beside.t0, beside.t1, &beside.breaks, tolerance))
+}
+
+/// An offset of a closed-form base between its base measures `va < vb`
+/// (into the base piece), as the curve its length and its frames are
+/// certified on (#307, #316): the native parameters of its ends, and its
+/// law with how it is read along the base.
+pub(super) struct Beside<'c> {
+    offset: StationOffset<'c>,
+    pub(super) native: Native<'c>,
+    progress: Progress,
+    /// The native parameters of the ends, ascending.
+    pub(super) t0: Scalar,
+    pub(super) t1: Scalar,
+    /// Where the measured curve's third derivative may jump.
+    pub(super) breaks: Vec<Scalar>,
+    va: Scalar,
+    vb: Scalar,
+    /// Each law component's rate per unit base distance, and its size.
+    rates: [Scalar; 3],
+    sizes: [Scalar; 3],
+}
+
+impl<'c> Beside<'c> {
+    /// The offset between `va < vb`, its base measured by chords for
+    /// `tolerance` where its law varies along a base measured by
+    /// quadrature; `None` for an empty span.
+    pub(super) fn new(
+        offset: &StationOffset<'c>,
+        va: Scalar,
+        vb: Scalar,
+        tolerance: Scalar,
+    ) -> GeomResult<Option<Self>> {
+        let base = offset.base();
+        let measure = |v: Scalar| {
+            if base.reversed {
+                base.end - v
+            } else {
+                base.start + v
+            }
+        };
+        let (ma, mb) = (measure(va), measure(vb));
+        let native = Native::of(base.curve, ma.min(mb), ma.max(mb))?;
+        let (ta, tb) = (native.parameter(ma)?, native.parameter(mb)?);
+        let (t0, t1) = (ta.min(tb), ta.max(tb));
+        if t1.is_nan() || t1 <= t0 {
+            return Ok(None);
+        }
+        let mut breaks = native.breaks(3);
+        breaks.extend(native.breaks(1));
         let law = offset.law();
         let length = offset.base_length();
         let pairs = match law {
@@ -187,36 +222,71 @@ pub(super) fn chord_offset_length(
         } else if let Some(rate) = native.rate() {
             Progress::Rate(rate)
         } else {
-            let target = (PANEL_SHARE * tolerance).min(tolerance / (16.0 * rsum * TURNING));
-            let table = BaseTable::build(base_curve, t0, t1, &breaks, target)?;
-            let total = table.total();
-            if !(total.0 > 0.0 && total.1.is_finite()) {
-                return Err(uncertified());
-            }
-            Progress::Table(table, total)
+            native.measured(|base_curve| {
+                let target = (PANEL_SHARE * tolerance).min(tolerance / (16.0 * rsum * TURNING));
+                let table = BaseTable::build(base_curve, t0, t1, &breaks, target)?;
+                let total = table.total();
+                if !(total.0 > 0.0 && total.1.is_finite()) {
+                    return Err(uncertified());
+                }
+                Ok(Progress::Table(table, total))
+            })?
         };
-        offset_chords(
-            offset,
-            &native,
-            base_curve,
-            &progress,
-            (t0, t1, &breaks),
-            (va, vb, rates, sizes),
-            tolerance,
-        )
-    })
+        Ok(Some(Self {
+            offset: *offset,
+            native,
+            progress,
+            t0,
+            t1,
+            breaks,
+            va,
+            vb,
+            rates,
+            sizes,
+        }))
+    }
+
+    /// The direction of travel along the base's native parameter: `-1` on
+    /// a reversed base.
+    pub(super) fn travel(&self) -> Scalar {
+        if self.offset.base().reversed {
+            -1.0
+        } else {
+            1.0
+        }
+    }
+
+    /// `run` given the offset measured by chords at its base's native
+    /// parameter, its law read as the [module documentation](self) says.
+    pub(super) fn measured<R>(
+        &self,
+        run: impl FnOnce(&Measured<'_>) -> GeomResult<R>,
+    ) -> GeomResult<R> {
+        self.native.measured(|base_curve| {
+            offset_chords(
+                &self.offset,
+                &self.native,
+                base_curve,
+                &self.progress,
+                (self.t0, self.t1),
+                (self.va, self.vb, self.rates, self.sizes),
+                run,
+            )
+        })
+    }
 }
 
-/// The chord measure of the offset itself, its law read by `progress`.
-fn offset_chords(
+/// The offset itself measured by chords, its law read by `progress`, handed
+/// to `run`.
+fn offset_chords<R>(
     offset: &StationOffset<'_>,
     native: &Native<'_>,
     base_curve: &Measured<'_>,
     progress: &Progress,
-    (t0, t1, breaks): (Scalar, Scalar, &[Scalar]),
+    (t0, t1): (Scalar, Scalar),
     (va, vb, rates, sizes): (Scalar, Scalar, [Scalar; 3], [Scalar; 3]),
-    tolerance: Scalar,
-) -> GeomResult<DistanceInterval> {
+    run: impl FnOnce(&Measured<'_>) -> GeomResult<R>,
+) -> GeomResult<R> {
     let base = offset.base();
     let law = offset.law();
     let travel = if base.reversed { -1.0 } else { 1.0 };
@@ -414,11 +484,10 @@ fn offset_chords(
             _ => 0.0,
         };
     let shift = placement.map_or(0.0, |rigid| rigid.translation.abs().max_element());
-    Measured {
+    run(&Measured {
         point: &point,
         velocity: &velocity,
         bounds: &bounds,
         scale: native.extent() + reach + shift,
-    }
-    .chord_turning(t0, t1, breaks, tolerance)
+    })
 }

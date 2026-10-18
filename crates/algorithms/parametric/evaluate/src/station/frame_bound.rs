@@ -72,21 +72,54 @@
 //! Gauss-Legendre rule is exact up to rounding and the root find stops
 //! within its tolerance: twice [`ARC_LENGTH_TOLERANCE`]` * max(1, s)`.
 //!
+//! # Read by quadrature (#316)
+//!
+//! An ellipse, a B-spline and an offset beside a line, a circle, an
+//! ellipse or a B-spline read their frames through estimates (the
+//! arc-length inverse, an offset's own length table, an offset's tangent by
+//! a difference quotient), so [`piece_frame_bounds`] leaves them unbounded.
+//! [`FrameLaw`] bounds them against their EXACT frame law instead: the
+//! curve the length certificates of [`super::certify`] measure, framed by
+//! its own tangent at its true arc length from the piece's start. Each read
+//! frame stands at a native parameter where the exact curve's point and
+//! velocity are known in closed form to a certified error; the read
+//! point's and each read axis's distance from the exact frame there are
+//! computed and carried as [`FrameLawBounds::point_error`] and
+//! [`FrameLawBounds::axis_error`], and the true arc length to that
+//! parameter, bounded by chord panels over the piece measured once, gives
+//! the measure. Over a span between two reads the exact law is bounded in
+//! its own arc length from the certified suprema of `|P''|` and `|P'''|`
+//! (the base's `|B''|` to `|B''''|` beside an offset, and the frame's unit
+//! vectors) and a floor of `|P'|`: `|O''| = |T'| <= M2 / sigma^2` and
+//! `|T''| <= (M3 / sigma + 3 M2^2 / sigma^2) / sigma^2 + M2^2 / sigma^4`.
+//! The axes follow from the tangent as above. On a composite, a piece after
+//! one measured by quadrature starts where the kernel sums the lengths
+//! before it; its distance from the certified joint
+//! ([`super::CompositeBasis::joint_intervals`]) adds to the measure.
+//!
 //! # Not bounded
 //!
-//! `None`, never a guess: an ellipse, a B-spline, an intrinsic curve, a
-//! chain and an offset (their frames rest on a quadrature, an estimate); a
-//! circle with a skewed frame; an elevated or banked curve with another
-//! plan or an intrinsic profile; a span that crosses a seam, a vertex of a
-//! polyline or a piece of a law; a tangent too steep for a horizontal
-//! lower bound; a cant whose roll reaches a quarter turn.
+//! `None`, never a guess: an intrinsic curve, a chain, and an offset beside
+//! one of them, beside an elevated or a banked curve; a circle with a
+//! skewed frame; an elevated or banked curve with another plan or an
+//! intrinsic profile; a span that crosses a seam, a vertex of a polyline
+//! or a piece of a law; a tangent too steep for a horizontal lower bound;
+//! a cant whose roll reaches a quarter turn; a curve read by quadrature
+//! placed in a frame that tilts `+Z`, and a placed offset piece.
+//! [`piece_frame_bounds`] alone also leaves an ellipse, a B-spline and
+//! every offset unbounded: they are [`FrameLaw`]'s.
 //!
 //! [`SectionFrame::carried`]: super::SectionFrame::carried
 
-use axiolid_core::{Scalar, Vec2, Vec3};
+use std::cell::OnceCell;
+
+use axiolid_contracts::GeomResult;
+use axiolid_core::{Scalar, Transform3, Vec2, Vec3};
 use axiolid_curve::{Curve2, Curve3};
 
-use super::{DistanceConvention, StationCurve, StationPiece, KEEPS_UP_TOLERANCE};
+use super::certify::{checked_tolerance, PieceReader};
+use super::offset::OffsetTable;
+use super::{CompositeBasis, DistanceConvention, StationCurve, StationPiece, KEEPS_UP_TOLERANCE};
 use crate::arc_parameter::ARC_LENGTH_TOLERANCE;
 use crate::bound::ROUNDING;
 
@@ -117,6 +150,14 @@ pub struct FrameLawBounds {
     /// How far the distance a frame is read at may lie from the distance
     /// asked for (see [the measure](self#the-measure)).
     pub measure: Scalar,
+    /// How far a frame's point read at a distance may lie from the exact
+    /// frame law's point at the distance it truly stands at: zero where
+    /// the frame is read in closed form, a certified bound where it is
+    /// read by quadrature ([`FrameLaw`], #316).
+    pub point_error: Scalar,
+    /// How far each of a read frame's axes may lie from the exact frame
+    /// law's, likewise.
+    pub axis_error: Scalar,
 }
 
 impl FrameLawBounds {
@@ -376,11 +417,62 @@ pub fn piece_frame_bounds(
     } else {
         (piece.start + u0, piece.start + u1)
     };
-    let mut law = match piece.curve {
+    let law = match piece.curve {
         StationCurve::Two(curve) => tangent_law2(curve, m0, m1)?,
         StationCurve::Three(curve) => tangent_law3(curve, m0, m1)?,
         StationCurve::Offset(_) => return None,
     };
+    finish(piece, law, m1 - m0, reading, [0.0; 2])
+}
+
+/// The bounds of a piece read by quadrature (#316) over `[from, to]` into
+/// it, from `reader`'s certified frame law; `None` where it is not
+/// bounded. An offset piece reads through `table`.
+pub(crate) fn read_frame_bounds(
+    reader: &PieceReader<'_>,
+    piece: &StationPiece<'_>,
+    from: Scalar,
+    to: Scalar,
+    table: Option<&OffsetTable>,
+    reading: FrameReading,
+) -> Option<FrameLawBounds> {
+    let (u0, u1) = (from.min(to), from.max(to));
+    let length = piece.length();
+    let slack = numerical_measure(length);
+    if !(u0.is_finite() && u1.is_finite()) || u0 < -slack || u1 > length + slack {
+        return None;
+    }
+    let read = reader.read(piece, u0, u1, table).ok()??;
+    let law = TangentLaw {
+        point: read.point,
+        tangent: read.tangent,
+        middle: unit(read.middle)?,
+        kind: if read.planar {
+            Kind::Planar
+        } else {
+            Kind::ReferenceUp
+        },
+        measure: read.measure,
+    };
+    finish(
+        piece,
+        law,
+        u1 - u0 + 2.0 * read.measure,
+        reading,
+        [read.point_error, read.axis_error],
+    )
+}
+
+/// The bounds of `law` over a span `span` long, as `piece` presents it
+/// (reversed, placed) and read as `reading`, with a read point's and a
+/// read axis's errors `errors` (#316).
+fn finish(
+    piece: &StationPiece<'_>,
+    mut law: TangentLaw,
+    span: Scalar,
+    reading: FrameReading,
+    errors: [Scalar; 2],
+) -> Option<FrameLawBounds> {
     if piece.reversed {
         law.middle = -law.middle;
     }
@@ -397,7 +489,7 @@ pub fn piece_frame_bounds(
     }
     let [k1, k2] = law.tangent;
     let horizontal = || -> Option<Scalar> {
-        let rho = law.middle.x.hypot(law.middle.y) - 0.5 * (m1 - m0) * k1;
+        let rho = law.middle.x.hypot(law.middle.y) - 0.5 * span * k1;
         (rho.is_finite() && rho > 0.0).then_some(rho)
     };
     let tangent = [k1, k2];
@@ -415,12 +507,18 @@ pub fn piece_frame_bounds(
             (axis, axis)
         }
     };
+    let [point_error, mut axis_error] = errors;
     let (tangent, lateral, up) = match reading {
         FrameReading::Section => (tangent, lateral, up),
         // A 2D curve's frame is already its plan frame.
         FrameReading::Plan if matches!(law.kind, Kind::Planar) => (tangent, lateral, up),
         FrameReading::Plan => {
-            let flat = normalised(k1, k2, horizontal()?);
+            let rho = horizontal()?;
+            // A tangent `e` off has its plan direction `2 e / rho` off.
+            if axis_error > 0.0 {
+                axis_error = 2.0 * axis_error / rho;
+            }
+            let flat = normalised(k1, k2, rho);
             (flat, flat, [0.0, 0.0])
         }
     };
@@ -431,13 +529,228 @@ pub fn piece_frame_bounds(
         lateral: grow(lateral),
         up: grow(up),
         measure: law.measure,
+        point_error: point_error * scale * (1.0 + ROUNDING),
+        axis_error: axis_error * scale * (1.0 + ROUNDING),
     };
     let finite = [out.point, out.tangent, out.lateral, out.up]
         .iter()
         .flatten()
-        .chain([&out.measure])
+        .chain([&out.measure, &out.point_error, &out.axis_error])
         .all(|v| v.is_finite());
     finite.then_some(out)
+}
+
+/// A piece's reader, built when first asked for.
+enum Slot<'c> {
+    /// A piece whose frame is read in closed form.
+    Closed,
+    /// A piece read by quadrature, with its reader.
+    Read(Box<PieceReader<'c>>),
+    /// A piece read by quadrature that is not bounded.
+    Unbounded,
+}
+
+/// What a [`FrameLaw`] is the law along.
+// Large only by `StationCurve`'s offset variant; one value lives per law.
+#[allow(clippy::large_enum_variant)]
+enum LawBasis<'b, 'c> {
+    /// One atomic curve, possibly placed; `whole` the curve as one piece
+    /// where it is read by quadrature.
+    Atomic {
+        curve: StationCurve<'c>,
+        placement: Option<Transform3>,
+        whole: Option<StationPiece<'c>>,
+    },
+    Composite(&'b CompositeBasis<'c>),
+}
+
+/// Certified bounds on the frame law along a station basis (#316): an
+/// atomic curve or a [`CompositeBasis`], over spans that cross no seam.
+///
+/// A piece read in closed form is bounded by [`piece_frame_bounds`]. A
+/// piece read by quadrature -- an ellipse, a B-spline, an offset beside a
+/// line, a circle, an ellipse or a B-spline -- is bounded against its
+/// exact frame law, its own length measured once by chord panels to the
+/// tolerance (see [the module documentation](self#read-by-quadrature-316)):
+/// the measure is how far a read's true distance lies from the one asked
+/// for, and the read point's and axes' distances from the exact frame at
+/// that true distance are [`FrameLawBounds::point_error`] and
+/// [`FrameLawBounds::axis_error`]. On a composite, a piece after one
+/// measured by quadrature starts where the kernel sums the lengths before
+/// it, which [`CompositeBasis::joint_intervals`] certifies: its distance
+/// from the true joint is added to the measure.
+///
+/// Not bounded (`None`): every family [`piece_frame_bounds`] leaves
+/// unbounded other than those above (an intrinsic curve, a chain, an
+/// offset beside a curve parameterised by its plan length or beside a
+/// banked curve, a skewed circle, a steep tangent), a curve read by
+/// quadrature placed in a frame that tilts `+Z`, a placed offset piece,
+/// and a piece after joints whose distances are not certified at the
+/// tolerance.
+pub struct FrameLaw<'b, 'c> {
+    basis: LawBasis<'b, 'c>,
+    tolerance: Scalar,
+    /// Each joint's distance from where it truly lies, built when first
+    /// needed; `None` where the joints are not certified.
+    joints: OnceCell<Option<Vec<Scalar>>>,
+    slots: Vec<OnceCell<Slot<'c>>>,
+}
+
+impl core::fmt::Debug for FrameLaw<'_, '_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FrameLaw")
+            .field("tolerance", &self.tolerance)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether a piece's frame is read by quadrature.
+fn by_quadrature(curve: StationCurve<'_>) -> bool {
+    matches!(curve, StationCurve::Offset(_)) || !curve.measure_is_exact()
+}
+
+impl<'b, 'c> FrameLaw<'b, 'c> {
+    /// The frame law along the atomic `curve`, placed by `placement` if
+    /// any, its quadratures certified to `tolerance`.
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive, and a curve read by
+    /// quadrature whose length a station cannot be measured against, by
+    /// name.
+    pub fn atomic(
+        curve: StationCurve<'c>,
+        placement: Option<Transform3>,
+        tolerance: Scalar,
+    ) -> GeomResult<Self> {
+        let tolerance = checked_tolerance(tolerance)?;
+        let whole = if by_quadrature(curve) {
+            let piece = StationPiece::whole(curve)?;
+            Some(match placement {
+                Some(rigid) => piece.placed(rigid, true),
+                None => piece,
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            basis: LawBasis::Atomic {
+                curve,
+                placement,
+                whole,
+            },
+            tolerance,
+            joints: OnceCell::new(),
+            slots: vec![OnceCell::new()],
+        })
+    }
+
+    /// The frame law along `basis`, its quadratures certified to
+    /// `tolerance`.
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive, by name.
+    pub fn composite(basis: &'b CompositeBasis<'c>, tolerance: Scalar) -> GeomResult<Self> {
+        let tolerance = checked_tolerance(tolerance)?;
+        Ok(Self {
+            basis: LawBasis::Composite(basis),
+            tolerance,
+            joints: OnceCell::new(),
+            slots: basis.pieces().iter().map(|_| OnceCell::new()).collect(),
+        })
+    }
+
+    /// Certified bounds of the frame law over the distances `[a, b]` along
+    /// the basis, a span that crosses no seam, read as `reading`; `None`
+    /// where they are not certified (see the [type documentation](Self)).
+    #[must_use]
+    pub fn bounds(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<FrameLawBounds> {
+        match &self.basis {
+            LawBasis::Atomic {
+                curve,
+                placement,
+                whole,
+            } => match whole {
+                Some(whole) => self.read(0, whole, a, b, None, reading),
+                None => {
+                    let mut piece = StationPiece::between(*curve, a, b).ok()?;
+                    if let Some(rigid) = placement {
+                        piece = piece.placed(*rigid, true);
+                    }
+                    piece_frame_bounds(&piece, 0.0, b - a, reading)
+                }
+            },
+            LawBasis::Composite(composite) => {
+                let slack = numerical_measure(b);
+                let starts = composite.starts();
+                for (k, piece) in composite.pieces().iter().enumerate() {
+                    let (start, end) = (starts[k], starts[k] + piece.length());
+                    if a >= start - slack && b <= end + slack {
+                        let table = composite.tables()[k].as_ref();
+                        let mut bounds =
+                            self.read(k, piece, a - start, b - start, table, reading)?;
+                        bounds.measure += self.joint_error(composite, k)?;
+                        return Some(bounds);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// The bounds of piece `k` over `[from, to]` into it.
+    fn read(
+        &self,
+        k: usize,
+        piece: &StationPiece<'c>,
+        from: Scalar,
+        to: Scalar,
+        table: Option<&OffsetTable>,
+        reading: FrameReading,
+    ) -> Option<FrameLawBounds> {
+        let slot = self.slots[k].get_or_init(|| {
+            if !by_quadrature(piece.curve) {
+                return Slot::Closed;
+            }
+            match PieceReader::new(piece, table, self.tolerance) {
+                Ok(Some(reader)) => Slot::Read(Box::new(reader)),
+                _ => Slot::Unbounded,
+            }
+        });
+        match slot {
+            Slot::Closed => piece_frame_bounds(piece, from, to, reading),
+            Slot::Read(reader) => read_frame_bounds(reader, piece, from, to, table, reading),
+            Slot::Unbounded => None,
+        }
+    }
+
+    /// How far piece `k`'s start, where the kernel sums the lengths before
+    /// it, may lie from where it truly lies: zero after pieces measured
+    /// from stored data alone.
+    fn joint_error(&self, composite: &CompositeBasis<'c>, k: usize) -> Option<Scalar> {
+        if composite.pieces()[..k]
+            .iter()
+            .all(|piece| piece.curve.measure_is_exact())
+        {
+            return Some(0.0);
+        }
+        let errors = self.joints.get_or_init(|| {
+            let joints = composite.joint_intervals(self.tolerance).ok()?;
+            let starts = composite.starts();
+            Some(
+                joints
+                    .iter()
+                    .enumerate()
+                    .map(|(j, joint)| {
+                        let at = starts[j + 1];
+                        (at - joint.lower).max(joint.upper - at).max(0.0) * (1.0 + ROUNDING)
+                    })
+                    .collect(),
+            )
+        });
+        errors.as_ref()?.get(k.checked_sub(1)?).copied()
+    }
 }
 
 #[cfg(test)]

@@ -805,12 +805,25 @@ impl<'c> StationPiece<'c> {
     }
 
     /// [`Self::section_on`], an offset read through `table`.
-    fn section_with(
+    pub(crate) fn section_with(
         &self,
         u: Scalar,
         side: SeamSide,
         table: Option<&OffsetTable>,
     ) -> GeomResult<SectionFrame> {
+        let (_, section) = self.raw_section(u, side, table)?;
+        self.finished(section)
+    }
+
+    /// The curve's own measure a read at distance `u` into the piece from
+    /// `side` stands at, and the curve's section there before the piece
+    /// reverses or places it: what [`Self::section_on`] reads (#316).
+    pub(crate) fn raw_section(
+        &self,
+        u: Scalar,
+        side: SeamSide,
+        table: Option<&OffsetTable>,
+    ) -> GeomResult<(Scalar, SectionFrame)> {
         let length = self.length();
         let u = u.clamp(0.0, length);
         let side = if u <= slack(u) {
@@ -821,7 +834,11 @@ impl<'c> StationPiece<'c> {
             side
         };
         let (m, curve_side) = self.measure(u, side);
-        let mut section = self.curve.section_at(m, curve_side, table)?;
+        Ok((m, self.curve.section_at(m, curve_side, table)?))
+    }
+
+    /// A curve's section as the piece presents it: reversed, then placed.
+    pub(crate) fn finished(&self, mut section: SectionFrame) -> GeomResult<SectionFrame> {
         if self.reversed {
             section.tangent = -section.tangent;
             section.lateral = -section.lateral;
@@ -966,6 +983,26 @@ impl<'c> CompositeBasis<'c> {
     #[must_use]
     pub fn pieces(&self) -> &[StationPiece<'c>] {
         &self.pieces
+    }
+
+    /// Each piece's start distance, and the total length last.
+    pub(crate) fn starts(&self) -> &[Scalar] {
+        &self.starts
+    }
+
+    /// Each offset piece's measure table.
+    pub(crate) fn tables(&self) -> &[Option<OffsetTable>] {
+        &self.tables
+    }
+
+    /// Certified bounds on the frame law along the composite (#316), its
+    /// quadratures certified to `tolerance` ([`super::FrameLaw`]).
+    ///
+    /// # Errors
+    ///
+    /// A tolerance that is not finite and positive, by name.
+    pub fn frame_law(&self, tolerance: Scalar) -> GeomResult<super::FrameLaw<'_, 'c>> {
+        super::FrameLaw::composite(self, tolerance)
     }
 
     /// The total length in the composite's station measure.

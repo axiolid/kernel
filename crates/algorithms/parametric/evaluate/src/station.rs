@@ -157,7 +157,7 @@ pub mod window;
 
 pub use certify::{DistanceInterval, MAX_CERTIFIED_PANELS, POINT_ROUNDING, UNCERTIFIED_LENGTH};
 pub use composite::{CompositeBasis, StationCurve, StationPiece, JOINT_TOLERANCE};
-pub use frame_bound::{piece_frame_bounds, FrameLawBounds, FrameReading};
+pub use frame_bound::{piece_frame_bounds, FrameLaw, FrameLawBounds, FrameReading};
 pub use offset::{offset_pieces, StationOffset, CUSP_TOLERANCE, OFFSET_TOLERANCE};
 pub use path_bound::{
     point_bound_tolerance, PATH_POINT_AMBIGUOUS, PATH_POINT_OFF_CURVE, POINT_BOUND_UNSUPPORTED,

@@ -42,6 +42,25 @@ caret rule for `0.x` versions.
   and surface and parameter curves.
 - `FINER_FACTOR`, re-exported from `axiolid-brep-boolean` with the
   report it describes (`BooleanReport::finer`, #332).
+- Certified deviations for runs of sections at stations whose frames are
+  read by quadrature (#316): along an ellipse, a B-spline, and an offset
+  beside a line, a circle, an ellipse or a B-spline, constant or by
+  distances. Such a run reported `Unbounded(UNCERTIFIED_FRAMES)`; its
+  cells are now bounded against the exact frame law
+  (`axiolid_reference::station::FrameLaw`, its quadratures certified to a
+  thousandth of the run's budget), each vertex charged the read's
+  certified distance error, point error and axis error on top of the
+  chord bound (the `station::bound` module documentation). Runs along the
+  openbimrs/ifc#443 deck's offset beside an ellipse, a tapered run along a
+  B-spline and runs along an ellipse and its offset are certified within
+  a millimetre request, and a dense sampling of the exact solid, framed
+  independently of the kernel, stays within the bound
+  (`tests/station_bound_quadrature.rs`). The deck's own run, which
+  crosses the corner its widening law makes at station 2, is still
+  unbounded by `MITRED_SECTIONS`: a cell beside a mitre on a curved piece
+  is not bounded. Intrinsic curves, chains and offsets beside them,
+  skewed circles and steep tangents stay `UNCERTIFIED_FRAMES`, whose
+  message now names them.
 
 ### Fixed
 
@@ -73,6 +92,10 @@ caret rule for `0.x` versions.
   thin as nothing along the contact, stays refused as a result touching
   itself (#194) on the tangent plane and a unit in the last place past
   it; a unit short of it, the box is certified.
+- A piece of a composite basis after an ellipse, a B-spline or a numerical
+  offset carried no error for where its start truly lies: the kernel sums
+  the estimated lengths before it, and the run's measure now adds that
+  sum's distance from the certified joint (#316).
 
 ## [0.3.27] - 2026-10-16
 

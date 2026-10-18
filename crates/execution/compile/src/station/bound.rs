@@ -60,6 +60,18 @@
 //! long at the run's ends, and each is up to `2 delta` longer: `delta (S +
 //! 2 Q)` per vertex, `S` its speed, covers all three.
 //!
+//! Where it reads its frame by quadrature (an ellipse, a B-spline, an
+//! offset beside a line, a circle, an ellipse or a B-spline, #316), the
+//! exact surface is the one on the exact frame law
+//! (`axiolid_reference::station::FrameLaw`): `delta` bounds how far a
+//! read's true distance lies from the one asked for, its certified length
+//! measured to a thousandth of the run's budget, and each read point and
+//! axis lies within `e_p` and `e_a` of the exact frame's there. A vertex is
+//! then within `e_p + e_a (|lat| + |vert| + |long| + c (|x| + |y|))` of
+//! its exact position besides `delta (S + 2 Q)`, `c` one for the base
+//! frame and `sqrt 3` for a turned one (`|sum w_i dF_i| <= sqrt 3 e_a` for
+//! unit components `w`).
+//!
 //! # Mitres
 //!
 //! A cell beside a mitre ends on the mitre's plane. Where the piece it
@@ -73,7 +85,7 @@
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_model::{SeamSide, StationFrame, StationOffsets, StationOrientation};
-use axiolid_reference::station::{FrameLawBounds, FrameReading};
+use axiolid_reference::station::{FrameLaw, FrameLawBounds, FrameReading};
 
 use super::{interval, lerp, lerp_offsets, oriented, place_turned, seam_slack, Run};
 
@@ -85,8 +97,10 @@ pub(crate) const MITRED_SECTIONS: &str =
 /// Why a run along a basis without a certified frame law is not bounded.
 pub(crate) const UNCERTIFIED_FRAMES: &str =
     "stationed sections: the frame law along this basis has no certified derivative bounds (a \
-     frame read by quadrature on an ellipse, a B-spline, an intrinsic curve, a chain or an \
-     offset, a skewed circle, or a steep tangent)";
+     frame read on an intrinsic curve or a chain, an offset beside one of them or beside an \
+     elevated or banked curve, a skewed circle, a steep tangent, a curve read by quadrature \
+     placed in a frame that tilts +Z, or a piece after joints whose distances cannot be \
+     certified)";
 
 /// Why an orientation that turns too far between stations is not bounded.
 pub(crate) const UNBOUNDED_TURN: &str =
@@ -114,8 +128,13 @@ pub(super) struct SectionLaw<'r, 'g> {
     pub(super) locals: Vec<Vec<Point2>>,
     pub(super) edges: &'r [(usize, usize)],
     reading: Option<FrameReading>,
+    frames: FrameLaw<'r, 'g>,
     seams: Vec<Scalar>,
 }
+
+/// The share of a run's budget its frames' quadratures are certified to
+/// (#316): their lengths, so a read's measure, to a thousandth of it.
+const CERTIFICATION_SHARE: Scalar = 1e-3;
 
 /// `sup |W'|` and `sup |W''|` of a turned axis.
 type Pair = [Scalar; 2];
@@ -193,6 +212,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         orientations: Vec<StationOrientation>,
         locals: Vec<Vec<Point2>>,
         edges: &'r [(usize, usize)],
+        budget: Scalar,
     ) -> GeomResult<Self> {
         let seams = run
             .basis
@@ -202,6 +222,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
             .collect();
         Ok(Self {
             reading: reading(run.frame),
+            frames: run.basis.frame_law(CERTIFICATION_SHARE * budget)?,
             run,
             distances,
             offsets,
@@ -276,7 +297,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
         cuts.push(hi);
         let mut pieces = Vec::with_capacity(cuts.len() - 1);
         for pair in cuts.windows(2) {
-            let Some(bounds) = self.run.basis.frame_bounds(pair[0], pair[1], reading) else {
+            let Some(bounds) = self.frames.bounds(pair[0], pair[1], reading) else {
                 return Ok(Err(UNCERTIFIED_FRAMES));
             };
             if mitred && !bounds.is_straight() {
@@ -354,6 +375,11 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                     + y * ut[1]
                     + 2.0 * (xr * lt[0] + yr * ut[0]);
                 chord[k] = chord[k].max(0.125 * span * span * second);
+                // A read point and axes off the exact law's (#316).
+                let lever = if plain { 1.0 } else { Scalar::sqrt(3.0) };
+                let read = bounds.point_error
+                    + bounds.axis_error * (base.iter().sum::<Scalar>() + lever * (x + y));
+                slide[k] = slide[k].max(read);
                 if bounds.measure > 0.0 {
                     let speed = bounds.point[0]
                         + frame(0)
@@ -366,7 +392,7 @@ impl<'r, 'g> SectionLaw<'r, 'g> {
                     let rate = offset_rate
                         + (q - p).length() / delta
                         + reach * (turn.lateral[0] + turn.up[0]);
-                    slide[k] = slide[k].max(bounds.measure * (speed + 2.0 * rate));
+                    slide[k] = slide[k].max(bounds.measure * (speed + 2.0 * rate) + read);
                 }
             }
         }

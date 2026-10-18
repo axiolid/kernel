@@ -115,6 +115,9 @@ use panels::{adapt, finish, product, Compensated, Jet, Measured, PANEL_SHARE, VE
 
 mod beside;
 mod panels;
+mod reading;
+
+pub(crate) use reading::PieceReader;
 
 /// The input a length no certified bound here reaches is refused for.
 pub const UNCERTIFIED_LENGTH: &str =

@@ -9,8 +9,8 @@ use axiolid_construct::profile::profile_rings;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Frame2, Point2, Point3, Scalar, Tolerance, Transform2, Vec2, Vec3};
 use axiolid_curve::{
-    BankConvention, Banked3, CantLaw, CantPiece, Circle2, Curve2, Curve3, Elevated3, ElevationLaw,
-    Ellipse2, Line2, Polyline2,
+    BankConvention, Banked3, CantLaw, CantPiece, Circle2, CurvatureLaw, Curve2, Curve3, Elevated3,
+    ElevationLaw, Ellipse2, Intrinsic2, Line2, Polyline2,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::{exact_properties, volume_properties};
@@ -729,16 +729,18 @@ fn unbounded_reason(graph: &GeometryGraph, root: NodeId) -> &'static str {
 #[test]
 fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
-    let ellipse = b
-        .push_value(Curve2::Ellipse(Ellipse2 {
-            frame: Frame2 {
+    // A clothoid: its frame rests on a quadrature no bound here reaches
+    // (an ellipse's is certified since #316).
+    let clothoid = b
+        .push_value(Curve2::Intrinsic(Intrinsic2::new(
+            Frame2 {
                 origin: Point2::ZERO,
                 x: Vec2::X,
                 y: Vec2::Y,
             },
-            semi_axis_x: 30.0,
-            semi_axis_y: 20.0,
-        }))
+            CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
+            60.0,
+        )))
         .unwrap();
     let line = b
         .push_value(Curve2::Line(Line2 {
@@ -755,9 +757,9 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         .unwrap()
     };
     let (small, large) = (disk(&mut b, 0.5), disk(&mut b, 0.8));
-    let along_ellipse = spine(
+    let along_clothoid = spine(
         &mut b,
-        ellipse,
+        clothoid,
         vec![
             section(profile, 0.0, StationOffsets::ZERO),
             section(profile, 10.0, StationOffsets::ZERO),
@@ -783,9 +785,9 @@ fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
         StationFrame::Section,
     );
     let graph = b
-        .finish(vec![along_ellipse, curved_taper, one_disk])
+        .finish(vec![along_clothoid, curved_taper, one_disk])
         .unwrap();
-    let reason = unbounded_reason(&graph, along_ellipse);
+    let reason = unbounded_reason(&graph, along_clothoid);
     assert!(reason.contains("certified derivative bounds"), "{reason}");
     let reason = unbounded_reason(&graph, curved_taper);
     assert!(reason.contains("curved profiles"), "{reason}");

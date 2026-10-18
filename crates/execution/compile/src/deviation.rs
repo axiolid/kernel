@@ -120,10 +120,12 @@
 //!   from certified derivative bounds of the frame law, breakpoints at
 //!   seams inside a cell, and the wall quad's
 //!   `axiolid_construct::loft::quad_deviation`, plus a spine's profile
-//!   flattening, [`DeviationBound::Certified`]; a numerically framed basis,
-//!   a cell beside a mitre on a curved piece or with a changing section,
-//!   and different curved profiles are [`DeviationBound::Unbounded`] by
-//!   name.
+//!   flattening, [`DeviationBound::Certified`], a frame read by quadrature
+//!   (an ellipse, a B-spline, an offset of a curve in closed form) bounded
+//!   against its exact law (#316); a frame on an intrinsic curve, a chain or
+//!   an offset beside one, a cell beside a mitre on a curved piece or with
+//!   a changing section, and different curved profiles are
+//!   [`DeviationBound::Unbounded`] by name.
 //! - Instances at stations (#264) move their source rigidly: on a line
 //!   basis the frame is exact and the source's bound stands; on any other
 //!   the frame is the exact curve's at a distance read by an estimate (the
