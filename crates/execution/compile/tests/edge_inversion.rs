@@ -659,11 +659,11 @@ fn an_edge_off_its_surface_is_refused() {
     );
 }
 
-/// Without a pcurve or an edge interval the curve's whole domain is the
-/// edge: a circle that starts a quarter turn away from its vertex is
-/// refused, not trimmed by a guess.
+/// A closed curve is trimmed at its vertex (#319): a circle that starts a
+/// quarter turn away from the edge's single vertex is the whole turn from
+/// that vertex, not refused.
 #[test]
-fn an_edge_curve_that_does_not_start_at_its_vertex_is_refused() {
+fn a_full_circle_is_the_whole_turn_from_its_one_vertex() {
     let (radius, height) = (0.3, 0.5);
     let surface = Surface::Cylinder(Cylinder {
         frame: frame_at(0.0),
@@ -681,18 +681,221 @@ fn an_edge_curve_that_does_not_start_at_its_vertex_is_refused() {
     let mut face = OneFace::new();
     let bottom = face.vertex(Point3::new(radius, 0.0, 0.0));
     let top = face.vertex(Point3::new(radius, 0.0, height));
-    let rim0 = face.edge(bottom, bottom, Some(turned));
+    let rim0 = face.edge(bottom, bottom, Some(turned.clone()));
     let rim1 = face.edge(top, top, Some(circle(height, radius)));
     let seam = face.edge(bottom, top, None);
     face.use_edge(rim0, Orientation::Forward);
     face.use_edge(seam, Orientation::Forward);
     face.use_edge(rim1, Orientation::Reversed);
     face.use_edge(seam, Orientation::Reversed);
-    let error = face
-        .compile(&surface, &options(1e-3))
-        .expect_err("a curve that misses its vertex is refused");
+    let (mesh, report) = face
+        .compile(&surface, &options(1e-4))
+        .expect("a circle trimmed at its one vertex compiles");
+    let mut samples = surface_samples(&surface, (0.0, TAU), (0.0, height), 400);
+    samples.extend(curve_samples(&turned, 20_000));
+    samples.extend(curve_samples(&circle(height, radius), 20_000));
+    assert_bounded("circle from its vertex", &mesh, &samples, &report, 4.0);
+}
+
+/// The IFC cylinder of openbimrs/ifc's `advanced_brep_3d_edges` fixture
+/// with its seam an `IfcLine` whose vector is a unit length (#319): the
+/// line's parameter runs past `[0, 1]` to the top vertex at `t = 2`, and
+/// the seam is the segment between its vertices' parameters.
+#[test]
+fn a_seam_line_with_a_unit_direction_is_trimmed_at_its_vertices() {
+    let (radius, height) = (0.5, 2.0);
+    let line = Curve3::Line(axiolid_curve::Line3 {
+        origin: Point3::new(radius, 0.0, 0.0),
+        direction: Vec3::Z,
+    });
+    for budget in [1e-3, 1e-4] {
+        let (mesh, closure, report) = capped_cylinder(
+            radius,
+            height,
+            frame_at(0.0),
+            circle(0.0, radius),
+            Some(line.clone()),
+            budget,
+            false,
+        );
+        let name = format!("unit-direction seam at {budget:e}");
+        assert_eq!(closure, MeshClosure::Solid, "{name}");
+        assert_watertight(&name, &mesh);
+        let top = mesh.positions.iter().map(|p| p.z).fold(0.0, Scalar::max);
+        assert!(top <= height + 1e-12, "{name}: the seam runs to {top}");
+        let area = TAU * radius * height + TAU * radius * radius;
+        assert_volume(
+            &name,
+            &mesh,
+            &report,
+            0.5 * TAU * radius * radius * height,
+            area,
+        );
+        let wall = Surface::Cylinder(Cylinder {
+            frame: frame_at(0.0),
+            radius,
+        });
+        let mut samples = surface_samples(&wall, (0.0, TAU), (0.0, height), 400);
+        samples.extend(span(0.0, height, 4_000).map(|z| Point3::new(radius, 0.0, z)));
+        assert_bounded(&name, &mesh, &samples, &report, 6.0);
+    }
+}
+
+/// A quarter of a cylinder whose arcs are whole circles trimmed at the
+/// patch's corners, its rulings lines with unit directions, none with a
+/// p-curve. `clockwise` gives the arcs circles running the other way about
+/// the axis, so each arc's edge runs from the quarter's far corner back to
+/// its near one and the patch uses it reversed.
+fn quarter_patch(clockwise: bool) -> (TriMesh, DeviationReport, Vec<Point3>) {
+    let (radius, height) = (0.3, 0.5);
+    let surface = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let arc = |z: Scalar| {
+        let frame = if clockwise {
+            Frame3 {
+                origin: Point3::new(0.0, 0.0, z),
+                x: Vec3::X,
+                y: -Vec3::Y,
+                z: -Vec3::Z,
+            }
+        } else {
+            frame_at(z)
+        };
+        Curve3::Circle(Circle3 { frame, radius })
+    };
+    let ruling = |x: Scalar, y: Scalar| {
+        Curve3::Line(axiolid_curve::Line3 {
+            origin: Point3::new(x, y, 0.0),
+            direction: Vec3::Z,
+        })
+    };
+    let mut face = OneFace::new();
+    let corners = [
+        Point3::new(radius, 0.0, 0.0),
+        Point3::new(0.0, radius, 0.0),
+        Point3::new(0.0, radius, height),
+        Point3::new(radius, 0.0, height),
+    ];
+    let v: Vec<_> = corners.iter().map(|&p| face.vertex(p)).collect();
+    let (low, high, sense) = if clockwise {
+        (
+            face.edge(v[1], v[0], Some(arc(0.0))),
+            face.edge(v[2], v[3], Some(arc(height))),
+            [Orientation::Reversed, Orientation::Forward],
+        )
+    } else {
+        (
+            face.edge(v[0], v[1], Some(arc(0.0))),
+            face.edge(v[3], v[2], Some(arc(height))),
+            [Orientation::Forward, Orientation::Reversed],
+        )
+    };
+    let left = face.edge(v[1], v[2], Some(ruling(0.0, radius)));
+    let right = face.edge(v[0], v[3], Some(ruling(radius, 0.0)));
+    face.use_edge(low, sense[0]);
+    face.use_edge(left, Orientation::Forward);
+    face.use_edge(high, sense[1]);
+    face.use_edge(right, Orientation::Reversed);
+    let (mesh, report) = face
+        .compile(&surface, &options(1e-4))
+        .expect("a quarter patch bounded by trimmed circles compiles");
+    let mut samples = surface_samples(&surface, (0.0, TAU / 4.0), (0.0, height), 400);
+    for z in [0.0, height] {
+        samples.extend(
+            span(0.0, TAU / 4.0, 20_000)
+                .map(|t| Point3::new(radius * t.cos(), radius * t.sin(), z)),
+        );
+    }
+    (mesh, report, samples)
+}
+
+/// Every mesh vertex of a quarter patch lies in its quarter: the arcs were
+/// trimmed at the corners, not sampled whole.
+fn assert_in_quarter(name: &str, mesh: &TriMesh) {
+    for p in &mesh.positions {
+        assert!(
+            p.x >= -1e-12 && p.y >= -1e-12,
+            "{name}: a mesh vertex {p:?} lies outside the quarter"
+        );
+    }
+}
+
+#[test]
+fn a_quarter_circle_edge_is_trimmed_at_its_vertices() {
+    let (mesh, report, samples) = quarter_patch(false);
+    assert_in_quarter("quarter circle", &mesh);
+    assert_bounded("quarter circle", &mesh, &samples, &report, 4.0);
+}
+
+/// The same quarter on circles running clockwise: each arc runs forward
+/// along its own circle from its start vertex, and the patch uses it
+/// reversed.
+#[test]
+fn a_reversed_sense_arc_is_trimmed_at_its_vertices() {
+    let (mesh, report, samples) = quarter_patch(true);
+    assert_in_quarter("reversed-sense arc", &mesh);
+    assert_bounded("reversed-sense arc", &mesh, &samples, &report, 4.0);
+}
+
+/// The refusal of a cylinder face whose bottom rim is the edge `curve`
+/// (the bottom circle by default) from `(r, 0, 0)` to a second vertex at
+/// `end`, closed back to its start by a straight edge.
+fn refused_rim(end: Point3, curve: Option<Curve3>) -> GeomError {
+    let (radius, height) = (0.3, 0.5);
+    let surface = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let mut face = OneFace::new();
+    let bottom = face.vertex(Point3::new(radius, 0.0, 0.0));
+    let other = face.vertex(end);
+    let top = face.vertex(Point3::new(radius, 0.0, height));
+    let curve = curve.unwrap_or_else(|| circle(0.0, radius));
+    let rim0 = face.edge(bottom, other, Some(curve));
+    let back = face.edge(other, bottom, None);
+    let rim1 = face.edge(top, top, Some(circle(height, radius)));
+    let seam = face.edge(bottom, top, None);
+    face.use_edge(rim0, Orientation::Forward);
+    face.use_edge(back, Orientation::Forward);
+    face.use_edge(seam, Orientation::Forward);
+    face.use_edge(rim1, Orientation::Reversed);
+    face.use_edge(seam, Orientation::Reversed);
+    face.compile(&surface, &options(1e-3))
+        .expect_err("the rim is refused")
+}
+
+/// A vertex a little off its edge's circle is not projected onto it.
+#[test]
+fn a_vertex_off_its_edge_curve_is_refused_by_name() {
+    let error = refused_rim(Point3::new(0.0, 0.303, 0.0), None);
     assert!(
-        matches!(&error, GeomError::InvalidInput(reason) if reason.contains("whole domain")),
+        matches!(&error, GeomError::InvalidInput(reason)
+            if reason.contains("end vertex of an edge without a p-curve is not on its curve")),
+        "got {error:?}"
+    );
+}
+
+/// Two vertices at one point of a circle bound either no arc or the whole
+/// turn: refused as ambiguous rather than read as either.
+#[test]
+fn two_vertices_at_one_point_of_a_circle_are_refused_as_ambiguous() {
+    let error = refused_rim(Point3::new(0.3, 0.0, 0.0), None);
+    assert!(
+        matches!(&error, GeomError::InvalidInput(reason) if reason.contains("ambiguous")),
+        "got {error:?}"
+    );
+}
+
+/// A B-spline edge whose domain does not end at its vertices has no
+/// closed-form inversion naming one turn, and is refused by name.
+#[test]
+fn a_bspline_edge_not_ending_at_its_vertices_is_refused_by_name() {
+    let error = refused_rim(Point3::new(0.0, 0.3, 0.0), Some(half_circle(0.0, 0.3, 0.0)));
+    assert!(
+        matches!(&error, GeomError::InvalidInput(reason)
+            if reason.contains("neither runs its whole domain")),
         "got {error:?}"
     );
 }
@@ -748,6 +951,7 @@ fn capped_cylinder(
     height: Scalar,
     floor: Frame3,
     bottom: Curve3,
+    seam: Option<Curve3>,
     budget: Scalar,
     caps_first: bool,
 ) -> (TriMesh, MeshClosure, DeviationReport) {
@@ -761,7 +965,7 @@ fn capped_cylinder(
     let high = solid.vertex(Point3::new(radius, 0.0, height));
     let rim0 = solid.edge(low, low, Some(bottom));
     let rim1 = solid.edge(high, high, Some(circle(height, radius)));
-    let seam = solid.edge(low, high, None);
+    let seam = solid.edge(low, high, seam);
     solid.use_edge(rim0, Orientation::Forward);
     solid.use_edge(seam, Orientation::Forward);
     solid.use_edge(rim1, Orientation::Reversed);
@@ -843,6 +1047,7 @@ fn a_closed_cylinder_with_circular_caps_compiles_as_a_watertight_solid() {
             height,
             frame_at(0.0),
             circle(0.0, radius),
+            None,
             budget,
             caps_first,
         );
@@ -892,7 +1097,7 @@ fn a_cylinder_cut_by_an_oblique_plane_compiles_as_a_watertight_solid() {
         semi_axis_y: radius,
     });
     let (mesh, closure, report) =
-        capped_cylinder(radius, height, floor, ellipse.clone(), 1e-4, false);
+        capped_cylinder(radius, height, floor, ellipse.clone(), None, 1e-4, false);
     assert_eq!(closure, MeshClosure::Solid);
     assert_watertight("oblique cylinder", &mesh);
     let floor_area = 0.5 * TAU * radius * radius * (1.0 + k * k).sqrt();

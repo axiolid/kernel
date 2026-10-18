@@ -48,6 +48,17 @@
 //!   resolution; Gauss-Newton then sharpens the parameters inside the
 //!   proven enclosure, and the residual left reaches the report as above.
 //!
+//! An edge runs from its start vertex to its end vertex in its curve's own
+//! sense, and its vertices bound it (#319): a curve whose whole domain does
+//! not already run between them is trimmed at their parameters, located by
+//! closed-form inversion with its residual checked (`vertex_span`). A line
+//! is the segment between them, a circle or ellipse the arc forward from
+//! the start vertex, the whole turn for an edge with one vertex. Everything
+//! downstream (the shared samples, their span bounds and the report) covers
+//! that span only. A vertex off its curve, two vertices at one point of a
+//! closed curve, and a family whose inversion does not name one turn are
+//! refused by name.
+//!
 //! An edge with no 3D curve is straight (the topology's contract). An edge
 //! shared with a face that sampled it through a p-curve is inverted at those
 //! samples; its 3D chord bound is then known only for a straight edge, and a
@@ -631,26 +642,93 @@ fn edge_trace<'g>(
             "edge curve must reference a Curve3 node".to_string(),
         ));
     };
-    let domain = axiolid_reference::curve::domain3(curve);
-    if !(domain.start.is_finite() && domain.end.is_finite() && domain.end > domain.start) {
+    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;
+    Ok(EdgeTrace::Curve(curve, domain))
+}
+
+/// The span of `curve` an edge from `start` to `end` covers, in the
+/// curve's own sense (#319). Exchange formats bound an edge by its
+/// vertices, not by its curve's range: IFC trims an unbounded `IfcLine` or
+/// a whole `IfcCircle` at `EdgeStart` and `EdgeEnd`.
+///
+/// - On a line, a circle or an ellipse each vertex is located by
+///   closed-form inversion, which checks its residual against the linear
+///   tolerance; a vertex off the curve is refused by name.
+/// - A line is the segment between the two parameters, whichever comes
+///   first.
+/// - A circle or an ellipse is the arc from the start vertex's angle
+///   forward to the end vertex's, and the whole turn from it when start
+///   and end are one vertex. Two vertices at one point name either no arc
+///   or the whole turn, and are refused as ambiguous.
+/// - Any other curve is the edge only when its whole domain already runs
+///   from the start vertex to the end vertex (a B-spline arc, a closed
+///   curve starting at its one vertex). Otherwise it is refused by name:
+///   such a family either has no closed-form inversion, or one that takes
+///   the first of several turns naming the point, so the span between two
+///   vertices is not determined by it.
+fn vertex_span(
+    curve: &axiolid_curve::Curve3,
+    (start_id, start): (axiolid_topology::VertexId, Vec3),
+    (end_id, end): (axiolid_topology::VertexId, Vec3),
+    tolerance: Tolerance,
+) -> GeomResult<axiolid_core::Interval> {
+    use axiolid_curve::Curve3;
+    let linear = tolerance.linear();
+    if !matches!(
+        curve,
+        Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
+    ) {
+        let domain = axiolid_reference::curve::domain3(curve);
+        let gap = |parameter: Scalar, vertex: Vec3| -> GeomResult<Scalar> {
+            Ok((axiolid_reference::curve::evaluate3(curve, parameter)? - vertex).length())
+        };
+        let bounded =
+            domain.start.is_finite() && domain.end.is_finite() && domain.end > domain.start;
+        if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {
+            return Ok(domain);
+        }
         return Err(GeomError::InvalidInput(
-            "an edge curve without a p-curve needs a bounded parameter domain".to_owned(),
+            "an edge curve without a p-curve neither runs its whole domain from the edge's \
+             start vertex to its end vertex nor is a line, circle or ellipse its vertices \
+             can be located on unambiguously"
+                .to_owned(),
         ));
     }
-    // Without a p-curve or an edge interval, the curve's whole domain is the
-    // edge, so it must run from the edge's start vertex to its end vertex.
-    let linear = ctx.tolerance.linear();
-    for (parameter, vertex) in [(domain.start, start), (domain.end, end)] {
-        let on = axiolid_reference::curve::evaluate3(curve, parameter)?;
-        let gap = (on - vertex).length();
-        if gap.is_nan() || gap > linear {
-            return Err(GeomError::InvalidInput(format!(
-                "an edge curve without a p-curve ends {gap:e} from its vertex: its whole \
-                 domain must run from the edge's start vertex to its end vertex"
-            )));
+    let locate = |vertex: Vec3, which: &str| {
+        axiolid_reference::curve::invert3(curve, vertex, tolerance).map_err(|error| {
+            GeomError::InvalidInput(format!(
+                "the {which} vertex of an edge without a p-curve is not on its curve: {error}"
+            ))
+        })
+    };
+    let (t0, t1) = (locate(start, "start")?, locate(end, "end")?);
+    let span = match curve {
+        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1 },
+        _ => {
+            let turn = core::f64::consts::TAU;
+            let sweep = if start_id == end_id {
+                turn
+            } else if (end - start).length() <= linear {
+                return Err(GeomError::InvalidInput(
+                    "an edge without a p-curve joins two vertices at one point of its closed \
+                     curve: it is either no arc or the whole turn, so its span is ambiguous"
+                        .to_owned(),
+                ));
+            } else {
+                (t1 - t0).rem_euclid(turn)
+            };
+            axiolid_core::Interval {
+                start: t0,
+                end: t0 + sweep,
+            }
         }
+    };
+    if !(span.start.is_finite() && span.end.is_finite() && span.start != span.end) {
+        return Err(GeomError::Degenerate(
+            "an edge without a p-curve has no length between its vertices on its curve".to_owned(),
+        ));
     }
-    Ok(EdgeTrace::Curve(curve, domain))
+    Ok(span)
 }
 
 pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {

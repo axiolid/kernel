@@ -4,7 +4,7 @@ Each mutant weakens one decision of `crates/execution/compile/src/brep/
 inversion.rs` or its caller in `brep.rs`: the refusal at a cone apex or
 sphere pole, the unwrapping and its quarter-turn guard, the strict pass of
 the certified B-spline inversion, the polish inside its enclosure, the
-domain clamp, the check that an edge curve runs between its vertices, and
+domain clamp, the trim of an edge curve at its vertices (#319), and
 the terms the deviation report adds per span (the parameter chord's image,
 the lens and the containment that sizes it).
 `tests/edge_inversion.rs` or the module's unit tests must fail on it. A
@@ -33,7 +33,8 @@ quarter-turn guard, the polish and the span terms; the guard and the
 polish got unit tests, and the flat patch trimmed by a 3D circle (whose
 bound is its trim terms alone) was added for the span terms. 11 / 11
 killed after. The planar caps (closed cylinders, #310 follow-up) added two
-mutants: 13 / 13.
+mutants: 13 / 13. Trimming edge curves at their vertices (#319) replaced
+the whole-domain check with seven mutants: 19 / 19.
 """
 import probe_lib
 
@@ -71,9 +72,30 @@ MUTANTS = [
     ("polish not clamped to the domain", I,
      "        let (u_lo, u_hi) = (u_lo.max(u_domain.0), u_hi.min(u_domain.1));",
      "        let (u_lo, u_hi) = (u_lo, u_hi);"),
-    ("edge curve need not start at its vertex", I,
-     "        if gap.is_nan() || gap > linear {",
-     "        if gap.is_nan() {"),
+    # Edge curves trimmed at their vertices (#319).
+    ("edge curve taken whole, not trimmed at its vertices", I,
+     "    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;",
+     "    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)\n"
+     "        .map(|_| axiolid_reference::curve::domain3(curve))?;"),
+    ("a one-vertex edge is half a turn", I,
+     "            let sweep = if start_id == end_id {\n                turn",
+     "            let sweep = if start_id == end_id {\n                0.5 * turn"),
+    ("arc runs backwards from its start vertex", I,
+     "                (t1 - t0).rem_euclid(turn)",
+     "                (t0 - t1).rem_euclid(turn)"),
+    ("two vertices at one point of a circle not refused", I,
+     "            } else if (end - start).length() <= linear {",
+     "            } else if false {"),
+    ("vertices located at a loose tolerance", I,
+     "        axiolid_reference::curve::invert3(curve, vertex, tolerance).map_err(|error| {",
+     "        axiolid_reference::curve::invert3(curve, vertex, Tolerance::new(1.0, 1e-9).unwrap())\n"
+     "            .map_err(|error| {"),
+    ("line clamped to its unit domain", I,
+     "        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1 },",
+     "        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1.min(1.0) },"),
+    ("other families' whole domain need not end at the vertices", I,
+     "        if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {",
+     "        if bounded {"),
     ("span terms left out of the report", I,
      "            self.trim = self.trim.max(near + lens);",
      "            self.trim = self.trim.max(lens);"),

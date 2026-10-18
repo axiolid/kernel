@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- An edge without a p-curve is bounded by its vertices, not by its
+  curve's domain (#319). Each vertex is located on a line, circle or
+  ellipse by closed-form inversion, its residual checked against the
+  linear tolerance: a line is the segment between the two parameters (an
+  `IfcLine` with a unit-length vector no longer refuses with "ends 1.999e0
+  from its vertex"), a circle or ellipse the arc forward along the curve
+  from the start vertex to the end vertex, and the whole turn from an
+  edge's one vertex, wherever the curve's own parameter starts. The shared
+  samples and the deviation report cover that span only. A vertex off its
+  curve, two distinct vertices at one point of a closed curve, and any
+  other family whose domain does not already run from vertex to vertex
+  (a B-spline, say) are refused by name. The edge runs in its curve's
+  sense from `Edge::start` to `Edge::end`: an exchange format's edge that
+  runs against its curve (IFC `SameSense = .F.`) is that edge with its
+  vertices swapped, used the other way.
+
 ## [0.3.27] - 2026-10-16
 
 ### Added
