@@ -141,6 +141,49 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-brep-boolean
 
+### 0.1.11 - 2026-10-18
+
+### Added
+
+- `FINER_FACTOR` and `BooleanReport::finer` (#332): a boolean refused at
+  the caller's tolerance is cut again at `2^-10` times it, and its report
+  says so. `BooleanReport::merged` keeps the flag.
+
+### Fixed
+
+- Curved walls with abutting openings are cut (#332). Where one
+  opening's radial side reaches a few micrometres, or just under the
+  tolerance, past its neighbour's, the two side planes are turned by more
+  than the angular tolerance and lie within the linear one in the wall:
+  read within the tolerance, a region on one of them was "a point too
+  close to a face boundary to classify", and the sections' cuts merged at
+  a point on neither face's boundary, so the faces did not sew. Such a
+  boolean is now cut again at the finer tolerance, where the sides are
+  apart and decided by the exact predicates. A split face's piece ends
+  now weld into one vertex only where they also lie within the tolerance
+  on the surface: the relative slack in parameters spans `7 um` of an
+  arc of radius `24`, and welded two vertices a split had kept apart
+  ("two pieces leave a vertex of a split face in one direction"). A wall
+  of radii `6` to `6.25` less five wedge openings, abutting by `15 um`
+  and `0.6 mm`, and one of radii `24` to `24.1` whose openings abut by
+  `7 um`, are cut at the closed-form volume (within `1e-9`), every
+  reading within the finer tolerance. A boolean that succeeds at the caller's tolerance is
+  unchanged; one refused at both returns the first refusal. A web hole
+  half a tolerance off a filleted flange, refused as an
+  `UnsupportedContact` before, is now cut at the finer tolerance at the
+  reference volume.
+- A box whose face touches a curved wall's inner cylinder along a ruling
+  is cut at the caller's tolerance (#327). Every point of the box's face
+  near the ruling lay within the tolerance of the cylinder and was not
+  classified ("a point lies too close to a face boundary to classify").
+  Where no point of a region decides with the ray's start read within
+  tolerance, its points are classified again reading the start exactly:
+  on a support only within the rounding floor, but for the faces read as
+  the point's own support. The quarter ring of radii `4.8` to `5` less a
+  box on the tangent plane, or a unit in the last place either side of
+  it, is cut at the closed-form volume (within `1e-12`), its report
+  within `1e-14`.
+
 ### 0.1.10 - 2026-10-16
 
 ### Fixed
@@ -1773,6 +1816,50 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.17 - 2026-10-18
+
+### Added
+
+- Chord bounds for constant offsets and intrinsic curves (#317), in
+  `bound`: `offset_point2`, `offset_point3`, `offset_chord_bound2` and
+  `offset_chord_bound3` evaluate and bound the offset `B + d u` of a curve
+  at its basis's parameter (`u` the left normal in 2D, `normalise(V x
+  B')` in 3D), `sup |P''|` from the basis's derivative suprema through the
+  unit-vector rule `station::certify` uses for offset lengths (#294,
+  #307), refusing a span across a break of the basis's `C^2` continuity;
+  `intrinsic_chord_bound2`, `intrinsic_chord_bound3` and
+  `intrinsic_derivative_bounds2` bound an intrinsic curve from its
+  curvature law (`|c''| = |k|` at unit speed, times the start frame's
+  stretch), the chord bound across seams of a piecewise law.
+  `IntrinsicPositions` reads an intrinsic curve's points (2D, a planar 3D
+  one in its start plane, and a 2D one's left offset) with a certified
+  error: the unit tangent of the closed-form heading integrated by the
+  composite midpoint rule, its remainder `w^3 / 24 (|k'| + k^2)` per panel
+  from the law's bounds, panels split at seams, plus the heading's, the
+  sums' and the placement's rounding; `MAX_POSITION_PANELS` caps the work.
+  `certifies_flattening2` and `certifies_flattening3` are unchanged.
+- `station::FrameLaw` (#316, ADR 0082 amendment): certified frame-law
+  bounds along an atomic curve or a `CompositeBasis`
+  (`CompositeBasis::frame_law`), including pieces whose frames are read by
+  quadrature, which `piece_frame_bounds` leaves unbounded: an ellipse, a
+  B-spline, and an offset beside a line, a circle, an ellipse or a
+  B-spline (constant, or by distances). Each is bounded against its exact
+  frame law, the curve the length certificates measure, at its true arc
+  length: every read frame is compared at its native parameter with the
+  exact one, known in closed form to a certified error; the true arc
+  length to it is bounded by chord panels over the piece, measured once;
+  and over a span the law is bounded in its own arc length from the
+  certified suprema of `|P''|` and `|P'''|` (the base's `|B''|` to
+  `|B''''|` beside an offset, and the frame's unit vectors). A piece after
+  joints measured by quadrature adds its start's distance from the
+  certified joint to the measure. Intrinsic curves, chains, offsets beside
+  them or beside elevated and banked curves, skewed circles, steep
+  tangents, curves read by quadrature placed in a frame that tilts `+Z`,
+  and placed offset pieces stay unbounded (`None`).
+- `FrameLawBounds::point_error` and `FrameLawBounds::axis_error`: how far
+  a read frame's point and axes may lie from the exact frame law's, zero
+  where the frame is read in closed form.
+
 ### 0.3.16 - 2026-10-14
 
 ### Added
@@ -3072,6 +3159,96 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.28 - 2026-10-18
+
+### Added
+
+- `PolylineCompiler` compiles trimmed, composite, offset and intrinsic
+  curves (#317), which it refused by name, so an `OpenProfile` whose path
+  is such a relation compiles too. A trim of an atomic 2D or 3D curve is
+  the basis flattened between the trim parameters with its own chord
+  bounds, the parameters read as a station basis reads them (a closed
+  conic wrapped from the start selector by the trim's sense, across its
+  seam), in the trim's sense; a parameter past a non-periodic basis's
+  domain is refused. A composite is its segments compiled to the budget in
+  their senses, each joint one shared vertex (the earlier segment's end,
+  and the first vertex where it closes), the bound the worst segment's
+  plus the largest joint gap within the linear tolerance (the segments
+  compiled once more within the budget less the gap when that misses it);
+  a larger gap is refused by name. A constant offset (2D: the left normal;
+  3D: `V x T`) of an atomic curve, a trim or a composite takes its basis's
+  parameter, offsets piece by piece on the side each piece's direction
+  gives, and is bounded by `h^2 / 8 sup |P''|` from the basis's derivative
+  bounds through the unit-vector rule of the certified station lengths
+  (#294, #307), cut where the basis is not `C^2`. A 2D intrinsic curve,
+  and a 3D one whose torsion law is identically zero, is bounded by its
+  curvature law (`h^2 / 8 sigma sup |k|`), across seams of a piecewise law,
+  and its vertices are certified positions (`bound::IntrinsicPositions`,
+  an eighth of the budget, the largest vertex error added to the bound),
+  never the evaluator's quadrature estimate; an offset beside a 2D one is
+  cut at its seams and read the same way. Still refused by name:
+  implicit and banked curves, a 3D intrinsic curve with torsion, a trim of
+  a relation or a placed curve, an offset of an offset, of a placed curve,
+  of a chain, implicit or 3D intrinsic curve or across a corner of its
+  basis, a 3D offset without a reference direction, offsets by stations,
+  and surface and parameter curves.
+- `FINER_FACTOR`, re-exported from `axiolid-brep-boolean` with the
+  report it describes (`BooleanReport::finer`, #332).
+- Certified deviations for runs of sections at stations whose frames are
+  read by quadrature (#316): along an ellipse, a B-spline, and an offset
+  beside a line, a circle, an ellipse or a B-spline, constant or by
+  distances. Such a run reported `Unbounded(UNCERTIFIED_FRAMES)`; its
+  cells are now bounded against the exact frame law
+  (`axiolid_reference::station::FrameLaw`, its quadratures certified to a
+  thousandth of the run's budget), each vertex charged the read's
+  certified distance error, point error and axis error on top of the
+  chord bound (the `station::bound` module documentation). Runs along the
+  openbimrs/ifc#443 deck's offset beside an ellipse, a tapered run along a
+  B-spline and runs along an ellipse and its offset are certified within
+  a millimetre request, and a dense sampling of the exact solid, framed
+  independently of the kernel, stays within the bound
+  (`tests/station_bound_quadrature.rs`). The deck's own run, which
+  crosses the corner its widening law makes at station 2, is still
+  unbounded by `MITRED_SECTIONS`: a cell beside a mitre on a curved piece
+  is not bounded. Intrinsic curves, chains and offsets beside them,
+  skewed circles and steep tangents stay `UNCERTIFIED_FRAMES`, whose
+  message now names them.
+
+### Fixed
+
+- An edge without a p-curve is bounded by its vertices, not by its
+  curve's domain (#319). Each vertex is located on a line, circle or
+  ellipse by closed-form inversion, its residual checked against the
+  linear tolerance: a line is the segment between the two parameters (an
+  `IfcLine` with a unit-length vector no longer refuses with "ends 1.999e0
+  from its vertex"), a circle or ellipse the arc forward along the curve
+  from the start vertex to the end vertex, and the whole turn from an
+  edge's one vertex, wherever the curve's own parameter starts. The shared
+  samples and the deviation report cover that span only. A vertex off its
+  curve, two distinct vertices at one point of a closed curve, and any
+  other family whose domain does not already run from vertex to vertex
+  (a B-spline, say) are refused by name. The edge runs in its curve's
+  sense from `Edge::start` to `Edge::end`: an exchange format's edge that
+  runs against its curve (IFC `SameSense = .F.`) is that edge with its
+  vertices swapped, used the other way.
+- Curved walls whose openings abut, one's side reaching a few
+  micrometres or just under the tolerance past its neighbour's, are
+  certified (#332): the general boolean refused the cut, so the deviation
+  report left the boolean unbounded; it now cuts it again at a finer
+  tolerance (`axiolid-brep-boolean`). A wall of radii `6` to `6.25` less
+  five wedge openings, abutting by `15 um` and `0.6 mm`, is certified
+  within the millimetre requested, its exact result at the closed-form
+  volume.
+- A box touching a curved wall's inner cylinder along a ruling compiles
+  exactly at the closed-form volume (#327). Its mesh, whose material is as
+  thin as nothing along the contact, stays refused as a result touching
+  itself (#194) on the tangent plane and a unit in the last place past
+  it; a unit short of it, the box is certified.
+- A piece of a composite basis after an ellipse, a B-spline or a numerical
+  offset carried no error for where its start truly lies: the kernel sums
+  the estimated lengths before it, and the run's measure now adds that
+  sum's distance from the certified joint (#316).
 
 ### 0.3.27 - 2026-10-16
 

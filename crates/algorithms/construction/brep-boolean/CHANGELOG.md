@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-10-18
+
 ### Added
 
 - `FINER_FACTOR` and `BooleanReport::finer` (#332): a boolean refused at

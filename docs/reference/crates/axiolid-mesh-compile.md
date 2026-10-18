@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.27 (2026-10-16) |
+| Latest release | 0.3.28 (2026-10-18) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,73 +78,94 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.27 (2026-10-16):
+Latest release, 0.3.28 (2026-10-18):
 
 ### Added
 
-- `deviation::COINCIDENT_OPERANDS` (#324): a boolean whose exact result
-  read faces of its two operands as one surface within tolerance reports
-  how far that reading moved an operand, as a certified contribution of
-  the boolean path next to its measured one, as a snap's move is
-  reported. Such booleans now carry two contributions instead of one.
-- Bounded half-spaces along their placement's `z` (#321,
-  `SolidOperation::BoundedHalfSpaceAlongZ`), in both compilers: the kept
-  side of the plane within the prism of the boundary along the placement's
-  `z`, at any angle to the plane, the boundary at `placement * (u, v, 0)` as
-  written. The mesh compiler builds the oblique slab (its boundary chorded
-  within the budget over the frame's longest axis); the exact compiler builds the
-  prism in the boundary's own plane, a margin past the subject's envelope
-  both ways, and intersects it with the plane's side over the envelope, so
-  an arc is a cylinder wall the plane cuts in an ellipse, and the mesh's
-  deviation is certified against it. The IFC2X3 gable wall of
-  openbimrs/ifc#515 (four sloped planes over vertical prisms) is
-  49.999912042537 m³ exactly, IfcOpenShell's volume
-  (`tests/bounded_half_space_prism_axis.rs`). An axis within the angular
-  tolerance of the plane and a degenerate placement are refused by name in
-  both. Under a sheared placement, whose `z` leans off the boundary's
-  plane, a boundary with arcs sweeps elliptical cylinders, which the exact
-  general boolean may refuse to sew, by name.
+- `PolylineCompiler` compiles trimmed, composite, offset and intrinsic
+  curves (#317), which it refused by name, so an `OpenProfile` whose path
+  is such a relation compiles too. A trim of an atomic 2D or 3D curve is
+  the basis flattened between the trim parameters with its own chord
+  bounds, the parameters read as a station basis reads them (a closed
+  conic wrapped from the start selector by the trim's sense, across its
+  seam), in the trim's sense; a parameter past a non-periodic basis's
+  domain is refused. A composite is its segments compiled to the budget in
+  their senses, each joint one shared vertex (the earlier segment's end,
+  and the first vertex where it closes), the bound the worst segment's
+  plus the largest joint gap within the linear tolerance (the segments
+  compiled once more within the budget less the gap when that misses it);
+  a larger gap is refused by name. A constant offset (2D: the left normal;
+  3D: `V x T`) of an atomic curve, a trim or a composite takes its basis's
+  parameter, offsets piece by piece on the side each piece's direction
+  gives, and is bounded by `h^2 / 8 sup |P''|` from the basis's derivative
+  bounds through the unit-vector rule of the certified station lengths
+  (#294, #307), cut where the basis is not `C^2`. A 2D intrinsic curve,
+  and a 3D one whose torsion law is identically zero, is bounded by its
+  curvature law (`h^2 / 8 sigma sup |k|`), across seams of a piecewise law,
+  and its vertices are certified positions (`bound::IntrinsicPositions`,
+  an eighth of the budget, the largest vertex error added to the bound),
+  never the evaluator's quadrature estimate; an offset beside a 2D one is
+  cut at its seams and read the same way. Still refused by name:
+  implicit and banked curves, a 3D intrinsic curve with torsion, a trim of
+  a relation or a placed curve, an offset of an offset, of a placed curve,
+  of a chain, implicit or 3D intrinsic curve or across a corner of its
+  basis, a 3D offset without a reference direction, offsets by stations,
+  and surface and parameter curves.
+- `FINER_FACTOR`, re-exported from `axiolid-brep-boolean` with the
+  report it describes (`BooleanReport::finer`, #332).
+- Certified deviations for runs of sections at stations whose frames are
+  read by quadrature (#316): along an ellipse, a B-spline, and an offset
+  beside a line, a circle, an ellipse or a B-spline, constant or by
+  distances. Such a run reported `Unbounded(UNCERTIFIED_FRAMES)`; its
+  cells are now bounded against the exact frame law
+  (`axiolid_reference::station::FrameLaw`, its quadratures certified to a
+  thousandth of the run's budget), each vertex charged the read's
+  certified distance error, point error and axis error on top of the
+  chord bound (the `station::bound` module documentation). Runs along the
+  openbimrs/ifc#443 deck's offset beside an ellipse, a tapered run along a
+  B-spline and runs along an ellipse and its offset are certified within
+  a millimetre request, and a dense sampling of the exact solid, framed
+  independently of the kernel, stays within the bound
+  (`tests/station_bound_quadrature.rs`). The deck's own run, which
+  crosses the corner its widening law makes at station 2, is still
+  unbounded by `MITRED_SECTIONS`: a cell beside a mitre on a curved piece
+  is not bounded. Intrinsic curves, chains and offsets beside them,
+  skewed circles and steep tangents stay `UNCERTIFIED_FRAMES`, whose
+  message now names them.
 
 ### Fixed
 
-- The mesh compiler refuses a bounded half-space with no subject to size
-  it by (#325) -- a root, a union or exclusive-or operand, a collection
-  member -- as `GeomError::UnsupportedInput { input: "bounded half-space
-  without a subject to size it by: ..." }`, as the exact compiler already
-  did. It used to mesh a slab twice its boundary's extent deep, an
-  arbitrary stand-in for a solid unbounded on its kept side: silently
-  wrong output, now refused by name, as #295's refusal was.
-- A curved wall less a niche flush with its inner face, or one unit in
-  the last place inside it (#324), is certified: the general boolean's
-  refusal ("exact boolean whose kept faces do not sew into a solid") left
-  the deviation unbounded. A quarter ring of radii `4.8` to `5` less a
-  niche of `10` degrees reports `0.99973 mm` at a `1 mm` request, as the
-  niche placed well inside does, with the coincidence reported (at most
-  `4e-15`), and the exact result measures to the annular sectors' volume.
-- A bounded half-space's slab is sized by the subject it meets (#325),
-  along either axis: the tool of a difference or an intersection, read
-  through any instances above it (their placements composed, the subject
-  brought into the tool's frame), reaches past the subject's farthest
-  point on the kept side by a tenth of its span. It was a slab twice the
-  boundary's extent deep, so a small boundary over a tall subject (a
-  0.5 m square over a 20 m column) cut it too little, or kept too little,
-  with no error. An unbounded half-space's tool is now read through
-  instances too. The IFC2X3 gable wall compiles to 49.999912042537 m³ in
-  the mesh compiler as well, certified against the exact result
-  (`tests/bounded_half_space_subject_depth.rs`,
-  `tests/bounded_half_space_prism_axis.rs`).
-- A bounded half-space's placement is read whole (#322), in both
-  compilers and along either axis. Along the plane normal the mesh
-  compiler normalised the placement's axes and rebuilt `y` from the
-  normal, so a scaled frame cut its boundary at unit scale, a sheared one
-  unsheared and a left-handed (mirrored) one its mirror image, with no
-  error; the exact compiler did the same. Now the boundary keeps the
-  frame's scale, shear and handedness (`BoundaryPrism::along_plane_normal`),
-  and only a degenerate frame (parallel or zero axes) is refused by name. A
-  right-handed unit frame, even one whose `z` points against the normal,
-  reads as before. In the exact compiler a profile boundary under a scaling
-  or mirroring frame is a derived profile, its arcs exact under a
-  similarity and refused by name as ellipses otherwise
-  (`tests/bounded_half_space_whole_frame.rs`).
+- An edge without a p-curve is bounded by its vertices, not by its
+  curve's domain (#319). Each vertex is located on a line, circle or
+  ellipse by closed-form inversion, its residual checked against the
+  linear tolerance: a line is the segment between the two parameters (an
+  `IfcLine` with a unit-length vector no longer refuses with "ends 1.999e0
+  from its vertex"), a circle or ellipse the arc forward along the curve
+  from the start vertex to the end vertex, and the whole turn from an
+  edge's one vertex, wherever the curve's own parameter starts. The shared
+  samples and the deviation report cover that span only. A vertex off its
+  curve, two distinct vertices at one point of a closed curve, and any
+  other family whose domain does not already run from vertex to vertex
+  (a B-spline, say) are refused by name. The edge runs in its curve's
+  sense from `Edge::start` to `Edge::end`: an exchange format's edge that
+  runs against its curve (IFC `SameSense = .F.`) is that edge with its
+  vertices swapped, used the other way.
+- Curved walls whose openings abut, one's side reaching a few
+  micrometres or just under the tolerance past its neighbour's, are
+  certified (#332): the general boolean refused the cut, so the deviation
+  report left the boolean unbounded; it now cuts it again at a finer
+  tolerance (`axiolid-brep-boolean`). A wall of radii `6` to `6.25` less
+  five wedge openings, abutting by `15 um` and `0.6 mm`, is certified
+  within the millimetre requested, its exact result at the closed-form
+  volume.
+- A box touching a curved wall's inner cylinder along a ruling compiles
+  exactly at the closed-form volume (#327). Its mesh, whose material is as
+  thin as nothing along the contact, stays refused as a result touching
+  itself (#194) on the tangent plane and a unit in the last place past
+  it; a unit short of it, the box is certified.
+- A piece of a composite basis after an ellipse, a B-spline or a numerical
+  offset carried no error for where its start truly lies: the kernel sums
+  the estimated lengths before it, and the run's measure now adds that
+  sum's distance from the certified joint (#316).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

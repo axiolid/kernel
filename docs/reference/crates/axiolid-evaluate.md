@@ -8,7 +8,7 @@ Analytic and spline curve/surface evaluation, jets, and inversion.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.16 (2026-10-14) |
+| Latest release | 0.3.17 (2026-10-18) |
 | crates.io | [`axiolid-evaluate`](https://crates.io/crates/axiolid-evaluate) |
 | Facade | [`axiolid`](./axiolid) feature `evaluate` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,21 +42,48 @@ intrinsics, threading or feature gates.
 
 ## Changes
 
-Latest release, 0.3.16 (2026-10-14):
+Latest release, 0.3.17 (2026-10-18):
 
 ### Added
 
-- Certified lengths of offsets beside a planar 3D intrinsic curve (#302,
-  ADR 0082 amendment), which `station::certify` refused naming
-  `UNCERTIFIED_LENGTH` for every `Curve3::Intrinsic`. One whose torsion
-  law is identically zero (`Intrinsic3::is_planar`, a structural test on
-  the stored law) and whose start tangent and normal have no `z`
-  component (compared with `0.0`) is a 2D intrinsic curve lifted to a
-  level plane: its offsets are certified by the midpoint rule on their
-  speed in closed form, as beside a 2D intrinsic curve, measured in 3D.
-  So the joints of a path of offsets beside a stand-alone composite with
-  a clothoid lowered to 3D are certified. A torsion law not identically
-  zero and a tilted plane are still refused by name; the message of
-  `UNCERTIFIED_LENGTH` now says so.
+- Chord bounds for constant offsets and intrinsic curves (#317), in
+  `bound`: `offset_point2`, `offset_point3`, `offset_chord_bound2` and
+  `offset_chord_bound3` evaluate and bound the offset `B + d u` of a curve
+  at its basis's parameter (`u` the left normal in 2D, `normalise(V x
+  B')` in 3D), `sup |P''|` from the basis's derivative suprema through the
+  unit-vector rule `station::certify` uses for offset lengths (#294,
+  #307), refusing a span across a break of the basis's `C^2` continuity;
+  `intrinsic_chord_bound2`, `intrinsic_chord_bound3` and
+  `intrinsic_derivative_bounds2` bound an intrinsic curve from its
+  curvature law (`|c''| = |k|` at unit speed, times the start frame's
+  stretch), the chord bound across seams of a piecewise law.
+  `IntrinsicPositions` reads an intrinsic curve's points (2D, a planar 3D
+  one in its start plane, and a 2D one's left offset) with a certified
+  error: the unit tangent of the closed-form heading integrated by the
+  composite midpoint rule, its remainder `w^3 / 24 (|k'| + k^2)` per panel
+  from the law's bounds, panels split at seams, plus the heading's, the
+  sums' and the placement's rounding; `MAX_POSITION_PANELS` caps the work.
+  `certifies_flattening2` and `certifies_flattening3` are unchanged.
+- `station::FrameLaw` (#316, ADR 0082 amendment): certified frame-law
+  bounds along an atomic curve or a `CompositeBasis`
+  (`CompositeBasis::frame_law`), including pieces whose frames are read by
+  quadrature, which `piece_frame_bounds` leaves unbounded: an ellipse, a
+  B-spline, and an offset beside a line, a circle, an ellipse or a
+  B-spline (constant, or by distances). Each is bounded against its exact
+  frame law, the curve the length certificates measure, at its true arc
+  length: every read frame is compared at its native parameter with the
+  exact one, known in closed form to a certified error; the true arc
+  length to it is bounded by chord panels over the piece, measured once;
+  and over a span the law is bounded in its own arc length from the
+  certified suprema of `|P''|` and `|P'''|` (the base's `|B''|` to
+  `|B''''|` beside an offset, and the frame's unit vectors). A piece after
+  joints measured by quadrature adds its start's distance from the
+  certified joint to the measure. Intrinsic curves, chains, offsets beside
+  them or beside elevated and banked curves, skewed circles, steep
+  tangents, curves read by quadrature placed in a frame that tilts `+Z`,
+  and placed offset pieces stay unbounded (`None`).
+- `FrameLawBounds::point_error` and `FrameLawBounds::axis_error`: how far
+  a read frame's point and axes may lie from the exact frame law's, zero
+  where the frame is read in closed form.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

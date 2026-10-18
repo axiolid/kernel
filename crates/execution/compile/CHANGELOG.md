@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.28] - 2026-10-18
+
 ### Added
 
 - `PolylineCompiler` compiles trimmed, composite, offset and intrinsic
