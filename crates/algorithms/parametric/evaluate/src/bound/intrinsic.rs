@@ -17,10 +17,10 @@
 //! seam and the chord bound crosses it. `c'''` does not exist there: the
 //! third-derivative bound refuses a span with a seam strictly inside.
 //!
-//! These bound the curve the law defines. Its points are read by
-//! quadrature (`crate::arc_length`, `crate::frenet`), whose error is the
-//! evaluator's stated estimate, as an arc-length chain's intrinsic pieces'
-//! are (`crate::chain`): a caller that flattens one says so.
+//! These bound the curve the law defines. The evaluator reads its points
+//! by quadrature (`crate::arc_length`, `crate::frenet`) to a stated
+//! estimate; a caller that needs a bound on the points reads them with
+//! [`super::IntrinsicPositions`] instead.
 
 use axiolid_core::Scalar;
 use axiolid_curve::{CurvatureLaw, Intrinsic2, Intrinsic3};

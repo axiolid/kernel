@@ -759,64 +759,178 @@ fn an_offset_of_a_composite_offsets_each_piece_and_shares_its_joints() {
 
 // --- intrinsic curves -----------------------------------------------------------
 
+/// Nodes and weights of the 8-point Gauss-Legendre rule on `[-1, 1]`.
+const GAUSS: [(Scalar, Scalar); 8] = [
+    (-0.960_289_856_497_536_2, 0.101_228_536_290_376_3),
+    (-0.796_666_477_413_626_7, 0.222_381_034_453_374_5),
+    (-0.525_532_409_916_328_9, 0.313_706_645_877_887_3),
+    (-0.183_434_642_495_649_8, 0.362_683_783_378_361_9),
+    (0.183_434_642_495_649_8, 0.362_683_783_378_361_9),
+    (0.525_532_409_916_328_9, 0.313_706_645_877_887_3),
+    (0.796_666_477_413_626_7, 0.222_381_034_453_374_5),
+    (0.960_289_856_497_536_2, 0.101_228_536_290_376_3),
+];
+
+/// An independent high-precision reference for an intrinsic curve, in
+/// its start frame's coordinates: the unit tangent of the law's
+/// closed-form heading integrated cumulatively by 8-point Gauss-Legendre
+/// on panels a few millimetres wide, split at the law's seams (error far
+/// below 1e-12), at `n + 1` arc lengths evenly from `from` to `to`. Each
+/// entry is the point and the unit tangent there.
+fn reference(curve: &Intrinsic2, from: Scalar, to: Scalar, n: usize) -> Vec<(Vec2, Vec2)> {
+    let seams = curve.curvature.seams_within(curve.length);
+    let heading = |s: Scalar| curve.heading_at(s).unwrap();
+    let integrate = |a: Scalar, b: Scalar| -> Vec2 {
+        let mut cuts = vec![a];
+        cuts.extend(seams.iter().copied().filter(|&t| t > a && t < b));
+        cuts.push(b);
+        let mut out = Vec2::ZERO;
+        for pair in cuts.windows(2) {
+            let panels = ((pair[1] - pair[0]) / 0.005).ceil().max(1.0) as usize;
+            let w = (pair[1] - pair[0]) / panels as Scalar;
+            for k in 0..panels {
+                let mid = pair[0] + (k as Scalar + 0.5) * w;
+                for (x, weight) in GAUSS {
+                    let theta = heading(mid + 0.5 * w * x);
+                    out += Vec2::new(theta.cos(), theta.sin()) * (0.5 * w * weight);
+                }
+            }
+        }
+        out
+    };
+    let mut at = integrate(0.0, from);
+    let mut out = Vec::with_capacity(n + 1);
+    let mut last = from;
+    for i in 0..=n {
+        let s = from + (to - from) * i as Scalar / n as Scalar;
+        at += integrate(last, s);
+        last = s;
+        let theta = heading(s);
+        out.push((at, Vec2::new(theta.cos(), theta.sin())));
+    }
+    out
+}
+
+/// A local point or vector of a 2D start frame, placed.
+fn place(frame: &Frame2, local: Vec2) -> Point2 {
+    frame.origin + frame.x * local.x + frame.y * local.y
+}
+
+/// The reference sample nearest a fraction `s` of `n` samples.
+fn nth(s: Scalar, n: usize) -> usize {
+    (s * n as Scalar).round() as usize
+}
+
+/// The reference curve of `curve` from `from` to `to`, offset by
+/// `distance` to its left, as `within_bound` samples it.
+fn reference2(
+    curve: &Intrinsic2,
+    from: Scalar,
+    to: Scalar,
+    distance: Scalar,
+) -> impl Fn(Scalar) -> Point3 {
+    let table = reference(curve, from, to, SAMPLES);
+    let frame = curve.start;
+    move |s| {
+        let (p, t) = table[nth(s, SAMPLES)];
+        let tangent = frame.x * t.x + frame.y * t.y;
+        let left = Vec2::new(-tangent.y, tangent.x) / tangent.length();
+        lift(place(&frame, p) + left * distance)
+    }
+}
+
 #[test]
 fn an_intrinsic_curve_is_bounded_by_its_curvature_law() {
-    let spiral = Curve2::Intrinsic(clothoid(60.0));
-    let (graph, root) = graph_of(|b| b.push_value(spiral.clone()).unwrap());
+    // Constant curvature is an arc, in closed form.
+    let arc = Intrinsic2::new(
+        clothoid(40.0).start,
+        CurvatureLaw::Constant {
+            curvature: 1.0 / 12.0,
+        },
+        40.0,
+    );
+    let (graph, root) = graph_of(|b| b.push_value(Curve2::Intrinsic(arc.clone())).unwrap());
     let outcome = polyline(&graph, root).unwrap();
-    let worst = within_bound(
+    within_bound(
         &outcome,
-        |s| lift(evaluate2(&spiral, 60.0 * s).unwrap()),
+        |s| {
+            let a = 40.0 * s / 12.0;
+            lift(place(
+                &arc.start,
+                Vec2::new(12.0 * a.sin(), 12.0 * (1.0 - a.cos())),
+            ))
+        },
         SAMPLES,
     );
+
+    // A straight one has no chord error, but its vertices are integrated:
+    // the bound carries their certified error, however small.
+    let straight = Intrinsic2::new(
+        clothoid(40.0).start,
+        CurvatureLaw::Constant { curvature: 0.0 },
+        40.0,
+    );
+    let (graph, root) = graph_of(|b| b.push_value(Curve2::Intrinsic(straight.clone())).unwrap());
+    let outcome = polyline(&graph, root).unwrap();
+    assert!(outcome.deviation.bound > 0.0 && outcome.deviation.bound < 1e-9);
+    within_bound(
+        &outcome,
+        |s| lift(place(&straight.start, Vec2::new(40.0 * s, 0.0))),
+        SAMPLES,
+    );
+
+    let spiral = clothoid(60.0);
+    let (graph, root) = graph_of(|b| b.push_value(Curve2::Intrinsic(spiral.clone())).unwrap());
+    let outcome = polyline(&graph, root).unwrap();
+    let worst = within_bound(&outcome, reference2(&spiral, 0.0, 60.0, 0.0), SAMPLES);
     assert!(worst > 0.0);
 
     // Placed by a frame that doubles it, its chords bend twice as much.
-    let scaled = Curve2::Intrinsic(Intrinsic2 {
+    let scaled = Intrinsic2 {
         start: Frame2 {
             origin: Point2::new(3.0, -1.0),
             x: Vec2::new(1.2, 1.6),
             y: Vec2::new(-1.6, 1.2),
         },
         ..clothoid(60.0)
-    });
-    let (graph, root) = graph_of(|b| b.push_value(scaled.clone()).unwrap());
+    };
+    let (graph, root) = graph_of(|b| b.push_value(Curve2::Intrinsic(scaled.clone())).unwrap());
     let outcome = polyline(&graph, root).unwrap();
-    within_bound(
-        &outcome,
-        |s| lift(evaluate2(&scaled, 60.0 * s).unwrap()),
-        SAMPLES,
-    );
+    within_bound(&outcome, reference2(&scaled, 0.0, 60.0, 0.0), SAMPLES);
 
     // A piecewise law: a clothoid into an arc, its curvature continuous
     // but its rate jumping at the seam, and an arc against it.
-    let law = joined_law();
-    let joined = Curve2::Intrinsic(Intrinsic2::new(plane(), law.clone(), 70.0));
-    let (graph, root) = graph_of(|b| b.push_value(joined.clone()).unwrap());
+    let joined = Intrinsic2::new(plane(), joined_law(), 70.0);
+    let (graph, root) = graph_of(|b| b.push_value(Curve2::Intrinsic(joined.clone())).unwrap());
     let outcome = polyline(&graph, root).unwrap();
-    within_bound(
-        &outcome,
-        |s| lift(evaluate2(&joined, 70.0 * s).unwrap()),
-        SAMPLES,
-    );
+    within_bound(&outcome, reference2(&joined, 0.0, 70.0, 0.0), SAMPLES);
 
     // A planar space curve, in a tilted plane.
+    let frame = tilted_frame();
     let space = Curve3::Intrinsic(Intrinsic3::new(
-        tilted_frame(),
-        law,
+        frame,
+        joined_law(),
         CurvatureLaw::Constant { curvature: 0.0 },
         70.0,
     ));
     let (graph, root) = graph_of(|b| b.push_value(space.clone()).unwrap());
     let outcome = polyline(&graph, root).unwrap();
-    within_bound(&outcome, |s| evaluate3(&space, 70.0 * s).unwrap(), SAMPLES);
+    let table = reference(&joined, 0.0, 70.0, SAMPLES);
+    within_bound(
+        &outcome,
+        |s| {
+            let (p, _) = table[nth(s, SAMPLES)];
+            frame.origin + frame.x * p.x + frame.y * p.y
+        },
+        SAMPLES,
+    );
 }
 
 #[test]
 fn a_trim_and_an_offset_of_a_clothoid_are_bounded() {
-    let spiral = Curve2::Intrinsic(clothoid(60.0));
+    let spiral = clothoid(60.0);
     let (graph, root) = graph_of(|b| {
-        let basis = b.push_value(spiral.clone()).unwrap();
+        let basis = b.push_value(Curve2::Intrinsic(spiral.clone())).unwrap();
         let part = trim(
             b,
             basis,
@@ -827,24 +941,32 @@ fn a_trim_and_an_offset_of_a_clothoid_are_bounded() {
         offset(b, part, 1.5, None)
     });
     let outcome = polyline(&graph, root).unwrap();
-    assert_eq!(outcome.points[0], left_offset2(&spiral, 1.5, 10.0));
-    within_bound(
-        &outcome,
-        |s| left_offset2(&spiral, 1.5, 10.0 + 45.0 * s),
-        SAMPLES,
-    );
+    let exact = reference2(&spiral, 10.0, 55.0, 1.5);
+    assert!((outcome.points[0] - exact(0.0)).length() <= outcome.deviation.bound);
+    within_bound(&outcome, exact, SAMPLES);
+
     // Beside a law whose curvature jumps at its seams the offset's speed
     // jumps: it is cut at each seam.
-    let joined = Curve2::Intrinsic(Intrinsic2::new(plane(), joined_law(), 70.0));
+    let joined = Intrinsic2::new(plane(), joined_law(), 70.0);
     let (graph, root) = graph_of(|b| {
-        let basis = b.push_value(joined.clone()).unwrap();
+        let basis = b.push_value(Curve2::Intrinsic(joined.clone())).unwrap();
         offset(b, basis, 1.5, None)
     });
     let outcome = polyline(&graph, root).unwrap();
+    let exact = reference2(&joined, 0.0, 70.0, 1.5);
     for seam in [30.0, 50.0] {
-        assert_eq!(count(&outcome.points, left_offset2(&joined, 1.5, seam)), 1);
+        let (p, t) = reference(&joined, seam, seam, 1)[0];
+        let at = lift(place(&joined.start, p) + Vec2::new(-t.y, t.x) * 1.5);
+        assert!(
+            // Within the share of the budget its position may be off.
+            outcome
+                .points
+                .iter()
+                .any(|p| (*p - at).length() <= CHORD / 8.0),
+            "the seam at {seam} is a vertex"
+        );
     }
-    within_bound(&outcome, |s| left_offset2(&joined, 1.5, 70.0 * s), SAMPLES);
+    within_bound(&outcome, exact, SAMPLES);
 }
 
 // --- refused by name ------------------------------------------------------------

@@ -32,12 +32,18 @@
 //! An intrinsic curve (#317) is bounded by its curvature law: it runs at
 //! unit speed, so `|c''| = |k|`, and the law's closed-form supremum over a
 //! span ([`axiolid_reference::bound::intrinsic_chord_bound2`], `3`) gives
-//! `h^2 / 8 sup |k|`, across a seam of a piecewise law too. Its vertices
-//! are read by the evaluator's quadrature, whose error is its stated
-//! estimate, as an arc-length chain's intrinsic pieces' are. A 3D one
-//! compiles only with its torsion law identically zero
-//! (`Intrinsic3::is_planar`), as the certified station lengths take it
-//! (#302): with torsion its frame is a truncated Magnus series.
+//! `h^2 / 8 sup |k|`, across a seam of a piecewise law too. Its points have
+//! no closed form, so its vertices are not the evaluator's quadrature (an
+//! estimate) but [`axiolid_reference::bound::IntrinsicPositions`]: the
+//! midpoint rule with a certified remainder from the same law bounds,
+//! asked for an eighth of the budget. The spans are bisected to the rest,
+//! and the bound adds the largest vertex error, since a chord whose ends
+//! each move by at most `e` moves by at most `e` everywhere; so the
+//! reported bound covers the exact curve. A 3D one compiles only with its
+//! torsion law identically zero (`Intrinsic3::is_planar`), as the certified
+//! station lengths take it (#302): its points are then the plane curve's in
+//! its start frame, and with torsion its frame is a truncated Magnus
+//! series. An offset beside a 2D one reads its points the same way.
 //!
 //! A placement moves the source's polyline rigidly or scales it: the source
 //! is compiled to the budget shrunk by an upper bound on the transform's
@@ -473,10 +479,46 @@ fn lift(p: Point2) -> Point3 {
     Point3::new(p.x, p.y, 0.0)
 }
 
-/// `breaks` and the seams of an intrinsic curve's law, if any.
-fn with_seams(mut breaks: Vec<Scalar>, seams: Option<Vec<Scalar>>) -> Vec<Scalar> {
-    breaks.extend(seams.unwrap_or_default());
-    breaks
+/// The share of the budget an intrinsic curve's vertices may be off their
+/// exact points: an eighth.
+fn vertex_room(chord: Scalar) -> Scalar {
+    0.125 * chord
+}
+
+/// [`bisected`] through vertices whose positions carry a certified error
+/// (an intrinsic curve's, read by [`bound::IntrinsicPositions`], #317):
+/// the spans are bisected to `chord` less `room`, the error the positions
+/// were asked for, and the bound grows by the largest vertex error, since a
+/// chord whose ends each move by at most `e` moves by at most `e`
+/// everywhere.
+fn certified_vertices(
+    positions: bound::IntrinsicPositions,
+    read: impl Fn(&mut bound::IntrinsicPositions, Scalar) -> Option<(Point3, Scalar)>,
+    chord_bound: impl Fn(Scalar, Scalar) -> Option<Scalar>,
+    span: (Scalar, Scalar),
+    breaks: &[Scalar],
+    (chord, room): (Scalar, Scalar),
+) -> GeomResult<(Vec<Point3>, Scalar)> {
+    let positions = core::cell::RefCell::new(positions);
+    let vertex: core::cell::Cell<Scalar> = core::cell::Cell::new(0.0);
+    let (points, worst) = bisected(
+        |t| {
+            let (point, error) = read(&mut positions.borrow_mut(), t).ok_or_else(|| {
+                refused(
+                    "an intrinsic curve whose position cannot be certified there (a law that \
+                     does not integrate, or a degenerate frame)",
+                )
+            })?;
+            vertex.set(vertex.get().max(error));
+            Ok(point)
+        },
+        chord_bound,
+        span,
+        breaks,
+        chord - room,
+        false,
+    )?;
+    Ok((points, worst + vertex.get()))
 }
 
 /// A 2D curve over its domain or a trim's `window`, lifted to `z = 0`,
@@ -505,16 +547,19 @@ fn atomic2(
     let full_turn = periodic && span.1 - span.0 >= core::f64::consts::TAU;
     let Some(offset) = offset else {
         if let Curve2::Intrinsic(intrinsic) = curve {
-            if bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_none() {
-                return Err(refused(uncertified2(curve)));
-            }
-            return bisected(
-                |t| evaluate2(curve, t).map(lift),
+            let room = vertex_room(chord);
+            let positions = bound::IntrinsicPositions::new2(intrinsic, room)
+                .filter(|_| {
+                    bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_some()
+                })
+                .ok_or_else(|| refused(uncertified2(curve)))?;
+            return certified_vertices(
+                positions,
+                |positions, t| positions.point2(t).map(|(p, e)| (lift(p), e)),
                 |a, b| bound::intrinsic_chord_bound2(intrinsic, a, b),
                 span,
                 &[],
-                chord,
-                false,
+                (chord, room),
             );
         }
         if !bound::certifies_flattening2(curve) {
@@ -535,12 +580,32 @@ fn atomic2(
              normal",
         ));
     }
-    let seams = match curve {
+    let distance = offset.distance;
+    match curve {
         Curve2::Intrinsic(intrinsic) => {
-            if bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_none() {
-                return Err(refused(uncertified2(curve)));
-            }
-            Some(intrinsic.curvature.seams_within(intrinsic.length))
+            let room = vertex_room(chord);
+            let positions = bound::IntrinsicPositions::new2(intrinsic, room)
+                .filter(|_| {
+                    bound::intrinsic_chord_bound2(intrinsic, 0.0, intrinsic.length).is_some()
+                })
+                .ok_or_else(|| refused(uncertified2(curve)))?;
+            return certified_vertices(
+                positions,
+                |positions, t| {
+                    positions
+                        .offset_point2(t, distance)
+                        .map(|(p, e)| (lift(p), e))
+                },
+                |a, b| {
+                    Some(
+                        bound::offset_chord_bound2(curve, distance, a, b)
+                            .unwrap_or(Scalar::INFINITY),
+                    )
+                },
+                span,
+                &intrinsic.curvature.seams_within(intrinsic.length),
+                (chord, room),
+            );
         }
         Curve2::Chain(_) | Curve2::Implicit(_) => {
             return Err(refused(
@@ -549,17 +614,16 @@ fn atomic2(
             ))
         }
         _ if !bound::certifies_flattening2(curve) => return Err(refused(uncertified2(curve))),
-        _ => None,
-    };
+        _ => {}
+    }
     if inside(&bound::continuity_breaks2(curve, 1), span) {
         return Err(refused(OFFSET_ACROSS_CORNER));
     }
-    let distance = offset.distance;
     bisected(
         |t| bound::offset_point2(curve, distance, t).map(lift),
         |a, b| Some(bound::offset_chord_bound2(curve, distance, a, b).unwrap_or(Scalar::INFINITY)),
         span,
-        &with_seams(bound::continuity_breaks2(curve, 2), seams),
+        &bound::continuity_breaks2(curve, 2),
         chord,
         full_turn,
     )
@@ -590,18 +654,19 @@ fn atomic3(
     let full_turn = periodic && span.1 - span.0 >= core::f64::consts::TAU;
     let Some(offset) = offset else {
         if let Curve3::Intrinsic(intrinsic) = curve {
-            if !intrinsic.is_planar()
-                || bound::intrinsic_chord_bound3(intrinsic, 0.0, intrinsic.length).is_none()
-            {
-                return Err(refused(uncertified3(curve)));
-            }
-            return bisected(
-                |t| evaluate3(curve, t),
+            let room = vertex_room(chord);
+            let positions = bound::IntrinsicPositions::new3(intrinsic, room)
+                .filter(|_| {
+                    bound::intrinsic_chord_bound3(intrinsic, 0.0, intrinsic.length).is_some()
+                })
+                .ok_or_else(|| refused(uncertified3(curve)))?;
+            return certified_vertices(
+                positions,
+                bound::IntrinsicPositions::point3,
                 |a, b| bound::intrinsic_chord_bound3(intrinsic, a, b),
                 span,
                 &[],
-                chord,
-                false,
+                (chord, room),
             );
         }
         if !bound::certifies_flattening3(curve) {

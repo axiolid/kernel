@@ -22,6 +22,12 @@ caret rule for `0.x` versions.
   `intrinsic_derivative_bounds2` bound an intrinsic curve from its
   curvature law (`|c''| = |k|` at unit speed, times the start frame's
   stretch), the chord bound across seams of a piecewise law.
+  `IntrinsicPositions` reads an intrinsic curve's points (2D, a planar 3D
+  one in its start plane, and a 2D one's left offset) with a certified
+  error: the unit tangent of the closed-form heading integrated by the
+  composite midpoint rule, its remainder `w^3 / 24 (|k'| + k^2)` per panel
+  from the law's bounds, panels split at seams, plus the heading's, the
+  sums' and the placement's rounding; `MAX_POSITION_PANELS` caps the work.
   `certifies_flattening2` and `certifies_flattening3` are unchanged.
 
 ## [0.3.16] - 2026-10-14

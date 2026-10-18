@@ -30,8 +30,11 @@ caret rule for `0.x` versions.
   bounds through the unit-vector rule of the certified station lengths
   (#294, #307), cut where the basis is not `C^2`. A 2D intrinsic curve,
   and a 3D one whose torsion law is identically zero, is bounded by its
-  curvature law (`h^2 / 8 sigma sup |k|`), across seams of a piecewise law;
-  an offset beside a 2D one is cut at its seams. Still refused by name:
+  curvature law (`h^2 / 8 sigma sup |k|`), across seams of a piecewise law,
+  and its vertices are certified positions (`bound::IntrinsicPositions`,
+  an eighth of the budget, the largest vertex error added to the bound),
+  never the evaluator's quadrature estimate; an offset beside a 2D one is
+  cut at its seams and read the same way. Still refused by name:
   implicit and banked curves, a 3D intrinsic curve with torsion, a trim of
   a relation or a placed curve, an offset of an offset, of a placed curve,
   of a chain, implicit or 3D intrinsic curve or across a corner of its
