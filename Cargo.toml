@@ -124,8 +124,8 @@ axiolid-exact = { path = "crates/algorithms/exact", version = "0.1.2" }
 axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.1" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
-axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.8" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.28" }
+axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.9" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.29" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that

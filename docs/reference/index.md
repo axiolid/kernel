@@ -73,7 +73,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.3 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.1 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.0 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
-| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.8 | Portable scalar reference implementation and certified predicates |
+| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.9 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.2 | Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.7 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.3 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
@@ -94,7 +94,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.2 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.1 | GPU executor adapter contract for batched Axiolid geometry |
 | [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.4 | Provider registration, ordering, fallback, and execution policy |
-| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.28 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
+| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.29 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 

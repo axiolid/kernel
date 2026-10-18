@@ -1,6 +1,6 @@
 [package]
 name = "axiolid-mesh-compile"
-version = "0.3.28"
+version = "0.3.29"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

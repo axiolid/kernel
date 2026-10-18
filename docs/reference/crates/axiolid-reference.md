@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-12) |
+| Latest release | 0.3.9 (2026-10-18) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,16 +46,13 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-12):
+Latest release, 0.3.9 (2026-10-18):
 
 ### Fixed
 
-- `clash::interference` counted every narrow-phase pair of well-formed
-  triangles that do not meet (`TriangleTriangleRelation::Disjoint`) as a
-  `degenerate_skips`, through a catch-all arm, so a clash report over-stated
-  how much of its input was untestable (two unit boxes 5 apart at a 10 m
-  tolerance reported 120 of 144 pairs skipped). Disjoint pairs are now a
-  verdict, and the match is exhaustive so a new relation cannot fall
-  through again.
+- Requires `axiolid-evaluate` 0.3.17, whose certified frame laws and
+  intrinsic positions it re-exports and `axiolid-mesh-compile` 0.3.28 uses
+  through it. 0.3.8 accepted any 0.3.12 or later, so a lockfile holding an
+  older `axiolid-evaluate` did not build `axiolid-mesh-compile` 0.3.28.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

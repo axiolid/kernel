@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-10-18
+
+### Fixed
+
+- Requires `axiolid-reference` 0.3.9, and through it `axiolid-evaluate`
+  0.3.17, whose certified frame laws and intrinsic positions 0.3.28 uses.
+  0.3.28 accepted `axiolid-reference` 0.3.8, which accepts any
+  `axiolid-evaluate` from 0.3.12, so a lockfile holding an older one did
+  not build.
+
 ## [0.3.28] - 2026-10-18
 
 ### Added

@@ -3160,6 +3160,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.29 - 2026-10-18
+
+### Fixed
+
+- Requires `axiolid-reference` 0.3.9, and through it `axiolid-evaluate`
+  0.3.17, whose certified frame laws and intrinsic positions 0.3.28 uses.
+  0.3.28 accepted `axiolid-reference` 0.3.8, which accepts any
+  `axiolid-evaluate` from 0.3.12, so a lockfile holding an older one did
+  not build.
+
 ### 0.3.28 - 2026-10-18
 
 ### Added
@@ -5852,6 +5862,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.9 - 2026-10-18
+
+### Fixed
+
+- Requires `axiolid-evaluate` 0.3.17, whose certified frame laws and
+  intrinsic positions it re-exports and `axiolid-mesh-compile` 0.3.28 uses
+  through it. 0.3.8 accepted any 0.3.12 or later, so a lockfile holding an
+  older `axiolid-evaluate` did not build `axiolid-mesh-compile` 0.3.28.
 
 ### 0.3.8 - 2026-10-12
 

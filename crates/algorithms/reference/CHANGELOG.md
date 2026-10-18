@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-18
+
+### Fixed
+
+- Requires `axiolid-evaluate` 0.3.17, whose certified frame laws and
+  intrinsic positions it re-exports and `axiolid-mesh-compile` 0.3.28 uses
+  through it. 0.3.8 accepted any 0.3.12 or later, so a lockfile holding an
+  older `axiolid-evaluate` did not build `axiolid-mesh-compile` 0.3.28.
+
 ## [0.3.8] - 2026-10-12
 
 ### Fixed
