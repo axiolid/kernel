@@ -47,6 +47,16 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
   A chord whose hull or any trimmed hull would be a ring of zero area is not used, so
   trimming never adds a ring the arrangement refuses (#331). `scripts/probe_minkowski_cover_mutants.py`
   and `scripts/probe_minkowski_degenerate_mutants.py` list the faults its tests must catch.
+- The disc morphology has two modes (`MorphologyMode`, ADR 0087, #330). `Exact`, the
+  default and the behaviour of `erode_inner` and its siblings, is bit for bit the route
+  above; a CAD kernel takes it. Its cost still grows with the square of the corners where
+  teeth stand closer than their tips' slivers are wide. `Fast`, through
+  `erode_inner_with` and its siblings, first fills the summed set's notches with chords
+  proved to lie outside it, each used only when the excess it adds is within the caller's
+  budget, and keeps the inner or outer side: the excess goes into `MorphologyBound`'s
+  deviation and is reported by `Region::excess`. A wall of teeth then costs about its
+  corners; a rule engine takes it (`src/fill.rs`).
+  `scripts/probe_fast_morphology_mutants.py` lists the faults its tests must catch.
 
 ## Depends on
 

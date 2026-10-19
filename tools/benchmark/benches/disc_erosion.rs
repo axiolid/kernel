@@ -14,7 +14,10 @@
 //! corners: the toothed room eroded and dilated, and the same toothed
 //! ring as a hole (`hole`) in a plain room 1.5 m larger all round, eroded
 //! and dilated. A hole's boundary and a dilation sum on the other side of
-//! the teeth than a room's erosion does.
+//! the teeth than a room's erosion does. These run in both modes: `exact`,
+//! the default (`Region::erode_inner` and its siblings), and `fast`
+//! (`MorphologyMode::Fast` with a budget of 1 mm), whose filled notches add
+//! the excess in the `excess` column to the deviation.
 //!
 //! Each case is validated before its time counts: the result is not
 //! empty, every vertex lies inside the region for an erosion and outside
@@ -28,7 +31,8 @@
 //! so each case runs in a fresh process: this binary re-runs itself with
 //! the case in `DISC_EROSION_CASE`. Set `DISC_EROSION_CORNERS` (for example
 //! `102,602`) or `DISC_EROSION_LARGE` (for example `2402`) to run other
-//! sizes of #323's and #330's cases, an empty list to run none, and
+//! sizes of #323's and #330's cases, an empty list to run none,
+//! `DISC_EROSION_MODES` (`exact`, `fast` or both) for #330's modes, and
 //! `DISC_EROSION_RUNS` for fewer timed runs.
 //!
 //! ```bash
@@ -36,7 +40,7 @@
 //! ```
 
 use axiolid_core::{Point2, Tolerance};
-use axiolid_overlay::{Polygon, Region, Ring};
+use axiolid_overlay::{MorphologyMode, Polygon, Region, Ring};
 use std::hint::black_box;
 use std::process::Command;
 use std::time::Instant;
@@ -51,6 +55,8 @@ const RUNS: usize = 3;
 const RADIUS: f64 = 0.75;
 /// The disc's radius in #330's cases.
 const LARGE_RADIUS: f64 = 0.4;
+/// The fast mode's budget in #330's cases.
+const FAST_BUDGET: f64 = 1e-3;
 /// How far the room around a hole reaches past it.
 const AROUND: f64 = 1.5;
 /// The room's width (along the toothed walls) and depth.
@@ -149,8 +155,9 @@ fn fingerprint(out: &Region) -> u64 {
     h
 }
 
-/// One case in this process, given as `walls:op:side:corners:radius`:
-/// prints the median time and peak memory.
+/// One case in this process, given as
+/// `walls:op:side:corners:radius:mode`: prints the median time and peak
+/// memory.
 fn case(spec: &str) {
     let parts: Vec<&str> = spec.split(':').collect();
     let corners: usize = parts[3].parse().expect("a corner count");
@@ -162,6 +169,10 @@ fn case(spec: &str) {
     };
     let erode = parts[1] == "erode";
     let outer = parts[2] == "outer";
+    let mode = match parts[5] {
+        "fast" => MorphologyMode::fast(FAST_BUDGET),
+        _ => MorphologyMode::Exact,
+    };
     let runs: usize = std::env::var("DISC_EROSION_RUNS")
         .ok()
         .and_then(|r| r.parse().ok())
@@ -195,10 +206,10 @@ fn case(spec: &str) {
     .expect("a valid room");
     let run = || {
         match (erode, outer) {
-            (true, true) => region.erode_outer(radius, tolerance),
-            (true, false) => region.erode_inner(radius, tolerance),
-            (false, true) => region.dilate_outer(radius, tolerance),
-            (false, false) => region.dilate_inner(radius, tolerance),
+            (true, true) => region.erode_outer_with(radius, tolerance, mode),
+            (true, false) => region.erode_inner_with(radius, tolerance, mode),
+            (false, true) => region.dilate_outer_with(radius, tolerance, mode),
+            (false, false) => region.dilate_inner_with(radius, tolerance, mode),
         }
         .expect("the disc morphology")
     };
@@ -228,16 +239,21 @@ fn case(spec: &str) {
                 .and_then(|kb| kb.parse::<f64>().ok())
         })
         .map_or_else(|| "n/a".to_string(), |kb| format!("{:.0}", kb / 1024.0));
+    let excess = out
+        .excess()
+        .map_or_else(|| "-".to_string(), |e| format!("{e:.1e}"));
     println!(
-        "{:<6} {:<6} {:<6} {:>6} {:>7} {:>7} {:>9.3} {:>8} {:016x}",
+        "{:<6} {:<6} {:<6} {:<6} {:>6} {:>7} {:>7} {:>9.3} {:>8} {:>8} {:016x}",
         parts[0],
         parts[1],
         parts[2],
+        parts[5],
         radius,
         ring.len(),
         out_corners,
         times[runs / 2],
         peak,
+        excess,
         fingerprint(&out)
     );
 }
@@ -261,27 +277,41 @@ fn main() {
     let corners = sizes("DISC_EROSION_CORNERS", &CORNERS);
     let large = sizes("DISC_EROSION_LARGE", &LARGE);
     println!(
-        "{:<6} {:<6} {:<6} {:>6} {:>7} {:>7} {:>9} {:>8} {:>16}",
-        "walls", "op", "side", "radius", "corners", "result", "median_s", "peak_mb", "hash"
+        "{:<6} {:<6} {:<6} {:<6} {:>6} {:>7} {:>7} {:>9} {:>8} {:>8} {:>16}",
+        "walls",
+        "op",
+        "side",
+        "mode",
+        "radius",
+        "corners",
+        "result",
+        "median_s",
+        "peak_mb",
+        "excess",
+        "hash"
     );
     let exe = std::env::current_exe().expect("this benchmark");
     let mut cases = Vec::new();
     if !corners.is_empty() {
         for side in ["inner", "outer"] {
-            cases.push(format!("plain:erode:{side}:4:{RADIUS}"));
+            cases.push(format!("plain:erode:{side}:4:{RADIUS}:exact"));
             for walls in ["teeth", "flat"] {
                 for &n in &corners {
-                    cases.push(format!("{walls}:erode:{side}:{n}:{RADIUS}"));
+                    cases.push(format!("{walls}:erode:{side}:{n}:{RADIUS}:exact"));
                 }
             }
         }
     }
-    // #330: the teeth seen from the other side, by a hole or a dilation.
-    for walls in ["teeth", "hole"] {
-        for op in ["erode", "dilate"] {
-            for side in ["inner", "outer"] {
-                for &n in &large {
-                    cases.push(format!("{walls}:{op}:{side}:{n}:{LARGE_RADIUS}"));
+    // #330: the teeth seen from the other side, by a hole or a dilation,
+    // in both modes. `DISC_EROSION_MODES` (for example `fast`) runs fewer.
+    let modes = std::env::var("DISC_EROSION_MODES").unwrap_or_else(|_| "exact,fast".into());
+    for mode in modes.split(',').filter(|m| !m.is_empty()) {
+        for walls in ["teeth", "hole"] {
+            for op in ["erode", "dilate"] {
+                for side in ["inner", "outer"] {
+                    for &n in &large {
+                        cases.push(format!("{walls}:{op}:{side}:{n}:{LARGE_RADIUS}:{mode}"));
+                    }
                 }
             }
         }

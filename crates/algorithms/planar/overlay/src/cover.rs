@@ -80,7 +80,7 @@ pub(crate) struct Boundary {
     /// The vertices kept, in ring order.
     pub(crate) points: Vec<Point2>,
     /// Each kept vertex's index in the ring as given.
-    origin: Vec<usize>,
+    pub(crate) origin: Vec<usize>,
 }
 
 /// Whether `b`, exactly collinear with `a` and `c`, lies strictly between
@@ -124,10 +124,10 @@ pub(crate) fn merged(ring: &[Point2]) -> Boundary {
 
 /// Every boundary edge of the set, boxed, for the chords' exact checks.
 pub(crate) struct Index<'a> {
-    rings: &'a [Vec<Point2>],
+    pub(crate) rings: &'a [Vec<Point2>],
     /// `(ring, edge)`: the edge leaving `rings[ring][edge]`.
-    edges: Vec<(usize, usize)>,
-    tree: BoxTree,
+    pub(crate) edges: Vec<(usize, usize)>,
+    pub(crate) tree: BoxTree,
 }
 
 impl<'a> Index<'a> {
@@ -177,6 +177,14 @@ pub(crate) fn chords(
     depth: f64,
     index: &Index<'_>,
 ) -> Vec<Chord> {
+    proposals(boundary, side, depth)
+        .into_iter()
+        .filter(|&chord| proved(ring, boundary, chord, side, index))
+        .collect()
+}
+
+/// The chords [`chords`] proposes, before their proof.
+pub(crate) fn proposals(boundary: &Boundary, side: Sign, depth: f64) -> Vec<Chord> {
     let p = &boundary.points;
     let n = p.len();
     if side == Sign::Zero || n < 4 || depth.is_nan() || depth <= 0.0 {
@@ -215,7 +223,6 @@ pub(crate) fn chords(
             from: (start + w[0].0) % n,
             span: w[1].0 - w[0].0,
         })
-        .filter(|&chord| proved(ring, boundary, chord, side, index))
         .collect()
 }
 
@@ -235,7 +242,13 @@ fn leaves_inside(at: Point2, next: Point2, prev: Point2, other: Point2, side: Si
 }
 
 /// The exact proof that `chord` lies in the closed set (module docs).
-fn proved(ring: usize, boundary: &Boundary, chord: Chord, side: Sign, index: &Index<'_>) -> bool {
+pub(crate) fn proved(
+    ring: usize,
+    boundary: &Boundary,
+    chord: Chord,
+    side: Sign,
+    index: &Index<'_>,
+) -> bool {
     let p = &boundary.points;
     let n = p.len();
     let to = (chord.from + chord.span) % n;

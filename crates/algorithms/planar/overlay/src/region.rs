@@ -63,6 +63,9 @@ pub struct Region {
     /// For a disc morphology with a stated side, that side and the
     /// deviation from the exact result (#163).
     bound: Option<MorphologyBound>,
+    /// For a fast disc morphology, the excess its filled notches add
+    /// (#330).
+    excess: Option<f64>,
 }
 
 /// Normalise a polygon set: canonical ring order, deterministic sorting.
@@ -132,6 +135,7 @@ impl Region {
             polygons: normalise(polygons),
             evidence,
             bound: None,
+            excess: None,
         }
     }
 
@@ -153,6 +157,22 @@ impl Region {
     #[must_use]
     pub const fn bound(&self) -> Option<MorphologyBound> {
         self.bound
+    }
+
+    /// Record the excess of a fast disc morphology.
+    pub(crate) fn set_excess(&mut self, excess: f64) {
+        self.excess = Some(excess);
+    }
+
+    /// For a result of [`Self::erode_inner_with`] and its siblings in
+    /// [`crate::MorphologyMode::Fast`]: how much larger the filled notches
+    /// made the sum, at most the mode's budget, zero where no notch was
+    /// filled (#330). It is part of [`MorphologyBound::deviation`], which
+    /// states the whole distance from the exact result. `None` for every
+    /// other region, the exact mode's results included.
+    #[must_use]
+    pub const fn excess(&self) -> Option<f64> {
+        self.excess
     }
 
     /// The region's polygons, in canonical order.

@@ -85,6 +85,20 @@
 //! when the result is presented -- cannot carry a point across. What each
 //! side proves, and how far it can be from the true disc morphology, is in
 //! [`MorphologyBound`].
+//!
+//! # Exact and fast
+//!
+//! Where a wall's teeth stand closer than the slivers #323 leaves of
+//! their hulls are wide, those slivers still overlap dozens of others, and
+//! the cost grows with the square of the corners (#330). The exact union
+//! of the slivers has cusps that are crossing points, not vertex sums, so
+//! [`MorphologyMode::Exact`], the default, keeps them all. In
+//! [`MorphologyMode::Fast`], the set's notches are first filled by chords
+//! across its outermost corners, each within the caller's budget of
+//! excess ([`crate::fill`]). Each side then absorbs the excess: a
+//! circumscribed polygon adds it to the deviation, and an inscribed one is
+//! drawn in by it. A rule engine takes the fast mode, a CAD kernel the
+//! exact one (ADR 0087).
 
 use axiolid_core::{Point2, Tolerance};
 use axiolid_exact::{certify, Arith, SignExpr};
@@ -125,6 +139,42 @@ pub enum BoundSide {
     /// Containing the exact result. "Unreachable" in an outer erosion is a
     /// proof; a route found in it may be invalid.
     Outer,
+}
+
+/// How the disc morphology ([`Region::erode_inner_with`] and its
+/// siblings) is computed (#330).
+///
+/// Both modes keep the stated side: an inner result lies within the
+/// exact disc morphology, an outer one holds it, and [`MorphologyBound`]
+/// says by how much they may differ.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub enum MorphologyMode {
+    /// The exact route of [`Region::erode_inner`] and its siblings, bit
+    /// for bit. Its cost grows with the square of the corners along walls
+    /// of teeth closer together than about a tenth of the radius. The
+    /// choice of a CAD kernel.
+    #[default]
+    Exact,
+    /// The set is summed with its notches filled by chords across its
+    /// outermost corners, where that makes the sum at most `budget`
+    /// larger (in metres, for a disc of the radius): each wall of teeth
+    /// costs about its corners. The excess actually taken, at most
+    /// `budget` and often far less, is added to the
+    /// [`MorphologyBound::deviation`] and reported by
+    /// [`Region::excess`]. The choice of a rule engine.
+    Fast {
+        /// The greatest excess a filled notch may add.
+        budget: f64,
+    },
+}
+
+impl MorphologyMode {
+    /// The fast mode with the given budget.
+    #[must_use]
+    pub const fn fast(budget: f64) -> Self {
+        Self::Fast { budget }
+    }
 }
 
 /// How a disc morphology's result relates to the exact one.
@@ -825,8 +875,7 @@ impl Region {
     fn sum_rule(&self, parts: &[Part], covers: bool, tolerance: Tolerance) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
         let shape = Layout::new(self.polygons());
-        let mut terms = sum_terms(&own, &Set::Region(shape), parts, covers, tolerance);
-        (std::mem::take(&mut terms.rings), Rule::Sum(terms))
+        sum_rule_of(&own, shape, parts, covers, tolerance)
     }
 
     pub(crate) fn erode_parts(
@@ -853,58 +902,85 @@ impl Region {
     ) -> (Vec<ArcRing>, Rule) {
         let own = rings_of(self.polygons());
         let shape = Layout::new(self.polygons());
-        // A box holding the region: its complement within the box, summed
-        // with -K, reaches every point of the region that K cannot sit
-        // around (a translate of K leaving the box crosses its boundary,
-        // whose own edge pieces cover that). The room about the region only
-        // keeps the box's edges off the region's.
-        let (mut lo, mut hi) = (own[0][0], own[0][0]);
-        for p in own.iter().flatten() {
-            lo = lo.min(*p);
-            hi = hi.max(*p);
-        }
-        let reach = parts
-            .iter()
-            .flat_map(Part::points)
-            .fold(0.0_f64, |m, q| m.max(q.x.abs()).max(q.y.abs()));
-        let pad = 2.0 * reach + (hi - lo).max_element() + 1.0;
-        let frame = vec![
-            Point2::new(lo.x - pad, lo.y - pad),
-            Point2::new(hi.x + pad, lo.y - pad),
-            Point2::new(hi.x + pad, hi.y + pad),
-            Point2::new(lo.x - pad, hi.y + pad),
-        ];
-        let mut outside = vec![frame];
-        outside.extend(own.iter().cloned());
-        let flipped: Vec<Part> = parts.iter().map(Part::flipped).collect();
-        let mut terms = sum_terms(
-            &outside,
-            &Set::Outside(shape.clone()),
-            &flipped,
-            covers,
-            tolerance,
-        );
-        let m = own.len();
-        let mut rings: Vec<ArcRing> = own.iter().map(|r| ArcRing::from_points(r)).collect();
-        rings.append(&mut terms.rings);
-        // A point of the erosion moved by the anchor `k0` of the first
-        // part lies in the region: when the origin is in K that is implied
-        // by the region itself; otherwise it is read from the region moved
-        // by `-k0`, whose rings follow the frame's in the first translated
-        // copy (frame minus region).
-        let origin = parts.iter().any(Part::holds_origin);
-        let first = m + terms.sets[0].0 + 1;
-        (
-            rings,
-            Rule::Erosion {
-                anchor: if origin { 0 } else { first },
-                own: m,
-                shape,
-                terms,
-            },
-        )
+        erosion_rule_of(own, shape, parts, covers, tolerance)
     }
+}
 
+/// The rings of a sum's arrangement for the set bounded by `own`, laid out
+/// as `shape`, and the rule that reads the sum from them.
+fn sum_rule_of(
+    own: &[Vec<Point2>],
+    shape: Layout,
+    parts: &[Part],
+    covers: bool,
+    tolerance: Tolerance,
+) -> (Vec<ArcRing>, Rule) {
+    let mut terms = sum_terms(own, &Set::Region(shape), parts, covers, tolerance);
+    (std::mem::take(&mut terms.rings), Rule::Sum(terms))
+}
+
+/// The rings of an erosion's arrangement for the region bounded by `own`,
+/// laid out as `shape`, and the rule that reads the erosion from them.
+fn erosion_rule_of(
+    own: Vec<Vec<Point2>>,
+    shape: Layout,
+    parts: &[Part],
+    covers: bool,
+    tolerance: Tolerance,
+) -> (Vec<ArcRing>, Rule) {
+    // A box holding the region: its complement within the box, summed
+    // with -K, reaches every point of the region that K cannot sit
+    // around (a translate of K leaving the box crosses its boundary,
+    // whose own edge pieces cover that). The room about the region only
+    // keeps the box's edges off the region's.
+    let (mut lo, mut hi) = (own[0][0], own[0][0]);
+    for p in own.iter().flatten() {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    let reach = parts
+        .iter()
+        .flat_map(Part::points)
+        .fold(0.0_f64, |m, q| m.max(q.x.abs()).max(q.y.abs()));
+    let pad = 2.0 * reach + (hi - lo).max_element() + 1.0;
+    let frame = vec![
+        Point2::new(lo.x - pad, lo.y - pad),
+        Point2::new(hi.x + pad, lo.y - pad),
+        Point2::new(hi.x + pad, hi.y + pad),
+        Point2::new(lo.x - pad, hi.y + pad),
+    ];
+    let mut outside = vec![frame];
+    outside.extend(own.iter().cloned());
+    let flipped: Vec<Part> = parts.iter().map(Part::flipped).collect();
+    let mut terms = sum_terms(
+        &outside,
+        &Set::Outside(shape.clone()),
+        &flipped,
+        covers,
+        tolerance,
+    );
+    let m = own.len();
+    let mut rings: Vec<ArcRing> = own.iter().map(|r| ArcRing::from_points(r)).collect();
+    rings.append(&mut terms.rings);
+    // A point of the erosion moved by the anchor `k0` of the first
+    // part lies in the region: when the origin is in K that is implied
+    // by the region itself; otherwise it is read from the region moved
+    // by `-k0`, whose rings follow the frame's in the first translated
+    // copy (frame minus region).
+    let origin = parts.iter().any(Part::holds_origin);
+    let first = m + terms.sets[0].0 + 1;
+    (
+        rings,
+        Rule::Erosion {
+            anchor: if origin { 0 } else { first },
+            own: m,
+            shape,
+            terms,
+        },
+    )
+}
+
+impl Region {
     /// Dilation by a disc of `radius`, contained in the exact one: the sum
     /// with an inscribed polygon, drawn in by a margin.
     ///
@@ -913,7 +989,13 @@ impl Region {
     /// [`OverlayError::InvalidOffsetDistance`] for a radius that is not
     /// finite and nonnegative, and overlay refusals.
     pub fn dilate_inner(&self, radius: f64, tolerance: Tolerance) -> Result<Self, OverlayError> {
-        self.disc(radius, BoundSide::Inner, false, tolerance)
+        self.disc(
+            radius,
+            BoundSide::Inner,
+            false,
+            MorphologyMode::Exact,
+            tolerance,
+        )
     }
 
     /// Dilation by a disc of `radius`, containing the exact one: the sum
@@ -923,7 +1005,13 @@ impl Region {
     ///
     /// As [`Self::dilate_inner`].
     pub fn dilate_outer(&self, radius: f64, tolerance: Tolerance) -> Result<Self, OverlayError> {
-        self.disc(radius, BoundSide::Outer, false, tolerance)
+        self.disc(
+            radius,
+            BoundSide::Outer,
+            false,
+            MorphologyMode::Exact,
+            tolerance,
+        )
     }
 
     /// Erosion by a disc of `radius`, contained in the exact one: eroded by
@@ -934,7 +1022,13 @@ impl Region {
     ///
     /// As [`Self::dilate_inner`].
     pub fn erode_inner(&self, radius: f64, tolerance: Tolerance) -> Result<Self, OverlayError> {
-        self.disc(radius, BoundSide::Inner, true, tolerance)
+        self.disc(
+            radius,
+            BoundSide::Inner,
+            true,
+            MorphologyMode::Exact,
+            tolerance,
+        )
     }
 
     /// Erosion by a disc of `radius`, containing the exact one: eroded by
@@ -945,7 +1039,76 @@ impl Region {
     ///
     /// As [`Self::dilate_inner`].
     pub fn erode_outer(&self, radius: f64, tolerance: Tolerance) -> Result<Self, OverlayError> {
-        self.disc(radius, BoundSide::Outer, true, tolerance)
+        self.disc(
+            radius,
+            BoundSide::Outer,
+            true,
+            MorphologyMode::Exact,
+            tolerance,
+        )
+    }
+
+    /// [`Self::dilate_inner`] in the given mode: [`MorphologyMode::Exact`]
+    /// gives the same result, [`MorphologyMode::Fast`] one whose
+    /// [`MorphologyBound`] (still `Inner`) carries the excess too.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::dilate_inner`], and
+    /// [`OverlayError::InvalidOffsetDistance`] for a fast mode's budget that
+    /// is not finite and nonnegative.
+    pub fn dilate_inner_with(
+        &self,
+        radius: f64,
+        tolerance: Tolerance,
+        mode: MorphologyMode,
+    ) -> Result<Self, OverlayError> {
+        self.disc(radius, BoundSide::Inner, false, mode, tolerance)
+    }
+
+    /// [`Self::dilate_outer`] in the given mode, as
+    /// [`Self::dilate_inner_with`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::dilate_inner_with`].
+    pub fn dilate_outer_with(
+        &self,
+        radius: f64,
+        tolerance: Tolerance,
+        mode: MorphologyMode,
+    ) -> Result<Self, OverlayError> {
+        self.disc(radius, BoundSide::Outer, false, mode, tolerance)
+    }
+
+    /// [`Self::erode_inner`] in the given mode, as
+    /// [`Self::dilate_inner_with`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::dilate_inner_with`].
+    pub fn erode_inner_with(
+        &self,
+        radius: f64,
+        tolerance: Tolerance,
+        mode: MorphologyMode,
+    ) -> Result<Self, OverlayError> {
+        self.disc(radius, BoundSide::Inner, true, mode, tolerance)
+    }
+
+    /// [`Self::erode_outer`] in the given mode, as
+    /// [`Self::dilate_inner_with`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::dilate_inner_with`].
+    pub fn erode_outer_with(
+        &self,
+        radius: f64,
+        tolerance: Tolerance,
+        mode: MorphologyMode,
+    ) -> Result<Self, OverlayError> {
+        self.disc(radius, BoundSide::Outer, true, mode, tolerance)
     }
 
     fn disc(
@@ -953,10 +1116,16 @@ impl Region {
         radius: f64,
         side: BoundSide,
         erode: bool,
+        mode: MorphologyMode,
         tolerance: Tolerance,
     ) -> Result<Self, OverlayError> {
         if !radius.is_finite() || radius < 0.0 {
             return Err(OverlayError::InvalidOffsetDistance);
+        }
+        if let MorphologyMode::Fast { budget } = mode {
+            if !budget.is_finite() || budget < 0.0 {
+                return Err(OverlayError::InvalidOffsetDistance);
+            }
         }
         if self.is_empty() || radius == 0.0 {
             let mut same = Self::from_valid_polygons(self.polygons().to_vec(), false);
@@ -985,7 +1154,7 @@ impl Region {
         // Inner dilation and outer erosion use the inscribed polygon, the
         // other two the circumscribed one.
         let inscribed = (side == BoundSide::Inner) != erode;
-        let (reach, deviation) = if inscribed {
+        let (mut reach, mut deviation) = if inscribed {
             let reach = radius - margin;
             (reach, radius - reach * half.cos())
         } else {
@@ -1003,16 +1172,54 @@ impl Region {
             });
             return Ok(same);
         }
+        // The fast mode sums the set with its notches filled, `excess`
+        // larger (`crate::fill`, #330): for discs of half the inscribed
+        // radius or more, the budget no more than that half, so that an
+        // inscribed polygon drawn in by the excess still reaches it.
+        let filled = match mode {
+            MorphologyMode::Exact => None,
+            MorphologyMode::Fast { budget } => {
+                let own = rings_of(self.polygons());
+                let shape = Layout::new(self.polygons());
+                let mut sides = Set::Region(shape.clone()).sides(&own);
+                if erode {
+                    // The sum is the complement's.
+                    for s in &mut sides {
+                        *s = s.flip();
+                    }
+                }
+                let t = 0.5 * (radius - margin);
+                let filled = crate::fill::fill(&own, &sides, t, budget.min(t), tolerance.linear());
+                if inscribed {
+                    reach -= filled.excess;
+                    deviation = radius - reach * half.cos();
+                } else {
+                    deviation += filled.excess;
+                }
+                Some((filled, shape))
+            }
+        };
         let k: Vec<Point2> = (0..n)
             .map(|i| {
                 let t = 2.0 * half * i as f64;
                 Point2::new(reach * t.cos(), reach * t.sin())
             })
             .collect();
-        let mut out = if erode {
-            self.erode_with(&k, tolerance)?
-        } else {
-            self.sum_with(&k, tolerance)?
+        let mut out = match filled {
+            None if erode => self.erode_with(&k, tolerance)?,
+            None => self.sum_with(&k, tolerance)?,
+            Some((filled, shape)) => {
+                let parts = [Part::Pieces(vec![k])];
+                let (rings, rule) = if erode {
+                    erosion_rule_of(filled.rings, shape, &parts, true, tolerance)
+                } else {
+                    sum_rule_of(&filled.rings, shape, &parts, true, tolerance)
+                };
+                let arrangement = ArcArrangement::new(&rings, tolerance)?;
+                let mut out = region_of(&arrangement, |r| rule.holds(r), true, tolerance)?;
+                out.set_excess(filled.excess);
+                out
+            }
         };
         out.set_bound(MorphologyBound { side, deviation });
         Ok(out)

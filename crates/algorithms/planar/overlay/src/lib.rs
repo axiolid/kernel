@@ -33,6 +33,7 @@ mod cover;
 mod degenerate;
 mod exact_arc;
 mod exact_overlay;
+mod fill;
 mod minkowski;
 mod offset;
 mod rectangle;
@@ -55,7 +56,7 @@ pub use degenerate::{
     DegenerateRings, DropReason, DroppedRing, OverlayOperand, OverlayOptions, ReportedOverlay,
     ReportedUnion, RingRole,
 };
-pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound};
+pub use minkowski::{BoundSide, MinkowskiError, MorphologyBound, MorphologyMode};
 pub use offset::{
     offset_polygons, polygon_area, ring_area, stroke_polyline, total_area, CapStyle, JoinStyle,
     OffsetEvidence, OffsetResult,

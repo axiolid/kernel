@@ -14,7 +14,7 @@
 
 use axiolid_core::Vec2;
 use axiolid_core::{Point2, Tolerance};
-use axiolid_overlay::{BoundSide, MinkowskiError, Polygon, Region, Ring};
+use axiolid_overlay::{BoundSide, MinkowskiError, MorphologyMode, Polygon, Region, Ring};
 
 fn tol() -> Tolerance {
     Tolerance::METRE
@@ -860,4 +860,216 @@ fn a_wall_along_a_side_of_the_disc_polygon_dilates_and_erodes_as_before() {
         }
     }
     assert_eq!(digest(&out), 1_896_521_490_611_984_927);
+}
+
+/// The ring of [`toothed_room`], `teeth` teeth of 0.5 mm per long wall.
+fn toothed_ring(teeth: u32) -> Vec<Point2> {
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    toothed_room(teeth, 5e-4, t).polygons()[0]
+        .outer
+        .points
+        .clone()
+}
+
+/// The disc morphology in the given mode: erode or dilate, inner or
+/// outer.
+fn morphology(
+    r: &Region,
+    erode: bool,
+    outer: bool,
+    radius: f64,
+    mode: MorphologyMode,
+) -> Result<Region, axiolid_overlay::OverlayError> {
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    match (erode, outer) {
+        (true, true) => r.erode_outer_with(radius, t, mode),
+        (true, false) => r.erode_inner_with(radius, t, mode),
+        (false, true) => r.dilate_outer_with(radius, t, mode),
+        (false, false) => r.dilate_inner_with(radius, t, mode),
+    }
+}
+
+/// #330's shapes: the toothed room, and its ring as a hole in a room 1.5 m
+/// larger all round.
+fn rooms_and_holes(teeth: u32) -> Vec<(&'static str, Region)> {
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let ring = toothed_ring(teeth);
+    let around = vec![
+        Point2::new(-1.5, -1.5),
+        Point2::new(6.0, -1.5),
+        Point2::new(6.0, 6.5),
+        Point2::new(-1.5, 6.5),
+    ];
+    let hole = Region::new(
+        vec![Polygon {
+            outer: Ring { points: around },
+            holes: vec![Ring {
+                points: ring.iter().rev().copied().collect(),
+            }],
+        }],
+        t,
+    )
+    .unwrap();
+    vec![("room", toothed_room(teeth, 5e-4, t)), ("hole", hole)]
+}
+
+#[test]
+fn the_exact_mode_is_the_default_bit_for_bit() {
+    // The modes' entry points in `MorphologyMode::Exact` give what the
+    // plain ones do, bit for bit, the toothed room's pinned digest too.
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let room = toothed_room(25, 5e-4, t);
+    let exact = MorphologyMode::default();
+    assert_eq!(exact, MorphologyMode::Exact);
+    let inner = room.erode_inner_with(0.75, t, exact).unwrap();
+    let outer = room.erode_outer_with(0.75, t, exact).unwrap();
+    assert_eq!(digest(&[inner, outer]), 13_049_825_630_976_000_310);
+    for r in [room, u_with_hole()] {
+        for erode in [false, true] {
+            for side in [false, true] {
+                let a = morphology(&r, erode, side, 0.3, exact).unwrap();
+                let plain = match (erode, side) {
+                    (true, true) => r.erode_outer(0.3, t),
+                    (true, false) => r.erode_inner(0.3, t),
+                    (false, true) => r.dilate_outer(0.3, t),
+                    (false, false) => r.dilate_inner(0.3, t),
+                }
+                .unwrap();
+                assert_eq!(a, plain);
+                assert_eq!(a.excess(), None);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_fast_mode_lies_on_the_certified_side_within_its_deviation() {
+    // #330's rooms and holes, 402 corners, by a 0.4 m disc in the fast
+    // mode: an inner result lies within the exact disc morphology and holds
+    // every point the exact one holds by the deviation's margin, an outer
+    // one the other way round; the deviation carries the excess. Most
+    // samples lie in bands about the toothed walls' offsets, where the
+    // filled notches change the result.
+    let radius = 0.4;
+    let budget = 1e-3;
+    let slack = 1e-7;
+    let mut points = samples(Point2::new(-1.6, -1.6), Point2::new(6.1, 6.6), 2000);
+    for centre in [-radius, radius, 5.0 - radius, 5.0 + radius] {
+        for half in [1e-3, 3e-4] {
+            points.extend(samples(
+                Point2::new(0.3, centre - half),
+                Point2::new(4.2, centre + half),
+                1000,
+            ));
+        }
+    }
+    for (name, r) in rooms_and_holes(100) {
+        for erode in [false, true] {
+            for outer in [false, true] {
+                let what = format!("{name}, erode {erode}, outer {outer}");
+                let exact = morphology(&r, erode, outer, radius, MorphologyMode::Exact).unwrap();
+                let fast =
+                    morphology(&r, erode, outer, radius, MorphologyMode::fast(budget)).unwrap();
+                let (bound, exact_bound) = (fast.bound().unwrap(), exact.bound().unwrap());
+                assert_eq!(bound.side, exact_bound.side, "{what}");
+                let excess = fast.excess().expect("a fast result's excess");
+                // About the square of the teeth's spacing over 8 t, t about
+                // half the radius: 0.0225^2 / 1.6.
+                assert!(excess > 3e-4 && excess <= budget, "{what}: {excess}");
+                assert!(
+                    bound.deviation >= exact_bound.deviation + 0.99 * excess
+                        && bound.deviation <= exact_bound.deviation + excess + 1e-12,
+                    "{what}: {} against {}",
+                    bound.deviation,
+                    exact_bound.deviation
+                );
+                let d = bound.deviation + slack;
+                let (mut inside, mut checked) = (0, 0);
+                for &p in &points {
+                    let held = in_region(&fast, p);
+                    inside += usize::from(held);
+                    let (sure, near) = if erode {
+                        let rule = |s: f64| in_exact_erosion(&r, p, s);
+                        if outer {
+                            (rule(radius), rule(radius - d))
+                        } else {
+                            (rule(radius + d), rule(radius))
+                        }
+                    } else {
+                        let rule = |s: f64| in_exact_dilation(&r, p, s);
+                        if outer {
+                            (rule(radius), rule(radius + d))
+                        } else {
+                            (rule(radius - d), rule(radius))
+                        }
+                    };
+                    // `sure`: the result must hold it; outside `near` it
+                    // must not.
+                    assert!(!sure || held, "{what}: {p:?} left out");
+                    assert!(!held || near, "{what}: {p:?} taken");
+                    checked += usize::from(sure != near);
+                }
+                assert!(inside > 100 && checked > 100, "{what}: {inside}, {checked}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_fast_mode_without_a_notch_to_fill_is_the_exact_one() {
+    // With a budget below every notch's excess, or on a plain rectangle,
+    // no notch is filled: the exact result bit for bit, its excess zero.
+    let t = Tolerance::new(1e-9, 1e-9).unwrap();
+    let plain = region(vec![Polygon {
+        outer: ring(&[(0.0, 0.0), (4.5, 0.0), (4.5, 5.0), (0.0, 5.0)]),
+        holes: vec![],
+    }]);
+    for (r, budget) in [
+        (toothed_room(100, 5e-4, t), 1e-4),
+        (toothed_room(100, 5e-4, t), 0.0),
+        (plain, 1e-3),
+    ] {
+        for erode in [false, true] {
+            for outer in [false, true] {
+                let exact = morphology(&r, erode, outer, 0.4, MorphologyMode::Exact).unwrap();
+                let fast = morphology(&r, erode, outer, 0.4, MorphologyMode::fast(budget)).unwrap();
+                assert_eq!(fast.excess(), Some(0.0));
+                assert_eq!(fast.polygons(), exact.polygons());
+                assert_eq!(fast.bound(), exact.bound());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_fast_budget_must_be_finite_and_nonnegative() {
+    let r = u_with_hole();
+    for budget in [-1e-3, f64::NAN, f64::INFINITY] {
+        for erode in [false, true] {
+            for outer in [false, true] {
+                assert_eq!(
+                    morphology(&r, erode, outer, 0.3, MorphologyMode::fast(budget)),
+                    Err(axiolid_overlay::OverlayError::InvalidOffsetDistance)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_hole_its_notches_would_close_keeps_its_ring() {
+    // A rhombus hole 0.2 mm high: the chords across it from either side
+    // would leave a ring of two corners. The ring keeps its notches, and
+    // the fast dilation is the exact one.
+    let h = 1e-4;
+    let r = region(vec![Polygon {
+        outer: ring(&[(-1.0, -1.0), (2.0, -1.0), (2.0, 1.0), (-1.0, 1.0)]),
+        holes: vec![ring(&[(0.0, 0.0), (0.5, h), (1.0, 0.0), (0.5, -h)])],
+    }]);
+    for outer in [false, true] {
+        let exact = morphology(&r, false, outer, 0.3, MorphologyMode::Exact).unwrap();
+        let fast = morphology(&r, false, outer, 0.3, MorphologyMode::fast(1e-3)).unwrap();
+        assert_eq!(fast.excess(), Some(0.0));
+        assert_eq!(fast.polygons(), exact.polygons());
+    }
 }
