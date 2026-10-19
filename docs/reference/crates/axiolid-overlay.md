@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.17 (2026-10-16) |
+| Latest release | 0.3.18 (2026-10-19) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -66,24 +66,42 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.17 (2026-10-16):
+Latest release, 0.3.18 (2026-10-19):
 
-### Fixed
+### Added
 
-- Minkowski sums and erosions, and the disc morphology built on them, no
-  longer refuse with `OverlayError::ZeroArea` footprints that 0.3.15
-  handled (#331, a regression of #323 in 0.3.16). Where a wall runs
-  parallel to a side of the convex piece -- a tessellated round body
-  against the 64-gon of `dilate_outer`, say -- with a corner an ulp off
-  the chord across it, trimming an edge hull by the chord's hull left a
-  sliver of three nearly collinear vertices, with an area under the
-  tolerance squared, and the arrangement refused it. A chord whose hull or
-  any trimmed hull would be such a ring is now not used: its hull and its
-  trimmed hulls are dropped and the edges it spans keep their whole hulls.
-  The consumer's footprints that failed now give 0.3.15's results bit for
-  bit; `tests/minkowski.rs` pins synthetic walls of that kind, 15 of whose
-  36 results 0.3.16 refused, against 0.3.15 by hash. Results 0.3.16 gave
-  are unchanged, and so is the cost. `scripts/probe_minkowski_degenerate_mutants.py`
-  lists the faults the tests must catch.
+- A fast mode for the disc morphology (#330, ADR 0087).
+  `Region::erode_inner_with`, `erode_outer_with`, `dilate_inner_with` and
+  `dilate_outer_with` take a `MorphologyMode`:
+  - `MorphologyMode::Exact`, the default, is what `erode_inner` and its
+    siblings give, unchanged bit for bit. A CAD kernel takes it.
+  - `MorphologyMode::fast(budget)` first fills the summed set's notches with
+    chords proved to lie outside it (`src/fill.rs`), so a wall of teeth
+    becomes one edge. A chord is used only when the excess it adds stays
+    within `budget`, in metres; a refused chord is split into shorter ones.
+    The result keeps its inner or outer side. The excess is part of
+    `MorphologyBound::deviation`, and `Region::excess` reports it on its
+    own. A rule engine takes this mode.
+
+  The excess is a proved bound on how much larger the filled set makes the
+  sum: about the square of the spacing of the corners on the chord over
+  eight times the radius, and never more than the notch's depth. A budget
+  that is not finite and nonnegative is refused with
+  `OverlayError::InvalidOffsetDistance`.
+
+  Measured on #330's cases (#323's room with 0.5 mm teeth, as a room and
+  as a hole, a 0.4 m disc, a 1 mm budget, release) with
+  `cargo bench -p axiolid-benchmark --bench disc_erosion`. At 10,002
+  corners, exact mode takes 3–11 s and about 1.2 GB, and grows about with
+  the square of the corners (2.9–7.8 s and 1.15–1.19 GB in this run).
+  Fast mode takes 0.010–0.013 s, 0.020–0.024 s and 0.036–0.045 s at 2,402,
+  5,002 and 10,002 corners, at 4–7 MB, so it grows about linearly. Its
+  excess is 35 µm, 8 µm and 2 µm at those sizes, and 0.9 mm at 10,002
+  corners in the four cases where a chord within the budget cuts a corner
+  of the room. Exact mode's hashes are those of 0.3.17 in every case. Tests check fast results pointwise against the true disc
+  morphology on the certified side, within the stated deviation, for rooms
+  and holes, inner and outer, erosion and dilation.
+  `scripts/probe_fast_morphology_mutants.py` lists the faults they must
+  catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

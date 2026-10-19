@@ -382,10 +382,10 @@
       "description": "Deterministic validated planar overlay contract",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/overlay",
-      "released": "0.3.17",
-      "released_date": "2026-10-16",
+      "released": "0.3.18",
+      "released_date": "2026-10-19",
       "role": "algorithm.planar",
-      "version": "0.3.17"
+      "version": "0.3.18"
     },
     "axiolid-pointcloud": {
       "description": "Portable point-sampled geometry values with optional per-point channels.",

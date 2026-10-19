@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-10-19
+
 ### Added
 
 - A fast mode for the disc morphology (#330, ADR 0087).
