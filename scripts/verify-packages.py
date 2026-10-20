@@ -450,15 +450,22 @@ def unpack_archives(archives: Path, packages: list[dict], destination: Path) -> 
 
 
 def check_minimal_versions(
-    released: list[dict], archives: Path, temporary_path: Path
+    released: list[dict], archives: Path, temporary_path: Path, patched: list[dict] | None = None
 ) -> list[str]:
-    """Build each to-be-released crate against its minimal internal versions;
-    return one line per checked (crate, feature set)."""
+    """Build each crate in `released` against its minimal internal versions;
+    return one line per checked (crate, feature set).
+
+    `patched` (default: `released`) is every crate whose new version is not
+    on crates.io: each checked crate resolves its unpublished siblings from
+    their archives, so checking one crate of a release still finds the new
+    versions of the others it requires."""
     require_toolchain()
     # Outside every scratch workspace: a path dependency below a workspace
     # root would become a member and drag its dev-dependencies into the
     # resolution.
-    patches = unpack_archives(archives, released, temporary_path / "minimal-packages")
+    patches = unpack_archives(
+        archives, patched if patched is not None else released, temporary_path / "minimal-packages"
+    )
     environment = os.environ.copy()
     environment["CARGO_TARGET_DIR"] = str(temporary_path / "minimal-target")
     environment.pop("RUSTUP_TOOLCHAIN", None)
@@ -548,10 +555,14 @@ def main() -> None:
 
     publishable, excluded = workspace_packages(cargo_metadata())
     lookup_started = time.monotonic()
+    pending = to_be_released(publishable)
     if args.crates is not None:
         released = select_packages(publishable, [n for n in args.crates.split(",") if n])
     else:
-        released = to_be_released(publishable)
+        released = pending
+    # The checked crates plus every unpublished one they may require.
+    names = {package["name"] for package in released}
+    patched = released + [package for package in pending if package["name"] not in names]
     print(
         "MINIMAL_VERSIONS_SET="
         + (",".join(f'{p["name"]}@{p["version"]}' for p in released) or "-")
@@ -569,13 +580,15 @@ def main() -> None:
             if not released:
                 print("MINIMAL_VERSIONS=PASS crates=0 builds=0 seconds=0")
                 return
-            archives = package_selected(released, temporary_path, patch_config, args.allow_dirty)
+            archives = package_selected(patched, temporary_path, patch_config, args.allow_dirty)
         else:
             archives, roots = bootstrap_preflight(
                 publishable, excluded, temporary_path, patch_config, args.allow_dirty
             )
         started = time.monotonic()
-        checked = check_minimal_versions(released, archives, temporary_path) if released else []
+        checked = (
+            check_minimal_versions(released, archives, temporary_path, patched) if released else []
+        )
         minimal_seconds = time.monotonic() - started
 
     if roots is not None:

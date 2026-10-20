@@ -129,6 +129,9 @@ All notable changes to Axiolid are documented in this file.
   requirements admit (pinned `nightly-2026-09-25`, `-Z minimal-versions`,
   internal crates only), and names the crate that does not build.
   `scripts/probe_minimal_versions_gate.py` (5 mutants) runs in the gate.
+  Checking named crates (`--crates`) still patches in every crate that is
+  not on crates.io yet, so a crate of a multi-crate release resolves its
+  unpublished siblings.
 
 ### Changed
 
