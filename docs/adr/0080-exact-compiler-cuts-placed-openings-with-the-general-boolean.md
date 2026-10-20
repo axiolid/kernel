@@ -785,3 +785,32 @@ caller's tolerance), `crates/execution/compile/tests/curved_wall_openings.rs`
 refused where it touches itself), `fillet_tangent.rs` and
 `exact_tangent_hole.rs` (the half-tolerance hole, cut finer); probe
 `scripts/probe_finer_boolean_mutants.py`.
+
+## Amendment 2026-10-20: a faceted face's `0` means planar (#343)
+
+The #257 rule above gave a B-rep face without a surface `0` whenever its
+corners lay within the linear tolerance of their fit plane, and the slab
+width `w` only beyond it. So `0` meant "within a millimetre", not
+"planar": the faceted IFC2X3 walls #343 measured at `(1.5e6, 5.0e6)`
+have faces off their plane by up to `4.1e-10` m in exact arithmetic, and
+each reported a proven `0`.
+
+- **Decision (maintainer).** A face without a surface whose corners are
+  not exactly coplanar reports `Certified(w)` under
+  `"non-planar face without a surface"`, the width #261 already computes,
+  however small. Coplanarity is decided on the stored corners by the
+  certified `orient3d` (a plane through two distinct corners and a third
+  off their line, every corner exactly on it), so `0` is now a proof. A
+  tilted face whose corners are exactly coplanar still reports `0`.
+- **Unchanged.** A face warped beyond the tolerance reports the same `w`
+  as before, the triangulation is unchanged, and authored polygon faces
+  keep their tolerance rule (#261). A faceted face rounded off its plane
+  by a few ulps now reports about 64 ulps of its reach rather than `0`,
+  well within any budget, so whether a mesh meets its requested chord
+  error does not change for it.
+
+Tests: `crates/execution/compile/tests/brep_warped_faces.rs` (a corner
+lifted `9e-4`, `1e-6` and `4e-10` m reports half its lift; an exactly
+coplanar tilted top reports `0`), the `planar` unit tests (exact
+coplanarity, a diagonal wall on a national grid); probe
+`scripts/probe_faceted_planarity_mutants.py`.

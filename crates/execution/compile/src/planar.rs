@@ -125,6 +125,8 @@ use axiolid_construct::profile::{
 };
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Vec3};
+use axiolid_guarantees::Sign;
+use axiolid_reference::{orient2d, orient3d};
 
 /// Newell normal of a closed ring: correct for concave rings and rings that
 /// start with collinear corners. Its length is twice the ring's area.
@@ -1110,21 +1112,24 @@ impl CornerSpread {
     }
 }
 
-/// How far a polygon given as an outer ring plus holes is warped, as
-/// [`triangulate_authored_polygon`] reports it: `None` when every corner
-/// lies within `linear` of the fit plane, else `Some` slab width of the
-/// module notes (#261). For a caller that triangulates the polygon itself
-/// projected along the same Newell normal, such as a B-rep face that
-/// declares no surface (#257).
+/// How far a polygon given as an outer ring plus holes is warped, for a
+/// caller that triangulates it itself projected along the outer ring's
+/// Newell normal, such as a B-rep face that declares no surface (#257):
+/// `None` when every corner lies exactly in one plane, else `Some` slab
+/// width of the module notes (#261), however small (#343).
+///
+/// "Exactly" is exact arithmetic on the stored corners
+/// ([`exactly_coplanar`]), so `None` is a proof that the polygon is its
+/// own flat surface, not a reading within a tolerance. A face warped by
+/// less than the linear tolerance is triangulated as before and reports
+/// its width; one warped beyond it reports the same width it always did.
+/// [`triangulate_authored_polygon`] keeps its own rule, the tolerance.
 ///
 /// # Refusals
 ///
 /// [`PolygonRefusal::NoPlane`] when the outer ring encloses no area or a
 /// corner is not finite.
-pub(crate) fn polygon_warp(
-    rings: &[&[Vec3]],
-    linear: Scalar,
-) -> Result<Option<Scalar>, PolygonRefusal> {
+pub(crate) fn polygon_slab(rings: &[&[Vec3]]) -> Result<Option<Scalar>, PolygonRefusal> {
     let Some(outer) = rings.first().filter(|outer| !outer.is_empty()) else {
         return Err(PolygonRefusal::NoPlane);
     };
@@ -1133,7 +1138,37 @@ pub(crate) fn polygon_warp(
     let n = normal.normalize();
     let centroid = outer.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / outer.len() as Scalar;
     let spread = CornerSpread::of(rings, centroid, n)?;
-    Ok(spread.beyond(linear))
+    Ok((!exactly_coplanar(rings)).then(|| spread.slab_width()))
+}
+
+/// Whether every corner of `rings` lies in one plane, decided exactly on
+/// the stored coordinates by the certified orientation predicates: a
+/// plane through two distinct corners and a third off their line, and
+/// `orient3d` exactly zero for every corner against it. Corners all on
+/// one line, or all equal, lie in a plane too.
+pub(crate) fn exactly_coplanar(rings: &[&[Vec3]]) -> bool {
+    let corners: Vec<Vec3> = rings.iter().flat_map(|ring| ring.iter().copied()).collect();
+    let Some(&a) = corners.first() else {
+        return true;
+    };
+    let Some(&b) = corners.iter().find(|&&p| p != a) else {
+        return true;
+    };
+    let Some(&c) = corners.iter().find(|&&p| !exactly_collinear(a, b, p)) else {
+        return true;
+    };
+    corners
+        .iter()
+        .all(|&p| orient3d(a, b, c, p).sign() == Some(Sign::Zero))
+}
+
+/// Whether `c` lies on the line through `a` and `b`, exactly: three points
+/// are collinear exactly when each of their axis projections is.
+fn exactly_collinear(a: Vec3, b: Vec3, c: Vec3) -> bool {
+    let flat = |p: Vec3, i: usize, j: usize| Point2::new(p[i], p[j]);
+    [(0, 1), (1, 2), (2, 0)].into_iter().all(|(i, j)| {
+        orient2d(flat(a, i, j), flat(b, i, j), flat(c, i, j)).sign() == Some(Sign::Zero)
+    })
 }
 
 /// A typed error naming the authored face that could not be triangulated.
@@ -1504,12 +1539,59 @@ mod tests {
                 .unwrap();
             assert!((want..want + 1e-12).contains(&warp), "{warp}, want {want}");
             // The B-rep path measures the same way (#257).
-            assert_eq!(polygon_warp(rings, 1e-3), Ok(Some(warp)));
+            assert_eq!(polygon_slab(rings), Ok(Some(warp)));
         }
         let mut planar = lifted[0].to_vec();
         planar[2].z = 0.0;
-        assert_eq!(polygon_warp(&[&planar], 1e-3), Ok(None));
-        assert_eq!(polygon_warp(&[], 1e-3), Err(PolygonRefusal::NoPlane));
+        assert_eq!(polygon_slab(&[&planar]), Ok(None));
+        // Within the tolerance a warp is still a warp (#343): only an
+        // exactly planar polygon reports none.
+        planar[2].z = 4e-10;
+        let slab = polygon_slab(&[&planar]).unwrap().expect("warped");
+        assert!((2e-10..1e-9).contains(&slab), "{slab}");
+        assert_eq!(polygon_slab(&[]), Err(PolygonRefusal::NoPlane));
+    }
+
+    /// Coplanarity is exact (#343): a plane is found through any first
+    /// corners, even a vertical edge's whose axis projection is a point,
+    /// and a corner `4e-10` off it is off it.
+    #[test]
+    fn coplanarity_is_decided_exactly() {
+        let wall = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        ];
+        assert!(exactly_coplanar(&[&wall]));
+        let mut warped = wall;
+        warped[3].y = 4e-10;
+        assert!(!exactly_coplanar(&[&warped]));
+        // Exactly coplanar off every axis plane: x + 2y + 4z = 4.
+        let tilted = [
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(2.0, 0.0, 0.5),
+        ];
+        assert!(exactly_coplanar(&[&tilted]));
+        // A diagonal wall on a national grid, exactly in the plane x = y:
+        // its distances computed in f64 from the rounded Newell normal are
+        // not all zero, yet it is planar, and says so.
+        let t = 1_507_969.853_114_797_3;
+        let diagonal = [
+            Vec3::new(t, t, 25.09),
+            Vec3::new(t + 1.0, t + 1.0, 25.09),
+            Vec3::new(t + 1.0, t + 1.0, 27.94),
+            Vec3::new(t, t, 27.94),
+        ];
+        let normal = newell_normal(diagonal.iter().copied()).normalize();
+        let spread = CornerSpread::of(&[&diagonal], diagonal[0], normal).unwrap();
+        assert!(spread.above - spread.below > 0.0, "{spread:?}");
+        assert_eq!(polygon_slab(&[&diagonal]), Ok(None));
+        // Collinear and coincident corners lie in a plane.
+        assert!(exactly_coplanar(&[&wall[..2]]));
+        assert!(exactly_coplanar(&[&[wall[0]; 3]]));
     }
 
     /// Every ring corner in a triangle, every ring edge used once and

@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- A B-rep face without a surface reports its slab width whenever its
+  corners are not exactly coplanar (#343, ADR 0080 amendment
+  2026-10-20). Within the linear tolerance of its fit plane it reported a
+  proven `0`, so faceted IFC walls whose faces lie up to `4e-10` m off
+  their plane read as exact. Coplanarity is now decided in exact
+  arithmetic on the stored corners (certified `orient3d`), and a face that
+  fails it reports `Certified(w)` under `"non-planar face without a
+  surface"`, the width #261 computes, however small; `0` now means
+  planar. An exactly coplanar face, tilted or not, still reports `0`; a
+  face warped beyond the tolerance reports what it did, and authored
+  polygon faces keep their tolerance rule.
+
 ## [0.3.30] - 2026-10-20
 
 ### Added

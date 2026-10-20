@@ -50,9 +50,11 @@
 //!   is their chord bounds plus each sample's distance from the plane. A
 //!   face skipped for having no area is unbounded by name.
 //! - A face that declares no surface (#257) is its boundary polygon and
-//!   nothing else. Within the linear tolerance of its fit plane it is
-//!   planar and exact, `0`, as before. Warped beyond it, it has no single
-//!   flat surface, so it is measured as a warped authored polygon face is
+//!   nothing else. Its corners exactly coplanar (decided in exact
+//!   arithmetic on the stored coordinates), it is planar and exact, `0`.
+//!   Otherwise it has no single flat surface, however little it is warped
+//!   (#343: a warp within the linear tolerance read `0` before), so it is
+//!   measured as a warped authored polygon face is
 //!   (`crate::planar`, #261): projected along the outer ring's Newell
 //!   normal, exactly as it is triangulated here, it reports the width of
 //!   the slab its corners (holes included) span about the fit plane,
@@ -549,7 +551,7 @@ fn append_face(
         }
     }
     if support.is_none() {
-        report_warp(ctx, &rings, deviation)?;
+        report_warp(&rings, deviation)?;
     }
     // Weld through every corner a face inserts into a shared edge (#265):
     // this face takes each such corner on its own copy of the edge.
@@ -757,18 +759,18 @@ fn checked_closure(mesh: &TriMesh, declared: MeshClosure) -> MeshClosure {
 }
 
 /// Measure the warp of a face that declares no surface (#257) and report it
-/// by name when its corners lie off their fit plane beyond the linear
-/// tolerance. `rings` holds the outer ring first, as the face is
-/// triangulated: projected along the outer ring's Newell normal, the plane
-/// [`crate::planar::polygon_warp`] measures against. The module notes say
-/// why it is certified rather than refused.
-fn report_warp(ctx: &FaceContext<'_>, rings: &[Ring], deviation: &mut Deviation) -> GeomResult<()> {
+/// by name unless its corners lie exactly in one plane (#343), however
+/// little they leave it. `rings` holds the outer ring first, as the face
+/// is triangulated: projected along the outer ring's Newell normal, the
+/// plane [`crate::planar::polygon_slab`] measures against. The module
+/// notes say why it is certified rather than refused.
+fn report_warp(rings: &[Ring], deviation: &mut Deviation) -> GeomResult<()> {
     let points: Vec<Vec<Vec3>> = rings
         .iter()
         .map(|ring| ring.iter().map(|&(_, p)| p).collect())
         .collect();
     let views: Vec<&[Vec3]> = points.iter().map(Vec::as_slice).collect();
-    let warp = crate::planar::polygon_warp(&views, ctx.tolerance.linear()).map_err(|refusal| {
+    let warp = crate::planar::polygon_slab(&views).map_err(|refusal| {
         GeomError::Degenerate(format!("planar face cannot be measured: {refusal}"))
     })?;
     if let Some(warp) = warp {

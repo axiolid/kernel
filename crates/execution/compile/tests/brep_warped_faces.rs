@@ -233,11 +233,13 @@ fn a_box_with_one_corner_lifted_five_centimetres_is_not_exact() {
     }
 }
 
-/// A planar box, and one whose top is warped within the linear tolerance,
-/// stay exact: no warped-face contribution and every bound `Proven(0)`.
+/// A planar box stays exact: no warped-face contribution and every bound
+/// `Proven(0)`. So does one whose top is tilted, `z = 1 + x / 2 + y / 4`:
+/// its corners are not in an axis plane, but they are exactly coplanar,
+/// and exactly is what `0` claims (#343).
 #[test]
 fn a_planar_box_stays_exact() {
-    for top in [[1.0; 4], [1.0, 1.0, 1.0 + 9e-4, 1.0]] {
+    for top in [[1.0; 4], [1.0, 1.5, 1.75, 1.25]] {
         let (_, report) = compile(box_with_top(top), None);
         assert_eq!(warp_of(&report), None, "{report:?}");
         assert_eq!(report.bound, Some(0.0), "{report:?}");
@@ -248,6 +250,29 @@ fn a_planar_box_stays_exact() {
                 .all(|c| c.bound == DeviationBound::Proven(0.0)),
             "{report:?}"
         );
+    }
+}
+
+/// A warp within the linear tolerance is still a warp (#343). A faceted
+/// face reported `0` whenever its corners lay within the tolerance of their
+/// fit plane, so `0` meant "within a millimetre", not "planar". Now a top
+/// with one corner lifted by `h` reports the slab `h / 2` the module notes
+/// derive (a lifted corner, above), down to the `4e-10` m a faceted IFC
+/// export left on a wall on a national grid, and `0` means planar.
+#[test]
+fn a_warp_within_the_tolerance_reports_its_slab() {
+    for h in [9e-4, 1e-6, 4e-10] {
+        let (_, report) = compile(box_with_top([1.0, 1.0, 1.0 + h, 1.0]), None);
+        let warp = certified(&report);
+        let want = 0.5 * h * 2.0 / (4.0 + 2.0 * h * h).sqrt();
+        // The slab plus its rounding, 64 ulps of the corners' reach.
+        assert!(
+            (want..want + 1e-13).contains(&warp),
+            "h = {h:e}: warp {warp:e}, want {want:e}"
+        );
+        assert_eq!(report.bound, Some(warp), "{report:?}");
+        // Well within a millimetre: the mesh still meets its budget.
+        assert!(report.meets_requested(), "{report:?}");
     }
 }
 
