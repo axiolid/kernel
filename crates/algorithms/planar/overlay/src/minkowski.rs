@@ -754,10 +754,9 @@ pub(crate) fn region_of(
             holes,
         });
     }
-    Ok(Region::from_valid_polygons(
-        crate::settle::settle(polygons, tolerance),
-        had_input,
-    ))
+    // Settled, so it carries the proof its rings are valid (#341).
+    let (polygons, validated) = crate::settle::settle_validated(polygons, tolerance);
+    Ok(Region::from_valid_polygons(polygons, had_input).with_validated(validated))
 }
 
 impl Region {
@@ -1128,7 +1127,8 @@ impl Region {
             }
         }
         if self.is_empty() || radius == 0.0 {
-            let mut same = Self::from_valid_polygons(self.polygons().to_vec(), false);
+            let mut same = Self::from_valid_polygons(self.polygons().to_vec(), false)
+                .with_validated(self.validated());
             same.set_bound(MorphologyBound {
                 side,
                 deviation: 0.0,
@@ -1165,7 +1165,8 @@ impl Region {
             // The margin swallows the disc: the polygon is a point for the
             // inner dilation (the region itself) and the region itself is an
             // outer erosion.
-            let mut same = Self::from_valid_polygons(self.polygons().to_vec(), true);
+            let mut same = Self::from_valid_polygons(self.polygons().to_vec(), true)
+                .with_validated(self.validated());
             same.set_bound(MorphologyBound {
                 side,
                 deviation: radius + margin,

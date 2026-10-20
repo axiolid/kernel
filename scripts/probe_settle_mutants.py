@@ -20,7 +20,7 @@ S = "crates/algorithms/planar/overlay/src/settle.rs"
 TESTS = ["-p", "axiolid-overlay", "--test", "roundtrip"]
 
 MUTANTS = [
-    ('overlay output not settled', L, 'let polygons = settle::settle(canonical_polygons(rings), tolerance);', 'let polygons = canonical_polygons(rings);', TESTS),
+    ('overlay output not settled', L, 'let (polygons, validated) = settle::settle_validated(canonical_polygons(rings), tolerance);', 'let (polygons, validated) = (canonical_polygons(rings), None::<settle::Validated>);', TESTS),
     ('offset output not settled', O, '        crate::settle::settle(\n            to_kernel(backend_shape(polygons).outline(&style)),\n            tolerance,\n        )', '        to_kernel(backend_shape(polygons).outline(&style))', TESTS),
     ('rings passing a point twice kept whole', S, '        if let Some((i, j)) = split_point(&ring) {', '        if let Some((i, j)) = split_point(&ring).filter(|_| false) {', TESTS),
     ('touching vertices left off the edge', S, '        match touching(&ring, eps) {', '        match None::<Vec<Point2>>.or_else(|| { let _ = touching; None }) {', TESTS),

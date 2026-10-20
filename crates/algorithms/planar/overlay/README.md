@@ -29,6 +29,12 @@ cargo add axiolid-overlay
   memory budget the subdivision is charged before it allocates and refused with
   `OverlayRefusal::BudgetExceeded` before it would hold more (`src/budget.rs`, ADR 0088).
   `scripts/probe_grown_soup_mutants.py` lists the faults its tests must catch.
+- Ring validation asks the crate's box tree for the edge pairs that can meet within the
+  tolerance, decided by the same exact test in the same order, so a ring of 100,000 corners
+  validates in about `n log n`. A `Region` carries the proof that its rings are valid under its
+  tolerance, set only by `Region::new` and by settled outputs, and booleans on regions under that
+  tolerance do not validate them again (#341). `scripts/probe_ring_validation_mutants.py` lists
+  the faults its tests must catch.
 - A degenerate input ring refuses the operation by default. `overlay_with` and
   `union_soup_with` with `OverlayOptions::dropping_degenerate_rings` leave out a ring that
   is too short, has a repeated vertex, or has zero area under the exact `ZeroArea` rule,

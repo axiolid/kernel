@@ -30,9 +30,64 @@ use crate::contact::{on_segment, segments_intersect};
 use crate::segment_sweep::rounded_crossing;
 use crate::{contains, orientation, signed, zero_area, Polygon, Ring};
 
+/// Proof that every ring of a set of polygons passes
+/// [`crate::validate_ring`] under one linear tolerance (#341).
+///
+/// Minted in two places only, both in this module: [`Validated::check`],
+/// which runs the validation, and [`settle_validated`], whose every kept
+/// ring passed the same tests validation applies. A [`crate::Region`]
+/// carries it, so an operation on regions skips validating rings already
+/// known valid; nothing a caller builds can carry one. Valid at one
+/// tolerance is not valid at a larger one, so it holds for its own
+/// tolerance only.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Validated {
+    linear: f64,
+}
+
+impl Validated {
+    /// Validate every ring of `polygons`, each refused with its reason.
+    pub(crate) fn check(
+        polygons: &[Polygon],
+        tolerance: Tolerance,
+    ) -> Result<Self, crate::OverlayError> {
+        for polygon in polygons {
+            crate::validate_ring(&polygon.outer, tolerance)?;
+            for hole in &polygon.holes {
+                crate::validate_ring(hole, tolerance)?;
+            }
+        }
+        Ok(Self {
+            linear: tolerance.linear(),
+        })
+    }
+
+    /// Whether the proof covers validation under `tolerance`.
+    pub(crate) fn holds_for(self, tolerance: Tolerance) -> bool {
+        self.linear == tolerance.linear()
+    }
+}
+
 /// Polygons whose every ring passes [`crate::validate_ring`].
 pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygon> {
+    settle_validated(polygons, tolerance).0
+}
+
+/// [`settle`], with the proof that every ring passes
+/// [`crate::validate_ring`] when each was settled by those tests (#341).
+///
+/// A ring is kept once it has more than two vertices, all finite, no edge
+/// within the tolerance, no point twice, no pair of edges meeting within
+/// the tolerance and more than the tolerance squared of area: what
+/// validation asks, by the same exact tests. Only a ring whose repairs
+/// ran out of their step budget is kept untested, and then no proof is
+/// given.
+pub(crate) fn settle_validated(
+    polygons: Vec<Polygon>,
+    tolerance: Tolerance,
+) -> (Vec<Polygon>, Option<Validated>) {
     let eps = tolerance.linear();
+    let mut proved = true;
     let mut outers: Vec<Vec<Point2>> = Vec::new();
     let mut holes: Vec<Vec<Point2>> = Vec::new();
     for polygon in polygons {
@@ -40,7 +95,9 @@ pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygo
             .chain(polygon.holes.into_iter().map(|h| (h, true)))
         {
             let sense = orientation(&ring.points) == Sign::Positive;
-            for piece in pieces(ring.points, eps) {
+            let (cut, tested) = pieces(ring.points, eps);
+            proved &= tested;
+            for piece in cut {
                 let same = (orientation(&piece) == Sign::Positive) == sense;
                 if same != hole {
                     outers.push(piece);
@@ -94,7 +151,16 @@ pub(crate) fn settle(polygons: Vec<Polygon>, tolerance: Tolerance) -> Vec<Polygo
             out[i].holes.push(ring);
         }
     }
-    out
+    let validated = proved.then_some(Validated { linear: eps });
+    debug_assert!(
+        validated.is_none()
+            || out
+                .iter()
+                .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+                .all(|ring| crate::ring_checks(ring, tolerance).is_ok()),
+        "settled rings pass validation"
+    );
+    (out, validated)
 }
 
 fn area(points: &[Point2]) -> f64 {
@@ -112,8 +178,10 @@ fn strictly_inside(ring: &Ring, p: Point2, eps: f64) -> bool {
     !near && contains(ring, p)
 }
 
-/// The ring repaired and cut into rings validation accepts.
-fn pieces(points: Vec<Point2>, eps: f64) -> Vec<Vec<Point2>> {
+/// The ring repaired and cut into rings validation accepts, and whether
+/// every one was tested to: `false` when the repairs ran out of steps.
+fn pieces(points: Vec<Point2>, eps: f64) -> (Vec<Vec<Point2>>, bool) {
+    let mut tested = true;
     let mut done = Vec::new();
     let mut work = vec![points];
     let mut budget = 64 + 8 * work[0].len();
@@ -129,16 +197,20 @@ fn pieces(points: Vec<Point2>, eps: f64) -> Vec<Vec<Point2>> {
             continue;
         }
         if budget == 0 {
+            tested = false;
             done.push(ring);
             continue;
         }
         budget -= 1;
         match touching(&ring, eps) {
             Some(fixed) => work.push(fixed),
-            None => done.push(ring),
+            None => {
+                tested &= ring.iter().all(|p| p.is_finite());
+                done.push(ring);
+            }
         }
     }
-    done
+    (done, tested)
 }
 
 /// Drop each vertex within `eps` of the one before it.
@@ -326,7 +398,7 @@ mod tests {
             let cross = |a: Point2, b: Point2, c: Point2| (b - a).perp_dot(c - a);
             let s = cross(c, d, a) / (cross(c, d, a) - cross(c, d, b));
             rounded_off += usize::from(a + (b - a) * s != u);
-            let settled = pieces(ring.clone(), 0.0);
+            let settled = pieces(ring.clone(), 0.0).0;
             assert_eq!(settled.len(), 2, "{ring:?}");
             for piece in settled {
                 assert!(piece.contains(&u), "{ring:?}: {piece:?}");

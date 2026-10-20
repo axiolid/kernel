@@ -24,6 +24,30 @@ caret rule for `0.x` versions.
   and that four times the unbudgeted high-water mark is admitted. The
   crate now depends on `axiolid-contracts`.
 
+### Changed
+
+- Ring validation no longer compares every pair of a ring's edges (#341).
+  A ring of more than 32 edges asks the crate's box tree for the pairs
+  whose boxes, grown by the tolerance, overlap, and the unchanged exact
+  `segments_intersect` decides each, in the old order: the refusals, their
+  order and the first pair found are as before, which a test checks
+  against the all-pairs search on rings valid, crossing, touching and
+  within the tolerance. And a `Region` carries the proof that its rings
+  are valid under the tolerance it was built with: `Region::new` sets it,
+  and a boolean on regions and the disc morphology set it from their
+  settled output, so `Region::union`, `intersection` and `difference`
+  under the same tolerance validate no ring again (holes are still checked
+  against their outer rings). A region translated, or used under another
+  tolerance, is validated as before; the proof is not part of `Region`
+  equality. Measured with `cargo bench -p axiolid-overlay --bench
+  ring_validation` (release), on a 40 m by 30 m floor with toothed walls:
+  `Region::new` at 10,000, 50,000 and 100,000 corners took 0.17 s, 4.2 s
+  and 17 s and now takes 0.006 s, 0.028 s and 0.059 s; a
+  `Region::difference` with a 1 m square took 0.20 s, 4.4 s and 18 s per
+  call and now takes 0.029 s, 0.18 s and 0.38 s.
+  `scripts/probe_ring_validation_mutants.py` lists the faults the tests
+  must catch.
+
 ### Fixed
 
 - A soup of grown triangles whose union is one polygon no longer needs

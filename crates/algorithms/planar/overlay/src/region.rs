@@ -34,7 +34,8 @@ use axiolid_core::{Point2, Tolerance, Vec2};
 
 use crate::minkowski::MorphologyBound;
 use crate::offset::{offset_polygons, total_area, JoinStyle};
-use crate::{canonical, validate_ring, OverlayError, Polygon, Ring};
+use crate::settle::Validated;
+use crate::{canonical, OverlayError, Polygon, Ring};
 
 /// What an operation did to produce a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,7 +57,12 @@ pub struct RegionEvidence {
 /// canonical (outer counter-clockwise, holes clockwise, each rotated to its
 /// lexicographically smallest vertex) and polygons are sorted, so equal
 /// regions compare equal regardless of how they were built.
-#[derive(Debug, Clone, PartialEq, Default)]
+///
+/// A region built by [`Region::new`] or by a boolean on regions carries
+/// the proof that its rings are valid under that call's tolerance (#341),
+/// and a boolean on it under the same tolerance does not validate them
+/// again. The proof is not part of equality.
+#[derive(Debug, Clone, Default)]
 pub struct Region {
     polygons: Vec<Polygon>,
     evidence: RegionEvidence,
@@ -66,6 +72,19 @@ pub struct Region {
     /// For a fast disc morphology, the excess its filled notches add
     /// (#330).
     excess: Option<f64>,
+    /// Every ring passes validation under this tolerance (#341): set by
+    /// [`Region::new`] and by settled outputs only.
+    validated: Option<Validated>,
+}
+
+impl PartialEq for Region {
+    fn eq(&self, other: &Self) -> bool {
+        // The proof says how the region was reached, not what it is.
+        self.polygons == other.polygons
+            && self.evidence == other.evidence
+            && self.bound == other.bound
+            && self.excess == other.excess
+    }
 }
 
 /// Normalise a polygon set: canonical ring order, deterministic sorting.
@@ -114,17 +133,17 @@ impl Region {
     /// Validation is the same used by [`crate::overlay`], so the two cannot
     /// disagree about what a well-formed polygon is.
     pub fn new(polygons: Vec<Polygon>, tolerance: Tolerance) -> Result<Self, OverlayError> {
-        for polygon in &polygons {
-            validate_ring(&polygon.outer, tolerance)?;
-            for hole in &polygon.holes {
-                validate_ring(hole, tolerance)?;
-            }
-        }
-        Ok(Self::from_valid(normalise(polygons), false))
+        let validated = Validated::check(&polygons, tolerance)?;
+        let mut region = Self::from_valid(normalise(polygons), false);
+        // Turning and rotating a ring, and ordering rings, change nothing
+        // validation reads.
+        region.validated = Some(validated);
+        Ok(region)
     }
 
     /// Wrap already-valid geometry, recording whether the producing operation
-    /// annihilated a non-empty input.
+    /// annihilated a non-empty input. No proof of validity is carried; see
+    /// [`Self::with_validated`].
     fn from_valid(polygons: Vec<Polygon>, had_input: bool) -> Self {
         let evidence = RegionEvidence {
             polygons: polygons.len(),
@@ -136,7 +155,20 @@ impl Region {
             evidence,
             bound: None,
             excess: None,
+            validated: None,
         }
+    }
+
+    /// This region with the proof `validated` of its rings, from settling
+    /// them or from the region it equals.
+    pub(crate) fn with_validated(mut self, validated: Option<Validated>) -> Self {
+        self.validated = validated;
+        self
+    }
+
+    /// The proof this region's rings are valid, if it carries one.
+    pub(crate) fn validated(&self) -> Option<Validated> {
+        self.validated
     }
 
     /// [`Self::from_valid`] for the other modules of the crate.
@@ -250,16 +282,19 @@ impl Region {
         let had_input = !self.is_empty() || !other.is_empty();
         match operation {
             crate::OverlayOperation::Union if other.is_empty() => {
-                return Ok(Self::from_valid(self.polygons.clone(), had_input));
+                return Ok(Self::from_valid(self.polygons.clone(), had_input)
+                    .with_validated(self.validated));
             }
             crate::OverlayOperation::Union if self.is_empty() => {
-                return Ok(Self::from_valid(other.polygons.clone(), had_input));
+                return Ok(Self::from_valid(other.polygons.clone(), had_input)
+                    .with_validated(other.validated));
             }
             crate::OverlayOperation::Intersection if self.is_empty() || other.is_empty() => {
                 return Ok(Self::from_valid(Vec::new(), had_input));
             }
             crate::OverlayOperation::Difference if other.is_empty() => {
-                return Ok(Self::from_valid(self.polygons.clone(), had_input));
+                return Ok(Self::from_valid(self.polygons.clone(), had_input)
+                    .with_validated(self.validated));
             }
             crate::OverlayOperation::Difference if self.is_empty() => {
                 return Ok(Self::from_valid(Vec::new(), had_input));
@@ -282,14 +317,21 @@ impl Region {
             frame,
             polygons: other.polygons.clone(),
         };
-        let result = crate::overlay(
+        // Rings known valid under this tolerance are not validated again
+        // (#341); the settled output carries its own proof.
+        let known = |region: &Self| region.validated.is_some_and(|v| v.holds_for(tolerance));
+        let (reported, validated) = crate::overlay_known(
             &subject,
             &clip,
             operation,
             crate::FillRule::NonZero,
             tolerance,
-        )?;
-        Ok(Self::from_valid(result.polygons, had_input))
+            crate::OverlayOptions::new(),
+            &mut crate::budget::Charge::unlimited(),
+            [known(self), known(other)],
+        )
+        .map_err(crate::budget::unbudgeted)?;
+        Ok(Self::from_valid(reported.result.polygons, had_input).with_validated(validated))
     }
 
     /// Dilate by `radius`: the Minkowski sum with a disc, approximated by

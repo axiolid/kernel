@@ -73,6 +73,8 @@ pub use segment_sweep::{
 };
 pub use visibility::VisibilityError;
 
+use std::borrow::Cow;
+
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
 use axiolid_exact::{certify, Arith, SignExpr};
@@ -259,24 +261,52 @@ pub(crate) fn zero_area(points: &[Point2], linear: f64) -> bool {
     area_sign(points, bound) != Sign::Positive && area_sign(points, -bound) != Sign::Negative
 }
 fn self_intersects(r: &Ring, t: Tolerance) -> bool {
-    let n = r.points.len();
-    for i in 0..n {
-        for j in i + 1..n {
-            if j == i + 1 || (i == 0 && j + 1 == n) {
-                continue;
-            }
-            if segments_intersect(
-                r.points[i],
-                r.points[(i + 1) % n],
-                r.points[j],
-                r.points[(j + 1) % n],
-                t.linear(),
-            ) {
-                return true;
-            }
+    first_touching_pair(&r.points, t.linear()).is_some()
+}
+
+/// Rings with at most this many edges compare every pair of them; longer
+/// ones ask a box tree for the pairs that can meet.
+const ALL_PAIRS_UP_TO: usize = 32;
+
+/// The first pair of a ring's edges `(i, j)`, `i < j`, not neighbours,
+/// that meet within `linear` ([`segments_intersect`]): the lowest `i`, then
+/// the lowest `j`, as comparing every pair in that order finds it.
+///
+/// A long ring asks the crate's box tree (`exact_arc::boxes`, #341) for
+/// the edges whose boxes, grown by `linear` and padded far beyond any
+/// rounding of their own ([`exact_arc::Bounds::around`]), overlap edge
+/// `i`'s. Two edges that meet within `linear` have boxes no farther apart
+/// than `linear`, so every pair the exact test accepts is a candidate, and
+/// the candidates come in ascending order: the pair found is the one the
+/// all-pairs loop finds, at about `n log n` cost for a valid ring.
+pub(crate) fn first_touching_pair(points: &[Point2], linear: f64) -> Option<(usize, usize)> {
+    let n = points.len();
+    let edge = |i: usize| (points[i], points[(i + 1) % n]);
+    let meets = |i: usize, j: usize| {
+        if j == i + 1 || (i == 0 && j + 1 == n) {
+            return false;
+        }
+        let ((a, b), (c, d)) = (edge(i), edge(j));
+        segments_intersect(a, b, c, d, linear)
+    };
+    if n <= ALL_PAIRS_UP_TO {
+        return (0..n).find_map(|i| (i + 1..n).find(|&j| meets(i, j)).map(|j| (i, j)));
+    }
+    let boxes: Vec<exact_arc::Bounds> = (0..n)
+        .map(|i| {
+            let (a, b) = edge(i);
+            exact_arc::Bounds::around(&[a, b], linear)
+        })
+        .collect();
+    let tree = exact_arc::boxes::BoxTree::new(boxes.clone());
+    let (mut candidates, mut stack) = (Vec::new(), Vec::new());
+    for (i, own) in boxes.iter().enumerate() {
+        tree.query_into(|b| b.overlaps(own), &mut candidates, &mut stack);
+        if let Some(&j) = candidates.iter().find(|&&j| j > i && meets(i, j)) {
+            return Some((i, j));
         }
     }
-    false
+    None
 }
 
 /// Validate one ring: the contract every operand and every settled output
@@ -290,6 +320,14 @@ fn self_intersects(r: &Ring, t: Tolerance) -> bool {
 /// ring whose vertices all lie exactly on one line is not refused: it
 /// encloses nothing, and a boolean leaves it out (#219).
 pub(crate) fn validate_ring(r: &Ring, t: Tolerance) -> Result<(), OverlayError> {
+    #[cfg(test)]
+    tests::VALIDATED.with(|count| count.set(count.get() + 1));
+    ring_checks(r, t)
+}
+
+/// [`validate_ring`]'s checks, for debug assertions that must not count
+/// as validating.
+pub(crate) fn ring_checks(r: &Ring, t: Tolerance) -> Result<(), OverlayError> {
     if r.points.len() < 3 {
         return Err(OverlayError::RingTooShort);
     };
@@ -325,6 +363,34 @@ fn validate(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
             if hole_outside(&p.outer, h, t) {
                 return Err(OverlayError::HoleOutsideOuter);
             }
+        }
+    }
+    Ok(())
+}
+/// [`degenerate::admit`], or for an operand whose rings are `known` valid
+/// and whose degenerate rings are refused, [`validate_known`] (#341).
+fn admit_known<'a>(
+    input: &'a OverlayInput,
+    operand: OverlayOperand,
+    tolerance: Tolerance,
+    options: OverlayOptions,
+    known: bool,
+    dropped: &mut Vec<DroppedRing>,
+) -> Result<Cow<'a, [Polygon]>, OverlayError> {
+    if known && options.degenerate_rings == DegenerateRings::Refuse {
+        validate_known(input, tolerance)?;
+        return Ok(Cow::Borrowed(&input.polygons));
+    }
+    degenerate::admit(input, operand, tolerance, options, dropped)
+}
+
+/// [`validate`] for an input whose rings are known valid (#341): the
+/// frame, and every hole inside its outer ring.
+fn validate_known(input: &OverlayInput, t: Tolerance) -> Result<(), OverlayError> {
+    validate_frame(input, t)?;
+    for p in &input.polygons {
+        if p.holes.iter().any(|h| hole_outside(&p.outer, h, t)) {
+            return Err(OverlayError::HoleOutsideOuter);
         }
     }
     Ok(())
@@ -501,6 +567,32 @@ fn overlay_charged(
     options: OverlayOptions,
     charge: &mut Charge,
 ) -> Result<ReportedOverlay, OverlayRefusal> {
+    let known = [false, false];
+    overlay_known(
+        subject, clip, operation, fill, tolerance, options, charge, known,
+    )
+    .map(|(reported, _)| reported)
+}
+
+/// [`overlay_charged`] for operands some of which are known valid, and the
+/// proof that the output is (#341).
+///
+/// An operand with `known` set, its rings proved valid under `tolerance`
+/// by a [`settle::Validated`] the caller holds, has its frame and its
+/// holes' places checked but no ring validated again; refused
+/// degenerate rings are the only mode it applies to, the others validate
+/// as usual. The proof returned is the settled output's.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn overlay_known(
+    subject: &OverlayInput,
+    clip: &OverlayInput,
+    operation: OverlayOperation,
+    fill: FillRule,
+    tolerance: Tolerance,
+    options: OverlayOptions,
+    charge: &mut Charge,
+    known: [bool; 2],
+) -> Result<(ReportedOverlay, Option<settle::Validated>), OverlayRefusal> {
     let vertices = |input: &OverlayInput| -> usize {
         input
             .polygons
@@ -511,15 +603,22 @@ fn overlay_charged(
     };
     charge.add(vertices(subject) + vertices(clip), budget::PER_VERTEX)?;
     let mut dropped = Vec::new();
-    let subject_polygons = degenerate::admit(
+    let subject_polygons = admit_known(
         subject,
         OverlayOperand::Subject,
         tolerance,
         options,
+        known[0],
         &mut dropped,
     )?;
-    let clip_polygons =
-        degenerate::admit(clip, OverlayOperand::Clip, tolerance, options, &mut dropped)?;
+    let clip_polygons = admit_known(
+        clip,
+        OverlayOperand::Clip,
+        tolerance,
+        options,
+        known[1],
+        &mut dropped,
+    )?;
     if subject.frame != clip.frame {
         return Err(OverlayError::InvalidFrame.into());
     };
@@ -531,17 +630,20 @@ fn overlay_charged(
         tolerance.linear(),
         charge,
     )?;
-    let polygons = settle::settle(canonical_polygons(rings), tolerance);
+    let (polygons, validated) = settle::settle_validated(canonical_polygons(rings), tolerance);
     let evidence = OverlayEvidence {
         subject_rings: subject_polygons.iter().map(|p| 1 + p.holes.len()).sum(),
         clip_rings: clip_polygons.iter().map(|p| 1 + p.holes.len()).sum(),
         output_polygons: polygons.len(),
         output_holes: polygons.iter().map(|polygon| polygon.holes.len()).sum(),
     };
-    Ok(ReportedOverlay {
-        result: OverlayResult { polygons, evidence },
-        dropped,
-    })
+    Ok((
+        ReportedOverlay {
+            result: OverlayResult { polygons, evidence },
+            dropped,
+        },
+        validated,
+    ))
 }
 
 /// Union a set of individually-valid rings that may overlap each other.
@@ -683,4 +785,211 @@ fn canonical_polygons(rings: Vec<(Ring, Vec<Ring>)>) -> Vec<Polygon> {
             .then(a.outer.points[0].y.total_cmp(&b.outer.points[0].y))
     });
     polygons
+}
+
+#[cfg(test)]
+mod tests {
+    //! Ring validation's candidate search and the proof regions carry
+    //! (#341).
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Rings validated on this thread.
+        pub(super) static VALIDATED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn validated() -> usize {
+        VALIDATED.with(Cell::get)
+    }
+
+    /// The search before #341: every pair, lowest `i` then lowest `j`.
+    fn all_pairs(points: &[Point2], linear: f64) -> Option<(usize, usize)> {
+        let n = points.len();
+        for i in 0..n {
+            for j in i + 1..n {
+                if j == i + 1 || (i == 0 && j + 1 == n) {
+                    continue;
+                }
+                let (a, b) = (points[i], points[(i + 1) % n]);
+                let (c, d) = (points[j], points[(j + 1) % n]);
+                if segments_intersect(a, b, c, d, linear) {
+                    return Some((i, j));
+                }
+            }
+        }
+        None
+    }
+
+    /// A small deterministic generator, so failures reproduce.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// A star of `n` corners around the origin at seeded radii, with
+    /// `faults` corners moved through the centre, onto another corner or
+    /// within the tolerance of a far edge, so that some stars cross or
+    /// touch themselves and others do not.
+    fn star(rng: &mut Lcg, n: usize, faults: usize) -> Vec<Point2> {
+        let mut points: Vec<Point2> = (0..n)
+            .map(|i| {
+                let angle = std::f64::consts::TAU * (i as f64 + 0.5 * rng.next()) / n as f64;
+                let radius = 1.0 + 0.2 * rng.next();
+                Point2::new(radius * angle.cos(), radius * angle.sin())
+            })
+            .collect();
+        for _ in 0..faults {
+            let k = (rng.next() * n as f64) as usize % n;
+            points[k] = match (rng.next() * 3.0) as usize {
+                0 => Point2::new(-0.9 * points[k].x, -0.9 * points[k].y),
+                1 => points[(k + 2) % n],
+                _ => {
+                    let j = (k + n / 2) % n;
+                    let (a, b) = (points[j], points[(j + 1) % n]);
+                    Point2::new(0.5 * (a.x + b.x) + 1e-10, 0.5 * (a.y + b.y))
+                }
+            };
+        }
+        points
+    }
+
+    /// The box tree finds the pair the all-pairs loop finds, on rings long
+    /// enough to use it, valid or crossing, touching or within the
+    /// tolerance.
+    #[test]
+    fn the_first_touching_pair_is_the_all_pairs_one() {
+        let mut rng = Lcg(341);
+        let (mut found, mut clean) = (0, 0);
+        for case in 0..400 {
+            let n = [5, 33, 40, 64, 200][case % 5];
+            let faults = case / 5 % 4;
+            let points = star(&mut rng, n, faults);
+            for linear in [1e-9, 1e-3, 0.05] {
+                let pair = first_touching_pair(&points, linear);
+                assert_eq!(pair, all_pairs(&points, linear), "case {case} at {linear}");
+                match pair {
+                    Some(_) => found += 1,
+                    None => clean += 1,
+                }
+            }
+        }
+        assert!(found > 200 && clean > 200, "{found} found, {clean} clean");
+    }
+
+    /// A comb whose last corner comes within the tolerance of the first
+    /// tooth's flank: a pair far apart in the ring, near in the plane.
+    #[test]
+    fn a_long_ring_touching_itself_far_along_is_found() {
+        let mut points = Vec::new();
+        for k in 0..2_000 {
+            let x = k as f64;
+            points.push(Point2::new(x, 0.0));
+            points.push(Point2::new(x + 0.5, 1.0));
+        }
+        points.push(Point2::new(2_000.0, 0.0));
+        points.push(Point2::new(2_000.0, -1.0));
+        points.push(Point2::new(0.0, -1.0));
+        let t = Tolerance::new(1e-9, 1e-9).expect("a tolerance");
+        let ring = Ring {
+            points: points.clone(),
+        };
+        assert_eq!(validate_ring(&ring, t), Ok(()));
+        assert_eq!(first_touching_pair(&points, t.linear()), None);
+        let n = points.len();
+        points[n - 1] = Point2::new(0.25, 0.5 - 1e-10);
+        let pair = first_touching_pair(&points, t.linear());
+        assert!(pair.is_some());
+        assert_eq!(pair, all_pairs(&points, t.linear()));
+        assert_eq!(
+            validate_ring(&Ring { points }, t),
+            Err(OverlayError::SelfIntersection)
+        );
+    }
+
+    fn square(x: f64, y: f64, side: f64) -> Polygon {
+        Polygon {
+            outer: Ring {
+                points: vec![
+                    Point2::new(x, y),
+                    Point2::new(x + side, y),
+                    Point2::new(x + side, y + side),
+                    Point2::new(x, y + side),
+                ],
+            },
+            holes: Vec::new(),
+        }
+    }
+
+    /// Booleans on regions validate no ring a region carries a proof for
+    /// under the call's tolerance, and the results carry one in turn; a
+    /// call under another tolerance, or on a region without a proof,
+    /// validates again and refuses what it refuses today.
+    #[test]
+    fn regions_are_validated_once() {
+        let t = Tolerance::new(1e-9, 1e-9).expect("a tolerance");
+        let a = Region::new(vec![square(0.0, 0.0, 2.0)], t).expect("valid");
+        let b = Region::new(vec![square(1.0, 1.0, 2.0)], t).expect("valid");
+        let before = validated();
+        let union = a.union(&b, t).expect("the union");
+        let cut = union.difference(&a, t).expect("the difference");
+        let again = cut.intersection(&b, t).expect("the intersection");
+        assert_eq!(validated(), before, "no ring validated again");
+        assert!(!again.is_empty());
+        let input = |region: &Region| OverlayInput {
+            frame: Frame2 {
+                origin: Point2::ZERO,
+                x: Point2::X,
+                y: Point2::Y,
+            },
+            polygons: region.polygons().to_vec(),
+        };
+        let raw = overlay(
+            &input(&a),
+            &input(&b),
+            OverlayOperation::Union,
+            FillRule::NonZero,
+            t,
+        )
+        .expect("the union");
+        assert_eq!(raw.polygons, union.polygons());
+        assert!(validated() > before, "overlay validates every ring");
+
+        // A ring with an edge of 1e-6 is valid at 1e-9, not at 1e-3.
+        let mut short = square(5.0, 5.0, 1.0);
+        short.outer.points.insert(1, Point2::new(5.5, 5.0));
+        short.outer.points.insert(2, Point2::new(5.5 + 1e-6, 5.0));
+        let fine = Region::new(vec![short], t).expect("valid at 1e-9");
+        let coarse = Tolerance::new(1e-3, 1e-3).expect("a tolerance");
+        assert_eq!(fine.union(&a, coarse), Err(OverlayError::RepeatedVertex));
+        // A translated region carries no proof.
+        let moved = a
+            .translate(axiolid_core::Vec2::new(0.5, 0.5))
+            .expect("moved");
+        let before = validated();
+        moved.union(&b, t).expect("the union");
+        assert!(validated() > before, "a translate is validated again");
+
+        // A disc morphology's settled result carries a proof too.
+        let eroded = union.erode_inner(0.1, t).expect("the erosion");
+        let before = validated();
+        eroded.difference(&b, t).expect("the difference");
+        assert_eq!(validated(), before, "an erosion is not validated again");
+
+        // A hole outside its outer ring is valid ring by ring, so a region
+        // holds it; a boolean refuses it, proof or not.
+        let mut stray = square(10.0, 10.0, 1.0);
+        let mut hole = square(20.0, 20.0, 0.5).outer;
+        hole.points.reverse();
+        stray.holes.push(hole);
+        let stray = Region::new(vec![stray], t).expect("each ring valid");
+        assert_eq!(stray.union(&a, t), Err(OverlayError::HoleOutsideOuter));
+    }
 }

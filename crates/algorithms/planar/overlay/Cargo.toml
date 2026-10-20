@@ -36,3 +36,7 @@ harness = false
 [[bench]]
 name = "grown_soup"
 harness = false
+
+[[bench]]
+name = "ring_validation"
+harness = false
