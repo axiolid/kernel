@@ -9,6 +9,24 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `exact_properties` measures a solid far from the world origin correctly
+  (#343). Its cone fields were integrated about the world origin, so on a
+  national grid each term grew with the cube of a `5.6e6` m reach and the
+  noise floor of every curved-face integral was set from that reach: a
+  `0.57 m^3` box at `(6.0e5, 5.6e6, 204.5)` measured `0.544` to
+  `0.664 m^3` depending on the last bits of its placement, a wall less
+  flush openings up to 5 % off, each without an error. The solid is now
+  moved to the centre of its vertices' bounding box and integrated there,
+  and the centroid and second moments (still about the world origin) are
+  shifted back by the parallel-axis terms. Such a solid measures its
+  closed form to its input's own grid (`9.3e-10` m at `5.6e6`); one at
+  the origin measures as before up to rounding. A B-rep the translation
+  refuses (an elevated or banked alignment curve) is integrated in place
+  about the same point: a curved face far out may then be refused as not
+  converged, never measured looser.
+
 ## [0.3.10] - 2026-10-09
 
 ### Changed

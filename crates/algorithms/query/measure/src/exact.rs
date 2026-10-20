@@ -26,7 +26,7 @@
 //! tessellation error this path exists to avoid.
 
 use axiolid_brep::ExactBRep;
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
+use axiolid_core::{Point3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_curve::Curve3;
 use axiolid_surface::Surface;
 use axiolid_topology::{Face, LoopId, Orientation};
@@ -122,6 +122,16 @@ pub(crate) fn family(surface: &Surface) -> &'static str {
 /// `exact_face`). Both paths use the same fields, so a solid mixing
 /// them sums consistently.
 ///
+/// Every field is integrated about a point of the solid -- the centre of
+/// its vertices' bounding box -- not about the world origin, and the
+/// centroid and second moments are shifted back by the parallel-axis
+/// terms (#343). The cone of a face about the world origin grows with the
+/// cube of the distance to it: a 0.57 m^3 box on a national grid at
+/// (6e5, 5.6e6) summed terms near 1e14 whose cancellation had to produce
+/// the volume, and measured up to 18 % wrong with no error. About its own
+/// centre the same box measures its closed form up to the grid its corners
+/// were placed on, wherever it sits.
+///
 /// Orientation is honoured at every level: a face marked
 /// [`Orientation::Reversed`], a reversed use of a face in its shell, and a
 /// reversed bound each flip the loop's winding, exactly as `audit_brep`
@@ -138,8 +148,38 @@ pub fn exact_properties(
     brep: &ExactBRep,
     tolerance: Tolerance,
 ) -> Result<MassProperties, ExactMeasureError> {
+    let origin = reference_point(brep);
+    // Integrate a copy moved to `origin`, so the surfaces are evaluated
+    // near their own coordinates too: subtracting `origin` from a point
+    // evaluated on a national grid keeps that grid's rounding, about 1e-9 m,
+    // which no curved-face integral can then hold to its relative bound. A
+    // B-rep the translation refuses (an elevated or banked alignment curve)
+    // is integrated in place about `origin`: planar faces just as well; a
+    // curved face far from the world origin may then be refused as not
+    // converged, never measured looser.
+    let moved = if origin == Point3::ZERO {
+        None
+    } else {
+        brep.transformed(&Transform3::from_translation(-origin))
+            .ok()
+    };
+    match &moved {
+        Some(moved) => measure_about(moved, Point3::ZERO, origin, tolerance),
+        None => measure_about(brep, origin, origin, tolerance),
+    }
+}
+
+/// [`exact_properties`] of `brep` with every field integrated about
+/// `about`, in `brep`'s coordinates, and the centroid and second moments
+/// shifted home by `home`: `brep` is the solid moved by `-(home - about)`.
+fn measure_about(
+    brep: &ExactBRep,
+    about: Point3,
+    home: Point3,
+    tolerance: Tolerance,
+) -> Result<MassProperties, ExactMeasureError> {
     let topology = brep.topology();
-    let scale = characteristic_length(brep);
+    let scale = characteristic_length(brep, about);
     // Consecutive pcurves must meet on the surface. The caller's tolerance
     // governs, with a floor for `Tolerance::ZERO` so rounding in the pcurve
     // evaluation itself is not read as a gap.
@@ -173,6 +213,9 @@ pub fn exact_properties(
             let mut vector_area = Vec3::ZERO;
             for bound in &face.bounds {
                 let mut ring = ring_positions(brep, bound.loop_id)?;
+                for point in &mut ring {
+                    *point -= about;
+                }
                 if ring.len() < 3 {
                     continue;
                 }
@@ -204,7 +247,7 @@ pub fn exact_properties(
             continue;
         }
 
-        let sums = crate::exact_face::face_sums(brep, face, surface, linear, scale)?;
+        let sums = crate::exact_face::face_sums(brep, face, surface, about, linear, scale)?;
         let sign = if flip_face { -1.0 } else { 1.0 };
         area += sums[0].abs();
         volume += sign * sums[1];
@@ -216,12 +259,48 @@ pub fn exact_properties(
         return Err(ExactMeasureError::Degenerate);
     }
 
+    // The sums ran about `home` in world coordinates: `volume_weighted` is
+    // the first moment and `moments` the second moments about it. Shift
+    // both home; with `x = x' + o`,
+    // `int x_i^2 = int x'_i^2 + 2 o_i int x'_i + o_i^2 V`.
+    let second_moment_diagonal = moments + 2.0 * home * volume_weighted + home * home * volume;
     Ok(MassProperties {
         area,
         signed_volume: volume,
-        centroid: volume_weighted / volume,
-        second_moment_diagonal: moments,
+        centroid: home + volume_weighted / volume,
+        second_moment_diagonal,
     })
+}
+
+/// The point every field is integrated about: the centre of the vertices'
+/// bounding box, else the frame origin of the first analytic surface (a
+/// solid bounded by vertex-free faces), else the world origin.
+///
+/// Any point near the solid conditions the sums; the centre keeps every
+/// fan term within the solid's own extent of it.
+fn reference_point(brep: &ExactBRep) -> Point3 {
+    let mut vertices = brep.topology().vertices().iter().map(|v| v.position);
+    if let Some(first) = vertices.next() {
+        let (low, high) = vertices.fold((first, first), |(low, high), p| (low.min(p), high.max(p)));
+        let centre = (low + high) * 0.5;
+        if centre.is_finite() {
+            return centre;
+        }
+    }
+    brep.surfaces()
+        .iter()
+        .find_map(|surface| {
+            let origin = match surface {
+                Surface::Cylinder(c) => c.frame.origin,
+                Surface::EllipticalCylinder(c) => c.frame.origin,
+                Surface::Cone(c) => c.frame.origin,
+                Surface::Sphere(s) => s.frame.origin,
+                Surface::Torus(t) => t.frame.origin,
+                _ => return None,
+            };
+            origin.is_finite().then_some(origin)
+        })
+        .unwrap_or(Point3::ZERO)
 }
 
 /// Whether every edge on the face's boundary is a straight line, so its
@@ -253,26 +332,30 @@ fn straight_edged(
     Ok(true)
 }
 
-/// A length on the solid's own scale, measured from the origin the cone
-/// fields are taken about: the noise floor of every integral is set from it.
-fn characteristic_length(brep: &ExactBRep) -> Scalar {
+/// A length on the solid's own scale, measured from `origin`, the point the
+/// cone fields are taken about: the noise floor of every integral is set
+/// from it. Measured from the world origin it would be the solid's distance
+/// from it, and a floor that loose at a national grid accepts any integral.
+fn characteristic_length(brep: &ExactBRep, origin: Point3) -> Scalar {
     let reach = brep
         .topology()
         .vertices()
         .iter()
-        .map(|vertex| vertex.position.length())
+        .map(|vertex| (vertex.position - origin).length())
         .fold(0.0, Scalar::max);
     let extent = brep
         .surfaces()
         .iter()
         .map(|surface| match surface {
-            Surface::Cylinder(c) => c.frame.origin.length() + c.radius,
+            Surface::Cylinder(c) => (c.frame.origin - origin).length() + c.radius,
             Surface::EllipticalCylinder(c) => {
-                c.frame.origin.length() + c.semi_axis_x.max(c.semi_axis_y)
+                (c.frame.origin - origin).length() + c.semi_axis_x.max(c.semi_axis_y)
             }
-            Surface::Cone(c) => c.frame.origin.length() + c.radius.abs(),
-            Surface::Sphere(s) => s.frame.origin.length() + s.radius,
-            Surface::Torus(t) => t.frame.origin.length() + t.major_radius + t.minor_radius,
+            Surface::Cone(c) => (c.frame.origin - origin).length() + c.radius.abs(),
+            Surface::Sphere(s) => (s.frame.origin - origin).length() + s.radius,
+            Surface::Torus(t) => {
+                (t.frame.origin - origin).length() + t.major_radius + t.minor_radius
+            }
             _ => 0.0,
         })
         .filter(|value| value.is_finite())

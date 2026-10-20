@@ -6,8 +6,9 @@
 //! are sums over the faces of `int F . n dA` for a field `F` whose divergence
 //! is the wanted density (1, `x_i`, `x_i^2`). [`crate::exact`] uses the cone
 //! fields `x / 3`, `x_i x / 4` and `x_i^2 x / 5` so each face contributes the
-//! solid cone it subtends from the origin. A planar polygon's cone is a fan of
-//! tetrahedra; a curved face's cone is the surface integral
+//! solid cone it subtends from the point it integrates about, a point of the
+//! solid rather than the world origin (#343). A planar polygon's cone is a
+//! fan of tetrahedra; a curved face's cone is the surface integral
 //!
 //! ```text
 //! int int_D g(u, v) du dv,   g = (S . N) * [1/3, S/4, S^2/5],  N = S_u x S_v
@@ -60,7 +61,7 @@
 //! integrated the other way round, `oint G dv` with `G` an integral in `u`.
 
 use axiolid_brep::ExactBRep;
-use axiolid_core::{Point2, Scalar, Vec3};
+use axiolid_core::{Point2, Point3, Scalar, Vec3};
 use axiolid_evaluate::surface::{evaluate, partials};
 use axiolid_surface::Surface;
 use axiolid_topology::Face;
@@ -87,6 +88,7 @@ pub(crate) fn face_sums(
     brep: &ExactBRep,
     face: &Face<axiolid_brep::SurfaceId>,
     surface: &Surface,
+    origin: Point3,
     linear: Scalar,
     scale: Scalar,
 ) -> Result<Sums, ExactMeasureError> {
@@ -119,11 +121,14 @@ pub(crate) fn face_sums(
                 let (point, tangent) = piece.at(t)?;
                 // `- H du` in the default direction, `+ G dv` along the tube.
                 let (weight, inner) = if along_v {
-                    (tangent.y, inner_along_u(surface, reference, point, &floor)?)
+                    (
+                        tangent.y,
+                        inner_along_u(surface, origin, reference, point, &floor)?,
+                    )
                 } else {
                     (
                         -tangent.x,
-                        inner_along_v(surface, reference, point, &floor)?,
+                        inner_along_v(surface, origin, reference, point, &floor)?,
                     )
                 };
                 let mut value = inner;
@@ -143,27 +148,38 @@ pub(crate) fn face_sums(
 /// `H(u, v)`: the density integrated in `v` from the reference line.
 fn inner_along_v(
     surface: &Surface,
+    origin: Point3,
     reference: Scalar,
     at: Point2,
     floor: &Sums,
 ) -> Result<Sums, ExactMeasureError> {
-    adaptive(reference, at.y, floor, &mut |v| density(surface, at.x, v))
+    adaptive(reference, at.y, floor, &mut |v| {
+        density(surface, origin, at.x, v)
+    })
 }
 
 /// `G(u, v)`: the density integrated in `u` from the reference line.
 fn inner_along_u(
     surface: &Surface,
+    origin: Point3,
     reference: Scalar,
     at: Point2,
     floor: &Sums,
 ) -> Result<Sums, ExactMeasureError> {
-    adaptive(reference, at.x, floor, &mut |u| density(surface, u, at.y))
+    adaptive(reference, at.x, floor, &mut |u| {
+        density(surface, origin, u, at.y)
+    })
 }
 
 /// Every component's density at `(u, v)`: `|N|`, then the cone fields
-/// dotted with `N = S_u x S_v`.
-fn density(surface: &Surface, u: Scalar, v: Scalar) -> Result<Sums, ExactMeasureError> {
-    let p = evaluate(surface, u, v).map_err(|_| crate::exact::EVALUATION)?;
+/// about `origin` dotted with `N = S_u x S_v`.
+fn density(
+    surface: &Surface,
+    origin: Point3,
+    u: Scalar,
+    v: Scalar,
+) -> Result<Sums, ExactMeasureError> {
+    let p = evaluate(surface, u, v).map_err(|_| crate::exact::EVALUATION)? - origin;
     let (su, sv) = partials(surface, u, v).map_err(|_| crate::exact::EVALUATION)?;
     let n: Vec3 = su.cross(sv);
     let w = p.dot(n);
