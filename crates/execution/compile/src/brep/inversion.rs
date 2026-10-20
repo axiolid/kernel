@@ -5,8 +5,9 @@
 //! boundary in its surface's parameters, so the edge's 3D samples are
 //! inverted onto the surface instead of a p-curve being fitted. The samples
 //! are the ones every face sharing the edge uses (`state.edge_samples`): the
-//! first face to reach the edge samples its 3D curve, and every later face
-//! inverts the same points, so shared vertices stay shared.
+//! edge pass ([`super::edges`], #336) samples its 3D curve as finely as the
+//! strictest face using it asks, by [`sample_edge`] run for each face, and
+//! every face inverts the same points, so shared vertices stay shared.
 //!
 //! - Analytic surfaces invert in closed form
 //!   ([`axiolid_reference::surface::invert`]), which checks the residual
@@ -353,7 +354,7 @@ fn certified_parameters(
 }
 
 /// How an edge is traced in 3D, in its own start-to-end direction.
-enum EdgeTrace<'g> {
+pub(super) enum EdgeTrace<'g> {
     /// No curve: the segment between its vertices.
     Straight(Vec3, Vec3),
     Curve(&'g axiolid_curve::Curve3, axiolid_core::Interval),
@@ -361,7 +362,7 @@ enum EdgeTrace<'g> {
 
 impl EdgeTrace<'_> {
     /// The point at fraction `s` of the edge's parameter span.
-    fn at(&self, s: Scalar) -> GeomResult<Vec3> {
+    pub(super) fn at(&self, s: Scalar) -> GeomResult<Vec3> {
         match self {
             Self::Straight(a, b) => Ok(*a + (*b - *a) * s),
             Self::Curve(curve, domain) => axiolid_reference::curve::evaluate3(
@@ -574,21 +575,18 @@ pub(super) fn inverted_edge_use(
                 EdgeTrace::Curve(curve, _) => straight_curve(curve),
             };
             let spans = match spans {
-                Some(spans) => Ok(spans),
-                None if straight => Ok(points
+                Ok(spans) => Ok(spans),
+                Err(_) if straight => Ok(points
                     .windows(2)
                     .map(|ends| SpanBound::straight(ends[0], ends[1]))
                     .collect()),
-                None => Err(
-                    "curved edge without a pcurve, sampled through a neighbour's pcurve, \
-                     has no chord bound on its 3D curve",
-                ),
+                Err(reason) => Err(reason),
             };
             (points, params, spans)
         }
         None => {
             let (mut points, mut params, spans) = sample_edge(&trace, inverter, bound, ctx)?;
-            let mut spans = spans.ok_or("edge curve family with no chord bound");
+            let mut spans = spans.ok_or(NO_CHORD_BOUND);
             if use_.orientation == Orientation::Reversed {
                 points.reverse();
                 params.reverse();
@@ -616,12 +614,21 @@ pub(super) fn inverted_edge_use(
         start_vertex,
         end_vertex,
         &points,
-        spans.ok(),
+        spans,
     )?;
     Ok((params, shared))
 }
 
-fn edge_trace<'g>(
+/// Why a curved edge sampled through a pcurve has no span bounds on its 3D
+/// curve.
+pub(super) const THROUGH_PCURVE: &str =
+    "curved edge without a pcurve, sampled through a neighbour's pcurve, has no chord bound \
+     on its 3D curve";
+
+/// Why an edge's curve family has no span bounds.
+pub(super) const NO_CHORD_BOUND: &str = "edge curve family with no chord bound";
+
+pub(super) fn edge_trace<'g>(
     ctx: &FaceContext<'g>,
     edge: &axiolid_topology::Edge<NodeId>,
 ) -> GeomResult<EdgeTrace<'g>> {
@@ -744,7 +751,7 @@ pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {
 /// and its parameters turn less than a quarter period, then while the
 /// span's certified terms miss the budget, up to the segment cap.
 #[allow(clippy::type_complexity)]
-fn sample_edge(
+pub(super) fn sample_edge(
     trace: &EdgeTrace<'_>,
     inverter: &SurfaceInverter<'_>,
     bound: &FaceBound<'_>,
@@ -835,7 +842,7 @@ fn sample_edge(
 
 /// The bounds of the uniform spans between `points`, sampled at equal
 /// fractions of the edge's parameter; `None` where a family has none.
-fn spans_of(trace: &EdgeTrace<'_>, points: &[Vec3]) -> Option<Vec<SpanBound>> {
+pub(super) fn spans_of(trace: &EdgeTrace<'_>, points: &[Vec3]) -> Option<Vec<SpanBound>> {
     let n = points.len().checked_sub(1)?;
     let fraction = |i: usize| i as Scalar / n as Scalar;
     (0..n)

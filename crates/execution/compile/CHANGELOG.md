@@ -43,6 +43,18 @@ caret rule for `0.x` versions.
   exact volume checked; at `0` it stays at rounding (`1.3e-12`). Probe
   `scripts/probe_closing_reading_mutants.py` (5/5 killed).
 
+- A B-rep whose planar face shares a straight edge with a curved face
+  closes (#336): a D-shaped half cylinder (a half-cylinder wall and a
+  planar face sharing two rulings, with two half-disk caps) compiled open,
+  since the wall sampled each ruling in pieces and the planar face took
+  only its endpoints. Every edge a curved face uses is now sampled once,
+  before any face, from the strictest requirement of all the faces using
+  it (the largest of their power-of-two span counts), and every face takes
+  those samples, a planar face's straight edges included. The mesh no
+  longer depends on the order the shell lists its faces in. A planar face
+  that takes samples adds their distance off its plane and off their edge
+  to its bound.
+
 ## [0.3.29] - 2026-10-18
 
 ### Fixed

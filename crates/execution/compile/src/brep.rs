@@ -29,6 +29,12 @@
 //! a closed, consistently wound two-manifold by index; otherwise it is
 //! [`MeshClosure::OpenSolid`], never a solid with boundary edges.
 //!
+//! A curved face samples its edges more finely than their vertices, so
+//! every edge a curved face uses is sampled once, before any face, from the
+//! strictest requirement of all the faces using it ([`edges`], #336). Each
+//! face then takes those samples, a planar face's straight edges included,
+//! whatever order the shell lists the faces in.
+//!
 //! # Deviation (#232)
 //!
 //! Every face also reports a certified bound on how far its exact surface
@@ -36,7 +42,8 @@
 //!
 //! - A planar face with straight edges is its own polygon: the bound is
 //!   how far its vertices sit off its declared plane, which is its exact
-//!   surface. A face on a declared plane with an edge that follows a
+//!   surface; an edge's samples it takes (#336) add how far they sit off
+//!   the plane and off the segment between the edge's vertices. A face on a declared plane with an edge that follows a
 //!   curve (an IFC cap bounded by a circle) is meshed as a curved face
 //!   whose surface is the plane (#310): its boundary is the edges' shared
 //!   samples, the same vertices as the wall across each edge, and its bound
@@ -109,6 +116,7 @@ use crate::planar::{
 };
 use crate::weld::EdgeSplits;
 
+mod edges;
 mod inversion;
 
 const MAX_BREP_FACES: usize = 1 << 16;
@@ -358,6 +366,16 @@ pub fn tessellate(
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
         std::collections::HashMap::new();
     let mut total_curved_records = 0_usize;
+    // Every edge a curved face uses is sampled once, before any face, from
+    // the strictest requirement of all the faces using it (#336).
+    edges::sample_shell_edges(
+        &mut mesh,
+        &ctx,
+        &shells,
+        &mut welded,
+        &mut edge_cache,
+        &mut total_curved_records,
+    )?;
     let mut deviation = Deviation::empty();
     for &(shell, void) in &shells {
         let first_index = mesh.indices.len();
@@ -452,7 +470,7 @@ struct FaceContext<'a> {
     closure: MeshClosure,
     /// The corners planar faces insert into shared edges, which every face
     /// using such an edge takes too (#265).
-    splits: EdgeSplits<axiolid_topology::VertexId>,
+    splits: EdgeSplits<Corner>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -474,7 +492,7 @@ fn append_face(
     // cheap, a wrong wall corrupts every downstream quantity.
     let support = face_surface(graph, face)?;
     if let Some(surface) = support {
-        if !surface_is_planar(surface) || curved_plane(brep, graph, face) {
+        if takes_curved_path(brep, graph, face, surface) {
             let mut bound = FaceBound::new(surface);
             with_curved_face_transaction(
                 mesh,
@@ -495,9 +513,12 @@ fn append_face(
     deviation.add(
         DeviationPath::BRepFace,
         "plane",
-        planar_face_bound(ctx, face, support)?,
+        planar_face_bound(ctx, face, support, cache, &mesh.positions)?,
     );
-    let mut rings = planar_rings(brep, face)?;
+    // An edge the edge pass sampled is taken with its samples, straight or
+    // not (#336): the face then runs along it in the pieces the face
+    // across uses.
+    let mut rings = planar_rings(brep, face, Some((cache, &mesh.positions)))?;
 
     for (index, ring) in rings.iter().enumerate() {
         if plane_axes(newell_normal(ring.iter().map(|&(_, p)| p))).is_none() {
@@ -536,8 +557,7 @@ fn append_face(
     let (flat, hole_starts, projection) = project_rings(&rings).ok_or_else(|| {
         GeomError::Degenerate("planar face outer bound has no stable plane".into())
     })?;
-    let positions: Vec<(axiolid_topology::VertexId, Vec3)> =
-        rings.iter().flatten().copied().collect();
+    let positions: Vec<(Corner, Vec3)> = rings.iter().flatten().copied().collect();
 
     // A face of a shell: a keyhole's seam is never a triangle edge (#283).
     let corners: Vec<Vec3> = positions.iter().map(|&(_, point)| point).collect();
@@ -561,9 +581,13 @@ fn append_face(
     // Weld by topological vertex. Adjacent facets already share interned
     // vertices upstream; emitting per-face copies would leave every edge
     // unshared, so the mesh would look correct yet fail a manifold check.
+    // An edge sample is already a mesh vertex, shared by index.
     let new_vertices: HashSet<_> = positions
         .iter()
-        .map(|(vertex, _)| *vertex)
+        .filter_map(|(corner, _)| match corner {
+            Corner::Vertex(vertex) => Some(*vertex),
+            Corner::Sample(_) => None,
+        })
         .filter(|vertex| !welded.contains_key(vertex))
         .collect();
     checked_output_len(
@@ -573,12 +597,15 @@ fn append_face(
         "mesh positions",
     )?;
     let mut local: Vec<u32> = Vec::with_capacity(positions.len() + cover.steiner.len());
-    for &(vertex, point) in &positions {
-        let index = *welded.entry(vertex).or_insert_with(|| {
-            let next = mesh.positions.len() as u32;
-            mesh.positions.push(point);
-            next
-        });
+    for &(corner, point) in &positions {
+        let index = match corner {
+            Corner::Sample(index) => index,
+            Corner::Vertex(vertex) => *welded.entry(vertex).or_insert_with(|| {
+                let next = mesh.positions.len() as u32;
+                mesh.positions.push(point);
+                next
+            }),
+        };
         local.push(index);
     }
     // Steiner points belong to this face alone and weld with nothing.
@@ -598,17 +625,37 @@ fn append_face(
     Ok(())
 }
 
+/// A corner of a planar face's ring: a topological vertex, or an interior
+/// sample of an edge the edge pass sampled (#336), by its mesh index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Corner {
+    Vertex(axiolid_topology::VertexId),
+    Sample(u32),
+}
+
+/// One ring of a planar face: its corners and their positions.
+type Ring = Vec<(Corner, Vec3)>;
+
+/// The shared edge samples and the mesh positions they index.
+type SampledEdges<'a> = (&'a EdgeSamples, &'a [Vec3]);
+
 /// A planar face's bounds as rings of corners, the outer ring first and the
-/// holes in their authored order after it.
+/// holes in their authored order after it. With `samples`, each edge the
+/// edge pass sampled contributes its interior samples too (#336).
 fn planar_rings(
     brep: &BRep<NodeId>,
     face: &axiolid_topology::Face<NodeId>,
-) -> GeomResult<Vec<Vec<(axiolid_topology::VertexId, Vec3)>>> {
-    let mut rings: Vec<Vec<(axiolid_topology::VertexId, Vec3)>> = Vec::new();
+    samples: Option<SampledEdges<'_>>,
+) -> GeomResult<Vec<Ring>> {
+    let mut rings: Vec<Ring> = Vec::new();
     let mut outer_index = None;
     for bound in &face.bounds {
-        let points = loop_points(brep, bound)?;
-        if points.len() < 3 {
+        let points = loop_points(brep, bound, samples)?;
+        let vertices = points
+            .iter()
+            .filter(|(corner, _)| matches!(corner, Corner::Vertex(_)))
+            .count();
+        if vertices < 3 {
             return Err(GeomError::Degenerate(
                 "planar face bound has fewer than three vertices".into(),
             ));
@@ -634,9 +681,7 @@ fn planar_rings(
 /// Newell normal, about its first corner, with the index in the
 /// projection at which each hole starts, and the projection; `None` when
 /// the outer ring has no stable plane.
-fn project_rings(
-    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
-) -> Option<(Vec<[Scalar; 2]>, Vec<usize>, Projection)> {
+fn project_rings(rings: &[Ring]) -> Option<(Vec<[Scalar; 2]>, Vec<usize>, Projection)> {
     let outer = rings.first()?;
     let (u, v) = plane_axes(newell_normal(outer.iter().map(|&(_, p)| p)))?;
     let projection = Projection {
@@ -663,7 +708,7 @@ fn shared_edge_splits(
     brep: &BRep<NodeId>,
     graph: &axiolid_model::GeometryGraph,
     shells: &[(&axiolid_topology::Shell, bool)],
-) -> EdgeSplits<axiolid_topology::VertexId> {
+) -> EdgeSplits<Corner> {
     let mut splits = EdgeSplits::new();
     for &(face_id, _) in shells.iter().flat_map(|(shell, _)| shell.faces.iter()) {
         let Some(face) = brep.faces().get(face_id.index()) else {
@@ -671,11 +716,13 @@ fn shared_edge_splits(
         };
         match face_surface(graph, face) {
             Ok(None) => {}
-            Ok(Some(surface)) if surface_is_planar(surface) && !curved_plane(brep, graph, face) => {
-            }
+            Ok(Some(surface)) if !takes_curved_path(brep, graph, face, surface) => {}
             _ => continue,
         }
-        let Ok(rings) = planar_rings(brep, face) else {
+        // Recorded between vertices: a corner inside an edge the edge pass
+        // samples is not taken by the faces across it, and the closure
+        // check reports the shell open there.
+        let Ok(rings) = planar_rings(brep, face, None) else {
             continue;
         };
         // One triangle has no corner inside its own edge.
@@ -714,11 +761,7 @@ fn checked_closure(mesh: &TriMesh, declared: MeshClosure) -> MeshClosure {
 /// triangulated: projected along the outer ring's Newell normal, the plane
 /// [`crate::planar::polygon_warp`] measures against. The module notes say
 /// why it is certified rather than refused.
-fn report_warp(
-    ctx: &FaceContext<'_>,
-    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
-    deviation: &mut Deviation,
-) -> GeomResult<()> {
+fn report_warp(ctx: &FaceContext<'_>, rings: &[Ring], deviation: &mut Deviation) -> GeomResult<()> {
     let points: Vec<Vec<Vec3>> = rings
         .iter()
         .map(|ring| ring.iter().map(|&(_, p)| p).collect())
@@ -741,11 +784,7 @@ fn report_warp(
 /// when they lie off an axis plane: within rounding of the face, bounded
 /// by [`crate::planar::steiner_offset`]. A face in an axis plane holds
 /// them exactly and reports nothing.
-fn report_steiner(
-    rings: &[Vec<(axiolid_topology::VertexId, Vec3)>],
-    steiner: &[Vec3],
-    deviation: &mut Deviation,
-) -> GeomResult<()> {
+fn report_steiner(rings: &[Ring], steiner: &[Vec3], deviation: &mut Deviation) -> GeomResult<()> {
     if steiner.is_empty() {
         return Ok(());
     }
@@ -767,16 +806,18 @@ fn report_steiner(
     Ok(())
 }
 
-/// Walk a bound loop and collect its vertex positions in order.
+/// Walk a bound loop and collect its vertex positions in order, each
+/// edge's interior samples after its start when `samples` holds the edge.
 fn loop_points(
     brep: &BRep<NodeId>,
     bound: &axiolid_topology::FaceBound,
-) -> GeomResult<Vec<(axiolid_topology::VertexId, Vec3)>> {
+    samples: Option<SampledEdges<'_>>,
+) -> GeomResult<Ring> {
     let wire = brep
         .loops()
         .get(bound.loop_id.index())
         .ok_or_else(|| GeomError::InvalidInput("loop missing".to_string()))?;
-    let mut points: Vec<(axiolid_topology::VertexId, Vec3)> = Vec::with_capacity(wire.edges.len());
+    let mut points: Ring = Vec::with_capacity(wire.edges.len());
     for use_ in &wire.edges {
         let edge = brep
             .edges()
@@ -794,7 +835,21 @@ fn loop_points(
             .get(vertex.index())
             .ok_or_else(|| GeomError::InvalidInput("vertex missing".to_string()))?
             .position;
-        points.push((vertex, position));
+        points.push((Corner::Vertex(vertex), position));
+        let Some((cache, positions)) = samples else {
+            continue;
+        };
+        if let Some(shared) = cache.get(&use_.edge) {
+            let (indices, _) = shared.in_direction(use_.orientation);
+            let interior = indices.get(1..indices.len().saturating_sub(1));
+            for &index in interior.into_iter().flatten() {
+                let position = positions
+                    .get(index as usize)
+                    .copied()
+                    .ok_or_else(|| GeomError::InvalidInput("edge sample missing".to_string()))?;
+                points.push((Corner::Sample(index), position));
+            }
+        }
     }
     if bound.orientation == Orientation::Reversed {
         points.reverse();
@@ -810,6 +865,17 @@ fn loop_points(
 /// silent modelling error.
 fn surface_is_planar(surface: &axiolid_surface::Surface) -> bool {
     matches!(surface, axiolid_surface::Surface::Plane(_))
+}
+
+/// Whether a face with the support `surface` is meshed as a curved face:
+/// its surface curves, or it is a plane with an edge that follows a curve.
+fn takes_curved_path(
+    brep: &BRep<NodeId>,
+    graph: &axiolid_model::GeometryGraph,
+    face: &axiolid_topology::Face<NodeId>,
+    surface: &axiolid_surface::Surface,
+) -> bool {
+    !surface_is_planar(surface) || curved_plane(brep, graph, face)
 }
 
 /// Whether a face on a declared plane has an edge that follows a curve
@@ -927,32 +993,38 @@ fn seed_grid_vertices(
     Ok(Some((grid, next_local)))
 }
 
-/// Shared boundary samples, keyed by edge. Interior refinement is
+/// Shared boundary samples, keyed by edge: the output of the edge pass
+/// ([`edges`], #336), which every face then takes. Interior refinement is
 /// deliberately face-local.
 type EdgeSamples = HashMap<axiolid_topology::EdgeId, SharedEdge>;
 
-/// One edge's samples, as the first face to reach it stored them.
+/// The certified bounds of an edge's spans on its 3D curve, or why it has
+/// none.
+type SpanBounds = Result<Vec<inversion::SpanBound>, &'static str>;
+
+/// One edge's samples, as the edge pass fixed them.
 struct SharedEdge {
     /// Mesh indices, both endpoints included, in the direction of `sense`.
     indices: Vec<u32>,
-    /// The direction of the edge use that sampled it.
+    /// The direction the samples run in.
     sense: Orientation,
     /// The certified bounds of each span on the edge's 3D curve, in the
     /// same direction, when the samples were taken from that curve (#310);
-    /// `None` for samples taken through a pcurve.
-    spans: Option<Vec<inversion::SpanBound>>,
+    /// otherwise why there are none: samples taken through a pcurve, or a
+    /// curve family with no chord bound.
+    spans: SpanBounds,
 }
 
 impl SharedEdge {
     /// The indices and span bounds in the direction of a use with `sense`.
     /// The COMPLETE endpoint-inclusive sequence is reversed: reversing an
     /// endpoint-excluding one shifts every sample by one segment.
-    fn in_direction(&self, sense: Orientation) -> (Vec<u32>, Option<Vec<inversion::SpanBound>>) {
+    fn in_direction(&self, sense: Orientation) -> (Vec<u32>, SpanBounds) {
         let mut indices = self.indices.clone();
         let mut spans = self.spans.clone();
         if self.sense != sense {
             indices.reverse();
-            if let Some(spans) = spans.as_mut() {
+            if let Ok(spans) = spans.as_mut() {
                 spans.reverse();
             }
         }
@@ -1489,7 +1561,7 @@ fn curved_boundary(
                 start_vertex,
                 end_vertex,
                 &points,
-                None,
+                Err(inversion::THROUGH_PCURVE),
             )?;
             // The next edge contributes this edge's final junction.
             out.uv.extend(params.into_iter().take(n));
@@ -1535,10 +1607,10 @@ fn curved_boundary(
 
 /// Intern one edge's 3D samples, or return the existing ones.
 ///
-/// Interning is keyed by EDGE, not by face. Whichever face reaches a seam
-/// first creates the vertices; every later face reuses the identical
-/// indices, so the seam is shared rather than merely coincident. `spans`
-/// is stored with new samples taken from the edge's 3D curve (#310).
+/// Interning is keyed by EDGE, not by face. The edge pass ([`edges`],
+/// #336) creates every shell edge's vertices before any face; each face
+/// then reuses the identical indices, so the seam is shared rather than
+/// merely coincident. `spans` is stored with new samples (#310).
 fn edge_samples(
     state: &mut CurvedMeshState<'_>,
     edge: axiolid_topology::EdgeId,
@@ -1546,7 +1618,7 @@ fn edge_samples(
     start_vertex: axiolid_topology::VertexId,
     end_vertex: axiolid_topology::VertexId,
     points: &[Vec3],
-    spans: Option<Vec<inversion::SpanBound>>,
+    spans: SpanBounds,
 ) -> GeomResult<Vec<u32>> {
     if let Some(cached) = state.edge_samples.get(&edge) {
         let (out, _) = cached.in_direction(sense);
@@ -2266,13 +2338,19 @@ pub(crate) fn surface_family(surface: &axiolid_surface::Surface) -> &'static str
 }
 
 /// A planar face's bound: its vertices' distance off the declared plane,
-/// when every edge is straight (#232).
+/// when every edge is straight (#232). An edge the edge pass sampled
+/// (#336) adds its interior samples' distance off the plane and, on top,
+/// their distance from the segment between the edge's vertices: the
+/// polygon's corners are within that of the exact face's boundary.
 fn planar_face_bound(
     ctx: &FaceContext<'_>,
     face: &axiolid_topology::Face<NodeId>,
     support: Option<&axiolid_surface::Surface>,
+    cache: &EdgeSamples,
+    positions: &[Vec3],
 ) -> GeomResult<DeviationBound> {
     let mut off_plane: Scalar = 0.0;
+    let mut off_edge: Scalar = 0.0;
     let plane = match support {
         Some(axiolid_surface::Surface::Plane(plane)) => {
             let normal = plane.frame.x.cross(plane.frame.y).normalize_or_zero();
@@ -2312,24 +2390,57 @@ fn planar_face_bound(
                     "planar face with a curved edge, chorded vertex to vertex",
                 ));
             }
+            let position = |vertex: axiolid_topology::VertexId| -> GeomResult<Vec3> {
+                Ok(ctx
+                    .brep
+                    .vertices()
+                    .get(vertex.index())
+                    .ok_or_else(|| GeomError::InvalidInput("vertex missing".to_owned()))?
+                    .position)
+            };
+            let (start, end) = (position(edge.start)?, position(edge.end)?);
+            let interior: Vec<Vec3> = match cache.get(&use_.edge) {
+                Some(shared) => shared
+                    .indices
+                    .get(1..shared.indices.len().saturating_sub(1))
+                    .into_iter()
+                    .flatten()
+                    .map(|&index| {
+                        positions.get(index as usize).copied().ok_or_else(|| {
+                            GeomError::InvalidInput("edge sample missing".to_owned())
+                        })
+                    })
+                    .collect::<GeomResult<_>>()?,
+                None => Vec::new(),
+            };
+            for &sample in &interior {
+                off_edge = off_edge.max(segment_distance(sample, start, end));
+            }
             if let Some((origin, normal)) = plane {
-                for vertex in [edge.start, edge.end] {
-                    let position = ctx
-                        .brep
-                        .vertices()
-                        .get(vertex.index())
-                        .ok_or_else(|| GeomError::InvalidInput("vertex missing".to_owned()))?
-                        .position;
-                    off_plane = off_plane.max((position - origin).dot(normal).abs());
+                for point in [start, end].into_iter().chain(interior) {
+                    off_plane = off_plane.max((point - origin).dot(normal).abs());
                 }
             }
         }
     }
-    Ok(if off_plane == 0.0 {
+    let bound = off_plane + off_edge;
+    Ok(if bound == 0.0 {
         DeviationBound::Proven(0.0)
     } else {
-        DeviationBound::Certified(off_plane * (1.0 + 1e-12))
+        DeviationBound::Certified(bound * (1.0 + 1e-12))
     })
+}
+
+/// The distance of `point` from the segment `a`-`b`.
+fn segment_distance(point: Vec3, a: Vec3, b: Vec3) -> Scalar {
+    let along = b - a;
+    let length = along.length_squared();
+    let t = if length > 0.0 {
+        ((point - a).dot(along) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (point - (a + along * t)).length()
 }
 
 /// The bound of one curved face, gathered while it is meshed (#232).

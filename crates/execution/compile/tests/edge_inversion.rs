@@ -1118,3 +1118,126 @@ fn a_cylinder_cut_by_an_oblique_plane_compiles_as_a_watertight_solid() {
     }
     assert_bounded("oblique cylinder", &mesh, &samples, &report, 6.0);
 }
+
+/// A D-shaped half cylinder the way an IFC advanced B-rep writes it (#336):
+/// a half-cylinder wall and a planar face across its diameter sharing two
+/// straight rulings, and two half-disk caps, no p-curve anywhere. The
+/// faces are listed rotated left by `rotate` and then, with `reverse`,
+/// backwards, so every face reaches the shared edges first in some order.
+fn d_shaped_half_cylinder(
+    radius: Scalar,
+    height: Scalar,
+    budget: Scalar,
+    rotate: usize,
+    reverse: bool,
+) -> (TriMesh, MeshClosure, DeviationReport) {
+    let wall = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let mut solid = OneFace::new();
+    let a = solid.vertex(Point3::new(0.0, -radius, 0.0));
+    let b = solid.vertex(Point3::new(0.0, radius, 0.0));
+    let c = solid.vertex(Point3::new(0.0, radius, height));
+    let d = solid.vertex(Point3::new(0.0, -radius, height));
+    // The arcs run forward about the axis from the start vertex at -pi/2
+    // to the end vertex at pi/2, through x = r (#319).
+    let arc_low = solid.edge(a, b, Some(circle(0.0, radius)));
+    let arc_high = solid.edge(d, c, Some(circle(height, radius)));
+    let ruling_a = solid.edge(a, d, None);
+    let ruling_b = solid.edge(b, c, None);
+    let diameter_low = solid.edge(a, b, None);
+    let diameter_high = solid.edge(d, c, None);
+    // The wall, counter-clockwise in (u, v): outward.
+    solid.use_edge(arc_low, Orientation::Forward);
+    solid.use_edge(ruling_b, Orientation::Forward);
+    solid.use_edge(arc_high, Orientation::Reversed);
+    solid.use_edge(ruling_a, Orientation::Reversed);
+    solid.close_face(&wall);
+    // The flat side at x = 0, facing -x.
+    solid.use_edge(ruling_a, Orientation::Forward);
+    solid.use_edge(diameter_high, Orientation::Forward);
+    solid.use_edge(ruling_b, Orientation::Reversed);
+    solid.use_edge(diameter_low, Orientation::Reversed);
+    solid.close_face(&Surface::Plane(Plane {
+        frame: Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::Z,
+            y: Vec3::Y,
+            z: -Vec3::X,
+        },
+    }));
+    // The floor faces -z, against its plane's normal.
+    solid.use_edge(diameter_low, Orientation::Forward);
+    solid.use_edge(arc_low, Orientation::Reversed);
+    solid.close_oriented_face(
+        &Surface::Plane(Plane {
+            frame: frame_at(0.0),
+        }),
+        Orientation::Reversed,
+    );
+    solid.use_edge(arc_high, Orientation::Forward);
+    solid.use_edge(diameter_high, Orientation::Reversed);
+    solid.close_face(&Surface::Plane(Plane {
+        frame: frame_at(height),
+    }));
+    solid.faces.rotate_left(rotate);
+    if reverse {
+        solid.faces.reverse();
+    }
+    solid
+        .compile_shell(true, &options(budget))
+        .expect("a D-shaped half cylinder with only 3D edges compiles")
+}
+
+/// The wall samples each ruling in pieces sized by its curvature; the flat
+/// side takes the same pieces, whichever face comes first (#336).
+#[test]
+fn a_d_shaped_half_cylinder_compiles_as_a_watertight_solid_in_any_face_order() {
+    let (radius, height) = (0.3, 0.5);
+    let wall = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let quarter = 0.25 * TAU;
+    let mut samples = surface_samples(&wall, (-quarter, quarter), (0.0, height), 300);
+    for z in [0.0, height] {
+        for rr in span(0.0, radius, 60) {
+            for t in span(-quarter, quarter, 120) {
+                samples.push(Point3::new(rr * t.cos(), rr * t.sin(), z));
+            }
+        }
+    }
+    for y in span(-radius, radius, 60) {
+        for z in span(0.0, height, 60) {
+            samples.push(Point3::new(0.0, y, z));
+        }
+    }
+    let area = 0.5 * TAU * radius * height + 2.0 * radius * height + 0.5 * TAU * radius * radius;
+    let mut counts = Vec::new();
+    for budget in [1e-3, 1e-4] {
+        for rotate in 0..4 {
+            for reverse in [false, true] {
+                let (mesh, closure, report) =
+                    d_shaped_half_cylinder(radius, height, budget, rotate, reverse);
+                let name = format!("D-shape at {budget:e}, rotated {rotate}, reversed {reverse}");
+                assert_eq!(closure, MeshClosure::Solid, "{name}");
+                assert_watertight(&name, &mesh);
+                assert_volume(
+                    &name,
+                    &mesh,
+                    &report,
+                    0.25 * TAU * radius * radius * height,
+                    area,
+                );
+                assert_bounded(&name, &mesh, &samples, &report, 6.0);
+                counts.push((budget, mesh.positions.len(), mesh.indices.len()));
+            }
+        }
+    }
+    // The order changes nothing the mesh is made of.
+    for &(budget, positions, indices) in &counts {
+        let first = counts.iter().find(|c| c.0 == budget).unwrap();
+        assert_eq!((positions, indices), (first.1, first.2), "{budget:e}");
+    }
+}

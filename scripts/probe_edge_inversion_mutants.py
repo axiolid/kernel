@@ -34,12 +34,22 @@ polish got unit tests, and the flat patch trimmed by a 3D circle (whose
 bound is its trim terms alone) was added for the span terms. 11 / 11
 killed after. The planar caps (closed cylinders, #310 follow-up) added two
 mutants: 13 / 13. Trimming edge curves at their vertices (#319) replaced
-the whole-domain check with seven mutants: 19 / 19.
+the whole-domain check with seven mutants: 19 / 19. The edge pass (#336),
+with the D-shaped half cylinder in every face order, added four: 23 / 23.
+
+Not listed for the edge pass, as equivalent at test resolution:
+- a planar face's bound without its samples' distance off their edge: the
+  fixtures' straight edges are sampled on their segments, so the term is
+  rounding.
+- the pcurve use the samples are taken through: every pcurve use must
+  agree with them within the budget, and no fixture shares an edge between
+  two pcurve uses that differ.
 """
 import probe_lib
 
 I = "crates/execution/compile/src/brep/inversion.rs"
 B = "crates/execution/compile/src/brep.rs"
+E = "crates/execution/compile/src/brep/edges.rs"
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "edge_inversion"],
     ["-p", "axiolid-mesh-compile", "--lib", "brep::inversion"],
@@ -104,14 +114,27 @@ MUTANTS = [
      "            if true {"),
     # Planar caps bounded by curved edges.
     ("caps bounded by curved edges keep the planar path", B,
-     "        if !surface_is_planar(surface) || curved_plane(brep, graph, face) {",
-     "        if !surface_is_planar(surface) {"),
+     "    !surface_is_planar(surface) || curved_plane(brep, graph, face)\n",
+     "    !surface_is_planar(surface)\n"),
     ("every edge curve reads as straight", B,
      "            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve),",
      "            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve) && false,"),
     ("sampling ignores the certified terms", I,
      "            if certified.is_none_or(|worst| worst <= budget) {",
      "            if certified.is_none_or(|worst| worst <= budget) || true {"),
+    # The edge pass (#336).
+    ("no edge pass: the first face to reach an edge samples it", E,
+     "    let plans = plan_edges(ctx, shells)?;",
+     "    let plans = plan_edges(ctx, &shells[..0])?;"),
+    ("planar faces take only their edges' vertices", B,
+     "    let mut rings = planar_rings(brep, face, Some((cache, &mesh.positions)))?;",
+     "    let mut rings = planar_rings(brep, face, None)?;"),
+    ("the last face's requirement wins, not the strictest", E,
+     "                plan.segments = plan.segments.max(segments);",
+     "                plan.segments = segments;"),
+    ("a planar face takes a reversed use's samples forwards", B,
+     "            let (indices, _) = shared.in_direction(use_.orientation);",
+     "            let (indices, _) = shared.in_direction(Orientation::Forward);"),
 ]
 
 probe_lib.main(MUTANTS, tests=TARGETS, command=probe_lib.CARGO_TEST + ("--all-features",), timeout=1800)
