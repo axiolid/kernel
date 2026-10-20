@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.18 (2026-10-19) |
+| Latest release | 0.3.19 (2026-10-20) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -81,42 +81,79 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.18 (2026-10-19):
+Latest release, 0.3.19 (2026-10-20):
 
 ### Added
 
-- A fast mode for the disc morphology (#330, ADR 0087).
-  `Region::erode_inner_with`, `erode_outer_with`, `dilate_inner_with` and
-  `dilate_outer_with` take a `MorphologyMode`:
-  - `MorphologyMode::Exact`, the default, is what `erode_inner` and its
-    siblings give, unchanged bit for bit. A CAD kernel takes it.
-  - `MorphologyMode::fast(budget)` first fills the summed set's notches with
-    chords proved to lie outside it (`src/fill.rs`), so a wall of teeth
-    becomes one edge. A chord is used only when the excess it adds stays
-    within `budget`, in metres; a refused chord is split into shorter ones.
-    The result keeps its inner or outer side. The excess is part of
-    `MorphologyBound::deviation`, and `Region::excess` reports it on its
-    own. A rule engine takes this mode.
+- `overlay_within` and `union_soup_within` take `OverlayOptions` and the
+  caller's `ExecutionOptions` (#338, ADR 0088): the tolerance is the
+  options', and with `ExecutionOptions::with_memory_budget` the
+  subdivision charges what it is about to hold before allocating it and is
+  refused with `OverlayRefusal::BudgetExceeded { needed, budget }` as soon
+  as the charges pass the budget. `OverlayRefusal::Invalid` carries every
+  refusal `overlay_with` and `union_soup_with` make. Without a budget
+  nothing new is refused, and an admitted call gives the unbudgeted result
+  bit for bit. `tests/grown_soup.rs` measures with a counting allocator
+  that a call never holds more heap than its budget, admitted or refused,
+  and that four times the unbudgeted high-water mark is admitted. The
+  crate now depends on `axiolid-contracts`.
 
-  The excess is a proved bound on how much larger the filled set makes the
-  sum: about the square of the spacing of the corners on the chord over
-  eight times the radius, and never more than the notch's depth. A budget
-  that is not finite and nonnegative is refused with
-  `OverlayError::InvalidOffsetDistance`.
+### Changed
 
-  Measured on #330's cases (#323's room with 0.5 mm teeth, as a room and
-  as a hole, a 0.4 m disc, a 1 mm budget, release) with
-  `cargo bench -p axiolid-benchmark --bench disc_erosion`. At 10,002
-  corners, exact mode takes 3–11 s and about 1.2 GB, and grows about with
-  the square of the corners (2.9–7.8 s and 1.15–1.19 GB in this run).
-  Fast mode takes 0.010–0.013 s, 0.020–0.024 s and 0.036–0.045 s at 2,402,
-  5,002 and 10,002 corners, at 4–7 MB, so it grows about linearly. Its
-  excess is 35 µm, 8 µm and 2 µm at those sizes, and 0.9 mm at 10,002
-  corners in the four cases where a chord within the budget cuts a corner
-  of the room. Exact mode's hashes are those of 0.3.17 in every case. Tests check fast results pointwise against the true disc
-  morphology on the certified side, within the stated deviation, for rooms
-  and holes, inner and outer, erosion and dilation.
-  `scripts/probe_fast_morphology_mutants.py` lists the faults they must
+- Ring validation no longer compares every pair of a ring's edges (#341).
+  A ring of more than 32 edges asks the crate's box tree for the pairs
+  whose boxes, grown by the tolerance, overlap, and the unchanged exact
+  `segments_intersect` decides each, in the old order: the refusals, their
+  order and the first pair found are as before, which a test checks
+  against the all-pairs search on rings valid, crossing, touching and
+  within the tolerance. And a `Region` carries the proof that its rings
+  are valid under the tolerance it was built with: `Region::new` sets it,
+  and a boolean on regions and the disc morphology set it from their
+  settled output, so `Region::union`, `intersection` and `difference`
+  under the same tolerance validate no ring again (holes are still checked
+  against their outer rings). A region translated, or used under another
+  tolerance, is validated as before; the proof is not part of `Region`
+  equality. Measured with `cargo bench -p axiolid-overlay --bench
+  ring_validation` (release), on a 40 m by 30 m floor with toothed walls:
+  `Region::new` at 10,000, 50,000 and 100,000 corners took 0.17 s, 4.2 s
+  and 17 s and now takes 0.006 s, 0.028 s and 0.059 s; a
+  `Region::difference` with a 1 m square took 0.20 s, 4.4 s and 18 s per
+  call and now takes 0.029 s, 0.18 s and 0.38 s.
+  `scripts/probe_ring_validation_mutants.py` lists the faults the tests
+  must catch.
+
+### Fixed
+
+- A soup of grown triangles whose union is one polygon no longer needs
+  gigabytes (#338). axioval/engine's soup -- the strips of a faceted bar,
+  each corner grown by a circumscribed 16-gon, hulled and fanned -- took
+  4.1 GB and 26 s for `union_soup` at 128 facets and 1.9 GB and 10 s for
+  `overlay(Intersection)`, and at 256 facets, and for the soup's union
+  with itself at 128, failed to allocate. Three causes, each fixed with
+  results unchanged:
+  - The chain reduction walked the whole soup once and gave up on every
+    ring when one cycle crossed itself: two overlapping hulls sharing
+    vertices let the walk pass from one into the other. It now reduces
+    such a soup group by group, the rings joined by edges given each way,
+    so every fan becomes its hull's outline.
+  - Edges with the same two ends (hulls' flat sides lined up on one line
+    and split there by the snap) were paired with one another for every
+    copy. Only the first copy keeps their pieces, so the later copies are
+    no longer paired among themselves.
+  - Where many edges meet at one vertex, every pair recorded the vertex
+    for both edges. A point at an edge's own end is no longer recorded
+    for that edge: it is its first or last stop, and the rings met there
+    are never read.
+
+  Measured with `cargo bench -p axiolid-overlay --bench grown_soup`
+  (release, peak resident memory): circumscribed `union_soup` at 64, 128
+  and 256 facets takes 0.08 s, 0.32 s and 1.6 s at 22 MB, 64 MB and
+  245 MB, and the intersection 0.09 s, 0.37 s and 1.8 s at 24 MB, 70 MB
+  and 254 MB, against 0.07 s, 0.32 s and 0.94 s at 20 MB, 58 MB and
+  217 MB for the inscribed soup. The self-union at 256 facets takes 5.5 s
+  at 482 MB. Every output that completed before is the same bit for bit,
+  pinned by hash in `tests/grown_soup.rs`.
+  `scripts/probe_grown_soup_mutants.py` lists the faults the tests must
   catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

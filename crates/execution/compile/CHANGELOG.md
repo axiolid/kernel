@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.30] - 2026-10-20
+
 ### Added
 
 - B-rep edges without a p-curve whose B-spline or polyline curve does not

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-10-20
+
 ### Added
 
 - `overlay_within` and `union_soup_within` take `OverlayOptions` and the

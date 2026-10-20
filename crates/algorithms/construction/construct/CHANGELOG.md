@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-10-20
+
 ### Fixed
 
 - `section_lower::rectangle_contour` accepts a corner radius equal to its

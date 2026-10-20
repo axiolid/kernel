@@ -557,6 +557,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.20 - 2026-10-20
+
+### Fixed
+
+- `section_lower::rectangle_contour` accepts a corner radius equal to its
+  half-extent after unit conversion (#339). A radius above its limit by at
+  most four relative epsilons of the smaller half-extent the limit is cut
+  from is rounding and is snapped onto the limit, for the outer and the
+  inner radius alike; one wider than that (a micrometre, say) is still
+  refused by name. buildingSMART's IFC4 Annex E `air-terminal-element.ifc`
+  tube (24 x 24 in, 2 in wall, 10 in inner fillet, in metres) used to be
+  refused with "inner corner radius must lie in [0, 0.25399999999999995],
+  got 0.254" and now builds with a fully rounded core. The structural
+  sections have no such bound: their radii meet only the shared router's
+  edge check, which already allows `1e-12`.
+
 ### 0.3.19 - 2026-10-16
 
 ### Added
@@ -3160,6 +3176,74 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.30 - 2026-10-20
+
+### Added
+
+- B-rep edges without a p-curve whose B-spline or polyline curve does not
+  already run from vertex to vertex are trimmed at their vertices (#333),
+  which were refused by name. A B-spline locates each vertex by the
+  certified global projection (`axiolid_nurbs::project_curve3_certified`,
+  at a thousandth of the tolerance), its minimiser cover refined to a
+  fixed parameter resolution by certified speed bounds, and requires that
+  cover to be one connected interval: a vertex whose certified distance
+  lower bound exceeds the tolerance is refused as off the curve, one the
+  curve passes more than once as ambiguous. A polyline locates each vertex
+  on its segments exactly, under the same uniqueness rule. On a closed
+  curve (a closed polyline, a B-spline whose closed seam verifies) the
+  edge runs forward from its start vertex across the seam where it must,
+  and is the whole curve from a single vertex; two vertices at one point
+  are refused as ambiguous. Section curves stay refused by name. A span
+  over a polyline corner, a B-spline's full-multiplicity knot or a closed
+  curve's seam is now bounded piecewise, the split points' distance from
+  the span's chord added, where its chord bound was missing before.
+
+### Changed
+
+- The "result touches itself" refusal (#194) is shown to refuse only true
+  contacts (#328, #327); no code path changes. Chains of half-space
+  intersections, each plane through an edge an earlier cut left, compile
+  to their analytic volume under placements, and a seeded sweep of such
+  chains is never refused. The refusal openbimrs/ifc met is a non-convex
+  subject: a wall notched by a sloped clip, cut by a plane through the
+  notch's corner, is two solids meeting along the corner line; the same
+  strip cut with its prism's walls first compiles to its analytic volume.
+  The box tangent to a curved wall's inner face (#327) touches it along a
+  ruling of the chorded face exactly on the tangent plane; a unit in the
+  last place past it, the box crosses the ruling by under `1e-15` and the
+  slit that opens, about `1e-13` wide, is returned closed: both stay
+  refused. `tests/half_space_chain_contact.rs` pins the chains and the
+  notch; probe `scripts/probe_pinch_mutants.py` (7/7 killed).
+
+### Fixed
+
+- A boolean's deviation measurement admits an exact face whose pcurve
+  loops close only within the readings the exact boolean took (#334), up
+  to the largest linear one it reported (`BooleanReport::linear`), never
+  beyond the caller's linear tolerance, in parameters by the surface's
+  largest first derivative. It refused such faces by name ("an exact
+  face's loops do not close in its parameters"), so a flat wall whose
+  openings' faces coincide with its own or each other's within `1e-8`
+  was left unbounded. The slack holds the gap measured, so the bound
+  stays sound, and loops that close exactly keep their rounding gap: the
+  all-planar bound of #314 is unchanged. A synthetic wall `5 x 0.25 x 3`
+  less a door and windows whose caps and shared side are `1e-8` and
+  `3e-8` off is certified at about its readings (`2e-8`, `6e-8`), its
+  exact volume checked; at `0` it stays at rounding (`1.3e-12`). Probe
+  `scripts/probe_closing_reading_mutants.py` (5/5 killed).
+
+- A B-rep whose planar face shares a straight edge with a curved face
+  closes (#336): a D-shaped half cylinder (a half-cylinder wall and a
+  planar face sharing two rulings, with two half-disk caps) compiled open,
+  since the wall sampled each ruling in pieces and the planar face took
+  only its endpoints. Every edge a curved face uses is now sampled once,
+  before any face, from the strictest requirement of all the faces using
+  it (the largest of their power-of-two span counts), and every face takes
+  those samples, a planar face's straight edges included. The mesh no
+  longer depends on the order the shell lists its faces in. A planar face
+  that takes samples adds their distance off its plane and off their edge
+  to its bound.
+
 ### 0.3.29 - 2026-10-18
 
 ### Fixed
@@ -5214,6 +5298,81 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.19 - 2026-10-20
+
+### Added
+
+- `overlay_within` and `union_soup_within` take `OverlayOptions` and the
+  caller's `ExecutionOptions` (#338, ADR 0088): the tolerance is the
+  options', and with `ExecutionOptions::with_memory_budget` the
+  subdivision charges what it is about to hold before allocating it and is
+  refused with `OverlayRefusal::BudgetExceeded { needed, budget }` as soon
+  as the charges pass the budget. `OverlayRefusal::Invalid` carries every
+  refusal `overlay_with` and `union_soup_with` make. Without a budget
+  nothing new is refused, and an admitted call gives the unbudgeted result
+  bit for bit. `tests/grown_soup.rs` measures with a counting allocator
+  that a call never holds more heap than its budget, admitted or refused,
+  and that four times the unbudgeted high-water mark is admitted. The
+  crate now depends on `axiolid-contracts`.
+
+### Changed
+
+- Ring validation no longer compares every pair of a ring's edges (#341).
+  A ring of more than 32 edges asks the crate's box tree for the pairs
+  whose boxes, grown by the tolerance, overlap, and the unchanged exact
+  `segments_intersect` decides each, in the old order: the refusals, their
+  order and the first pair found are as before, which a test checks
+  against the all-pairs search on rings valid, crossing, touching and
+  within the tolerance. And a `Region` carries the proof that its rings
+  are valid under the tolerance it was built with: `Region::new` sets it,
+  and a boolean on regions and the disc morphology set it from their
+  settled output, so `Region::union`, `intersection` and `difference`
+  under the same tolerance validate no ring again (holes are still checked
+  against their outer rings). A region translated, or used under another
+  tolerance, is validated as before; the proof is not part of `Region`
+  equality. Measured with `cargo bench -p axiolid-overlay --bench
+  ring_validation` (release), on a 40 m by 30 m floor with toothed walls:
+  `Region::new` at 10,000, 50,000 and 100,000 corners took 0.17 s, 4.2 s
+  and 17 s and now takes 0.006 s, 0.028 s and 0.059 s; a
+  `Region::difference` with a 1 m square took 0.20 s, 4.4 s and 18 s per
+  call and now takes 0.029 s, 0.18 s and 0.38 s.
+  `scripts/probe_ring_validation_mutants.py` lists the faults the tests
+  must catch.
+
+### Fixed
+
+- A soup of grown triangles whose union is one polygon no longer needs
+  gigabytes (#338). axioval/engine's soup -- the strips of a faceted bar,
+  each corner grown by a circumscribed 16-gon, hulled and fanned -- took
+  4.1 GB and 26 s for `union_soup` at 128 facets and 1.9 GB and 10 s for
+  `overlay(Intersection)`, and at 256 facets, and for the soup's union
+  with itself at 128, failed to allocate. Three causes, each fixed with
+  results unchanged:
+  - The chain reduction walked the whole soup once and gave up on every
+    ring when one cycle crossed itself: two overlapping hulls sharing
+    vertices let the walk pass from one into the other. It now reduces
+    such a soup group by group, the rings joined by edges given each way,
+    so every fan becomes its hull's outline.
+  - Edges with the same two ends (hulls' flat sides lined up on one line
+    and split there by the snap) were paired with one another for every
+    copy. Only the first copy keeps their pieces, so the later copies are
+    no longer paired among themselves.
+  - Where many edges meet at one vertex, every pair recorded the vertex
+    for both edges. A point at an edge's own end is no longer recorded
+    for that edge: it is its first or last stop, and the rings met there
+    are never read.
+
+  Measured with `cargo bench -p axiolid-overlay --bench grown_soup`
+  (release, peak resident memory): circumscribed `union_soup` at 64, 128
+  and 256 facets takes 0.08 s, 0.32 s and 1.6 s at 22 MB, 64 MB and
+  245 MB, and the intersection 0.09 s, 0.37 s and 1.8 s at 24 MB, 70 MB
+  and 254 MB, against 0.07 s, 0.32 s and 0.94 s at 20 MB, 58 MB and
+  217 MB for the inscribed soup. The self-union at 256 facets takes 5.5 s
+  at 482 MB. Every output that completed before is the same bit for bit,
+  pinned by hash in `tests/grown_soup.rs`.
+  `scripts/probe_grown_soup_mutants.py` lists the faults the tests must
+  catch.
 
 ### 0.3.18 - 2026-10-19
 

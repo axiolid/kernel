@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.19 (2026-10-16) |
+| Latest release | 0.3.20 (2026-10-20) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -65,46 +65,20 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.19 (2026-10-16):
-
-### Added
-
-- `half_space::bounded_half_space_prism` (#321): the slab of a half-space
-  bounded by the prism of a boundary along any axis that crosses the
-  plane, oblique to it allowed. The near cap is the boundary carried along
-  the axis onto the plane, the far cap the same at the depth: a
-  `SlabDepth`, `Relative` to the boundary's extent (as before) or the
-  `Reach` of a subject. `BoundaryPrism` states where the boundary stands
-  (`origin`, `x`, `y`, used as given) and the `axis`;
-  `BoundaryPrism::along_placement_z` reads it from a placement, IFC's
-  `IfcPolygonalBoundedHalfSpace.Position`, `BoundaryPrism::along_normal`
-  from a plane frame as `bounded_half_space_in_frame` does, and
-  `BoundaryPrism::crossing` the cosine of the axis against the plane.
-  Refused by name: an axis within the angular tolerance of the plane
-  (`"parallel to the clip plane"`), a degenerate placement (axes parallel
-  or zero) and a depth that is not positive and finite.
-
-- `BoundaryPrism::along_plane_normal` (#322): a boundary placed by a whole
-  placement along the plane normal, the placement's `x` projected into the
-  plane, its scale, shear and handedness kept; a degenerate placement
-  (parallel or zero axes) is refused by name.
-
-### Changed
-
-- `bounded_half_space_in_frame` honours a frame mirrored about the plane
-  normal, whose `y` is `-(normal x x)` (#322): its boundary is built
-  mirrored, as written, still outward-facing. It used to rebuild `y` as
-  `normal x x` and build the mirror image. A frame standing perpendicular
-  to the plane has no handedness there and is refused by name.
+Latest release, 0.3.20 (2026-10-20):
 
 ### Fixed
 
-- A bounded half-space whose boundary ring runs clockwise is built
-  outward-facing, the ring read reversed (the same region); it came out
-  inside-out before.
-- A derived contour's arcs under a scaling transform are scaled once
-  (#322): the scale went into the radius and into the arc's frame axes, so
-  every arc came out scaled twice, its contour open, and the extrusion
-  refused (`tests/derived_composite.rs`).
+- `section_lower::rectangle_contour` accepts a corner radius equal to its
+  half-extent after unit conversion (#339). A radius above its limit by at
+  most four relative epsilons of the smaller half-extent the limit is cut
+  from is rounding and is snapped onto the limit, for the outer and the
+  inner radius alike; one wider than that (a micrometre, say) is still
+  refused by name. buildingSMART's IFC4 Annex E `air-terminal-element.ifc`
+  tube (24 x 24 in, 2 in wall, 10 in inner fillet, in metres) used to be
+  refused with "inner corner radius must lie in [0, 0.25399999999999995],
+  got 0.254" and now builds with a fully rounded core. The structural
+  sections have no such bound: their radii meet only the shared router's
+  edge check, which already allows `1e-12`.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)
