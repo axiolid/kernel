@@ -65,7 +65,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.6 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.1 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.1 | Portable, deterministic intersections for linear geometry |
-| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.10 | Metric properties: area, volume, centroid, moments of inertia. |
+| [`axiolid-measure`](./crates/axiolid-measure) | `algorithm.query` | 0.3.11 | Metric properties: area, volume, centroid, moments of inertia. |
 | [`axiolid-minkowski`](./crates/axiolid-minkowski) | `algorithm.discrete` | 0.3.1 | Minkowski sum and difference of planar-faced solids |
 | [`axiolid-numeric`](./crates/axiolid-numeric) | `algorithm.numeric` | 0.1.1 | Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, dense least squares, and minimisation, each with error estimates |
 | [`axiolid-nurbs`](./crates/axiolid-nurbs) | `algorithm.parametric` | 0.3.6 | General polynomial and rational B-spline analysis and transformation algorithms |
@@ -94,7 +94,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.2 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.1 | GPU executor adapter contract for batched Axiolid geometry |
 | [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.4 | Provider registration, ordering, fallback, and execution policy |
-| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.30 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
+| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.31 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 

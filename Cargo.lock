@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-measure"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "axiolid-brep",
  "axiolid-core",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.30"
+version = "0.3.31"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

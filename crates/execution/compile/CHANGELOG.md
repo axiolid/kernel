@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.31] - 2026-10-20
+
 ### Changed
 
 - A B-rep face without a surface reports its slab width whenever its

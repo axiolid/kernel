@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.30 (2026-10-20) |
+| Latest release | 0.3.31 (2026-10-20) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,72 +78,20 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.30 (2026-10-20):
-
-### Added
-
-- B-rep edges without a p-curve whose B-spline or polyline curve does not
-  already run from vertex to vertex are trimmed at their vertices (#333),
-  which were refused by name. A B-spline locates each vertex by the
-  certified global projection (`axiolid_nurbs::project_curve3_certified`,
-  at a thousandth of the tolerance), its minimiser cover refined to a
-  fixed parameter resolution by certified speed bounds, and requires that
-  cover to be one connected interval: a vertex whose certified distance
-  lower bound exceeds the tolerance is refused as off the curve, one the
-  curve passes more than once as ambiguous. A polyline locates each vertex
-  on its segments exactly, under the same uniqueness rule. On a closed
-  curve (a closed polyline, a B-spline whose closed seam verifies) the
-  edge runs forward from its start vertex across the seam where it must,
-  and is the whole curve from a single vertex; two vertices at one point
-  are refused as ambiguous. Section curves stay refused by name. A span
-  over a polyline corner, a B-spline's full-multiplicity knot or a closed
-  curve's seam is now bounded piecewise, the split points' distance from
-  the span's chord added, where its chord bound was missing before.
+Latest release, 0.3.31 (2026-10-20):
 
 ### Changed
 
-- The "result touches itself" refusal (#194) is shown to refuse only true
-  contacts (#328, #327); no code path changes. Chains of half-space
-  intersections, each plane through an edge an earlier cut left, compile
-  to their analytic volume under placements, and a seeded sweep of such
-  chains is never refused. The refusal openbimrs/ifc met is a non-convex
-  subject: a wall notched by a sloped clip, cut by a plane through the
-  notch's corner, is two solids meeting along the corner line; the same
-  strip cut with its prism's walls first compiles to its analytic volume.
-  The box tangent to a curved wall's inner face (#327) touches it along a
-  ruling of the chorded face exactly on the tangent plane; a unit in the
-  last place past it, the box crosses the ruling by under `1e-15` and the
-  slit that opens, about `1e-13` wide, is returned closed: both stay
-  refused. `tests/half_space_chain_contact.rs` pins the chains and the
-  notch; probe `scripts/probe_pinch_mutants.py` (7/7 killed).
-
-### Fixed
-
-- A boolean's deviation measurement admits an exact face whose pcurve
-  loops close only within the readings the exact boolean took (#334), up
-  to the largest linear one it reported (`BooleanReport::linear`), never
-  beyond the caller's linear tolerance, in parameters by the surface's
-  largest first derivative. It refused such faces by name ("an exact
-  face's loops do not close in its parameters"), so a flat wall whose
-  openings' faces coincide with its own or each other's within `1e-8`
-  was left unbounded. The slack holds the gap measured, so the bound
-  stays sound, and loops that close exactly keep their rounding gap: the
-  all-planar bound of #314 is unchanged. A synthetic wall `5 x 0.25 x 3`
-  less a door and windows whose caps and shared side are `1e-8` and
-  `3e-8` off is certified at about its readings (`2e-8`, `6e-8`), its
-  exact volume checked; at `0` it stays at rounding (`1.3e-12`). Probe
-  `scripts/probe_closing_reading_mutants.py` (5/5 killed).
-
-- A B-rep whose planar face shares a straight edge with a curved face
-  closes (#336): a D-shaped half cylinder (a half-cylinder wall and a
-  planar face sharing two rulings, with two half-disk caps) compiled open,
-  since the wall sampled each ruling in pieces and the planar face took
-  only its endpoints. Every edge a curved face uses is now sampled once,
-  before any face, from the strictest requirement of all the faces using
-  it (the largest of their power-of-two span counts), and every face takes
-  those samples, a planar face's straight edges included. The mesh no
-  longer depends on the order the shell lists its faces in. A planar face
-  that takes samples adds their distance off its plane and off their edge
-  to its bound.
+- A B-rep face without a surface reports its slab width whenever its
+  corners are not exactly coplanar (#343, ADR 0080 amendment
+  2026-10-20). Within the linear tolerance of its fit plane it reported a
+  proven `0`, so faceted IFC walls whose faces lie up to `4e-10` m off
+  their plane read as exact. Coplanarity is now decided in exact
+  arithmetic on the stored corners (certified `orient3d`), and a face that
+  fails it reports `Certified(w)` under `"non-planar face without a
+  surface"`, the width #261 computes, however small; `0` now means
+  planar. An exactly coplanar face, tilted or not, still reports `0`; a
+  face warped beyond the tolerance reports what it did, and authored
+  polygon faces keep their tolerance rule.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

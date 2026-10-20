@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-20
+
 ### Fixed
 
 - `exact_properties` measures a solid far from the world origin correctly

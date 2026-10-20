@@ -2616,6 +2616,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-measure
 
+### 0.3.11 - 2026-10-20
+
+### Fixed
+
+- `exact_properties` measures a solid far from the world origin correctly
+  (#343). Its cone fields were integrated about the world origin, so on a
+  national grid each term grew with the cube of a `5.6e6` m reach and the
+  noise floor of every curved-face integral was set from that reach: a
+  `0.57 m^3` box at `(6.0e5, 5.6e6, 204.5)` measured `0.544` to
+  `0.664 m^3` depending on the last bits of its placement, a wall less
+  flush openings up to 5 % off, each without an error. The solid is now
+  moved to the centre of its vertices' bounding box and integrated there,
+  and the centroid and second moments (still about the world origin) are
+  shifted back by the parallel-axis terms. Such a solid measures its
+  closed form to its input's own grid (`9.3e-10` m at `5.6e6`); one at
+  the origin measures as before up to rounding. A B-rep the translation
+  refuses (an elevated or banked alignment curve) is integrated in place
+  about the same point: a curved face far out may then be refused as not
+  converged, never measured looser.
+- `second_moments` (and so `MeshMeasure`'s `second_moment_diagonal`) sums
+  about the mesh's first vertex and shifts the moments back to the origin
+  by the parallel-axis terms, as `volume_properties` already did (#343).
+  About the world origin each term grew with the fifth power of the
+  distance: a unit box at `(6.0e5, 5.6e6, 204.5)` measured
+  `360016800160` against `360016800196.08` and lost its central moments
+  entirely. It now matches the closed form to rounding.
+
 ### 0.3.10 - 2026-10-09
 
 ### Changed
@@ -3175,6 +3202,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.31 - 2026-10-20
+
+### Changed
+
+- A B-rep face without a surface reports its slab width whenever its
+  corners are not exactly coplanar (#343, ADR 0080 amendment
+  2026-10-20). Within the linear tolerance of its fit plane it reported a
+  proven `0`, so faceted IFC walls whose faces lie up to `4e-10` m off
+  their plane read as exact. Coplanarity is now decided in exact
+  arithmetic on the stored corners (certified `orient3d`), and a face that
+  fails it reports `Certified(w)` under `"non-planar face without a
+  surface"`, the width #261 computes, however small; `0` now means
+  planar. An exactly coplanar face, tilted or not, still reports `0`; a
+  face warped beyond the tolerance reports what it did, and authored
+  polygon faces keep their tolerance rule.
 
 ### 0.3.30 - 2026-10-20
 
