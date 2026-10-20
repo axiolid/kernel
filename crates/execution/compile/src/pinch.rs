@@ -8,6 +8,29 @@
 //! position sees an edge with four faces, or a vertex with two separate
 //! fans, and rejects the body. Such a result is refused with the contact
 //! named rather than returned.
+//!
+//! The check reads the result as returned, welded by exact position, so
+//! vertices a boolean leaves duplicated within one continuing surface are
+//! never read as a contact: only two surfaces meeting along a line or at a
+//! point are. It
+//! does not misread a convex result, which cannot touch itself: chains of
+//! half-space intersections, each plane through an edge an earlier cut
+//! left, compile to their analytic volume
+//! (`tests/half_space_chain_contact.rs`). What it refuses are true
+//! contacts of the operands as meshed, and they arise beyond the void
+//! tangent to a face:
+//!
+//! - A non-convex subject cut through the corner of a notch (#328): above a
+//!   plane through the corner, the notched wall is two solids meeting along
+//!   the corner line. The same set cut in another order, the prism's walls
+//!   before its plane, never passes through the contact.
+//! - A box whose face touches a chorded cylinder along one of its rulings
+//!   (#327): on the tangent plane the ruling lies exactly on the box's
+//!   face, so the box's void meets the wall's inner face along the ruling;
+//!   a unit in the last place past it, the box crosses the ruling by less
+//!   than `1e-15`, and the slit that opens, about `1e-13` wide, is
+//!   returned closed, the void touching the face along a segment. Both
+//!   are refused, and pinned in `tests/curved_wall_openings.rs`.
 
 use std::collections::HashMap;
 

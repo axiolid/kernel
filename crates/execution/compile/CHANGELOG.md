@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The "result touches itself" refusal (#194) is shown to refuse only true
+  contacts (#328, #327); no code path changes. Chains of half-space
+  intersections, each plane through an edge an earlier cut left, compile
+  to their analytic volume under placements, and a seeded sweep of such
+  chains is never refused. The refusal openbimrs/ifc met is a non-convex
+  subject: a wall notched by a sloped clip, cut by a plane through the
+  notch's corner, is two solids meeting along the corner line; the same
+  strip cut with its prism's walls first compiles to its analytic volume.
+  The box tangent to a curved wall's inner face (#327) touches it along a
+  ruling of the chorded face exactly on the tangent plane; a unit in the
+  last place past it, the box crosses the ruling by under `1e-15` and the
+  slit that opens, about `1e-13` wide, is returned closed: both stay
+  refused. `tests/half_space_chain_contact.rs` pins the chains and the
+  notch; probe `scripts/probe_pinch_mutants.py` (7/7 killed).
+
 ### Fixed
 
 - A boolean's deviation measurement admits an exact face whose pcurve
