@@ -35,6 +35,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
         with:
           toolchain: 1.88.0
+      - name: Install the pinned nightly that resolves minimal versions
+        # verify-packages.py builds every to-be-released crate at its minimal
+        # internal dependency versions; only `-Z minimal-versions` makes
+        # that lockfile, and the build itself uses 1.88.0.
+        run: rustup toolchain install nightly-2026-09-25 --profile minimal
       - name: Test release tooling and publication order
         run: |
           python3 scripts/test_release_scripts.py

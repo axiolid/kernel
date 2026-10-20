@@ -48,6 +48,7 @@ step "release script tests" python3 -m unittest scripts.test_release_scripts
 step "crate release script tests" python3 -m unittest scripts.test_crate_release
 step "release publish plan" python3 scripts/publish-workspace.py
 step "release package preflight" python3 scripts/verify-packages.py
+step "minimal versions mutation probe" python3 scripts/probe_minimal_versions_gate.py
 step "semver policy" python3 scripts/check-semver.py
 step "semver mutation probe" scripts/probe_semver_gate.sh
 # Derived from `cargo metadata`, never hand-maintained: a new publishable

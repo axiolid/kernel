@@ -123,6 +123,12 @@ All notable changes to Axiolid are documented in this file.
   convex hull, sampled coverage) on grids, lattice spheres, coplanar
   layers and random sets, plus a 21-fault mutation probe. Constraints
   (segments, faces) are not recovered yet.
+- Release check for stale dependency floors (#337): `scripts/verify-packages.py`
+  builds every crate whose version is not on crates.io yet with each
+  `axiolid-*` crate in its graph at the oldest version the published
+  requirements admit (pinned `nightly-2026-09-25`, `-Z minimal-versions`,
+  internal crates only), and names the crate that does not build.
+  `scripts/probe_minimal_versions_gate.py` (5 mutants) runs in the gate.
 
 ### Changed
 

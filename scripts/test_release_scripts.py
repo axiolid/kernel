@@ -291,5 +291,194 @@ version = "0.1.0"
             prepare_release.CARGO_TOML = original
 
 
+INCIDENT_LOCK = """version = 4
+
+[[package]]
+name = "axiolid-evaluate"
+version = "0.3.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "axiolid-mesh-compile"
+version = "0.3.28"
+
+[[package]]
+name = "axiolid-minimal-versions-probe"
+version = "0.0.0"
+
+[[package]]
+name = "axiolid-reference"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "glam"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"""
+
+
+class MinimalVersionsTests(unittest.TestCase):
+    """The minimal-internal-versions release check (kernel#337)."""
+
+    def test_sparse_index_path_follows_cargo_layout(self) -> None:
+        self.assertEqual(verify.sparse_index_path("a"), "1/a")
+        self.assertEqual(verify.sparse_index_path("ab"), "2/ab")
+        self.assertEqual(verify.sparse_index_path("abc"), "3/a/abc")
+        self.assertEqual(
+            verify.sparse_index_path("axiolid-Reference"), "ax/io/axiolid-reference"
+        )
+
+    def test_index_versions_count_yanked_releases_as_taken(self) -> None:
+        text = (
+            '{"name":"x","vers":"0.3.8","yanked":false}\n'
+            '{"name":"x","vers":"0.3.9","yanked":true}\n'
+        )
+        self.assertEqual(verify.parse_index_versions(text), {"0.3.8", "0.3.9"})
+
+    def test_to_be_released_is_every_version_missing_from_the_registry(self) -> None:
+        packages = [
+            {"name": "axiolid-evaluate", "version": "0.3.17"},
+            {"name": "axiolid-reference", "version": "0.3.8"},
+            {"name": "axiolid-new", "version": "0.1.0"},
+        ]
+        registry = {"axiolid-evaluate": {"0.3.16"}, "axiolid-reference": {"0.3.8"}}
+        released = verify.to_be_released(packages, lambda name: registry.get(name, set()))
+        self.assertEqual(
+            [package["name"] for package in released], ["axiolid-evaluate", "axiolid-new"]
+        )
+
+    def test_absent_crate_has_no_published_versions(self) -> None:
+        error = verify.urllib.error.HTTPError("url", 404, "Not Found", {}, None)
+        with mock.patch.object(verify.urllib.request, "urlopen", side_effect=error):
+            self.assertEqual(verify.published_versions("axiolid-new"), set())
+
+    def test_unclear_registry_answer_refuses_instead_of_guessing(self) -> None:
+        error = verify.urllib.error.URLError("offline")
+        with mock.patch.object(verify.urllib.request, "urlopen", side_effect=error):
+            with mock.patch.object(verify.time, "sleep"):
+                with self.assertRaisesRegex(SystemExit, "cannot tell whether axiolid-core"):
+                    verify.published_versions("axiolid-core")
+
+    def test_explicit_crates_must_be_publishable_members(self) -> None:
+        packages = [{"name": "axiolid-core", "version": "0.3.2"}]
+        self.assertEqual(verify.select_packages(packages, ["axiolid-core"]), packages)
+        with self.assertRaisesRegex(SystemExit, "axiolid-oracle"):
+            verify.select_packages(packages, ["axiolid-oracle"])
+
+    def test_feature_sets_cover_the_default_build_and_every_feature(self) -> None:
+        self.assertEqual(
+            verify.feature_sets({"name": "axiolid-core", "features": {}}), [("default", [])]
+        )
+        self.assertEqual(
+            verify.feature_sets(
+                {"name": "axiolid-measure", "features": {"default": [], "exact": []}}
+            ),
+            [("default", []), ("all-features", ["default", "exact"])],
+        )
+        # The facade compiles nothing without a capability feature (kernel#9).
+        self.assertEqual(
+            verify.feature_sets({"name": "axiolid", "features": {"standard": []}}),
+            [("default", ["standard"])],
+        )
+
+    def test_probe_workspace_pins_exactly_the_crate_under_check(self) -> None:
+        files = verify.probe_workspace_files(
+            "axiolid-mesh-compile",
+            "0.3.28",
+            ["exact"],
+            {"axiolid-mesh-compile": Path("/scratch/axiolid-mesh-compile-0.3.28")},
+        )
+        probe = files["probe/Cargo.toml"]
+        self.assertIn(
+            '"axiolid-mesh-compile" = { version = "=0.3.28", features = ["exact"] }', probe
+        )
+        self.assertIn("publish = false", probe)
+        # Only the crate under check: anything else here would be a direct
+        # dependency that lifts a floor the crate does not state.
+        self.assertEqual(probe.count(" = { version"), 1)
+        workspace = files["Cargo.toml"]
+        self.assertIn("[patch.crates-io]", workspace)
+        self.assertIn(
+            '"axiolid-mesh-compile" = { path = "/scratch/axiolid-mesh-compile-0.3.28" }',
+            workspace,
+        )
+        self.assertIn('members = ["probe"]', workspace)
+
+    def test_update_lowers_only_internal_crates(self) -> None:
+        self.assertEqual(
+            verify.internal_update_specs(INCIDENT_LOCK),
+            [
+                "axiolid-evaluate@0.3.16",
+                "axiolid-mesh-compile@0.3.28",
+                "axiolid-reference@0.3.8",
+            ],
+        )
+
+    def test_update_command_uses_transitive_minimal_versions_on_the_pinned_nightly(self) -> None:
+        command = verify.minimal_update_command(Path("/w/Cargo.toml"), ["axiolid-reference@0.3.9"])
+        self.assertEqual(
+            command,
+            [
+                "cargo",
+                "+nightly-2026-09-25",
+                "-Z",
+                "minimal-versions",
+                "update",
+                "--manifest-path",
+                "/w/Cargo.toml",
+                "-p",
+                "axiolid-reference@0.3.9",
+            ],
+        )
+        # The direct mode keeps indirect dependencies at their newest, which
+        # hides a floor passed on by a re-exporting crate.
+        self.assertNotIn("direct-minimal-versions", command)
+
+    def test_release_workflow_installs_the_pinned_nightly(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn(f"rustup toolchain install {verify.MINIMAL_VERSIONS_TOOLCHAIN}", workflow)
+
+    def test_locked_internal_versions_record_their_origin(self) -> None:
+        self.assertEqual(
+            verify.locked_internal_versions(INCIDENT_LOCK),
+            [
+                ("axiolid-evaluate", "0.3.16", True),
+                ("axiolid-mesh-compile", "0.3.28", False),
+                ("axiolid-reference", "0.3.8", True),
+            ],
+        )
+
+    def test_failure_names_the_crate_whose_floor_is_too_low(self) -> None:
+        output = (
+            "error[E0432]: unresolved import `axiolid_reference::station::FrameLaw`\n"
+            "error: could not compile `axiolid-mesh-compile` (lib) due to 22 previous errors\n"
+            "error: could not compile `axiolid-mesh-compile` (lib) due to 22 previous errors\n"
+        )
+        self.assertEqual(verify.failing_crates(output), ["axiolid-mesh-compile"])
+        message = verify.minimal_versions_failure(
+            "axiolid-mesh-compile",
+            "0.3.28",
+            "default",
+            output,
+            verify.locked_internal_versions(INCIDENT_LOCK),
+        )
+        self.assertTrue(message.startswith("MINIMAL_VERSIONS=FAIL axiolid-mesh-compile 0.3.28"))
+        self.assertIn("axiolid-mesh-compile 0.3.28 (to be released) does not build", message)
+        self.assertIn("axiolid-evaluate 0.3.16, axiolid-reference 0.3.8", message)
+        self.assertIn("FrameLaw", message)
+
+    def test_failure_in_a_published_dependency_names_that_crate(self) -> None:
+        output = "error: could not compile `axiolid-reference` (lib)\n"
+        message = verify.minimal_versions_failure(
+            "axiolid-mesh-compile",
+            "0.3.28",
+            "default",
+            output,
+            verify.locked_internal_versions(INCIDENT_LOCK),
+        )
+        self.assertIn("axiolid-reference 0.3.8 (crates.io) does not build", message)
+
+
 if __name__ == "__main__":
     unittest.main()
