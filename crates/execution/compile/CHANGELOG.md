@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- B-rep edges without a p-curve whose B-spline or polyline curve does not
+  already run from vertex to vertex are trimmed at their vertices (#333),
+  which were refused by name. A B-spline locates each vertex by the
+  certified global projection (`axiolid_nurbs::project_curve3_certified`,
+  at a thousandth of the tolerance), its minimiser cover refined to a
+  fixed parameter resolution by certified speed bounds, and requires that
+  cover to be one connected interval: a vertex whose certified distance
+  lower bound exceeds the tolerance is refused as off the curve, one the
+  curve passes more than once as ambiguous. A polyline locates each vertex
+  on its segments exactly, under the same uniqueness rule. On a closed
+  curve (a closed polyline, a B-spline whose closed seam verifies) the
+  edge runs forward from its start vertex across the seam where it must,
+  and is the whole curve from a single vertex; two vertices at one point
+  are refused as ambiguous. Section curves stay refused by name. A span
+  over a polyline corner, a B-spline's full-multiplicity knot or a closed
+  curve's seam is now bounded piecewise, the split points' distance from
+  the span's chord added, where its chord bound was missing before.
+
 ### Changed
 
 - The "result touches itself" refusal (#194) is shown to refuse only true

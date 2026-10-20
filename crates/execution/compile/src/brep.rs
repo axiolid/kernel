@@ -118,6 +118,7 @@ use crate::weld::EdgeSplits;
 
 mod edges;
 mod inversion;
+mod trim;
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;

@@ -888,15 +888,321 @@ fn two_vertices_at_one_point_of_a_circle_are_refused_as_ambiguous() {
     );
 }
 
-/// A B-spline edge whose domain does not end at its vertices has no
-/// closed-form inversion naming one turn, and is refused by name.
+/// A vertex off a B-spline edge curve is refused by name (#333): the
+/// certified projection's distance lower bound exceeds the tolerance.
 #[test]
-fn a_bspline_edge_not_ending_at_its_vertices_is_refused_by_name() {
-    let error = refused_rim(Point3::new(0.0, 0.3, 0.0), Some(half_circle(0.0, 0.3, 0.0)));
+fn a_vertex_off_its_bspline_edge_curve_is_refused_by_name() {
+    let error = refused_rim(
+        Point3::new(0.0, 0.303, 0.0),
+        Some(half_circle(0.0, 0.3, 0.0)),
+    );
+    assert!(
+        matches!(&error, GeomError::InvalidInput(reason)
+            if reason.contains("end vertex of an edge without a p-curve is not on its curve")),
+        "got {error:?}"
+    );
+}
+
+/// A section curve's inversion takes the first of several turns naming a
+/// point, so an edge on one that does not run its whole domain stays
+/// refused by name (#333): here the bottom rim as the section of the
+/// cylinder at height zero.
+#[test]
+fn a_section_edge_not_ending_at_its_vertices_is_refused_by_name() {
+    let section = Curve3::RuledSection(axiolid_curve::RuledSection3 {
+        carrier: axiolid_curve::RuledCarrier {
+            frame: frame_at(0.0),
+            x_radius: 0.3,
+            y_radius: 0.3,
+            slope: 0.0,
+        },
+        graph: axiolid_curve::QuadraticGraph2 {
+            a: axiolid_curve::Trig2 {
+                constant: 1.0,
+                ..axiolid_curve::Trig2::default()
+            },
+            b: axiolid_curve::Trig2::default(),
+            c: axiolid_curve::Trig2::default(),
+            branch: axiolid_curve::Branch::Plus,
+        },
+    });
+    let error = refused_rim(Point3::new(0.0, 0.3, 0.0), Some(section));
     assert!(
         matches!(&error, GeomError::InvalidInput(reason)
             if reason.contains("neither runs its whole domain")),
         "got {error:?}"
+    );
+}
+
+/// A whole circle as one closed rational B-spline of four quarter arcs,
+/// starting at angle zero.
+fn closed_circle_spline(z: Scalar, radius: Scalar) -> Curve3 {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let p = |x: Scalar, y: Scalar| Point3::new(x * radius, y * radius, z);
+    Curve3::BSpline(BSplineCurve3 {
+        degree: 2,
+        control_points: vec![
+            p(1.0, 0.0),
+            p(1.0, 1.0),
+            p(0.0, 1.0),
+            p(-1.0, 1.0),
+            p(-1.0, 0.0),
+            p(-1.0, -1.0),
+            p(0.0, -1.0),
+            p(1.0, -1.0),
+            p(1.0, 0.0),
+        ],
+        knots: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+        multiplicities: vec![3, 2, 2, 2, 3],
+        weights: Some(vec![1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0]),
+        closed: true,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// The patch of a cylinder between angles `from` and `to` (`from < to`),
+/// its arcs `low` and `high` trimmed at the patch's corners, its rulings
+/// straight, no p-curve anywhere; with dense samples of the exact patch
+/// and arcs.
+fn trimmed_patch(
+    low: Curve3,
+    high: Curve3,
+    (from, to): (Scalar, Scalar),
+) -> (TriMesh, DeviationReport, Vec<Point3>) {
+    let (radius, height) = (0.3, 0.5);
+    let surface = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let at = |t: Scalar, z: Scalar| Point3::new(radius * t.cos(), radius * t.sin(), z);
+    let mut face = OneFace::new();
+    let corners = [at(from, 0.0), at(to, 0.0), at(to, height), at(from, height)];
+    let v: Vec<_> = corners.iter().map(|&p| face.vertex(p)).collect();
+    let bottom = face.edge(v[0], v[1], Some(low));
+    let top = face.edge(v[3], v[2], Some(high));
+    let left = face.edge(v[1], v[2], None);
+    let right = face.edge(v[0], v[3], None);
+    face.use_edge(bottom, Orientation::Forward);
+    face.use_edge(left, Orientation::Forward);
+    face.use_edge(top, Orientation::Reversed);
+    face.use_edge(right, Orientation::Reversed);
+    let (mesh, report) = face
+        .compile(&surface, &options(1e-4))
+        .expect("a patch bounded by trimmed B-spline arcs compiles");
+    let mut samples = surface_samples(&surface, (from, to), (0.0, height), 400);
+    for z in [0.0, height] {
+        samples.extend(span(from, to, 20_000).map(|t| at(t, z)));
+    }
+    (mesh, report, samples)
+}
+
+/// Every mesh vertex lies between the angles `from` and `to`: the arcs
+/// were trimmed at the corners, not sampled whole.
+fn assert_within_angles(name: &str, mesh: &TriMesh, (from, to): (Scalar, Scalar)) {
+    let middle = 0.5 * (from + to);
+    for p in &mesh.positions {
+        let off = (p.y.atan2(p.x) - middle + 0.5 * TAU).rem_euclid(TAU) - 0.5 * TAU;
+        assert!(
+            off.abs() <= 0.5 * (to - from) + 1e-9,
+            "{name}: a mesh vertex {p:?} lies outside the patch"
+        );
+    }
+}
+
+/// An open rational B-spline half circle trimmed at two interior vertices
+/// (#333), on either side of its double knot: the span is located by the
+/// certified projection and its bounds are split at the knot.
+#[test]
+fn an_open_bspline_edge_is_trimmed_at_interior_vertices() {
+    let angles = (TAU / 12.0, TAU / 3.0);
+    let (mesh, report, samples) = trimmed_patch(
+        half_circle(0.0, 0.3, 0.0),
+        half_circle(0.5, 0.3, 0.0),
+        angles,
+    );
+    assert_within_angles("trimmed open B-spline", &mesh, angles);
+    assert_bounded("trimmed open B-spline", &mesh, &samples, &report, 4.0);
+}
+
+/// A closed B-spline circle trimmed at two vertices either side of its seam
+/// (#333): the span runs forward from the start vertex across the seam.
+#[test]
+fn a_closed_bspline_edge_is_trimmed_across_its_seam() {
+    let angles = (-TAU / 8.0, TAU / 8.0);
+    let (mesh, report, samples) = trimmed_patch(
+        closed_circle_spline(0.0, 0.3),
+        closed_circle_spline(0.5, 0.3),
+        angles,
+    );
+    assert_within_angles("closed B-spline across its seam", &mesh, angles);
+    assert_bounded(
+        "closed B-spline across its seam",
+        &mesh,
+        &samples,
+        &report,
+        4.0,
+    );
+}
+
+/// A closed B-spline circle whose one vertex lies a quarter turn from its
+/// seam is the whole curve from that vertex (#333).
+#[test]
+fn a_closed_bspline_edge_is_the_whole_curve_from_its_one_vertex() {
+    let (radius, height) = (0.3, 0.5);
+    let surface = Surface::Cylinder(Cylinder {
+        frame: frame_at(0.0),
+        radius,
+    });
+    let rim = closed_circle_spline(0.0, radius);
+    let mut face = OneFace::new();
+    let bottom = face.vertex(Point3::new(0.0, radius, 0.0));
+    let top = face.vertex(Point3::new(0.0, radius, height));
+    let turned = Curve3::Circle(Circle3 {
+        frame: Frame3 {
+            origin: Point3::new(0.0, 0.0, height),
+            x: Vec3::Y,
+            y: -Vec3::X,
+            z: Vec3::Z,
+        },
+        radius,
+    });
+    let rim0 = face.edge(bottom, bottom, Some(rim.clone()));
+    let rim1 = face.edge(top, top, Some(turned.clone()));
+    let seam = face.edge(bottom, top, None);
+    face.use_edge(rim0, Orientation::Forward);
+    face.use_edge(seam, Orientation::Forward);
+    face.use_edge(rim1, Orientation::Reversed);
+    face.use_edge(seam, Orientation::Reversed);
+    let (mesh, report) = face
+        .compile(&surface, &options(1e-4))
+        .expect("a closed B-spline trimmed at its one vertex compiles");
+    let mut samples = surface_samples(&surface, (0.0, TAU), (0.0, height), 400);
+    samples.extend(curve_samples(&rim, 20_000));
+    samples.extend(curve_samples(&turned, 20_000));
+    assert_bounded(
+        "closed B-spline from its vertex",
+        &mesh,
+        &samples,
+        &report,
+        4.0,
+    );
+}
+
+/// The area of a triangle mesh.
+fn mesh_area(mesh: &TriMesh) -> Scalar {
+    mesh.indices
+        .chunks_exact(3)
+        .map(|t| {
+            let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
+            0.5 * (b - a).cross(c - a).length()
+        })
+        .sum()
+}
+
+/// Points every `step` along the closed polygon `corners`.
+fn polygon_samples(corners: &[Point3], per_side: usize) -> Vec<Point3> {
+    let mut out = Vec::new();
+    for (i, &a) in corners.iter().enumerate() {
+        let b = corners[(i + 1) % corners.len()];
+        out.extend(span(0.0, 1.0, per_side).map(|s| a + (b - a) * s));
+    }
+    out
+}
+
+/// A planar face whose top edge is a zigzag polyline trimmed at two
+/// vertices inside its end segments (#333), closed by straight edges: the
+/// vertices are located on their segments exactly, and the edge is the
+/// zigzag between them, its corners included within its bound.
+#[test]
+fn an_open_polyline_edge_is_trimmed_at_interior_vertices() {
+    let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+    let zigzag = Curve3::Polyline(axiolid_curve::Polyline3 {
+        points: vec![
+            p(-0.2, 0.0),
+            p(0.25, 0.3),
+            p(0.5, 0.0),
+            p(0.75, 0.3),
+            p(1.2, 0.0),
+        ],
+        closed: false,
+    });
+    let (a, b) = (p(0.025, 0.15), p(0.975, 0.15));
+    let (c, d) = (p(0.975, -0.5), p(0.025, -0.5));
+    let mut face = OneFace::new();
+    let [va, vb, vc, vd] = [a, b, c, d].map(|q| face.vertex(q));
+    let top = face.edge(va, vb, Some(zigzag));
+    let down = face.edge(va, vd, None);
+    let bottom = face.edge(vd, vc, None);
+    let up = face.edge(vc, vb, None);
+    face.use_edge(down, Orientation::Forward);
+    face.use_edge(bottom, Orientation::Forward);
+    face.use_edge(up, Orientation::Forward);
+    face.use_edge(top, Orientation::Reversed);
+    let plane = Surface::Plane(Plane {
+        frame: frame_at(0.0),
+    });
+    let (mesh, report) = face
+        .compile(&plane, &options(1e-4))
+        .expect("a face bounded by a trimmed polyline compiles");
+    let exact = [a, d, c, b, p(0.75, 0.3), p(0.5, 0.0), p(0.25, 0.3)];
+    let shoelace: Scalar = (0..exact.len())
+        .map(|i| {
+            let (u, v) = (exact[i], exact[(i + 1) % exact.len()]);
+            0.5 * (u.x * v.y - v.x * u.y)
+        })
+        .sum();
+    let bound = report.bound.expect("a certified bound");
+    let perimeter: Scalar = (0..exact.len())
+        .map(|i| (exact[(i + 1) % exact.len()] - exact[i]).length())
+        .sum();
+    let area = mesh_area(&mesh);
+    eprintln!("trimmed polyline: area {area}, exact {shoelace}, bound {bound:e}");
+    assert!(
+        (area - shoelace).abs() <= bound * perimeter,
+        "area {area} misses {shoelace} by more than the bound allows"
+    );
+    for q in &mesh.positions {
+        assert!(
+            q.x >= 0.025 - 1e-12 && q.x <= 0.975 + 1e-12,
+            "{q:?} past a vertex"
+        );
+    }
+    let samples = polygon_samples(&exact, 4_000);
+    assert_bounded("trimmed polyline", &mesh, &samples, &report, 6.0);
+}
+
+/// A planar face bounded by one closed polyline edge whose one vertex lies
+/// inside a side (#333): the edge is the whole square from it, its corners
+/// between samples and within its bound.
+#[test]
+fn a_closed_polyline_edge_is_the_whole_loop_from_its_one_vertex() {
+    let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+    let corners = [p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 1.0)];
+    let square = Curve3::Polyline(axiolid_curve::Polyline3 {
+        points: corners.to_vec(),
+        closed: true,
+    });
+    let mut face = OneFace::new();
+    let start = face.vertex(p(0.3, 0.0));
+    let edge = face.edge(start, start, Some(square));
+    face.use_edge(edge, Orientation::Forward);
+    let plane = Surface::Plane(Plane {
+        frame: frame_at(0.0),
+    });
+    let (mesh, report) = face
+        .compile(&plane, &options(1e-3))
+        .expect("a face bounded by a closed polyline compiles");
+    let area = mesh_area(&mesh);
+    let bound = report.bound.expect("a certified bound");
+    eprintln!("closed polyline: area {area}, bound {bound:e}");
+    assert!((area - 1.0).abs() <= 4.0 * bound, "area {area}");
+    assert_bounded(
+        "closed polyline",
+        &mesh,
+        &polygon_samples(&corners, 4_000),
+        &report,
+        6.0,
     );
 }
 

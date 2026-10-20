@@ -50,15 +50,10 @@
 //!   proven enclosure, and the residual left reaches the report as above.
 //!
 //! An edge runs from its start vertex to its end vertex in its curve's own
-//! sense, and its vertices bound it (#319): a curve whose whole domain does
-//! not already run between them is trimmed at their parameters, located by
-//! closed-form inversion with its residual checked (`vertex_span`). A line
-//! is the segment between them, a circle or ellipse the arc forward from
-//! the start vertex, the whole turn for an edge with one vertex. Everything
-//! downstream (the shared samples, their span bounds and the report) covers
-//! that span only. A vertex off its curve, two vertices at one point of a
-//! closed curve, and a family whose inversion does not name one turn are
-//! refused by name.
+//! sense, and its vertices bound it (#319, #333): a curve whose whole domain
+//! does not already run between them is trimmed at their parameters
+//! ([`super::trim`]). Everything downstream (the shared samples, their span
+//! bounds and the report) covers that span only.
 //!
 //! An edge with no 3D curve is straight (the topology's contract). An edge
 //! shared with a face that sampled it through a p-curve is inverted at those
@@ -76,6 +71,7 @@ use axiolid_nurbs::{
 use axiolid_surface::{BSplineSurface, Surface};
 use axiolid_topology::{EdgeUse, Orientation};
 
+use super::trim::CurveSpan;
 use super::{
     edge_samples, localized_parameter, surface_periods, CurvedMeshState, FaceBound, FaceContext,
     MAX_CURVED_EDGE_SEGMENTS,
@@ -357,7 +353,8 @@ fn certified_parameters(
 pub(super) enum EdgeTrace<'g> {
     /// No curve: the segment between its vertices.
     Straight(Vec3, Vec3),
-    Curve(&'g axiolid_curve::Curve3, axiolid_core::Interval),
+    /// Its curve over the span its vertices bound ([`super::trim`]).
+    Curve(&'g axiolid_curve::Curve3, CurveSpan),
 }
 
 impl EdgeTrace<'_> {
@@ -365,29 +362,17 @@ impl EdgeTrace<'_> {
     pub(super) fn at(&self, s: Scalar) -> GeomResult<Vec3> {
         match self {
             Self::Straight(a, b) => Ok(*a + (*b - *a) * s),
-            Self::Curve(curve, domain) => axiolid_reference::curve::evaluate3(
-                curve,
-                domain.start + (domain.end - domain.start) * s,
-            ),
+            Self::Curve(curve, span) => span.evaluate(curve, s),
         }
     }
 
     /// The certified bounds of the span between fractions `a` and `b`,
     /// whose ends are the points `pa` and `pb`.
     fn span(&self, a: Scalar, b: Scalar, pa: Vec3, pb: Vec3) -> Option<SpanBound> {
-        let Self::Curve(curve, domain) = self else {
+        let Self::Curve(curve, span) = self else {
             return Some(SpanBound::straight(pa, pb));
         };
-        let at = |s: Scalar| domain.start + (domain.end - domain.start) * s;
-        let chord = axiolid_reference::bound::chord_bound3(curve, at(a), at(b))?;
-        if chord == 0.0 {
-            return Some(SpanBound::straight(pa, pb));
-        }
-        let speed = axiolid_reference::bound::curve_derivative_bounds3(curve, at(a), at(b))?;
-        Some(SpanBound {
-            chord,
-            arc: speed.first * (at(b) - at(a)).abs(),
-        })
+        span.bound(curve, a, b, pa, pb)
     }
 }
 
@@ -395,13 +380,13 @@ impl EdgeTrace<'_> {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SpanBound {
     /// How far the span strays from its chord.
-    chord: Scalar,
+    pub(super) chord: Scalar,
     /// How long the span is.
-    arc: Scalar,
+    pub(super) arc: Scalar,
 }
 
 impl SpanBound {
-    fn straight(a: Vec3, b: Vec3) -> Self {
+    pub(super) fn straight(a: Vec3, b: Vec3) -> Self {
         Self {
             chord: 0.0,
             arc: (b - a).length(),
@@ -649,93 +634,9 @@ pub(super) fn edge_trace<'g>(
             "edge curve must reference a Curve3 node".to_string(),
         ));
     };
-    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;
-    Ok(EdgeTrace::Curve(curve, domain))
-}
-
-/// The span of `curve` an edge from `start` to `end` covers, in the
-/// curve's own sense (#319). Exchange formats bound an edge by its
-/// vertices, not by its curve's range: IFC trims an unbounded `IfcLine` or
-/// a whole `IfcCircle` at `EdgeStart` and `EdgeEnd`.
-///
-/// - On a line, a circle or an ellipse each vertex is located by
-///   closed-form inversion, which checks its residual against the linear
-///   tolerance; a vertex off the curve is refused by name.
-/// - A line is the segment between the two parameters, whichever comes
-///   first.
-/// - A circle or an ellipse is the arc from the start vertex's angle
-///   forward to the end vertex's, and the whole turn from it when start
-///   and end are one vertex. Two vertices at one point name either no arc
-///   or the whole turn, and are refused as ambiguous.
-/// - Any other curve is the edge only when its whole domain already runs
-///   from the start vertex to the end vertex (a B-spline arc, a closed
-///   curve starting at its one vertex). Otherwise it is refused by name:
-///   such a family either has no closed-form inversion, or one that takes
-///   the first of several turns naming the point, so the span between two
-///   vertices is not determined by it.
-fn vertex_span(
-    curve: &axiolid_curve::Curve3,
-    (start_id, start): (axiolid_topology::VertexId, Vec3),
-    (end_id, end): (axiolid_topology::VertexId, Vec3),
-    tolerance: Tolerance,
-) -> GeomResult<axiolid_core::Interval> {
-    use axiolid_curve::Curve3;
-    let linear = tolerance.linear();
-    if !matches!(
-        curve,
-        Curve3::Line(_) | Curve3::Circle(_) | Curve3::Ellipse(_)
-    ) {
-        let domain = axiolid_reference::curve::domain3(curve);
-        let gap = |parameter: Scalar, vertex: Vec3| -> GeomResult<Scalar> {
-            Ok((axiolid_reference::curve::evaluate3(curve, parameter)? - vertex).length())
-        };
-        let bounded =
-            domain.start.is_finite() && domain.end.is_finite() && domain.end > domain.start;
-        if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {
-            return Ok(domain);
-        }
-        return Err(GeomError::InvalidInput(
-            "an edge curve without a p-curve neither runs its whole domain from the edge's \
-             start vertex to its end vertex nor is a line, circle or ellipse its vertices \
-             can be located on unambiguously"
-                .to_owned(),
-        ));
-    }
-    let locate = |vertex: Vec3, which: &str| {
-        axiolid_reference::curve::invert3(curve, vertex, tolerance).map_err(|error| {
-            GeomError::InvalidInput(format!(
-                "the {which} vertex of an edge without a p-curve is not on its curve: {error}"
-            ))
-        })
-    };
-    let (t0, t1) = (locate(start, "start")?, locate(end, "end")?);
-    let span = match curve {
-        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1 },
-        _ => {
-            let turn = core::f64::consts::TAU;
-            let sweep = if start_id == end_id {
-                turn
-            } else if (end - start).length() <= linear {
-                return Err(GeomError::InvalidInput(
-                    "an edge without a p-curve joins two vertices at one point of its closed \
-                     curve: it is either no arc or the whole turn, so its span is ambiguous"
-                        .to_owned(),
-                ));
-            } else {
-                (t1 - t0).rem_euclid(turn)
-            };
-            axiolid_core::Interval {
-                start: t0,
-                end: t0 + sweep,
-            }
-        }
-    };
-    if !(span.start.is_finite() && span.end.is_finite() && span.start != span.end) {
-        return Err(GeomError::Degenerate(
-            "an edge without a p-curve has no length between its vertices on its curve".to_owned(),
-        ));
-    }
-    Ok(span)
+    let span =
+        super::trim::vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;
+    Ok(EdgeTrace::Curve(curve, span))
 }
 
 pub(super) fn straight_curve(curve: &axiolid_curve::Curve3) -> bool {

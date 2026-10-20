@@ -36,6 +36,14 @@ killed after. The planar caps (closed cylinders, #310 follow-up) added two
 mutants: 13 / 13. Trimming edge curves at their vertices (#319) replaced
 the whole-domain check with seven mutants: 19 / 19. The edge pass (#336),
 with the D-shaped half cylinder in every face order, added four: 23 / 23.
+B-spline and polyline trims (#333) moved the #319 mutants to `trim.rs` and
+added eleven: 33 / 34 on the first run, the seam cut surviving (every
+fixture's seam span is matched by an equal one elsewhere); a unit test on
+a span across a square's seam corner kills it: 34 / 34.
+
+Not listed for the trims, as equivalent:
+- a circle's or ellipse's span wrapped at its turn: the families evaluate
+  periodically, so wrapping names the same points.
 
 Not listed for the edge pass, as equivalent at test resolution:
 - a planar face's bound without its samples' distance off their edge: the
@@ -50,9 +58,11 @@ import probe_lib
 I = "crates/execution/compile/src/brep/inversion.rs"
 B = "crates/execution/compile/src/brep.rs"
 E = "crates/execution/compile/src/brep/edges.rs"
+T = "crates/execution/compile/src/brep/trim.rs"
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "edge_inversion"],
     ["-p", "axiolid-mesh-compile", "--lib", "brep::inversion"],
+    ["-p", "axiolid-mesh-compile", "--lib", "brep::trim"],
 ]
 
 MUTANTS = [
@@ -82,30 +92,67 @@ MUTANTS = [
     ("polish not clamped to the domain", I,
      "        let (u_lo, u_hi) = (u_lo.max(u_domain.0), u_hi.min(u_domain.1));",
      "        let (u_lo, u_hi) = (u_lo, u_hi);"),
-    # Edge curves trimmed at their vertices (#319).
-    ("edge curve taken whole, not trimmed at its vertices", I,
-     "    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;",
-     "    let domain = vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)\n"
-     "        .map(|_| axiolid_reference::curve::domain3(curve))?;"),
-    ("a one-vertex edge is half a turn", I,
-     "            let sweep = if start_id == end_id {\n                turn",
-     "            let sweep = if start_id == end_id {\n                0.5 * turn"),
-    ("arc runs backwards from its start vertex", I,
+    # Edge curves trimmed at their vertices (#319), now in `trim.rs`.
+    ("edge curve taken whole, not trimmed at its vertices", T,
+     "    Ok(CurveSpan { span, period })",
+     "    let _ = span;\n"
+     "    Ok(CurveSpan { span: axiolid_reference::curve::domain3(curve), period })"),
+    ("a one-vertex edge is half a turn", T,
+     "            let sweep = if start_id == end_id {\n                turn\n",
+     "            let sweep = if start_id == end_id {\n                0.5 * turn\n"),
+    ("arc runs backwards from its start vertex", T,
      "                (t1 - t0).rem_euclid(turn)",
      "                (t0 - t1).rem_euclid(turn)"),
-    ("two vertices at one point of a circle not refused", I,
+    ("two vertices at one point of a closed curve not refused", T,
      "            } else if (end - start).length() <= linear {",
      "            } else if false {"),
-    ("vertices located at a loose tolerance", I,
-     "        axiolid_reference::curve::invert3(curve, vertex, tolerance).map_err(|error| {",
-     "        axiolid_reference::curve::invert3(curve, vertex, Tolerance::new(1.0, 1e-9).unwrap())\n"
-     "            .map_err(|error| {"),
-    ("line clamped to its unit domain", I,
-     "        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1 },",
-     "        Curve3::Line(_) => axiolid_core::Interval { start: t0, end: t1.min(1.0) },"),
-    ("other families' whole domain need not end at the vertices", I,
-     "        if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {",
-     "        if bounded {"),
+    ("vertices located at a loose tolerance", T,
+     "                axiolid_reference::curve::invert3(curve, vertex, tolerance).map_err(|error| {",
+     "                axiolid_reference::curve::invert3(curve, vertex, Tolerance::new(1.0, 1e-9).unwrap())\n"
+     "                    .map_err(|error| {"),
+    ("line clamped to its unit domain", T,
+     "        None => Interval { start: t0, end: t1 },",
+     "        None => Interval { start: t0, end: t1.min(1.0) },"),
+    ("other families' whole domain need not end at the vertices", T,
+     "            if bounded && gap(domain.start, start)? <= linear && gap(domain.end, end)? <= linear {",
+     "            if bounded {"),
+    # B-spline and polyline edge curves trimmed at their vertices (#333).
+    ("an off-curve B-spline vertex accepted", T,
+     [("    if certificate.distance_lower_bound > linear {", "    if false {"),
+      ("    if residual.is_nan() || residual > linear {", "    if false {")],
+     TARGETS),
+    ("the B-spline cover judged unrefined", T,
+     "    let intervals = minimiser_cover(curve, vertex, cells, threshold)?;",
+     "    let intervals = cells;\n    let _ = (minimiser_cover, threshold);"),
+    ("a separated cover read as unique", T,
+     "        _ => false,\n    };\n    if !connected {",
+     "        _ => true,\n    };\n    if !connected {"),
+    ("a cover across the seam read as separated", T,
+     "        ([first, last], Some(domain)) => first.0 <= domain.start && last.1 >= domain.end,",
+     "        ([first, last], Some(domain)) => first.0 <= domain.start && last.1 >= domain.end && false,"),
+    ("a closed B-spline read as open", T,
+     "                    let period = axiolid_nurbs::PeriodicCurve3::try_new(spline, tolerance)\n"
+     "                        .ok()\n",
+     "                    let period = axiolid_nurbs::PeriodicCurve3::try_new(spline, tolerance)\n"
+     "                        .ok()\n                        .filter(|_| false)\n"),
+    ("a closed polyline read as open", T,
+     "                    let period = polyline.closed.then_some(domain);",
+     "                    let period = polyline.closed.then_some(domain).filter(|_| false);"),
+    ("B-spline vertex parameter not polished", T,
+     "    for _ in 0..POLISH_STEPS {",
+     "    for _ in 0..0 {"),
+    ("polyline tolerance band ignored", T,
+     "        if reach >= 0.0 {",
+     "        if false {"),
+    ("spans not split at breaks", T,
+     "        cuts.retain(|&t| lo < t && t < hi);",
+     "        cuts.clear();"),
+    ("the seam not a cut", T,
+     "            cuts.push(domain.end);",
+     "            let _ = domain.end;"),
+    ("split points' distance off the chord left out", T,
+     "        let chord = chord + corner;",
+     "        let chord = chord + 0.0 * corner;"),
     ("span terms left out of the report", I,
      "            self.trim = self.trim.max(near + lens);",
      "            self.trim = self.trim.max(lens);"),
