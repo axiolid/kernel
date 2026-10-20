@@ -34,7 +34,9 @@ use axiolid_guarantees::Sign;
 
 use std::sync::Arc;
 
-use super::point::{dy, orient, same_point, sgn, sign, Circle, Direction, Pred, Tangent, XPoint};
+use super::point::{
+    dy, orient, plainly_same, same_point, sgn, sign, Circle, Direction, Pred, Tangent, XPoint,
+};
 
 /// Which curve an edge follows.
 // Edges live in short per-call vectors; boxing the arc would add an
@@ -313,6 +315,12 @@ impl Edge {
         } else {
             None
         }
+    }
+
+    /// Whether `x` is one of this edge's ends, read off without arithmetic
+    /// ([`plainly_same`]); `false` proves nothing.
+    pub(crate) fn plainly_ends_at(&self, x: &XPoint) -> bool {
+        plainly_same(x, &self.p0) || plainly_same(x, &self.p1)
     }
 
     /// Whether `x` lies on this edge (any point, carrier not assumed).

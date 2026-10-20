@@ -21,6 +21,14 @@ cargo add axiolid-overlay
   meet (`src/contact.rs`, #272): an end on the other edge within the tolerance, or a proper
   crossing, so every output is a valid operand wherever it lies.
   `scripts/probe_edge_contact_mutants.py` lists the faults its tests must catch.
+- A soup of convex parts fanned into triangles reduces to the parts' outlines even where the
+  parts overlap and share vertices: the chain is reduced group by group when one walk through it
+  closes a crossing cycle. Edges given more than once, and edges meeting at a shared vertex, are
+  not paired again for every copy, so a soup whose grown parts line up costs about what its
+  outlines cost (#338). `overlay_within` and `union_soup_within` take `ExecutionOptions`: with a
+  memory budget the subdivision is charged before it allocates and refused with
+  `OverlayRefusal::BudgetExceeded` before it would hold more (`src/budget.rs`, ADR 0088).
+  `scripts/probe_grown_soup_mutants.py` lists the faults its tests must catch.
 - A degenerate input ring refuses the operation by default. `overlay_with` and
   `union_soup_with` with `OverlayOptions::dropping_degenerate_rings` leave out a ring that
   is too short, has a repeated vertex, or has zero area under the exact `ZeroArea` rule,

@@ -26,6 +26,7 @@
 mod arc;
 mod arc_overlay;
 mod arrangement;
+mod budget;
 mod circle;
 mod contact;
 mod convex_parts;
@@ -49,6 +50,7 @@ pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPoly
 pub use arrangement::{
     ArcArrangement, ArrangementEdge, ArrangementRegion, EdgeSource, EdgeUse as ArrangementEdgeUse,
 };
+pub use budget::OverlayRefusal;
 pub use circle::{
     minimum_enclosing_circle, CircleError, CircleEvidence, EnclosingCircle, MinimumCircle,
 };
@@ -71,9 +73,11 @@ pub use segment_sweep::{
 };
 pub use visibility::VisibilityError;
 
+use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Frame2, Point2, Polygon2, Tolerance};
 use axiolid_exact::{certify, Arith, SignExpr};
 use axiolid_guarantees::Sign;
+use budget::Charge;
 use contact::{on_segment, segments_intersect, side};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -445,6 +449,67 @@ pub fn overlay_with(
     tolerance: Tolerance,
     options: OverlayOptions,
 ) -> Result<ReportedOverlay, OverlayError> {
+    overlay_charged(
+        subject,
+        clip,
+        operation,
+        fill,
+        tolerance,
+        options,
+        &mut Charge::unlimited(),
+    )
+    .map_err(budget::unbudgeted)
+}
+
+/// [`overlay_with`] under the caller's execution options (#338): the
+/// tolerance is [`ExecutionOptions::tolerance`], and with
+/// [`ExecutionOptions::with_memory_budget`] the subdivision is refused
+/// with [`OverlayRefusal::BudgetExceeded`] before it would hold more than
+/// the budget. Without a budget it is [`overlay_with`] exactly, its
+/// refusals wrapped in [`OverlayRefusal::Invalid`]. An admitted call gives
+/// the same result as [`overlay_with`], bit for bit. No other option is
+/// read: a cancellation token is not polled.
+///
+/// The charges and their bounds are in the docs of the `budget` module;
+/// a budget covers the subdivision, not the operands or the output.
+pub fn overlay_within(
+    subject: &OverlayInput,
+    clip: &OverlayInput,
+    operation: OverlayOperation,
+    fill: FillRule,
+    options: OverlayOptions,
+    execution: &ExecutionOptions,
+) -> Result<ReportedOverlay, OverlayRefusal> {
+    overlay_charged(
+        subject,
+        clip,
+        operation,
+        fill,
+        execution.tolerance(),
+        options,
+        &mut Charge::within(execution.memory_budget_bytes()),
+    )
+}
+
+/// [`overlay_with`], charged against `charge`.
+fn overlay_charged(
+    subject: &OverlayInput,
+    clip: &OverlayInput,
+    operation: OverlayOperation,
+    fill: FillRule,
+    tolerance: Tolerance,
+    options: OverlayOptions,
+    charge: &mut Charge,
+) -> Result<ReportedOverlay, OverlayRefusal> {
+    let vertices = |input: &OverlayInput| -> usize {
+        input
+            .polygons
+            .iter()
+            .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
+            .map(|ring| ring.points.len())
+            .sum()
+    };
+    charge.add(vertices(subject) + vertices(clip), budget::PER_VERTEX)?;
     let mut dropped = Vec::new();
     let subject_polygons = degenerate::admit(
         subject,
@@ -456,7 +521,7 @@ pub fn overlay_with(
     let clip_polygons =
         degenerate::admit(clip, OverlayOperand::Clip, tolerance, options, &mut dropped)?;
     if subject.frame != clip.frame {
-        return Err(OverlayError::InvalidFrame);
+        return Err(OverlayError::InvalidFrame.into());
     };
     let rings = exact_overlay::boolean(
         &subject_polygons,
@@ -464,6 +529,7 @@ pub fn overlay_with(
         operation,
         fill,
         tolerance.linear(),
+        charge,
     )?;
     let polygons = settle::settle(canonical_polygons(rings), tolerance);
     let evidence = OverlayEvidence {
@@ -489,7 +555,7 @@ pub fn union_soup(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, 
     for ring in rings {
         validate_ring(ring, tolerance)?;
     }
-    union_valid(rings, tolerance)
+    union_valid(rings, tolerance, &mut Charge::unlimited()).map_err(budget::unbudgeted)
 }
 
 /// [`union_soup`] with explicit options; the default options make it
@@ -507,6 +573,39 @@ pub fn union_soup_with(
     tolerance: Tolerance,
     options: OverlayOptions,
 ) -> Result<ReportedUnion, OverlayError> {
+    union_soup_charged(rings, tolerance, options, &mut Charge::unlimited())
+        .map_err(budget::unbudgeted)
+}
+
+/// [`union_soup_with`] under the caller's execution options (#338), as
+/// [`overlay_within`] is [`overlay_with`]: the tolerance is
+/// [`ExecutionOptions::tolerance`], and a memory budget refuses the
+/// subdivision with [`OverlayRefusal::BudgetExceeded`] before it would
+/// hold more. Without a budget it is [`union_soup_with`] exactly.
+pub fn union_soup_within(
+    rings: &[Ring],
+    options: OverlayOptions,
+    execution: &ExecutionOptions,
+) -> Result<ReportedUnion, OverlayRefusal> {
+    union_soup_charged(
+        rings,
+        execution.tolerance(),
+        options,
+        &mut Charge::within(execution.memory_budget_bytes()),
+    )
+}
+
+/// [`union_soup_with`], charged against `charge`.
+fn union_soup_charged(
+    rings: &[Ring],
+    tolerance: Tolerance,
+    options: OverlayOptions,
+    charge: &mut Charge,
+) -> Result<ReportedUnion, OverlayRefusal> {
+    charge.add(
+        rings.iter().map(|ring| ring.points.len()).sum(),
+        budget::PER_VERTEX,
+    )?;
     let mut dropped = Vec::new();
     let mut kept = Vec::with_capacity(rings.len());
     for (index, ring) in rings.iter().enumerate() {
@@ -528,13 +627,17 @@ pub fn union_soup_with(
         }
     }
     Ok(ReportedUnion {
-        polygons: union_valid(&kept, tolerance)?,
+        polygons: union_valid(&kept, tolerance, charge)?,
         dropped,
     })
 }
 
 /// The union of rings already validated one by one.
-fn union_valid(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, OverlayError> {
+fn union_valid(
+    rings: &[Ring],
+    tolerance: Tolerance,
+    charge: &mut Charge,
+) -> Result<Vec<Polygon>, OverlayRefusal> {
     if rings.is_empty() {
         return Ok(Vec::new());
     }
@@ -554,6 +657,7 @@ fn union_valid(rings: &[Ring], tolerance: Tolerance) -> Result<Vec<Polygon>, Ove
         OverlayOperation::Union,
         FillRule::NonZero,
         tolerance.linear(),
+        charge,
     )?;
     // Settled like every other output, so the polygons are valid operands
     // (#191).

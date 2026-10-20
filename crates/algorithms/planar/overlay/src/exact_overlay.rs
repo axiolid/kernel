@@ -26,7 +26,10 @@
 //! number off it. A mesh given as a soup of its triangles shrinks to its
 //! outline this way. What is left is split into cycles through distinct
 //! vertices; if every one is simple, decided exactly, they replace the
-//! operand's rings, else the rings are kept as given.
+//! operand's rings. Else the rings joined by cancelled edges are reduced
+//! group by group, each group's cycles kept when all are simple and its
+//! rings as given otherwise (#338, see [`reduce`]): a soup of overlapping
+//! convex parts fanned into triangles reduces to the parts' outlines.
 //!
 //! The tolerance enters once, before step 1: features closer than it are
 //! taken as touching and snapped together (see [`snap_within`], #222).
@@ -71,8 +74,9 @@ use axiolid_core::Point2;
 use axiolid_guarantees::Sign;
 
 use crate::arc::{ArcRing, ArcVertex};
+use crate::budget::Charge;
 use crate::exact_arc::{arrangement, orient_doubles, WordMap as HashMap};
-use crate::{orientation, FillRule, OverlayError, OverlayOperation, Polygon, Ring};
+use crate::{orientation, FillRule, OverlayError, OverlayOperation, OverlayRefusal, Polygon, Ring};
 
 /// Which operand a ring belongs to, and how it counts.
 struct Counted {
@@ -104,7 +108,8 @@ fn combined(operation: OverlayOperation, subject: bool, clip: bool) -> bool {
 /// other, within an operand too.
 ///
 /// Returns the result's rings as `(outer, holes)`, before canonical
-/// orientation and settling.
+/// orientation and settling. What the subdivision holds is charged
+/// against `charge` before it is allocated (#338, `crate::budget`).
 ///
 /// # Errors
 ///
@@ -112,13 +117,15 @@ fn combined(operation: OverlayOperation, subject: bool, clip: bool) -> bool {
 /// vertices (#309). Every public entry validates first, which refuses
 /// them; a caller that skips validation gets this refusal instead of a
 /// subdivision cut by an edge of no length.
+/// [`OverlayRefusal::BudgetExceeded`] when a charge passes the budget.
 pub(crate) fn boolean(
     subject: &[Polygon],
     clip: &[Polygon],
     operation: OverlayOperation,
     fill: FillRule,
     snap: f64,
-) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
+    charge: &mut Charge,
+) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayRefusal> {
     let repeats = |ring: &Ring| {
         let n = ring.points.len();
         (0..n).any(|i| ring.points[i] == ring.points[(i + 1) % n])
@@ -129,7 +136,7 @@ pub(crate) fn boolean(
         .flat_map(|p| std::iter::once(&p.outer).chain(&p.holes))
         .any(repeats)
     {
-        return Err(OverlayError::RepeatedVertex);
+        return Err(OverlayError::RepeatedVertex.into());
     }
     boolean_with(
         subject,
@@ -141,6 +148,7 @@ pub(crate) fn boolean(
             reduce: true,
             cull: true,
         },
+        charge,
     )
 }
 
@@ -169,10 +177,19 @@ fn boolean_reduced(
         reduce: reduced,
         cull: true,
     };
-    boolean_with(subject, clip, operation, fill, snap, steps)
+    boolean_with(
+        subject,
+        clip,
+        operation,
+        fill,
+        snap,
+        steps,
+        &mut Charge::unlimited(),
+    )
+    .map_err(crate::budget::unbudgeted)
 }
 
-/// [`boolean`], with the shortcuts in `steps`.
+/// [`boolean`], with the shortcuts in `steps`, charged against `charge`.
 fn boolean_with(
     subject: &[Polygon],
     clip: &[Polygon],
@@ -180,7 +197,8 @@ fn boolean_with(
     fill: FillRule,
     snap: f64,
     steps: Steps,
-) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayError> {
+    charge: &mut Charge,
+) -> Result<Vec<(Ring, Vec<Ring>)>, OverlayRefusal> {
     let mut all: Vec<(bool, Vec<Point2>)> = Vec::new();
     for (is_clip, polygons) in [(false, subject), (true, clip)] {
         for ring in polygons
@@ -226,7 +244,7 @@ fn boolean_with(
         return Ok(Vec::new());
     }
 
-    let raw = arrangement::build(&rings)?;
+    let raw = arrangement::build_charged(&rings, charge)?;
     // Whether the result holds the region on one side of a piece: the
     // rings containing that side are the ones containing the piece, and
     // each carrier whose inside faces that side.
@@ -600,13 +618,109 @@ fn identity(p: Point2) -> (u64, u64) {
 /// One operand's rings, as a chain with every edge given both ways
 /// cancelled, split into cycles through distinct vertices -- or the rings
 /// as given, when nothing cancels or a cycle is not simple.
+///
+/// When a cycle of the whole chain is not simple, the chain is reduced
+/// again group by group (#338): rings joined by an edge one gives each way
+/// form a group, and each group's chain is split into cycles of its own,
+/// kept when every one is simple and replaced by the group's rings as
+/// given otherwise. An edge cancels only within its group, so every
+/// group's cycles hold its rings' net edges and the winding numbers off
+/// the edges are the same as the rings'. One walk through the whole chain
+/// can pass from one ring into another at a vertex they share, and the
+/// cycle it closes then crosses itself where the two rings overlap; the
+/// walk within a group cannot leave it. A soup of convex parts, each
+/// fanned into triangles, so reduces to the parts' outlines even where
+/// the parts overlap and share vertices.
 fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
+    let Some(cycles) = cycles(&rings) else {
+        return rings;
+    };
+    if cycles.iter().all(|cycle| simple(cycle)) {
+        return cycles;
+    }
+    grouped(rings)
+}
+
+/// [`reduce`] group by group: the rings joined by edges given each way.
+fn grouped(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
+    type Key = ((u64, u64), (u64, u64));
+    let undirected = |a: Point2, b: Point2| -> (Key, bool) {
+        let (a, b) = (identity(a), identity(b));
+        if a < b {
+            ((a, b), true)
+        } else {
+            ((b, a), false)
+        }
+    };
+    fn edges_of(ring: &[Point2]) -> impl Iterator<Item = (Point2, Point2)> + '_ {
+        let n = ring.len();
+        (0..n)
+            .map(move |i| (ring[i], ring[(i + 1) % n]))
+            .filter(|(a, b)| identity(*a) != identity(*b))
+    }
+    // Each edge's first ring, and the ways it is given.
+    let mut seen: HashMap<Key, (usize, bool, bool)> = HashMap::default();
+    for (index, ring) in rings.iter().enumerate() {
+        for (a, b) in edges_of(ring) {
+            let (key, forward) = undirected(a, b);
+            let entry = seen.entry(key).or_insert((index, false, false));
+            if forward {
+                entry.1 = true;
+            } else {
+                entry.2 = true;
+            }
+        }
+    }
+    let mut parent: Vec<usize> = (0..rings.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for (index, ring) in rings.iter().enumerate() {
+        for (a, b) in edges_of(ring) {
+            let (first, forward, back) = seen[&undirected(a, b).0];
+            if forward && back {
+                let (x, y) = (root(&mut parent, index), root(&mut parent, first));
+                // The lower index roots, so groups keep their first ring's
+                // place.
+                parent[x.max(y)] = x.min(y);
+            }
+        }
+    }
+    drop(seen);
+    // Groups in the order of their first ring, members in given order.
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); rings.len()];
+    for index in 0..rings.len() {
+        let group = root(&mut parent, index);
+        members[group].push(index);
+    }
+    let mut rings: Vec<Option<Vec<Point2>>> = rings.into_iter().map(Some).collect();
+    let mut out = Vec::new();
+    for group in members.into_iter().filter(|m| !m.is_empty()) {
+        let given: Vec<Vec<Point2>> = group
+            .iter()
+            .map(|&i| rings[i].take().expect("each ring in one group"))
+            .collect();
+        match cycles(&given) {
+            Some(cycles) if cycles.iter().all(|cycle| simple(cycle)) => out.extend(cycles),
+            _ => out.extend(given),
+        }
+    }
+    out
+}
+
+/// The chain of `rings` with every edge given both ways cancelled, split
+/// into cycles through distinct vertices; `None` when nothing cancels.
+fn cycles(rings: &[Vec<Point2>]) -> Option<Vec<Vec<Point2>>> {
     let mut ids: HashMap<(u64, u64), usize> = HashMap::default();
     let mut points: Vec<Point2> = Vec::new();
     // Net multiplicity of each edge, `+` from the lower vertex id.
     let mut net: HashMap<(usize, usize), i64> = HashMap::default();
     let mut total = 0usize;
-    for ring in &rings {
+    for ring in rings {
         let mut id = |p: Point2| {
             *ids.entry(identity(p)).or_insert_with(|| {
                 points.push(p);
@@ -627,7 +741,7 @@ fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
     }
     let left: i64 = net.values().map(|m| m.abs()).sum();
     if usize::try_from(left).is_ok_and(|left| left == total) {
-        return rings;
+        return None;
     }
     let mut edges: Vec<((usize, usize), i64)> = net.into_iter().filter(|(_, m)| *m != 0).collect();
     edges.sort_unstable();
@@ -649,9 +763,7 @@ fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
             position[start] = 0;
             let mut at = start;
             loop {
-                let Some(next) = out[at].pop() else {
-                    return rings;
-                };
+                let next = out[at].pop()?;
                 if position[next] == usize::MAX {
                     position[next] = path.len();
                     path.push(next);
@@ -673,15 +785,12 @@ fn reduce(rings: Vec<Vec<Point2>>) -> Vec<Vec<Point2>> {
             }
         }
     }
-    let cycles: Vec<Vec<Point2>> = cycles
-        .into_iter()
-        .map(|cycle| cycle.into_iter().map(|v| points[v]).collect())
-        .collect();
-    if cycles.iter().all(|cycle| simple(cycle)) {
+    Some(
         cycles
-    } else {
-        rings
-    }
+            .into_iter()
+            .map(|cycle| cycle.into_iter().map(|v| points[v]).collect())
+            .collect(),
+    )
 }
 
 /// Whether the closed segments `a-b` and `c-d` share a point, exactly.
@@ -1151,7 +1260,11 @@ mod tests {
                 OverlayOperation::Xor,
             ] {
                 let (s, c) = (subject.clone(), clip.clone());
-                let result = within(move || boolean(&s, &c, operation, FillRule::NonZero, 1e-9));
+                let result = within(move || {
+                    let mut charge = Charge::unlimited();
+                    boolean(&s, &c, operation, FillRule::NonZero, 1e-9, &mut charge)
+                        .map_err(crate::budget::unbudgeted)
+                });
                 assert_eq!(result, Err(OverlayError::RepeatedVertex), "{operation:?}");
             }
         }
@@ -1325,7 +1438,9 @@ mod tests {
             for (a, b) in [(&subject, &clip), (&clip, &subject)] {
                 let run = |cull| {
                     let steps = Steps { reduce: true, cull };
-                    let rings = boolean_with(a, b, operation, fill, 1e-9, steps).unwrap();
+                    let rings =
+                        boolean_with(a, b, operation, fill, 1e-9, steps, &mut Charge::unlimited())
+                            .unwrap();
                     crate::canonical_polygons(rings)
                         .into_iter()
                         .map(|p| {
@@ -1387,7 +1502,15 @@ mod tests {
             let clip = operand(1 + case % 2);
             let (operation, rule) = operations[case % 4];
             let (fill, backend_fill) = fills[(case / 4) % 4];
-            let exact = boolean(&subject, &clip, operation, fill, 0.0).expect("simple rings link");
+            let exact = boolean(
+                &subject,
+                &clip,
+                operation,
+                fill,
+                0.0,
+                &mut Charge::unlimited(),
+            )
+            .expect("simple rings link");
             let grid: Vec<(Ring, Vec<Ring>)> = backend(&subject)
                 .overlay(&backend(&clip), rule, backend_fill)
                 .into_iter()
@@ -1415,5 +1538,112 @@ mod tests {
             }
         }
         assert!(compared > 40_000, "{compared}");
+    }
+
+    /// #338's clip soup at `n` facets: per strip triangle, the hull of its
+    /// corners grown by the circumscribed 16-gon, fanned from the hull's
+    /// first vertex. Each hull's triangles, counter-clockwise.
+    fn grown_hulls(n: usize) -> Vec<Vec<Vec<Point2>>> {
+        let y = |i: usize| {
+            let t = std::f64::consts::TAU * (i % n) as f64 / n as f64 + 0.1;
+            0.01 + 0.12 * t.cos()
+        };
+        let step = std::f64::consts::PI / 8.0;
+        let r = 0.051 / (step / 2.0).cos();
+        let disc: Vec<(f64, f64)> = (0..16)
+            .map(|k| {
+                let a = step / 2.0 + step * k as f64;
+                (r * a.cos(), r * a.sin())
+            })
+            .collect();
+        let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+            (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+        };
+        let mut out = Vec::new();
+        for i in 0..n {
+            let (a, b) = (y(i), y(i + 1));
+            for t in [
+                [(0.0, a), (0.0, b), (6.0, b)],
+                [(0.0, a), (6.0, b), (6.0, a)],
+            ] {
+                let mut pts: Vec<(f64, f64)> = t
+                    .iter()
+                    .flat_map(|p| disc.iter().map(move |d| (p.0 + d.0, p.1 + d.1)))
+                    .collect();
+                pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+                pts.dedup();
+                // Monotone chain, collinear points dropped.
+                let mut h: Vec<(f64, f64)> = Vec::new();
+                for pass in 0..2 {
+                    let floor = h.len() + 1;
+                    let it: Vec<_> = if pass == 1 {
+                        pts.iter().rev().skip(1).copied().collect()
+                    } else {
+                        pts.clone()
+                    };
+                    for p in it {
+                        while h.len() >= floor.max(2)
+                            && cross(h[h.len() - 2], h[h.len() - 1], p) <= 0.0
+                        {
+                            h.pop();
+                        }
+                        h.push(p);
+                    }
+                }
+                h.pop();
+                let fan = h[1..]
+                    .windows(2)
+                    .map(|w| {
+                        let mut q = vec![h[0], w[0], w[1]];
+                        if cross(q[0], q[1], q[2]) < 0.0 {
+                            q.reverse();
+                        }
+                        q.into_iter().map(|(x, y)| Point2::new(x, y)).collect()
+                    })
+                    .collect();
+                out.push(fan);
+            }
+        }
+        out
+    }
+
+    /// #338: overlapping hulls, each fanned into triangles and snapped as
+    /// the boolean snaps them, share vertices, and one walk through the
+    /// whole chain closes a cycle that crosses itself, which kept all
+    /// 1,965 triangles. Reduced group by group, every fan becomes its
+    /// hull's outline: 128 simple rings.
+    #[test]
+    fn overlapping_fans_reduce_group_by_group() {
+        let hulls = grown_hulls(64);
+        let mut tagged: Vec<(bool, Vec<Point2>)> = hulls
+            .iter()
+            .flatten()
+            .map(|ring| (false, ring.clone()))
+            .collect();
+        snap_within(&mut tagged, 1e-9);
+        let given: Vec<Vec<Point2>> = tagged.into_iter().map(|(_, ring)| ring).collect();
+        assert_eq!(given.len(), 1965);
+        let whole = cycles(&given).expect("the fans cancel their diagonals");
+        assert!(!whole.iter().all(|cycle| simple(cycle)));
+        let reduced = reduce(given.clone());
+        assert_eq!(reduced.len(), 128);
+        assert!(reduced.iter().all(|ring| simple(ring)));
+        // The net edges are the same: every directed edge given, less
+        // those given back.
+        type Edge = ((u64, u64), (u64, u64));
+        let net = |rings: &[Vec<Point2>]| {
+            let mut net: HashMap<Edge, i64> = HashMap::default();
+            for ring in rings {
+                for i in 0..ring.len() {
+                    let (a, b) = (identity(ring[i]), identity(ring[(i + 1) % ring.len()]));
+                    let (key, step) = if a < b { ((a, b), 1) } else { ((b, a), -1) };
+                    *net.entry(key).or_default() += step;
+                }
+            }
+            let mut left: Vec<_> = net.into_iter().filter(|(_, m)| *m != 0).collect();
+            left.sort_unstable();
+            left
+        };
+        assert_eq!(net(&reduced), net(&given));
     }
 }

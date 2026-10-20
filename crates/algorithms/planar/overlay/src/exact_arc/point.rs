@@ -804,6 +804,15 @@ fn box_cmp(a: Interval, b: Interval) -> Option<Sign> {
     }
 }
 
+/// Whether two points are one, when that is read off without arithmetic:
+/// copies of one point, or two points whose boxes are the same single
+/// point. `false` proves nothing.
+pub(crate) fn plainly_same(a: &XPoint, b: &XPoint) -> bool {
+    let exact = |p: &XPoint| p.bx.lo() == p.bx.hi() && p.by.lo() == p.by.hi();
+    Arc::ptr_eq(&a.exact, &b.exact)
+        || (exact(a) && exact(b) && a.bx.lo() == b.bx.lo() && a.by.lo() == b.by.lo())
+}
+
 /// Exact equality.
 pub(crate) fn same_point(a: &XPoint, b: &XPoint) -> bool {
     if a.bx.disjoint(b.bx) || a.by.disjoint(b.by) {

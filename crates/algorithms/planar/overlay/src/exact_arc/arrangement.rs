@@ -44,13 +44,29 @@
 //!   time: they are computed once per pair of distinct segments and
 //!   shared, so their copies are one point to every later question.
 //!
+//! Soups whose parts line up (#338) give many copies of one segment and
+//! many edges through one vertex. Two more facts keep that near linear:
+//!
+//! - Of the edges with the same two ends, in either order, the first
+//!   (by ring) keeps every piece, which the others carry too. So the
+//!   later copies are not paired among themselves; each is paired with
+//!   the first, which puts the first among its carriers.
+//! - A point at an edge's own end is its first or last stop whatever else
+//!   meets it there, and the rings met at a stop are read only between
+//!   two pieces, so that point is not recorded for that edge.
+//!
+//! With a memory budget (`crate::budget`, ADR 0088) the build charges the
+//! edges, every recorded point, the pieces and each piece's rings before
+//! it holds them.
+//!
 //! Debug builds search and count as before for every piece and check the
 //! shortcuts against that.
 
 use axiolid_guarantees::Sign;
 
 use crate::arc::ArcRing;
-use crate::OverlayError;
+use crate::budget::{self, Charge};
+use crate::{OverlayError, OverlayRefusal};
 
 use super::boxes::BoxTree;
 use super::edge::Bounds;
@@ -216,6 +232,21 @@ impl Winder {
 /// [`OverlayError::RepeatedVertex`] for a piece whose ends are one point
 /// (#309), which only unvalidated rings give.
 pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
+    build_charged(rings, &mut Charge::unlimited()).map_err(budget::unbudgeted)
+}
+
+/// [`build`], charging what it holds against `charge` before allocating
+/// it (#338, `crate::budget`).
+///
+/// # Errors
+///
+/// As [`build`], and [`OverlayRefusal::BudgetExceeded`] when a charge
+/// passes the budget.
+pub(crate) fn build_charged(rings: &[ArcRing], charge: &mut Charge) -> Result<Raw, OverlayRefusal> {
+    charge.add(
+        rings.iter().map(|ring| ring.vertices.len()).sum(),
+        budget::PER_EDGE,
+    )?;
     let edges: Vec<Vec<Edge>> = rings.iter().map(edges_of).collect();
 
     // Broad phase over every edge and every monotone part of every ring
@@ -306,6 +337,32 @@ pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
         }
     }
     drop(first_of);
+    // Each straight edge's first twin (#338): the first edge, by flat
+    // index and so by ring, with the same two ends in either order. Twins
+    // carry each other's every piece, so the first twin's ring keeps those
+    // pieces and every later twin skips its own. A pair of later twins
+    // therefore records nothing a kept piece reads, and is not asked.
+    let mut first_twin: WordMap<[u64; 4], usize> = WordMap::default();
+    let twin: Vec<usize> = flat
+        .iter()
+        .enumerate()
+        .map(|(index, &(ring, edge))| {
+            if edges[ring][edge].is_arc() {
+                return index;
+            }
+            let vertices = &rings[ring].vertices;
+            let bits = |p: axiolid_core::Point2| [(p.x + 0.0).to_bits(), (p.y + 0.0).to_bits()];
+            let (a, b) = (
+                bits(vertices[edge].point),
+                bits(vertices[(edge + 1) % vertices.len()].point),
+            );
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            *first_twin
+                .entry([lo[0], lo[1], hi[0], hi[1]])
+                .or_insert(index)
+        })
+        .collect();
+    drop(first_twin);
     let mut met_before: WordMap<(usize, usize), Vec<XPoint>> = WordMap::default();
     // Query buffers, reused for every edge and piece.
     let (mut hits, mut stack) = (Vec::new(), Vec::new());
@@ -319,17 +376,29 @@ pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
             if near <= index || other == ring {
                 continue;
             }
+            if twin[index] == twin[near] && twin[index] != index {
+                // Two later twins: neither keeps a piece.
+                continue;
+            }
             let theirs = &edges[other][their];
             let xs = if repeated[index] || repeated[near] {
-                met_before
-                    .entry((named[index], named[near]))
-                    .or_insert_with(|| crossings(edge, theirs))
-                    .clone()
+                match met_before.entry((named[index], named[near])) {
+                    std::collections::hash_map::Entry::Occupied(held) => held.get().clone(),
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        let xs = crossings(edge, theirs);
+                        charge.add(xs.len() + 1, budget::PER_SHARED_CROSSING)?;
+                        slot.insert(xs).clone()
+                    }
+                }
             } else {
                 crossings(edge, theirs)
             };
             let straight = !edge.is_arc() && !theirs.is_arc();
+            let recorded = xs.iter().filter(|x| !edge.plainly_ends_at(x)).count()
+                + xs.iter().filter(|x| !theirs.plainly_ends_at(x)).count();
+            charge.add(recorded, budget::PER_MEETING)?;
             if xs.len() > 1 {
+                charge.add(2, budget::PER_MEMBER)?;
                 // Two segments with two points in common share the
                 // stretch between them.
                 if straight {
@@ -342,16 +411,28 @@ pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
             // A point at an end of either segment is met again: the end
             // is a stop already, or a vertex the next edge of its ring
             // meets too, so the merge below clears its tag.
+            //
+            // At an edge's own end nothing is recorded for that edge
+            // (#338): the end is its first or last stop, kept as the copy
+            // pushed first, with no tag, and the rings met at a stop are
+            // read only between two pieces. Where many rings share a
+            // vertex, recording every pair of their edges there for both
+            // cost the square of their number.
             let simple = straight && xs.len() == 1;
             for x in &xs {
-                cuts[index].push((x.clone(), simple.then_some(near), Some(other)));
-                cuts[near].push((x.clone(), simple.then_some(index), Some(ring)));
+                if !edge.plainly_ends_at(x) {
+                    cuts[index].push((x.clone(), simple.then_some(near), Some(other)));
+                }
+                if !theirs.plainly_ends_at(x) {
+                    cuts[near].push((x.clone(), simple.then_some(index), Some(ring)));
+                }
             }
         }
     }
 
     // At most one piece between consecutive stops.
     let count: usize = cuts.iter().map(|stops| stops.len() - 1).sum();
+    charge.add(count, budget::PER_PIECE)?;
     let mut pieces = Vec::with_capacity(count);
     let mut out = Vec::with_capacity(count);
     // Buffers reused for every edge: the rings met at each stop, the rings
@@ -578,6 +659,7 @@ pub(crate) fn build(rings: &[ArcRing]) -> Result<Raw, OverlayError> {
                 }
                 None => counted(),
             };
+            charge.add(inside.len() + carriers.len(), budget::PER_MEMBER)?;
             before = Some((inside.clone(), carriers.iter().map(|c| c.0).collect()));
             out.push(RawEdge {
                 from: 0,

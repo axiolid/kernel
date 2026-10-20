@@ -344,6 +344,7 @@ graph TD
     axiolid_oracle --> axiolid_curve
     axiolid_oracle --> axiolid_evaluate
     axiolid_oracle --> axiolid_surface
+    axiolid_overlay --> axiolid_contracts
     axiolid_overlay --> axiolid_core
     axiolid_overlay --> axiolid_exact
     axiolid_overlay --> axiolid_guarantees

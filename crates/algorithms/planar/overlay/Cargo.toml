@@ -10,6 +10,7 @@ homepage.workspace = true
 readme = "README.md"
 
 [dependencies]
+axiolid-contracts.workspace = true
 axiolid-core.workspace = true
 axiolid-exact.workspace = true
 axiolid-guarantees.workspace = true
@@ -22,7 +23,7 @@ role = "algorithm.planar"
 domain = "planar.overlay"
 public = true
 format-neutral = true
-allowed-internal-dependencies = ["axiolid-core", "axiolid-exact", "axiolid-guarantees"]
+allowed-internal-dependencies = ["axiolid-contracts", "axiolid-core", "axiolid-exact", "axiolid-guarantees"]
 
 [[bench]]
 name = "arc_overlay"
@@ -30,4 +31,8 @@ harness = false
 
 [[bench]]
 name = "segment_sweep"
+harness = false
+
+[[bench]]
+name = "grown_soup"
 harness = false

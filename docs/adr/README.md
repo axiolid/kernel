@@ -72,3 +72,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0085](./0085-geometry-graph-wire-format.md) | The geometry graph has a versioned wire format |
 | [0086](./0086-curved-faces-invert-their-edges-without-pcurves.md) | Curved faces without pcurves invert their shared edge samples |
 | [0087](./0087-disc-morphology-has-an-exact-and-a-fast-mode.md) | Disc morphology has an exact and a fast mode |
+| [0088](./0088-planar-overlay-takes-a-memory-budget.md) | The planar overlay takes a memory budget from ExecutionOptions |

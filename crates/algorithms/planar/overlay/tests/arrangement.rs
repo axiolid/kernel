@@ -283,3 +283,88 @@ fn a_segment_touching_an_arc_stays_inside_its_ring() {
     // The touch splits the strip's bottom edge in two.
     assert_eq!(pieces, 5);
 }
+
+/// A ring's vertex inside another ring's edge (#338): the edge is split
+/// there, whichever ring comes first, whether the rings share a stretch of
+/// the edge or touch at the vertex only, and whether the edge is vertical
+/// (every point on it has its ends' `x`) or slanted. Nothing snaps here,
+/// so the subdivision itself must record the meeting for the edge it lies
+/// inside, though it lies at an end of the other edge.
+#[test]
+fn a_vertex_inside_another_edge_splits_it() {
+    let straight = |p: &[(f64, f64)]| {
+        ArcRing::new(
+            p.iter()
+                .map(|&(x, y)| ArcVertex::straight(Point2::new(x, y)))
+                .collect(),
+        )
+    };
+    let square = rect(0.0, 0.0, 2.0, 2.0);
+    let triangle = straight(&[(0.0, 2.0), (2.0, 0.0), (4.0, 4.0)]);
+    let scenes = [
+        // A stretch of the square's right edge shared.
+        (&square, rect(2.0, 0.5, 3.0, 1.5)),
+        // One vertex on the square's right edge, from outside.
+        (
+            &square,
+            straight(&[(2.0, 1.0), (3.0, 0.5), (3.5, 1.0), (3.0, 1.5)]),
+        ),
+        // A stretch of the triangle's slanted edge shared, from outside.
+        (
+            &triangle,
+            straight(&[(0.5, 1.5), (0.0, 1.0), (1.0, 0.0), (1.5, 0.5)]),
+        ),
+        // The same stretches with a vertex where the boundary goes
+        // straight on: both its edges run along the other edge, so only
+        // the overlap reports it there, as an end of the other edge.
+        (
+            &square,
+            straight(&[(2.0, 0.5), (3.0, 0.5), (3.0, 1.5), (2.0, 1.5), (2.0, 1.0)]),
+        ),
+        (
+            &triangle,
+            straight(&[(0.5, 1.5), (0.0, 1.0), (1.0, 0.0), (1.5, 0.5), (1.0, 1.0)]),
+        ),
+    ];
+    for (k, (first, other)) in scenes.iter().enumerate() {
+        for rings in [
+            vec![(*first).clone(), other.clone()],
+            vec![other.clone(), (*first).clone()],
+        ] {
+            let arr = ArcArrangement::new(&rings, tol()).expect("subdivides");
+            let either = area(&arr, |s| s[0] || s[1]);
+            let expected = overlay_area(&rings[0], &rings[1], OverlayOperation::Union);
+            assert!(
+                close(either, expected),
+                "scene {k}: {either} against {expected}"
+            );
+            let both = area(&arr, |s| s[0] && s[1]);
+            assert!(close(both, 0.0), "scene {k}: {both} in both");
+            assert_closed(&arr, |s| s[0] || s[1]);
+            assert_closed(&arr, |s| s[0] != s[1]);
+            for ring in &rings {
+                for v in &ring.vertices {
+                    assert!(
+                        arr.vertices().contains(&v.point),
+                        "scene {k}: {:?} not a vertex",
+                        v.point
+                    );
+                }
+            }
+            // Every piece lies on its sources: none spans a vertex of
+            // another ring.
+            for edge in arr.edges() {
+                let (a, b) = (arr.vertices()[edge.from], arr.vertices()[edge.to]);
+                for ring in &rings {
+                    for v in &ring.vertices {
+                        let p = v.point;
+                        let inside = (p - a).perp_dot(b - a) == 0.0
+                            && (p - a).dot(b - a) > 0.0
+                            && (p - b).dot(a - b) > 0.0;
+                        assert!(!inside, "scene {k}: {p:?} inside a piece {a:?}-{b:?}");
+                    }
+                }
+            }
+        }
+    }
+}

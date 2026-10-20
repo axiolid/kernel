@@ -9,6 +9,55 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `overlay_within` and `union_soup_within` take `OverlayOptions` and the
+  caller's `ExecutionOptions` (#338, ADR 0088): the tolerance is the
+  options', and with `ExecutionOptions::with_memory_budget` the
+  subdivision charges what it is about to hold before allocating it and is
+  refused with `OverlayRefusal::BudgetExceeded { needed, budget }` as soon
+  as the charges pass the budget. `OverlayRefusal::Invalid` carries every
+  refusal `overlay_with` and `union_soup_with` make. Without a budget
+  nothing new is refused, and an admitted call gives the unbudgeted result
+  bit for bit. `tests/grown_soup.rs` measures with a counting allocator
+  that a call never holds more heap than its budget, admitted or refused,
+  and that four times the unbudgeted high-water mark is admitted. The
+  crate now depends on `axiolid-contracts`.
+
+### Fixed
+
+- A soup of grown triangles whose union is one polygon no longer needs
+  gigabytes (#338). axioval/engine's soup -- the strips of a faceted bar,
+  each corner grown by a circumscribed 16-gon, hulled and fanned -- took
+  4.1 GB and 26 s for `union_soup` at 128 facets and 1.9 GB and 10 s for
+  `overlay(Intersection)`, and at 256 facets, and for the soup's union
+  with itself at 128, failed to allocate. Three causes, each fixed with
+  results unchanged:
+  - The chain reduction walked the whole soup once and gave up on every
+    ring when one cycle crossed itself: two overlapping hulls sharing
+    vertices let the walk pass from one into the other. It now reduces
+    such a soup group by group, the rings joined by edges given each way,
+    so every fan becomes its hull's outline.
+  - Edges with the same two ends (hulls' flat sides lined up on one line
+    and split there by the snap) were paired with one another for every
+    copy. Only the first copy keeps their pieces, so the later copies are
+    no longer paired among themselves.
+  - Where many edges meet at one vertex, every pair recorded the vertex
+    for both edges. A point at an edge's own end is no longer recorded
+    for that edge: it is its first or last stop, and the rings met there
+    are never read.
+
+  Measured with `cargo bench -p axiolid-overlay --bench grown_soup`
+  (release, peak resident memory): circumscribed `union_soup` at 64, 128
+  and 256 facets takes 0.08 s, 0.32 s and 1.6 s at 22 MB, 64 MB and
+  245 MB, and the intersection 0.09 s, 0.37 s and 1.8 s at 24 MB, 70 MB
+  and 254 MB, against 0.07 s, 0.32 s and 0.94 s at 20 MB, 58 MB and
+  217 MB for the inscribed soup. The self-union at 256 facets takes 5.5 s
+  at 482 MB. Every output that completed before is the same bit for bit,
+  pinned by hash in `tests/grown_soup.rs`.
+  `scripts/probe_grown_soup_mutants.py` lists the faults the tests must
+  catch.
+
 ## [0.3.18] - 2026-10-19
 
 ### Added

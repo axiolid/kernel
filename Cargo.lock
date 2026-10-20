@@ -650,6 +650,7 @@ dependencies = [
 name = "axiolid-overlay"
 version = "0.3.18"
 dependencies = [
+ "axiolid-contracts",
  "axiolid-core",
  "axiolid-exact",
  "axiolid-guarantees",

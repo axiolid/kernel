@@ -57,8 +57,8 @@ MUTANTS = [
      "            let key = [a.x, a.y, b.x, b.y].map(f64::to_bits);",
      "            let key = [a.x, a.y, a.x, a.y].map(f64::to_bits);"),
     ("a pair's crossings shared with another pair", ARR,
-     "                    .entry((named[index], named[near]))",
-     "                    .entry((named[index], named[index]))"),
+     "                match met_before.entry((named[index], named[near])) {",
+     "                match met_before.entry((named[index], named[index])) {"),
     # Not listed: repeated segments left unmarked. Their crossings are then
     # computed for every pair, as before #315: slower, the same output.
     # The intersection cull.
