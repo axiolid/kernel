@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `section_lower::rectangle_contour` accepts a corner radius equal to its
+  half-extent after unit conversion (#339). A radius above its limit by at
+  most four relative epsilons of the smaller half-extent the limit is cut
+  from is rounding and is snapped onto the limit, for the outer and the
+  inner radius alike; one wider than that (a micrometre, say) is still
+  refused by name. buildingSMART's IFC4 Annex E `air-terminal-element.ifc`
+  tube (24 x 24 in, 2 in wall, 10 in inner fillet, in metres) used to be
+  refused with "inner corner radius must lie in [0, 0.25399999999999995],
+  got 0.254" and now builds with a fully rounded core. The structural
+  sections have no such bound: their radii meet only the shared router's
+  edge check, which already allows `1e-12`.
+
 ## [0.3.19] - 2026-10-16
 
 ### Added

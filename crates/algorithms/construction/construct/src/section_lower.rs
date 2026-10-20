@@ -288,7 +288,10 @@ pub fn circle_contour(circle: &CircleProfile) -> GeomResult<ContourProfile> {
 ///
 /// Refuses, rather than clamps, a radius that is negative, non-finite, or
 /// wider than the half-extent it rounds, and an inner radius on a filled
-/// rectangle.
+/// rectangle. A radius past its half-extent by rounding alone, at most four
+/// relative epsilons of the smaller outer half-extent, states the fully
+/// rounded corner and is snapped onto the limit (#339); one wider than that
+/// is still refused.
 ///
 /// Also refuses a hollow section whose corners leave no wall. Two rounded
 /// rectangles nest exactly when their support functions do; along the corner
@@ -298,7 +301,11 @@ pub fn rectangle_contour(rectangle: &RectangleProfile) -> GeomResult<ContourProf
     positive(rectangle.x, "rectangle x extent")?;
     positive(rectangle.y, "rectangle y extent")?;
     let (hx, hy) = (rectangle.x / 2.0, rectangle.y / 2.0);
-    let outer_radius = corner_radius(rectangle.outer_radius, hx.min(hy), "outer")?;
+    // Both limits are cut from the smaller half-extent, so its magnitude is
+    // the scale their rounding lives at (the inner limit's axis is the
+    // outer's, since `ix - iy == hx - hy`).
+    let scale = hx.min(hy);
+    let outer_radius = corner_radius(rectangle.outer_radius, scale, scale, "outer")?;
     let outer = route(&box_corners(hx, hy, outer_radius))?;
     let Some(thickness) = rectangle.thickness else {
         if rectangle.inner_radius.is_some() {
@@ -319,7 +326,7 @@ pub fn rectangle_contour(rectangle: &RectangleProfile) -> GeomResult<ContourProf
         )));
     }
     let (ix, iy) = (hx - thickness, hy - thickness);
-    let inner_radius = corner_radius(rectangle.inner_radius, ix.min(iy), "inner")?;
+    let inner_radius = corner_radius(rectangle.inner_radius, ix.min(iy), scale, "inner")?;
     let wall_limit = (2.0 + core::f64::consts::SQRT_2) * thickness;
     if outer_radius - inner_radius >= wall_limit {
         return Err(GeomError::Degenerate(format!(
@@ -345,15 +352,42 @@ fn box_corners(hx: Scalar, hy: Scalar, radius: Scalar) -> [Corner; 4] {
     ]
 }
 
+/// How far past its limit, in relative epsilons of the half-extent the
+/// limit is cut from, a corner radius may round and still state the fully
+/// rounded corner (#339).
+///
+/// A radius and the extents it is checked against are converted from the
+/// source units separately, and the inner limit is a difference
+/// `x / 2 - thickness`, so a radius equal to its half-extent in the source
+/// lands up to about one unit in the last place of that half-extent above
+/// it (24 x 24 in, 2 in wall, 10 in inner fillet, in metres: `0.254`
+/// against `0.25399999999999995`, 0.82 epsilons of `0.3048`). Four
+/// epsilons cover that with a margin and are still rounding: the same kind
+/// of relative reach as the boolean snap's (#276, #291), never a modelling
+/// tolerance.
+const RADIUS_REACH_EPSILONS: Scalar = 4.0;
+
 /// Validate a stated corner radius; `None` is a sharp corner.
-fn corner_radius(radius: Option<Scalar>, limit: Scalar, which: &str) -> GeomResult<Scalar> {
+///
+/// `limit` is the widest radius the corner admits and `scale` the magnitude
+/// of the half-extent it is cut from. A radius above the limit by at most
+/// [`RADIUS_REACH_EPSILONS`] relative epsilons of `scale` is rounding, and
+/// is snapped onto the limit so the arcs meet exactly; one wider than that
+/// is refused by name, never clamped.
+fn corner_radius(
+    radius: Option<Scalar>,
+    limit: Scalar,
+    scale: Scalar,
+    which: &str,
+) -> GeomResult<Scalar> {
     let value = radius.unwrap_or(0.0);
-    if !value.is_finite() || value < 0.0 || value > limit {
+    let reach = RADIUS_REACH_EPSILONS * Scalar::EPSILON * scale;
+    if !value.is_finite() || value < 0.0 || value > limit + reach {
         return Err(GeomError::InvalidInput(format!(
             "{which} corner radius must lie in [0, {limit}], got {value}"
         )));
     }
-    Ok(value)
+    Ok(value.min(limit))
 }
 
 fn positive(value: Scalar, what: &str) -> GeomResult<()> {
@@ -861,6 +895,45 @@ fn trapezium_corners(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A radius past its limit by rounding is snapped onto the limit, bit
+    /// for bit, and the reach is exactly [`RADIUS_REACH_EPSILONS`] relative
+    /// epsilons (four) of the scale: a little inside it is accepted, a little past
+    /// it refused (#339).
+    #[test]
+    fn a_radius_past_its_limit_by_rounding_snaps_and_no_further() {
+        // The Annex E inner corner: 10 in against 12 in - 2 in, in metres.
+        let scale = 24.0 * 0.0254 / 2.0;
+        let limit = scale - 2.0 * 0.0254;
+        let radius = 10.0 * 0.0254;
+        assert!(radius > limit, "the case must round past its limit");
+        let snapped = corner_radius(Some(radius), limit, scale, "inner").expect("rounding");
+        assert_eq!(snapped.to_bits(), limit.to_bits(), "snapped onto the limit");
+
+        // Spelled out rather than read from the constant, so a changed
+        // reach turns this red.
+        let reach = 4.0 * Scalar::EPSILON * scale;
+        let inside = limit + 0.75 * reach;
+        assert!(inside > limit);
+        assert_eq!(
+            corner_radius(Some(inside), limit, scale, "inner").map(Scalar::to_bits),
+            Ok(limit.to_bits())
+        );
+        let past = limit + 1.5 * reach;
+        assert!(
+            matches!(
+                corner_radius(Some(past), limit, scale, "inner"),
+                Err(GeomError::InvalidInput(_))
+            ),
+            "a radius past the reach is refused"
+        );
+        // Within the limit nothing moves.
+        let below = limit * 0.5;
+        assert_eq!(
+            corner_radius(Some(below), limit, scale, "inner").map(Scalar::to_bits),
+            Ok(below.to_bits())
+        );
+    }
 
     /// The corner router must round a NON-right corner correctly.
     ///

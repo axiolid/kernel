@@ -15,6 +15,7 @@ use axiolid_construct::revolve_exact::revolve_profile_exact;
 use axiolid_construct::section_lower::rectangle_contour;
 use axiolid_contracts::GeomError;
 use axiolid_core::{Point3, Tolerance, Vec3};
+use axiolid_curve::Curve2;
 use axiolid_profile::{Profile, RectangleProfile};
 use axiolid_surface::Surface;
 
@@ -157,6 +158,83 @@ fn a_radius_filling_the_short_side_makes_a_stadium() {
         "stadium area {got}, want {want}"
     );
     extrude_clean(rect(x, y, None, Some(r), None));
+}
+
+/// buildingSMART IFC4 Annex E `air-terminal-element.ifc` (#339):
+/// `IFCRECTANGLEHOLLOWPROFILEDEF(.AREA.,$,$,24.,24.,2.,10.,0.)` in inches,
+/// lowered to metres. The 10 in inner fillet is exactly half the 20 in
+/// opening, a fully rounded (circular) core, but in metres it lands one ulp
+/// above `x / 2 - thickness`.
+#[test]
+fn the_annex_e_tube_builds_with_a_fully_rounded_core() {
+    let inch = 0.0254;
+    let (x, t, ri) = (24.0 * inch, 2.0 * inch, 10.0 * inch);
+    let profile = rect(x, x, Some(t), Some(0.0), Some(ri));
+    let contour = rectangle_contour(&profile).expect("the Annex E profile lowers");
+    // Fully rounded: the hole is four quarter arcs and no straight run.
+    let hole = &contour.holes[0];
+    assert_eq!(hole.segments.len(), 4, "{:?}", hole.segments);
+    let core = x / 2.0 - t;
+    for segment in &hole.segments {
+        let Curve2::Circle(arc) = segment.curve else {
+            panic!("a straight run in a fully rounded core: {segment:?}");
+        };
+        assert!((arc.radius - core).abs() < 1e-15, "radius {}", arc.radius);
+        let centre = arc.frame.origin;
+        assert!(centre.x.hypot(centre.y) < 1e-15, "centre {centre:?}");
+    }
+    let got = net_area(&profile);
+    let want = x * x - PI * core * core;
+    assert!((got - want).abs() < 1e-12, "net section {got}, want {want}");
+    extrude_clean(profile);
+}
+
+/// The inner limit's rounding is that of the half-extent it is cut from,
+/// not of the opening: 161 x 161 in with an 80 in wall leaves a 1 in core,
+/// and its 0.5 in fillet lands about 100 epsilons of the core above it in
+/// metres, 0.63 of the half-extent (#339).
+#[test]
+fn a_narrow_core_rounds_at_the_scale_of_its_half_extent() {
+    let inch = 0.0254;
+    let (x, t, ri) = (161.0 * inch, 80.0 * inch, 0.5 * inch);
+    assert!(ri > x / 2.0 - t, "the case must round past its limit");
+    let contour = rectangle_contour(&rect(x, x, Some(t), Some(0.0), Some(ri)))
+        .expect("a fully rounded narrow core lowers");
+    assert_eq!(contour.holes[0].segments.len(), 4);
+}
+
+/// The outer radius takes the same reach: a radius one ulp above the
+/// half-extent is the stadium it states (#339).
+#[test]
+fn an_outer_radius_one_ulp_past_the_half_extent_is_the_stadium() {
+    let r: f64 = 0.254;
+    let half = f64::from_bits(r.to_bits() - 1);
+    let (x, y) = (4.0 * half, 2.0 * half);
+    assert!(r > y / 2.0);
+    let got = net_area(&rect(x, y, None, Some(r), None));
+    let want = (x - y) * y + PI * half * half;
+    assert!((got - want).abs() < 1e-12, "stadium {got}, want {want}");
+    extrude_clean(rect(x, y, None, Some(r), None));
+}
+
+/// The reach is rounding only: a radius a micrometre past its limit is a
+/// modelling error and is still refused, inner and outer alike (#339).
+#[test]
+fn a_radius_a_micrometre_past_its_limit_is_refused() {
+    let inch = 0.0254;
+    let (x, t) = (24.0 * inch, 2.0 * inch);
+    let core = x / 2.0 - t;
+    let cases = [
+        ("inner", rect(x, x, Some(t), Some(0.0), Some(core + 1e-6))),
+        ("outer", rect(x, x, None, Some(x / 2.0 + 1e-6), None)),
+    ];
+    for (which, profile) in cases {
+        let result = rectangle_contour(&profile);
+        assert!(
+            matches!(&result, Err(GeomError::InvalidInput(message)) if message.contains(which)),
+            "{which}: expected a refusal by name, got {result:?}"
+        );
+    }
 }
 
 #[test]
