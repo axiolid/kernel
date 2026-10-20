@@ -26,6 +26,13 @@ caret rule for `0.x` versions.
   refuses (an elevated or banked alignment curve) is integrated in place
   about the same point: a curved face far out may then be refused as not
   converged, never measured looser.
+- `second_moments` (and so `MeshMeasure`'s `second_moment_diagonal`) sums
+  about the mesh's first vertex and shifts the moments back to the origin
+  by the parallel-axis terms, as `volume_properties` already did (#343).
+  About the world origin each term grew with the fifth power of the
+  distance: a unit box at `(6.0e5, 5.6e6, 204.5)` measured
+  `360016800160` against `360016800196.08` and lost its central moments
+  entirely. It now matches the closed form to rounding.
 
 ## [0.3.10] - 2026-10-09
 

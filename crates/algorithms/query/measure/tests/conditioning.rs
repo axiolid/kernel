@@ -12,7 +12,7 @@
 //! conditioning. These tests pin that down.
 
 use axiolid_core::{Point3, Tolerance};
-use axiolid_measure::{surface_properties, volume_properties};
+use axiolid_measure::{second_moments, surface_properties, volume_properties};
 use axiolid_mesh::TriMesh;
 
 /// An axis-aligned box with its minimum corner at `(ox, oy, oz)`.
@@ -174,4 +174,31 @@ fn plate(base: f64, thickness: f64) -> TriMesh {
             6, 3, 0, 4, 3, 4, 7,
         ],
     )
+}
+
+/// Second moments of a box on a national grid match their closed form
+/// (#343): `V (c_i^2 + s^2 / 12)` about the world origin.
+///
+/// Summed about the world origin each tetrahedron's term grows with the
+/// fifth power of its distance, `(5.6e6)^5 ~ 5e33`, for moments of about
+/// `3e13`: the sum lost every digit. About the first vertex, shifted home
+/// by the parallel-axis terms, it is right to rounding. The corners are
+/// dyadic, so the box is exactly the one the closed form describes.
+#[test]
+fn second_moments_are_accurate_at_survey_grid_coordinates() {
+    let s = 1.0;
+    for origin in [[0.0, 0.0, 0.0], [600_013.5, 5_599_985.25, 204.5]] {
+        let mesh = boxx(origin[0], origin[1], origin[2], s);
+        let moments = second_moments(&mesh, Tolerance::METRE).expect("a closed box");
+        let volume = s * s * s;
+        for axis in 0..3 {
+            let centre = origin[axis] + s / 2.0;
+            let want = volume * (centre * centre + s * s / 12.0);
+            let got = moments[axis];
+            assert!(
+                (got - want).abs() <= 1e-13 * want,
+                "box at {origin:?}, axis {axis}: second moment {got}, want {want}"
+            );
+        }
+    }
 }

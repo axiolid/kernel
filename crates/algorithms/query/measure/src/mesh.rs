@@ -113,6 +113,13 @@ pub fn volume_properties<M: TriangleMeshView + ?Sized>(
 /// `(nx / 60) * sum over the 10 symmetric monomials`, the standard
 /// closed-form tetrahedral moment about the origin.
 ///
+/// The sum runs about the mesh's first vertex, as [`volume_properties`]'s
+/// does, and is shifted back to the origin by the parallel-axis terms: with
+/// `x = x' + o`, `int x_i^2 = int x'_i^2 + 2 o_i int x'_i + o_i^2 V`
+/// (#343). About the world origin each term grew with the fifth power of
+/// the distance to it, and a box on a national grid lost its central
+/// moments entirely to the cancellation.
+///
 /// Requires the same closed two-manifold input as [`volume_properties`]:
 /// an open shell has no enclosed region and the integral is meaningless,
 /// so it is refused rather than summed into a plausible number.
@@ -124,11 +131,14 @@ pub fn second_moments<M: TriangleMeshView + ?Sized>(
     if !health.is_closed_two_manifold() {
         return Err(MeshMeasureError::MeshNotVolumeUsable(health));
     }
-    let mut moments = Vec3::ZERO;
+    let base = mesh.position(0);
+    let (mut moments, mut first, mut volume) = (Vec3::ZERO, Vec3::ZERO, 0.0);
     for i in 0..mesh.triangle_count() {
-        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize));
-        // Signed volume of the tetrahedron on the origin, times 6.
+        let [a, b, c] = mesh.triangle(i).map(|j| mesh.position(j as usize) - base);
+        // Signed volume of the tetrahedron on `base`, times 6.
         let six_v = a.dot(b.cross(c));
+        volume += six_v / 6.0;
+        first += (a + b + c) * (six_v / 24.0);
         for axis in 0..3 {
             let (pa, pb, pc) = (a[axis], b[axis], c[axis]);
             // Integral of t^2 over the tetrahedron, in barycentric closed
@@ -137,6 +147,8 @@ pub fn second_moments<M: TriangleMeshView + ?Sized>(
             moments[axis] += six_v * quadratic / 60.0;
         }
     }
+    // Shift the moments about `base` home to the origin.
+    let moments = moments + 2.0 * base * first + base * base * volume;
     if !moments.x.is_finite() || !moments.y.is_finite() || !moments.z.is_finite() {
         return Err(MeshMeasureError::ZeroSignedVolume);
     }
