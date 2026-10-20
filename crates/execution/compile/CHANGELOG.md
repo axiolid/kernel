@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A boolean's deviation measurement admits an exact face whose pcurve
+  loops close only within the readings the exact boolean took (#334), up
+  to the largest linear one it reported (`BooleanReport::linear`), never
+  beyond the caller's linear tolerance, in parameters by the surface's
+  largest first derivative. It refused such faces by name ("an exact
+  face's loops do not close in its parameters"), so a flat wall whose
+  openings' faces coincide with its own or each other's within `1e-8`
+  was left unbounded. The slack holds the gap measured, so the bound
+  stays sound, and loops that close exactly keep their rounding gap: the
+  all-planar bound of #314 is unchanged. A synthetic wall `5 x 0.25 x 3`
+  less a door and windows whose caps and shared side are `1e-8` and
+  `3e-8` off is certified at about its readings (`2e-8`, `6e-8`), its
+  exact volume checked; at `0` it stays at rounding (`1.3e-12`). Probe
+  `scripts/probe_closing_reading_mutants.py` (5/5 killed).
+
 ## [0.3.29] - 2026-10-18
 
 ### Fixed

@@ -25,7 +25,8 @@
 //! - Its domain is the region its loops' pcurves enclose (even-odd). Each
 //!   pcurve span is flattened in parameters until its certified chord
 //!   bound ([`chord_bound2`]) is within `delta`, and the loops must close
-//!   within a rounding gap. Every point of the exact boundary is then within
+//!   within a gap the result explains (see "Loops closed by a reading"
+//!   below). Every point of the exact boundary is then within
 //!   `slack = delta + gap` of the polygon, and each polygon point within
 //!   `slack` of the boundary, so a cell further than `slack` from every
 //!   polygon segment does not meet the boundary. Such a cell is wholly
@@ -118,6 +119,25 @@
 //! ([`Domain::clip`]), and the slack is the chord bound the flattening
 //! reached (`0` for a straight trim) rather than the `delta` it allowed.
 //!
+//! # Loops closed by a reading
+//!
+//! A loop's consecutive pcurve spans repeat the point they share, and the
+//! measured gap between the repeats goes into the slack, so the bound is
+//! sound for any gap. Which gaps are admitted only says which loops the
+//! result explains (#334). A loop that closes exactly is admitted within
+//! the rounding of its parameters (`1e-9` of their extent), as before, and
+//! keeps its slack, so #314's tight planar bound is unchanged. Where the
+//! exact boolean read features as one within tolerance (merged points,
+//! coincident faces), the pcurves of the result's faces close only within
+//! those readings, so a gap is also admitted up to the largest linear
+//! reading the boolean reported
+//! ([`BooleanReport::linear`],
+//! over the whole boolean: the report is not kept per face), never beyond
+//! the caller's linear tolerance, and turned into parameters by the
+//! surface's largest first derivative over the face, so the admitted gap
+//! spans no more than that reading on the surface. A wider gap, or one with no
+//! reading to explain it, stays refused by name.
+//!
 //! # Unbounded, by name
 //!
 //! A boolean the exact compiler refuses (a union or intersection of placed
@@ -126,7 +146,8 @@
 //! refusal's name. A face whose
 //! surface family has no derivative bounds, whose pcurve family has no
 //! certified chord bound, or whose loops do not close in its parameters
-//! (a periodic face trimmed by two separate circles) is unbounded by name.
+//! within the gap admitted above (a periodic face trimmed by two separate
+//! circles) is unbounded by name.
 //!
 //! The exact result is compiled at the node's own options, so under an
 //! instance it is the local solid and the mesh the local mesh; the
@@ -143,7 +164,7 @@ use axiolid_model::{GeometryGraph, GeometryNode, NodeId, SolidOperation};
 use axiolid_reference::bound::{chord_bound2, continuity_breaks2, SurfaceBoundOracle};
 use axiolid_surface::Surface;
 
-use axiolid_brep_boolean::ToleranceDecisionKind;
+use axiolid_brep_boolean::{BooleanReport, ToleranceDecisionKind};
 
 use super::{Deviation, DeviationBound, DeviationPath, COINCIDENT_OPERANDS};
 use crate::certify::{certify_affine, certify_within, Cell, Coverage, Patch};
@@ -211,11 +232,12 @@ pub(crate) fn of_boolean(
     // settles within the budget too rather than tightening further.
     // The slab width is a deviation the report already carries: like a
     // sampled one, it lets the budget settle an all-planar search (#314).
+    let reading = closing_reading(&report, options);
     let measured = if flattened < budget {
         let left = budget - flattened;
-        measure(&exact, mesh, left, left, flattened)
+        measure(&exact, mesh, left, left, flattened, reading)
     } else {
-        measure(&exact, mesh, budget, budget, flattened)
+        measure(&exact, mesh, budget, budget, flattened, reading)
     };
     let bound = match measured {
         Ok(value) => DeviationBound::Certified(widened(value, flattened)),
@@ -238,6 +260,14 @@ pub(crate) fn of_boolean(
         );
     }
     deviation
+}
+
+/// The gap within which an exact face's loops may close beyond rounding
+/// (#334): the largest linear reading the boolean took, never beyond the
+/// caller's linear tolerance (see the module's "Loops closed by a
+/// reading").
+fn closing_reading(report: &BooleanReport, options: &ExecutionOptions) -> Scalar {
+    report.linear().min(options.tolerance().linear())
 }
 
 /// The measured distance to the exact boolean of the flattened operands,
@@ -292,13 +322,16 @@ fn refusal(error: &GeomError) -> &'static str {
 /// A certified bound on the distance from every point of `exact`'s faces
 /// to `mesh`, or why there is none; the search settles once it is within
 /// `enough` (see the module's "When to stop"), an all-planar one only once
-/// a deviation is shown, sampled or the `shown` one the report adds.
+/// a deviation is shown, sampled or the `shown` one the report adds. A
+/// face's loops may close within `reading`, the largest linear reading the
+/// boolean took (see the module's "Loops closed by a reading").
 fn measure(
     exact: &ExactBRep,
     mesh: &TriMesh,
     target: Scalar,
     enough: Scalar,
     shown: Scalar,
+    reading: Scalar,
 ) -> Result<Scalar, &'static str> {
     let topology = exact.topology();
     let mut faces = Vec::with_capacity(topology.faces().len());
@@ -309,7 +342,7 @@ fn measure(
             .ok_or("boolean: an exact face has no surface")?;
         let oracle = SurfaceBoundOracle::new(surface)
             .ok_or("boolean: an exact face's surface family has no derivative bounds")?;
-        let domain = Domain::new(exact, face, surface, target)?;
+        let domain = Domain::new(exact, face, surface, target, reading)?;
         faces.push(ExactFace {
             surface,
             oracle,
@@ -419,6 +452,7 @@ impl Domain {
         face: &axiolid_topology::Face<axiolid_brep::SurfaceId>,
         surface: &Surface,
         target: Scalar,
+        reading: Scalar,
     ) -> Result<Self, &'static str> {
         let topology = exact.topology();
         let mut rings: Vec<Vec<Point2>> = Vec::new();
@@ -480,7 +514,13 @@ impl Domain {
         // what it allowed (#314): zero for straight trims.
         let delta = if affine { chord } else { delta };
         let scale = (hi - lo).length().max(lo.length()).max(hi.length());
-        let closing = 1e-9 * scale.max(1.0);
+        // A loop closes within the rounding of its parameters, or within
+        // the boolean's largest reading (#334): a gap of `p` in parameters
+        // spans at most `g p` on the surface, so one within `reading / g`
+        // spans no more than the reading that explains it.
+        // The slack takes the gap measured, not the one admitted, so a
+        // loop that closes exactly keeps its tight slack (#314).
+        let closing = (1e-9 * scale.max(1.0)).max(reading / g);
         let mut gap: Scalar = 0.0;
         // Consecutive spans repeat (within rounding) the point they share,
         // and the ring closes from its last point to its first: measure
@@ -913,7 +953,7 @@ mod tests {
         let exact = ReferenceExactCompiler::new()
             .compile_exact(&graph, cut, &options)
             .unwrap();
-        let bound = measure(&exact, &mesh, budget, 0.0, 0.0).unwrap();
+        let bound = measure(&exact, &mesh, budget, 0.0, 0.0, 0.0).unwrap();
         let index = crate::certify::TriangleIndex::new(&mesh).unwrap();
         let topology = exact.topology();
         let mut worst: Scalar = 0.0;
@@ -1165,7 +1205,7 @@ mod tests {
         let (mut curved, mut straight) = (0, 0);
         for face in topology.faces() {
             let surface = &exact.surfaces()[face.surface.unwrap().index()];
-            let domain = Domain::new(&exact, face, surface, target).unwrap();
+            let domain = Domain::new(&exact, face, surface, target, 0.0).unwrap();
             if !domain.affine {
                 continue;
             }
@@ -1197,6 +1237,103 @@ mod tests {
             curved >= 2 && straight >= 2,
             "{curved} curved, {straight} straight"
         );
+    }
+
+    /// A wall `5 x 3 x 0.25` less a door on its bottom edge and a window,
+    /// their caps `1e-8` outside and inside its faces (#334): read as one surface within tolerance, the
+    /// exact result's loops close only within the readings. They are
+    /// admitted within the boolean's largest reading, capped by the
+    /// caller's tolerance, and refused without it or with a reading too
+    /// small to explain them.
+    #[test]
+    fn loops_close_within_the_booleans_readings() {
+        let e = 1e-8;
+        let mut g = GeometryGraphBuilder::new();
+        let rectangle = |g: &mut GeometryGraphBuilder, x, y| {
+            g.push(GeometryNode::Profile(Profile::Rectangle(
+                RectangleProfile {
+                    x,
+                    y,
+                    thickness: None,
+                    outer_radius: None,
+                    inner_radius: None,
+                },
+            )))
+            .unwrap()
+        };
+        let solid = |g: &mut GeometryGraphBuilder, profile, depth, at: Vec3| {
+            let solid = g
+                .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+                    profile,
+                    direction: Vec3::Z,
+                    depth,
+                }))
+                .unwrap();
+            g.push(GeometryNode::Instance(Instance {
+                source: solid,
+                transform: Transform3::from_translation(at),
+            }))
+            .unwrap()
+        };
+        let wall = rectangle(&mut g, 5.0, 3.0);
+        let door = rectangle(&mut g, 1.0, 2.2);
+        let window = rectangle(&mut g, 1.0, 1.0);
+        let mut cut = solid(&mut g, wall, 0.25, Vec3::ZERO);
+        for (profile, at, depth) in [
+            (door, Vec3::new(-1.5, -0.4, -e), 0.25 + 2.0 * e),
+            (window, Vec3::new(1.0, 0.0, e), 0.25 - 2.0 * e),
+        ] {
+            let tool = solid(&mut g, profile, depth, at);
+            cut = g
+                .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+                    left: cut,
+                    right: tool,
+                    operator: BooleanOperator::Difference,
+                }))
+                .unwrap();
+        }
+        let graph = g.finish(vec![cut]).unwrap();
+        let target = 1e-3;
+        let options = ExecutionOptions::new(Tolerance::new(target, 1e-9).unwrap())
+            .with_chord_error(target)
+            .unwrap();
+        let (exact, report) = ReferenceExactCompiler::new()
+            .compile_exact_with_report(&graph, cut, &options)
+            .unwrap();
+        let reading = report.linear();
+        assert!(reading >= e && reading <= 10.0 * e, "{report:?}");
+        // The reading, capped by the caller's tolerance; none when exact.
+        assert_eq!(closing_reading(&report, &options), reading);
+        let fine = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).unwrap());
+        assert_eq!(closing_reading(&report, &fine), 1e-9);
+        assert_eq!(closing_reading(&BooleanReport::default(), &options), 0.0);
+        let open = "boolean: an exact face's loops do not close in its parameters";
+        let domains = |reading: Scalar| {
+            exact
+                .topology()
+                .faces()
+                .iter()
+                .map(|face| {
+                    let surface = &exact.surfaces()[face.surface.unwrap().index()];
+                    Domain::new(&exact, face, surface, target, reading).map(|d| d.slack)
+                })
+                .collect::<Vec<_>>()
+        };
+        // Every face closes within the reading, the slack holding its gap.
+        let admitted = domains(reading);
+        assert!(admitted.iter().all(Result::is_ok), "{admitted:?}");
+        assert!(
+            admitted.iter().flatten().any(|&slack| slack >= e),
+            "{admitted:?}"
+        );
+        // Without it, or with a thousandth of it, some face stays open.
+        for short in [0.0, 1e-3 * reading] {
+            assert!(
+                domains(short).contains(&Err(open)),
+                "{short:e}: {:?}",
+                domains(short)
+            );
+        }
     }
 
     /// The bound of an all-planar boolean still holds its exact result
@@ -1256,11 +1393,11 @@ mod tests {
             .compile_exact(&graph, cut, &options)
             .unwrap();
         // Every face is a plane: the search runs to the floor.
-        let untouched = measure(&exact, &mesh, 1e-3, 1e-3, 0.0).unwrap();
+        let untouched = measure(&exact, &mesh, 1e-3, 1e-3, 0.0, 0.0).unwrap();
         assert!(untouched <= 1e-11, "{untouched:e}");
         // A deviation the report adds anyway (a slab width, #266) lets the
         // budget settle it, as a sampled one does.
-        let shown = measure(&exact, &mesh, 1e-3, 1e-3, 1e-6).unwrap();
+        let shown = measure(&exact, &mesh, 1e-3, 1e-3, 1e-6, 0.0).unwrap();
         assert!(shown > 1e-6 && shown <= 1e-3, "{shown:e}");
         // Three mesh corners in turn, each moved off every face it is on.
         let corners = mesh.positions.len();
@@ -1268,7 +1405,7 @@ mod tests {
             let original = mesh.positions[k];
             mesh.positions[k] = original + Vec3::new(1.0, -2.0, 1.5) * 1e-5;
             let budget = 1e-3;
-            let bound = measure(&exact, &mesh, budget, budget, 0.0).unwrap();
+            let bound = measure(&exact, &mesh, budget, budget, 0.0, 0.0).unwrap();
             let index = crate::certify::TriangleIndex::new(&mesh).unwrap();
             let topology = exact.topology();
             let mut worst: Scalar = 0.0;
@@ -1304,7 +1441,7 @@ mod tests {
             );
             // Without a budget it tightens towards them.
             if k == 0 {
-                let tight = measure(&exact, &mesh, budget, 0.0, 0.0).unwrap();
+                let tight = measure(&exact, &mesh, budget, 0.0, 0.0, 0.0).unwrap();
                 assert!(
                     worst <= tight && tight <= 3.0 * worst.max(moved),
                     "corner {k}: {tight:e} for {worst:e} sampled, {moved:e} at the corner"
