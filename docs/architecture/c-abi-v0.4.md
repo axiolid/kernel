@@ -1,6 +1,6 @@
 # C ABI v0.4
 
-The generated public header is [`axiolid.h`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid-capi/include/axiolid.h). Generate it with `cargo +1.88.0 xtask ffi header`; verify freshness with `cargo +1.88.0 xtask ffi check`.
+The generated public header is [`axiolid.h`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid-capi/include/axiolid.h). Generate it with `cargo +1.99.1 xtask ffi header`; verify freshness with `cargo +1.99.1 xtask ffi check`.
 
 ## Compatibility contract
 
@@ -44,8 +44,8 @@ All exported Rust functions catch panics and return `AxiolidStatus_Panic`. No Ru
 ## Verification
 
 ```bash
-cargo +1.88.0 test -p axiolid-capi
-cargo +1.88.0 xtask ffi check
+cargo +1.99.1 test -p axiolid-capi
+cargo +1.99.1 xtask ffi check
 scripts/check-capi.sh
 ```
 

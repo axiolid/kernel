@@ -34,11 +34,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
         with:
-          toolchain: 1.88.0
+          toolchain: 1.99.1
       - name: Install the pinned nightly that resolves minimal versions
         # verify-packages.py builds every to-be-released crate at its minimal
         # internal dependency versions; only `-Z minimal-versions` makes
-        # that lockfile, and the build itself uses 1.88.0.
+        # that lockfile, and the build itself uses 1.99.1.
         run: rustup toolchain install nightly-2026-09-25 --profile minimal
       - name: Test release tooling and publication order
         run: |
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
         with:
-          toolchain: 1.88.0
+          toolchain: 1.99.1
       - name: Publish workspace in stable dependency order
         # A crates.io trusted-publishing token lives 30 minutes, and a
         # rate-limited workspace publish can take hours. Each attempt gets a

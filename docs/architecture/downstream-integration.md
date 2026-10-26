@@ -6,8 +6,8 @@ The v0.4 protocol supports three consumption profiles. These rows define boundar
 
 | Profile | Transport | Discovery | Compatibility | API | ABI | MSRV | Ownership | Thread safety |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `rust-leaf` | Rust packages selected directly | selected operation traits plus Backend::descriptor | Cargo SemVer per selected leaf package | 0.4.0 | — | 1.88 | Rust-owned values | `Send + Sync` values |
-| `rust-facade` | feature-gated axiolid package | compiled IntegrationDescriptor plus operation traits | Cargo SemVer and additive feature names | 0.4.0 | — | 1.88 | Rust-owned values | `Send + Sync` values |
+| `rust-leaf` | Rust packages selected directly | selected operation traits plus Backend::descriptor | Cargo SemVer per selected leaf package | 0.4.0 | — | 1.99 | Rust-owned values | `Send + Sync` values |
+| `rust-facade` | feature-gated axiolid package | compiled IntegrationDescriptor plus operation traits | Cargo SemVer and additive feature names | 0.4.0 | — | 1.99 | Rust-owned values | `Send + Sync` values |
 | `native-c` | C ABI with opaque handles | ABI version and runtime IntegrationDescriptor query | ABI major match; additive minor and patch releases | 0.4.0 | 0.4.0 | — | opaque owned handles | context `Send`, not `Sync` |
 
 ## Boundary invariants

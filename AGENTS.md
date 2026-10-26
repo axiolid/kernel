@@ -82,8 +82,9 @@ workspace-wide changes. Judge it by exit code:
 scripts/gate.sh
 ```
 
-It needs `cargo-semver-checks`, pinned because newer releases need a
-newer rustc: `cargo install cargo-semver-checks --version 0.44.0 --locked`.
+It needs `cargo-semver-checks`, pinned so the gate is reproducible and
+built by the pinned rustc:
+`cargo install cargo-semver-checks --version 0.51.0 --locked`.
 The main steps can run alone:
 
 ```bash

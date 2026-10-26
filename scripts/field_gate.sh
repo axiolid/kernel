@@ -3,7 +3,7 @@
 set -euo pipefail
 
 unset CARGO_NET_OFFLINE CARGO_HOME GIT_DIR GIT_WORK_TREE 2>/dev/null || true
-export RUSTUP_TOOLCHAIN=1.88.0
+export RUSTUP_TOOLCHAIN=1.99.1
 
 # Run against the tree this script lives in, not a hardcoded checkout.
 # The absolute path made the gate test someone else's working copy: from a

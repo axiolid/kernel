@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo +1.88.0 xtask ffi check
-cargo +1.88.0 build --release -p axiolid-capi
+cargo +1.99.1 xtask ffi check
+cargo +1.99.1 build --release -p axiolid-capi
 
 target_dir="${CARGO_TARGET_DIR:-target}"
 output="${target_dir}/axiolid-capi-smoke"

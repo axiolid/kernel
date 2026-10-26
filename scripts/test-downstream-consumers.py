@@ -138,7 +138,7 @@ def render_manifest(
 def workspace_packages() -> tuple[dict[str, str], set[str]]:
     metadata = json.loads(
         run(
-            ["cargo", "+1.88.0", "metadata", "--no-deps", "--format-version", "1"]
+            ["cargo", "+1.99.1", "metadata", "--no-deps", "--format-version", "1"]
         ).stdout
     )
     versions: dict[str, str] = {}
@@ -197,7 +197,7 @@ def copy_probe(
 def verify_resolved_boundary(probe: Path, revision: str, env: dict[str, str]) -> None:
     metadata = json.loads(
         run(
-            ["cargo", "+1.88.0", "metadata", "--locked", "--format-version", "1"],
+            ["cargo", "+1.99.1", "metadata", "--locked", "--format-version", "1"],
             cwd=probe,
             env=env,
         ).stdout
@@ -237,10 +237,10 @@ def run_rust_probes(work: Path, revision: str, env: dict[str, str]) -> None:
             source_url=source_url,
             revision=revision,
         )
-        run(["cargo", "+1.88.0", "generate-lockfile"], cwd=probe, env=env)
+        run(["cargo", "+1.99.1", "generate-lockfile"], cwd=probe, env=env)
         verify_resolved_boundary(probe, revision, env)
         result = run(
-            ["cargo", "+1.88.0", "run", "--release", "--locked", "--quiet"],
+            ["cargo", "+1.99.1", "run", "--release", "--locked", "--quiet"],
             cwd=probe,
             env=env,
         )
@@ -255,9 +255,9 @@ def run_rust_probes(work: Path, revision: str, env: dict[str, str]) -> None:
     if mutated == facade.read_text(encoding="utf-8"):
         fail("feature mutation did not alter facade manifest")
     facade.write_text(mutated, encoding="utf-8")
-    run(["cargo", "+1.88.0", "generate-lockfile"], cwd=facade.parent, env=env)
+    run(["cargo", "+1.99.1", "generate-lockfile"], cwd=facade.parent, env=env)
     failure = run(
-        ["cargo", "+1.88.0", "check", "--locked", "--quiet"],
+        ["cargo", "+1.99.1", "check", "--locked", "--quiet"],
         cwd=facade.parent,
         env=env,
         check=False,

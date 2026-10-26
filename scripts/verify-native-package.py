@@ -282,7 +282,7 @@ def verify_files(files: dict[str, bytes], allow_dirty: bool) -> tuple[str, dict]
     if (
         not isinstance(rustc, str)
         or not rustc.splitlines()
-        or rustc.splitlines()[0] != "rustc 1.88.0 (6b00bc388 2025-06-23)"
+        or rustc.splitlines()[0] != "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
     ):
         raise ValueError("manifest was not built with the supported Rust toolchain")
     if not isinstance(manifest.get("source_dirty"), bool):

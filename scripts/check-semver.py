@@ -205,7 +205,7 @@ def main() -> int:
         # a tool is missing is worse than no gate: it reports success.
         print("cargo-semver-checks is not installed; the breaking-change")
         print("gate cannot run. Install it with:")
-        print("    cargo install cargo-semver-checks --version 0.44.0 --locked")
+        print("    cargo install cargo-semver-checks --version 0.51.0 --locked")
         return 1
 
     crates = publishable()

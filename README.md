@@ -13,7 +13,7 @@
   <a href="https://axiolid.github.io/kernel/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Axiolid-111827?style=flat-square"></a>
   <a href="https://github.com/axiolid/kernel/actions/workflows/docs.yml"><img alt="Documentation deployment" src="https://github.com/axiolid/kernel/actions/workflows/docs.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MPL-2.0 license" src="https://img.shields.io/badge/license-MPL--2.0-2563eb?style=flat-square"></a>
-  <img alt="MSRV Rust 1.88" src="https://img.shields.io/badge/MSRV-1.88-b7410e?style=flat-square">
+  <img alt="MSRV Rust 1.99" src="https://img.shields.io/badge/MSRV-1.99-b7410e?style=flat-square">
 </p>
 
 > **Status: early kernel.** Axiolid has real, tested building blocks and strict architecture gates, but it is not yet a drop-in replacement for an established CAD kernel. The [capability page](https://axiolid.github.io/kernel/capabilities) separates implemented behavior from contracts and planned work.

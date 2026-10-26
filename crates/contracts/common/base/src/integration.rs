@@ -12,7 +12,7 @@ use crate::{BackendId, CapabilityId, Operation};
 /// First downstream integration protocol shipped by Axiolid.
 pub const INTEGRATION_API_VERSION: ApiVersion = ApiVersion::new(0, 4, 0);
 /// Minimum supported Rust compiler for Rust integration profiles.
-pub const MINIMUM_RUST_VERSION: &str = "1.88";
+pub const MINIMUM_RUST_VERSION: &str = "1.99";
 
 /// Semantic version of an integration API or ABI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

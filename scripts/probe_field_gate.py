@@ -82,7 +82,7 @@ PROBES = [
 ]
 
 TEST_CMD = [
-    "cargo", "+1.88.0", "test",
+    "cargo", "+1.99.1", "test",
     "-p", "axiolid-field", "-p", "axiolid-field-ops",
     "--all-features", "--quiet",
 ]

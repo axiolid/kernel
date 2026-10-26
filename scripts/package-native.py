@@ -62,7 +62,7 @@ def run(*args: str, env: dict[str, str] | None = None) -> str:
 
 
 def host_triple() -> str:
-    for line in run("rustc", "+1.88.0", "-vV").splitlines():
+    for line in run("rustc", "+1.99.1", "-vV").splitlines():
         if line.startswith("host: "):
             return line.removeprefix("host: ")
     raise RuntimeError("rustc did not report a host triple")
@@ -140,10 +140,10 @@ def git_metadata() -> tuple[str, int, bool]:
 def build(target: str, profile: str, target_dir: Path) -> Path:
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(target_dir)
-    run("cargo", "+1.88.0", "xtask", "ffi", "check", env=env)
+    run("cargo", "+1.99.1", "xtask", "ffi", "check", env=env)
     command = [
         "cargo",
-        "+1.88.0",
+        "+1.99.1",
         "build",
         "--package",
         "axiolid-capi",
@@ -230,7 +230,7 @@ def write_manifest(
         "profile": profile,
         "source_commit": commit,
         "source_dirty": dirty,
-        "rustc": run("rustc", "+1.88.0", "-vV"),
+        "rustc": run("rustc", "+1.99.1", "-vV"),
         "files": files,
     }
     (stage / "manifest.json").write_text(

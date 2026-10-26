@@ -21,7 +21,7 @@ axiolid_fetch(
 )
 ```
 
-The helper rejects anything other than a full hexadecimal commit. It builds `axiolid-capi` with Cargo and verifies that the checked-in header matches the Rust API. Rust **1.88.0** and CMake **3.24+** are required. A local `add_subdirectory(<checkout>/native)` path exists for repository development only; it is not the distribution pinning mechanism. The targets set only target-local include/link properties; they never mutate `CMAKE_C_FLAGS`, `CMAKE_CXX_FLAGS`, or inject `target-cpu=native`.
+The helper rejects anything other than a full hexadecimal commit. It builds `axiolid-capi` with Cargo and verifies that the checked-in header matches the Rust API. Rust **1.99.1** and CMake **3.24+** are required. A local `add_subdirectory(<checkout>/native)` path exists for repository development only; it is not the distribution pinning mechanism. The targets set only target-local include/link properties; they never mutate `CMAKE_C_FLAGS`, `CMAKE_CXX_FLAGS`, or inject `target-cpu=native`.
 
 When `native/` is the top-level project, it also supports a conventional install:
 

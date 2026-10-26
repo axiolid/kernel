@@ -42,7 +42,7 @@ class NativePackagingTests(unittest.TestCase):
             "source_dirty": False,
             "target": "x86_64-unknown-linux-gnu",
             "profile": "release",
-            "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)\nrest",
+            "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nrest",
             "files": {
                 name: {"sha256": verify.digest(payload), "size": len(payload)}
                 for name, payload in relative.items()

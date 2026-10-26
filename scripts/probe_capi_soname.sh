@@ -18,7 +18,7 @@ restore() { cp "$BACKUP" "$BUILD_RS"; rm -f "$BACKUP"; }
 trap restore EXIT
 
 echo "=== baseline: SONAME present, check passes ==="
-cargo +1.88.0 build --release -p axiolid-capi >/dev/null 2>&1
+cargo +1.99.1 build --release -p axiolid-capi >/dev/null 2>&1
 have="$(readelf -d "${target_dir}/release/libaxiolid_capi.so" | grep -c SONAME)"
 check "cdylib carries a SONAME" "$have" "1"
 
@@ -29,7 +29,7 @@ fn main() {
 }
 RS
 touch crates/facade/axiolid-capi/src/lib.rs
-cargo +1.88.0 build --release -p axiolid-capi >/dev/null 2>&1
+cargo +1.99.1 build --release -p axiolid-capi >/dev/null 2>&1
 have="$(readelf -d "${target_dir}/release/libaxiolid_capi.so" | grep -c SONAME)"
 check "mutated artifact really loses its SONAME" "$have" "0"
 
@@ -42,7 +42,7 @@ fi
 restore
 trap - EXIT
 touch crates/facade/axiolid-capi/src/lib.rs
-cargo +1.88.0 build --release -p axiolid-capi >/dev/null 2>&1
+cargo +1.99.1 build --release -p axiolid-capi >/dev/null 2>&1
 have="$(readelf -d "${target_dir}/release/libaxiolid_capi.so" | grep -c SONAME)"
 echo "=== restored ==="
 check "SONAME back after restore" "$have" "1"
