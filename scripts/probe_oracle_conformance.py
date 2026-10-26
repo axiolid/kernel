@@ -44,8 +44,8 @@ PROBES = [
     (
         "oracle-cavity-is-not-reversed",
         "crates/algorithms/reference/src/boolean.rs",
-        "    for triangle in indices.chunks_exact_mut(3) {\n        triangle.swap(0, 1);\n    }",
-        "    for _triangle in indices.chunks_exact_mut(3) {}",
+        "    for triangle in indices.as_chunks_mut::<3>().0 {\n        triangle.swap(0, 1);\n    }",
+        "    for _triangle in indices.as_chunks_mut::<3>().0 {}",
     ),
     (
         "oracle-self-difference-is-not-empty",

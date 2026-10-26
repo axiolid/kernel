@@ -76,7 +76,7 @@ PROBES = [
     (
         "occupancy-accepts-unbalanced-crossings",
         VALUE_SRC / "cell.rs",
-        "if self.surfaces.len() % 2 != 0 {\n            return Err(LayeredFieldError::UnbalancedCrossings);\n        }",
+        "if !self.surfaces.len().is_multiple_of(2) {\n            return Err(LayeredFieldError::UnbalancedCrossings);\n        }",
         "if false {\n            return Err(LayeredFieldError::UnbalancedCrossings);\n        }",
     ),
 ]

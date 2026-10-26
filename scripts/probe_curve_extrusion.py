@@ -70,8 +70,8 @@ PROBES = [
     (
         "de-boor-alpha-inverted",
         "crates/algorithms/parametric/evaluate/src/curve.rs",
-        "                points[j][k] = points[j - 1][k] * (1.0 - alpha) + points[j][k] * alpha;",
-        "                points[j][k] = points[j - 1][k] * alpha + points[j][k] * (1.0 - alpha);",
+        "            points[j] = core::array::from_fn(|k| prev[k] * (1.0 - alpha) + cur[k] * alpha);",
+        "            points[j] = core::array::from_fn(|k| prev[k] * alpha + cur[k] * (1.0 - alpha));",
     ),
     (
         "de-boor-skips-the-rational-divide",
