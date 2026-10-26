@@ -227,12 +227,12 @@ fn sample(
     let w = at.weights;
     match channel.blend {
         Blend::Linear => {
-            for ((a, b), c) in values[0]
-                .iter()
-                .zip(values[1])
-                .zip(values[2])
-                .take(channel.width)
-            {
+            // `AttributeChannel::get` returns exactly `width` values or
+            // `None`, so the zip below never truncates.
+            for value in values {
+                debug_assert_eq!(value.len(), channel.width);
+            }
+            for ((a, b), c) in values[0].iter().zip(values[1]).zip(values[2]) {
                 out.push(w[0] * a + w[1] * b + w[2] * c);
             }
         }

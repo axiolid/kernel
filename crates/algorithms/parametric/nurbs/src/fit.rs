@@ -161,16 +161,16 @@ fn solve(mut matrix: Vec<Vec<Scalar>>, mut rhs: Vec<[Scalar; 3]>) -> GeomResult<
         matrix.swap(column, pivot);
         rhs.swap(column, pivot);
 
+        let pivot_row = matrix[column].clone();
+        let pivot_rhs = rhs[column];
         for row in (column + 1)..n {
             let factor = matrix[row][column] / matrix[column][column];
             if factor == 0.0 {
                 continue;
             }
-            let pivot_row = matrix[column].clone();
             for (slot, pivot) in matrix[row].iter_mut().zip(&pivot_row).skip(column) {
                 *slot -= factor * pivot;
             }
-            let pivot_rhs = rhs[column];
             for (slot, pivot) in rhs[row].iter_mut().zip(pivot_rhs) {
                 *slot -= factor * pivot;
             }

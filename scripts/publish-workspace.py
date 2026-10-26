@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Publish Axiolid crates to crates.io in stable dependency order.
 
-`cargo publish --workspace` is unstable in Cargo 1.88. This script derives an
-acyclic order from every internal normal, build, and dev dependency, then
-publishes one package at a time. Existing immutable versions are skipped only
+`cargo publish --workspace` was unstable in Cargo 1.88 and is stable now, but
+this script still publishes one package at a time, to keep control of the
+order, the skip rule and the resume path. It derives an acyclic order from
+every internal normal, build, and dev dependency, then publishes one package
+at a time. Existing immutable versions are skipped only
 when their crates.io checksum matches the exact unpatched local package, so a
 workflow interrupted by registry propagation or rate limits can be rerun.
 

@@ -665,6 +665,11 @@ impl Patch {
     fn partial_intervals(&self, along_u: bool) -> GeomResult<[Interval; 3]> {
         let u_count = self.controls.len();
         let v_count = self.controls.first().map_or(0, Vec::len);
+        if u_count == 0 || v_count == 0 || self.controls.iter().any(|row| row.len() != v_count) {
+            return Err(GeomError::InvalidInput(
+                "Bezier patch control net must be nonempty and rectangular".to_owned(),
+            ));
+        }
         let degree = if along_u {
             u_count.checked_sub(1)
         } else {
