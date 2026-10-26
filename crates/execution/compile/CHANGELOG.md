@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- An edge without a p-curve that leaves its B-spline face's surface by more
+  than the linear tolerance is refused by name ("leaves its B-spline face's
+  surface"), where the certified search ran out of budget refining toward
+  the parameter resolution and reported `BudgetExceeded` (#320, ADR 0086
+  amendment). A sample whose strict search overruns its budget is retried at
+  the model tolerance and accepted when that pass proves it unique.
+
 ## [0.3.31] - 2026-10-20
 
 ### Changed

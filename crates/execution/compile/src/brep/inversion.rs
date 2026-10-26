@@ -14,7 +14,8 @@
 //!   against the linear tolerance. B-spline surfaces invert by the certified
 //!   global search ([`axiolid_nurbs::invert_surface_certified`], the
 //!   periodic form for a surface whose closed axes validate as periodic),
-//!   which refuses an off-surface point and parameters that are not unique.
+//!   which refuses an off-surface point as soon as it proves the separation
+//!   (#320) and parameters that are not unique.
 //! - A sample at a cone's apex or a sphere's pole, where every `u` names
 //!   the point, is refused by name, as is a sample within the linear
 //!   tolerance of it.
@@ -111,7 +112,12 @@ enum InverterKind {
 /// runs at a thousandth of it, refining until those ties separate; a point
 /// the strict pass finds off the surface but within the linear tolerance is
 /// searched again at that tolerance, `model`, and accepted only when that
-/// pass proves it unique.
+/// pass proves it unique. The certified search refuses a point as soon as
+/// it proves it off the surface, so a point far off never refines to the
+/// parameter resolution (#320). A point on the surface can still overrun the
+/// strict pass's budget (where four patches meet); `model` is then tried,
+/// and a strict overrun stands unless `model` accepts the point or proves
+/// it off the surface.
 #[derive(Clone, Copy)]
 struct SplineSearch {
     strict: CertifiedSurfaceProjectionOptions,
@@ -183,11 +189,17 @@ impl<'s> SurfaceInverter<'s> {
             }
             InverterKind::BSpline(search) | InverterKind::Periodic(_, search) => *search,
         };
-        let outcome = match run(search.strict)? {
-            Err(SurfaceInversionRefusal::OffSurface {
+        let outcome = match run(search.strict) {
+            Ok(Err(SurfaceInversionRefusal::OffSurface {
                 distance_lower_bound,
-            }) if distance_lower_bound <= self.tolerance.linear() => run(search.model)?,
-            outcome => outcome,
+            })) if distance_lower_bound <= self.tolerance.linear() => run(search.model)?,
+            Ok(outcome) => outcome,
+            Err(exhausted @ GeomError::BudgetExceeded { .. }) => match run(search.model) {
+                Ok(Ok(certificate)) => Ok(certificate),
+                Ok(Err(off @ SurfaceInversionRefusal::OffSurface { .. })) => Err(off),
+                _ => return Err(exhausted),
+            },
+            Err(error) => return Err(error),
         };
         let certificate = certified_parameters(outcome)?;
         self.polish(point, certificate)
@@ -880,5 +892,48 @@ mod tests {
             let on = axiolid_reference::surface::evaluate(&surface, uv.x, uv.y).unwrap();
             assert!((on - point).length() < 1e-12, "{u} {v}: {uv:?}");
         }
+    }
+
+    /// Where four Bezier patches meet the strict search can exhaust its
+    /// budget although the point is on the surface; the model-tolerance
+    /// search proves it unique, so the sample is accepted (#320).
+    #[test]
+    fn a_strict_budget_overrun_is_retried_at_the_model_tolerance() {
+        let net: Vec<Vec<Vec3>> = (0..5)
+            .map(|i| {
+                (0..5)
+                    .map(|j| {
+                        let (x, y) = (i as Scalar * 0.25, j as Scalar * 0.25);
+                        let lift = if (1..4).contains(&i) && (1..4).contains(&j) {
+                            0.12
+                        } else {
+                            0.0
+                        };
+                        Vec3::new(x, y, lift + 0.05 * x * y)
+                    })
+                    .collect()
+            })
+            .collect();
+        let bump = Surface::BSpline(BSplineSurface {
+            u_degree: 3,
+            v_degree: 3,
+            control_points: net,
+            u_knots: vec![0.0, 0.5, 1.0],
+            u_multiplicities: vec![4, 1, 4],
+            v_knots: vec![0.0, 0.5, 1.0],
+            v_multiplicities: vec![4, 1, 4],
+            weights: None,
+            u_closed: false,
+            v_closed: false,
+            knot_spec: axiolid_curve::KnotSpec::Unspecified,
+            self_intersect: None,
+        });
+        let inverter = SurfaceInverter::new(&bump, Tolerance::new(1e-4, 1e-9).unwrap()).unwrap();
+        let point = axiolid_reference::surface::evaluate(&bump, 0.5, 0.5).unwrap();
+        let uv = inverter
+            .invert(point)
+            .expect("the model pass proves the four-patch corner unique");
+        let on = axiolid_reference::surface::evaluate(&bump, uv.x, uv.y).unwrap();
+        assert!((on - point).length() < 1e-9, "{uv:?}");
     }
 }

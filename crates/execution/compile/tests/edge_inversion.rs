@@ -462,12 +462,10 @@ fn a_cylinder_patch_bounded_by_rational_arcs_is_within_its_reported_bound() {
     assert_bounded("cylinder patch", &mesh, &samples, &report, 4.0);
 }
 
-/// The bicubic bump of the deviation report, its four boundary edges given
-/// as the 3D B-spline curves they are (the net's border rows), with no
-/// p-curves: each sample is inverted by the certified global search.
-#[test]
-fn a_bspline_face_with_only_3d_edges_compiles_within_its_reported_bound() {
-    let net: Vec<Vec<Point3>> = (0..5)
+/// The control net of the bicubic bump: a 5x5 net whose interior 3x3 block
+/// is lifted, four Bezier patches meeting at its centre.
+fn bump_net() -> Vec<Vec<Point3>> {
+    (0..5)
         .map(|i| {
             (0..5)
                 .map(|j| {
@@ -481,11 +479,14 @@ fn a_bspline_face_with_only_3d_edges_compiles_within_its_reported_bound() {
                 })
                 .collect()
         })
-        .collect();
-    let surface = Surface::BSpline(BSplineSurface {
+        .collect()
+}
+
+fn bump_surface(net: &[Vec<Point3>]) -> Surface {
+    Surface::BSpline(BSplineSurface {
         u_degree: 3,
         v_degree: 3,
-        control_points: net.clone(),
+        control_points: net.to_vec(),
         u_knots: vec![0.0, 0.5, 1.0],
         u_multiplicities: vec![4, 1, 4],
         v_knots: vec![0.0, 0.5, 1.0],
@@ -495,24 +496,34 @@ fn a_bspline_face_with_only_3d_edges_compiles_within_its_reported_bound() {
         v_closed: false,
         knot_spec: KnotSpec::Unspecified,
         self_intersect: None,
-    });
-    let border = |points: Vec<Point3>| {
-        Curve3::BSpline(BSplineCurve3 {
-            degree: 3,
-            control_points: points,
-            knots: vec![0.0, 0.5, 1.0],
-            multiplicities: vec![4, 1, 4],
-            weights: None,
-            closed: false,
-            self_intersect: None,
-            knot_spec: KnotSpec::Unspecified,
-        })
-    };
+    })
+}
+
+fn bump_border(points: Vec<Point3>) -> Curve3 {
+    Curve3::BSpline(BSplineCurve3 {
+        degree: 3,
+        control_points: points,
+        knots: vec![0.0, 0.5, 1.0],
+        multiplicities: vec![4, 1, 4],
+        weights: None,
+        closed: false,
+        self_intersect: None,
+        knot_spec: KnotSpec::Unspecified,
+    })
+}
+
+/// The bicubic bump of the deviation report, its four boundary edges given
+/// as the 3D B-spline curves they are (the net's border rows), with no
+/// p-curves: each sample is inverted by the certified global search.
+#[test]
+fn a_bspline_face_with_only_3d_edges_compiles_within_its_reported_bound() {
+    let net = bump_net();
+    let surface = bump_surface(&net);
     // Along u at v = 0 and v = 1, along v at u = 0 and u = 1.
-    let v0 = border((0..5).map(|i| net[i][0]).collect());
-    let v1 = border((0..5).map(|i| net[i][4]).collect());
-    let u0 = border(net[0].clone());
-    let u1 = border(net[4].clone());
+    let v0 = bump_border((0..5).map(|i| net[i][0]).collect());
+    let v1 = bump_border((0..5).map(|i| net[i][4]).collect());
+    let u0 = bump_border(net[0].clone());
+    let u1 = bump_border(net[4].clone());
 
     let mut face = OneFace::new();
     let c00 = face.vertex(net[0][0]);
@@ -535,6 +546,47 @@ fn a_bspline_face_with_only_3d_edges_compiles_within_its_reported_bound() {
         samples.extend(curve_samples(curve, 20_000));
     }
     assert_bounded("B-spline face", &mesh, &samples, &report, 5.0);
+}
+
+/// A border raised off the bump by far more than the tolerance is refused
+/// by name: the certified search proves the separation, where it used to
+/// run out of budget refining toward the parameter resolution (#320).
+#[test]
+fn an_edge_off_its_bspline_face_is_refused_by_name() {
+    for lift in [1e-3, 0.05] {
+        let net = bump_net();
+        let surface = bump_surface(&net);
+        let mut raised: Vec<Point3> = (0..5).map(|i| net[i][0]).collect();
+        for point in &mut raised[1..=3] {
+            point.z += lift;
+        }
+        let v0 = bump_border(raised);
+        let v1 = bump_border((0..5).map(|i| net[i][4]).collect());
+        let u0 = bump_border(net[0].clone());
+        let u1 = bump_border(net[4].clone());
+
+        let mut face = OneFace::new();
+        let c00 = face.vertex(net[0][0]);
+        let c10 = face.vertex(net[4][0]);
+        let c11 = face.vertex(net[4][4]);
+        let c01 = face.vertex(net[0][4]);
+        let e0 = face.edge(c00, c10, Some(v0));
+        let e1 = face.edge(c10, c11, Some(u1));
+        let e2 = face.edge(c01, c11, Some(v1));
+        let e3 = face.edge(c00, c01, Some(u0));
+        face.use_edge(e0, Orientation::Forward);
+        face.use_edge(e1, Orientation::Forward);
+        face.use_edge(e2, Orientation::Reversed);
+        face.use_edge(e3, Orientation::Reversed);
+        let error = face
+            .compile(&surface, &options(1e-4))
+            .expect_err("an edge off its B-spline face is refused");
+        assert!(
+            matches!(&error, GeomError::Degenerate(reason)
+                if reason.contains("leaves its B-spline face's surface")),
+            "lift {lift}: got {error:?}"
+        );
+    }
 }
 
 /// A whole cone up to its apex, bounded by its base circle and one ruling

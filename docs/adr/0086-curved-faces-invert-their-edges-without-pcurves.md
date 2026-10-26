@@ -57,8 +57,13 @@ no pcurve, by inverting the 3D samples every face sharing the edge uses
   (the periodic form when the closed axes validate as periodic), at a
   thousandth of the linear tolerance first and at the tolerance itself for
   a point the first pass finds just off the surface; ambiguous,
-  off-surface and unresolved samples are refused. Gauss-Newton sharpens
-  the parameters inside the proven enclosure.
+  off-surface and unresolved samples are refused. Amended by #320: each
+  pass refuses a point as soon as its certified lower bound exceeds that
+  pass's tolerance, without refining to the parameter resolution; and a
+  point whose first pass exhausts the work budget is searched again at the
+  tolerance itself, accepted when that pass proves it unique and refused
+  off-surface when it proves the separation. Gauss-Newton sharpens the
+  parameters inside the proven enclosure.
 - The reported deviation adds per span `d + e + M W^2 / 2`: the edge's
   chord bound, the surface image of the parameter chord, and the lens
   between the edge's preimage and that chord, whose width `W` is bounded
@@ -101,8 +106,10 @@ and its dependencies, so no `expected_internal` list changes.
 
 - `axiolid-mesh-compile` depends on `axiolid-nurbs` (and through it on
   `axiolid-exact` and `axiolid-numeric`).
-- A B-spline sample where four Bézier patches meet exhausts the certified
-  search's work budget and is refused (`BudgetExceeded`).
+- A B-spline sample where four Bézier patches meet may exhaust the strict
+  search's work budget. It compiles where the model-tolerance pass proves
+  uniqueness, and is refused (`BudgetExceeded`) otherwise (amended by
+  #320).
 
 **Follow-ups / risks to watch**
 

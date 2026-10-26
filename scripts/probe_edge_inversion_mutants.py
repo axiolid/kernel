@@ -41,6 +41,14 @@ added eleven: 33 / 34 on the first run, the seam cut surviving (every
 fixture's seam span is matched by an equal one elsewhere); a unit test on
 a span across a square's seam corner kills it: 34 / 34.
 
+The early off-surface exit and the overrun retry (#320) added four mutants: 38 / 38 killed.
+
+Not listed for #320, as equivalent: the model pass, run after a strict
+overrun, returning an off-surface refusal that is passed on as the
+refusal. Dropping the arm turns it into the strict `BudgetExceeded`, and
+only a point the strict pass cannot decide yet the model pass proves off
+the surface distinguishes the two, which no fixture builds.
+
 Not listed for the trims, as equivalent:
 - a circle's or ellipse's span wrapped at its turn: the families evaluate
   periodically, so wrapping names the same points.
@@ -59,6 +67,10 @@ I = "crates/execution/compile/src/brep/inversion.rs"
 B = "crates/execution/compile/src/brep.rs"
 E = "crates/execution/compile/src/brep/edges.rs"
 T = "crates/execution/compile/src/brep/trim.rs"
+N = "crates/algorithms/parametric/nurbs/src/certified_surface_projection.rs"
+NURBS_INVERSION = ["-p", "axiolid-nurbs", "--test", "certified_surface_inversion"]
+NURBS_PROJECTION = ["-p", "axiolid-nurbs", "--test", "certified_surface_projection"]
+EDGE_INVERSION = ["-p", "axiolid-mesh-compile", "--test", "edge_inversion"]
 TARGETS = [
     ["-p", "axiolid-mesh-compile", "--test", "edge_inversion"],
     ["-p", "axiolid-mesh-compile", "--lib", "brep::inversion"],
@@ -84,8 +96,22 @@ MUTANTS = [
      "period.is_none_or(|p| d.abs() < 0.25 * p)",
      "period.is_none_or(|p| d.abs() < 0.5 * p)"),
     ("B-spline inverted at the model tolerance only", I,
-     "        let outcome = match run(search.strict)? {",
-     "        let outcome = match run(search.model)? {"),
+     "        let outcome = match run(search.strict) {",
+     "        let outcome = match run(search.model) {"),
+    ("a strict budget overrun not accepted from the model pass", I,
+     "                Ok(Ok(certificate)) => Ok(certificate),\n",
+     ""),
+    # The early off-surface exit of the certified surface search (#320).
+    ("no separation exit", N,
+     [("lower > threshold", "lower > threshold && false")],
+     [NURBS_INVERSION, EDGE_INVERSION]),
+    ("separation exit taken on the surface", N,
+     [("lower > threshold", "lower >= 0.0 * threshold")],
+     [NURBS_INVERSION]),
+    ("projection given a separation threshold", N,
+     "        surface, target, options, false, false, None,\n",
+     "        surface, target, options, false, false, Some(options.distance_tolerance().linear()),\n",
+     [NURBS_PROJECTION]),
     ("certified B-spline parameters not polished", I,
      "        for _ in 0..POLISH_STEPS {",
      "        for _ in 0..0 {"),
