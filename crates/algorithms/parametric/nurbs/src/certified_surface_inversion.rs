@@ -17,6 +17,8 @@
 //! Inversion also asserts the point lies ON the surface. That is a separate
 //! obligation from uniqueness, checked against the certified distance LOWER
 //! bound so a miss cannot be absorbed by a loose representative evaluation.
+//! A point is refused off-surface as soon as that separation is proven,
+//! without refining to the parameter resolution (#320).
 
 use axiolid_contracts::GeomResult;
 use axiolid_core::{Point3, Scalar};
@@ -27,7 +29,7 @@ use crate::certified_projection::{
     SurfaceParameterBox, SurfaceProjectionCertificate3, SurfaceProjectionUnresolvedReason,
 };
 use crate::certified_surface_projection::{
-    project_periodic_surface_certified, project_surface_certified,
+    search_periodic_surface_certified, search_surface_certified, SurfaceSearch,
 };
 use crate::periodic_surface::PeriodicBSplineSurface;
 
@@ -90,7 +92,15 @@ pub fn invert_surface_certified(
     point: Point3,
     options: CertifiedSurfaceProjectionOptions,
 ) -> GeomResult<Result<SurfaceInversionCertificate3, SurfaceInversionRefusal>> {
-    decide(project_surface_certified(surface, point, options)?, options)
+    decide(
+        search_surface_certified(
+            surface,
+            point,
+            options,
+            options.distance_tolerance().linear(),
+        )?,
+        options,
+    )
 }
 
 /// Globally invert a point against one canonical period of a cyclic surface.
@@ -103,20 +113,35 @@ pub fn invert_periodic_surface_certified(
     options: CertifiedSurfaceProjectionOptions,
 ) -> GeomResult<Result<SurfaceInversionCertificate3, SurfaceInversionRefusal>> {
     decide(
-        project_periodic_surface_certified(surface, point, options)?,
+        search_periodic_surface_certified(
+            surface,
+            point,
+            options,
+            options.distance_tolerance().linear(),
+        )?,
         options,
     )
 }
 
-/// Turn a global projection certificate into an inversion verdict.
+/// Turn a certified surface search into an inversion verdict.
 ///
-/// Order matters. Uniqueness is checked BEFORE the on-surface residual: a
-/// point at a pole is ambiguous whether or not it lies on the surface, and
-/// reporting it as merely "off surface" would hide the structural defect.
+/// Order matters. The on-surface check comes BEFORE uniqueness: a plainly
+/// off-surface point must be named as such, not mislabelled ambiguous
+/// because the search stopped at its distance gap with a wide cover.
 fn decide(
-    outcome: CertifiedSurfaceProjection3,
+    search: SurfaceSearch,
     options: CertifiedSurfaceProjectionOptions,
 ) -> GeomResult<Result<SurfaceInversionCertificate3, SurfaceInversionRefusal>> {
+    let outcome = match search {
+        SurfaceSearch::Finished(outcome) => outcome,
+        SurfaceSearch::Separated {
+            distance_lower_bound,
+        } => {
+            return Ok(Err(SurfaceInversionRefusal::OffSurface {
+                distance_lower_bound,
+            }))
+        }
+    };
     let certificate = match outcome {
         CertifiedSurfaceProjection3::Complete(certificate) => certificate,
         // An unresolved projection has sound bounds but has NOT proven the

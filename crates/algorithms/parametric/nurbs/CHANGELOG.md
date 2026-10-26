@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `invert_surface_certified` and `invert_periodic_surface_certified` refuse
+  an off-surface point as `OffSurface` once the certified lower bound
+  exceeds the tolerance, where they returned `BudgetExceeded` from refining
+  the retained boxes down to the parameter resolution (#320). Projection is
+  unchanged.
+
 ## [0.3.6] - 2026-10-10
 
 ### Added

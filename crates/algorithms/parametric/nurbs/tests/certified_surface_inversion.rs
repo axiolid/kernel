@@ -4,8 +4,9 @@
 //! family collapsing to one point), seams, and near-degenerate
 //! parameterisations.
 
-use axiolid_core::{Point3, Tolerance};
+use axiolid_core::{Point3, Scalar, Tolerance};
 use axiolid_curve::KnotSpec;
+use axiolid_evaluate::surface::bspline_jet;
 use axiolid_nurbs::{
     invert_periodic_surface_certified, invert_surface_certified, CertifiedSurfaceProjectionOptions,
     PeriodicBSplineSurface, SurfaceInversionRefusal,
@@ -167,6 +168,87 @@ fn a_pole_is_reported_ambiguous_rather_than_resolved_arbitrarily() {
     };
     // The ambiguity is handed back for inspection, not swallowed.
     assert!(candidates.len() > 1, "got {} candidates", candidates.len());
+}
+
+/// The bicubic bump of the edge-inversion report: a 5x5 net whose interior
+/// 3x3 block is lifted, with four Bezier patches meeting at (0.5, 0.5).
+fn bump() -> BSplineSurface {
+    let control_points = (0..5)
+        .map(|i| {
+            (0..5)
+                .map(|j| {
+                    let (x, y) = (i as Scalar * 0.25, j as Scalar * 0.25);
+                    let lift = if (1..4).contains(&i) && (1..4).contains(&j) {
+                        0.12
+                    } else {
+                        0.0
+                    };
+                    Point3::new(x, y, lift + 0.05 * x * y)
+                })
+                .collect()
+        })
+        .collect();
+    BSplineSurface {
+        u_degree: 3,
+        v_degree: 3,
+        control_points,
+        u_knots: vec![0.0, 0.5, 1.0],
+        u_multiplicities: vec![4, 1, 4],
+        v_knots: vec![0.0, 0.5, 1.0],
+        v_multiplicities: vec![4, 1, 4],
+        weights: None,
+        u_closed: false,
+        v_closed: false,
+        knot_spec: KnotSpec::Unspecified,
+        self_intersect: None,
+    }
+}
+
+/// A point off a curved patch used to exhaust the budget refining every
+/// retained box down to the parameter resolution, and so surfaced
+/// `BudgetExceeded` instead of the separation it had already proven (#320).
+#[test]
+fn a_point_far_off_a_curved_patch_is_refused_off_surface_not_over_budget() {
+    let surface = bump();
+    let jet = bspline_jet(&surface, 0.3, 0.7).expect("an interior jet");
+    let normal = jet.du.cross(jet.dv).normalize();
+    for offset in [1e-3, 0.05, -0.05] {
+        let target = jet.point + normal * offset;
+        let refusal = invert_surface_certified(&surface, target, options())
+            .expect("an off-surface point is a verdict, not an error")
+            .expect_err("a point off the surface is not invertible");
+        let SurfaceInversionRefusal::OffSurface {
+            distance_lower_bound,
+        } = refusal
+        else {
+            panic!("offset {offset}: expected OffSurface, got {refusal:?}");
+        };
+        assert!(
+            distance_lower_bound > 1e-8 && distance_lower_bound <= offset.abs() + 1e-12,
+            "offset {offset}: lower bound {distance_lower_bound}"
+        );
+    }
+}
+
+#[test]
+fn a_point_off_a_periodic_surface_is_refused_off_surface_not_over_budget() {
+    let surface = periodic_ring();
+    // The ring's chord midpoint lies 1/sqrt(2) from the axis; (0.55, 0.55)
+    // is 0.1/sqrt(2) outside it.
+    let target = Point3::new(0.55, 0.55, 0.5);
+    let refusal = invert_periodic_surface_certified(&surface, target, options())
+        .expect("an off-surface point is a verdict, not an error")
+        .expect_err("a point off the surface is not invertible");
+    let SurfaceInversionRefusal::OffSurface {
+        distance_lower_bound,
+    } = refusal
+    else {
+        panic!("expected OffSurface, got {refusal:?}");
+    };
+    assert!(
+        distance_lower_bound > 1e-8 && distance_lower_bound <= 0.1 / 2f64.sqrt() + 1e-12,
+        "lower bound {distance_lower_bound}"
+    );
 }
 
 #[test]

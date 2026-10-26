@@ -22,6 +22,30 @@ use crate::{
 
 const DIMENSIONS: usize = 3;
 
+/// How a certified surface search ended.
+#[derive(Debug, Clone)]
+pub(crate) enum SurfaceSearch {
+    /// The search ran to its normal completion or sound stop.
+    Finished(CertifiedSurfaceProjection3),
+    /// The certified distance lower bound already exceeded the caller's
+    /// separation threshold, so the search stopped without refining to the
+    /// parameter resolution (#320).
+    Separated {
+        /// Certified lower bound on the distance to the whole surface.
+        distance_lower_bound: Scalar,
+    },
+}
+
+/// Unwrap a search that was given no separation threshold.
+fn finished(search: SurfaceSearch) -> GeomResult<CertifiedSurfaceProjection3> {
+    match search {
+        SurfaceSearch::Finished(projection) => Ok(projection),
+        SurfaceSearch::Separated { .. } => Err(GeomError::Degenerate(
+            "surface projection stopped at a separation threshold it was not given".to_owned(),
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Pending {
     patch_index: usize,
@@ -61,7 +85,21 @@ pub fn project_surface_certified(
     options: CertifiedSurfaceProjectionOptions,
 ) -> GeomResult<CertifiedSurfaceProjection3> {
     validate_query(surface, target)?;
-    project_surface_certified_with_modes(surface, target, options, false, false)
+    finished(project_surface_certified_with_modes(
+        surface, target, options, false, false, None,
+    )?)
+}
+
+/// [`project_surface_certified`] that stops as soon as the certified distance
+/// lower bound exceeds `separation` (#320).
+pub(crate) fn search_surface_certified(
+    surface: &BSplineSurface,
+    target: Point3,
+    options: CertifiedSurfaceProjectionOptions,
+    separation: Scalar,
+) -> GeomResult<SurfaceSearch> {
+    validate_query(surface, target)?;
+    project_surface_certified_with_modes(surface, target, options, false, false, Some(separation))
 }
 
 /// Exhaustively bound the global point-to-surface minimum over one canonical
@@ -77,12 +115,32 @@ pub fn project_periodic_surface_certified(
     options: CertifiedSurfaceProjectionOptions,
 ) -> GeomResult<CertifiedSurfaceProjection3> {
     validate_target(target)?;
+    finished(project_surface_certified_with_modes(
+        surface.as_bspline_surface(),
+        target,
+        options,
+        surface.u_is_periodic(),
+        surface.v_is_periodic(),
+        None,
+    )?)
+}
+
+/// [`project_periodic_surface_certified`] that stops as soon as the certified
+/// distance lower bound exceeds `separation` (#320).
+pub(crate) fn search_periodic_surface_certified(
+    surface: &PeriodicBSplineSurface,
+    target: Point3,
+    options: CertifiedSurfaceProjectionOptions,
+    separation: Scalar,
+) -> GeomResult<SurfaceSearch> {
+    validate_target(target)?;
     project_surface_certified_with_modes(
         surface.as_bspline_surface(),
         target,
         options,
         surface.u_is_periodic(),
         surface.v_is_periodic(),
+        Some(separation),
     )
 }
 
@@ -92,7 +150,8 @@ fn project_surface_certified_with_modes(
     options: CertifiedSurfaceProjectionOptions,
     u_periodic: bool,
     v_periodic: bool,
-) -> GeomResult<CertifiedSurfaceProjection3> {
+    separation: Option<Scalar>,
+) -> GeomResult<SurfaceSearch> {
     let target_array = target.to_array();
     let mut budget = RefinementBudget::new(options.max_work(), "certified surface projection");
     let patches = if u_periodic || v_periodic {
@@ -148,6 +207,14 @@ fn project_surface_certified_with_modes(
         }
 
         let lower = global_lower(&pending)?;
+        // Sound: a box is dropped only when its lower bound exceeds an
+        // attained upper bound, so every global minimiser lies in a retained
+        // box and the minimum over `pending` is at most the true distance.
+        if separation.is_some_and(|threshold| lower > threshold) {
+            return Ok(SurfaceSearch::Separated {
+                distance_lower_bound: lower,
+            });
+        }
         let parameter_ready = pending.iter().try_fold(true, |ready, record| {
             Ok::<_, GeomError>(
                 ready
@@ -158,12 +225,14 @@ fn project_surface_certified_with_modes(
         let gap = certified_gap(candidate.upper, lower)?;
         if gap <= options.distance_tolerance().linear() && parameter_ready {
             let boxes = take_sorted_boxes(pending)?;
-            return Ok(CertifiedSurfaceProjection3::Complete(certificate(
-                candidate,
-                lower,
-                boxes,
-                visited_nodes,
-            )));
+            return Ok(SurfaceSearch::Finished(
+                CertifiedSurfaceProjection3::Complete(certificate(
+                    candidate,
+                    lower,
+                    boxes,
+                    visited_nodes,
+                )),
+            ));
         }
 
         let selected = select_refinable(
@@ -181,10 +250,12 @@ fn project_surface_certified_with_modes(
                 SurfaceProjectionUnresolvedReason::FloatingPointNoProgress
             };
             let boxes = take_sorted_boxes(pending)?;
-            return Ok(CertifiedSurfaceProjection3::Unresolved {
-                certificate: certificate(candidate, lower, boxes, visited_nodes),
-                reason,
-            });
+            return Ok(SurfaceSearch::Finished(
+                CertifiedSurfaceProjection3::Unresolved {
+                    certificate: certificate(candidate, lower, boxes, visited_nodes),
+                    reason,
+                },
+            ));
         };
 
         let record = pending.swap_remove(selected_index);
