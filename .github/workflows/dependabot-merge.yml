@@ -1,0 +1,64 @@
+# Merges a Dependabot pull request once every check on it has passed.
+# Patch and minor updates only: major updates, a move of the pinned Rust
+# version and branches someone else has pushed to wait for a person.
+#
+# Runs after each workflow that checks pull requests rather than on the pull
+# request itself, where Dependabot's token is read-only. The merge uses
+# GITHUB_TOKEN, so it starts no push workflows on the default branch.
+name: Dependabot merge
+
+on:
+  workflow_run:
+    workflows: ["Deploy documentation", "Native integration", "Performance", "Roadmap freshness"]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-merge-${{ github.event.workflow_run.head_branch }}
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Merge if every check passed
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --head "$BRANCH" --state open --json number,author \
+            --jq '[.[] | select(.author.login == "app/dependabot")][0].number // empty')
+          if [ -z "$pr" ]; then echo "No open Dependabot pull request for $BRANCH."; exit 0; fi
+          view=$(gh pr view "$pr" --json headRefOid,commits)
+          if [ "$(jq -r .headRefOid <<<"$view")" != "$HEAD_SHA" ]; then
+            echo "#$pr has moved on from $HEAD_SHA; its own checks decide."; exit 0
+          fi
+          if [ "$(jq '[.commits[].authors[].login | select(. != "dependabot[bot]")] | length' <<<"$view")" != 0 ]; then
+            echo "#$pr has commits from someone other than Dependabot; leaving it for review."; exit 0
+          fi
+          body=$(jq -r '[.commits[].messageBody] | join("\n")' <<<"$view")
+          if grep -q 'update-type: version-update:semver-major' <<<"$body"; then
+            echo "#$pr is a major update; leaving it for review."; exit 0
+          fi
+          # A version-branch pin (`@<sha> # 1.99.1`) carries its Rust version, so
+          # moving it changes the compiler; all repositories bump that together.
+          if gh pr diff "$pr" | grep -qE '^-.*dtolnay/rust-toolchain@[0-9a-f]+ +# +[0-9]+\.[0-9]+'; then
+            echo "#$pr moves a pinned Rust version; leaving it for review."; exit 0
+          fi
+          if ! gh pr checks "$pr" >/dev/null; then
+            echo "#$pr still has pending or failing checks."; exit 0
+          fi
+          gh pr merge "$pr" --squash --match-head-commit "$HEAD_SHA" \
+            || echo "::warning::#$pr passed its checks but did not merge (conflict or branch rules)."
