@@ -347,7 +347,9 @@ fn the_adjacency_surface_is_stable_across_representations() {
         assert_eq!(
             adjacency.face_count(),
             mesh.indices
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .filter(|c| c[0] != c[1] && c[1] != c[2] && c[2] != c[0])
                 .count(),
             "{label}: face_count"

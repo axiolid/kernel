@@ -257,7 +257,9 @@ fn an_open_section_run_across_a_corner_is_mitred() {
     // Two trapezoids of the 2 m deck: 5 m of centreline each.
     let area: Scalar = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             0.5 * (b - a).cross(c - a).length()

@@ -160,7 +160,9 @@ fn surface_aware_refinement_places_vertices_on_the_real_cylinder() {
 /// precisely what refinement removes.
 fn max_surface_error(mesh: &TriMesh, radius: Scalar) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let c = (mesh.positions[t[0] as usize]
                 + mesh.positions[t[1] as usize]
@@ -247,7 +249,9 @@ fn edge_length_refinement_reaches_its_target() {
 
     let longest = refined
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .flat_map(|t| {
             [(0, 1), (1, 2), (2, 0)].map(|(a, b)| {
                 (refined.positions[t[b] as usize] - refined.positions[t[a] as usize]).length()

@@ -115,7 +115,9 @@ fn icosphere(levels: u32) -> TriMesh {
 
 fn triangles(mesh: &TriMesh) -> Vec<[Point3; 3]> {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| {
             [
                 mesh.positions[c[0] as usize],

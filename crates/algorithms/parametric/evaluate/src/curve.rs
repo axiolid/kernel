@@ -645,9 +645,8 @@ pub(crate) fn de_boor_recurrence<const N: usize>(
             } else {
                 0.0
             };
-            for k in 0..N {
-                points[j][k] = points[j - 1][k] * (1.0 - alpha) + points[j][k] * alpha;
-            }
+            let (prev, cur) = (points[j - 1], points[j]);
+            points[j] = core::array::from_fn(|k| prev[k] * (1.0 - alpha) + cur[k] * alpha);
             weights[j] = weights[j - 1] * (1.0 - alpha) + weights[j] * alpha;
         }
     }
@@ -957,9 +956,8 @@ pub(crate) fn eval_homogeneous<const N: usize>(
             } else {
                 0.0
             };
-            for k in 0..N {
-                work[j][k] = work[j - 1][k] * (1.0 - alpha) + work[j][k] * alpha;
-            }
+            let (prev, cur) = (work[j - 1], work[j]);
+            work[j] = core::array::from_fn(|k| prev[k] * (1.0 - alpha) + cur[k] * alpha);
             weights[j] = weights[j - 1] * (1.0 - alpha) + weights[j] * alpha;
         }
     }

@@ -189,7 +189,7 @@ impl EdgeAdjacency {
         let mut degenerate_triangles = 0;
         let mut face_count = 0;
 
-        for (triangle, chunk) in mesh.indices.chunks_exact(3).enumerate() {
+        for (triangle, chunk) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
             let (a, b, c) = (chunk[0], chunk[1], chunk[2]);
             if a == b || b == c || c == a {
                 degenerate_triangles += 1;

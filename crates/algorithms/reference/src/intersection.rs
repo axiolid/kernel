@@ -384,7 +384,7 @@ pub fn intersection_segments(subject: &TriMesh, tool: &TriMesh) -> GeomResult<In
             // Ordering the nodes ALONG the intersection line and taking the
             // middle two yields exactly the shared interval: the outer two
             // are each outside the other triangle.
-            nodes.sort_by(|left, right| left.0.cmp(&right.0));
+            nodes.sort_by_key(|left| left.0);
             nodes.dedup_by(|left, right| left.0 == right.0);
             if nodes.len() < 2 {
                 // A single point of contact contributes no segment.
@@ -562,10 +562,7 @@ fn walk(
     let mut current = start;
     let mut previous = None;
 
-    loop {
-        let Some(neighbours) = adjacency.get(&current) else {
-            break;
-        };
+    while let Some(neighbours) = adjacency.get(&current) {
         // Step to the neighbour we did not arrive from. On a cycle both are
         // unvisited at the first step, so the choice of direction is
         // arbitrary but consistent -- `adjacency` is sorted.

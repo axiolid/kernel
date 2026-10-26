@@ -48,7 +48,7 @@ fn assert_is_the_spanned_cube(mesh: &TriMesh, k: usize, pitch: f64, how: &str) {
     // skip the collinear slivers the triangulator leaves on subdivided
     // faces and report their edges as open, which is not what this checks.
     let mut directed: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *directed.entry((a, b)).or_default() += 1;
         }

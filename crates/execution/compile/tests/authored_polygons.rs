@@ -49,7 +49,9 @@ fn p(x: f64, y: f64, z: f64) -> Point3 {
 /// Per-triangle unnormalised normals, three indices at a time.
 fn normals(mesh: &TriMesh) -> Vec<Vec3> {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             (b - a).cross(c - a)
@@ -192,7 +194,7 @@ fn a_face_with_a_hole_covers_only_the_ring() {
         close(area(&mesh), 12.0);
         all_face(&mesh, Vec3::Z);
         // No triangle covers the window: its centroid is never inside it.
-        for t in mesh.indices.chunks_exact(3) {
+        for t in mesh.indices.as_chunks::<3>().0 {
             let c = t
                 .iter()
                 .fold(Vec3::ZERO, |s, &i| s + mesh.positions[i as usize])
@@ -236,7 +238,9 @@ fn a_cube_of_quads_is_a_closed_solid_with_unit_volume() {
     assert_eq!(mesh.indices.len(), 36);
     let volume: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             a.dot(b.cross(c))
@@ -251,13 +255,13 @@ fn a_cube_of_quads_is_a_closed_solid_with_unit_volume() {
 fn is_closed_two_manifold(mesh: &TriMesh) -> bool {
     use std::collections::HashMap;
     let mut uses: HashMap<(u32, u32), i32> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *uses.entry((a.min(b), a.max(b))).or_default() += if a < b { 1 } else { -1 };
         }
     }
     let mut count: HashMap<(u32, u32), usize> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *count.entry((a.min(b), a.max(b))).or_default() += 1;
         }
@@ -299,7 +303,9 @@ fn a_corner_on_a_straight_run_stays_shared_with_its_neighbour() {
     assert!(is_closed_two_manifold(&mesh), "no T-junction crack");
     let volume: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             a.dot(b.cross(c))
@@ -473,7 +479,9 @@ fn collinear_notch_and_window_heads_close_the_real_lining() {
     let want = ((x1 - x0) * (z1 - z0) - notch - window) * thickness;
     let volume: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             a.dot(b.cross(c))
@@ -584,7 +592,9 @@ fn corner_slab_about_fit_plane(corners: &[Point3]) -> f64 {
 /// Distance to the nearest triangle of the cube's top face (corners 4..8).
 fn distance_to_top(point: Point3, mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .filter(|t| t.iter().all(|&i| (4..8).contains(&i)))
         .map(|t| {
             let tri = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
@@ -618,7 +628,9 @@ fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp(
     // within 5 cm of z = 1 over the unit square, so the volume is 1 to that.
     let volume: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             a.dot(b.cross(c))
@@ -662,7 +674,9 @@ fn a_box_with_a_face_five_centimetres_out_of_plane_is_tessellated_with_its_warp(
     assert!(worst >= 0.045, "{worst}");
     for t in mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .filter(|t| t.iter().all(|&i| (4..8).contains(&i)))
     {
         for corner in t {

@@ -50,7 +50,7 @@ pub(crate) fn six_signed_volume(positions: &[Point3], indices: &[u32]) -> f64 {
         Vec3::new(p.x - c[0], p.y - c[1], p.z - c[2])
     };
     let mut total = 0.0;
-    for corner in indices.chunks_exact(3) {
+    for corner in indices.as_chunks::<3>().0 {
         let a = shifted(corner[0]);
         let b = shifted(corner[1]);
         let c = shifted(corner[2]);

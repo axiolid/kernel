@@ -33,7 +33,7 @@ fn cuboid(min: Point3, max: Point3) -> TriMesh {
 /// number rather than a plausible one.
 fn volume(mesh: &TriMesh) -> f64 {
     let mut total = 0.0;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[triangle[0] as usize];
         let b = mesh.positions[triangle[1] as usize];
         let c = mesh.positions[triangle[2] as usize];
@@ -126,7 +126,7 @@ fn the_result_is_a_closed_surface() {
     let result = exact_boolean(&subject, &tool, BooleanOperator::Difference).expect("supported");
 
     let mut edge_use: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for triangle in result.indices.chunks_exact(3) {
+    for triangle in result.indices.as_chunks::<3>().0 {
         for i in 0..3 {
             let (u, v) = (triangle[i], triangle[(i + 1) % 3]);
             *edge_use.entry((u.min(v), u.max(v))).or_insert(0) += 1;
@@ -154,7 +154,7 @@ fn the_through_cut_result_is_also_closed() {
     let result = exact_boolean(&box_solid, &slab, BooleanOperator::Difference).expect("supported");
 
     let mut edge_use: BTreeMap<(u32, u32), usize> = BTreeMap::new();
-    for triangle in result.indices.chunks_exact(3) {
+    for triangle in result.indices.as_chunks::<3>().0 {
         for i in 0..3 {
             let (u, v) = (triangle[i], triangle[(i + 1) % 3]);
             *edge_use.entry((u.min(v), u.max(v))).or_insert(0) += 1;

@@ -368,7 +368,7 @@ fn count_interpolated(
 ) -> usize {
     let _ = points;
     let mut count = 0;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let centroid = (mesh.positions[triangle[0] as usize]
             + mesh.positions[triangle[1] as usize]
             + mesh.positions[triangle[2] as usize])
@@ -397,7 +397,7 @@ fn component_count(mesh: &axiolid_mesh::TriMesh) -> usize {
         }
         node
     }
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let a = find(&mut parent, triangle[0] as usize);
         let b = find(&mut parent, triangle[1] as usize);
         let c = find(&mut parent, triangle[2] as usize);

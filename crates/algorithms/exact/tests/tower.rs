@@ -201,7 +201,7 @@ fn program<B: Build>(b: &mut B, seed: u64) -> B::V {
         let c = b.int(rng.small());
         let term = b.mul(&x, &y);
         let term = b.mul(&term, &c);
-        acc = if rng.next() % 2 == 0 {
+        acc = if rng.next().is_multiple_of(2) {
             b.add(&acc, &term)
         } else {
             b.sub(&acc, &term)

@@ -90,7 +90,7 @@ pub fn extrude(
     // alike. An offset IN the plane bounds no volume either way and was
     // refused above.
     if offset.z < 0.0 {
-        for triangle in indices.chunks_exact_mut(3) {
+        for triangle in indices.as_chunks_mut::<3>().0 {
             triangle.swap(1, 2);
         }
     }
@@ -181,7 +181,7 @@ pub fn outward_orientation(mesh: &TriMesh) -> Option<bool> {
         return None;
     }
     let mut total: Vec<f64> = vec![0.0];
-    for corner in mesh.indices.chunks_exact(3) {
+    for corner in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[corner[0] as usize];
         let b = mesh.positions[corner[1] as usize];
         let c = mesh.positions[corner[2] as usize];

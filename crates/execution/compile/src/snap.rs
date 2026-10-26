@@ -263,7 +263,9 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
     let grow = Vec3::splat(reach);
     let faces: Vec<Face> = fixed
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .filter_map(|t| {
             let corners = [
                 *fixed.positions.get(t[0] as usize)?,
@@ -331,7 +333,7 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
     // A move must keep every triangle facing the way it did, and keep its
     // area: an operand with a feature of its own thinner than the reach is
     // cut as given rather than folded.
-    for t in moving.indices.chunks_exact(3) {
+    for t in moving.indices.as_chunks::<3>().0 {
         let [a, b, c] = [t[0], t[1], t[2]].map(|i| i as usize);
         let before = (moving.positions[b] - moving.positions[a])
             .cross(moving.positions[c] - moving.positions[a]);

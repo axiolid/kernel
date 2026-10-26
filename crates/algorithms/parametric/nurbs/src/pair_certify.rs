@@ -637,12 +637,8 @@ pub(crate) fn isolate(
             let Some(root) = newton3(centre, curve, enclosure) else {
                 match touch3(centre, curve, enclosure) {
                     Some(r) if !tangent(&r, curve, enclosure) => return None,
-                    Some(r) => {
-                        if inside_asked(&r.0) {
-                            push_root(&mut out, r);
-                        }
-                    }
-                    None => {}
+                    Some(r) if inside_asked(&r.0) => push_root(&mut out, r),
+                    Some(_) | None => {}
                 }
                 continue;
             };

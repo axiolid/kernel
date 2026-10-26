@@ -239,8 +239,9 @@ fn casteljau(c: &[H], s: Scalar) -> (Vec<H>, Vec<H>) {
     right[n - 1] = w[n - 1];
     for k in 1..n {
         for i in 0..n - k {
-            for d in 0..4 {
-                w[i][d] = w[i][d] * (1.0 - s) + w[i + 1][d] * s;
+            let next = w[i + 1];
+            for (slot, hi) in w[i].iter_mut().zip(next) {
+                *slot = *slot * (1.0 - s) + hi * s;
             }
         }
         left[k] = w[0];

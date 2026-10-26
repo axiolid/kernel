@@ -94,7 +94,7 @@ pub fn assert_covers_hull(name: &str, points: &[Point2], tri: &Triangulation) {
     let at = |k: u32| points[k as usize];
     let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
     let mut used = vec![false; points.len()];
-    for t in tri.triangles().chunks_exact(3) {
+    for t in tri.triangles().as_chunks::<3>().0 {
         assert_eq!(
             sign(orient2d(at(t[0]), at(t[1]), at(t[2]))),
             Sign::Positive,

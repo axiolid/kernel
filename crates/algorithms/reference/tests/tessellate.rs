@@ -27,7 +27,9 @@ fn budget(chord: Scalar) -> TessellationBudget {
 /// Triangulated surface area, straight from the mesh.
 fn mesh_area(mesh: &axiolid_mesh::TriMesh) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| {
             let a = mesh.positions[c[0] as usize];
             let b = mesh.positions[c[1] as usize];
@@ -214,7 +216,7 @@ fn every_triangle_has_three_distinct_corners() {
     // tessellator being tested here.
     let patch = Patch::new(0.0, TAU, -1.5, 1.5).expect("patch");
     let out = tessellate_patch(&s, patch, budget(1e-3)).expect("tessellate");
-    for c in out.mesh.indices.chunks_exact(3) {
+    for c in out.mesh.indices.as_chunks::<3>().0 {
         assert!(
             c[0] != c[1] && c[1] != c[2] && c[0] != c[2],
             "degenerate index triple {c:?}"
@@ -259,7 +261,7 @@ fn cells_split_along_the_shorter_diagonal() {
     let out = tessellate_patch(&s, patch, budget(0.05)).expect("tessellate");
 
     let mut worst_ratio: Scalar = 0.0;
-    for t in out.mesh.indices.chunks_exact(3) {
+    for t in out.mesh.indices.as_chunks::<3>().0 {
         let p = [
             out.mesh.positions[t[0] as usize],
             out.mesh.positions[t[1] as usize],
@@ -279,7 +281,7 @@ fn cells_split_along_the_shorter_diagonal() {
     // every quad the emitted interior edge must be the SHORTER of the two
     // candidates, otherwise the mesh carries avoidable slivers.
     let mut edges: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
-    for t in out.mesh.indices.chunks_exact(3) {
+    for t in out.mesh.indices.as_chunks::<3>().0 {
         for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             edges.insert(if x < y { (x, y) } else { (y, x) });
         }

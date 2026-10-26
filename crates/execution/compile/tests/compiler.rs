@@ -25,7 +25,7 @@ fn compiler() -> ReferenceMeshCompiler<BoolmeshBoolean> {
 /// Divergence-theorem volume: triangulation-invariant.
 fn volume(mesh: &TriMesh) -> f64 {
     let mut sum = 0.0;
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[t[0] as usize];
         let b = mesh.positions[t[1] as usize];
         let c = mesh.positions[t[2] as usize];

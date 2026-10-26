@@ -158,7 +158,9 @@ impl TriangleGrid {
     fn new(mesh: &TriMesh, reach: Scalar) -> Self {
         let triangles: Vec<[Point3; 3]> = mesh
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| [0, 1, 2].map(|i| mesh.positions[t[i] as usize]))
             .collect();
         let (lo, hi) = mesh.positions.iter().fold(
@@ -379,7 +381,7 @@ fn two_faces_share_the_samples_of_an_edge_without_a_pcurve() {
 
     // Every mesh edge off the rims is used by exactly two triangles.
     let mut uses: HashMap<(u32, u32), usize> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *uses.entry((x.min(y), x.max(y))).or_default() += 1;
         }
@@ -1144,7 +1146,9 @@ fn a_closed_bspline_edge_is_the_whole_curve_from_its_one_vertex() {
 /// The area of a triangle mesh.
 fn mesh_area(mesh: &TriMesh) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             0.5 * (b - a).cross(c - a).length()
@@ -1352,7 +1356,7 @@ fn capped_cylinder(
 /// Every mesh edge is used by exactly two triangles, once each way.
 fn assert_watertight(name: &str, mesh: &TriMesh) {
     let mut directed: HashMap<(u32, u32), usize> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (x, y) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *directed.entry((x, y)).or_default() += 1;
         }

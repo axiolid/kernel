@@ -376,7 +376,7 @@ fn a_cube_tessellates_to_a_closed_welded_mesh() {
     );
 
     let mut directed: HashMap<(u32, u32), i32> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for &(a, b) in &[(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *directed.entry((a, b)).or_default() += 1;
         }
@@ -399,7 +399,7 @@ fn a_cube_tessellates_to_a_closed_welded_mesh() {
 fn tessellated_winding_stays_outward() {
     let mesh = compile(cube());
     let mut volume = 0.0;
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[t[0] as usize];
         let b = mesh.positions[t[1] as usize];
         let c = mesh.positions[t[2] as usize];
@@ -485,7 +485,9 @@ fn add_box_shell(
 
 fn signed_volume(mesh: &axiolid_mesh::TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];
@@ -623,7 +625,7 @@ fn an_open_void_shell_is_refused() {
 fn a_reversed_shell_inverts_the_signed_volume() {
     let mesh = compile(cube_with_sense(Orientation::Reversed));
     let mut volume = 0.0;
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[t[0] as usize];
         let b = mesh.positions[t[1] as usize];
         let c = mesh.positions[t[2] as usize];
@@ -696,7 +698,7 @@ fn a_concave_face_keeps_its_true_area() {
 
     let mesh = compile(brep);
     let mut area = 0.0;
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[t[0] as usize];
         let b = mesh.positions[t[1] as usize];
         let c = mesh.positions[t[2] as usize];
@@ -1252,7 +1254,7 @@ fn two_curved_faces_share_their_seam_vertices() {
     // exactly two triangles, one from each face. Duplicated seam vertices
     // would make it two separate boundary edges instead.
     let mut edges: std::collections::HashMap<(u32, u32), i32> = std::collections::HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
             *edges.entry(key).or_default() += if a < b { 1 } else { -1 };
@@ -1407,7 +1409,7 @@ fn a_periodic_seam_closes_the_tube() {
     }
     // The seam must be interior: no vertical run of boundary edges at u = 0.
     let mut edges: std::collections::HashMap<(u32, u32), i32> = Default::default();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
             *edges.entry(key).or_default() += if a < b { 1 } else { -1 };
@@ -1463,7 +1465,9 @@ fn a_periodic_seam_closes_the_tube() {
     // close, which fails outright if triangles went missing at the seam.
     let area: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];
@@ -1620,7 +1624,9 @@ fn a_half_cylinder_is_not_welded_shut() {
     // Half the lateral area of a full cylinder, inscribed.
     let area: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];
@@ -1636,7 +1642,7 @@ fn a_half_cylinder_is_not_welded_shut() {
 
     // The opening must survive: a sheet has boundary on all four sides.
     let mut balance: std::collections::HashMap<(u32, u32), i32> = Default::default();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
             *balance.entry(key).or_default() += if a < b { 1 } else { -1 };
@@ -1813,7 +1819,7 @@ fn a_periodic_patch_with_interior_rows_closes_across_the_seam() {
 
     // And the only open edges may be the two rims, never a vertical crack.
     let mut balance: std::collections::HashMap<(u32, u32), i32> = Default::default();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
             *balance.entry(key).or_default() += if a < b { 1 } else { -1 };
@@ -1972,7 +1978,9 @@ fn a_curved_face_with_a_hole_is_not_gridded() {
     // it claimed to have cut.
     let area: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];
@@ -2098,7 +2106,9 @@ fn a_slanted_trim_is_not_gridded() {
 
     let area: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];
@@ -2114,7 +2124,7 @@ fn a_slanted_trim_is_not_gridded() {
         "a slanted trim must not be squared off: area {area} vs rectangle {rectangle}"
     );
     assert!(area > 0.0, "the face must still be meshed");
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[triangle[0] as usize];
         let b = mesh.positions[triangle[1] as usize];
         let c = mesh.positions[triangle[2] as usize];
@@ -2264,7 +2274,7 @@ fn a_trimmed_rational_bspline_face_refines_its_support_surface() {
         let radial_error = (point.x.hypot(point.y) - radius).abs();
         assert!(radial_error <= 1e-9, "off-support NURBS vertex: {point:?}");
     }
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[triangle[0] as usize];
         let b = mesh.positions[triangle[1] as usize];
         let c = mesh.positions[triangle[2] as usize];
@@ -2277,7 +2287,9 @@ fn a_trimmed_rational_bspline_face_refines_its_support_surface() {
     }
     let max_sagitta = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .flat_map(|triangle| {
             [
                 (triangle[0], triangle[1]),
@@ -2413,7 +2425,7 @@ fn a_curved_face_preserves_a_pcurve_hole_during_refinement() {
         Point2::new(point.y.atan2(point.x), point.z)
     };
     let mut parameter_area = 0.0;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [
             parameter(triangle[0]),
             parameter(triangle[1]),

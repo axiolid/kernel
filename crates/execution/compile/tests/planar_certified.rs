@@ -52,7 +52,9 @@ fn twice_ring_area(ring: &[Point2]) -> f64 {
 
 fn twice_area(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             (b - a).cross(c - a).length()
@@ -379,7 +381,7 @@ fn check_patch(outer: Vec<Point2>, holes: Vec<Vec<Point2>>, twice: f64, what: &s
     let mesh = compile_node(GeometryNode::PolygonMesh(authored(&corners, &faces)))
         .unwrap_or_else(|e| panic!("{what}: authored face refused: {e:?}"));
     assert_eq!(twice_area(&mesh), twice, "{what}: authored area");
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
         assert!((b - a).cross(c - a).z > 0.0, "{what}: {t:?} faces down");
     }
@@ -453,7 +455,7 @@ fn a_doubled_corner_inside_a_ring_is_dropped() {
         "an L of six corners: four triangles"
     );
     assert!(!mesh.indices.contains(&2), "{:?}", mesh.indices);
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
         assert!((b - a).cross(c - a).z > 0.0, "{t:?} faces down");
     }

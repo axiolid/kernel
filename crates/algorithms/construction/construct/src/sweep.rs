@@ -158,7 +158,7 @@ pub fn tapered_revolve(
     // check alone cannot be made consistent with a sign flip of `dir` too.
     // Settle it from the built mesh's own orientation instead.
     if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
-        for triangle in mesh.indices.chunks_exact_mut(3) {
+        for triangle in mesh.indices.as_chunks_mut::<3>().0 {
             triangle.swap(1, 2);
         }
     }

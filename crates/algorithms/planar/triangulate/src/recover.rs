@@ -30,7 +30,9 @@ impl Triangulation {
     /// Whether some triangle already carries the edge `(a, b)`.
     fn has_edge(&self, a: u32, b: u32) -> bool {
         self.triangles
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .any(|t| (t[0] == a || t[1] == a || t[2] == a) && (t[0] == b || t[1] == b || t[2] == b))
     }
 }

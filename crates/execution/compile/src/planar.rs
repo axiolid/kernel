@@ -400,7 +400,7 @@ pub(crate) fn clip_shell_face(
         &mut split,
     );
     let on_seam = |indices: &[usize]| {
-        indices.chunks_exact(3).any(|t| {
+        indices.as_chunks::<3>().0.iter().any(|t| {
             (0..3).any(|k| {
                 let (a, b) = (extended[t[k]], extended[t[(k + 1) % 3]]);
                 seams.contains(&(Point2::new(a[0], a[1]), Point2::new(b[0], b[1])))
@@ -421,7 +421,9 @@ pub(crate) fn clip_shell_face(
 fn steiner_turns(flat: &[[Scalar; 2]], corners: usize, indices: &[usize]) -> Option<[usize; 3]> {
     let at = |i: usize| Point2::new(flat[i][0], flat[i][1]);
     indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .find(|t| {
             t.iter().any(|&i| i >= corners)
                 && axiolid_reference::orient2d(at(t[0]), at(t[1]), at(t[2])).sign()
@@ -609,7 +611,7 @@ fn split_invented_edges_over(
     let mut slivers: std::collections::HashMap<(usize, usize), usize> =
         std::collections::HashMap::new();
     let mut kept: Vec<usize> = Vec::with_capacity(indices.len());
-    for t in indices.chunks_exact(3) {
+    for t in indices.as_chunks::<3>().0 {
         match sliver_apex(t) {
             Some(i) => {
                 slivers.insert((t[(i + 1) % 3], t[(i + 2) % 3]), t[i]);
@@ -628,7 +630,7 @@ fn split_invented_edges_over(
     // corner in no triangle.
     let mut exposed: std::collections::HashMap<(usize, usize), Vec<usize>> =
         std::collections::HashMap::new();
-    for t in kept.chunks_exact(3) {
+    for t in kept.as_chunks::<3>().0 {
         for i in 0..3 {
             let (p, q) = (t[i], t[(i + 1) % 3]);
             if slivers.contains_key(&(q, p)) {
@@ -643,7 +645,7 @@ fn split_invented_edges_over(
     // (low, high) key so both sides of an edge see the identical list.
     let mut on_edge: std::collections::HashMap<(usize, usize), Vec<usize>> =
         std::collections::HashMap::new();
-    for t in kept.chunks_exact(3) {
+    for t in kept.as_chunks::<3>().0 {
         for i in 0..3 {
             let (p, q) = (t[i], t[(i + 1) % 3]);
             let key = (p.min(q), p.max(q));
@@ -669,7 +671,7 @@ fn split_invented_edges_over(
     }
 
     let mut out: Vec<usize> = Vec::with_capacity(kept.len());
-    for t in kept.chunks_exact(3) {
+    for t in kept.as_chunks::<3>().0 {
         // Corners on side i run from t[i] to t[i+1].
         let side = |i: usize| -> Vec<usize> {
             let (p, q) = (t[i], t[(i + 1) % 3]);
@@ -748,7 +750,7 @@ fn same_cover(flat: &[[Scalar; 2]], cover: &[usize], split: &[usize]) -> bool {
     type Net = std::collections::HashMap<(usize, usize), i64>;
     fn net(indices: &[usize]) -> Net {
         let mut net = Net::with_capacity(indices.len());
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             for i in 0..3 {
                 let (p, q) = (t[i], t[(i + 1) % 3]);
                 *net.entry((p.min(q), p.max(q))).or_insert(0) += if p < q { 1 } else { -1 };
@@ -757,17 +759,21 @@ fn same_cover(flat: &[[Scalar; 2]], cover: &[usize], split: &[usize]) -> bool {
         net.retain(|_, n| *n != 0);
         net
     }
-    let doubled_area = |t: &[usize]| {
+    let doubled_area = |t: &[usize; 3]| {
         let [a, b, c] = [flat[t[0]], flat[t[1]], flat[t[2]]];
         (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
     };
     let winding: Scalar = cover
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(doubled_area)
         .sum::<Scalar>()
         .signum();
     let wound = split
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .all(|t| doubled_area(t) * winding > 0.0);
     wound && net(cover) == net(split)
 }
@@ -1195,7 +1201,7 @@ mod tests {
     /// Undirected edge use counts of a triangle list.
     fn edge_uses(indices: &[usize]) -> std::collections::HashMap<(usize, usize), usize> {
         let mut uses = std::collections::HashMap::new();
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             for i in 0..3 {
                 let (p, q) = (t[i], t[(i + 1) % 3]);
                 *uses.entry((p.min(q), p.max(q))).or_insert(0) += 1;
@@ -1218,7 +1224,9 @@ mod tests {
         assert_eq!(uses.get(&(2, 4)), Some(&2), "{indices:?}");
         assert_eq!(uses.get(&(0, 2)), None, "the diagonal is gone: {indices:?}");
         let area: Scalar = indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]))
             .sum();
         assert!((area - 8.0).abs() < 1e-12, "area {area}");
@@ -1255,7 +1263,7 @@ mod tests {
             !indices.contains(&6),
             "the pinch is no corner of 0-2: {indices:?}"
         );
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             assert!(
                 doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]) > 0.0,
                 "{indices:?}"
@@ -1275,7 +1283,7 @@ mod tests {
         split_invented_edges(&flat, &[], collinear_band(1.0e-3), &mut indices);
         let uses = edge_uses(&indices);
         assert_eq!(uses.get(&(0, 2)), None, "{indices:?}");
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             assert!(t[0] != t[1] && t[1] != t[2] && t[2] != t[0], "{indices:?}");
         }
     }
@@ -1385,7 +1393,9 @@ mod tests {
         };
         let noise = collinear_band(1.0e-3);
         indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .filter(|t| {
                 (0..3).any(|i| {
                     let (a, b) = (t[(i + 1) % 3], t[(i + 2) % 3]);
@@ -1420,7 +1430,9 @@ mod tests {
         assert_eq!(uses.get(&(0, 1)), Some(&1), "{indices:?}");
         assert!(uses.values().all(|&n| n <= 2), "{indices:?}");
         let area: Scalar = indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]))
             .sum();
         assert!((area - 2.0 * (8.0 - 0.25)).abs() < 1e-6, "area {area}");
@@ -1609,7 +1621,7 @@ mod tests {
                 assert_eq!(count, 2, "invented edge {key:?} unpaired: {indices:?}");
             }
         }
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             let area = doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]);
             assert!(area > 0.0, "{t:?} winds clockwise: {indices:?}");
         }
@@ -1636,7 +1648,7 @@ mod tests {
         let indices = clip_planar_face(&flat, &[], 1.0e-3).expect("the cap triangulates");
         assert_eq!(indices.len(), 9, "{indices:?}");
         assert_closed_cover(&flat, &indices);
-        for t in indices.chunks_exact(3) {
+        for t in indices.as_chunks::<3>().0 {
             assert!(t.contains(&0), "not a fan from p0: {indices:?}");
             let area = doubled_area(flat[t[0]], flat[t[1]], flat[t[2]]);
             assert!(area > 0.1, "a sliver is left: {indices:?}");

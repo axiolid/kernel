@@ -92,7 +92,7 @@ fn validate(points: &[Point2], tri: &Triangulation) {
     let corner = |k: u32| points[k as usize];
     let mut used = vec![false; n];
     let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
-    for t in tri.triangles().chunks_exact(3) {
+    for t in tri.triangles().as_chunks::<3>().0 {
         assert_eq!(
             sign(orient2d(corner(t[0]), corner(t[1]), corner(t[2]))),
             Sign::Positive,

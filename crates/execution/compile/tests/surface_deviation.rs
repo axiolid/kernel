@@ -82,7 +82,9 @@ impl TriangleGrid {
     fn new(mesh: &TriMesh, reach: Scalar) -> Self {
         let triangles: Vec<[Point3; 3]> = mesh
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| [0, 1, 2].map(|i| mesh.positions[t[i] as usize]))
             .collect();
         let (lo, hi) = mesh.positions.iter().fold(
@@ -1113,7 +1115,7 @@ fn try_compile(
 /// closed, two-manifold and consistently oriented.
 fn assert_watertight(name: &str, mesh: &TriMesh) {
     let mut uses: HashMap<(u32, u32), (usize, i64)> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for k in 0..3 {
             let (a, b) = (t[k], t[(k + 1) % 3]);
             let entry = uses.entry((a.min(b), a.max(b))).or_default();

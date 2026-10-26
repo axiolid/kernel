@@ -833,7 +833,7 @@ pub(crate) fn free_triangles_in(
         triangulate(&points, &constraints).map_err(|_| FarthestError::Triangulation)?;
     let at = triangulation.points();
     let mut out = Vec::new();
-    for t in triangulation.triangles().chunks_exact(3) {
+    for t in triangulation.triangles().as_chunks::<3>().0 {
         let corners = [at[t[0] as usize], at[t[1] as usize], at[t[2] as usize]];
         let centroid = Point2::new(
             (corners[0].x + corners[1].x + corners[2].x) / 3.0,

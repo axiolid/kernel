@@ -133,11 +133,11 @@ impl RefineReport {
 const MAX_TRIANGLES: usize = 20_000_000;
 
 fn validate(mesh: &TriMesh) -> Result<(), RefineError> {
-    if mesh.indices.len() % 3 != 0 {
+    if !mesh.indices.len().is_multiple_of(3) {
         return Err(RefineError::RaggedIndices(mesh.indices.len()));
     }
     let vertex_count = mesh.positions.len();
-    for (triangle, chunk) in mesh.indices.chunks_exact(3).enumerate() {
+    for (triangle, chunk) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         for &index in chunk {
             if index as usize >= vertex_count {
                 return Err(RefineError::IndexOutOfRange(triangle, index));
@@ -185,9 +185,7 @@ pub fn refine(
     let input_triangles = mesh.triangle_count();
     // Each pass quadruples the triangle count. Checking the projection up
     // front turns an out-of-memory kill into a typed refusal.
-    let projected = input_triangles
-        .checked_mul(4usize.saturating_pow(levels))
-        .unwrap_or(usize::MAX);
+    let projected = input_triangles.saturating_mul(4usize.saturating_pow(levels));
     if projected > MAX_TRIANGLES {
         return Err(RefineError::BudgetExceeded {
             produced: projected,
@@ -203,7 +201,7 @@ pub fn refine(
         let mut midpoints: AHashMap<(u32, u32), u32> = AHashMap::new();
         let mut next = Vec::with_capacity(indices.len() * 4);
 
-        for chunk in indices.chunks_exact(3) {
+        for chunk in indices.as_chunks::<3>().0 {
             let [a, b, c] = [chunk[0], chunk[1], chunk[2]];
             let ab = split_edge(
                 a,
@@ -295,7 +293,7 @@ pub fn refine(
 /// budget check can happen before any memory is allocated.
 fn passes_for_edge_length(mesh: &TriMesh, max_edge: Scalar) -> u32 {
     let mut longest: Scalar = 0.0;
-    for chunk in mesh.indices.chunks_exact(3) {
+    for chunk in mesh.indices.as_chunks::<3>().0 {
         for (from, to) in [(0, 1), (1, 2), (2, 0)] {
             let a = mesh.positions[chunk[from] as usize];
             let b = mesh.positions[chunk[to] as usize];

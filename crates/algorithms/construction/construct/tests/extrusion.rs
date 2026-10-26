@@ -14,7 +14,9 @@ use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
 /// Six times the signed volume, via the divergence theorem.
 fn six_volume(m: &TriMesh) -> f64 {
     m.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (a, b, c) = (
                 m.positions[t[0] as usize],
@@ -176,7 +178,7 @@ fn a_disk_converges_from_below_as_the_chord_budget_tightens() {
 fn assert_edge_manifold(mesh: &TriMesh, what: &str) {
     use std::collections::HashMap;
     let mut directed: HashMap<(u32, u32), i32> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             *directed.entry((a, b)).or_default() += 1;
         }
@@ -340,7 +342,7 @@ fn certified_orientation_agrees_with_volume_on_real_solids() {
 
         // Reversing every triangle must flip the verdict, not merely fail.
         let mut inverted = mesh.clone();
-        for corner in inverted.indices.chunks_exact_mut(3) {
+        for corner in inverted.indices.as_chunks_mut::<3>().0 {
             corner.swap(1, 2);
         }
         assert_eq!(
@@ -402,7 +404,9 @@ fn a_thin_plate_on_survey_coordinates_is_still_judged_correctly() {
     // test is exercising the exact path rather than restating the easy case.
     let naive: f64 = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (a, b, c) = (
                 mesh.positions[t[0] as usize],
@@ -426,7 +430,7 @@ fn a_thin_plate_on_survey_coordinates_is_still_judged_correctly() {
     );
 
     let mut inverted = mesh.clone();
-    for corner in inverted.indices.chunks_exact_mut(3) {
+    for corner in inverted.indices.as_chunks_mut::<3>().0 {
         corner.swap(1, 2);
     }
     assert_eq!(outward_orientation(&inverted), Some(false));

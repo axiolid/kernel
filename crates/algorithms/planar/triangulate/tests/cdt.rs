@@ -511,7 +511,9 @@ fn long_constraints_through_a_point_cloud_are_recovered_and_the_rest_restored() 
         for c in &constraints {
             let has = tri
                 .triangles()
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .any(|t| t.contains(&c.a) && t.contains(&c.b));
             assert!(has, "round {round}: constraint {c:?} missing");
         }

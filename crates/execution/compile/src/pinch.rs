@@ -75,7 +75,9 @@ pub(crate) fn find(mesh: &TriMesh) -> Option<Pinch> {
         .collect();
     let triangles: Vec<[u32; 3]> = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| [0, 1, 2].map(|k| welded[t[k] as usize]))
         .filter(|t| t[0] != t[1] && t[1] != t[2] && t[2] != t[0])
         .collect();

@@ -60,9 +60,9 @@ impl DegeneracyRate {
     pub fn is_degenerate(self, index: usize) -> bool {
         match self {
             Self::None => false,
-            Self::Rare => index % 10_000 == 0,
-            Self::Occasional => index % 100 == 0,
-            Self::Frequent => index % 10 == 0,
+            Self::Rare => index.is_multiple_of(10_000),
+            Self::Occasional => index.is_multiple_of(100),
+            Self::Frequent => index.is_multiple_of(10),
         }
     }
 }

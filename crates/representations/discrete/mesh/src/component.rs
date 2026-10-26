@@ -42,7 +42,7 @@ impl Partition {
 /// Build the vertex partition for a mesh.
 fn partition_of(mesh: &TriMesh) -> Partition {
     let mut partition = Partition::new(mesh.positions.len());
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let first = triangle[0] as usize;
         for corner in &triangle[1..] {
             partition.union(first, *corner as usize);
@@ -85,7 +85,7 @@ pub fn decompose(mesh: &TriMesh) -> Vec<TriMesh> {
     // first appearance keeps the order deterministic and input-shaped.
     let mut order: BTreeMap<usize, usize> = BTreeMap::new();
     let mut groups: Vec<Vec<usize>> = Vec::new();
-    for (triangle_index, triangle) in mesh.indices.chunks_exact(3).enumerate() {
+    for (triangle_index, triangle) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         let root = partition.find(triangle[0] as usize);
         let slot = *order.entry(root).or_insert_with(|| {
             groups.push(Vec::new());

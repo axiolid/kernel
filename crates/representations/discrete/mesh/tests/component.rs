@@ -89,7 +89,9 @@ fn compose_of_decompose_preserves_every_triangle() {
     let resolve = |m: &TriMesh| {
         let mut tris: Vec<[[u64; 3]; 3]> = m
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| {
                 let mut corners: Vec<[u64; 3]> = t
                     .iter()

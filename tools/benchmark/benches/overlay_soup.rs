@@ -258,7 +258,10 @@ fn main() {
             )
             .unwrap()
         };
-        let (ga, gb) = (contours(&[a.clone()]), contours(&[b.clone()]));
+        let (ga, gb) = (
+            contours(std::slice::from_ref(&a)),
+            contours(std::slice::from_ref(&b)),
+        );
         check(
             name,
             exact_area(&run().polygons),

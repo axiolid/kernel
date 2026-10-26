@@ -632,10 +632,10 @@ impl Form<'_, '_> {
             let (mut positive, mut negative, mut unclear) = (false, false, false);
             let mut largest: Scalar = 0.0;
             for row in &c {
-                for q in 0..=nv {
+                for (q, ratio_q) in ratio[nv].iter().enumerate().take(nv + 1) {
                     let mut b = zero;
                     for (j, value) in row.iter().enumerate().take(q + 1) {
-                        b = b.add(ratio[nv][q][j].mul(*value));
+                        b = b.add(ratio_q[j].mul(*value));
                     }
                     largest = largest.max(b.lo.abs()).max(b.hi.abs());
                     if b.lo > remainder {

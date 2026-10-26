@@ -101,7 +101,7 @@ fn pos_key(p: Point3) -> PosKey {
 impl Adjacency {
     fn new(mesh: &TriMesh) -> Self {
         let mut edges: HashMap<(PosKey, PosKey), Vec<usize>> = HashMap::new();
-        for (t, tri) in mesh.indices.chunks_exact(3).enumerate() {
+        for (t, tri) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
             for k in 0..3 {
                 let a = pos_key(mesh.positions[tri[k] as usize]);
                 let b = pos_key(mesh.positions[tri[(k + 1) % 3] as usize]);
@@ -227,8 +227,13 @@ fn sample(
     let w = at.weights;
     match channel.blend {
         Blend::Linear => {
-            for d in 0..channel.width {
-                out.push(w[0] * values[0][d] + w[1] * values[1][d] + w[2] * values[2][d]);
+            for ((a, b), c) in values[0]
+                .iter()
+                .zip(values[1])
+                .zip(values[2])
+                .take(channel.width)
+            {
+                out.push(w[0] * a + w[1] * b + w[2] * c);
             }
         }
         Blend::Nearest => {
@@ -341,7 +346,7 @@ fn build(
 /// (the face straddles a partially mapped source region). Such a face has
 /// no value the source defines over its whole extent: it is unmapped.
 fn unmap_partial(corners: &mut [u32]) {
-    for tri in corners.chunks_exact_mut(3) {
+    for tri in corners.as_chunks_mut::<3>().0 {
         if tri.contains(&AttributeChannel::UNMAPPED) {
             tri.fill(AttributeChannel::UNMAPPED);
         }

@@ -82,7 +82,7 @@ fn corner(s: f64) -> TriMesh {
 
 fn turned(m: &TriMesh) -> TriMesh {
     let mut out = m.clone();
-    for t in out.indices.chunks_exact_mut(3) {
+    for t in out.indices.as_chunks_mut::<3>().0 {
         t.swap(1, 2);
     }
     out
@@ -313,7 +313,9 @@ fn a_non_convex_solid() {
     let side = mesh(
         side,
         &l.indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| [t[0], t[1], t[2]])
             .collect::<Vec<_>>(),
     );
@@ -345,7 +347,7 @@ fn d(v: f64) -> Dyadic {
 /// Six times the volume a closed, outward-wound mesh encloses, exactly:
 /// the sum of its triangles' determinants.
 fn six_volume(m: &TriMesh) -> Dyadic {
-    m.indices.chunks_exact(3).fold(d(0.0), |sum, t| {
+    m.indices.as_chunks::<3>().0.iter().fold(d(0.0), |sum, t| {
         let [a, b, c] = [0, 1, 2].map(|k| m.positions[t[k] as usize]);
         let (a, b, c) = (
             [d(a.x), d(a.y), d(a.z)],

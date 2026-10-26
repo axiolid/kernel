@@ -242,7 +242,7 @@ fn the_bracket_holds_against_sampled_walks() {
         holes: Vec::new(),
     };
     check_against_samples(
-        &[l.clone()],
+        std::slice::from_ref(&l),
         &[],
         p(5.5, 1.0),
         p(1.0, 5.5),

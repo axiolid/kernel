@@ -191,7 +191,9 @@ fn volume(mesh: &TriMesh, shift: [f64; 3]) -> f64 {
         Vec3::new(p.x - shift[0], p.y - shift[1], p.z - shift[2])
     };
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| at(t[0]).dot(at(t[1]).cross(at(t[2]))))
         .sum::<f64>()
         / 6.0

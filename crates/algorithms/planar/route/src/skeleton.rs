@@ -198,7 +198,7 @@ pub fn skeleton(region: &[Polygon], spacing: f64, prune: f64) -> Result<Skeleton
     let fixed: std::collections::BTreeSet<Constraint> = tri.constraints().iter().copied().collect();
     // Triangles inside the region.
     let mut inside: Vec<[u32; 3]> = Vec::new();
-    for t in tri.triangles().chunks_exact(3) {
+    for t in tri.triangles().as_chunks::<3>().0 {
         let (a, b, c) = (at[t[0] as usize], at[t[1] as usize], at[t[2] as usize]);
         let centroid = Point2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0);
         if contains(region, centroid)? {

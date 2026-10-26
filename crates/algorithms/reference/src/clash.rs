@@ -369,7 +369,7 @@ fn interior_probes(mesh: &TriMesh) -> impl Iterator<Item = Point3> + '_ {
     // the exact-arithmetic boundary where winding is undefined.
     let nudge = span * 1e-12;
 
-    core::iter::once(centre).chain(mesh.indices.chunks_exact(3).map(move |t| {
+    core::iter::once(centre).chain(mesh.indices.as_chunks::<3>().0.iter().map(move |t| {
         let a = mesh.positions[t[0] as usize];
         let b = mesh.positions[t[1] as usize];
         let c = mesh.positions[t[2] as usize];

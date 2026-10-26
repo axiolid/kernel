@@ -43,7 +43,9 @@ fn box_solid(cx: f64, cy: f64, cz: f64, sx: f64, sy: f64, sz: f64) -> TriMesh {
 /// Signed volume, so the two paths can be proven to agree.
 fn volume(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (a, b, c) = (
                 mesh.positions[t[0] as usize],

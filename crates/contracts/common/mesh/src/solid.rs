@@ -146,7 +146,9 @@ pub(crate) fn six_signed_volume(mesh: &TriMesh) -> f64 {
         Vec3::new(p.x - cx, p.y - cy, p.z - cz)
     };
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|triangle| {
             let a = shifted(triangle[0]);
             let b = shifted(triangle[1]);
@@ -211,7 +213,7 @@ mod tests {
     #[test]
     fn a_genuinely_inside_out_solid_is_still_refused() {
         let mut inverted = cube([1e9, 1e9, 1e9], 1e-6);
-        for t in inverted.indices.chunks_exact_mut(3) {
+        for t in inverted.indices.as_chunks_mut::<3>().0 {
             t.swap(1, 2);
         }
         assert!(six_signed_volume(&inverted) < 0.0);

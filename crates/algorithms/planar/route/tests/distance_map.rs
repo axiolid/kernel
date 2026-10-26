@@ -47,7 +47,7 @@ fn assert_brackets(lower: f64, upper: f64, exact: f64) {
 #[test]
 fn one_door_the_far_corners() {
     let room = rect(0.0, 0.0, 10.0, 4.0);
-    let map = distance_map(&[room.clone()], &[], &[p(0.0, 2.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &[], &[p(0.0, 2.0)]).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     assert_brackets(far.distance.lower, far.distance.upper, 104f64.sqrt());
@@ -62,7 +62,12 @@ fn one_door_the_far_corners() {
 fn two_doors_the_middle_of_the_long_walls() {
     // Nearest of two doors: the maximum is a crease, at (5, 0) and (5, 4).
     let room = rect(0.0, 0.0, 10.0, 4.0);
-    let map = distance_map(&[room.clone()], &[], &[p(0.0, 2.0), p(10.0, 2.0)]).unwrap();
+    let map = distance_map(
+        std::slice::from_ref(&room),
+        &[],
+        &[p(0.0, 2.0), p(10.0, 2.0)],
+    )
+    .unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     assert_brackets(far.distance.lower, far.distance.upper, 29f64.sqrt());
@@ -80,7 +85,7 @@ fn an_l_shaped_room_is_measured_around_the_corner() {
         (8.0, 2.0),
         (0.0, 2.0),
     ]);
-    let map = distance_map(&[room.clone()], &[], &[p(0.0, 1.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &[], &[p(0.0, 1.0)]).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     // Straight to (10, 10) would leave the room; round (8, 2) it is
@@ -118,7 +123,7 @@ fn a_barrier_lengthens_the_way() {
     // A free-standing wall at x = 5 from y = 1 to y = 9; the door at (0, 5).
     let room = rect(0.0, 0.0, 10.0, 10.0);
     let barrier = vec![vec![p(5.0, 1.0), p(5.0, 9.0)]];
-    let map = distance_map(&[room.clone()], &barrier, &[p(0.0, 5.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &barrier, &[p(0.0, 5.0)]).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     // (10, 5) is reached round either end of the wall: 2 sqrt(41).
@@ -133,7 +138,7 @@ fn the_far_side_of_a_barrier_is_not_bounded_from_the_near_side() {
     // is reached only round either end.
     let room = rect(0.0, 0.0, 6.0, 10.0);
     let barrier = vec![vec![p(5.0, 0.5), p(5.0, 8.5)]];
-    let map = distance_map(&[room.clone()], &barrier, &[p(0.0, 5.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &barrier, &[p(0.0, 5.0)]).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     // On the far wall x = 6 the ways round the two ends tie; bisect for
@@ -161,7 +166,7 @@ fn a_barrier_drawn_in_pieces_has_no_gap_at_its_joint() {
     // sides; the far strip is still reached only round the ends.
     let room = rect(0.0, 0.0, 6.0, 10.0);
     let barrier = vec![vec![p(5.0, 0.5), p(5.0, 4.0), p(5.0, 8.5)]];
-    let map = distance_map(&[room.clone()], &barrier, &[p(0.0, 5.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &barrier, &[p(0.0, 5.0)]).unwrap();
     let reach = map.nearest(p(6.0, 4.0)).unwrap().unwrap();
     let expected = 45.25f64.sqrt() + 13.25f64.sqrt();
     assert!((reach.route.length - expected).abs() < 1e-9, "{reach:?}");
@@ -214,7 +219,7 @@ fn an_interior_maximum_is_found() {
     // to 0.001 must find this one. Value to 40 digits by mpmath.
     let room = rect(0.0, 0.0, 10.0, 7.0);
     let targets = [p(0.5, 1.0), p(9.0, 0.2), p(9.7, 6.1), p(1.3, 6.8)];
-    let map = distance_map(&[room.clone()], &[], &targets).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &[], &targets).unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     assert!(far.converged);
     assert_brackets(far.distance.lower, far.distance.upper, 5.075_490_229_455_75);
@@ -235,7 +240,12 @@ fn the_interval_contains_every_sampled_distance() {
         (3.0, 6.0),
         (0.0, 6.0),
     ]);
-    let map = distance_map(&[room.clone()], &[], &[p(6.0, 1.5), p(1.5, 6.0)]).unwrap();
+    let map = distance_map(
+        std::slice::from_ref(&room),
+        &[],
+        &[p(6.0, 1.5), p(1.5, 6.0)],
+    )
+    .unwrap();
     let far = farthest_point(&map, &room, TOL).unwrap();
     let mut sampled: f64 = 0.0;
     for i in 0..=120 {
@@ -322,14 +332,19 @@ fn nearest_agrees_with_shortest_path_to_each_target() {
 fn malformed_maps_and_queries_are_refused() {
     let room = rect(0.0, 0.0, 4.0, 4.0);
     assert_eq!(
-        distance_map(&[room.clone()], &[], &[]).unwrap_err(),
+        distance_map(std::slice::from_ref(&room), &[], &[]).unwrap_err(),
         MapError::NoTargets
     );
     assert_eq!(
-        distance_map(&[room.clone()], &[], &[p(1.0, 1.0), p(5.0, 1.0)]).unwrap_err(),
+        distance_map(
+            std::slice::from_ref(&room),
+            &[],
+            &[p(1.0, 1.0), p(5.0, 1.0)]
+        )
+        .unwrap_err(),
         MapError::TargetOutside { index: 1 }
     );
-    let map = distance_map(&[room.clone()], &[], &[p(1.0, 1.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &[], &[p(1.0, 1.0)]).unwrap();
     assert_eq!(
         farthest_point(&map, &room, -1.0).unwrap_err(),
         FarthestError::InvalidTolerance
@@ -342,7 +357,7 @@ fn malformed_maps_and_queries_are_refused() {
         vec![p(1.0, 0.5), p(3.0, 0.5)],
         vec![p(2.0, 0.0), p(2.0, 1.0)],
     ];
-    let map = distance_map(&[room.clone()], &crossing, &[p(1.0, 1.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &crossing, &[p(1.0, 1.0)]).unwrap();
     assert_eq!(
         farthest_point(&map, &room, TOL).unwrap_err(),
         FarthestError::CrossingObstacles
@@ -352,7 +367,7 @@ fn malformed_maps_and_queries_are_refused() {
 #[test]
 fn a_small_budget_still_brackets() {
     let room = rect(0.0, 0.0, 10.0, 4.0);
-    let map = distance_map(&[room.clone()], &[], &[p(0.0, 2.0)]).unwrap();
+    let map = distance_map(std::slice::from_ref(&room), &[], &[p(0.0, 2.0)]).unwrap();
     let far = farthest_point_within(&map, &room, 0.0, 12).unwrap();
     assert!(!far.converged);
     let exact = 104f64.sqrt();

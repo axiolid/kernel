@@ -34,7 +34,7 @@ pub fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
     for _ in 0..levels {
         let mut positions = current.positions.clone();
         let mut indices = Vec::new();
-        for triangle in current.indices.chunks_exact(3) {
+        for triangle in current.indices.as_chunks::<3>().0 {
             let [ia, ib, ic] = [triangle[0], triangle[1], triangle[2]];
             let (a, b, c) = (
                 current.positions[ia as usize],
@@ -112,7 +112,7 @@ fn mirrored(mut mesh: TriMesh) -> TriMesh {
     for p in &mut mesh.positions {
         std::mem::swap(&mut p.x, &mut p.y);
     }
-    for corner in mesh.indices.chunks_exact_mut(3) {
+    for corner in mesh.indices.as_chunks_mut::<3>().0 {
         corner.swap(1, 2);
     }
     mesh

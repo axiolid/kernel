@@ -442,7 +442,9 @@ fn check_void_closed(brep: &BRep<NodeId>, shell: &axiolid_topology::Shell) -> Ge
 fn face_into_cavity(mesh: &mut TriMesh, first_index: usize) {
     let positions = &mesh.positions;
     let volume: Scalar = mesh.indices[first_index..]
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (a, b, c) = (
                 positions[t[0] as usize],
@@ -453,7 +455,7 @@ fn face_into_cavity(mesh: &mut TriMesh, first_index: usize) {
         })
         .sum();
     if volume > 0.0 {
-        for triangle in mesh.indices[first_index..].chunks_exact_mut(3) {
+        for triangle in mesh.indices[first_index..].as_chunks_mut::<3>().0 {
             triangle.swap(1, 2);
         }
     }
@@ -617,7 +619,7 @@ fn append_face(
         mesh.positions.push(point);
     }
 
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         let (a, b, c) = (local[triangle[0]], local[triangle[1]], local[triangle[2]]);
         if flip {
             mesh.indices.extend([a, c, b]);
@@ -1755,7 +1757,7 @@ fn append_curved_face(
 
     let boundary_edges = local_boundary_edges(boundary.uv.len(), &boundary.hole_starts)?;
     let mut triangles = Vec::with_capacity(indices.len() / 3);
-    for t in indices.chunks_exact(3) {
+    for t in indices.as_chunks::<3>().0 {
         let vertex = |index: usize| -> GeomResult<SurfaceVertex> {
             Ok(SurfaceVertex {
                 uv: boundary.uv[index],
@@ -2949,7 +2951,9 @@ mod tests {
         let uses = state
             .mesh
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|triangle| {
                 [
                     (triangle[0], triangle[1]),
@@ -2965,7 +2969,7 @@ mod tests {
         );
 
         let mut counts: HashMap<(u32, u32), usize> = HashMap::new();
-        for triangle in state.mesh.indices.chunks_exact(3) {
+        for triangle in state.mesh.indices.as_chunks::<3>().0 {
             for (a, b) in [
                 (triangle[0], triangle[1]),
                 (triangle[1], triangle[2]),

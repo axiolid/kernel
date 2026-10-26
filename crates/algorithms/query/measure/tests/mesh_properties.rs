@@ -49,7 +49,7 @@ fn volume_rejects_closed_mesh_with_inconsistent_winding() {
 #[test]
 fn reversed_orientation_flips_only_signed_volume() {
     let mut mesh = tetra();
-    for face in mesh.indices.chunks_exact_mut(3) {
+    for face in mesh.indices.as_chunks_mut::<3>().0 {
         face.swap(1, 2);
     }
     let forward = volume_properties(&tetra(), Tolerance::ZERO).unwrap();

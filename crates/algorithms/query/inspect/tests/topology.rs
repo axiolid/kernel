@@ -147,7 +147,7 @@ fn assert_basis(mesh: &TriMesh, component: &ComponentTopology, expected_rank: us
     let loops = component.homology_basis.as_ref().expect("a basis");
     assert_eq!(loops.len(), expected_rank);
     let mut edges: BTreeMap<(u32, u32), Vec<usize>> = BTreeMap::new();
-    for (t, tri) in mesh.indices.chunks_exact(3).enumerate() {
+    for (t, tri) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         for k in 0..3 {
             let (a, b) = (tri[k], tri[(k + 1) % 3]);
             edges.entry((a.min(b), a.max(b))).or_default().push(t);

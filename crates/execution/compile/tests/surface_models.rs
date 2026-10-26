@@ -132,7 +132,9 @@ fn cube(as_solid: bool) -> BRep<NodeId> {
 
 fn area(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             (b - a).cross(c - a).length() / 2.0

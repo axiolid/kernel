@@ -910,7 +910,7 @@ impl Pipe {
         // As `revolve::revolve` (#221): settle the winding from the built
         // mesh rather than from the frames' handedness.
         if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
-            for triangle in mesh.indices.chunks_exact_mut(3) {
+            for triangle in mesh.indices.as_chunks_mut::<3>().0 {
                 triangle.swap(1, 2);
             }
         }

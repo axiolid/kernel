@@ -368,7 +368,9 @@ fn the_exact_prism_boolean_agrees_with_the_mesh_oracle() {
     // Divergence-theorem volume: triangulation-invariant.
     let mesh_volume: f64 = mesh_result
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh_result.positions[t[0] as usize];
             let b = mesh_result.positions[t[1] as usize];

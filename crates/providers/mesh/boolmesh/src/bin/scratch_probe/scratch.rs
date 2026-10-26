@@ -122,7 +122,7 @@ unsafe impl GlobalAlloc for Counting {
         if window == WINDOW.load(Ordering::Relaxed) {
             // Saturating: a block freed while a window opens may have been
             // counted before the reset.
-            let _ = LIVE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
+            let _ = LIVE.try_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
                 Some(live.saturating_sub(layout.size()))
             });
         }

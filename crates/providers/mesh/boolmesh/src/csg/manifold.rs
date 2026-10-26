@@ -48,10 +48,10 @@ pub struct Manifold {
 
 impl Manifold {
     pub fn new(pos: &[f64], idx: &[usize]) -> Result<Self, String> {
-        if pos.len() % 3 != 0 {
+        if !pos.len().is_multiple_of(3) {
             return Err("pos must be a multiple of 3".into());
         }
-        if idx.len() % 3 != 0 {
+        if !idx.len().is_multiple_of(3) {
             return Err("idx must be a multiple of 3".into());
         }
 

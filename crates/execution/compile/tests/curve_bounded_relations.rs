@@ -31,7 +31,9 @@ fn options() -> ExecutionOptions {
 
 fn area(mesh: &TriMesh) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             0.5 * (b - a).cross(c - a).length()
@@ -282,7 +284,7 @@ fn reversed_composite_holes_cut_the_same_area() {
     })
     .unwrap();
     assert_eq!(area(&outcome.mesh), 11.0);
-    for t in outcome.mesh.indices.chunks_exact(3) {
+    for t in outcome.mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| outcome.mesh.positions[t[k] as usize]);
         assert!((b - a).cross(c - a).z > 0.0);
     }

@@ -115,7 +115,7 @@ fn the_contract_rejects_inadmissible_operands_before_dispatch() {
 
     // An inside-out operand would silently invert the operation.
     let mut flipped = cube();
-    for triangle in flipped.indices.chunks_exact_mut(3) {
+    for triangle in flipped.indices.as_chunks_mut::<3>().0 {
         triangle.swap(0, 1);
     }
     let error = registry

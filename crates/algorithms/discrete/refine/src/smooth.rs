@@ -53,11 +53,11 @@ pub fn smooth(
     mesh: &TriMesh,
     options: SmoothOptions,
 ) -> Result<(TriMesh, SmoothReport), RefineError> {
-    if mesh.indices.len() % 3 != 0 {
+    if !mesh.indices.len().is_multiple_of(3) {
         return Err(RefineError::RaggedIndices(mesh.indices.len()));
     }
     let vertex_count = mesh.positions.len();
-    for (triangle, chunk) in mesh.indices.chunks_exact(3).enumerate() {
+    for (triangle, chunk) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         for &index in chunk {
             if index as usize >= vertex_count {
                 return Err(RefineError::IndexOutOfRange(triangle, index));

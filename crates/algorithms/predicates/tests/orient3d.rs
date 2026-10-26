@@ -222,7 +222,7 @@ fn certified_signs_agree_with_an_independent_exact_oracle() {
         // a, b, c so exact zeros actually occur. Random points in a 100^3 box
         // are essentially never coplanar, so an unbiased sweep would only ever
         // exercise the easy path.
-        let d = if compared % 2 == 0 {
+        let d = if compared.is_multiple_of(2) {
             coords(&mut state, 50)
         } else {
             coplanar_with(a, b, c, &mut state)

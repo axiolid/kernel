@@ -65,7 +65,7 @@ pub(crate) fn transform(built: &Built, transform: Transform3, rounding: Scalar) 
 
 /// Swap corners 1 and 2 of every triangle in a per-corner buffer.
 fn swap_corners(buffer: &mut [u32]) {
-    for triangle in buffer.chunks_exact_mut(3) {
+    for triangle in buffer.as_chunks_mut::<3>().0 {
         triangle.swap(1, 2);
     }
 }

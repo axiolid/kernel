@@ -221,7 +221,7 @@ fn subdivide(mesh: &TriMesh, levels: usize) -> TriMesh {
     for _ in 0..levels {
         let mut positions = mesh.positions.clone();
         let mut indices = Vec::with_capacity(mesh.indices.len() * 4);
-        for corner in mesh.indices.chunks_exact(3) {
+        for corner in mesh.indices.as_chunks::<3>().0 {
             let [a, b, c] = [corner[0], corner[1], corner[2]];
             let mid =
                 |i: u32, j: u32| (mesh.positions[i as usize] + mesh.positions[j as usize]) * 0.5;

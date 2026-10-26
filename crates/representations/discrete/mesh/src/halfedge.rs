@@ -187,7 +187,7 @@ impl HalfedgeMesh {
     /// A ragged index buffer, an out-of-range or repeated corner, and every
     /// non-manifold or inconsistently wound configuration, each by name.
     pub fn from_tri_mesh(mesh: &TriMesh) -> Result<Self, HalfedgeBuildError> {
-        if mesh.indices.len() % 3 != 0 {
+        if !mesh.indices.len().is_multiple_of(3) {
             return Err(HalfedgeBuildError::IncompleteTriangle {
                 index_count: mesh.indices.len(),
             });

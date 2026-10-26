@@ -112,8 +112,14 @@ fn a_walk_refracts_across_a_cost_edge() {
         2.0 * (x * x + 4.0).sqrt() + ((6.0 - x).powi(2) + 4.0).sqrt()
     };
     for spacing in [0.2, 0.05] {
-        let map =
-            weighted_distance_map(&room, &[], &[p(0.0, 0.0)], &[cheap.clone()], spacing).unwrap();
+        let map = weighted_distance_map(
+            &room,
+            &[],
+            &[p(0.0, 0.0)],
+            std::slice::from_ref(&cheap),
+            spacing,
+        )
+        .unwrap();
         let reach = map.nearest(p(6.0, 4.0)).unwrap().unwrap();
         // The gap shrinks with the spacing.
         brackets(reach.cost.lower, reach.cost.upper, exact, 2.0 * spacing);
@@ -127,8 +133,9 @@ fn without_costs_it_is_the_plain_distance() {
         holes: vec![ring(&[(2.0, 1.0), (2.0, 4.0), (8.0, 4.0), (8.0, 1.0)])],
     };
     let targets = [p(1.0, 1.0), p(9.0, 5.0)];
-    let plain = distance_map(&[room.clone()], &[], &targets).unwrap();
-    let weighted = weighted_distance_map(&[room.clone()], &[], &targets, &[], 1.0).unwrap();
+    let plain = distance_map(std::slice::from_ref(&room), &[], &targets).unwrap();
+    let weighted =
+        weighted_distance_map(std::slice::from_ref(&room), &[], &targets, &[], 1.0).unwrap();
     for q in [p(5.0, 0.5), p(5.0, 5.5), p(0.5, 5.5), p(9.5, 0.5)] {
         let d = plain.nearest(q).unwrap().unwrap().route.length;
         let reach = weighted.nearest(q).unwrap().unwrap();
@@ -207,7 +214,7 @@ fn malformed_costs_are_refused() {
     let ok = CostRegion::new(rect(4.0, 0.0, 6.0, 3.0), 2.0);
     for spacing in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert_eq!(
-            weighted_distance_map(&room, &[], &t, &[ok.clone()], spacing).unwrap_err(),
+            weighted_distance_map(&room, &[], &t, std::slice::from_ref(&ok), spacing).unwrap_err(),
             MapError::InvalidSpacing
         );
     }

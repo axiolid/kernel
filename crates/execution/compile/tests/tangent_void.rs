@@ -146,7 +146,7 @@ fn welded_non_manifold(mesh: &TriMesh) -> usize {
         })
         .collect();
     let mut edges: HashMap<(u32, u32), usize> = HashMap::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         for k in 0..3 {
             let (a, b) = (welded[t[k] as usize], welded[t[(k + 1) % 3] as usize]);
             *edges.entry((a.min(b), a.max(b))).or_default() += 1;

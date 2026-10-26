@@ -730,7 +730,7 @@ pub(super) fn sample_edge(
                 return Err(singular_between_samples());
             };
             let stride = n / coarse;
-            let keep = |i: &usize| i % stride == 0;
+            let keep = |i: &usize| i.is_multiple_of(stride);
             let points: Vec<Vec3> = (0..=n).filter(keep).map(|i| points[i]).collect();
             let params: Vec<Point2> = (0..=n).filter(keep).map(|i| params[i]).collect();
             let spans = spans_of(trace, &points);

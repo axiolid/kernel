@@ -278,7 +278,7 @@ fn add_new_edge_verts(
 /// logic error here. The provider promises a `Result`, so this has to
 /// refuse rather than abort a process the caller cannot defend.
 fn pair_up(pts: &mut [EdgePt]) -> Result<Vec<Half>, String> {
-    if pts.len() % 2 != 0 {
+    if !pts.len().is_multiple_of(2) {
         return Err(format!(
             "boolean produced {} edge points, which cannot be paired into halfedges",
             pts.len()

@@ -1525,10 +1525,7 @@ fn chain(
         if !closed {
             // Backward from the first cell's start.
             let mut head = points[first].0;
-            loop {
-                let Some((k, at_start)) = find(usize::MAX, head, &used) else {
-                    break;
-                };
+            while let Some((k, at_start)) = find(usize::MAX, head, &used) {
                 used[k] = true;
                 // The cell must end at `head`.
                 let (prev, (start, end)) = if at_start {
@@ -1574,7 +1571,7 @@ mod tests {
         for j in 0..=k / 2 {
             let w = k - 2 * j;
             if k % 2 == 1 {
-                let sign = if ((k - 1) / 2 - j) % 2 == 0 {
+                let sign = if ((k - 1) / 2 - j).is_multiple_of(2) {
                     1.0
                 } else {
                     -1.0
@@ -1583,7 +1580,11 @@ mod tests {
             } else if w == 0 {
                 u[0] = binomial * scale / 2.0;
             } else {
-                let sign = if (k / 2 - j) % 2 == 0 { 1.0 } else { -1.0 };
+                let sign = if (k / 2 - j).is_multiple_of(2) {
+                    1.0
+                } else {
+                    -1.0
+                };
                 u[2 * w - 1] = sign * binomial * scale;
             }
             binomial = binomial * (k - j) as Scalar / (j + 1) as Scalar;

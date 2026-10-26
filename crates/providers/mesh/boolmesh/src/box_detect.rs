@@ -103,7 +103,7 @@ pub fn recognise(mesh: &TriMesh, eps: f64) -> Option<AlignedBox> {
     // if all corners are lattice points (e.g. a face split into 4 triangles
     // with another face missing).
     let mut plane_counts = [0usize; 6];
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let vs: [[f64; 3]; 3] = [
             corner_of(p, tri[0])?,
             corner_of(p, tri[1])?,

@@ -16,7 +16,9 @@ use axiolid_profile::{Profile, RectangleProfile};
 
 fn volume(m: &TriMesh) -> f64 {
     m.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let (a, b, c) = (
                 m.positions[t[0] as usize],

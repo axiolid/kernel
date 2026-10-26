@@ -529,11 +529,9 @@ fn principal_axes(points: &[Point3]) -> [Vec3; 3] {
                 row[p] = cs * a - sn * b;
                 row[q] = sn * a + cs * b;
             }
-            for k in 0..3 {
-                let (a, b) = (c[p][k], c[q][k]);
-                c[p][k] = cs * a - sn * b;
-                c[q][k] = sn * a + cs * b;
-            }
+            let (cp, cq) = (c[p], c[q]);
+            c[p] = core::array::from_fn(|k| cs * cp[k] - sn * cq[k]);
+            c[q] = core::array::from_fn(|k| sn * cp[k] + cs * cq[k]);
             for row in &mut v {
                 let (a, b) = (row[p], row[q]);
                 row[p] = cs * a - sn * b;
@@ -673,7 +671,7 @@ pub fn oriented_bounding_box(points: &[Point3]) -> Result<OrientedBoundingBox, B
     normals.extend(principal);
     match &hull {
         Some(h) => {
-            for t in h.indices.chunks_exact(3) {
+            for t in h.indices.as_chunks::<3>().0 {
                 let [a, b, c] = [0, 1, 2].map(|k| h.positions[t[k] as usize]);
                 normals.push((b - a).cross(c - a));
             }

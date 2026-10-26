@@ -469,7 +469,7 @@ fn power(k: usize) -> BSplineSurface {
         v_degree: 1,
         control_points: (0..=k)
             .map(|i| {
-                let c = if (k - i) % 2 == 0 { 1.0 } else { -1.0 };
+                let c = if (k - i).is_multiple_of(2) { 1.0 } else { -1.0 };
                 (0..2)
                     .map(|j| {
                         Point3::new(-1.0 + 2.0 * i as f64 / k as f64, -1.0 + 2.0 * j as f64, c)

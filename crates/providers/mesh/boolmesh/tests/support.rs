@@ -41,7 +41,7 @@ pub fn boxx(cx: f64, cy: f64, z0: f64, sx: f64, sy: f64, sz: f64, angle: f64) ->
 /// the implementation's own arithmetic cannot detect an error in it.
 pub fn volume(mesh: &TriMesh) -> f64 {
     let mut total = 0.0;
-    for corner in mesh.indices.chunks_exact(3) {
+    for corner in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[corner[0] as usize];
         let b = mesh.positions[corner[1] as usize];
         let c = mesh.positions[corner[2] as usize];
@@ -54,7 +54,7 @@ pub fn volume(mesh: &TriMesh) -> f64 {
 /// Reverse every triangle, producing a structurally valid inside-out mesh.
 pub fn inverted(mesh: &TriMesh) -> TriMesh {
     let mut flipped = mesh.clone();
-    for corner in flipped.indices.chunks_exact_mut(3) {
+    for corner in flipped.indices.as_chunks_mut::<3>().0 {
         corner.swap(1, 2);
     }
     flipped

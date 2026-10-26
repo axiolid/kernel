@@ -227,7 +227,9 @@ fn compile(node: GeometryNode) -> (CompileOutcome, DeviationReport) {
 
 fn volume(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             a.dot(b.cross(c))
@@ -251,7 +253,9 @@ fn uses_of(mesh: &TriMesh, body: &Polyhedron, (a, b): (usize, usize)) -> usize {
     };
     let (a, b) = (index(at(a)), index(at(b)));
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .filter(|t| {
             (0..3).any(|k| (t[k], t[(k + 1) % 3]) == (a, b) || (t[k], t[(k + 1) % 3]) == (b, a))
         })

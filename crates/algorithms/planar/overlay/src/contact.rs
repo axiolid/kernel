@@ -229,7 +229,7 @@ mod tests {
                 along(a, b, t, (rng.range(2), rng.range(2)))
             };
             let c = end(&mut rng);
-            let d = if rng.next() % 3 == 0 {
+            let d = if rng.next().is_multiple_of(3) {
                 (rng.range(big), rng.range(big))
             } else {
                 end(&mut rng)

@@ -11,7 +11,7 @@ pub(crate) struct GraphId(u64);
 impl GraphId {
     pub(crate) fn fresh() -> Self {
         let value = NEXT_GRAPH_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .expect("geometry graph identity space exhausted");

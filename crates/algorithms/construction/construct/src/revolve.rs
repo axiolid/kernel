@@ -203,7 +203,7 @@ pub fn revolve(
     // mesh's own orientation sidesteps that: whichever combination produced
     // it, a closed solid's sign is unambiguous.
     if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
-        for triangle in mesh.indices.chunks_exact_mut(3) {
+        for triangle in mesh.indices.as_chunks_mut::<3>().0 {
             triangle.swap(1, 2);
         }
     }

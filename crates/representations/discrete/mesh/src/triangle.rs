@@ -69,7 +69,7 @@ impl TriMesh {
 
     /// Cheap index-buffer and attribute-size validation.
     pub fn validate_structure(&self) -> Result<(), MeshValidationError> {
-        if self.indices.len() % 3 != 0 {
+        if !self.indices.len().is_multiple_of(3) {
             return Err(MeshValidationError::IncompleteTriangle {
                 index_count: self.indices.len(),
             });
@@ -147,7 +147,9 @@ impl TriMesh {
     /// Triangles in deterministic index-buffer order.
     pub fn triangles(&self) -> impl ExactSizeIterator<Item = [u32; 3]> + '_ {
         self.indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|triangle| [triangle[0], triangle[1], triangle[2]])
     }
 }
@@ -163,7 +165,7 @@ fn validate_corner_channel(
     corners: &[u32],
     corner_count: usize,
 ) -> Result<(), MeshValidationError> {
-    if channel.values.len() % channel.width != 0 {
+    if !channel.values.len().is_multiple_of(channel.width) {
         return Err(MeshValidationError::AttributeRaggedValues {
             name: channel.name.clone(),
             values: channel.values.len(),
@@ -188,7 +190,7 @@ fn validate_corner_channel(
             value_count,
         });
     }
-    for (triangle, entries) in corners.chunks_exact(3).enumerate() {
+    for (triangle, entries) in corners.as_chunks::<3>().0.iter().enumerate() {
         let unmapped = entries
             .iter()
             .filter(|&&index| index == AttributeChannel::UNMAPPED)

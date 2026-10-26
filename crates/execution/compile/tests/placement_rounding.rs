@@ -142,7 +142,9 @@ fn worst_distance(mesh: &TriMesh, samples: &[Point3]) -> Scalar {
     let key = |p: Point3| [p.x, p.y, p.z].map(|v| (v / cell).floor() as i64);
     let triangles: Vec<[Point3; 3]> = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| [0, 1, 2].map(|i| mesh.positions[t[i] as usize]))
         .collect();
     let mut cells: HashMap<[i64; 3], Vec<usize>> = HashMap::new();

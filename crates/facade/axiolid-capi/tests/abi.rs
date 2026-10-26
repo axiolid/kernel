@@ -197,7 +197,7 @@ fn mesh_audit_bounds_measurement_and_transform_are_bounded() {
 fn import_shifted_cube(context: AxiolidContextHandle) -> AxiolidMeshHandle {
     unsafe {
         let (mut positions, indices) = cube_arrays();
-        for point in positions.chunks_exact_mut(3) {
+        for point in positions.as_chunks_mut::<3>().0 {
             point[0] += 1.0;
             point[1] += 1.0;
             point[2] = point[2] * 0.5 + 0.5;

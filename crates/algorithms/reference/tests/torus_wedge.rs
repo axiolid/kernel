@@ -49,7 +49,7 @@ fn wedge(
 /// Closed, consistently oriented, one component; returns V - E + F.
 fn euler_characteristic(mesh: &TriMesh) -> i64 {
     let mut directed: HashSet<(u32, u32)> = HashSet::new();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         assert!(
             t[0] != t[1] && t[1] != t[2] && t[2] != t[0],
             "degenerate {t:?}"
@@ -175,7 +175,7 @@ fn a_torus_faces_outward_everywhere() {
     // triangle's normal must point away from the tube's centre circle.
     let (big, r) = (3.0, 1.0);
     let mesh = tessellate_primitive(&torus(big, r), Tolerance::new(1e-2, 1e-9).unwrap()).unwrap();
-    for t in mesh.indices.chunks_exact(3) {
+    for t in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
         let centre = (a + b + c) / 3.0;
         let rho = (centre.x * centre.x + centre.y * centre.y).sqrt();

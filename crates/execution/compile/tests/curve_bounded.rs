@@ -23,7 +23,9 @@ fn compiler() -> ReferenceMeshCompiler<BoolmeshBoolean> {
 
 fn area(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             0.5 * (b - a).cross(c - a).length()
@@ -106,7 +108,7 @@ fn a_four_by_three_plane_with_a_hole_has_area_eleven() {
     assert_eq!(outcome.closure, MeshClosure::Surface);
     assert_eq!(area(&outcome.mesh), 11.0);
     // Every triangle faces along the plane's normal.
-    for t in outcome.mesh.indices.chunks_exact(3) {
+    for t in outcome.mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| outcome.mesh.positions[t[k] as usize]);
         assert!((b - a).cross(c - a).z > 0.0);
     }
@@ -275,7 +277,7 @@ fn a_clockwise_outer_loop_still_faces_along_the_normal() {
     )
     .unwrap();
     assert_eq!(area(&outcome.mesh), 11.0);
-    for t in outcome.mesh.indices.chunks_exact(3) {
+    for t in outcome.mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| outcome.mesh.positions[t[k] as usize]);
         assert!((b - a).cross(c - a).z > 0.0);
     }

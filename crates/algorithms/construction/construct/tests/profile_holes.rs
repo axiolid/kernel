@@ -577,7 +577,7 @@ fn hole_layout(rng: &mut Lcg, round: usize) -> (Vec<Point2>, Vec<Vec<Point2>>) {
         })
         .collect();
     // The outer ring sometimes carries collinear points too.
-    let outer = if round % 3 == 0 {
+    let outer = if round.is_multiple_of(3) {
         shape(4, 16.0, 16.0)
             .into_iter()
             .map(|p| Point2::new(p.x - 8.0, p.y - 8.0))

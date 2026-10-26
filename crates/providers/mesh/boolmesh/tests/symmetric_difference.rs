@@ -40,7 +40,9 @@ fn box_at(min: [f64; 3], max: [f64; 3]) -> TriMesh {
 /// Enclosed volume by the divergence theorem.
 fn volume(mesh: &TriMesh) -> f64 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let a = mesh.positions[t[0] as usize];
             let b = mesh.positions[t[1] as usize];

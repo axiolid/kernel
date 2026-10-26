@@ -218,7 +218,7 @@ fn concatenate(a: &TriMesh, b: &TriMesh) -> TriMesh {
 /// Flip winding so the surface bounds the complement of what it bounded.
 fn reversed(mesh: &TriMesh) -> TriMesh {
     let mut indices = mesh.indices.clone();
-    for triangle in indices.chunks_exact_mut(3) {
+    for triangle in indices.as_chunks_mut::<3>().0 {
         triangle.swap(0, 1);
     }
     TriMesh::new(mesh.positions.clone(), indices)
@@ -239,7 +239,7 @@ fn components(mesh: &TriMesh) -> usize {
         node
     }
 
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let root = find(&mut parent, triangle[0] as usize);
         for corner in &triangle[1..] {
             let other = find(&mut parent, *corner as usize);
@@ -318,7 +318,9 @@ fn same_geometry(a: &TriMesh, b: &TriMesh) -> bool {
     }
     let mut left: Vec<[u32; 3]> = a
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let mut v = [t[0], t[1], t[2]];
             v.sort_unstable();
@@ -327,7 +329,9 @@ fn same_geometry(a: &TriMesh, b: &TriMesh) -> bool {
         .collect();
     let mut right: Vec<[u32; 3]> = b
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let mut v = [t[0], t[1], t[2]];
             v.sort_unstable();
@@ -345,14 +349,14 @@ fn same_geometry(a: &TriMesh, b: &TriMesh) -> bool {
 /// straddle its plane *and* the crossing lies inside the triangle. Shared
 /// vertices and edge contact are not proper crossings.
 fn surfaces_intersect(a: &TriMesh, b: &TriMesh, options: &ExecutionOptions) -> GeomResult<bool> {
-    for left in a.indices.chunks_exact(3) {
+    for left in a.indices.as_chunks::<3>().0 {
         options.check_cancelled()?;
         let triangle_a = [
             a.positions[left[0] as usize],
             a.positions[left[1] as usize],
             a.positions[left[2] as usize],
         ];
-        for right in b.indices.chunks_exact(3) {
+        for right in b.indices.as_chunks::<3>().0 {
             let triangle_b = [
                 b.positions[right[0] as usize],
                 b.positions[right[1] as usize],
@@ -447,7 +451,7 @@ pub(crate) fn contains_point_exact(mesh: &TriMesh, point: Point3) -> Option<bool
 
 /// Whether `point` lies exactly on one of the mesh's triangles.
 fn on_surface(mesh: &TriMesh, point: Point3) -> bool {
-    mesh.indices.chunks_exact(3).any(|triangle| {
+    mesh.indices.as_chunks::<3>().0.iter().any(|triangle| {
         let p = mesh.positions[triangle[0] as usize];
         let q = mesh.positions[triangle[1] as usize];
         let r = mesh.positions[triangle[2] as usize];
@@ -494,7 +498,7 @@ fn parity_along(mesh: &TriMesh, origin: Point3, direction: [f64; 3]) -> Option<b
     );
 
     let mut crossings = 0usize;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let p = mesh.positions[triangle[0] as usize];
         let q = mesh.positions[triangle[1] as usize];
         let r = mesh.positions[triangle[2] as usize];

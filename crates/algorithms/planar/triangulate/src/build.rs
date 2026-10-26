@@ -615,7 +615,7 @@ impl Builder {
     fn finish(self, original: &[Point2], constraints: &[Constraint]) -> Triangulation {
         let g = self.infinite;
         let mut triangles = Vec::with_capacity(self.triangles.len());
-        for t in self.triangles.chunks_exact(3) {
+        for t in self.triangles.as_chunks::<3>().0 {
             if !t.contains(&g) {
                 triangles.extend_from_slice(t);
             }

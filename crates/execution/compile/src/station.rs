@@ -1622,7 +1622,7 @@ pub(crate) fn sectioned_surface(
 /// tag at one point would leave a sliver no consumer can orient.
 fn reject_degenerate(mesh: &TriMesh, tolerance: Tolerance) -> GeomResult<()> {
     let floor = tolerance.linear() * tolerance.linear();
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[triangle[k] as usize]);
         if (b - a).cross(c - a).length() <= floor {
             return Err(GeomError::Degenerate(

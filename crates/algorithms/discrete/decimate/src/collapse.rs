@@ -81,11 +81,11 @@ pub fn decimate(
     target: DecimateTarget,
     tolerance: Tolerance,
 ) -> Result<(TriMesh, DecimateReport), DecimateError> {
-    if mesh.indices.len() % 3 != 0 {
+    if !mesh.indices.len().is_multiple_of(3) {
         return Err(DecimateError::RaggedIndices(mesh.indices.len()));
     }
     let vertex_count = mesh.positions.len();
-    for (t, chunk) in mesh.indices.chunks_exact(3).enumerate() {
+    for (t, chunk) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         for &index in chunk {
             if index as usize >= vertex_count {
                 return Err(DecimateError::IndexOutOfRange(t, index));
@@ -126,7 +126,9 @@ fn run(
     let mut positions = mesh.positions.clone();
     let mut triangles: Vec<[u32; 3]> = mesh
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| [c[0], c[1], c[2]])
         .collect();
 

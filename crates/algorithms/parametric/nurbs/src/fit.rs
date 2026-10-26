@@ -166,11 +166,13 @@ fn solve(mut matrix: Vec<Vec<Scalar>>, mut rhs: Vec<[Scalar; 3]>) -> GeomResult<
             if factor == 0.0 {
                 continue;
             }
-            for k in column..n {
-                matrix[row][k] -= factor * matrix[column][k];
+            let pivot_row = matrix[column].clone();
+            for (slot, pivot) in matrix[row].iter_mut().zip(&pivot_row).skip(column) {
+                *slot -= factor * pivot;
             }
-            for axis in 0..3 {
-                rhs[row][axis] -= factor * rhs[column][axis];
+            let pivot_rhs = rhs[column];
+            for (slot, pivot) in rhs[row].iter_mut().zip(pivot_rhs) {
+                *slot -= factor * pivot;
             }
         }
     }

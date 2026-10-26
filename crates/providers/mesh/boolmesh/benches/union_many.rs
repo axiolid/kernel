@@ -36,7 +36,7 @@ fn boxx(cx: f64, cy: f64, cz: f64, s: f64) -> TriMesh {
 /// Enclosed volume by the divergence theorem.
 fn volume(mesh: &TriMesh) -> f64 {
     let mut total = 0.0;
-    for corner in mesh.indices.chunks_exact(3) {
+    for corner in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[corner[0] as usize];
         let b = mesh.positions[corner[1] as usize];
         let c = mesh.positions[corner[2] as usize];

@@ -976,7 +976,7 @@ impl BoolmeshBoolean {
             // reason this axis can be threaded while intra-solve threading
             // cannot pay for itself -- there is no coordination inside the
             // level, only a join at the end of it.
-            let pairs = level.chunks_exact(2);
+            let pairs = level.as_chunks::<2>().0;
             let step = |pair: &[Node<'_>], budget: Option<usize>| -> GeomResult<(TriMesh, Fates)> {
                 let out = self.union(&pair[0].0, &pair[1].0, options, budget)?;
                 // Both halves' histories, then this union.
@@ -1005,7 +1005,8 @@ impl BoolmeshBoolean {
                 // every pair of the level is in flight however few workers
                 // there are. A finished pair's result is covered by its own
                 // term.
-                let chunks: Vec<&[Node<'_>]> = pairs.collect();
+                let chunks: Vec<&[Node<'_>]> =
+                    pairs.iter().map(<[Node<'_>; 2]>::as_slice).collect();
                 let elements = chunks.iter().map(|pair| triangles(pair)).sum();
                 crate::budget::charge_step(options, held, chunks.len(), elements)?;
                 // Each pair charges its result against its own share of the
@@ -1037,7 +1038,7 @@ impl BoolmeshBoolean {
             #[cfg(not(feature = "parallel-batch"))]
             let mut next: Vec<Node<'_>> = {
                 let mut acc: Vec<Node<'_>> = Vec::with_capacity(level.len() / 2 + 1);
-                for pair in pairs {
+                for pair in pairs.iter().map(<[Node<'_>; 2]>::as_slice) {
                     // One boolean at a time, on top of the level and the
                     // results so far.
                     let done: usize = acc.iter().map(node_bytes).sum();
@@ -1205,7 +1206,7 @@ mod tests {
     #[test]
     fn an_outward_result_is_accepted() {
         let mut mesh = inside_out_tetrahedron();
-        for corner in mesh.indices.chunks_exact_mut(3) {
+        for corner in mesh.indices.as_chunks_mut::<3>().0 {
             corner.swap(1, 2);
         }
         assert!(check_result(&mesh, BooleanOperator::Difference).is_ok());

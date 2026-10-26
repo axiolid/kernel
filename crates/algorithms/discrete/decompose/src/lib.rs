@@ -212,11 +212,11 @@ pub fn convex_decompose_with(
     tolerance: Tolerance,
     splitter: &split::Splitter<'_>,
 ) -> Result<Decomposition, DecomposeError> {
-    if mesh.indices.len() % 3 != 0 {
+    if !mesh.indices.len().is_multiple_of(3) {
         return Err(DecomposeError::RaggedIndices(mesh.indices.len()));
     }
     let vertex_count = mesh.positions.len();
-    for (triangle, chunk) in mesh.indices.chunks_exact(3).enumerate() {
+    for (triangle, chunk) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         for &index in chunk {
             if index as usize >= vertex_count {
                 return Err(DecomposeError::IndexOutOfRange(triangle, index));
@@ -387,7 +387,7 @@ fn worst_concavity(positions: &[Point3], indices: &[u32], tolerance: Tolerance) 
         .iter()
         .fold(0.0, |m: Scalar, p| m.max((*p - centre).length()));
 
-    for chunk in indices.chunks_exact(3) {
+    for chunk in indices.as_chunks::<3>().0 {
         let a = positions[chunk[0] as usize];
         let b = positions[chunk[1] as usize];
         let c = positions[chunk[2] as usize];
@@ -482,7 +482,7 @@ fn clip(mesh: &TriMesh, normal: Vec3, offset: Scalar, tolerance: Tolerance) -> O
         })
     };
 
-    for chunk in mesh.indices.chunks_exact(3) {
+    for chunk in mesh.indices.as_chunks::<3>().0 {
         let triangle = [
             mesh.positions[chunk[0] as usize],
             mesh.positions[chunk[1] as usize],
@@ -750,7 +750,7 @@ mod concavity_tests {
     fn unpruned(positions: &[Point3], indices: &[u32], tolerance: Tolerance) -> Option<Reflex> {
         let linear = tolerance.linear();
         let mut worst: Option<Reflex> = None;
-        for chunk in indices.chunks_exact(3) {
+        for chunk in indices.as_chunks::<3>().0 {
             let a = positions[chunk[0] as usize];
             let b = positions[chunk[1] as usize];
             let c = positions[chunk[2] as usize];

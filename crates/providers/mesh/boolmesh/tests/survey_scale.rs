@@ -168,7 +168,7 @@ fn per_triangle_rebasing_versus_per_mesh() {
             // edge differences that are small regardless of where the mesh
             // sits.
             let mut total = 0.0;
-            for corner in plate.indices.chunks_exact(3) {
+            for corner in plate.indices.as_chunks::<3>().0 {
                 let a = plate.positions[corner[0] as usize];
                 let b = plate.positions[corner[1] as usize];
                 let c = plate.positions[corner[2] as usize];

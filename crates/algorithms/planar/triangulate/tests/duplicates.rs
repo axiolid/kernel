@@ -64,7 +64,9 @@ fn assert_merged(name: &str, points: &[Point2], constraints: &[Constraint], tri:
     for c in &carried {
         assert!(
             tri.triangles()
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .any(|t| t.contains(&c.a) && t.contains(&c.b)),
             "{name}: constraint {c:?} is missing"
         );

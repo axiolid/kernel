@@ -70,7 +70,9 @@ impl TriangleGrid {
     fn new(mesh: &TriMesh, reach: Scalar) -> Self {
         let triangles: Vec<[Point3; 3]> = mesh
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|t| [0, 1, 2].map(|i| mesh.positions[t[i] as usize]))
             .collect();
         let (lo, hi) = mesh.positions.iter().fold(

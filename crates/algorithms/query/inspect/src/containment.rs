@@ -42,7 +42,7 @@ pub fn contains(mesh: &TriMesh, point: Point3) -> Option<bool> {
 /// degeneracy, which is exactly what the retry relies on.
 pub fn winding_number_along(mesh: &TriMesh, point: Point3, direction: Vec3) -> Option<i32> {
     let mut winding = 0;
-    for triangle in mesh.indices.chunks_exact(3) {
+    for triangle in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.positions[triangle[0] as usize];
         let b = mesh.positions[triangle[1] as usize];
         let c = mesh.positions[triangle[2] as usize];

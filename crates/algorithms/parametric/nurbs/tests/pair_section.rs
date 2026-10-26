@@ -239,9 +239,9 @@ fn a_small_window_inside_one_patch_pair_still_finds_its_stretch() {
     let a = sheet(-1.0, -1.0, [[-0.1; 3], [0.0; 3], [0.1; 3]]);
     let c = [1.0, -1.0, 1.0];
     let mut h = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            h[i][j] = 0.05 * c[i] - 0.1 * (j as f64 - 1.0);
+    for (row, ci) in h.iter_mut().zip(c) {
+        for (j, slot) in row.iter_mut().enumerate() {
+            *slot = 0.05 * ci - 0.1 * (j as f64 - 1.0);
         }
     }
     let b = sheet(-1.0, -1.0, h);

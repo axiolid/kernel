@@ -78,7 +78,9 @@ pub unsafe extern "C" fn axiolid_v0_4_mesh_import(
             );
         }
         let positions = positions
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|value| Point3::new(value[0], value[1], value[2]))
             .collect();
         let handle = context
@@ -166,7 +168,12 @@ pub unsafe extern "C" fn axiolid_v0_4_mesh_copy(
             // SAFETY: same invariant as positions, with three indices per triangle.
             unsafe { std::slice::from_raw_parts_mut(out_triangle_indices, mesh.indices.len()) }
         };
-        for (target, point) in positions.chunks_exact_mut(3).zip(&mesh.positions) {
+        for (target, point) in positions
+            .as_chunks_mut::<3>()
+            .0
+            .iter_mut()
+            .zip(&mesh.positions)
+        {
             target.copy_from_slice(&[point.x, point.y, point.z]);
         }
         indices.copy_from_slice(&mesh.indices);

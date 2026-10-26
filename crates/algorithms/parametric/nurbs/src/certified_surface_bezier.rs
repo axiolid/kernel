@@ -708,8 +708,8 @@ impl Patch {
         };
         if along_u {
             for rows in self.controls.windows(2) {
-                for v in 0..v_count {
-                    push_difference(&rows[0][v], &rows[1][v])?;
+                for (before, after) in rows[0].iter().zip(&rows[1]) {
+                    push_difference(before, after)?;
                 }
             }
         } else {

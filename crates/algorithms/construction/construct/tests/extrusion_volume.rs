@@ -77,7 +77,7 @@ fn ring_area(rings: &axiolid_construct::profile::Rings) -> Scalar {
 fn assert_closed_manifold(mesh: &TriMesh, what: &str) {
     use std::collections::HashMap;
     let mut edges: HashMap<(u32, u32), i32> = HashMap::new();
-    for c in mesh.indices.chunks_exact(3) {
+    for c in mesh.indices.as_chunks::<3>().0 {
         for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
             *edges.entry(key).or_default() += if a < b { 1 } else { -1 };
@@ -444,7 +444,9 @@ fn the_oracle_refuses_an_open_mesh_a_raw_integral_would_accept() {
 
     let raw: Scalar = holed
         .indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|c| {
             let a = holed.positions[c[0] as usize];
             let b = holed.positions[c[1] as usize];

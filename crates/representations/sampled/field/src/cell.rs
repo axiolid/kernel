@@ -137,11 +137,11 @@ impl LayeredCell {
     /// rather than guessed. A pair whose span is within the linear tolerance is
     /// reported as [`LayeredFieldError::DegenerateOccupancy`].
     pub fn derive_occupancy(&self, tolerance: Tolerance) -> Result<Self, LayeredFieldError> {
-        if self.surfaces.len() % 2 != 0 {
+        if !self.surfaces.len().is_multiple_of(2) {
             return Err(LayeredFieldError::UnbalancedCrossings);
         }
         let mut spans = Vec::with_capacity(self.surfaces.len() / 2);
-        for pair in self.surfaces.chunks_exact(2) {
+        for pair in self.surfaces.as_chunks::<2>().0 {
             if pair[0].facing != SurfaceFacing::AgainstNormal
                 || pair[1].facing != SurfaceFacing::WithNormal
             {

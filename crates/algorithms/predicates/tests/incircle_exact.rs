@@ -58,9 +58,9 @@ fn insphere_reference(a: Point3, b: Point3, c: Point3, e: Point3, p: Point3) -> 
         det3([pick(1), pick(2), pick(3)])
     };
     let mut total = Dyadic::from_f64(0.0);
-    for k in 0..4 {
-        let term = m[0][k].mul(&minor(k));
-        total = if k % 2 == 0 {
+    for (k, entry) in m[0].iter().enumerate() {
+        let term = entry.mul(&minor(k));
+        total = if k.is_multiple_of(2) {
             total.add(&term)
         } else {
             total.sub(&term)

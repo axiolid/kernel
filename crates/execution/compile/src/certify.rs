@@ -530,7 +530,9 @@ impl TriangleIndex {
     fn with_flatness(mesh: &TriMesh, flatness: Scalar) -> Option<Self> {
         let (triangles, ids): (Vec<[Point3; 3]>, Vec<[u32; 3]>) = mesh
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .filter_map(|t| {
                 let corners = [0, 1, 2].map(|k| mesh.positions.get(t[k] as usize).copied());
                 match corners {

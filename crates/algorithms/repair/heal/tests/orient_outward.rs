@@ -38,7 +38,7 @@ fn outward_cube() -> TriMesh {
 /// The same cube with every triangle reversed: inside-out.
 fn inward_cube() -> TriMesh {
     let mut mesh = outward_cube();
-    for triangle in mesh.indices.chunks_exact_mut(3) {
+    for triangle in mesh.indices.as_chunks_mut::<3>().0 {
         triangle.swap(1, 2);
     }
     mesh

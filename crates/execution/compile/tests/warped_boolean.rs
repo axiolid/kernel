@@ -347,7 +347,9 @@ fn boolean_samples(
 
 fn distance_to_mesh(p: Point3, mesh: &TriMesh) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .filter_map(|t| {
             let tri = [0, 1, 2].map(|i| mesh.positions[t[i] as usize]);
             axiolid_measure::proximity::closest_point_on_triangle(p, tri)

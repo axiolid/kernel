@@ -58,7 +58,7 @@ fn edge_pairing_defects(mesh: &TriMesh) -> usize {
         (p.x.to_bits(), p.y.to_bits(), p.z.to_bits())
     };
     let mut counts: HashMap<(PosKey, PosKey), i32> = HashMap::new();
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         for &(a, b) in &[(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
             let (ka, kb) = (key(a), key(b));
             let (k, delta) = if ka < kb {
@@ -83,7 +83,7 @@ fn edge_pairing_defects(mesh: &TriMesh) -> usize {
 fn duplicate_faces(mesh: &TriMesh) -> usize {
     use std::collections::HashMap;
     let mut seen: HashMap<[PosKey; 3], usize> = HashMap::new();
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let mut key: Vec<PosKey> = tri
             .iter()
             .map(|&i| {

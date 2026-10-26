@@ -21,7 +21,11 @@ impl Rng {
     fn float(&mut self) -> f64 {
         let mantissa = (self.next() >> 11) as f64 / (1u64 << 53) as f64;
         let exponent = (self.next() % 120) as i32 - 60;
-        let sign = if self.next() % 2 == 0 { 1.0 } else { -1.0 };
+        let sign = if self.next().is_multiple_of(2) {
+            1.0
+        } else {
+            -1.0
+        };
         sign * (0.5 + mantissa) * 2f64.powi(exponent)
     }
 }

@@ -30,7 +30,7 @@ fn square(dx: f64, dy: f64, z: f64) -> TriMesh {
 fn sampled_minimum(first: &TriMesh, second: &TriMesh, steps: usize) -> f64 {
     let samples = |mesh: &TriMesh| {
         let mut points = Vec::new();
-        for corner in mesh.indices.chunks_exact(3) {
+        for corner in mesh.indices.as_chunks::<3>().0 {
             let a = mesh.positions[corner[0] as usize];
             let b = mesh.positions[corner[1] as usize];
             let c = mesh.positions[corner[2] as usize];

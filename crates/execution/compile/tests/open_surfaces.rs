@@ -84,7 +84,9 @@ fn compile(t: &Trimmed) -> GeomResult<(CompileOutcome, DeviationReport)> {
 
 fn area(mesh: &TriMesh) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             0.5 * (b - a).cross(c - a).length()
@@ -94,7 +96,9 @@ fn area(mesh: &TriMesh) -> Scalar {
 
 fn distance_to_mesh(mesh: &TriMesh, p: Point3) -> Scalar {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let triangle = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             (closest_point_on_triangle(p, triangle).unwrap() - p).length()
@@ -148,7 +152,9 @@ fn cylinder() -> Surface {
 /// The mean of the mesh's triangle normals, area weighted.
 fn mean_normal(mesh: &TriMesh) -> Vec3 {
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [0, 1, 2].map(|k| mesh.positions[t[k] as usize]);
             (b - a).cross(c - a)
@@ -277,7 +283,7 @@ fn a_trimmed_bspline_and_a_sphere_over_its_pole_are_within_their_bounds() {
     let (u, v) = ((0.0, PI), (FRAC_PI_2 - PI / 6.0, FRAC_PI_2));
     let t = trimmed(sphere.clone(), u, v, true, true);
     let (outcome, report) = compile(&t).unwrap();
-    for tri in outcome.mesh.indices.chunks_exact(3) {
+    for tri in outcome.mesh.indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|k| outcome.mesh.positions[tri[k] as usize]);
         assert!(
             a != b && b != c && c != a,
