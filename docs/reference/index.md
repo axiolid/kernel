@@ -63,7 +63,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.3 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.2 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
-| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | not released | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
+| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.0 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.7 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.2 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.2 | Portable, deterministic intersections for linear geometry |
@@ -95,12 +95,12 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.3 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.2 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.5 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.6 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.34 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.4.2 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid`](./crates/axiolid) | `facade` | 0.4.3 | Feature-gated facade for Axiolid's format-neutral geometry stack |
 | [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.3.3 | Versioned, memory-safe C ABI for the Axiolid application facade. |

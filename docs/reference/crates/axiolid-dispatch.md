@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-28) |
+| Latest release | 0.3.6 (2026-10-28) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,14 +53,21 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-28):
+Latest release, 0.3.6 (2026-10-28):
 
-### Changed
+### Fixed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `MeshPlaneSectionRegistry` refuses a mesh whose index count is not a
+  multiple of three with `InvalidInput`; it used to drop the partial
+  triangle and could accept the rest as a closed solid.
+
+### Added
+
+- `MeshHiddenLinesRegistry` behind the `mesh-hidden-lines` feature: shape,
+  budget and topology checks before dispatch, outcome validation, fallback
+  only on unsupported or unavailable providers, and refusals that name the
+  mesh at fault (ADR 0090, #138). `axiolid-hidden-lines` is the first
+  provider behind it. Adjacent pieces of one source edge must differ in
+  visibility when hidden pieces are requested.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

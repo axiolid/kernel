@@ -8,6 +8,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.3 - 2026-10-28
+
+### Added
+
+- `mesh-hidden-lines` and `dispatch-mesh-hidden-lines` features, with the
+  `axiolid::mesh_hidden_lines` module: the orthographic hidden-line
+  drawing contract and its registry (ADR 0090, #138). Opt-in; the bundles
+  do not include it.
+- `hidden-lines-provider` feature: `axiolid::mesh_hidden_lines::ScalarHiddenLines`,
+  the exact scalar provider (`axiolid-hidden-lines`, #138).
+
 ### 0.4.2 - 2026-10-28
 
 ### Changed
@@ -2015,6 +2026,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.6 - 2026-10-28
+
+### Fixed
+
+- `MeshPlaneSectionRegistry` refuses a mesh whose index count is not a
+  multiple of three with `InvalidInput`; it used to drop the partial
+  triangle and could accept the rest as a closed solid.
+
+### Added
+
+- `MeshHiddenLinesRegistry` behind the `mesh-hidden-lines` feature: shape,
+  budget and topology checks before dispatch, outcome validation, fallback
+  only on unsupported or unavailable providers, and refusals that name the
+  mesh at fault (ADR 0090, #138). `axiolid-hidden-lines` is the first
+  provider behind it. Adjacent pieces of one source edge must differ in
+  visibility when hidden pieces are requested.
+
 ### 0.3.5 - 2026-10-28
 
 ### Changed
@@ -2818,6 +2846,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 - Repairs keep attribute channels and normals in step with the geometry they rewrite (#114). Weld compacts per-vertex channels and normals; a seam drops the channel by name, a hard edge switches normals to corner-indexed. Dropping or flipping triangles moves corner-indexed normals with them.
 - `RepairReport::attribute_fates` names every input channel's fate.
+
+
+## axiolid-hidden-lines
+
+### 0.1.0 - 2026-10-28
+
+### Added
+
+- `ScalarHiddenLines`, the exact scalar provider for `MeshHiddenLines`
+  (ADR 0090, #138): boundary, silhouette and crease edges of triangle
+  meshes split into visible and hidden pieces by exact interval and dyadic
+  decisions, with endpoints that are the exact points rounded once. A near
+  clipping plane that cuts a `Solid` mesh is refused as `UnsupportedInput`
+  naming it.
 
 
 ## axiolid-inspect

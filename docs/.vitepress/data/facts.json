@@ -4,10 +4,10 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.4.2",
+      "released": "0.4.3",
       "released_date": "2026-10-28",
       "role": "facade",
-      "version": "0.4.2"
+      "version": "0.4.3"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -157,10 +157,10 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.5",
+      "released": "0.3.6",
       "released_date": "2026-10-28",
       "role": "execution.dispatch",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
@@ -238,8 +238,8 @@
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
-      "released": null,
-      "released_date": null,
+      "released": "0.1.0",
+      "released_date": "2026-10-28",
       "role": "algorithm.discrete",
       "version": "0.1.0"
     },

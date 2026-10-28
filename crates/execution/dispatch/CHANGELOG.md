@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-28
+
 ### Fixed
 
 - `MeshPlaneSectionRegistry` refuses a mesh whose index count is not a

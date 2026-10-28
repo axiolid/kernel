@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-28
+
 ### Added
 
 - `ScalarHiddenLines`, the exact scalar provider for `MeshHiddenLines`

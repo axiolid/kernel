@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-28
+
 ### Added
 
 - `mesh-hidden-lines` and `dispatch-mesh-hidden-lines` features, with the

@@ -80,7 +80,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Format-agnostic Axiolid geometry kernel. Leaf crates remain independently consumable.
-axiolid = { path = "crates/facade/axiolid", version = "0.4.1", default-features = false }
+axiolid = { path = "crates/facade/axiolid", version = "0.4.3", default-features = false }
 axiolid-core = { path = "crates/foundation/core", version = "0.3.4" }
 axiolid-mesh = { path = "crates/representations/discrete/mesh", version = "0.3.5" }
 axiolid-pointcloud = { path = "crates/representations/discrete/pointcloud", version = "0.3.3" }
@@ -144,7 +144,7 @@ axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operatio
 axiolid-curve-evaluate-contract = { path = "crates/contracts/operations/curve-evaluate", version = "0.3.7" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.3.1" }
 axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.0" }
-axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.4", default-features = false }
+axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.6", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.3.2", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.3.1", default-features = false }
 axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.3.6" }

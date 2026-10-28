@@ -8,10 +8,11 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.1.0) |
+| Latest release | 0.1.0 (2026-10-28) |
+| crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_hidden_lines/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_hidden_lines/index.html) · [docs.rs](https://docs.rs/axiolid-hidden-lines) |
 | Source | [`crates/algorithms/discrete/hidden-lines/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/discrete/hidden-lines) |
 
 ## Overview
@@ -39,6 +40,15 @@ It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
 ## Changes
 
-No release yet.
+Latest release, 0.1.0 (2026-10-28):
+
+### Added
+
+- `ScalarHiddenLines`, the exact scalar provider for `MeshHiddenLines`
+  (ADR 0090, #138): boundary, silhouette and crease edges of triangle
+  meshes split into visible and hidden pieces by exact interval and dyadic
+  decisions, with endpoints that are the exact points rounded once. A near
+  clipping plane that cuts a `Solid` mesh is refused as `UnsupportedInput`
+  naming it.
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)
