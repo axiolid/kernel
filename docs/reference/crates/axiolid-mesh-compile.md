@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.32 (2026-10-28) |
+| Latest release | 0.3.33 (2026-10-28) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,23 +78,15 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.32 (2026-10-28):
-
-### Changed
-
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+Latest release, 0.3.33 (2026-10-28):
 
 ### Fixed
 
-- An edge without a p-curve that leaves its B-spline face's surface by more
-  than the linear tolerance is refused by name ("leaves its B-spline face's
-  surface"), where the certified search ran out of budget refining toward
-  the parameter resolution and reported `BudgetExceeded` (#320, ADR 0086
-  amendment). A sample whose strict search overruns its budget is retried at
-  the model tolerance and accepted when that pass proves it unique.
+- A mesh `Revolution` or `TaperedRevolution` whose profile crosses the axis
+  now fails with `InvalidInput` instead of compiling a self-intersecting
+  solid, and one touching it with `UnsupportedInput` instead of compiling a
+  degenerate solid, for full and partial turns alike (#351, from
+  `axiolid-construct`; proper meshing of touching profiles is tracked in
+  #363).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

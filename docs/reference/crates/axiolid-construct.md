@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.21 (2026-10-28) |
+| Latest release | 0.3.22 (2026-10-28) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -65,14 +65,20 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.21 (2026-10-28):
+Latest release, 0.3.22 (2026-10-28):
 
-### Changed
+### Fixed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `revolve` and `tapered_revolve` (the mesh path) refuse a profile whose
+  vertices lie on both sides of an in-plane axis (`InvalidInput`), judged by
+  an exact sign with no tolerance band; they used to sweep a
+  self-intersecting solid and return it as valid. A tapered revolution
+  judges the start and end sections together (#351).
+- A profile touching the axis is now refused (`UnsupportedInput`) for full
+  and partial turns alike, as the exact path does for full turns. This
+  includes cylinders, cones and spheres revolved from a profile with an edge
+  or vertex on the axis, and pie-slice partial turns, which used to mesh
+  with degenerate triangles; meshing them properly is tracked in #363. An
+  axis leaning out of the profile plane is still unchecked (#362).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

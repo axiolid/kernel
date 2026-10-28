@@ -657,6 +657,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.22 - 2026-10-28
+
+### Fixed
+
+- `revolve` and `tapered_revolve` (the mesh path) refuse a profile whose
+  vertices lie on both sides of an in-plane axis (`InvalidInput`), judged by
+  an exact sign with no tolerance band; they used to sweep a
+  self-intersecting solid and return it as valid. A tapered revolution
+  judges the start and end sections together (#351).
+- A profile touching the axis is now refused (`UnsupportedInput`) for full
+  and partial turns alike, as the exact path does for full turns. This
+  includes cylinders, cones and spheres revolved from a profile with an edge
+  or vertex on the axis, and pie-slice partial turns, which used to mesh
+  with degenerate triangles; meshing them properly is tracked in #363. An
+  axis leaning out of the profile plane is still unchecked (#362).
+
 ### 0.3.21 - 2026-10-28
 
 ### Changed
@@ -3532,6 +3548,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.33 - 2026-10-28
+
+### Fixed
+
+- A mesh `Revolution` or `TaperedRevolution` whose profile crosses the axis
+  now fails with `InvalidInput` instead of compiling a self-intersecting
+  solid, and one touching it with `UnsupportedInput` instead of compiling a
+  degenerate solid, for full and partial turns alike (#351, from
+  `axiolid-construct`; proper meshing of touching profiles is tracked in
+  #363).
 
 ### 0.3.32 - 2026-10-28
 

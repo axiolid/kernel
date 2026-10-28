@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.33] - 2026-10-28
+
 ### Fixed
 
 - A mesh `Revolution` or `TaperedRevolution` whose profile crosses the axis
