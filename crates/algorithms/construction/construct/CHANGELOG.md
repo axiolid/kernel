@@ -9,6 +9,22 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `pipe::fixed_reference_plan` and `pipe::fixed_reference_along_pieces`
+  sweep a profile with a fixed reference direction along a
+  tangent-continuous chain of segments and circular arcs, open or closed,
+  within the chord budget (#122). Where the reference is normal to the
+  plane of every arc or lies in it, each arc is an exact revolution of the
+  placed profile and each segment a prism, so the swept disk's per-piece
+  proof carries over. A corner, a reference parallel to the tangent, a gap
+  and a profile that folds through a bend's axis are refused by name; an
+  arc oblique to the reference is reported as twisting
+  (`FixedReferencePlan::Twisting`), which nothing here bounds. Also
+  `fixed_reference_twist`, `reference_clearance`, `ring_reach` and
+  `pipe::check_disk_along`, which refuses a disk wider than a lone arc's
+  bend.
+
 ## [0.3.24] - 2026-10-28
 
 ### Fixed

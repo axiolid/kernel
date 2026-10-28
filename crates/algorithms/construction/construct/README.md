@@ -10,7 +10,8 @@ circular cylinders), and revolution -- a full turn, or a partial turn capped by
 the profile at both ends -- covers any profile that lowers to a contour;
 a disk swept along a segment or an arc is exact; other sweeps and lofts
 produce meshes by default, a disk swept along a chain of segments and
-arcs within a proven chord bound. Geometry the kernel cannot
+arcs within a proven chord bound, as is a profile swept with a fixed
+reference along such a chain when it is tangent continuous. Geometry the kernel cannot
 represent exactly is refused, never tessellated in its place. The crate
 takes geometry and returns geometry: it owns no operation graph, cache,
 execution context or provider dispatch (ADR 0023); `axiolid-mesh-compile`

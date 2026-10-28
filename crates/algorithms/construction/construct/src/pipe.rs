@@ -164,6 +164,19 @@
 //! last span pays its measured distance from the station it was proved for.
 //! Refused by name: a loop whose frame comes back turned when no part of it
 //! is clear to take the twist.
+//!
+//! # Profiles with a fixed reference
+//!
+//! The same per-piece proof bounds an arbitrary profile swept with a fixed
+//! reference direction along a tangent-continuous chain (#122; see the
+//! `fixed_reference` module): where the reference is normal to the plane of
+//! every arc or lies in it, the fixed-reference frame is the
+//! rotation-minimising one, each arc is an exact revolution of the placed
+//! profile and each segment a prism, and the profile's rings stand in for
+//! the disk's. [`fixed_reference_plan`] refuses corners, a reference
+//! parallel to the tangent and a profile that folds through a bend's axis
+//! by name, and reports an arc oblique to the reference as twisting, which
+//! nothing here bounds.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
@@ -175,7 +188,12 @@ use crate::revolve::rotate;
 use crate::sweep;
 
 mod band;
+mod fixed_reference;
 pub use band::MitreBand;
+pub use fixed_reference::{
+    fixed_reference_along_pieces, fixed_reference_plan, fixed_reference_twist, reference_clearance,
+    ring_reach, FixedReferenceChain, FixedReferencePlan,
+};
 
 /// One smooth piece of a swept disk's directrix.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -393,6 +411,14 @@ impl PathPiece {
             }),
         }
     }
+}
+
+/// Refuse a disk of `radius` swept along `piece` alone when it is malformed
+/// or the tube would fold through a bend's axis: the checks
+/// [`swept_disk_along_pieces`] makes of each piece, for the one arc the
+/// conic sweep takes (#122).
+pub fn check_disk_along(piece: &PathPiece, radius: Scalar) -> GeomResult<()> {
+    piece.check(radius)
 }
 
 /// The largest turn a joint may make and still be tangent continuous at
