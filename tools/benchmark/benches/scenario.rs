@@ -152,28 +152,17 @@ fn hidden_line_box(min: [f64; 3], max: [f64; 3]) -> TriMesh {
     )
 }
 
-/// Hidden-line drawing of a 20 x 20 grid of boxes (#138).
+/// Hidden-line drawing of a 20 x 20 and a 50 x 50 grid of boxes (#138).
 ///
 /// A building-like layout: every cell holds a column of height 1 to 3 with a
 /// gap to its neighbours. In the isometric view every box overlaps its
 /// neighbours in the image; the cut plan sets the near plane at mid-height
 /// (2.0), so the taller columns are capped and the lower ones drawn whole.
+/// The BVH broad phase gains 3-6% at 400 boxes (exact evaluation dominates)
+/// and 27% (isometric) to 57% (cut plan) at 2,500; see the provider CHANGELOG.
 fn hidden_lines(criterion: &mut Criterion) {
     let provider = ScalarHiddenLines::new();
     let options = ExecutionOptions::new(tolerance());
-    let meshes: Vec<TriMesh> = (0..400_usize)
-        .map(|k| {
-            let (i, j) = ((k % 20) as f64, (k / 20) as f64);
-            let height = 1.0 + ((k * 7 + (k / 20) * 3) % 5) as f64 * 0.5;
-            hidden_line_box([i, j, 0.0], [i + 0.75, j + 0.75, height])
-        })
-        .collect();
-    let entries: Vec<HiddenLineMesh<'_>> = meshes
-        .iter()
-        .enumerate()
-        .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
-        .collect();
-    let limits = HiddenLineLimits::new(400, 3_200, 4_800, 100_000_000, 10_000_000);
     let (s2, s6, s3) = (
         std::f64::consts::FRAC_1_SQRT_2,
         1.0 / 6.0_f64.sqrt(),
@@ -195,29 +184,46 @@ fn hidden_lines(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("scenario/hidden-lines");
     group.sample_size(10);
 
-    for (name, view) in [("isometric", isometric), ("cut-plan", plan)] {
-        let request = HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
-        // A drawing with nothing visible, or nothing hidden, would time
-        // beautifully; require both before timing.
-        let outcome = provider
-            .hidden_lines(&request, &options)
-            .expect("the grid draws");
-        for visibility in [Visibility::Visible, Visibility::Hidden] {
-            assert!(
-                outcome.segments.iter().any(|s| s.visibility == visibility),
-                "{name}: no {visibility:?} segment"
-            );
-        }
-        group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
-        group.bench_function(name, |bencher| {
-            bencher.iter(|| {
-                black_box(
-                    provider
-                        .hidden_lines(black_box(&request), &options)
-                        .expect("the grid draws"),
-                )
+    for n in [20_usize, 50] {
+        let meshes: Vec<TriMesh> = (0..n * n)
+            .map(|k| {
+                let (i, j) = ((k % n) as f64, (k / n) as f64);
+                let height = 1.0 + ((k * 7 + (k / n) * 3) % 5) as f64 * 0.5;
+                hidden_line_box([i, j, 0.0], [i + 0.75, j + 0.75, height])
+            })
+            .collect();
+        let entries: Vec<HiddenLineMesh<'_>> = meshes
+            .iter()
+            .enumerate()
+            .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
+            .collect();
+        let limits =
+            HiddenLineLimits::new(n * n, 8 * n * n, 12 * n * n, 4_000_000_000, 100_000_000);
+        for (name, view) in [("isometric", isometric), ("cut-plan", plan)] {
+            let request =
+                HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
+            // A drawing with nothing visible, or nothing hidden, would time
+            // beautifully; require both before timing.
+            let outcome = provider
+                .hidden_lines(&request, &options)
+                .expect("the grid draws");
+            for visibility in [Visibility::Visible, Visibility::Hidden] {
+                assert!(
+                    outcome.segments.iter().any(|s| s.visibility == visibility),
+                    "{name} {n}x{n}: no {visibility:?} segment"
+                );
+            }
+            group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
+            group.bench_function(format!("{name}/{n}x{n}"), |bencher| {
+                bencher.iter(|| {
+                    black_box(
+                        provider
+                            .hidden_lines(black_box(&request), &options)
+                            .expect("the grid draws"),
+                    )
+                });
             });
-        });
+        }
     }
     group.finish();
 }
