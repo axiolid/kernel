@@ -95,12 +95,14 @@ mesh-contracts = ["contracts", "mesh", "dep:axiolid-mesh-contracts"]
 mesh-boolean = ["mesh-contracts", "dep:axiolid-mesh-boolean-contract"]
 mesh-section = ["mesh-contracts", "dep:axiolid-mesh-section-contract"]
 # Orthographic hidden-line drawings of triangle meshes (ADR 0090). Opt-in:
-# not part of `discrete`, `application` or `full` until a provider ships.
+# not part of `discrete`, `application` or `full` (a maintainer decision).
 mesh-hidden-lines = ["contracts", "mesh", "dep:axiolid-mesh-hidden-lines-contract"]
 graph-compile = ["contracts", "model", "mesh", "dep:axiolid-mesh-compile-contract"]
 dispatch-mesh-boolean = ["mesh-boolean", "dep:axiolid-dispatch", "axiolid-dispatch/mesh-boolean"]
 dispatch-mesh-section = ["mesh-section", "dep:axiolid-dispatch", "axiolid-dispatch/mesh-section"]
 dispatch-mesh-hidden-lines = ["mesh-hidden-lines", "dep:axiolid-dispatch", "axiolid-dispatch/mesh-hidden-lines"]
+# The exact scalar hidden-line provider; opt-in like the contract.
+hidden-lines-provider = ["mesh-hidden-lines", "dep:axiolid-hidden-lines"]
 generate = ["mesh", "profiles", "curves", "primitives", "mesh-boolean", "brep", "dep:axiolid-construct"]
 portable-provider = ["dep:axiolid-mesh-boolean-boolmesh", "dep:axiolid-reference"]
 application = ["discrete", "dispatch-mesh-boolean", "dispatch-mesh-section", "portable-provider"]
@@ -160,6 +162,7 @@ axiolid-overlay = { workspace = true, optional = true }
 axiolid-project = { workspace = true, optional = true }
 axiolid-route = { workspace = true, optional = true }
 axiolid-field = { workspace = true, optional = true }
+axiolid-hidden-lines = { workspace = true, optional = true }
 axiolid-mesh-hidden-lines-contract = { workspace = true, optional = true }
 axiolid-pointcloud = { workspace = true, optional = true }
 axiolid-pointcloud-reconstruction-contract = { workspace = true, optional = true }
@@ -188,4 +191,4 @@ format-neutral = true
 allowed-internal-dependencies = ["axiolid-backend-cpu", "axiolid-backend-gpu", "axiolid-brep", "axiolid-core", "axiolid-curve", "axiolid-linear", "axiolid-linear-intersection", "axiolid-predicates", "axiolid-project", "axiolid-route", "axiolid-field", "axiolid-field-ops", "axiolid-construct", "axiolid-heal", "axiolid-contracts", "axiolid-dispatch", "axiolid-evaluate", "axiolid-mesh-boolean-boolmesh",
     "axiolid-pointcloud",
     "axiolid-pointcloud-reconstruction-contract",
-    "axiolid-pointcloud-reconstruction-sdf", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-mesh-contracts", "axiolid-mesh-hidden-lines-contract", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-ray-mesh", "axiolid-reference", "axiolid-spatial", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]
+    "axiolid-pointcloud-reconstruction-sdf", "axiolid-mesh-boolean-contract", "axiolid-mesh-compile-contract", "axiolid-mesh-contracts", "axiolid-hidden-lines", "axiolid-mesh-hidden-lines-contract", "axiolid-mesh-section-contract", "axiolid-measure", "axiolid-mesh", "axiolid-model", "axiolid-nurbs", "axiolid-overlay", "axiolid-primitive", "axiolid-profile", "axiolid-ray-mesh", "axiolid-reference", "axiolid-spatial", "axiolid-surface", "axiolid-tessellation-contract", "axiolid-topology"]

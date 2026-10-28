@@ -20,7 +20,8 @@ caret rule for `0.x` versions.
 - `MeshHiddenLinesRegistry` behind the `mesh-hidden-lines` feature: shape,
   budget and topology checks before dispatch, outcome validation, fallback
   only on unsupported or unavailable providers, and refusals that name the
-  mesh at fault (ADR 0090, #138).
+  mesh at fault (ADR 0090, #138). `axiolid-hidden-lines` is the first
+  provider behind it.
 
 ## [0.3.5] - 2026-10-28
 

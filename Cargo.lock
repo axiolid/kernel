@@ -103,6 +103,7 @@ dependencies = [
  "axiolid-field",
  "axiolid-field-ops",
  "axiolid-heal",
+ "axiolid-hidden-lines",
  "axiolid-linear",
  "axiolid-linear-intersection",
  "axiolid-measure",
@@ -428,6 +429,20 @@ dependencies = [
  "axiolid-predicates",
  "axiolid-spatial",
  "thiserror",
+]
+
+[[package]]
+name = "axiolid-hidden-lines"
+version = "0.1.0"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-dispatch",
+ "axiolid-exact",
+ "axiolid-guarantees",
+ "axiolid-mesh",
+ "axiolid-mesh-hidden-lines-contract",
+ "num-bigint",
 ]
 
 [[package]]

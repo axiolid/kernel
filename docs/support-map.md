@@ -89,6 +89,7 @@ Indices that answer *which candidates*, never *what the intersection is*.
 | Convex hull (3D) | 🟢 | `generate` | Incremental hull decided by exact predicates; refuses degenerate input by name. |
 | Mesh boolean (union / difference / intersection) | 🟢 | `dispatch-mesh-boolean` | Through a swappable provider contract, with evidence and typed refusal. |
 | Mesh plane section | 🟢 | `mesh-section` | Exact binary64 plane-side classification with source-topology stitching. |
+| Mesh hidden-line drawing | 🟡 | `hidden-lines-provider` | Orthographic visible/hidden boundary, silhouette and crease edges of triangle meshes, decided exactly with correctly rounded endpoints. Brute-force candidate search; a near plane through a solid, perspective and exact B-rep edges are refused by name. |
 | Minkowski sum and difference | 🟢 | `axiolid-minkowski` † | Convex sums exactly via hull of pairwise vertex sums; general operands via convex decomposition. Difference is erosion, and refuses a non-convex subject rather than returning a too-large result. |
 | Offset and shelling | 🟢 | `generate` | Constant-distance offset with miter handling. |
 | Mesh decimation | 🟢 | `axiolid-decimate` † | Edge collapse with a bounded, *reported* deviation; cumulative per vertex so repeated collapses cannot drift. |

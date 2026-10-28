@@ -37,6 +37,7 @@ graph TD
     axiolid_fixtures["axiolid-fixtures\nrepresentation.fixtures"]
     axiolid_guarantees["axiolid-guarantees\ncontract.guarantees"]
     axiolid_heal["axiolid-heal\nalgorithm.repair"]
+    axiolid_hidden_lines["axiolid-hidden-lines\nalgorithm.discrete"]
     axiolid_inspect["axiolid-inspect\nalgorithm.query"]
     axiolid_levelset["axiolid-levelset\nalgorithm.sampled"]
     axiolid_linear["axiolid-linear\nrepresentation.atomic"]
@@ -86,6 +87,7 @@ graph TD
     axiolid --> axiolid_field
     axiolid --> axiolid_field_ops
     axiolid --> axiolid_heal
+    axiolid --> axiolid_hidden_lines
     axiolid --> axiolid_linear
     axiolid --> axiolid_linear_intersection
     axiolid --> axiolid_measure
@@ -242,6 +244,13 @@ graph TD
     axiolid_heal --> axiolid_mesh
     axiolid_heal --> axiolid_predicates
     axiolid_heal --> axiolid_spatial
+    axiolid_hidden_lines --> axiolid_contracts
+    axiolid_hidden_lines --> axiolid_core
+    axiolid_hidden_lines --> axiolid_dispatch
+    axiolid_hidden_lines --> axiolid_exact
+    axiolid_hidden_lines --> axiolid_guarantees
+    axiolid_hidden_lines --> axiolid_mesh
+    axiolid_hidden_lines --> axiolid_mesh_hidden_lines_contract
     axiolid_inspect --> axiolid_core
     axiolid_inspect --> axiolid_exact
     axiolid_inspect --> axiolid_guarantees

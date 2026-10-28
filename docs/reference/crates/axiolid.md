@@ -53,6 +53,7 @@ Default: none.
 | `gpu` | `graph-compile`, [`axiolid-backend-gpu`](./axiolid-backend-gpu) |
 | `graph-compile` | `contracts`, `model`, `mesh`, [`axiolid-mesh-compile-contract`](./axiolid-mesh-compile-contract) |
 | `heal` | `mesh`, [`axiolid-heal`](./axiolid-heal) |
+| `hidden-lines-provider` | `mesh-hidden-lines`, [`axiolid-hidden-lines`](./axiolid-hidden-lines) |
 | `integration` | `contracts` |
 | `linear` | [`axiolid-linear`](./axiolid-linear) |
 | `linear-intersection` | `linear`, `predicates`, [`axiolid-linear-intersection`](./axiolid-linear-intersection) |
@@ -100,6 +101,7 @@ Default: none.
 - [`axiolid-field`](./axiolid-field)
 - [`axiolid-field-ops`](./axiolid-field-ops)
 - [`axiolid-heal`](./axiolid-heal)
+- [`axiolid-hidden-lines`](./axiolid-hidden-lines)
 - [`axiolid-linear`](./axiolid-linear)
 - [`axiolid-linear-intersection`](./axiolid-linear-intersection)
 - [`axiolid-measure`](./axiolid-measure)

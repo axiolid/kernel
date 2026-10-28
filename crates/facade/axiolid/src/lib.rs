@@ -71,6 +71,7 @@ PICK BY TASK -- narrowest feature that does the job:
     exact B-rep topology ............ "brep"
     tessellate exact -> mesh ........ "tessellation"
     point clouds to mesh ............ "pointcloud-provider"
+    hidden-line drawings (exact) .... "hidden-lines-provider"
     2D fields, morphology ........... "field-ops"
     mesh repair / healing ........... "heal"
 
@@ -308,11 +309,15 @@ pub mod mesh_section {
 
 /// Orthographic hidden-line drawings of triangle meshes.
 ///
-/// The contract and its types; no provider ships yet (ADR 0090), so a caller
-/// supplies its own.
+/// The contract and its types (ADR 0090). The exact scalar provider arrives
+/// with the `hidden-lines-provider` feature, or a caller supplies its own.
 #[cfg(feature = "mesh-hidden-lines")]
 pub mod mesh_hidden_lines {
     pub use axiolid_mesh_hidden_lines_contract::*;
+
+    /// Reference provider: visibility decided exactly in the view's frame.
+    #[cfg(feature = "hidden-lines-provider")]
+    pub use axiolid_hidden_lines::ScalarHiddenLines;
 }
 
 #[cfg(feature = "graph-compile")]

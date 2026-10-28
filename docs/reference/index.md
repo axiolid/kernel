@@ -4,7 +4,7 @@
 
 # Crate reference
 
-Axiolid publishes 61 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
+Axiolid publishes 62 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
 
 Every page here is generated from the crate itself: its manifest, its crate documentation and its changelog. Sections follow the layers of the [crate map](/architecture/crate-map).
 
@@ -63,6 +63,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.3 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.2 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
+| [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.0 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |
 | [`axiolid-inspect`](./crates/axiolid-inspect) | `algorithm.query` | 0.3.7 | Mesh queries: clearance, containment, ray casting, and genus |
 | [`axiolid-levelset`](./crates/axiolid-levelset) | `algorithm.sampled` | 0.3.2 | Level-set extraction: a closed manifold mesh from a sampled scalar field |
 | [`axiolid-linear-intersection`](./crates/axiolid-linear-intersection) | `algorithm.query` | 0.3.2 | Portable, deterministic intersections for linear geometry |

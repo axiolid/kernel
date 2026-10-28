@@ -35,7 +35,7 @@ features=(
     mesh profiles curves surfaces topology primitives model
     evaluate nurbs tessellation spatial ray-mesh measure overlay field field-ops field-navigation heal
     contracts mesh-contracts mesh-boolean mesh-section mesh-hidden-lines graph-compile
-    dispatch-mesh-boolean dispatch-mesh-section dispatch-mesh-hidden-lines generate
+    dispatch-mesh-boolean dispatch-mesh-section dispatch-mesh-hidden-lines hidden-lines-provider generate
     cpu parallel simd gpu
     standard discrete parametric advanced full
 )
@@ -57,6 +57,7 @@ step "tessellation contract" cargo test -q -p axiolid-tessellation-contract
 step "mesh boolean contract" cargo test -q -p axiolid-mesh-boolean-contract
 step "mesh section contract" cargo test -q -p axiolid-mesh-section-contract
 step "mesh hidden-lines contract" cargo test -q -p axiolid-mesh-hidden-lines-contract
+step "hidden-lines provider" cargo test -q -p axiolid-hidden-lines --all-features
 step "mesh compile contract" cargo test -q -p axiolid-mesh-compile-contract
 step "dispatch: identity only" cargo check -q -p axiolid-dispatch --no-default-features
 step "dispatch: mesh boolean" cargo test -q -p axiolid-dispatch --no-default-features --features mesh-boolean

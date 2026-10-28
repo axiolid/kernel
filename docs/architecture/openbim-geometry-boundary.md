@@ -54,6 +54,7 @@ mapping.
 | `org.axiolid.geometry.tessellate.v1` | `axiolid_tessellation_contract::Tessellator` | typed graph/root and validated `TessellationOptions` | triangle mesh under explicit request parameters; no exact B-rep claim |
 | `org.axiolid.geometry.mesh-boolean.v1` | `axiolid_mesh_boolean_contract::MeshBoolean` | oriented closed mesh operands, operator, and execution options | `BooleanOutcome` and `BooleanEvidence`; unsupported cases remain explicit |
 | `org.axiolid.geometry.mesh-section.v1` | `axiolid_mesh_section_contract::MeshPlaneSection` | oriented closed mesh, plane frame, and typed limits/options | closed plane-local contours and `SectionEvidence`; unsupported topology fails closed |
+| `org.axiolid.geometry.mesh-hidden-lines.v1` | `axiolid_mesh_hidden_lines_contract::MeshHiddenLines` | meshes with roles, an orthographic view, edge selection, and typed limits/options | visible and hidden edge pieces and `HiddenLineEvidence`; the exact scalar provider refuses a near plane through a solid, non-manifold input and undecidable input |
 | `org.axiolid.geometry.graph-to-mesh.v1` | `axiolid_mesh_compile_contract::MeshCompiler` | geometry graph/root and execution options | explicitly mesh-valued output; never an implicit exact B-rep result |
 
 This table identifies possible evidence anchors; it does not add claims to the

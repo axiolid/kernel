@@ -58,6 +58,7 @@ Implementations remain independently replaceable:
 
 - `axiolid-reference` is readable portable reference work and the scalar oracle;
 - `axiolid-mesh-boolean-boolmesh` is an isolated mesh-Boolean provider;
+- `axiolid-hidden-lines` is the exact scalar hidden-line provider;
 - `axiolid-backend-cpu` and `axiolid-backend-gpu` are execution contexts/adapters;
 - `axiolid-mesh-compile` is the reference graph-to-mesh execution pipeline.
 

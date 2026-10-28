@@ -1,0 +1,39 @@
+[package]
+name = "axiolid-hidden-lines"
+description = "Exact scalar hidden-line drawings of triangle meshes in orthographic views"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[dependencies]
+axiolid-contracts.workspace = true
+axiolid-core.workspace = true
+axiolid-exact.workspace = true
+axiolid-guarantees.workspace = true
+axiolid-mesh.workspace = true
+axiolid-mesh-hidden-lines-contract.workspace = true
+num-bigint.workspace = true
+
+[dev-dependencies]
+axiolid-dispatch = { workspace = true, features = ["mesh-hidden-lines"] }
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.discrete"
+domain = "discrete.hidden-lines"
+public = true
+format-neutral = true
+allowed-internal-dependencies = [
+    "axiolid-contracts",
+    "axiolid-core",
+    "axiolid-dispatch",
+    "axiolid-exact",
+    "axiolid-guarantees",
+    "axiolid-mesh",
+    "axiolid-mesh-hidden-lines-contract",
+]

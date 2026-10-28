@@ -234,6 +234,15 @@
       "role": "algorithm.repair",
       "version": "0.3.2"
     },
+    "axiolid-hidden-lines": {
+      "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
+      "layer": "algorithms",
+      "path": "crates/algorithms/discrete/hidden-lines",
+      "released": "0.1.0",
+      "released_date": "2026-10-28",
+      "role": "algorithm.discrete",
+      "version": "0.1.0"
+    },
     "axiolid-inspect": {
       "description": "Mesh queries: clearance, containment, ray casting, and genus",
       "layer": "algorithms",
@@ -608,6 +617,7 @@
           "axiolid-exact",
           "axiolid-field-ops",
           "axiolid-heal",
+          "axiolid-hidden-lines",
           "axiolid-inspect",
           "axiolid-levelset",
           "axiolid-linear-intersection",
@@ -656,6 +666,6 @@
         "title": "Facade"
       }
     ],
-    "total": 61
+    "total": 62
   }
 }
