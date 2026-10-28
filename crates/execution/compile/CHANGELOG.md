@@ -13,7 +13,8 @@ caret rule for `0.x` versions.
 
 - A mesh `Revolution` whose profile touches the axis now compiles to a
   closed mesh instead of failing with `UnsupportedInput` (#363, from
-  `axiolid-construct`); a `TaperedRevolution` touching the axis is still
+  `axiolid-construct`), unless it touches the axis at an isolated vertex,
+  which pinches the solid and stays `UnsupportedInput`; a `TaperedRevolution` touching the axis is still
   refused (#364).
 
 ## [0.3.34] - 2026-10-28

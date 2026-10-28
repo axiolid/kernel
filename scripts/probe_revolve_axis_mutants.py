@@ -23,6 +23,8 @@ COMPILE = ["-p", "axiolid-mesh-compile", "--test", "surface_deviation", "crosses
 # ids in order, so `id[f] == f` there and the mapping is the identity.
 MUTANTS = [
     ('crossing check dropped', R, '    if positive && negative {', '    if false {', TESTS),
+    ('isolated axis vertex accepted', R, '            if ring[k] && !ring[(k + len - 1) % len] && !ring[(k + 1) % len] {', '            if false {', TESTS),
+    ('isolated axis vertex judged by one neighbour', R, '            if ring[k] && !ring[(k + len - 1) % len] && !ring[(k + 1) % len] {', '            if ring[k] && !ring[(k + 1) % len] {', TESTS),
     ('touching flags dropped', R, '        on_axis.push(side == Sign::Zero && !offset);', '        on_axis.push(false);', TESTS),
     ('touching flagged under an offset axis', R, '        on_axis.push(side == Sign::Zero && !offset);', '        on_axis.push(side == Sign::Zero);', TESTS),
     ('axis vertex duplicated per station', L, '                    (true, Some(v)) => v,', '                    (true, Some(_)) => positions.len() as u32,', TESTS),
@@ -46,7 +48,7 @@ MUTANTS = [
     ('holes not checked', R, '    for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {\n        if !(p.x', '    for p in rings.outer.iter() {\n        if !(p.x', TESTS),
     ('check not called', R, '    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance)?;', '    let _ = check_axis_side;\n    let on_axis = vec![false; rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>()];', TESTS),
     ('taper end rings not checked', S, '    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?', '    if { let _ = &ends; vec![false] }', TESTS_SWEEP),
-    ('taper end judged apart from the start', S, '        outer: start.outer.iter().chain(&end.outer).copied().collect(),', '        outer: start.outer.clone(),', TESTS_SWEEP),
+    ('taper end judged apart from the start', S, '        holes: core::iter::once(&end.outer)', '        holes: core::iter::empty()', TESTS_SWEEP),
     ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis', COMPILE),
 ]
 

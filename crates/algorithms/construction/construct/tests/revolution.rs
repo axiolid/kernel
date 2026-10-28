@@ -197,6 +197,35 @@ fn assert_sound(mesh: &TriMesh) {
         used[*i as usize] = true;
     }
     assert!(used.iter().all(|u| *u), "an unreferenced vertex");
+    assert_vertex_manifold(mesh);
+}
+
+/// The triangles around every vertex form a single fan: their link edges
+/// make one cycle. The edge audit cannot see a pinch, where two fans meet.
+fn assert_vertex_manifold(mesh: &TriMesh) {
+    let mut link: Vec<Vec<(u32, u32)>> = vec![Vec::new(); mesh.positions.len()];
+    for t in mesh.indices.as_chunks::<3>().0 {
+        for k in 0..3 {
+            link[t[k] as usize].push((t[(k + 1) % 3], t[(k + 2) % 3]));
+        }
+    }
+    for (v, edges) in link.iter().enumerate() {
+        let mut next = std::collections::HashMap::new();
+        for (a, b) in edges {
+            assert!(next.insert(*a, *b).is_none(), "vertex {v}: not a fan");
+        }
+        let mut at = edges[0].0;
+        let mut walked = 0;
+        loop {
+            at = next[&at];
+            walked += 1;
+            if at == edges[0].0 {
+                break;
+            }
+            assert!(walked <= edges.len(), "vertex {v}: not a cycle");
+        }
+        assert_eq!(walked, edges.len(), "vertex {v}: pinched into several fans");
+    }
 }
 
 /// A closed full-turn wall of `S` stations over a four-point profile has
@@ -333,21 +362,51 @@ fn a_right_triangle_with_a_leg_on_the_axis_revolves_to_a_cone() {
 }
 
 #[test]
-fn a_profile_touching_at_one_vertex_is_closed_and_meets_the_axis_once() {
-    // The apex sits between the two rim points: a cylinder of radius 1 and
-    // height 2 with a double cone taken out. Edge-manifold: the apex is one
-    // shared vertex of a fan on each nappe.
+fn a_profile_touching_at_one_vertex_is_refused_as_a_pinch() {
+    // The apex sits between the two rim points: the two nappes of a double
+    // cone meet there, so the boundary is not a two-manifold.
     let ring = vec![
         Point2::new(0.0, 0.0),
         Point2::new(1.0, -1.0),
         Point2::new(1.0, 1.0),
     ];
-    let mesh = revolve_touching(&ring, FULL);
-    assert_sound(&mesh);
-    assert_eq!(on_axis(&mesh), 1);
-    let (want, got) = (pappus(&ring), volume(&mesh, tol_for(AXIS_CHORD)));
-    assert!(got < want && (want - got) / want < 3.0 * AXIS_CHORD);
-    assert!(surface_deviation(&ring, FULL, &mesh) <= AXIS_CHORD);
+    let r = rings(ring, vec![]);
+    for angle in [FULL, 1.0, -1.0] {
+        assert!(matches!(
+            turn(&r, angle),
+            Err(GeomError::UnsupportedInput { .. })
+        ));
+    }
+}
+
+#[test]
+fn a_vertex_touching_the_axis_stays_refused_in_a_partial_turn_of_any_ring() {
+    // Not the first vertex, and on a hole as well as on the outer ring.
+    let outer = rings(
+        vec![
+            Point2::new(1.0, -1.0),
+            Point2::new(0.0, 0.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(2.0, 0.0),
+        ],
+        vec![],
+    );
+    assert!(matches!(
+        turn(&outer, 2.0),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    let hole = rings(
+        square(1.0, 6.0, 0.0, 4.0),
+        vec![vec![
+            Point2::new(0.0, 1.0),
+            Point2::new(2.0, 1.0),
+            Point2::new(2.0, 2.0),
+        ]],
+    );
+    assert!(matches!(
+        turn(&hole, 2.0),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
 }
 
 #[test]
@@ -396,23 +455,6 @@ fn a_profile_with_a_hole_clear_of_the_axis_is_unaffected() {
     let mesh = turn(&r, FULL).expect("revolves");
     assert_sound(&mesh);
     assert_eq!(on_axis(&mesh), 0);
-}
-
-#[test]
-fn a_hole_vertex_on_the_axis_follows_the_same_exact_rule() {
-    // The hole pokes out of the outer ring, a malformed input; the exact
-    // rule still welds its on-axis vertex to one mesh vertex.
-    let r = rings(
-        square(1.0, 6.0, 0.0, 4.0),
-        vec![vec![
-            Point2::new(0.0, 1.0),
-            Point2::new(2.0, 1.0),
-            Point2::new(2.0, 2.0),
-        ]],
-    );
-    if let Ok(mesh) = turn(&r, FULL) {
-        assert_eq!(on_axis(&mesh), 1);
-    }
 }
 
 #[test]
@@ -480,12 +522,13 @@ fn a_tilted_axis_is_judged_by_its_own_line() {
     let touching = rings(
         vec![
             Point2::new(1.0, 1.0),
-            Point2::new(3.0, 0.0),
+            Point2::new(2.0, 2.0),
             Point2::new(3.0, 1.0),
         ],
         vec![],
     );
-    // The vertex (1, 1) lies on the axis: meshed once, not refused (#363).
+    // The edge from (1, 1) to (2, 2) lies on the axis: meshed, not refused
+    // (#363).
     let mesh = tilt(&touching).expect("a touching profile revolves");
     assert_sound(&mesh);
 }

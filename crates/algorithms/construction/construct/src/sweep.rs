@@ -120,9 +120,15 @@ pub fn tapered_revolve(
     // vertices strictly on one side at both ends stay there throughout.
     // Judging both profiles' vertices together also refuses a section that
     // starts on one side and ends on the other (#351).
+    // Each ring stays a ring of its own: an isolated touch is judged by a
+    // vertex's neighbours in its ring.
     let ends = Rings {
-        outer: start.outer.iter().chain(&end.outer).copied().collect(),
-        holes: start.holes.iter().chain(&end.holes).cloned().collect(),
+        outer: start.outer.clone(),
+        holes: core::iter::once(&end.outer)
+            .chain(&start.holes)
+            .chain(&end.holes)
+            .cloned()
+            .collect(),
     };
     // TODO(#364): the tapered loft does not collapse axis vertices yet.
     if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?

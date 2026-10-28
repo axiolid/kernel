@@ -63,6 +63,13 @@
 //! exactly, as it did before the vertices were merged. Merging moves no
 //! vertex: the shared one is the profile point itself, which every station's
 //! rotated copy equals up to rounding.
+//!
+//! Only a vertex that ends a ring edge lying along the axis is accepted
+//! (sphere, cylinder and cone profiles). One whose both ring neighbours are
+//! off the axis is refused (`UnsupportedInput`): two nappes of the surface
+//! meet at that point, the boundary is not a two-manifold there, and its mesh
+//! would be non-manifold at the vertex whatever the edge audit says, as for
+//! the horn torus of #248.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
@@ -187,11 +194,12 @@ fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
 /// meaningful: each vertex is classified by the exact sign of its cross
 /// product with the axis direction, with no tolerance band. Vertices
 /// strictly on both sides are a crossing (the swept solid passes through
-/// itself) and `InvalidInput`. A vertex on the axis, which includes an edge
-/// lying on it, is not an error: the result holds `true` at its index in the
-/// flat ring order (outer ring, then each hole) and [`revolve`] meshes it
-/// once. An edge cannot meet the axis between two vertices without one of
-/// those two cases.
+/// itself) and `InvalidInput`. A vertex on the axis that ends an edge lying
+/// on it is not an error: the result holds `true` at its index in the flat
+/// ring order (outer ring, then each hole) and [`revolve`] meshes it once. A
+/// vertex on the axis with both ring neighbours off it pinches the solid to
+/// a point and is `UnsupportedInput`. An edge cannot meet the axis between
+/// two vertices without one of those cases.
 ///
 /// "In the plane" follows the exact path: the axis origin and direction
 /// leave it only beyond `tolerance.linear()` in z, so placement noise does
@@ -232,6 +240,24 @@ pub(crate) fn check_axis_side(
         return Err(GeomError::InvalidInput(
             "revolved profile crosses the axis: its rings lie on both sides".to_owned(),
         ));
+    }
+    // A vertex on the axis whose ring neighbours are both off it is a pinch:
+    // two nappes of the swept surface meet at one point, so the boundary is
+    // not a two-manifold there (the horn torus of #248 is refused alike).
+    let mut start = 0;
+    for len in core::iter::once(rings.outer.len()).chain(rings.holes.iter().map(Vec::len)) {
+        let ring = &on_axis[start..start + len];
+        for k in 0..len {
+            if ring[k] && !ring[(k + len - 1) % len] && !ring[(k + 1) % len] {
+                return Err(GeomError::UnsupportedInput {
+                    backend: crate::BACKEND_ID,
+                    operation: Operation::Sweep,
+                    input: "revolution of a profile that touches the axis at an isolated \
+                            point: the solid pinches there",
+                });
+            }
+        }
+        start += len;
     }
     Ok(on_axis)
 }

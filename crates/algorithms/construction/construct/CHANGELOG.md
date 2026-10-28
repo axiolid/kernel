@@ -18,7 +18,10 @@ caret rule for `0.x` versions.
   the axis (the exact sign is zero) is one mesh vertex shared by every
   station and by both caps; its quads collapse to triangles and a profile
   edge along the axis emits nothing. The chord bound and the step count are
-  unchanged. A profile crossing the axis is still `InvalidInput`.
+  unchanged. A vertex on the axis with both ring neighbours off it (an
+  isolated touch) is refused with `UnsupportedInput`: the solid pinches
+  there and its boundary is not a two-manifold. A profile crossing the axis
+  is still `InvalidInput`.
   `tapered_revolve` keeps its `UnsupportedInput` refusal for a profile
   touching the axis (#364).
 
