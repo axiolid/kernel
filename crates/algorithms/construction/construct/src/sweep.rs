@@ -131,7 +131,7 @@ pub fn tapered_revolve(
             .collect(),
     };
     // TODO(#364): the tapered loft does not collapse axis vertices yet.
-    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?
+    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?
         .contains(&true)
     {
         return Err(crate::revolve::touching_unsupported());

@@ -362,16 +362,18 @@ fn a_right_triangle_with_a_leg_on_the_axis_revolves_to_a_cone() {
 }
 
 #[test]
-fn a_profile_touching_at_one_vertex_is_refused_as_a_pinch() {
+fn a_profile_touching_at_one_vertex_is_refused_as_a_pinch_in_a_full_turn() {
     // The apex sits between the two rim points: the two nappes of a double
     // cone meet there, so the boundary is not a two-manifold.
-    let ring = vec![
-        Point2::new(0.0, 0.0),
-        Point2::new(1.0, -1.0),
-        Point2::new(1.0, 1.0),
-    ];
-    let r = rings(ring, vec![]);
-    for angle in [FULL, 1.0, -1.0] {
+    let r = rings(
+        vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(1.0, -1.0),
+            Point2::new(1.0, 1.0),
+        ],
+        vec![],
+    );
+    for angle in [FULL, -FULL] {
         assert!(matches!(
             turn(&r, angle),
             Err(GeomError::UnsupportedInput { .. })
@@ -380,8 +382,28 @@ fn a_profile_touching_at_one_vertex_is_refused_as_a_pinch() {
 }
 
 #[test]
-fn a_vertex_touching_the_axis_stays_refused_in_a_partial_turn_of_any_ring() {
-    // Not the first vertex, and on a hole as well as on the outer ring.
+fn a_profile_touching_at_one_vertex_is_a_sector_point_in_a_partial_turn() {
+    let ring = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(1.0, -1.0),
+        Point2::new(1.0, 1.0),
+    ];
+    for angle in [1.0, -1.0, 4.0] {
+        let mesh = revolve_touching(&ring, angle);
+        assert_sound(&mesh);
+        assert_eq!(on_axis(&mesh), 1);
+        let want = pappus(&ring) * angle.abs() / FULL;
+        let got = volume(&mesh, tol_for(AXIS_CHORD));
+        assert!(
+            (want - got).abs() / want < 3.0 * AXIS_CHORD,
+            "{got} vs {want}"
+        );
+        assert!(surface_deviation(&ring, angle, &mesh) <= AXIS_CHORD);
+    }
+}
+
+#[test]
+fn an_isolated_touch_on_a_later_vertex_or_a_hole_is_refused_in_a_full_turn() {
     let outer = rings(
         vec![
             Point2::new(1.0, -1.0),
@@ -392,7 +414,7 @@ fn a_vertex_touching_the_axis_stays_refused_in_a_partial_turn_of_any_ring() {
         vec![],
     );
     assert!(matches!(
-        turn(&outer, 2.0),
+        turn(&outer, FULL),
         Err(GeomError::UnsupportedInput { .. })
     ));
     let hole = rings(
@@ -404,8 +426,96 @@ fn a_vertex_touching_the_axis_stays_refused_in_a_partial_turn_of_any_ring() {
         ]],
     );
     assert!(matches!(
-        turn(&hole, 2.0),
+        turn(&hole, FULL),
         Err(GeomError::UnsupportedInput { .. })
+    ));
+}
+
+#[test]
+fn consecutive_axis_vertices_leave_no_unreferenced_vertex() {
+    // Three consecutive vertices on the axis: the middle one has no wall
+    // quad and, in a full turn, no cap.
+    let ring = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(2.0, 0.0),
+        Point2::new(2.0, 2.0),
+        Point2::new(0.0, 2.0),
+        Point2::new(0.0, 1.0),
+    ];
+    for angle in [FULL, -FULL] {
+        let mesh = revolve_touching(&ring, angle);
+        assert_sound(&mesh);
+        assert_eq!(on_axis(&mesh), 2);
+        let want = pappus(&ring);
+        assert!((want - volume(&mesh, tol_for(AXIS_CHORD))).abs() / want < 3.0 * AXIS_CHORD);
+    }
+}
+
+#[test]
+fn a_c_profile_with_two_axis_segments_gives_a_shell_around_a_void() {
+    let ring = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(2.0, 0.0),
+        Point2::new(2.0, 4.0),
+        Point2::new(0.0, 4.0),
+        Point2::new(0.0, 3.0),
+        Point2::new(1.0, 3.0),
+        Point2::new(1.0, 1.0),
+        Point2::new(0.0, 1.0),
+    ];
+    let mesh = revolve_touching(&ring, FULL);
+    assert_sound(&mesh);
+    assert_eq!(on_axis(&mesh), 4);
+    let want = pappus(&ring);
+    let got = volume(&mesh, tol_for(AXIS_CHORD));
+    assert!(
+        (want - got).abs() / want < 3.0 * AXIS_CHORD,
+        "{got} vs {want}"
+    );
+}
+
+#[test]
+fn z_noise_in_the_axis_refuses_a_touching_profile() {
+    // Within the tolerance the axis counts as in the plane, but a vertex on
+    // its projection is then off the real axis: welding it would collapse a
+    // real orbit, so the touch is refused instead (#363).
+    let r = rings(
+        vec![
+            Point2::new(0.0, 100.0),
+            Point2::new(1.0, 100.0),
+            Point2::new(0.0, 101.0),
+        ],
+        vec![],
+    );
+    let noise = 0.999e-3;
+    let tilted = revolve(
+        &r,
+        Point3::ZERO,
+        Vec3::new(0.0, 1.0, noise),
+        FULL,
+        tol_for(1e-3),
+    );
+    let raised = revolve(
+        &r,
+        Point3::new(0.0, 0.0, noise),
+        Vec3::Y,
+        FULL,
+        tol_for(1e-3),
+    );
+    for result in [tilted, raised] {
+        assert!(matches!(result, Err(GeomError::UnsupportedInput { .. })));
+    }
+    // A crossing is still named as one under the same noise.
+    let across = rings(square(-1.0, 2.0, 100.0, 101.0), vec![]);
+    assert!(matches!(
+        revolve(
+            &across,
+            Point3::new(0.0, 0.0, noise),
+            Vec3::Y,
+            FULL,
+            tol_for(1e-3)
+        ),
+        Err(GeomError::InvalidInput(_))
     ));
 }
 
@@ -531,6 +641,11 @@ fn a_tilted_axis_is_judged_by_its_own_line() {
     // (#363).
     let mesh = tilt(&touching).expect("a touching profile revolves");
     assert_sound(&mesh);
+    // The shared vertices are the profile points themselves, not rotated
+    // copies of them.
+    for p in [Point3::new(1.0, 1.0, 0.0), Point3::new(2.0, 2.0, 0.0)] {
+        assert!(mesh.positions.contains(&p), "{p:?}");
+    }
 }
 
 #[test]
@@ -574,9 +689,12 @@ fn an_axis_parallel_to_the_plane_and_offset_is_checked_for_crossing_only() {
         at(1e-17, &across),
         Err(GeomError::InvalidInput(_))
     ));
-    let touching = at(1e-17, &on_projection).expect("an on-axis edge is meshed");
-    assert_sound(&touching);
-    assert_eq!(on_axis(&touching), 2);
+    // ... but z noise makes the on-axis edge a real thin tube, which is not
+    // welded: the touch is refused (#363).
+    assert!(matches!(
+        at(1e-17, &on_projection),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
 }
 
 #[test]

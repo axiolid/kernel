@@ -58,18 +58,25 @@
 //! edge of a partial turn is then an edge between the two caps. The bound
 //! above is untouched. A point at radius 0 traces no circle, so the step
 //! count, which the largest radius governs, is unchanged. A collapsed quad is
-//! the triangle `(a, b, d)` or `(a, d, c)` with `a = c` or `b = d`, which the
-//! patch bound `min(|b - a|, |c - a|)` of `loft::quad_deviation` covers
-//! exactly, as it did before the vertices were merged. Merging moves no
+//! the triangle `(a, b, d)` (for `b = d`) or `(a, d, c)` (for `a = c`), which
+//! the patch bounds of `loft::quad_deviation` cover exactly: `|c - a|` is
+//! zero for `a = c`, and `2|d - b|` is zero for `b = d`, where the patch
+//! degenerates into the triangle `(a, d, c)`. The merge changes neither. Merging moves no
 //! vertex: the shared one is the profile point itself, which every station's
 //! rotated copy equals up to rounding.
 //!
-//! Only a vertex that ends a ring edge lying along the axis is accepted
-//! (sphere, cylinder and cone profiles). One whose both ring neighbours are
-//! off the axis is refused (`UnsupportedInput`): two nappes of the surface
-//! meet at that point, the boundary is not a two-manifold there, and its mesh
-//! would be non-manifold at the vertex whatever the edge audit says, as for
-//! the horn torus of #248.
+//! In a full turn only a vertex that ends a ring edge lying along the axis is
+//! accepted (sphere, cylinder and cone profiles). One whose both ring
+//! neighbours are off the axis is refused (`UnsupportedInput`): two nappes of
+//! the surface meet at that point, the boundary is not a two-manifold there,
+//! and its mesh would be non-manifold at the vertex whatever the edge audit
+//! says, as for the horn torus of #248. In a partial turn the two caps close
+//! the point into a sector point, as in the exact path, and it is meshed.
+//!
+//! The weld is exact: it needs the axis origin and direction to have z
+//! exactly zero. With z noise within the tolerance, which the in-plane check
+//! forgives, a 2D-on-axis vertex is off the real axis and its orbit is a real
+//! circle, so a touching profile is refused (`UnsupportedInput`) instead.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
@@ -198,8 +205,12 @@ fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
 /// on it is not an error: the result holds `true` at its index in the flat
 /// ring order (outer ring, then each hole) and [`revolve`] meshes it once. A
 /// vertex on the axis with both ring neighbours off it pinches the solid to
-/// a point and is `UnsupportedInput`. An edge cannot meet the axis between
-/// two vertices without one of those cases.
+/// a point and, in a `full` turn, is `UnsupportedInput`; a partial turn's
+/// caps close it into a sector point. An edge cannot meet the axis between
+/// two vertices without one of those cases. A vertex on the projected axis
+/// is `UnsupportedInput` too when the axis origin or direction has any
+/// nonzero z: the vertex is then off the real axis by the noise, and welding
+/// it would collapse a real orbit.
 ///
 /// "In the plane" follows the exact path: the axis origin and direction
 /// leave it only beyond `tolerance.linear()` in z, so placement noise does
@@ -212,6 +223,7 @@ pub(crate) fn check_axis_side(
     axis_origin: Point3,
     axis_direction: Vec3,
     tolerance: Tolerance,
+    full: bool,
 ) -> GeomResult<Vec<bool>> {
     let count = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
     // TODO(#362): an axis leaning out of the profile plane is not judged.
@@ -219,8 +231,9 @@ pub(crate) fn check_axis_side(
         return Ok(vec![false; count]);
     }
     let offset = axis_origin.z.abs() > tolerance.linear();
+    let exact = axis_origin.z == 0.0 && axis_direction.z == 0.0;
     let a = Point2::new(axis_origin.x, axis_origin.y);
-    let (mut positive, mut negative) = (false, false);
+    let (mut positive, mut negative, mut noisy_touch) = (false, false, false);
     let mut on_axis = Vec::with_capacity(count);
     for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
         if !(p.x.is_finite() && p.y.is_finite()) {
@@ -234,6 +247,7 @@ pub(crate) fn check_axis_side(
             Sign::Negative => negative = true,
             _ => {}
         }
+        noisy_touch |= side == Sign::Zero && !offset && !exact;
         on_axis.push(side == Sign::Zero && !offset);
     }
     if positive && negative {
@@ -241,9 +255,16 @@ pub(crate) fn check_axis_side(
             "revolved profile crosses the axis: its rings lie on both sides".to_owned(),
         ));
     }
-    // A vertex on the axis whose ring neighbours are both off it is a pinch:
-    // two nappes of the swept surface meet at one point, so the boundary is
-    // not a two-manifold there (the horn torus of #248 is refused alike).
+    if noisy_touch {
+        return Err(touching_unsupported());
+    }
+    // In a full turn a vertex on the axis whose ring neighbours are both off
+    // it is a pinch: two nappes of the swept surface meet at one point, so
+    // the boundary is not a two-manifold there (the horn torus of #248 is
+    // refused alike). A partial turn's caps close it into a sector point.
+    if !full {
+        return Ok(on_axis);
+    }
     let mut start = 0;
     for len in core::iter::once(rings.outer.len()).chain(rings.holes.iter().map(Vec::len)) {
         let ring = &on_axis[start..start + len];
@@ -304,7 +325,8 @@ pub fn revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
-    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance)?;
+    let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;
+    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;
     let dir = axis_direction / len;
     // Widest distance from the axis governs the angular step: a point at
     // radius r traces a circle of that radius.
@@ -313,7 +335,6 @@ pub fn revolve(
         let v = Point3::new(p.x, p.y, 0.0) - axis_origin;
         max_r = max_r.max((v - dir * dir.dot(v)).length());
     }
-    let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;
     let n = bounded_steps(rings, axis_origin, dir, angle, max_r, tolerance.linear())?;
     // A full turn emits n stations and wraps onto the first; a partial turn
     // emits n + 1 so both ends exist to be capped.

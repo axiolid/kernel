@@ -160,7 +160,32 @@ pub(crate) fn loft_welded(
             indices.extend([end[0], end[1], end[2]]);
         }
     }
+    if !welded.is_empty() {
+        (positions, indices) = compact(positions, indices);
+    }
     Ok(TriMesh::new(positions, indices))
+}
+
+/// Drop the vertices no triangle uses, keeping the order of the rest. A
+/// welded point whose ring neighbours are all welded has no wall quad and,
+/// in a closed loft, no cap either (#363).
+fn compact(positions: Vec<Point3>, mut indices: Vec<u32>) -> (Vec<Point3>, Vec<u32>) {
+    let mut used = vec![false; positions.len()];
+    for i in &indices {
+        used[*i as usize] = true;
+    }
+    let mut new_id = vec![0u32; positions.len()];
+    let mut kept = Vec::with_capacity(positions.len());
+    for (v, p) in positions.into_iter().enumerate() {
+        if used[v] {
+            new_id[v] = kept.len() as u32;
+            kept.push(p);
+        }
+    }
+    for i in &mut indices {
+        *i = new_id[*i as usize];
+    }
+    (kept, indices)
 }
 
 /// How far the bilinear patch over one wall quad can sit from the two
