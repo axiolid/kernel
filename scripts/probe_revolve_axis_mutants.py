@@ -1,4 +1,4 @@
-"""Mutation probe for the mesh revolve's axis handling (#351, #363).
+"""Mutation probe for the mesh revolve's axis handling (#351, #363, #365).
 
 Each mutant drops, weakens or misreads the check that a revolved profile does
 not cross the axis, or the meshing of a profile that touches it, and must turn
@@ -14,6 +14,7 @@ import probe_lib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 R = "crates/algorithms/construction/construct/src/revolve.rs"
 S = "crates/algorithms/construction/construct/src/sweep.rs"
+P = "crates/algorithms/construction/construct/src/profile.rs"
 L = "crates/algorithms/construction/construct/src/loft.rs"
 TESTS = ["-p", "axiolid-construct", "--test", "revolution", "--test", "sweeps"]
 TESTS_SWEEP = ["-p", "axiolid-construct", "--test", "sweeps"]
@@ -54,6 +55,9 @@ MUTANTS = [
     ('check not called', R, '    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;', '    let _ = check_axis_side;\n    let on_axis = vec![false; rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>()];', TESTS),
     ('taper end rings not checked', S, '    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?', '    if { let _ = &ends; vec![false] }', TESTS_SWEEP),
     ('taper end judged apart from the start', S, '        holes: core::iter::once(&end.outer)', '        holes: core::iter::empty()', TESTS_SWEEP),
+    ('arc end re-evaluated', P, '        if !near2(end, start, tolerance.linear()) {\n            continue;\n        }', '        if true {\n            continue;\n        }', TESTS),
+    ('joint taken from the curved neighbour', P, '        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {\n            start\n        } else {\n            end\n        };', '        let joint = end;', TESTS),
+    ('joint taken from the later segment', P, '        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {\n            start\n        } else {\n            end\n        };', '        let joint = start;', TESTS),
     ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis', COMPILE),
 ]
 

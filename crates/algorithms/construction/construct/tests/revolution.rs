@@ -714,3 +714,123 @@ fn an_axis_leaning_out_of_the_plane_is_not_judged_by_its_projection() {
     assert_sound(&mesh);
     assert_unwelded(&mesh);
 }
+
+// An arc ending on the axis (#365): its end is the joint with the next
+// segment, not a trigonometric sample, so it lies on the axis to the bit.
+
+fn arc_segment(radius: Scalar, from: Scalar, to: Scalar) -> axiolid_profile::ProfileSegment {
+    use axiolid_core::{Frame2, Interval, Vec2};
+    axiolid_profile::ProfileSegment {
+        curve: axiolid_curve::Curve2::Circle(axiolid_curve::Circle2 {
+            frame: Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius,
+        }),
+        domain: Interval::new(from, to),
+        same_sense: true,
+    }
+}
+
+fn line_segment(from: Point2, to: Point2) -> axiolid_profile::ProfileSegment {
+    axiolid_profile::ProfileSegment {
+        curve: axiolid_curve::Curve2::Line(axiolid_curve::Line2 {
+            origin: from,
+            direction: to - from,
+        }),
+        domain: axiolid_core::Interval::UNIT,
+        same_sense: true,
+    }
+}
+
+fn contour_of(segments: Vec<axiolid_profile::ProfileSegment>) -> Profile {
+    Profile::Contour(axiolid_profile::ContourProfile {
+        outer: axiolid_profile::Contour::new(segments),
+        holes: Vec::new(),
+    })
+}
+
+/// The half-disc of radius 0.5: an arc from (0,-0.5) over (0.5,0) to
+/// (0,0.5), and a line back along x = 0.
+fn arc_half_disc() -> Profile {
+    let half = core::f64::consts::FRAC_PI_2;
+    contour_of(vec![
+        arc_segment(0.5, -half, half),
+        line_segment(Point2::new(0.0, 0.5), Point2::new(0.0, -0.5)),
+    ])
+}
+
+fn assert_no_degenerate_triangle(mesh: &TriMesh) {
+    for t in mesh.indices.as_chunks::<3>().0 {
+        let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+        assert!(
+            (b - a).cross(c - a).length() > 1e-12,
+            "degenerate triangle {a:?} {b:?} {c:?}"
+        );
+    }
+}
+
+#[test]
+fn an_arc_ending_on_the_axis_ends_exactly_on_it() {
+    let rings = profile_rings(&arc_half_disc(), AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    let ring = &rings.outer;
+    let on_axis: Vec<_> = ring.iter().filter(|p| p.x == 0.0).collect();
+    assert_eq!(on_axis.len(), 2, "{ring:?}");
+    assert!(on_axis.contains(&&Point2::new(0.0, 0.5)));
+    assert!(on_axis.contains(&&Point2::new(0.0, -0.5)));
+    assert!(ring.iter().all(|p| p.x >= 0.0));
+}
+
+#[test]
+fn an_arc_half_disc_revolves_to_a_closed_sphere() {
+    let rings = profile_rings(&arc_half_disc(), AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    let mesh = turn_with(&rings, FULL, AXIS_CHORD).expect("a full turn");
+    assert_sound(&mesh);
+    assert_no_degenerate_triangle(&mesh);
+    assert_eq!(on_axis(&mesh), 2);
+    let want = 4.0 / 3.0 * core::f64::consts::PI * 0.5_f64.powi(3);
+    let got = volume(&mesh, tol_for(AXIS_CHORD));
+    assert!(
+        got < want && (want - got) / want < 3.0 * AXIS_CHORD / 0.5,
+        "{got} vs {want}"
+    );
+}
+
+#[test]
+fn half_and_quarter_turns_of_an_arc_half_disc_are_sound() {
+    let rings = profile_rings(&arc_half_disc(), AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    let sphere = 4.0 / 3.0 * core::f64::consts::PI * 0.5_f64.powi(3);
+    for (angle, share) in [(FULL / 2.0, 0.5), (FULL / 4.0, 0.25)] {
+        let mesh = turn_with(&rings, angle, AXIS_CHORD).expect("a partial turn");
+        assert_sound(&mesh);
+        assert_no_degenerate_triangle(&mesh);
+        assert_eq!(on_axis(&mesh), 2);
+        let (want, got) = (sphere * share, volume(&mesh, tol_for(AXIS_CHORD)));
+        assert!(
+            (want - got).abs() / want < 3.0 * AXIS_CHORD / 0.5,
+            "{angle}: {got} vs {want}"
+        );
+    }
+}
+
+#[test]
+fn a_quarter_disc_revolves_to_a_hemisphere() {
+    let half = core::f64::consts::FRAC_PI_2;
+    let profile = contour_of(vec![
+        arc_segment(0.5, 0.0, half),
+        line_segment(Point2::new(0.0, 0.5), Point2::ZERO),
+        line_segment(Point2::ZERO, Point2::new(0.5, 0.0)),
+    ]);
+    let rings = profile_rings(&profile, AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    let mesh = turn_with(&rings, FULL, AXIS_CHORD).expect("a full turn");
+    assert_sound(&mesh);
+    assert_no_degenerate_triangle(&mesh);
+    let want = 2.0 / 3.0 * core::f64::consts::PI * 0.5_f64.powi(3);
+    let got = volume(&mesh, tol_for(AXIS_CHORD));
+    assert!(
+        got < want && (want - got) / want < 3.0 * AXIS_CHORD / 0.5,
+        "{got} vs {want}"
+    );
+}

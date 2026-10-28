@@ -718,11 +718,16 @@ fn contour_points_measured(
     merged: &mut Scalar,
 ) -> GeomResult<Vec<Point2>> {
     let mut out: Vec<Point2> = Vec::new();
+    let mut flattened = Vec::with_capacity(contour.segments.len());
     for segment in &contour.segments {
         let mut pts = segment_points(segment, chord_error)?;
         if !segment.same_sense {
             pts.reverse();
         }
+        flattened.push(pts);
+    }
+    snap_joints(contour, &mut flattened, tolerance, merged);
+    for pts in flattened {
         for p in pts {
             match out.last() {
                 Some(last) if near2(*last, p, tolerance.linear()) => {
@@ -744,6 +749,56 @@ fn contour_points_measured(
         )));
     }
     Ok(out)
+}
+
+/// Snap the two points at every joint of a contour to one exact point (#365).
+///
+/// The first and last point of a flattened segment are its endpoints, not
+/// samples. A line or polyline evaluates its endpoints exactly; a curved
+/// segment evaluates them through trigonometry, which is off by rounding
+/// (`0.5 * cos(pi / 2)` is `3e-17`, not `0`), so an arc ending on a
+/// revolution axis would lie beside the axis. At each joint whose two points
+/// lie within the linear tolerance, both become the exact one: the line or
+/// polyline's endpoint when either neighbour is straight, else the earlier
+/// segment's end. Both segments then produce the bit-identical vertex. Only
+/// interior samples are ever trigonometric. A gap beyond the tolerance is
+/// left alone, as before. `moved` is raised to the distance a point moved, a
+/// rounding error far below the tolerance that
+/// [`profile_deviation`] adds to its bound.
+fn snap_joints(
+    contour: &axiolid_profile::Contour,
+    flattened: &mut [Vec<Point2>],
+    tolerance: Tolerance,
+    moved: &mut Scalar,
+) {
+    let n = flattened.len();
+    let exact = |curve: &Curve2| matches!(curve, Curve2::Line(_) | Curve2::Polyline(_));
+    for i in 0..n {
+        let j = (i + 1) % n;
+        if i == j {
+            continue;
+        }
+        let (Some(&end), Some(&start)) = (flattened[i].last(), flattened[j].first()) else {
+            continue;
+        };
+        if !near2(end, start, tolerance.linear()) {
+            continue;
+        }
+        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {
+            start
+        } else {
+            end
+        };
+        *moved = moved
+            .max((end - joint).length())
+            .max((start - joint).length());
+        if let Some(last) = flattened[i].last_mut() {
+            *last = joint;
+        }
+        if let Some(first) = flattened[j].first_mut() {
+            *first = joint;
+        }
+    }
 }
 
 /// Whether two points coincide within a linear tolerance.

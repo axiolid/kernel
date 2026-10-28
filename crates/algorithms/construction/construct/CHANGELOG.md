@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `profile_rings` ends every contour segment at its exact joint (#365). The
+  first and last point of a flattened segment are its endpoints, not
+  samples: where two segments meet within the linear tolerance, both now
+  produce one bit-identical vertex, the line or polyline's exact endpoint
+  when either neighbour is straight, else the earlier segment's end. An arc
+  ending on the revolution axis used to land at `x ~ 6e-17` (its end
+  re-evaluated as `centre + r (cos s, sin s)`), so a half-disc was refused
+  at a full turn as a pinch and a partial turn meshed degenerate triangles.
+  The snap distance is a rounding error; `profile_deviation` adds it to its
+  bound as it does a merged point. Arcs clear of the axis are unchanged.
+
 ## [0.3.23] - 2026-10-28
 
 ### Changed
