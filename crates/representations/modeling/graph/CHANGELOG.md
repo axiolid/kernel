@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The documentation of `SolidOperation::FixedReferenceSweep` states the
+  frame law, the tangent-continuity requirement, how `parameter_range` is
+  read, and what the reference compiler proves, reports unbounded and
+  refuses (#122).
+
 ## [0.3.16] - 2026-10-28
 
 ### Changed

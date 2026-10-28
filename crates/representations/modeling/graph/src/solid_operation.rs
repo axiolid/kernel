@@ -76,6 +76,22 @@ pub enum SolidOperation {
         fillet_radius: Option<Scalar>,
     },
     /// Profile swept along a directrix using a fixed reference direction.
+    ///
+    /// At each point of the directrix the profile's x axis is the reference
+    /// direction projected square to the tangent, its z axis is the tangent
+    /// and its y axis is z cross x. The directrix must be tangent
+    /// continuous (a corner has no tangent), and the reference must never
+    /// be parallel to the tangent, or the profile has no orientation there.
+    /// `parameter_range` selects the part of the directrix swept: a curve's
+    /// own parameter, and on a composite of curves the arc length.
+    ///
+    /// The reference compiler proves its chord budget along a chain of
+    /// segments and circular arcs, open or closed, when the reference is
+    /// normal to the plane of every arc or lies in it; it sweeps an arc
+    /// oblique to the reference as sampled and reports it unbounded. It
+    /// refuses a corner, a reference parallel to the tangent, a gap between
+    /// pieces and a profile that reaches an arc's axis by name. A closed
+    /// directrix is swept without caps.
     FixedReferenceSweep {
         profile: NodeId,
         directrix: NodeId,
