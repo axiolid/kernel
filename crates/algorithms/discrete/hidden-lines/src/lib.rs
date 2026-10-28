@@ -30,3 +30,5 @@ mod recipe;
 mod view;
 
 pub use provider::ScalarHiddenLines;
+#[doc(hidden)]
+pub use provider::ScanHiddenLines;

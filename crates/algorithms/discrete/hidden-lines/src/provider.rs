@@ -14,7 +14,7 @@ use axiolid_mesh_hidden_lines_contract::{
     HiddenLineSegment, MeshHiddenLines, MeshRole, SourceEdge, Visibility,
 };
 
-use crate::broad::Broad;
+use crate::broad::{Broad, BroadPhase};
 use crate::caps::Cap;
 use crate::decide::decide;
 use crate::edges::{collect, DrawEdge, MeshEdges, Tri};
@@ -76,155 +76,163 @@ impl MeshHiddenLines for ScalarHiddenLines {
         request: &HiddenLineRequest<'_>,
         options: &ExecutionOptions,
     ) -> Result<HiddenLineOutcome, HiddenLineError> {
-        options.check_cancelled()?;
-        let (total_vertices, total_triangles) = validate_shape(request, options)?;
-        for entry in request.meshes {
-            options.check_cancelled()?;
-            audit(entry, options)?;
-        }
-        let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
-        let mut verts: Vec<Vert> = Vec::new();
-        verts
-            .try_reserve_exact(total_vertices)
-            .map_err(|_| memory())?;
-        let mut tris: Vec<Tri> = Vec::new();
-        let mut edges: Vec<DrawEdge> = Vec::new();
-        let mut caps: Vec<Cap> = Vec::new();
-        let mut escalations = 0;
-        let frame = &request.view.frame;
-        for (index, entry) in request.meshes.iter().enumerate() {
-            let base = u32::try_from(verts.len()).map_err(|_| {
-                HiddenLineError::from(GeomError::BudgetExceeded {
-                    resource: "hidden-line source vertices",
-                })
-            })?;
-            verts.extend(entry.mesh.positions.iter().map(|p| Vert::new(*p, frame)));
-            let cut = match (request.view.near, entry.role) {
-                (Some(near), MeshRole::Solid) => {
-                    cut_by_near(&verts[base as usize..], near, &mut escalations)
-                        .map_err(|error| HiddenLineError::mesh(entry.id, error))?
-                }
-                _ => false,
-            };
-            let first_triangle = tris.len();
-            let input = MeshEdges {
-                index,
-                id: entry.id,
-                role: entry.role,
-                mesh: entry.mesh,
-                base,
-            };
-            collect(
-                &input,
-                &verts,
-                &request.edges,
-                options,
-                &mut escalations,
-                &mut tris,
-                &mut edges,
-            )?;
-            if cut {
-                caps.push(Cap {
-                    tris: first_triangle..tris.len(),
-                });
-            }
-        }
-        debug_assert_eq!(tris.len(), total_triangles);
+        draw(BroadPhase::Tree, request, options)
+    }
+}
 
-        let broad = Broad::build(&tris);
-        let scene = Scene {
-            verts: &verts,
-            tris: &tris,
-            near: request.view.near,
-            far: request.view.far,
-            region: request.region,
-            caps: &caps,
-            broad: &broad,
+fn draw(
+    phase: BroadPhase,
+    request: &HiddenLineRequest<'_>,
+    options: &ExecutionOptions,
+) -> Result<HiddenLineOutcome, HiddenLineError> {
+    options.check_cancelled()?;
+    let (total_vertices, total_triangles) = validate_shape(request, options)?;
+    for entry in request.meshes {
+        options.check_cancelled()?;
+        audit(entry, options)?;
+    }
+    let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
+    let mut verts: Vec<Vert> = Vec::new();
+    verts
+        .try_reserve_exact(total_vertices)
+        .map_err(|_| memory())?;
+    let mut tris: Vec<Tri> = Vec::new();
+    let mut edges: Vec<DrawEdge> = Vec::new();
+    let mut caps: Vec<Cap> = Vec::new();
+    let mut escalations = 0;
+    let frame = &request.view.frame;
+    for (index, entry) in request.meshes.iter().enumerate() {
+        let base = u32::try_from(verts.len()).map_err(|_| {
+            HiddenLineError::from(GeomError::BudgetExceeded {
+                resource: "hidden-line source vertices",
+            })
+        })?;
+        verts.extend(entry.mesh.positions.iter().map(|p| Vert::new(*p, frame)));
+        let cut = match (request.view.near, entry.role) {
+            (Some(near), MeshRole::Solid) => {
+                cut_by_near(&verts[base as usize..], near, &mut escalations)
+                    .map_err(|error| HiddenLineError::mesh(entry.id, error))?
+            }
+            _ => false,
         };
-        let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
-        evidence.selected_edges = edges.len();
-        let mut work = Work::default();
-        let mut segments: Vec<HiddenLineSegment> = Vec::new();
-        for edge in &edges {
-            options.check_cancelled()?;
-            let id = request.meshes[edge.mesh].id;
-            let resolved = resolve(&scene, edge, request.limits.max_candidate_pairs, &mut work)
-                .map_err(|error| match error {
-                    GeomError::Degenerate(_) => HiddenLineError::mesh(id, error),
-                    other => HiddenLineError::from(other),
-                })?;
-            let pieces = match resolved {
-                Resolved::Point => {
-                    evidence.point_edges += 1;
-                    continue;
-                }
-                Resolved::Clipped => {
-                    evidence.clipped_edges += 1;
-                    continue;
-                }
-                Resolved::Pieces(pieces) => pieces,
+        let first_triangle = tris.len();
+        let input = MeshEdges {
+            index,
+            id: entry.id,
+            role: entry.role,
+            mesh: entry.mesh,
+            base,
+        };
+        collect(
+            &input,
+            &verts,
+            &request.edges,
+            options,
+            &mut escalations,
+            &mut tris,
+            &mut edges,
+        )?;
+        if cut {
+            caps.push(Cap {
+                tris: first_triangle..tris.len(),
+            });
+        }
+    }
+    debug_assert_eq!(tris.len(), total_triangles);
+
+    let broad = Broad::build(&tris, phase);
+    let scene = Scene {
+        verts: &verts,
+        tris: &tris,
+        near: request.view.near,
+        far: request.view.far,
+        region: request.region,
+        caps: &caps,
+        broad: &broad,
+    };
+    let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
+    evidence.selected_edges = edges.len();
+    let mut work = Work::default();
+    let mut segments: Vec<HiddenLineSegment> = Vec::new();
+    for edge in &edges {
+        options.check_cancelled()?;
+        let id = request.meshes[edge.mesh].id;
+        let resolved = resolve(&scene, edge, request.limits.max_candidate_pairs, &mut work)
+            .map_err(|error| match error {
+                GeomError::Degenerate(_) => HiddenLineError::mesh(id, error),
+                other => HiddenLineError::from(other),
+            })?;
+        let pieces = match resolved {
+            Resolved::Point => {
+                evidence.point_edges += 1;
+                continue;
+            }
+            Resolved::Clipped => {
+                evidence.clipped_edges += 1;
+                continue;
+            }
+            Resolved::Pieces(pieces) => pieces,
+        };
+        let [start, end] = edge.ends;
+        let source = SourceEdge {
+            mesh: id,
+            vertices: edge.local,
+        };
+        let first = segments.len();
+        // A collapsed piece since the last pushed segment: its neighbours
+        // of one visibility are one piece after rounding.
+        let mut collapsed = false;
+        for piece in pieces {
+            if piece.hidden && !request.edges.hidden {
+                collapsed = false;
+                continue;
+            }
+            let round = |param| {
+                endpoint(&verts, start, end, param)
+                    .map_err(|error| HiddenLineError::mesh(id, error))
             };
-            let [start, end] = edge.ends;
-            let source = SourceEdge {
-                mesh: id,
-                vertices: edge.local,
+            let (from, to) = (round(piece.lo)?, round(piece.hi)?);
+            if from == to {
+                evidence.collapsed_segments += 1;
+                collapsed = true;
+                continue;
+            }
+            let visibility = if piece.hidden {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
             };
-            let first = segments.len();
-            // A collapsed piece since the last pushed segment: its neighbours
-            // of one visibility are one piece after rounding.
-            let mut collapsed = false;
-            for piece in pieces {
-                if piece.hidden && !request.edges.hidden {
+            if collapsed && segments.len() > first {
+                let count = segments.len();
+                let last = &mut segments[count - 1];
+                if last.visibility == visibility {
+                    last.end = to;
                     collapsed = false;
                     continue;
                 }
-                let round = |param| {
-                    endpoint(&verts, start, end, param)
-                        .map_err(|error| HiddenLineError::mesh(id, error))
-                };
-                let (from, to) = (round(piece.lo)?, round(piece.hi)?);
-                if from == to {
-                    evidence.collapsed_segments += 1;
-                    collapsed = true;
-                    continue;
-                }
-                let visibility = if piece.hidden {
-                    Visibility::Hidden
-                } else {
-                    Visibility::Visible
-                };
-                if collapsed && segments.len() > first {
-                    let count = segments.len();
-                    let last = &mut segments[count - 1];
-                    if last.visibility == visibility {
-                        last.end = to;
-                        collapsed = false;
-                        continue;
-                    }
-                }
-                collapsed = false;
-                if segments.len() >= request.limits.max_output_segments {
-                    return Err(GeomError::BudgetExceeded {
-                        resource: "hidden-line output segments",
-                    }
-                    .into());
-                }
-                segments.try_reserve(1).map_err(|_| memory())?;
-                segments.push(HiddenLineSegment::new(
-                    source, edge.kind, visibility, from, to,
-                ));
             }
-        }
-        for segment in &segments {
-            match segment.visibility {
-                Visibility::Hidden => evidence.hidden_segments += 1,
-                _ => evidence.visible_segments += 1,
+            collapsed = false;
+            if segments.len() >= request.limits.max_output_segments {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "hidden-line output segments",
+                }
+                .into());
             }
+            segments.try_reserve(1).map_err(|_| memory())?;
+            segments.push(HiddenLineSegment::new(
+                source, edge.kind, visibility, from, to,
+            ));
         }
-        evidence.candidate_pairs = work.candidate_pairs;
-        evidence.exact_escalations = work.escalations + escalations;
-        Ok(HiddenLineOutcome::new(request.view, segments, evidence))
     }
+    for segment in &segments {
+        match segment.visibility {
+            Visibility::Hidden => evidence.hidden_segments += 1,
+            _ => evidence.visible_segments += 1,
+        }
+    }
+    evidence.candidate_pairs = work.candidate_pairs;
+    evidence.exact_escalations = work.escalations + escalations;
+    Ok(HiddenLineOutcome::new(request.view, segments, evidence))
 }
 
 /// Whether the plane `W = near` cuts the vertices: one has `W > near` and one
@@ -390,4 +398,39 @@ fn audit(entry: &HiddenLineMesh<'_>, options: &ExecutionOptions) -> Result<(), H
         ))));
     }
     Ok(())
+}
+
+/// The scalar provider with a linear-scan broad phase: the baseline the
+/// benchmark times the BVH against, and the reference its candidates must
+/// equal. Its output is identical to [`ScalarHiddenLines`]; it is slower on
+/// large scenes. Not part of the supported API.
+#[doc(hidden)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ScanHiddenLines;
+
+impl Backend for ScanHiddenLines {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor::new(
+            BackendId::new("scalar-hidden-lines-scan"),
+            ExecutionTarget::PortableCpu,
+        )
+    }
+}
+
+impl MeshHiddenLines for ScanHiddenLines {
+    fn scratch_requirement(&self) -> ScratchRequirement {
+        ScalarHiddenLines.scratch_requirement()
+    }
+
+    fn cancellation_granularity(&self) -> CancellationGranularity {
+        CancellationGranularity::Incremental
+    }
+
+    fn hidden_lines(
+        &self,
+        request: &HiddenLineRequest<'_>,
+        options: &ExecutionOptions,
+    ) -> Result<HiddenLineOutcome, HiddenLineError> {
+        draw(BroadPhase::Scan, request, options)
+    }
 }

@@ -335,6 +335,7 @@ mod tests {
     use axiolid_mesh::TriMesh;
 
     use super::*;
+    use crate::broad::BroadPhase;
     use crate::view::{Bounds, Vert};
 
     fn frame() -> Frame3 {
@@ -381,7 +382,7 @@ mod tests {
             kind: axiolid_mesh_hidden_lines_contract::EdgeKind::Crease,
             bounds: Bounds::of(&verts, &ends),
         };
-        let broad = Broad::build(&tris);
+        let broad = Broad::build(&tris, BroadPhase::Tree);
         let scene = Scene {
             verts: &verts,
             tris: &tris,

@@ -11,7 +11,7 @@ caret rule for `0.x` versions.
 
 ### Changed
 
-- Candidate triangles for an edge, and the cap triangles of a cut solid, come from an `axiolid-spatial` BVH over view-space boxes instead of a linear scan. The predicate, the candidate set, its ascending order and `candidate_pairs` are unchanged (#138). Wall clock, `scenario/hidden-lines` (same binary, linear scan versus BVH): 20x20 boxes 437 ms to 425 ms isometric (3%) and 110 ms to 104 ms cut plan (6%); 50x50 boxes 3.96 s to 2.89 s isometric (27%) and 1.91 s to 0.83 s cut plan (57%). At 400 boxes the gain is small because exact evaluation (interval filter, then dyadic escalation) is about 90% of the time and the broad phase about 3%; the BVH pays off as the scene grows.
+- Candidate triangles for an edge, and the cap triangles of a cut solid, come from an `axiolid-spatial` BVH over view-space boxes instead of a linear scan. The predicate, the candidate set, its ascending order and `candidate_pairs` are unchanged (#138). Wall clock from `scenario/hidden-lines` (`cargo bench -p axiolid-benchmark --bench scenario -- hidden-lines`, which times the BVH and the linear scan, `ScanHiddenLines`, on each case; a loaded shared machine, so read these as ranges), linear scan / BVH: isometric 20x20 boxes 412 / 389 ms (a reviewer's run: 459 / 426), cut plan 20x20 174 / 140 ms (117 / 100; very noisy), isometric 50x50 3.34 / 2.52 s (3.62 / 2.88), cut plan 50x50 1.59 / 0.76 s (1.67 / 0.82). The gain is small at 400 boxes, because exact evaluation of the candidates dominates there, and 25-30% (isometric) to about 50% (cut plan) at 2,500.
 
 ## [0.1.1] - 2026-10-28
 

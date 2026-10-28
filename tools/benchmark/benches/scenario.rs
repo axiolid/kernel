@@ -16,7 +16,7 @@ use axiolid::application::Application;
 use axiolid::contracts::ExecutionOptions;
 use axiolid_benchmark::workload;
 use axiolid_core::{Frame3, Point3, Tolerance, Vec3};
-use axiolid_hidden_lines::ScalarHiddenLines;
+use axiolid_hidden_lines::{ScalarHiddenLines, ScanHiddenLines};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
@@ -158,10 +158,12 @@ fn hidden_line_box(min: [f64; 3], max: [f64; 3]) -> TriMesh {
 /// gap to its neighbours. In the isometric view every box overlaps its
 /// neighbours in the image; the cut plan sets the near plane at mid-height
 /// (2.0), so the taller columns are capped and the lower ones drawn whole.
-/// The BVH broad phase gains 3-6% at 400 boxes (exact evaluation dominates)
-/// and 27% (isometric) to 57% (cut plan) at 2,500; see the provider CHANGELOG.
+/// Each case runs with the BVH broad phase and with the linear scan
+/// (`ScanHiddenLines`, identical output), so the broad phase's gain is read
+/// off the same group; the provider CHANGELOG records a run.
 fn hidden_lines(criterion: &mut Criterion) {
-    let provider = ScalarHiddenLines::new();
+    let bvh = ScalarHiddenLines::new();
+    let providers: [(&str, &dyn MeshHiddenLines); 2] = [("bvh", &bvh), ("scan", &ScanHiddenLines)];
     let options = ExecutionOptions::new(tolerance());
     let (s2, s6, s3) = (
         std::f64::consts::FRAC_1_SQRT_2,
@@ -204,7 +206,7 @@ fn hidden_lines(criterion: &mut Criterion) {
                 HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
             // A drawing with nothing visible, or nothing hidden, would time
             // beautifully; require both before timing.
-            let outcome = provider
+            let outcome = bvh
                 .hidden_lines(&request, &options)
                 .expect("the grid draws");
             for visibility in [Visibility::Visible, Visibility::Hidden] {
@@ -213,16 +215,27 @@ fn hidden_lines(criterion: &mut Criterion) {
                     "{name} {n}x{n}: no {visibility:?} segment"
                 );
             }
+            // The scan is the baseline only if it draws the same thing.
+            let scanned = ScanHiddenLines
+                .hidden_lines(&request, &options)
+                .expect("the grid draws");
+            assert_eq!(
+                format!("{:?}", outcome.segments),
+                format!("{:?}", scanned.segments),
+                "{name} {n}x{n}: broad phases disagree"
+            );
             group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
-            group.bench_function(format!("{name}/{n}x{n}"), |bencher| {
-                bencher.iter(|| {
-                    black_box(
-                        provider
-                            .hidden_lines(black_box(&request), &options)
-                            .expect("the grid draws"),
-                    )
+            for (phase, provider) in providers {
+                group.bench_function(format!("{name}/{n}x{n}/{phase}"), |bencher| {
+                    bencher.iter(|| {
+                        black_box(
+                            provider
+                                .hidden_lines(black_box(&request), &options)
+                                .expect("the grid draws"),
+                        )
+                    });
                 });
-            });
+            }
         }
     }
     group.finish();

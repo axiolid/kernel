@@ -51,6 +51,9 @@ pub(crate) fn hidden_by_caps(
     max_pairs: usize,
 ) -> GeomResult<Vec<Span>> {
     let mut hidden: Vec<Span> = Vec::new();
+    if scene.caps.is_empty() {
+        return Ok(hidden);
+    }
     let query = Query {
         image: edge.bounds,
         w_lo: near,

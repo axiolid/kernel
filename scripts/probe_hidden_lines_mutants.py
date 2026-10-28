@@ -85,8 +85,8 @@ MUTANTS = [
      'std::cmp::Ordering::Equal => sticky || kept.bit(0),',
      'std::cmp::Ordering::Equal => kept.bit(0),', TESTS),
     ('output limit unchecked', PRO,
-     '                if segments.len() >= request.limits.max_output_segments {',
-     '                if false && segments.len() >= request.limits.max_output_segments {', TESTS),
+     '            if segments.len() >= request.limits.max_output_segments {',
+     '            if false && segments.len() >= request.limits.max_output_segments {', TESTS),
     ('near clip through a cut solid accepted', PRO,
      '        if beyond && kept {',
      '        if false && beyond && kept {', TESTS),
@@ -95,8 +95,8 @@ MUTANTS = [
     # plane, and a solid wholly beyond it is crossed an even number of times
     # (the ray enters and leaves), so neither ever has an odd parity.
     ('collapsed neighbours not merged', PRO,
-     '                    if last.visibility == visibility {',
-     '                    if false && last.visibility == visibility {', TESTS),
+     '                if last.visibility == visibility {',
+     '                if false && last.visibility == visibility {', TESTS),
     ('edge-on wall ignores near', OCC,
      '    let Some(near) = scene.near else {',
      '    let Some(near) = scene.near.filter(|_| false) else {', TESTS),
@@ -114,12 +114,18 @@ MUTANTS = [
      '        let side = if neg { side.reverse() } else { side };',
      '        let side = if neg && false { side.reverse() } else { side };', TESTS),
     ('caps applied to sheets', PRO,
-     '                (Some(near), MeshRole::Solid) => {',
-     '                (Some(near), _) => {', TESTS),
+     '            (Some(near), MeshRole::Solid) => {',
+     '            (Some(near), _) => {', TESTS),
     # The broad phase.
     ('BVH probe misses touching boxes', BRD,
      '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
      '                    max: Point3::new(query.image.hi[0].next_down(), query.image.hi[1], query.w_hi),', TESTS),
+    ('BVH probe misses touching boxes at y max', BRD,
+     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
+     '                    max: Point3::new(query.image.hi[0], query.image.hi[1].next_down(), query.w_hi),', TESTS),
+    ('BVH probe misses touching boxes at depth max', BRD,
+     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
+     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi.next_down()),', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=3600, reject_uncompiled=True)

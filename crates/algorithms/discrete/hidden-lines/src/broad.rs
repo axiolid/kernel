@@ -13,6 +13,7 @@
 //! answer is sorted ascending, so the candidates, their order and the pair
 //! count are those of the linear scan. A box the hierarchy would refuse
 //! (non-finite enclosure) makes the scan the answer; it never loses a pair.
+//! `ScanHiddenLines` runs the scan throughout, for the benchmark baseline.
 
 use axiolid_core::{Aabb, Point3};
 use axiolid_spatial::{Bvh, SpatialItem};
@@ -37,6 +38,15 @@ impl Query {
     }
 }
 
+/// How candidates are found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BroadPhase {
+    /// The BVH (the provider's own).
+    Tree,
+    /// The linear scan, the definition the BVH must reproduce.
+    Scan,
+}
+
 /// A hierarchy over the view-space boxes of the scene's triangles.
 #[derive(Debug)]
 pub(crate) struct Broad {
@@ -44,7 +54,10 @@ pub(crate) struct Broad {
 }
 
 impl Broad {
-    pub(crate) fn build(tris: &[Tri]) -> Self {
+    pub(crate) fn build(tris: &[Tri], phase: BroadPhase) -> Self {
+        if phase == BroadPhase::Scan {
+            return Self { bvh: None };
+        }
         let bvh = Bvh::build(tris.iter().enumerate().map(|(i, tri)| {
             let (lo, hi) = (tri.bounds.lo, tri.bounds.hi);
             SpatialItem::new(
@@ -63,7 +76,7 @@ impl Broad {
     /// The triangles `query` admits, ascending.
     pub(crate) fn candidates(&self, tris: &[Tri], query: &Query) -> Vec<usize> {
         let found = match &self.bvh {
-            Some(bvh) if !force_scan() => {
+            Some(bvh) => {
                 let probe = Aabb {
                     min: Point3::new(query.image.lo[0], query.image.lo[1], query.w_lo),
                     max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),
@@ -101,21 +114,6 @@ fn scan(tris: &[Tri], query: &Query) -> Vec<usize> {
 }
 
 #[cfg(test)]
-thread_local! {
-    static FORCE_SCAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-fn force_scan() -> bool {
-    FORCE_SCAN.with(std::cell::Cell::get)
-}
-
-#[cfg(not(test))]
-fn force_scan() -> bool {
-    false
-}
-
-#[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
 
@@ -128,7 +126,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::provider::ScalarHiddenLines;
+    use crate::provider::{ScalarHiddenLines, ScanHiddenLines};
 
     fn tri(lo: [f64; 3], hi: [f64; 3]) -> Tri {
         Tri {
@@ -147,22 +145,36 @@ mod tests {
     }
 
     #[test]
-    fn touching_boxes_are_candidates_in_every_axis() {
+    fn touching_boxes_are_candidates_wherever_the_leaves_fall() {
         let tris: Vec<Tri> = (0..40)
             .map(|i| {
                 let x = f64::from(i);
                 tri([x, 0.0, 0.0], [x + 1.0, 1.0, 1.0])
             })
             .collect();
-        let broad = Broad::build(&tris);
-        // Touches tri 3 and tri 4 along x; depth touches at 1.0 exactly.
-        let q = query([4.0, 1.0, 0.0], [4.0, 2.0, 0.0], 1.0, 5.0);
-        assert_eq!(broad.candidates(&tris, &q), vec![3, 4]);
-        // Depth gap: nothing.
-        let q = query([4.0, 1.0, 0.0], [4.0, 2.0, 0.0], 1.5, 5.0);
-        assert!(broad.candidates(&tris, &q).is_empty());
-        // Inverted depth range (near behind the edge) still agrees with the scan.
-        let q = query([0.0, 0.0, 0.0], [40.0, 1.0, 0.0], 3.0, -1.0);
+        let broad = Broad::build(&tris, BroadPhase::Tree);
+        let mut touching = 0;
+        // Integer x and leaf boundaries, y and w on both sides of every face.
+        for x in (-1..=41).map(f64::from).chain([0.5, 7.5]) {
+            for width in [0.0, 1.0] {
+                for y in [-1.0, 0.0, 0.5, 1.0, 2.0] {
+                    for w_lo in [-1.0, 0.0, 1.0, 2.0] {
+                        for w_hi in [-1.0, 0.0, 1.0, 2.0, f64::INFINITY] {
+                            let q = query([x, y, 0.0], [x + width, y, 0.0], w_lo, w_hi);
+                            let found = broad.candidates(&tris, &q);
+                            assert_eq!(found, scan(&tris, &q), "x {x} y {y} w {w_lo}..{w_hi}");
+                            touching += usize::from(!found.is_empty());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(touching > 1000);
+        // The documented touching cases, spelled out.
+        let q = query([5.0, 0.0, 0.0], [5.0, 0.0, 0.0], 1.0, 0.0);
+        assert_eq!(broad.candidates(&tris, &q), vec![4, 5]);
+        // A depth gap: nothing.
+        let q = query([5.0, 0.0, 0.0], [5.0, 0.0, 0.0], 1.5, 5.0);
         assert!(broad.candidates(&tris, &q).is_empty());
     }
 
@@ -172,7 +184,7 @@ mod tests {
             tri([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
             tri([f64::NEG_INFINITY, 0.0, 0.0], [f64::INFINITY, 1.0, 1.0]),
         ];
-        let broad = Broad::build(&tris);
+        let broad = Broad::build(&tris, BroadPhase::Tree);
         assert!(broad.bvh.is_none());
         let q = query([0.5, 0.5, 0.0], [0.5, 0.5, 0.0], 0.0, 1.0);
         assert_eq!(broad.candidates(&tris, &q), vec![0, 1]);
@@ -214,7 +226,12 @@ mod tests {
             .collect()
     }
 
-    fn draw(meshes: &[TriMesh], frame: Frame3, near: Option<f64>) -> String {
+    fn draw(
+        provider: &dyn MeshHiddenLines,
+        meshes: &[TriMesh],
+        frame: Frame3,
+        near: Option<f64>,
+    ) -> String {
         let entries: Vec<HiddenLineMesh<'_>> = meshes
             .iter()
             .enumerate()
@@ -227,7 +244,7 @@ mod tests {
         let limits = HiddenLineLimits::new(64, 4096, 4096, 10_000_000, 1_000_000);
         let request = HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
         let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("tolerance"));
-        let outcome = ScalarHiddenLines::new()
+        let outcome = provider
             .hidden_lines(&request, &options)
             .expect("the scene draws");
         format!("{outcome:?}")
@@ -253,21 +270,43 @@ mod tests {
             y: Vec3::Y,
             z: Vec3::Z,
         };
+        // Looking along +Y (an elevation) and along a generic direction.
+        let elevation = Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Z,
+            z: -Vec3::Y,
+        };
+        let (a, b, c) = (0.3_f64, -0.5_f64, 0.8_f64);
+        let norm = (a * a + b * b + c * c).sqrt();
+        let z = Vec3::new(a / norm, b / norm, c / norm);
+        let x_raw = Vec3::new(b, -a, 0.0);
+        let xn = (a * a + b * b).sqrt();
+        let x = Vec3::new(x_raw.x / xn, x_raw.y / xn, 0.0);
+        let y = Vec3::new(
+            z.y * x.z - z.z * x.y,
+            z.z * x.x - z.x * x.z,
+            z.x * x.y - z.y * x.x,
+        );
+        let oblique = Frame3 {
+            origin: Point3::new(-0.4, 0.7, 0.1),
+            x,
+            y,
+            z,
+        };
         let mut checked = 0;
         for seed in 0..12 {
             let meshes = boxes(3 + seed as usize, seed);
-            for frame in [iso, plan] {
+            for frame in [iso, plan, elevation, oblique] {
                 for near in [None, Some(0.55)] {
-                    FORCE_SCAN.with(|f| f.set(true));
-                    let scanned = draw(&meshes, frame, near);
-                    FORCE_SCAN.with(|f| f.set(false));
+                    let scanned = draw(&ScanHiddenLines, &meshes, frame, near);
                     // The assertion in `candidates` also compares every query.
-                    let indexed = draw(&meshes, frame, near);
+                    let indexed = draw(&ScalarHiddenLines::new(), &meshes, frame, near);
                     assert_eq!(scanned, indexed, "seed {seed}");
                     checked += 1;
                 }
             }
         }
-        assert_eq!(checked, 48);
+        assert_eq!(checked, 96);
     }
 }
