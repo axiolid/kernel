@@ -1,8 +1,9 @@
 //! Fixtures of the region conformance suite (ADR 0091).
 //!
-//! Every mesh is a closed, consistently wound, outward oriented solid (the
-//! tests below audit that), and every expected value is derived by hand in
-//! the comment of its case. Frame `h(z)` has its origin at `(0, 0, z)` and
+//! A solid case is a closed, consistently wound, outward oriented solid; a
+//! sheet case is an open, consistently wound, non-degenerate surface whose
+//! boundary edges were counted by hand (the tests below audit both). Every
+//! expected value is derived by hand in the comment of its case. Frame `h(z)` has its origin at `(0, 0, z)` and
 //! the model axes as `x`, `y`, `z`, so plane-local `(x, y)` equals model
 //! `(x, y)`. A ring starts at its lexicographically smallest point; an outer
 //! ring runs counter-clockwise and a hole clockwise.
@@ -11,8 +12,9 @@ use axiolid_core::{Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
 use crate::request::{
-    ChainEnd, InPlaneRegion, InPlaneSide, SectionChain, REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
-    REFUSED_OVERLAPPING_IN_PLANE_FACES,
+    ChainEnd, InPlaneRegion, InPlaneSide, SectionChain, SectionRole,
+    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
+    REFUSED_SADDLE_VERTEX,
 };
 
 /// What a fixture must produce.
@@ -22,6 +24,8 @@ pub(crate) enum Expected {
     /// Either the refusal or this output: a provider may merge overlapping
     /// in-plane faces instead of refusing them.
     OutputOrRefused(&'static str, Output),
+    /// Only the refusal.
+    Refused(&'static str),
 }
 
 /// Expected chains, regions and source counts.
@@ -37,6 +41,9 @@ pub(crate) struct Case {
     pub name: &'static str,
     pub mesh: TriMesh,
     pub frame: Frame3,
+    pub role: SectionRole,
+    /// Mesh edges used by one triangle only, counted by hand; zero for a solid.
+    pub boundary_edges: usize,
     pub expected: Expected,
 }
 
@@ -270,6 +277,94 @@ fn octahedron() -> TriMesh {
     b.finish()
 }
 
+/// Frame on the plane `x = x0` with local `(x, y)` equal to model `(y, z)`;
+/// its normal `Y x Z` is model `+x`.
+fn plane_x(x0: f64) -> Frame3 {
+    Frame3 {
+        origin: Point3::new(x0, 0.0, 0.0),
+        x: Vec3::Y,
+        y: Vec3::Z,
+        z: Vec3::X,
+    }
+}
+
+/// Terrain over a 3 x 3 grid: vertex `v(i, j) = i + 3 j` lies at
+/// `(i, j, h(i, j))` with the heights `h` below, and cell `(i, j)` is the two
+/// triangles `(v(i,j), v(i+1,j), v(i+1,j+1))` and `(v(i,j), v(i+1,j+1),
+/// v(i,j+1))`, both facing `+z`. Eight triangles; the boundary is the
+/// perimeter of the grid: 4 sides of 2 edges, 8 boundary edges.
+fn terrain() -> TriMesh {
+    // Rows j = 0, 1, 2; columns i = 0, 1, 2.
+    let heights = [[0.0, 2.0, 1.0], [2.0, 0.0, 1.0], [0.0, 3.0, 1.0]];
+    let mut positions = Vec::new();
+    for (j, row) in heights.iter().enumerate() {
+        for (i, &z) in row.iter().enumerate() {
+            positions.push(Point3::new(i as f64, j as f64, z));
+        }
+    }
+    let v = |i: u32, j: u32| i + 3 * j;
+    let mut indices = Vec::new();
+    for j in 0..2 {
+        for i in 0..2 {
+            indices.extend([v(i, j), v(i + 1, j), v(i + 1, j + 1)]);
+            indices.extend([v(i, j), v(i + 1, j + 1), v(i, j + 1)]);
+        }
+    }
+    TriMesh::new(positions, indices)
+}
+
+/// The square `(0,0) (2,0) (2,2) (0,2)` at `z = 0` as two triangles; the
+/// flipped one winds clockwise seen from `+z`. Four boundary edges.
+fn square_sheet(flipped: bool) -> TriMesh {
+    let p = |x, y| Point3::new(x, y, 0.0);
+    let positions = vec![p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0), p(0.0, 2.0)];
+    let indices = if flipped {
+        vec![0, 2, 1, 0, 3, 2]
+    } else {
+        vec![0, 1, 2, 0, 2, 3]
+    };
+    TriMesh::new(positions, indices)
+}
+
+/// Square annulus sheet at `z = 0`: outer `v0..v3 = (0,0) (3,0) (3,3) (0,3)`,
+/// inner `v4..v7 = (1,1) (2,1) (2,2) (1,2)`, eight triangles facing `+z`
+/// (each has a positive cross product). Eight boundary edges: four outer and
+/// four inner.
+fn annulus_sheet() -> TriMesh {
+    let p = |x, y| Point3::new(x, y, 0.0);
+    TriMesh::new(
+        vec![
+            p(0.0, 0.0),
+            p(3.0, 0.0),
+            p(3.0, 3.0),
+            p(0.0, 3.0),
+            p(1.0, 1.0),
+            p(2.0, 1.0),
+            p(2.0, 2.0),
+            p(1.0, 2.0),
+        ],
+        vec![
+            0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7,
+        ],
+    )
+}
+
+/// A four-triangle fan around `(0,0,0)` over the ring `(1,0,1) (0,1,-1)
+/// (-1,0,1) (0,-1,-1)`: a saddle. Four boundary edges, the ring.
+fn saddle_sheet() -> TriMesh {
+    let p = |x, y, z| Point3::new(x, y, z);
+    TriMesh::new(
+        vec![
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 1.0),
+            p(0.0, 1.0, -1.0),
+            p(-1.0, 0.0, 1.0),
+            p(0.0, -1.0, -1.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1],
+    )
+}
+
 /// The unit square ring starting at the origin.
 fn unit_square() -> Vec<Point2> {
     ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
@@ -288,6 +383,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // crossing, and each plane edge borders the top face: no touching.
         Case {
             name: "cube through its top face",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: crate::conformance::unit_cube(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -300,6 +397,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // Cube bottom at z = 0: the faces face -z, the material is above.
         Case {
             name: "cube through its bottom face",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: crate::conformance::unit_cube(),
             frame: h(0.0),
             expected: Expected::Output(output(
@@ -314,6 +413,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // The hole runs clockwise from its smallest point (1,1).
         Case {
             name: "frame top with a hole",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: frame_prism(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -337,6 +438,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // x = 1 and 1.1 border the strips: region edges, not cuts.
         Case {
             name: "parapet with a post",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: parapet_with_post(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -369,6 +472,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // smaller end comes first; each end is a vertex of a strip.
         Case {
             name: "parapet with a post seen from behind",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: parapet_with_post(),
             frame: Frame3 {
                 origin: Point3::new(0.0, 0.0, 1.0),
@@ -407,6 +512,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // canonical. No chains: the post walls border the top.
         Case {
             name: "slab with a post touching its corner",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: slab_with_corner_post(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -433,6 +540,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // touches: nothing is emitted, one touching edge is counted.
         Case {
             name: "prism touching along an edge",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: prism(),
             frame: h(0.0),
             expected: Expected::Output(output(vec![], vec![], 0, 1)),
@@ -441,6 +550,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // (0,-1) (2,-1) (2,1) (0,1), counter-clockwise from (0,-1).
         Case {
             name: "prism top",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: prism(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -454,6 +565,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // touch, neither a segment nor an edge.
         Case {
             name: "point touch",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: octahedron(),
             frame: h(1.0),
             expected: Expected::Output(output(vec![], vec![], 0, 0)),
@@ -465,6 +578,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // a Below region with a hole and the footprint as Both.
         Case {
             name: "box on a slab",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: boxes(&[
                 ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
                 ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
@@ -492,6 +607,8 @@ pub(crate) fn cases() -> Vec<Case> {
         // side. A provider may refuse, or merge them into [0,3] x [0,1].
         Case {
             name: "overlapping boxes",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             mesh: boxes(&[
                 ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
                 ((1.0, 3.0), (0.0, 1.0), (0.0, 1.0)),
@@ -507,6 +624,128 @@ pub(crate) fn cases() -> Vec<Case> {
                 ),
             ),
         },
+        // Sheets (open meshes). Terrain on the plane x = 0.5 (local (x, y) =
+        // model (y, z)): only cell column i = 0 is cut. Its edges crossing
+        // x = 0.5 are v00-v10 at (y, z) = (0, 1), the diagonal v00-v11 at
+        // (0.5, 0), v01-v11 at (1, 1), v01-v12 at (1.5, 2.5) and v12-v02 at
+        // (2, 1.5). The four triangles give the segments (0,1)-(0.5,0),
+        // (0.5,0)-(1,1), (1,1)-(1.5,2.5), (1.5,2.5)-(2,1.5): one open chain,
+        // no node collinear. Its first node lies on the boundary edge
+        // v00-v10 (y = 0) and its last on v12-v02 (y = 2): MeshBoundary at
+        // both ends. 8 boundary edges.
+        Case {
+            name: "terrain cut by a vertical plane",
+            mesh: terrain(),
+            frame: plane_x(0.5),
+            role: SectionRole::Sheet,
+            boundary_edges: 8,
+            expected: Expected::Output(output(
+                vec![SectionChain::open(
+                    ring(&[(0.0, 1.0), (0.5, 0.0), (1.0, 1.0), (1.5, 2.5), (2.0, 1.5)]),
+                    ChainEnd::MeshBoundary,
+                    ChainEnd::MeshBoundary,
+                )],
+                vec![],
+                0,
+                0,
+            )),
+        },
+        // The plane x = 1 holds v10 = (y, z) (0, 2), v11 (1, 0), v12 (2, 3).
+        // Edge v10-v11 lies between (v00,v10,v11), whose third vertex is at
+        // x = 0, and (v10,v21,v11), whose third vertex is at x = 2: opposite
+        // sides, a cut segment. Likewise v11-v12 between (v01,v11,v12) and
+        // (v11,v22,v12). The triangles with only one vertex on the plane have
+        // the others on one side and add nothing. One open chain (0,2) (1,0)
+        // (2,3), not collinear; v10 and v12 lie on the boundary y = 0 and
+        // y = 2 and touch no in-plane triangle: MeshBoundary.
+        Case {
+            name: "terrain cut through vertices",
+            mesh: terrain(),
+            frame: plane_x(1.0),
+            role: SectionRole::Sheet,
+            boundary_edges: 8,
+            expected: Expected::Output(output(
+                vec![SectionChain::open(
+                    ring(&[(0.0, 2.0), (1.0, 0.0), (2.0, 3.0)]),
+                    ChainEnd::MeshBoundary,
+                    ChainEnd::MeshBoundary,
+                )],
+                vec![],
+                0,
+                0,
+            )),
+        },
+        // Two triangles (0,1,2), (0,2,3) face +z: one Below region, the
+        // square counter-clockwise from (0,0); the diagonal is interior. Each
+        // square edge has one in-plane triangle: a region edge, no touching.
+        Case {
+            name: "sheet lying in the plane",
+            mesh: square_sheet(false),
+            frame: h(0.0),
+            role: SectionRole::Sheet,
+            boundary_edges: 4,
+            expected: Expected::Output(output(
+                vec![],
+                vec![region(
+                    Below,
+                    ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]),
+                    vec![],
+                )],
+                2,
+                0,
+            )),
+        },
+        // The same square wound the other way faces -z: the region is Above,
+        // its ring still counter-clockwise in the frame.
+        Case {
+            name: "sheet lying in the plane, flipped",
+            mesh: square_sheet(true),
+            frame: h(0.0),
+            role: SectionRole::Sheet,
+            boundary_edges: 4,
+            expected: Expected::Output(output(
+                vec![],
+                vec![region(
+                    Above,
+                    ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]),
+                    vec![],
+                )],
+                2,
+                0,
+            )),
+        },
+        // Eight triangles facing +z form one component. Its boundary edges
+        // are the outer square and the inner square [1,2]^2, whose directed
+        // edges run 4 -> 7 -> 6 -> 5 -> 4 = (1,1) (1,2) (2,2) (2,1):
+        // clockwise, a hole. No chains; 8 boundary edges.
+        Case {
+            name: "annulus sheet",
+            mesh: annulus_sheet(),
+            frame: h(0.0),
+            role: SectionRole::Sheet,
+            boundary_edges: 8,
+            expected: Expected::Output(output(
+                vec![],
+                vec![region(
+                    Below,
+                    square(0.0, 0.0, 3.0, 3.0),
+                    vec![ring(&[(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)])],
+                )],
+                8,
+                0,
+            )),
+        },
+        // The centre lies on z = 0 and the ring alternates +1, -1, +1, -1:
+        // every one of the four triangles cuts from the centre to the middle
+        // of its ring edge, so four segments meet at the centre.
+        Case {
+            name: "saddle vertex",
+            mesh: saddle_sheet(),
+            frame: h(0.0),
+            role: SectionRole::Sheet,
+            boundary_edges: 4,
+            expected: Expected::Refused(REFUSED_SADDLE_VERTEX),
+        },
     ]
 }
 
@@ -519,14 +758,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_fixture_is_a_closed_oriented_two_manifold() {
+    fn every_solid_is_closed_and_oriented_and_every_sheet_a_consistent_surface() {
         let tolerance = Tolerance::new(1e-9, 1e-9).expect("valid tolerance");
         for case in cases() {
             let health = try_audit_mesh(&case.mesh, tolerance).expect("audit");
-            assert!(health.is_closed_two_manifold(), "{}: {health:?}", case.name);
-            SolidRequirements::Oriented
-                .validate(&case.mesh, case.name)
-                .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+            assert_eq!(health.boundary_edges, case.boundary_edges, "{}", case.name);
+            match case.role {
+                SectionRole::Solid => {
+                    assert!(health.is_closed_two_manifold(), "{}: {health:?}", case.name);
+                    SolidRequirements::Oriented
+                        .validate(&case.mesh, case.name)
+                        .unwrap_or_else(|error| panic!("{}: {error}", case.name));
+                }
+                SectionRole::Sheet => {
+                    assert!(case.boundary_edges > 0, "{}", case.name);
+                    assert_eq!(health.degenerate_triangles, 0, "{}", case.name);
+                    assert_eq!(health.non_manifold_edges, 0, "{}", case.name);
+                    assert_eq!(health.inconsistent_winding_edges, 0, "{}", case.name);
+                }
+            }
         }
     }
 

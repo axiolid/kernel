@@ -3,8 +3,8 @@
 //!
 //! The suite runs analytic fixtures with hand-derived expectations
 //! (`fixtures.rs`): faces in the plane, a post rising out of a parapet whose
-//! top lies in the plane, edge and point contacts, and overlapping in-plane
-//! faces. A provider whose first case returns `Unsupported` does not claim
+//! top lies in the plane, edge and point contacts, overlapping in-plane
+//! faces, and sheets (terrain, a sheet in the plane, an annulus, a saddle). A provider whose first case returns `Unsupported` does not claim
 //! the method: the report passes with `claimed == false`. Every case runs
 //! twice and the results must be identical.
 
@@ -16,7 +16,8 @@ use axiolid_core::{Point2, Tolerance};
 use crate::conformance::{ConformanceFailure, ConformanceSuite};
 use crate::fixtures::{cases, Case, Expected, Output};
 use crate::request::{
-    InPlaneRegion, PlaneSection, PlaneSectionEvidence, RegionLimits, SectionChain, SectionRequest,
+    ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, RegionLimits, SectionChain,
+    SectionRequest,
 };
 use crate::{MeshPlaneSection, SectionLimits};
 
@@ -111,7 +112,8 @@ impl RegionConformanceSuite {
         let region_limits = RegionLimits::new(64, 4096, 1 << 20);
         let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("valid tolerance"));
         for (index, case) in cases().iter().enumerate() {
-            let request = SectionRequest::new(case.frame, limits, region_limits);
+            let request =
+                SectionRequest::new(case.frame, limits, region_limits).with_role(case.role);
             let first = provider.section_request(&case.mesh, &request, &options);
             if index == 0 && matches!(first, Err(GeomError::Unsupported { .. })) {
                 report.claimed = false;
@@ -151,7 +153,17 @@ fn check_case(
         | (Expected::OutputOrRefused(_, expected), Ok(got)) => {
             check_output(case, expected, &got, report);
         }
-        (Expected::OutputOrRefused(family, _), Err(error)) if is_refusal(&error, family) => {}
+        (Expected::OutputOrRefused(family, _) | Expected::Refused(family), Err(error))
+            if is_refusal(&error, family) => {}
+        (Expected::Refused(family), Ok(_)) => {
+            report
+                .failures
+                .push(RegionConformanceFailure::WrongRefusal {
+                    case: name,
+                    expected: family,
+                    actual: "a section was returned".into(),
+                });
+        }
         (Expected::Output(_), Err(error)) => {
             report
                 .failures
@@ -160,7 +172,7 @@ fn check_case(
                     error: error.to_string(),
                 });
         }
-        (Expected::OutputOrRefused(family, _), Err(error)) => {
+        (Expected::OutputOrRefused(family, _) | Expected::Refused(family), Err(error)) => {
             report
                 .failures
                 .push(RegionConformanceFailure::WrongRefusal {
@@ -207,6 +219,7 @@ fn check_output(
             expected.touching_edges,
             evidence.in_plane_pairs,
         )
+        .with_role(case.role, case.boundary_edges)
         .with_output(&got.chains, &got.regions);
     if evidence != derived || !evidence.is_derived_from_input_mesh() {
         report
@@ -215,8 +228,8 @@ fn check_output(
     }
 }
 
-/// Both end points of every open chain equal a region vertex bit for bit:
-/// chains and regions are projected by one function.
+/// Every end of an open chain declared to end on a region equals a region
+/// vertex bit for bit: chains and regions are projected by one function.
 fn open_ends_are_region_vertices(section: &PlaneSection) -> bool {
     let on_region = |point: &Point2| {
         section.regions.iter().any(|region| {
@@ -228,10 +241,13 @@ fn open_ends_are_region_vertices(section: &PlaneSection) -> bool {
     section
         .chains
         .iter()
-        .filter(|chain| !chain.is_closed())
-        .all(|chain| {
-            chain.points.first().is_some_and(on_region)
-                && chain.points.last().is_some_and(on_region)
+        .filter_map(|chain| Some((chain, chain.ends?)))
+        .all(|(chain, ends)| {
+            let on_region_if_declared = |end: ChainEnd, point: Option<&Point2>| {
+                end != ChainEnd::InPlaneRegion || point.is_some_and(on_region)
+            };
+            on_region_if_declared(ends[0], chain.points.first())
+                && on_region_if_declared(ends[1], chain.points.last())
         })
 }
 

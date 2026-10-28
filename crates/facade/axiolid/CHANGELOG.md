@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `Application::section_mesh_request` sections open meshes when the request
+  has `SectionRole::Sheet` (ADR 0091, #359).
+
 ## [0.4.4] - 2026-10-28
 
 ### Added

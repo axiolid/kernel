@@ -12,7 +12,7 @@ pub use contract::{
 };
 pub use request::{
     ChainEnd, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence, RegionLimits,
-    SectionChain, SectionRequest, REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    SectionChain, SectionRequest, SectionRole, REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
     REFUSED_OVERLAPPING_IN_PLANE_FACES, REFUSED_SADDLE_VERTEX,
 };
 

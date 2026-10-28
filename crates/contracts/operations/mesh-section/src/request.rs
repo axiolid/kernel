@@ -18,6 +18,17 @@
 //! points and region vertices are projected by the same function, so they are
 //! bit-identical.
 //!
+//! # Sheets
+//!
+//! [`SectionRequest::role`] says what the mesh is. A [`SectionRole::Solid`]
+//! is a closed, consistently wound, outward oriented two-manifold, as for the
+//! legacy method. A [`SectionRole::Sheet`] is an open surface (terrain, a
+//! surface body): boundary edges are allowed, degenerate, non-manifold and
+//! inconsistently wound input is refused. A cut chain of a sheet can end on
+//! the mesh boundary ([`ChainEnd::MeshBoundary`]). The side of a region of a
+//! sheet is the side its face's back lies on. The evidence reports the role
+//! and the number of boundary edges.
+//!
 //! # Output invariants
 //!
 //! All points are finite and in the plane frame. A closed chain has at least
@@ -75,6 +86,18 @@ impl RegionLimits {
     }
 }
 
+/// What the sectioned mesh is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SectionRole {
+    /// A closed, consistently wound, outward oriented two-manifold. A closed
+    /// chain keeps the solid on its left.
+    Solid,
+    /// An open or closed surface without volume: boundary edges are allowed.
+    /// A chain can end on the mesh boundary.
+    Sheet,
+}
+
 /// One section request that reports in-plane faces as regions.
 ///
 /// `limits.max_contours` bounds the chains and `limits.max_output_vertices`
@@ -88,16 +111,26 @@ pub struct SectionRequest {
     pub limits: SectionLimits,
     /// Region bounds.
     pub region_limits: RegionLimits,
+    /// What the mesh is; [`SectionRole::Solid`] unless set.
+    pub role: SectionRole,
 }
 
 impl SectionRequest {
-    /// Construct a request.
+    /// Construct a request for a [`SectionRole::Solid`].
     pub const fn new(frame: Frame3, limits: SectionLimits, region_limits: RegionLimits) -> Self {
         Self {
             frame,
             limits,
             region_limits,
+            role: SectionRole::Solid,
         }
+    }
+
+    /// Set what the mesh is.
+    #[must_use]
+    pub const fn with_role(mut self, role: SectionRole) -> Self {
+        self.role = role;
+        self
     }
 }
 
@@ -107,6 +140,8 @@ impl SectionRequest {
 pub enum ChainEnd {
     /// The end lies on the boundary of an in-plane region.
     InPlaneRegion,
+    /// The end lies on the boundary of the mesh, which is a sheet.
+    MeshBoundary,
 }
 
 /// One plane-local cut polyline: closed, or open and ending on a region.
@@ -184,6 +219,10 @@ pub struct PlaneSectionEvidence {
     pub source: SectionSource,
     /// Source triangles inspected.
     pub source_triangles: usize,
+    /// What the mesh was sectioned as.
+    pub role: SectionRole,
+    /// Mesh edges used by one triangle only; zero for a solid.
+    pub boundary_edges: usize,
     /// Source triangles lying in the plane.
     pub in_plane_triangles: usize,
     /// Plane edges that only touch the plane: nothing is emitted for them.
@@ -209,6 +248,8 @@ impl PlaneSectionEvidence {
         Self {
             source: SectionSource::InputMesh,
             source_triangles,
+            role: SectionRole::Solid,
+            boundary_edges: 0,
             in_plane_triangles: 0,
             touching_edges: 0,
             in_plane_pairs: 0,
@@ -230,6 +271,13 @@ impl PlaneSectionEvidence {
         self.in_plane_triangles = in_plane_triangles;
         self.touching_edges = touching_edges;
         self.in_plane_pairs = in_plane_pairs;
+        self
+    }
+
+    /// Record the role and the number of boundary edges of the source.
+    pub const fn with_role(mut self, role: SectionRole, boundary_edges: usize) -> Self {
+        self.role = role;
+        self.boundary_edges = boundary_edges;
         self
     }
 

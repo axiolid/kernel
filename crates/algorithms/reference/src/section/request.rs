@@ -10,12 +10,20 @@
 //! - two off-plane triangles on one side: a touching edge, counted and not
 //!   emitted;
 //! - an in-plane triangle: a region boundary, never a cut.
+//!
+//! A `SectionRole::Sheet` may be open. A mesh edge lying in the plane with one
+//! incident triangle is then either a region boundary (the triangle is in the
+//! plane) or a touching edge (it is off the plane), and a chain can end on a
+//! boundary edge or boundary vertex of the mesh. A solid refuses an edge with
+//! one incident triangle.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
 use axiolid_mesh::TriMesh;
-use axiolid_mesh_section_contract::{PlaneSection, PlaneSectionEvidence, SectionRequest};
+use axiolid_mesh_section_contract::{
+    PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole,
+};
 
 use super::chains::{assemble_chains, ChainContext};
 use super::regions::{build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection};
@@ -48,6 +56,10 @@ pub(super) fn plane_section(
     let plane = ExactSectionPlane::new(frame)?;
     let projection = Projection::new(&plane)?;
     let classifications = classify_vertices(mesh, plane)?;
+    let boundary = match request.role {
+        SectionRole::Sheet => Boundary::of(mesh, options)?,
+        _ => Boundary::default(),
+    };
 
     let mut segments = BTreeSet::<Segment>::new();
     let mut on_plane_edges = BTreeMap::<EdgeKey, Vec<Incidence>>::new();
@@ -194,6 +206,10 @@ pub(super) fn plane_section(
             }
             [Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {}
             [Incidence::In, Incidence::In] => {}
+            // Boundary edges of a sheet: a region boundary, or an edge the
+            // sheet touches the plane in.
+            [Incidence::In] if request.role == SectionRole::Sheet => {}
+            [Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 1,
             _ => {
                 return Err(GeomError::NotManifold(format!(
                     "on-plane mesh edge {:?} has {} incident triangles",
@@ -244,6 +260,9 @@ pub(super) fn plane_section(
             directions: &directions,
             coplanar_edges: &coplanar_edges,
             region_vertices: &region_vertices,
+            role: request.role,
+            boundary_edges: &boundary.edges,
+            boundary_vertices: &boundary.vertices,
         },
         &segments,
         limits,
@@ -252,8 +271,46 @@ pub(super) fn plane_section(
 
     let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
         .with_source_counts(in_plane_triangles, touching_edges, in_plane_pairs)
+        .with_role(request.role, boundary.edges.len())
         .with_output(&chains, &regions);
     Ok(PlaneSection::new(frame, chains, regions, evidence))
+}
+
+/// The boundary of a sheet: edges used by one triangle, and their vertices.
+#[derive(Debug, Default)]
+struct Boundary {
+    edges: BTreeSet<EdgeKey>,
+    vertices: BTreeSet<u32>,
+}
+
+impl Boundary {
+    fn of(mesh: &TriMesh, options: &ExecutionOptions) -> GeomResult<Self> {
+        let mut uses = BTreeMap::<EdgeKey, usize>::new();
+        for triangle in mesh.triangles() {
+            options.check_cancelled()?;
+            for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+                *uses
+                    .entry(EdgeKey::new(triangle[from], triangle[to]))
+                    .or_default() += 1;
+            }
+        }
+        let mut boundary = Self::default();
+        for (edge, count) in uses {
+            match count {
+                1 => {
+                    boundary.edges.insert(edge);
+                    boundary.vertices.extend([edge.0, edge.1]);
+                }
+                2 => {}
+                _ => {
+                    return Err(GeomError::NotManifold(format!(
+                        "mesh edge {edge:?} has {count} incident triangles"
+                    )))
+                }
+            }
+        }
+        Ok(boundary)
+    }
 }
 
 /// Record that the cut runs from `from` to `to`.

@@ -6,7 +6,9 @@ itself; providers implement `MeshPlaneSection`, and `axiolid-dispatch`
 selects one. `section` returns closed contours and refuses a face lying in the
 plane (ADR 0033). `section_request` is the opt-in alternative: a face in the
 plane comes back as a region with a side, cut curves are transversal chains
-that may end on a region, and touching edges are counted (ADR 0091).
+that may end on a region, and touching edges are counted (ADR 0091). With
+`SectionRole::Sheet` the mesh may be open, and a chain may end on the mesh
+boundary.
 
 ```bash
 cargo add axiolid-mesh-section-contract

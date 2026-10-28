@@ -345,7 +345,7 @@ mod request {
     use super::*;
     use axiolid_mesh_section_contract::{
         ChainEnd, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence, RegionLimits,
-        SectionChain, SectionRequest,
+        SectionChain, SectionRequest, SectionRole,
     };
 
     fn pts(points: &[(f64, f64)]) -> Vec<Point2> {
@@ -378,8 +378,17 @@ mod request {
                 pts(&[(0.5, 0.5), (0.5, 0.6), (0.6, 0.6)]),
             ],
         )];
+        let boundary_edges = match request.role {
+            SectionRole::Sheet => {
+                axiolid_mesh::try_audit_mesh(mesh, Tolerance::METRE)
+                    .expect("audit")
+                    .boundary_edges
+            }
+            _ => 0,
+        };
         let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
-            .with_source_counts(2, 1, 3)
+            .with_source_counts(mesh.triangle_count().min(2), 1, 3)
+            .with_role(request.role, boundary_edges)
             .with_output(&chains, &regions);
         PlaneSection::new(request.frame, chains, regions, evidence)
     }
@@ -429,7 +438,11 @@ mod request {
         }
     }
 
-    fn run(mutate: fn(&mut PlaneSection), request: &SectionRequest) -> GeomResult<PlaneSection> {
+    fn run_on(
+        mesh: &TriMesh,
+        mutate: fn(&mut PlaneSection),
+        request: &SectionRequest,
+    ) -> GeomResult<PlaneSection> {
         let mut registry = MeshPlaneSectionRegistry::new();
         registry.register(
             0,
@@ -438,7 +451,11 @@ mod request {
                 calls: Arc::new(AtomicUsize::new(0)),
             },
         );
-        registry.section_request(&cube(), request, &options())
+        registry.section_request(mesh, request, &options())
+    }
+
+    fn run(mutate: fn(&mut PlaneSection), request: &SectionRequest) -> GeomResult<PlaneSection> {
+        run_on(&cube(), mutate, request)
     }
 
     #[test]
@@ -492,6 +509,11 @@ mod request {
             ("evidence chains", |s| s.evidence.open_chains += 1),
             ("evidence regions", |s| s.evidence.region_vertices += 1),
             ("evidence in-plane", |s| s.evidence.in_plane_triangles = 13),
+            ("evidence role", |s| s.evidence.role = SectionRole::Sheet),
+            ("evidence boundary edges", |s| s.evidence.boundary_edges = 1),
+            ("solid chain ends on the mesh boundary", |s| {
+                s.chains[1].ends = Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion])
+            }),
         ];
         for (name, mutate) in cases {
             let error = run(mutate, &request()).expect_err(name);
@@ -556,6 +578,93 @@ mod request {
             registry.section_request(&open_sheet, &request(), &options()),
             Err(GeomError::NotManifold(_))
         ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// A triangle: three vertices, three boundary edges.
+    fn open_triangle() -> TriMesh {
+        TriMesh::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y], vec![0, 1, 2])
+    }
+
+    fn sheet_request() -> SectionRequest {
+        request().with_role(SectionRole::Sheet)
+    }
+
+    #[test]
+    fn a_sheet_request_accepts_an_open_mesh_and_checks_its_evidence() {
+        let mesh = open_triangle();
+        let section = run_on(&mesh, |_| {}, &sheet_request()).expect("a sheet may be open");
+        assert_eq!(section.evidence.role, SectionRole::Sheet);
+        assert_eq!(section.evidence.boundary_edges, 3);
+        // A chain of a sheet may end on the mesh boundary.
+        run_on(
+            &mesh,
+            |s| s.chains[1].ends = Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion]),
+            &sheet_request(),
+        )
+        .expect("a sheet chain ends on the mesh boundary");
+        let cases: Vec<(&str, Mutation)> = vec![
+            ("role", |s| s.evidence.role = SectionRole::Solid),
+            ("boundary edges", |s| s.evidence.boundary_edges = 2),
+            ("no boundary edges", |s| s.evidence.boundary_edges = 0),
+        ];
+        for (name, mutate) in cases {
+            let error = run_on(&mesh, mutate, &sheet_request()).expect_err(name);
+            assert!(
+                matches!(error, GeomError::BackendContractViolation { .. }),
+                "{name}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheet_request_refuses_a_defective_surface_before_dispatch() {
+        let flat = |indices: Vec<u32>| {
+            TriMesh::new(
+                vec![
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Vec3::new(1.0, 1.0, 0.0),
+                    Vec3::new(0.0, 0.0, 1.0),
+                ],
+                indices,
+            )
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = MeshPlaneSectionRegistry::new();
+        registry.register(
+            0,
+            Scripted {
+                mutate: |_| {},
+                calls: Arc::clone(&calls),
+            },
+        );
+        let refusals = [
+            // Both triangles run 0 -> 1: inconsistent winding.
+            ("winding", flat(vec![0, 1, 2, 0, 1, 3]), false),
+            // Three triangles on the edge 0-1.
+            ("non-manifold", flat(vec![0, 1, 2, 1, 0, 3, 1, 0, 4]), false),
+            // Collinear corners.
+            (
+                "degenerate",
+                TriMesh::new(vec![Vec3::ZERO, Vec3::X, Vec3::X * 2.0], vec![0, 1, 2]),
+                true,
+            ),
+        ];
+        for (name, mesh, degenerate) in refusals {
+            let error = registry
+                .section_request(&mesh, &sheet_request(), &options())
+                .expect_err(name);
+            assert!(
+                if degenerate {
+                    matches!(error, GeomError::Degenerate(_))
+                } else {
+                    matches!(error, GeomError::NotManifold(_))
+                },
+                "{name}: {error:?}"
+            );
+        }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 

@@ -4,14 +4,17 @@ Each mutant breaks one decision of `ScalarSection::section_request`: the side
 of an in-plane face, the dropped-axis orientation, what an edge in the plane
 contributes, the overlap refusals, the fan walk that links boundary edges, the
 outer/hole decision, ring orientation and canonical form, or the chain
-normalisation. It must turn a test red: the hand-derived cases of
-`tests/section_request.rs`, the region conformance suite, or the unit tests of
-the region tracing.
+normalisation. The sheet mutants break what makes an open mesh
+different: what a chain end lies on, the registry's topology check for a
+sheet, the fold test and the orientation of a sheet's closed chain. A mutant
+must turn a test red: the hand-derived cases of `tests/section_request.rs`,
+the region conformance suite, or the unit tests of the region tracing.
 """
 import probe_lib
 
 R = "crates/algorithms/reference/src/section/regions.rs"
 Q = "crates/algorithms/reference/src/section/request.rs"
+D = "crates/execution/dispatch/src/section_request.rs"
 C = "crates/algorithms/reference/src/section/chains.rs"
 TESTS = [
     ["-p", "axiolid-reference", "--test", "section_request"],
@@ -112,8 +115,16 @@ MUTANTS = [
     ),
     (
         'open chain direction unnormalised', C,
-        'std::cmp::Ordering::Greater => points.reverse(),',
+        'std::cmp::Ordering::Greater => {\n'
+        '                points.reverse();\n'
+        '                ends.reverse();\n'
+        '            }',
         'std::cmp::Ordering::Greater => {}', TESTS,
+    ),
+    (
+        'open chain ends not swapped with the points', C,
+        '                points.reverse();\n                ends.reverse();',
+        '                points.reverse();', TESTS,
     ),
     (
         'saddle vertex accepted', C,
@@ -138,6 +149,41 @@ MUTANTS = [
     (
         'closed chain direction ignored', C,
         'if forward == Some(false) {', 'if false && forward == Some(false) {', TESTS,
+    ),
+    (
+        'boundary edge end misclassified', C,
+        '            NodeKey::Edge(edge) if self.boundary_edges.contains(&edge) => {\n'
+        '                Ok(ChainEnd::MeshBoundary)',
+        '            NodeKey::Edge(edge) if self.boundary_edges.contains(&edge) => {\n'
+        '                Ok(ChainEnd::InPlaneRegion)',
+        TESTS,
+    ),
+    (
+        'boundary vertex end missing', C,
+        'NodeKey::Vertex(vertex) if self.boundary_vertices.contains(&vertex) => {',
+        'NodeKey::Vertex(vertex) if false && self.boundary_vertices.contains(&vertex) => {',
+        TESTS,
+    ),
+    (
+        'Sheet accepts inconsistent winding', D,
+        'if health.non_manifold_edges > 0 || health.inconsistent_winding_edges > 0 {',
+        'if health.non_manifold_edges > 0 {', TESTS,
+    ),
+    (
+        'fold pair skipped', R,
+        'if shared >= 2 && first.facing == second.facing {', 'if shared >= 2 {', TESTS,
+    ),
+    (
+        'sheet boundary edge in the plane not counted as touching', Q,
+        '[Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 1,',
+        '[Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 0,',
+        TESTS,
+    ),
+    (
+        'sheet closed chain orientation ignored', C,
+        '            if area < 0.0 {\n                points.reverse();',
+        '            if false && area < 0.0 {\n                points.reverse();',
+        TESTS,
     ),
     (
         'pinched extreme vertex has no fallback order', R,

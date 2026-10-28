@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshPlaneSectionRegistry::section_request` accepts open meshes for
+  `SectionRole::Sheet`: boundary edges are allowed, degenerate, non-manifold
+  and inconsistently wound input is refused before dispatch, the evidence must
+  echo the role and the audited `boundary_edges`, and a solid answer must not
+  end a chain on the mesh boundary (ADR 0091, #359).
+
 ## [0.3.7] - 2026-10-28
 
 ### Added

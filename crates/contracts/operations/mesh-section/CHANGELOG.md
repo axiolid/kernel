@@ -9,6 +9,17 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SectionRole` (`Solid`, `Sheet`) and `SectionRequest::role` with
+  `with_role`: a sheet is an open surface (terrain, a surface body), sectioned
+  with boundary edges allowed. `ChainEnd::MeshBoundary` and the evidence fields
+  `role` and `boundary_edges` (`PlaneSectionEvidence::with_role`). The default
+  stays `Solid`, today's semantics. Additive (ADR 0091, #359).
+- `RegionConformanceSuite` adds the terrain cut by a vertical plane and
+  through vertices, a sheet lying in the plane in both windings, an annulus
+  sheet and a saddle (#359).
+
 ## [0.3.3] - 2026-10-28
 
 ### Added

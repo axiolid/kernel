@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ScalarSection::section_request` sections `SectionRole::Sheet` meshes: a
+  chain ends on the mesh boundary at a crossed boundary edge or a boundary
+  vertex (`ChainEnd::MeshBoundary`), a boundary edge in the plane next to an
+  off-plane triangle is a touching edge, a sheet in the plane is a region, and
+  a sheet folded flat onto itself is refused as in-plane faces of both sides
+  (ADR 0091, #359).
+
 ## [0.3.11] - 2026-10-28
 
 ### Added

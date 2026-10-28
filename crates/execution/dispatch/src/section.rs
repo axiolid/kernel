@@ -18,7 +18,7 @@ use axiolid_mesh_section_contract::{
 
 use crate::device::matches_device;
 use crate::frame::validate_frame;
-use crate::section_request::validate_plane_section;
+use crate::section_request::{validate_plane_section, validate_request_topology};
 
 #[derive(Debug, Clone)]
 struct RegisteredSection {
@@ -176,7 +176,10 @@ impl MeshPlaneSectionRegistry {
     /// plane as regions (ADR 0091).
     ///
     /// The source must be a closed, consistently wound, outward oriented
-    /// two-manifold, as for [`section`](Self::section). A provider without
+    /// two-manifold, as for [`section`](Self::section), when the request's
+    /// role is `SectionRole::Solid`. For a `SectionRole::Sheet` it may be
+    /// open, but must be consistently wound, non-degenerate and
+    /// two-manifold. A provider without
     /// `section_request` refuses with `Unsupported`, which falls back to the
     /// next provider; every other error fails immediately.
     pub fn section_request(
@@ -211,7 +214,7 @@ impl MeshPlaneSectionRegistry {
             return Err(GeomError::BudgetExceeded { resource: "memory" });
         }
 
-        validate_source_topology(mesh, options)?;
+        let boundary_edges = validate_request_topology(mesh, request.role, options)?;
 
         let mut last_retryable = None;
         for entry in &self.providers {
@@ -227,7 +230,7 @@ impl MeshPlaneSectionRegistry {
             }
             match entry.provider.section_request(mesh, request, options) {
                 Ok(section) => {
-                    validate_plane_section(descriptor.id, mesh, request, &section)?;
+                    validate_plane_section(descriptor.id, mesh, request, boundary_edges, &section)?;
                     return Ok(section);
                 }
                 Err(error @ (GeomError::Unsupported { .. } | GeomError::Unavailable { .. })) => {
@@ -275,7 +278,10 @@ fn validate_source_shape(
     Ok(())
 }
 
-fn validate_source_topology(mesh: &TriMesh, options: &ExecutionOptions) -> GeomResult<()> {
+pub(crate) fn validate_source_topology(
+    mesh: &TriMesh,
+    options: &ExecutionOptions,
+) -> GeomResult<()> {
     let health = try_audit_mesh(mesh, options.tolerance())
         .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
     if !health.is_closed_two_manifold() {

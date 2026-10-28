@@ -118,7 +118,9 @@ fn descriptor_reports_selected_providers_and_exactness() {
 fn section_request_reports_a_face_in_the_plane_as_a_region() {
     use axiolid::core::{Frame3, Point2};
     use axiolid::mesh_section::conformance::RegionConformanceSuite;
-    use axiolid::mesh_section::{InPlaneSide, RegionLimits, SectionLimits, SectionRequest};
+    use axiolid::mesh_section::{
+        ChainEnd, InPlaneSide, RegionLimits, SectionLimits, SectionRequest, SectionRole,
+    };
     use axiolid_reference::ScalarSection;
 
     let application = ApplicationBuilder::new()
@@ -153,6 +155,42 @@ fn section_request_reports_a_face_in_the_plane_as_a_region() {
             Point2::new(0.0, 1.0),
         ]
     );
+
+    // An open mesh needs the sheet role: this unit square of two triangles is cut
+    // by the vertical plane x = 0.5 along a line that ends on its two
+    // boundary edges.
+    let strip = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+        ],
+        vec![0, 1, 2, 0, 2, 3],
+    );
+    let vertical = Frame3 {
+        origin: Point3::new(0.5, 0.0, 0.0),
+        x: Vec3::Y,
+        y: Vec3::Z,
+        z: Vec3::X,
+    };
+    let sheet = SectionRequest::new(
+        vertical,
+        SectionLimits::new(100, 100, 100, 10),
+        RegionLimits::new(10, 100, 100),
+    );
+    assert!(application
+        .section_mesh_request(&strip, &sheet, &options)
+        .is_err());
+    let section = application
+        .section_mesh_request(&strip, &sheet.with_role(SectionRole::Sheet), &options)
+        .expect("sheet section");
+    assert_eq!(section.chains.len(), 1);
+    assert_eq!(
+        section.chains[0].ends,
+        Some([ChainEnd::MeshBoundary, ChainEnd::MeshBoundary])
+    );
+    assert_eq!(section.evidence.boundary_edges, 4);
 
     let report = RegionConformanceSuite::run(&ScalarSection::new());
     assert!(report.claimed && report.is_success(), "{report}");

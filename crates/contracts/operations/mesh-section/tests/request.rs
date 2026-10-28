@@ -11,7 +11,7 @@ use axiolid_mesh_section_contract::conformance::{
 };
 use axiolid_mesh_section_contract::{
     ChainEnd, InPlaneRegion, InPlaneSide, MeshPlaneSection, PlaneSection, PlaneSectionEvidence,
-    RegionLimits, SectionChain, SectionLimits, SectionOutcome, SectionRequest,
+    RegionLimits, SectionChain, SectionLimits, SectionOutcome, SectionRequest, SectionRole,
 };
 
 fn world() -> Frame3 {
@@ -48,6 +48,11 @@ fn constructors_keep_their_fields() {
     assert_eq!(request.limits, limits);
     assert_eq!(request.region_limits, region_limits);
     assert_eq!(request.frame, world());
+    assert_eq!(request.role, SectionRole::Solid);
+    assert_eq!(
+        request.with_role(SectionRole::Sheet).role,
+        SectionRole::Sheet
+    );
 
     let closed = SectionChain::closed(square());
     assert!(closed.is_closed());
@@ -59,6 +64,15 @@ fn constructors_keep_their_fields() {
     );
     assert!(!open.is_closed());
     assert_eq!(open.ends, Some([ChainEnd::InPlaneRegion; 2]));
+    let ending_on_the_mesh = SectionChain::open(
+        vec![Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)],
+        ChainEnd::MeshBoundary,
+        ChainEnd::InPlaneRegion,
+    );
+    assert_eq!(
+        ending_on_the_mesh.ends,
+        Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion])
+    );
 
     let region = InPlaneRegion::new(InPlaneSide::Below, square(), vec![]);
     assert_eq!(region.side, InPlaneSide::Below);
@@ -100,6 +114,11 @@ fn evidence_counts_follow_the_output() {
 
     let empty = PlaneSectionEvidence::input_mesh(3);
     assert_eq!(empty.with_output(&[], &[]), empty);
+    assert_eq!((empty.role, empty.boundary_edges), (SectionRole::Solid, 0));
+    let sheet = empty.with_role(SectionRole::Sheet, 8);
+    assert_eq!((sheet.role, sheet.boundary_edges), (SectionRole::Sheet, 8));
+    assert_ne!(sheet, empty);
+    assert_eq!(sheet.with_output(&[], &[]), sheet);
 }
 
 /// A provider that implements only the legacy method.

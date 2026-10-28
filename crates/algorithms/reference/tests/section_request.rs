@@ -7,9 +7,9 @@ use axiolid_core::{Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_dispatch::MeshPlaneSectionRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    InPlaneSide, MeshPlaneSection, PlaneSection, RegionLimits, SectionLimits, SectionRequest,
-    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
-    REFUSED_SADDLE_VERTEX,
+    ChainEnd, InPlaneSide, MeshPlaneSection, PlaneSection, RegionLimits, SectionLimits,
+    SectionRequest, SectionRole, REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    REFUSED_OVERLAPPING_IN_PLANE_FACES, REFUSED_SADDLE_VERTEX,
 };
 use axiolid_reference::ScalarSection;
 
@@ -387,4 +387,199 @@ fn assert_unsupported(result: Result<PlaneSection, GeomError>, family: &'static 
         }) => assert_eq!(input, family),
         other => panic!("expected a refusal naming {family:?}, got {other:?}"),
     }
+}
+
+// ---- sheets: open meshes (ADR 0091) --------------------------------------
+
+fn sheet(mesh: &TriMesh, frame: Frame3) -> Result<PlaneSection, GeomError> {
+    let request = request(frame).with_role(SectionRole::Sheet);
+    ScalarSection::new().section_request(mesh, &request, &options())
+}
+
+fn mesh_of(points: &[[f64; 3]], indices: &[u32]) -> TriMesh {
+    TriMesh::new(
+        points
+            .iter()
+            .map(|&[x, y, z]| Point3::new(x, y, z))
+            .collect(),
+        indices.to_vec(),
+    )
+}
+
+/// A floor triangle `(0,0,0) (2,0,0) (0,2,0)` in the plane z = 0, and a wall
+/// triangle `(2,0,0) (3,-1,1) (3,1,-1)` that meets it in the vertex
+/// `(2,0,0)` only. The wall crosses the plane along the line from `(2,0)` to
+/// the middle `(3,0)` of its edge `(3,-1,1) (3,1,-1)`. The floor is an
+/// in-plane triangle, so the vertex end meets a region; the other end is on
+/// an edge used by the wall alone, a boundary edge of the sheet. Six boundary
+/// edges: three of each triangle.
+fn floor_and_wall() -> TriMesh {
+    mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [3.0, -1.0, 1.0],
+            [3.0, 1.0, -1.0],
+        ],
+        &[0, 1, 2, 1, 3, 4],
+    )
+}
+
+#[test]
+fn a_chain_ends_on_a_region_at_one_end_and_on_the_mesh_boundary_at_the_other() {
+    let found = sheet(&floor_and_wall(), horizontal(0.0)).expect("section");
+    assert_eq!(found.chains.len(), 1);
+    assert_eq!(found.chains[0].points, ring(&[(2.0, 0.0), (3.0, 0.0)]));
+    assert_eq!(
+        found.chains[0].ends,
+        Some([ChainEnd::InPlaneRegion, ChainEnd::MeshBoundary])
+    );
+    assert_eq!(found.regions.len(), 1);
+    assert_eq!(found.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        found.regions[0].outer,
+        ring(&[(0.0, 0.0), (2.0, 0.0), (0.0, 2.0)])
+    );
+    let evidence = found.evidence;
+    assert_eq!(
+        (evidence.role, evidence.boundary_edges),
+        (SectionRole::Sheet, 6)
+    );
+    assert_eq!(
+        (evidence.in_plane_triangles, evidence.touching_edges),
+        (1, 0)
+    );
+
+    // Mirrored in x, the frame's z is -Z: the chain runs from (-3,0) to
+    // (-2,0), so its ends swap with the points; the floor is now Above.
+    let mirrored = frame(Point3::new(0.0, 0.0, 0.0), -Vec3::X, Vec3::Y);
+    let found = sheet(&floor_and_wall(), mirrored).expect("section");
+    assert_eq!(found.chains[0].points, ring(&[(-3.0, 0.0), (-2.0, 0.0)]));
+    assert_eq!(
+        found.chains[0].ends,
+        Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion])
+    );
+    assert_eq!(found.regions[0].side, InPlaneSide::Above);
+}
+
+#[test]
+fn a_solid_cannot_end_a_chain_on_the_mesh_boundary() {
+    // A wall quad in the plane y = 0, cut by x = 1: the line ends on its
+    // boundary edges. A sheet reports it, a solid cannot have it.
+    let wall = mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [2.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        &[0, 1, 2, 0, 2, 3],
+    );
+    let vertical = frame(Point3::new(1.0, 0.0, 0.0), Vec3::Y, Vec3::Z);
+    let found = sheet(&wall, vertical).expect("a sheet may end on the boundary");
+    assert_eq!(found.chains.len(), 1);
+    assert_eq!(
+        found.chains[0].ends,
+        Some([ChainEnd::MeshBoundary, ChainEnd::MeshBoundary])
+    );
+    let error = section(&wall, vertical).expect_err("a solid is closed");
+    assert!(
+        matches!(error, GeomError::BackendContractViolation { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn an_edge_in_the_plane_with_one_off_plane_triangle_only_touches() {
+    // A wall x in [0,2], z in [0,1] at y = 0: its bottom edge lies in the
+    // plane z = 0 and has one incident triangle, off the plane.
+    let wall = mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [2.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        &[0, 1, 2, 0, 2, 3],
+    );
+    let found = sheet(&wall, horizontal(0.0)).expect("section");
+    assert!(found.chains.is_empty() && found.regions.is_empty());
+    assert_eq!(found.evidence.touching_edges, 1);
+    assert_eq!(found.evidence.boundary_edges, 4);
+}
+
+#[test]
+fn a_closed_chain_of_a_sheet_is_counter_clockwise_whatever_its_facing() {
+    // The upper half of an octahedron: apex (0,0,1) over the ring (1,0,0),
+    // (0,1,0), (-1,0,0), (0,-1,0). The plane z = 0.5 cuts the four edges to
+    // the apex at their middles: a diamond (-0.5,0) (0,-0.5) (0.5,0) (0,0.5)
+    // counter-clockwise from its smallest point. Four boundary edges.
+    let ring_points = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+    ];
+    for outward in [true, false] {
+        let mut points = ring_points.to_vec();
+        points.push([0.0, 0.0, 1.0]);
+        let mut indices = Vec::new();
+        for k in 0..4_u32 {
+            let n = (k + 1) % 4;
+            indices.extend(if outward { [k, n, 4] } else { [n, k, 4] });
+        }
+        let found = sheet(&mesh_of(&points, &indices), horizontal(0.5)).expect("section");
+        assert_eq!(found.chains.len(), 1, "outward {outward}");
+        assert_eq!(found.chains[0].ends, None);
+        assert_eq!(
+            found.chains[0].points,
+            ring(&[(-0.5, 0.0), (0.0, -0.5), (0.5, 0.0), (0.0, 0.5)]),
+            "outward {outward}"
+        );
+        assert_eq!(found.evidence.boundary_edges, 4);
+    }
+}
+
+#[test]
+fn a_sheet_folded_flat_onto_itself_is_refused_as_faces_of_both_sides() {
+    // (0,0) (1,0) (0,1) face +z; the second triangle b -> a (1,0) (0,0)
+    // (0.5,1) winds clockwise, so it faces -z and lies on the same side of
+    // the shared edge: the sheet doubles back over itself. The pair shares an
+    // edge and must still be tested.
+    let folded = mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.5, 1.0, 0.0],
+        ],
+        &[0, 1, 2, 1, 0, 3],
+    );
+    assert_unsupported(
+        sheet(&folded, horizontal(0.0)),
+        REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    );
+}
+
+#[test]
+fn a_registry_refuses_a_sheet_with_inconsistent_winding() {
+    let mut registry = MeshPlaneSectionRegistry::new();
+    registry.register(0, ScalarSection::new());
+    // Both triangles run 0 -> 1.
+    let mesh = mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+        ],
+        &[0, 1, 2, 0, 1, 3],
+    );
+    // A plane above the sheet: the provider alone would answer with nothing.
+    let request = request(horizontal(1.0)).with_role(SectionRole::Sheet);
+    assert!(matches!(
+        registry.section_request(&mesh, &request, &options()),
+        Err(GeomError::NotManifold(_))
+    ));
 }

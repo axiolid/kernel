@@ -11,7 +11,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign
 use axiolid_core::{Frame3, Point2};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    ChainEnd, SectionChain, SectionContour, SectionLimits, REFUSED_SADDLE_VERTEX,
+    ChainEnd, SectionChain, SectionContour, SectionLimits, SectionRole, REFUSED_SADDLE_VERTEX,
 };
 
 use super::regions::{canonical_rotation, corners, strictly_between, Projection};
@@ -148,13 +148,41 @@ pub(super) struct ChainContext<'a> {
     pub(super) coplanar_edges: &'a BTreeSet<EdgeKey>,
     /// Vertices of in-plane triangles.
     pub(super) region_vertices: &'a BTreeSet<u32>,
+    /// What the mesh is.
+    pub(super) role: SectionRole,
+    /// Mesh edges used by one triangle only; empty for a solid.
+    pub(super) boundary_edges: &'a BTreeSet<EdgeKey>,
+    /// Vertices of those edges.
+    pub(super) boundary_vertices: &'a BTreeSet<u32>,
+}
+
+impl ChainContext<'_> {
+    /// What an open chain ending at the degree-one `node` ends on: the
+    /// boundary of an in-plane region at a vertex of an in-plane triangle,
+    /// else the mesh boundary of a sheet: a boundary edge crossed, or a
+    /// boundary vertex. Anything else breaks the topology.
+    fn end_of(&self, node: NodeKey) -> GeomResult<ChainEnd> {
+        match node {
+            NodeKey::Vertex(vertex) if self.region_vertices.contains(&vertex) => {
+                Ok(ChainEnd::InPlaneRegion)
+            }
+            NodeKey::Vertex(vertex) if self.boundary_vertices.contains(&vertex) => {
+                Ok(ChainEnd::MeshBoundary)
+            }
+            NodeKey::Edge(edge) if self.boundary_edges.contains(&edge) => {
+                Ok(ChainEnd::MeshBoundary)
+            }
+            _ => Err(internal_topology_error()),
+        }
+    }
 }
 
 /// Open and closed chains of the cut segments of a request (ADR 0091).
 ///
-/// A vertex node of degree one ends an open chain; it must be a vertex of an
-/// in-plane triangle, where the chain meets a region boundary. A vertex node
-/// of degree above two is a saddle and is refused by name.
+/// A node of degree one ends an open chain: at a vertex of an in-plane
+/// triangle it meets a region boundary, and on the boundary of a sheet it
+/// meets the mesh boundary (`ChainContext::end_of`). A vertex node of degree
+/// above two is a saddle and is refused by name.
 ///
 /// Simplification and orientation are exact, decided on source data. A closed
 /// chain is made counter-clockwise by the segment directions. A node is
@@ -170,7 +198,6 @@ pub(super) fn assemble_chains(
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<SectionChain>> {
     let (mesh, frame, classifications) = (ctx.mesh, ctx.frame, ctx.classifications);
-    let region_vertices = ctx.region_vertices;
     let mut adjacency = BTreeMap::<NodeKey, Vec<NodeKey>>::new();
     for &Segment(left, right) in segments {
         adjacency.entry(left).or_default().push(right);
@@ -191,7 +218,6 @@ pub(super) fn assemble_chains(
         }
     }
 
-    let is_region_vertex = |node: NodeKey| matches!(node, NodeKey::Vertex(vertex) if region_vertices.contains(&vertex));
     let mut visited = BTreeSet::<Segment>::new();
     let mut chains = Vec::new();
     let mut chain_vertices = 0usize;
@@ -223,10 +249,7 @@ pub(super) fn assemble_chains(
                 return Err(internal_topology_error());
             }
         }
-        // Landing 1: an open chain can only end on an in-plane region.
-        if !(is_region_vertex(start) && is_region_vertex(current)) {
-            return Err(internal_topology_error());
-        }
+        let mut ends = [ctx.end_of(start)?, ctx.end_of(current)?];
         let nodes = simplify_nodes(ctx, nodes, false)?;
         let mut points = chain_points(mesh, frame, classifications, &nodes)?;
         if points.len() < 2 || has_adjacent_duplicate(&points, false) {
@@ -240,13 +263,16 @@ pub(super) fn assemble_chains(
                     "open section chain starts and ends at one point".into(),
                 ))
             }
-            std::cmp::Ordering::Greater => points.reverse(),
+            std::cmp::Ordering::Greater => {
+                points.reverse();
+                ends.reverse();
+            }
             std::cmp::Ordering::Less => {}
         }
         push_chain(
             &mut chains,
             &mut chain_vertices,
-            SectionChain::open(points, ChainEnd::InPlaneRegion, ChainEnd::InPlaneRegion),
+            SectionChain::open(points, ends[0], ends[1]),
             limits,
         )?;
     }
@@ -293,11 +319,25 @@ pub(super) fn assemble_chains(
                 "section contour collapsed below three vertices".into(),
             ));
         }
-        let points = chain_points(mesh, frame, classifications, &nodes)?;
+        let mut points = chain_points(mesh, frame, classifications, &nodes)?;
         if has_adjacent_duplicate(&points, true) {
             return Err(GeomError::Degenerate(
                 "section chain collapsed under projection".into(),
             ));
+        }
+        if ctx.role == SectionRole::Sheet {
+            // A sheet has no inside: the segment directions only say which
+            // side its faces point to. Make the chain counter-clockwise by
+            // its plane-local area, as the legacy path does.
+            let area = signed_area(&points);
+            if !area.is_finite() || area == 0.0 {
+                return Err(GeomError::Degenerate(
+                    "section chain has no finite signed area".into(),
+                ));
+            }
+            if area < 0.0 {
+                points.reverse();
+            }
         }
         push_chain(
             &mut chains,
@@ -498,6 +538,9 @@ mod tests {
             directions: &directions,
             coplanar_edges: &coplanar_edges,
             region_vertices: &region_vertices,
+            role: SectionRole::Solid,
+            boundary_edges: &BTreeSet::new(),
+            boundary_vertices: &BTreeSet::new(),
         };
         let options = ExecutionOptions::new(Tolerance::METRE);
         assemble_chains(
@@ -554,6 +597,9 @@ mod tests {
             directions: &directions,
             coplanar_edges: &coplanar_edges,
             region_vertices: &region_vertices,
+            role: SectionRole::Solid,
+            boundary_edges: &BTreeSet::new(),
+            boundary_vertices: &BTreeSet::new(),
         };
         let nodes = vec![vertex(0), vertex(1), vertex(5)];
         assert_eq!(

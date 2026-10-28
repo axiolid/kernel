@@ -82,11 +82,42 @@ back past one that does not implement it. All new types are
   two overlap cases, where a provider may refuse by name or merge. A provider
   whose first case returns `Unsupported` does not claim the method and passes.
 
-The first landing (this record's code) covers closed solids. A second landing
-adds a `SectionRole { Solid, Sheet }` on the request, so an open mesh (a
-terrain, a shell) is sectioned too: chains may then end on the mesh boundary
-(`ChainEnd::MeshBoundary`), boundary edges are counted, and a sheet in the
-plane is a region. Both additions are non-breaking.
+### Sheets (open meshes)
+
+`SectionRequest::role` (`with_role`, default `SectionRole::Solid`, today's
+semantics) says what the mesh is, so an open mesh (a terrain, a surface body)
+is sectioned too. All additions are non-breaking.
+
+- **Registry.** A `Solid` is validated as before. A `Sheet` follows
+  `hidden_lines.rs::validate_topology`: boundary edges are allowed, while a
+  degenerate triangle (`Degenerate`), a non-manifold edge or an inconsistent
+  winding (`NotManifold`) is refused before dispatch. The answer's evidence
+  repeats the role and `boundary_edges`, which must equal the audit's count,
+  and a `Solid` answer with a `ChainEnd::MeshBoundary` is a contract
+  violation.
+- **Chain ends.** A chain of a sheet can end on the mesh boundary
+  (`ChainEnd::MeshBoundary`): at a crossed edge that is a boundary edge, or at
+  a vertex on the boundary that no in-plane triangle touches. A vertex of an
+  in-plane triangle is still `InPlaneRegion`. Any other degree-one node is an
+  internal error. The ends travel with the points when a chain is turned to
+  start at its smaller end.
+- **Edges in the plane.** A boundary edge lying in the plane is a region
+  boundary when its one triangle is in the plane, and a touching edge when
+  that triangle is off the plane. A `Solid` still refuses an edge in the plane
+  with one triangle.
+- **Regions.** A sheet in the plane is a region exactly like a face of a
+  solid: `Below` when its normal agrees with the frame's `+z`, whatever the
+  mesh boundary around it. A sheet folded flat onto itself, two triangles of
+  opposite facing sharing an edge on the same side of it, is not skipped by
+  the overlap test and is refused as faces of both sides.
+- **Closed chains.** A sheet has no inside, so the segment directions say only
+  which side its faces point to. A closed chain of a sheet is made
+  counter-clockwise by the sign of its plane-local area, as the legacy path
+  does; this is the one orientation decision that is not exact, and a chain
+  without a finite non-zero area is `Degenerate`.
+- **Conformance.** The suite adds the terrain cut by a vertical plane and
+  through vertices, a sheet in the plane in both windings, an annulus sheet
+  and a saddle, all with hand-derived values.
 
 ## Alternatives considered
 
@@ -110,13 +141,17 @@ plane is a region. Both additions are non-breaking.
 
 - Elements that are soups of overlapping bodies with flush tops are refused by
   name until faces can be merged.
-- Open meshes are not covered by the first landing.
+- The orientation of a closed chain of a sheet uses a floating-point area, the
+  one inexact decision of the request path. It is refused when the area is zero
+  or not finite, and only a chain whose points are nearly degenerate can be
+  affected.
+- A boundary edge of a sheet lying in the plane next to an off-plane triangle
+  is only counted as touching; `PlaneSection` has no field for it yet.
 - The reference implementation is quadratic in the worst case in the overlap
   sweep and in ring simplification; it is an oracle, not a performance tier.
 
 **Follow-ups / risks to watch**
 
-- Landing 2: open meshes, `SectionRole`, `ChainEnd::MeshBoundary`.
 - Landing 3 (maintainer decision): `Both` and the merge of overlapping
   same-side faces, through `axiolid-overlay` or a focused provider.
 - Landing 4: pair cut segments at a saddle vertex by fan order.
@@ -127,7 +162,7 @@ plane is a region. Both additions are non-breaking.
   result, evidence and refusal names; `fixtures.rs` and
   `region_conformance.rs`: the suite.
 - `crates/execution/dispatch/src/section.rs` and `section_request.rs`: the
-  registry method and the outcome checks.
+  registry method, the topology check per role and the outcome checks.
 - `crates/algorithms/reference/src/section/`: `request.rs` (orchestration),
   `regions.rs` (in-plane regions), `chains.rs` (chains); the legacy path is
   unchanged.

@@ -6,15 +6,75 @@
 //! starts and orders, the budgets and the evidence counts. Ring orientation
 //! is not checked: a floating-point area sign is unreliable far from the
 //! origin (#274); the conformance suite checks it on fixtures.
+//!
+//! The source topology depends on the request's role: a solid is closed and
+//! oriented, a sheet may have boundary edges but not degenerate, non-manifold
+//! or inconsistently wound ones. The evidence repeats the role and the
+//! audited number of boundary edges, and a solid has no chain end on the mesh
+//! boundary.
 
 use std::cmp::Ordering;
 
-use axiolid_contracts::{BackendId, GeomError, GeomResult};
+use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, GeomResult, Operation};
 use axiolid_core::Point2;
-use axiolid_mesh::TriMesh;
+use axiolid_mesh::{try_audit_mesh, TriMesh};
 use axiolid_mesh_section_contract::{
-    InPlaneRegion, PlaneSection, PlaneSectionEvidence, SectionChain, SectionRequest,
+    ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, SectionChain, SectionRequest,
+    SectionRole,
 };
+
+use crate::section::validate_source_topology;
+
+/// Check the source against the request's role; return its number of boundary
+/// edges (zero for a solid, which has none).
+///
+/// A sheet follows `hidden_lines.rs::validate_topology`: boundary edges are
+/// allowed, every other defect is refused.
+pub(crate) fn validate_request_topology(
+    mesh: &TriMesh,
+    role: SectionRole,
+    options: &ExecutionOptions,
+) -> GeomResult<usize> {
+    match role {
+        SectionRole::Solid => {
+            validate_source_topology(mesh, options)?;
+            Ok(0)
+        }
+        SectionRole::Sheet => {
+            let health = try_audit_mesh(mesh, options.tolerance())
+                .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
+            if let Some((triangle, index)) = health.first_invalid_index {
+                return Err(GeomError::InvalidInput(format!(
+                    "triangle {triangle} references position {index}, but the mesh has {}",
+                    health.positions
+                )));
+            }
+            if let Some(position) = health.first_non_finite_position {
+                return Err(GeomError::InvalidInput(format!(
+                    "position {position} is not finite"
+                )));
+            }
+            if health.degenerate_triangles > 0 {
+                return Err(GeomError::Degenerate(format!(
+                    "{} degenerate triangle(s)",
+                    health.degenerate_triangles
+                )));
+            }
+            if health.non_manifold_edges > 0 || health.inconsistent_winding_edges > 0 {
+                return Err(GeomError::NotManifold(format!(
+                    "a sheet must be a consistently wound two-manifold; non_manifold={}, \
+                     inconsistent_winding={}",
+                    health.non_manifold_edges, health.inconsistent_winding_edges
+                )));
+            }
+            Ok(health.boundary_edges)
+        }
+        _ => Err(GeomError::Unsupported {
+            backend: BackendId::new("mesh-section-registry"),
+            operation: Operation::MeshPlaneSection,
+        }),
+    }
+}
 
 /// Lexicographic order of plane-local points: `x`, then `y`, by `total_cmp`.
 fn point_cmp(left: &Point2, right: &Point2) -> Ordering {
@@ -59,6 +119,7 @@ pub(crate) fn validate_plane_section(
     backend: BackendId,
     mesh: &TriMesh,
     request: &SectionRequest,
+    boundary_edges: usize,
     section: &PlaneSection,
 ) -> GeomResult<()> {
     let violation = |detail: &str| GeomError::BackendContractViolation {
@@ -102,6 +163,13 @@ pub(crate) fn validate_plane_section(
                 .zip(chain.points.last())
                 .is_some_and(|(first, last)| point_cmp(first, last).is_lt())
         };
+        if request.role == SectionRole::Solid
+            && chain
+                .ends
+                .is_some_and(|ends| ends.contains(&ChainEnd::MeshBoundary))
+        {
+            return Err(violation("a solid section chain ends on the mesh boundary"));
+        }
         if !canonical {
             return Err(violation(
                 "section chain is not in canonical start or direction",
@@ -195,6 +263,7 @@ pub(crate) fn validate_plane_section(
             evidence.touching_edges,
             evidence.in_plane_pairs,
         )
+        .with_role(request.role, boundary_edges)
         .with_output(&section.chains, &section.regions);
     if evidence != derived
         || !evidence.is_derived_from_input_mesh()
