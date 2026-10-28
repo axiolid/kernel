@@ -55,9 +55,12 @@ MUTANTS = [
     ('check not called', R, '    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;', '    let _ = check_axis_side;\n    let on_axis = vec![false; rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>()];', TESTS),
     ('taper end rings not checked', S, '    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?', '    if { let _ = &ends; vec![false] }', TESTS_SWEEP),
     ('taper end judged apart from the start', S, '        holes: core::iter::once(&end.outer)', '        holes: core::iter::empty()', TESTS_SWEEP),
+    ('joint taken from the earlier segment always', P, '        let joint = if rank(&contour.segments[j], false) < rank(&contour.segments[i], true) {\n            start\n        } else {\n            end\n        };', '        let joint = end;', TESTS),
+    ('joint taken from the later segment always', P, '        let joint = if rank(&contour.segments[j], false) < rank(&contour.segments[i], true) {\n            start\n        } else {\n            end\n        };', '        let joint = start;', TESTS),
+    ('line origin not preferred to a far end', P, '            if t == 0.0 {\n                0\n            } else {\n                2\n            }', '            2', TESTS),
+    ('polyline vertex ranked below a curved end', P, '        Curve2::Polyline(_) => 1,', '        Curve2::Polyline(_) => 4,', TESTS),
+    ('snap distance not measured', P, '        *moved = moved\n            .max((end - joint).length())\n            .max((start - joint).length());', '', TESTS),
     ('arc end re-evaluated', P, '        if !near2(end, start, tolerance.linear()) {\n            continue;\n        }', '        if true {\n            continue;\n        }', TESTS),
-    ('joint taken from the curved neighbour', P, '        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {\n            start\n        } else {\n            end\n        };', '        let joint = end;', TESTS),
-    ('joint taken from the later segment', P, '        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {\n            start\n        } else {\n            end\n        };', '        let joint = start;', TESTS),
     ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis', COMPILE),
 ]
 

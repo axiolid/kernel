@@ -754,25 +754,44 @@ fn contour_points_measured(
 /// Snap the two points at every joint of a contour to one exact point (#365).
 ///
 /// The first and last point of a flattened segment are its endpoints, not
-/// samples. A line or polyline evaluates its endpoints exactly; a curved
-/// segment evaluates them through trigonometry, which is off by rounding
-/// (`0.5 * cos(pi / 2)` is `3e-17`, not `0`), so an arc ending on a
+/// samples, and how exactly a family evaluates one differs. A line at
+/// parameter 0 returns its stored origin; at any other parameter
+/// `origin + direction * t` rounds (twice for `t = 1`). A polyline returns a
+/// stored vertex. A curved segment goes through trigonometry, off by
+/// rounding (`0.5 * cos(pi / 2)` is `3e-17`, not `0`), so an arc ending on a
 /// revolution axis would lie beside the axis. At each joint whose two points
-/// lie within the linear tolerance, both become the exact one: the line or
-/// polyline's endpoint when either neighbour is straight, else the earlier
-/// segment's end. Both segments then produce the bit-identical vertex. Only
-/// interior samples are ever trigonometric. A gap beyond the tolerance is
-/// left alone, as before. `moved` is raised to the distance a point moved, a
-/// rounding error far below the tolerance that
-/// [`profile_deviation`] adds to its bound.
+/// lie within the linear tolerance, both become the more exact one, ranked:
+/// a line's endpoint at parameter 0, a polyline vertex, any other line
+/// endpoint, a curved endpoint; a tie keeps the earlier segment's end. Both
+/// segments then produce the bit-identical vertex. Only interior samples are
+/// ever trigonometric. A gap beyond the tolerance is left alone, as before.
+/// `moved` is raised to the distance a point moved, a rounding error far
+/// below the tolerance that [`profile_deviation`] adds to its bound.
 fn snap_joints(
     contour: &axiolid_profile::Contour,
     flattened: &mut [Vec<Point2>],
     tolerance: Tolerance,
     moved: &mut Scalar,
 ) {
+    // Lower is more exact.
+    let rank = |segment: &axiolid_profile::ProfileSegment, at_end: bool| match &segment.curve {
+        Curve2::Line(_) => {
+            // The oriented end is the domain end for the forward sense.
+            let t = if at_end == segment.same_sense {
+                segment.domain.end
+            } else {
+                segment.domain.start
+            };
+            if t == 0.0 {
+                0
+            } else {
+                2
+            }
+        }
+        Curve2::Polyline(_) => 1,
+        _ => 3,
+    };
     let n = flattened.len();
-    let exact = |curve: &Curve2| matches!(curve, Curve2::Line(_) | Curve2::Polyline(_));
     for i in 0..n {
         let j = (i + 1) % n;
         if i == j {
@@ -784,7 +803,7 @@ fn snap_joints(
         if !near2(end, start, tolerance.linear()) {
             continue;
         }
-        let joint = if !exact(&contour.segments[i].curve) && exact(&contour.segments[j].curve) {
+        let joint = if rank(&contour.segments[j], false) < rank(&contour.segments[i], true) {
             start
         } else {
             end

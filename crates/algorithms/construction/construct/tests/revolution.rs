@@ -834,3 +834,168 @@ fn a_quarter_disc_revolves_to_a_hemisphere() {
         "{got} vs {want}"
     );
 }
+
+// Joints rank by how exactly each side states the point (#365): a line's
+// origin, a polyline vertex, a line's far end, a curved end.
+
+const AXIS_X: Scalar = 0.3;
+
+fn axis_x_vertices(mesh: &TriMesh) -> usize {
+    mesh.positions
+        .iter()
+        .filter(|p| p.x == AXIS_X && p.z == 0.0)
+        .count()
+}
+
+/// The profile revolved a full turn about the Y axis through `AXIS_X`.
+fn turn_about_offset_axis(profile: &Profile) -> TriMesh {
+    let rings = profile_rings(profile, AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    revolve(
+        &rings,
+        Point3::new(AXIS_X, 0.0, 0.0),
+        Vec3::Y,
+        FULL,
+        tol_for(AXIS_CHORD),
+    )
+    .expect("a profile touching the axis at its ends revolves")
+}
+
+/// An arc through (0.3, -0.5) and (1.1, 0), centre (0.45, 0.15), swept
+/// counter-clockwise: the angles are rounded, so its ends are inexact.
+fn offset_arc() -> axiolid_profile::ProfileSegment {
+    use axiolid_core::{Frame2, Interval, Vec2};
+    let centre = Point2::new(0.45, 0.15);
+    let from = Point2::new(0.3, -0.5) - centre;
+    let to = Point2::new(1.1, 0.0) - centre;
+    axiolid_profile::ProfileSegment {
+        curve: axiolid_curve::Curve2::Circle(axiolid_curve::Circle2 {
+            frame: Frame2 {
+                origin: centre,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: from.length(),
+        }),
+        domain: Interval::new(from.y.atan2(from.x), to.y.atan2(to.x)),
+        same_sense: true,
+    }
+}
+
+fn pole_points() -> (Point2, Point2, Point2) {
+    (
+        Point2::new(AXIS_X, 0.5),
+        Point2::new(AXIS_X, -0.5),
+        Point2::new(1.1, 0.0),
+    )
+}
+
+#[test]
+fn a_line_joint_takes_the_next_lines_origin_not_the_rounded_far_end() {
+    let (top, bottom, right) = pole_points();
+    for middle in [line_segment(bottom, right), offset_arc()] {
+        let profile = contour_of(vec![
+            line_segment(top, bottom),
+            middle,
+            line_segment(right, top),
+        ]);
+        let mesh = turn_about_offset_axis(&profile);
+        assert_sound(&mesh);
+        assert_no_degenerate_triangle(&mesh);
+        assert_eq!(axis_x_vertices(&mesh), 2);
+    }
+}
+
+#[test]
+fn a_reversed_line_states_its_ends_by_the_oriented_parameters() {
+    let (top, bottom, right) = pole_points();
+    // The closing line stored from the top to the right and read backwards.
+    let mut closing = line_segment(top, right);
+    closing.same_sense = false;
+    let profile = contour_of(vec![
+        line_segment(top, bottom),
+        line_segment(bottom, right),
+        closing,
+    ]);
+    let mesh = turn_about_offset_axis(&profile);
+    assert_sound(&mesh);
+    assert_eq!(axis_x_vertices(&mesh), 2);
+}
+
+#[test]
+fn a_polyline_vertex_beats_a_far_line_end_and_a_curved_end() {
+    let (top, bottom, right) = pole_points();
+    let corner = axiolid_profile::ProfileSegment {
+        curve: axiolid_curve::Curve2::Polyline(axiolid_curve::Polyline2 {
+            points: vec![top, bottom, right],
+            closed: false,
+        }),
+        domain: axiolid_core::Interval::new(0.0, 2.0),
+        same_sense: true,
+    };
+    let profile = contour_of(vec![corner, line_segment(right, top)]);
+    let mesh = turn_about_offset_axis(&profile);
+    assert_sound(&mesh);
+    assert_eq!(axis_x_vertices(&mesh), 2);
+}
+
+#[test]
+fn two_arcs_meeting_off_the_axis_still_close_a_ring() {
+    let ring = profile_rings(
+        &contour_of(vec![
+            arc_segment(1.0, 0.0, core::f64::consts::PI),
+            arc_segment(1.0, core::f64::consts::PI, FULL),
+        ]),
+        AXIS_CHORD,
+        tol_for(AXIS_CHORD),
+    )
+    .expect("rings")
+    .outer;
+    for k in 0..ring.len() {
+        assert_ne!(ring[k], ring[(k + 1) % ring.len()]);
+    }
+    let area: Scalar = (0..ring.len())
+        .map(|k| {
+            let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+            (p.x * q.y - q.x * p.y) / 2.0
+        })
+        .sum();
+    assert!((area - core::f64::consts::PI).abs() < 1e-2, "{area}");
+}
+
+#[test]
+fn a_hole_of_two_arcs_is_joined_like_an_outer_ring() {
+    let square = |s: Scalar| {
+        let c = [(-s, -s), (s, -s), (s, s), (-s, s)].map(|(x, y)| Point2::new(x, y));
+        (0..4).map(|k| line_segment(c[k], c[(k + 1) % 4])).collect()
+    };
+    let profile = Profile::Contour(axiolid_profile::ContourProfile {
+        outer: axiolid_profile::Contour::new(square(2.0)),
+        holes: vec![axiolid_profile::Contour::new(vec![
+            arc_segment(0.5, 0.0, core::f64::consts::PI),
+            arc_segment(0.5, core::f64::consts::PI, FULL),
+        ])],
+    });
+    let rings = profile_rings(&profile, AXIS_CHORD, tol_for(AXIS_CHORD)).expect("rings");
+    assert_eq!(rings.holes.len(), 1);
+    let hole = &rings.holes[0];
+    for k in 0..hole.len() {
+        assert_ne!(hole[k], hole[(k + 1) % hole.len()]);
+    }
+}
+
+#[test]
+fn the_snap_distance_joins_the_reported_deviation() {
+    use axiolid_construct::profile::{profile_deviation, ProfileDeviation};
+    // The second line starts 5e-4 above where the first ends; within the
+    // 1e-3 linear tolerance they are one joint, and the ring moves by that.
+    let profile = contour_of(vec![
+        line_segment(Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)),
+        line_segment(Point2::new(1.0, 0.0005), Point2::new(1.0, 1.0)),
+        line_segment(Point2::new(1.0, 1.0), Point2::new(0.0, 0.0)),
+    ]);
+    let tolerance = Tolerance::new(1e-3, 1e-9).expect("tolerance");
+    match profile_deviation(&profile, 1e-3, tolerance).expect("deviation") {
+        ProfileDeviation::Bounded(d) => assert!(d >= 5e-4, "{d}"),
+        other => panic!("{other:?}"),
+    }
+}

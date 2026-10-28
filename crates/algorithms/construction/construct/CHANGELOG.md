@@ -13,14 +13,18 @@ caret rule for `0.x` versions.
 
 - `profile_rings` ends every contour segment at its exact joint (#365). The
   first and last point of a flattened segment are its endpoints, not
-  samples: where two segments meet within the linear tolerance, both now
-  produce one bit-identical vertex, the line or polyline's exact endpoint
-  when either neighbour is straight, else the earlier segment's end. An arc
-  ending on the revolution axis used to land at `x ~ 6e-17` (its end
-  re-evaluated as `centre + r (cos s, sin s)`), so a half-disc was refused
-  at a full turn as a pinch and a partial turn meshed degenerate triangles.
-  The snap distance is a rounding error; `profile_deviation` adds it to its
-  bound as it does a merged point. Arcs clear of the axis are unchanged.
+  samples. Where two segments meet within the linear tolerance, both now
+  produce one bit-identical vertex, the more exactly stated of the two:
+  a line's endpoint at parameter 0 (its origin), a polyline vertex, any
+  other line endpoint (`origin + direction * t` rounds), a curved endpoint;
+  a tie keeps the earlier segment's end. An arc ending on the revolution
+  axis used to land at `x ~ 6e-17` (its end re-evaluated as
+  `centre + r (cos s, sin s)`), and a line ending there was rounded too, so
+  a half-disc was refused at a full turn as a pinch and a partial turn
+  meshed degenerate triangles. The snap distance is a rounding error (or a
+  gap within the tolerance); `profile_deviation` adds it to its bound as it
+  does a merged point. Ring vertices may move by an ulp wherever segments
+  meet.
 
 ## [0.3.23] - 2026-10-28
 

@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A mesh `Revolution` of a contour with an arc ending on the axis (a half-
+  or quarter-disc) compiles closed with one vertex per pole, in a full and
+  a partial turn, instead of being refused as a pinch (#365); the flattened
+  profile now ends segments at their exact joints (`axiolid-construct`).
+
 ## [0.3.35] - 2026-10-28
 
 ### Changed
