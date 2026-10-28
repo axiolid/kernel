@@ -35,14 +35,14 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.4 | Common backend-neutral execution and diagnostic contracts |
+| [`axiolid-contracts`](./crates/axiolid-contracts) | `contract.common` | 0.3.5 | Common backend-neutral execution and diagnostic contracts |
 | [`axiolid-curve-evaluate-contract`](./crates/axiolid-curve-evaluate-contract) | `contract.operation` | 0.3.8 | Portable curve evaluation capability contract: point, tangent and oriented frame at a distance |
 | [`axiolid-exact-compile-contract`](./crates/axiolid-exact-compile-contract) | `contract.operation` | 0.3.2 | Portable graph-to-exact-B-rep compilation contract |
 | [`axiolid-guarantees`](./crates/axiolid-guarantees) | `contract.guarantees` | 0.3.2 | Certified-value and escalation vocabulary for geometry contracts |
 | [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.4 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.5 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.2 | Shared mesh admissibility contracts |
-| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | not released | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
+| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.0 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.2 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.2 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.2 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |

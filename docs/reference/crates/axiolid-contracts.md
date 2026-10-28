@@ -8,7 +8,7 @@ Common backend-neutral execution and diagnostic contracts.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-28) |
+| Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-contracts`](https://crates.io/crates/axiolid-contracts) |
 | Facade | [`axiolid`](./axiolid) feature `contracts` |
 | Layer | contracts (`contract.common`) |
@@ -31,14 +31,13 @@ provider selection or fallback, which belong to `axiolid-dispatch`.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-28):
+Latest release, 0.3.5 (2026-10-28):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The `MESH_HIDDEN_LINES` capability identifier
+  (`org.axiolid.geometry.mesh-hidden-lines.v1`) and the
+  `Operation::MeshHiddenLines` diagnostic variant, for the hidden-line
+  drawing contract (ADR 0090, #138).
 
 Full history: [`crates/contracts/common/base/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/common/base/CHANGELOG.md)

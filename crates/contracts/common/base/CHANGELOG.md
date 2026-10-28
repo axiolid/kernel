@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-28
+
 ### Added
 
 - The `MESH_HIDDEN_LINES` capability identifier

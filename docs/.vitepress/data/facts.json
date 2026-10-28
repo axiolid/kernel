@@ -103,10 +103,10 @@
       "description": "Common backend-neutral execution and diagnostic contracts",
       "layer": "contracts",
       "path": "crates/contracts/common/base",
-      "released": "0.3.4",
+      "released": "0.3.5",
       "released_date": "2026-10-28",
       "role": "contract.common",
-      "version": "0.3.4"
+      "version": "0.3.5"
     },
     "axiolid-core": {
       "description": "Geometry data types and tolerance policy. No algorithms, no backends.",
@@ -337,8 +337,8 @@
       "description": "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
-      "released": null,
-      "released_date": null,
+      "released": "0.1.0",
+      "released_date": "2026-10-28",
       "role": "contract.operation",
       "version": "0.1.0"
     },

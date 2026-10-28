@@ -8,10 +8,11 @@ Portable orthographic hidden-line drawing request, result, and conformance contr
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.1.0) |
+| Latest release | 0.1.0 (2026-10-28) |
+| crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_hidden_lines_contract/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_hidden_lines_contract/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-hidden-lines-contract) |
 | Source | [`crates/contracts/operations/mesh-hidden-lines/`](https://github.com/axiolid/kernel/tree/main/crates/contracts/operations/mesh-hidden-lines) |
 
 ## Overview
@@ -30,6 +31,15 @@ implement `MeshHiddenLines`, and `axiolid-dispatch` selects one. See ADR 0090.
 
 ## Changes
 
-No release yet.
+Latest release, 0.1.0 (2026-10-28):
+
+### Added
+
+- The `MeshHiddenLines` operation contract (ADR 0090, #138): an
+  orthographic view with optional near and far clipping, a 2D crop region,
+  boundary, silhouette and crease edge selection, explicit limits,
+  visible and hidden segments naming their source edge, evidence counts,
+  `HiddenLineError` (a `GeomError` plus the mesh at fault), and a
+  conformance suite with self-contained fixtures.
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

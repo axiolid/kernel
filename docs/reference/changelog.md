@@ -1463,6 +1463,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-contracts
 
+### 0.3.5 - 2026-10-28
+
+### Added
+
+- The `MESH_HIDDEN_LINES` capability identifier
+  (`org.axiolid.geometry.mesh-hidden-lines.v1`) and the
+  `Operation::MeshHiddenLines` diagnostic variant, for the hidden-line
+  drawing contract (ADR 0090, #138).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -5140,6 +5149,20 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 - The crates.io page is this crate's own `README.md`, with links to its
   API documentation, its reference page and the source (ADR 0078).
+
+
+## axiolid-mesh-hidden-lines-contract
+
+### 0.1.0 - 2026-10-28
+
+### Added
+
+- The `MeshHiddenLines` operation contract (ADR 0090, #138): an
+  orthographic view with optional near and far clipping, a 2D crop region,
+  boundary, silhouette and crease edge selection, explicit limits,
+  visible and hidden segments naming their source edge, evidence counts,
+  `HiddenLineError` (a `GeomError` plus the mesh at fault), and a
+  conformance suite with self-contained fixtures.
 
 
 ## axiolid-mesh-section-contract

@@ -170,12 +170,12 @@ pub enum Operation {
     Tessellation,
     MeshBoolean,
     MeshPlaneSection,
-    MeshHiddenLines,
     PointcloudReconstruction,
     SpatialQuery,
     Measurement,
     Healing,
     GraphCompilation,
+    MeshHiddenLines,
 }
 
 /// Provider identity only. It deliberately contains no operation booleans.
