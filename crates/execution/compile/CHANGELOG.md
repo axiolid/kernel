@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.35] - 2026-10-28
+
 ### Changed
 
 - A mesh `Revolution` whose profile touches the axis now compiles to a

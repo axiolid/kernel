@@ -682,6 +682,28 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.23 - 2026-10-28
+
+### Changed
+
+- `revolve` meshes a profile touching an in-plane axis instead of refusing
+  it (#363): a cylinder, cone or sphere from a rectangle, triangle or
+  half-disk on the axis, and their partial turns, come out closed,
+  consistently wound and free of degenerate triangles. A vertex exactly on
+  the axis (the exact sign is zero) is one mesh vertex shared by every
+  station and by both caps; its quads collapse to triangles and a profile
+  edge along the axis emits nothing. The chord bound and the step count are
+  unchanged. In a full turn a vertex on the axis with both ring neighbours
+  off it (an isolated touch) is refused with `UnsupportedInput`: the solid
+  pinches there and its boundary is not a two-manifold; a partial turn
+  closes it into a sector point and meshes it. Vertices are welded only for
+  an axis whose origin and direction have z exactly zero: with z noise
+  within the tolerance a touching profile is still `UnsupportedInput`, since
+  its on-axis vertices are then off the real axis. A profile crossing the
+  axis is still `InvalidInput`.
+  `tapered_revolve` keeps its `UnsupportedInput` refusal for a profile
+  touching the axis (#364).
+
 ### 0.3.22 - 2026-10-28
 
 ### Fixed
@@ -3662,6 +3684,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.35 - 2026-10-28
+
+### Changed
+
+- A mesh `Revolution` whose profile touches the axis now compiles to a
+  closed mesh instead of failing with `UnsupportedInput` (#363, from
+  `axiolid-construct`), unless a full turn touches the axis at an isolated
+  vertex, which pinches the solid and stays `UnsupportedInput`; a `TaperedRevolution` touching the axis is still
+  refused (#364).
 
 ### 0.3.34 - 2026-10-28
 

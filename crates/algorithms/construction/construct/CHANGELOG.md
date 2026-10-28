@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.23] - 2026-10-28
+
 ### Changed
 
 - `revolve` meshes a profile touching an in-plane axis instead of refusing

@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.22 (2026-10-28) |
+| Latest release | 0.3.23 (2026-10-28) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -65,20 +65,26 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.22 (2026-10-28):
+Latest release, 0.3.23 (2026-10-28):
 
-### Fixed
+### Changed
 
-- `revolve` and `tapered_revolve` (the mesh path) refuse a profile whose
-  vertices lie on both sides of an in-plane axis (`InvalidInput`), judged by
-  an exact sign with no tolerance band; they used to sweep a
-  self-intersecting solid and return it as valid. A tapered revolution
-  judges the start and end sections together (#351).
-- A profile touching the axis is now refused (`UnsupportedInput`) for full
-  and partial turns alike, as the exact path does for full turns. This
-  includes cylinders, cones and spheres revolved from a profile with an edge
-  or vertex on the axis, and pie-slice partial turns, which used to mesh
-  with degenerate triangles; meshing them properly is tracked in #363. An
-  axis leaning out of the profile plane is still unchecked (#362).
+- `revolve` meshes a profile touching an in-plane axis instead of refusing
+  it (#363): a cylinder, cone or sphere from a rectangle, triangle or
+  half-disk on the axis, and their partial turns, come out closed,
+  consistently wound and free of degenerate triangles. A vertex exactly on
+  the axis (the exact sign is zero) is one mesh vertex shared by every
+  station and by both caps; its quads collapse to triangles and a profile
+  edge along the axis emits nothing. The chord bound and the step count are
+  unchanged. In a full turn a vertex on the axis with both ring neighbours
+  off it (an isolated touch) is refused with `UnsupportedInput`: the solid
+  pinches there and its boundary is not a two-manifold; a partial turn
+  closes it into a sector point and meshes it. Vertices are welded only for
+  an axis whose origin and direction have z exactly zero: with z noise
+  within the tolerance a touching profile is still `UnsupportedInput`, since
+  its on-axis vertices are then off the real axis. A profile crossing the
+  axis is still `InvalidInput`.
+  `tapered_revolve` keeps its `UnsupportedInput` refusal for a profile
+  touching the axis (#364).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)
