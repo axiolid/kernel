@@ -23,13 +23,11 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{OrthographicView, Visibility};
 use common::{
-    box_mesh, draw, frame, isometric_frame, looking_along, plan_frame, scalar, solids, try_draw,
-    BOX_EDGES,
+    box_mesh, draw, frame, isometric_frame, looking_along, plan_frame, scalar, solids, BOX_EDGES,
 };
 
 type V3 = [f64; 3];
@@ -409,8 +407,6 @@ struct Tally {
     ambiguous: usize,
     /// Robust samples hidden by a cap alone.
     capped: usize,
-    /// Scenes the provider refused as a tie.
-    refused: usize,
     seconds: f64,
 }
 
@@ -439,22 +435,8 @@ fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut
     }
     let started = Instant::now();
     let context = format!("scene {seed}, view {name}, near {near:?}");
-    let outcome = if near.is_some() {
-        match try_draw(&scalar(), &input, view) {
-            Ok(outcome) => outcome,
-            // A face in the near plane, or a cut line under a drawn edge, is
-            // a tie the provider refuses.
-            Err(error) if matches!(error.error, GeomError::Degenerate(_)) => {
-                assert!(error.mesh.is_some(), "{context}: {error}");
-                tally.refused += 1;
-                tally.scenes += 1;
-                return;
-            }
-            Err(error) => panic!("{context}: {error}"),
-        }
-    } else {
-        draw(&scalar(), &input, view)
-    };
+    // A cut scene is never refused: `draw` panics on any refusal.
+    let outcome = draw(&scalar(), &input, view);
     tally.seconds += started.elapsed().as_secs_f64();
     tally.scenes += 1;
 
@@ -568,17 +550,16 @@ fn the_provider_agrees_with_an_independent_ray_cast() {
 #[test]
 fn caps_of_cut_solids_agree_with_an_independent_ray_parity() {
     const SEEDS: u64 = 40;
-    let (mut capped, mut scenes, mut refused) = (0, 0, 0);
+    let mut capped = 0;
     for (name, view_frame) in views() {
         let mut tally = Tally::default();
         for seed in 1..=SEEDS {
             check(seed, name, view_frame, true, &mut tally);
         }
         eprintln!(
-            "{name:>9}: {} cut scenes ({} refused), {} samples, {} robust, {} by a cap, \
+            "{name:>9}: {} cut scenes {} samples, {} robust, {} by a cap, \
              {} ambiguous, {:.3} s",
             tally.scenes,
-            tally.refused,
             tally.segments,
             tally.robust,
             tally.capped,
@@ -591,15 +572,9 @@ fn caps_of_cut_solids_agree_with_an_independent_ray_parity() {
             tally.robust
         );
         capped += tally.capped;
-        scenes += tally.scenes;
-        refused += tally.refused;
     }
-    // The caps decide a good share of the samples, and ties are rare.
+    // The caps decide a good share of the samples.
     assert!(capped >= 200, "only {capped} samples are hidden by a cap");
-    assert!(
-        refused * 10 <= scenes,
-        "{refused} of {scenes} scenes refused"
-    );
 }
 
 #[test]

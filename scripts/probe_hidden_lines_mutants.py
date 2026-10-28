@@ -13,7 +13,6 @@ PAR = "crates/algorithms/discrete/hidden-lines/src/param.rs"
 DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
 OUT = "crates/algorithms/discrete/hidden-lines/src/output.rs"
 PRO = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
-CAP = "crates/algorithms/discrete/hidden-lines/src/caps.rs"
 TESTS = ["-p", "axiolid-hidden-lines"]
 
 MUTANTS = [
@@ -90,9 +89,10 @@ MUTANTS = [
     ('near clip through a cut solid accepted', PRO,
      '        if beyond && kept {',
      '        if false && beyond && kept {', TESTS),
-    ('near clip refuses an uncut solid', PRO,
-     '        if beyond && kept {',
-     '        if beyond || kept {', TESTS),
+    # No mutant makes `cut_by_near` report an uncut solid as cut: with caps
+    # that only filters work. A solid wholly kept has no triangle beyond the
+    # plane, and a solid wholly beyond it is crossed an even number of times
+    # (the ray enters and leaves), so neither ever has an odd parity.
     ('collapsed neighbours not merged', PRO,
      '                    if last.visibility == visibility {',
      '                    if false && last.visibility == visibility {', TESTS),
@@ -106,9 +106,12 @@ MUTANTS = [
     ('perturbation replaced by closed coverage', PAR,
      '        Ok((side == Ordering::Greater).then_some(span))',
      '        Ok((side == Ordering::Greater || true).then_some(span))', TESTS),
-    ('near tie decided instead of refused', CAP,
-     '            if solver.identically_zero(&above)? {',
-     '            if false && solver.identically_zero(&above)? {', TESTS),
+    # No mutant for the tie "a triangle at the near plane counts as crossed":
+    # over that triangle's image every point below the plane is hidden by the
+    # triangle itself, and elsewhere it adds no toggle, so no drawing differs.
+    ('perturbation ignores orientation', PAR,
+     '        let side = if neg { side.reverse() } else { side };',
+     '        let side = if neg && false { side.reverse() } else { side };', TESTS),
     ('caps applied to sheets', PRO,
      '                (Some(near), MeshRole::Solid) => {',
      '                (Some(near), _) => {', TESTS),

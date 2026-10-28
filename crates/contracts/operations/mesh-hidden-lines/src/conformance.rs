@@ -356,11 +356,7 @@ mod tests {
             _options: &ExecutionOptions,
         ) -> Result<HiddenLineOutcome, HiddenLineError> {
             if request.meshes.len() == 2 {
-                let error = if request.view.near.is_some() {
-                    GeomError::Degenerate("refused".into())
-                } else {
-                    GeomError::NotManifold("refused".into())
-                };
+                let error = GeomError::NotManifold("refused".into());
                 return Err(if self.blame_offender {
                     HiddenLineError::mesh(request.meshes[1].id, error)
                 } else {
@@ -383,12 +379,11 @@ mod tests {
         }
     }
 
-    const REFUSAL_CASES: [&str; 6] = [
+    const REFUSAL_CASES: [&str; 5] = [
         "three triangles on one edge",
         "inconsistent winding",
         "sheet declared solid",
         "output limit",
-        "face in the near plane of a solid",
         "candidate limit",
     ];
 
@@ -421,7 +416,7 @@ mod tests {
             blame_offender: false,
         });
         let wrong = refusal_failures(&report);
-        assert_eq!(wrong.len(), 4, "{wrong:?}");
+        assert_eq!(wrong.len(), 3, "{wrong:?}");
         for failure in wrong {
             assert!(matches!(
                 failure,

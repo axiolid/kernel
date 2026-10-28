@@ -1,26 +1,33 @@
 //! Near-plane caps of closed solids.
 //!
 //! A near plane that cuts a [`MeshRole::Solid`](axiolid_mesh_hidden_lines_contract::MeshRole)
-//! removes what lies beyond it and leaves the solid's cross-section there: a
-//! cap that occludes. A point `P` of an edge, nearer than the plane, is hidden
+//! removes what lies beyond it (`W > near`, nearer the viewer) and leaves
+//! the solid's cross-section there: a cap that occludes. A point `P` of an
+//! edge, with `W_P < near` (farther from the viewer than the plane), is hidden
 //! by the cap of `M` exactly when the point of the plane above it,
 //! `(U_P, V_P, near)`, lies in `M`. That is decided by ray parity: a ray from
-//! it towards the viewer crosses the triangles of `M` that are nearer than
-//! the plane, an odd number of times if and only if it starts inside `M`.
+//! it towards the viewer crosses the triangles of `M` that lie beyond the
+//! plane an odd number of times if and only if it starts inside `M`.
 //!
 //! The ray runs through the image point perturbed by `δ = (ε, ε²)`, so it
 //! never grazes an image edge: a point on the diagonal shared by two
 //! triangles lies in exactly one of them. Triangles seen edge-on are skipped
-//! for the same reason (they cover no area). A triangle that meets the plane
-//! along the image of the edge being resolved cannot be told from the cap
-//! itself and is refused.
+//! for the same reason (they cover no area).
+//!
+//! A triangle `T` of `M` whose plane is exactly at `near` over the edge's
+//! image is not a crossing (the strict clip is empty), and needs no
+//! refusal. Over the image of `T` every point `P` with `W_P < near` is
+//! already hidden by `T` itself: its point over `P'` has depth `near > W_P`
+//! and is not removed. Outside that image `T` contributes no toggles in
+//! either reading. So deciding the tie as "not crossed" cannot change a
+//! drawing.
 
 use std::ops::Range;
 
-use axiolid_contracts::GeomError;
+use axiolid_contracts::{GeomError, GeomResult};
 
 use crate::edges::DrawEdge;
-use crate::occlusion::{Refusal, Scene};
+use crate::occlusion::Scene;
 use crate::param::{Param, Solver, Span};
 use crate::recipe::{Constraint, Kind, Lift};
 use std::cmp::Ordering;
@@ -28,8 +35,6 @@ use std::cmp::Ordering;
 /// A solid the near plane cuts.
 #[derive(Debug, Clone)]
 pub(crate) struct Cap {
-    /// Position of the mesh in the request.
-    pub mesh: usize,
     /// Its triangles in the scene's triangle list.
     pub tris: Range<usize>,
 }
@@ -43,7 +48,7 @@ pub(crate) fn hidden_by_caps(
     kept: Span,
     pairs: &mut usize,
     max_pairs: usize,
-) -> Result<Vec<Span>, Refusal> {
+) -> GeomResult<Vec<Span>> {
     let mut hidden: Vec<Span> = Vec::new();
     for cap in scene.caps {
         let mut ends: Vec<Param> = Vec::new();
@@ -58,8 +63,7 @@ pub(crate) fn hidden_by_caps(
             if *pairs >= max_pairs {
                 return Err(GeomError::BudgetExceeded {
                     resource: "hidden-line candidate pairs",
-                }
-                .into());
+                });
             }
             *pairs += 1;
             let clockwise = tri.sigma == Ordering::Less;
@@ -94,17 +98,6 @@ pub(crate) fn hidden_by_caps(
                 },
                 true,
             );
-            if solver.identically_zero(&above)? {
-                return Err(Refusal::mesh(
-                    cap.mesh,
-                    GeomError::Degenerate(format!(
-                        "triangle {} meets the near plane along the image of edge ({}, {})",
-                        t - cap.tris.start,
-                        edge.local[0],
-                        edge.local[1]
-                    )),
-                ));
-            }
             if let Some(crossing) = solver.clip(span, &above)? {
                 sorted_insert(solver, &mut ends, crossing.lo)?;
                 sorted_insert(solver, &mut ends, crossing.hi)?;
@@ -131,11 +124,7 @@ pub(crate) fn hidden_by_caps(
 }
 
 /// Insert `param` into the sorted `list`, after its equals.
-fn sorted_insert(
-    solver: &mut Solver<'_>,
-    list: &mut Vec<Param>,
-    param: Param,
-) -> Result<(), Refusal> {
+fn sorted_insert(solver: &mut Solver<'_>, list: &mut Vec<Param>, param: Param) -> GeomResult<()> {
     let (mut low, mut high) = (0, list.len());
     while low < high {
         let mid = low + (high - low) / 2;

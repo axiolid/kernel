@@ -2,7 +2,7 @@
 
 mod common;
 
-use axiolid_contracts::{ExecutionOptions, GeomError};
+use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Point3, Tolerance};
 use axiolid_dispatch::MeshHiddenLinesRegistry;
 use axiolid_hidden_lines::ScalarHiddenLines;
@@ -99,9 +99,10 @@ fn a_near_plane_through_a_solid_caps_it() {
 }
 
 #[test]
-fn a_face_in_the_near_plane_is_refused_naming_the_solid() {
+fn a_face_in_the_near_plane_is_drawn() {
     // The base of the tetrahedron lies in the plane W = 1 and its apex is
-    // beyond it: the cap and the base coincide.
+    // beyond it: the cap and the base coincide, and a floor quad under the
+    // base is hidden by it.
     let tetra = TriMesh::new(
         vec![
             Point3::new(0.0, 0.0, 1.0),
@@ -111,17 +112,46 @@ fn a_face_in_the_near_plane_is_refused_naming_the_solid() {
         ],
         vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3],
     );
-    let under = box_mesh([-1.0, -1.0, -1.0], [2.0, 2.0, 0.0]);
+    let floor = box_mesh([0.1, 0.1, -1.0], [0.4, 0.4, 0.0]);
     let meshes = [
-        HiddenLineMesh::new(MeshId(3), MeshRole::Sheet, &under),
+        HiddenLineMesh::new(MeshId(3), MeshRole::Solid, &floor),
         HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &tetra),
     ];
-    let error = registry()
+    let outcome = registry()
         .hidden_lines(&plan_request(&meshes, 1.0), &options())
-        .expect_err("refused");
-    // The sheet's edge is resolved first, yet the refusal names the solid.
-    assert_eq!(error.mesh, Some(MeshId(7)));
-    assert!(matches!(&error.error, GeomError::Degenerate(m) if m.contains("meets the near plane")));
+        .expect("drawn");
+    assert!(outcome
+        .segments
+        .iter()
+        .filter(|s| s.source.mesh == MeshId(3))
+        .all(|s| s.visibility == Visibility::Hidden));
+}
+
+#[test]
+fn a_beam_whose_underside_is_at_the_cut_height_is_drawn() {
+    // The beam [0,2] x [0,0.3] x [1,1.5] is cut at 1 on its underside; the
+    // floor slab below it has its top edge y = 0 hidden under the beam over
+    // x in [0, 2] and visible beyond.
+    let beam = box_mesh([0.0, 0.0, 1.0], [2.0, 0.3, 1.5]);
+    let floor = box_mesh([0.0, 0.0, 0.0], [3.0, 1.0, 0.5]);
+    let meshes = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &floor),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Solid, &beam),
+    ];
+    let outcome = registry()
+        .hidden_lines(&plan_request(&meshes, 1.0), &options())
+        .expect("drawn");
+    let along = |visibility| {
+        outcome
+            .segments
+            .iter()
+            .filter(|s| s.source.mesh == MeshId(1) && s.source.vertices == [4, 5])
+            .filter(|s| s.visibility == visibility)
+            .map(|s| (s.end - s.start).length())
+            .sum::<f64>()
+    };
+    assert!((along(Visibility::Hidden) - 2.0).abs() < 1e-12);
+    assert!((along(Visibility::Visible) - 1.0).abs() < 1e-12);
 }
 
 fn plan_request<'a>(meshes: &'a [HiddenLineMesh<'a>], near: f64) -> HiddenLineRequest<'a> {

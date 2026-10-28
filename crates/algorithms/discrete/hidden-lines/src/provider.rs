@@ -33,10 +33,7 @@ use crate::view::Vert;
 /// A near clipping plane that cuts a [`MeshRole::Solid`] leaves a cap that
 /// occludes (decided by ray parity with a symbolic perturbation of the image
 /// point); a solid wholly beyond the plane is removed: it neither occludes
-/// nor is drawn. Refused by name, with the solid's mesh: a cut solid with a
-/// triangle that meets the near plane along the image of a drawn edge (a face
-/// in the plane, or a cut line under the edge), which would tie the cap with
-/// that triangle. A failure to produce an endpoint (a coordinate beyond the
+/// nor is drawn. A failure to produce an endpoint (a coordinate beyond the
 /// binary64 range) is `Degenerate` and names the mesh of the edge.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScalarHiddenLines;
@@ -125,7 +122,6 @@ impl MeshHiddenLines for ScalarHiddenLines {
             )?;
             if cut {
                 caps.push(Cap {
-                    mesh: index,
                     tris: first_triangle..tris.len(),
                 });
             }
@@ -148,10 +144,9 @@ impl MeshHiddenLines for ScalarHiddenLines {
             options.check_cancelled()?;
             let id = request.meshes[edge.mesh].id;
             let resolved = resolve(&scene, edge, request.limits.max_candidate_pairs, &mut work)
-                .map_err(|refusal| match (refusal.mesh, refusal.error) {
-                    (Some(index), error) => HiddenLineError::mesh(request.meshes[index].id, error),
-                    (None, error @ GeomError::Degenerate(_)) => HiddenLineError::mesh(id, error),
-                    (None, error) => HiddenLineError::from(error),
+                .map_err(|error| match error {
+                    GeomError::Degenerate(_) => HiddenLineError::mesh(id, error),
+                    other => HiddenLineError::from(other),
                 })?;
             let pieces = match resolved {
                 Resolved::Point => {

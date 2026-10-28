@@ -88,19 +88,21 @@ and closed (`far <= W <= near`); an optional crop region is a box in the image.
   edge in plan) is counted in `point_edges` only, before clipping: it is not
   drawn and is never counted as clipped.
 - **Near-plane caps** of closed solids occlude. A solid is cut when a vertex
-  has `W > near` and another `W <= near`. A point of an edge nearer than the
-  plane is hidden by the cap when the point of the plane above it,
-  `(U, V, near)`, lies in the solid: a ray from it towards the viewer
-  crosses the solid's triangles nearer than the plane an odd number of
-  times. The crossings are counted with the image point perturbed by
+  has `W > near` and another `W <= near`. A point of an edge with `W < near`
+  (farther from the viewer than the plane) is hidden by the cap when the
+  point of the plane above it, `(U, V, near)`, lies in the solid: a ray from
+  it towards the viewer crosses the solid's triangles beyond the plane
+  (`W > near`) an odd number of times. The crossings are counted with the image point perturbed by
   `δ = (ε, ε²)`, so a point on an image edge or on the diagonal two
   triangles share lies in exactly one of them: for an identically zero image
   side with `(dx, dy) = q' - p'` the perturbed side is `-sign(dy)`, or
   `sign(dx)` when `dy` is zero, times the triangle's orientation. Triangles
-  seen edge-on cover no area and do not count. Sheets are never capped. A cut
-  solid with a triangle whose plane meets the near plane along the image of a
-  drawn edge (a face in the plane, or a cut line under the edge) is refused
-  as `Degenerate` naming the solid: the cap and that triangle tie.
+  seen edge-on cover no area and do not count. Sheets are never capped. A
+  triangle whose plane is exactly at the near plane over the edge's image is
+  not a crossing and needs no refusal: over its image every point with
+  `W < near` is already hidden by that triangle itself (its point has depth
+  `near`, which is kept), and elsewhere it contributes no toggle either way.
+  A beam, lintel or sill with a face at the cut height is therefore drawn.
 - **Evidence** counts selected, point, clipped and collapsed edges, candidate
   pairs and exact escalations, so a consumer can tell how hard a drawing was.
 
@@ -114,7 +116,7 @@ Option<MeshId>, error: GeomError }` instead of a bare `GeomError`:
 - `mesh` is `Some` when one input mesh is at fault: a duplicate id (the second
   occurrence), a mesh without triangles, an invalid index or non-finite
   position, a degenerate or exactly collinear triangle, a non-manifold edge,
-  inconsistent winding, a `Solid` that is not closed, a near-plane tie.
+  inconsistent winding, a `Solid` that is not closed.
 - `mesh` is `None` for refusals of the whole request: limits, frame, near and
   far, crease threshold, region, an empty mesh list, memory, cancellation and
   a missing provider.

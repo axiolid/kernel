@@ -9,9 +9,8 @@ the exact points rounded once. It refuses what it cannot decide with a typed
 error that names the mesh. Candidate pairs are found by a bounding-box scan that is quadratic in edges
 times triangles; the examined pairs are bounded by `max_candidate_pairs`. A
 near clipping plane that cuts a `Solid` mesh leaves a cap that occludes, decided
-by exact ray parity with a symbolic perturbation of the image point; a cut solid
-with a face in the plane, or whose cut line runs along the image of a drawn
-edge, is refused as `Degenerate`, naming it. A solid wholly beyond the plane is
+by exact ray parity with a symbolic perturbation of the image point; a face of a
+cut solid in the plane needs no special case. A solid wholly beyond the plane is
 removed.
 It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 

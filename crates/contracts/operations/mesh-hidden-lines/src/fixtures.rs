@@ -665,7 +665,7 @@ pub(crate) fn cases() -> Vec<Case> {
                 }
             })
             .collect();
-        case(
+        let mut case = case(
             name,
             vec![
                 Fixture {
@@ -684,7 +684,9 @@ pub(crate) fn cases() -> Vec<Case> {
                 clipped_edges: Some(clipped),
                 ..Expect::default()
             },
-        )
+        );
+        case.orientation_independent = true;
+        case
     };
     cases.push(capped_top(
         "near cap of a solid",
@@ -724,7 +726,7 @@ pub(crate) fn cases() -> Vec<Case> {
         kind: Boundary,
         pieces: vec![piece(Hidden, [from[0], from[1]], [to[0], to[1]])],
     };
-    cases.push(case(
+    let mut diagonal = case(
         "near cap on a shared diagonal",
         vec![solid(1, capped_outer()), sheet(2, diagonal_triangle())],
         plan(plan_frame()).with_near(1.0),
@@ -740,8 +742,81 @@ pub(crate) fn cases() -> Vec<Case> {
             clipped_edges: Some(4),
             ..Expect::default()
         },
-    ));
+    );
+    diagonal.orientation_independent = true;
+    cases.push(diagonal);
 
+    // A tetrahedron whose base lies in the near plane (z = 1, apex at z = 3):
+    // the cap is the base. A floor quad at z = 0 under the base has its four
+    // boundary edges hidden, by the base itself and not by a tie.
+    let corner = |x: f64, y: f64| [x, y];
+    let floor = [
+        (0, 1, corner(0.1, 0.1), corner(0.4, 0.1)),
+        (1, 2, corner(0.4, 0.1), corner(0.4, 0.4)),
+        (2, 3, corner(0.4, 0.4), corner(0.1, 0.4)),
+        (0, 3, corner(0.1, 0.1), corner(0.1, 0.4)),
+    ];
+    let mut face_in_plane = case(
+        "near cap on a face in the plane",
+        vec![
+            solid(1, base_in_near_plane()),
+            sheet(2, sheet_quad(0.1, 0.1, 0.4, 0.4, 0.0)),
+        ],
+        plan(plan_frame()).with_near(1.0),
+        crease_half(),
+        Expect {
+            edges: floor
+                .into_iter()
+                .map(|(a, b, from, to)| EdgePieces {
+                    edge: edge(2, a, b),
+                    kind: Boundary,
+                    pieces: vec![piece(Hidden, from, to)],
+                })
+                .collect(),
+            ..Expect::default()
+        },
+    );
+    face_in_plane.orientation_independent = true;
+    cases.push(face_in_plane);
+
+    // A fold. The octahedron has its equator (z = 2) above the near plane 1
+    // and its lower apex (z = 0) below it; its upper apex is at z = 3. Its
+    // cross-section at z = 1 is the diamond |x| + |y| <= 0.5, so a point
+    // over the equator edge x + y = 1 is outside it: the ray crosses the
+    // upper face and the lower face there, which share that edge, and the
+    // parity is even. Both faces contain the edge's image, and only the
+    // orientation of each decides on which side of it the perturbed point
+    // lies. The sheet's first edge (0.75, 0.25) -> (0.25, 0.75) runs along
+    // it at z = 0.5, and is visible: nothing before it is in the kept range.
+    let mut fold = case(
+        "near cap fold under an equator edge",
+        vec![
+            solid(1, fold_octahedron()),
+            sheet(
+                2,
+                TriMesh::new(
+                    vec![
+                        Point3::new(0.75, 0.25, 0.5),
+                        Point3::new(0.25, 0.75, 0.5),
+                        Point3::new(0.75, 0.75, 0.5),
+                    ],
+                    vec![0, 1, 2],
+                ),
+            ),
+        ],
+        plan(plan_frame()).with_near(1.0),
+        crease_half(),
+        Expect {
+            edges: vec![EdgePieces {
+                edge: edge(2, 0, 1),
+                kind: Boundary,
+                pieces: vec![piece(Visible, [0.75, 0.25], [0.25, 0.75])],
+            }],
+            ..Expect::default()
+        },
+    );
+    fold.orientation_independent = true;
+    cases.push(fold);
     cases
 }
 
@@ -780,6 +855,25 @@ fn base_in_near_plane() -> TriMesh {
         Point3::new(0.0, 1.0, 1.0),
         Point3::new(0.0, 0.0, 3.0),
     ])
+}
+
+/// Octahedron with the equator `(+-1, 0, 2), (0, +-1, 2)`, the upper apex
+/// `(0, 0, 3)` and the lower apex `(0, 0, 0)`, wound outward.
+fn fold_octahedron() -> TriMesh {
+    TriMesh::new(
+        vec![
+            Point3::new(1.0, 0.0, 2.0),
+            Point3::new(0.0, 1.0, 2.0),
+            Point3::new(-1.0, 0.0, 2.0),
+            Point3::new(0.0, -1.0, 2.0),
+            Point3::new(0.0, 0.0, 3.0),
+            Point3::new(0.0, 0.0, 0.0),
+        ],
+        vec![
+            0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4, // upper
+            1, 0, 5, 2, 1, 5, 3, 2, 5, 0, 3, 5, // lower
+        ],
+    )
 }
 
 /// The ridge of the interpenetration scene: R0, R1 and the two low points.
@@ -861,21 +955,6 @@ pub(crate) fn refusals() -> Vec<Refusal> {
     };
     output.limits.max_output_segments = 1;
     refusals.push(output);
-    // A sheet below a cut tetrahedron: the tetrahedron's base is in the near
-    // plane, so its cap cannot be told from the base, and the refusal names
-    // the tetrahedron, not the sheet whose edge is resolved first.
-    refusals.push(Refusal {
-        name: "face in the near plane of a solid",
-        meshes: vec![
-            sheet(1, sheet_quad(-1.0, -1.0, 2.0, 2.0, 0.0)),
-            solid(2, base_in_near_plane()),
-        ],
-        view: plan(plan_frame()).with_near(1.0),
-        edges: crease_half(),
-        limits: limits(),
-        accepts: |e| matches!(e, GeomError::Degenerate(_)),
-        mesh: Some(MeshId(2)),
-    });
     let mut pairs = Refusal {
         name: "candidate limit",
         meshes: vec![solid(1, unit_cube())],
@@ -1116,6 +1195,21 @@ mod tests {
         assert!(signed_volume(&tetra) > 0.0);
         assert_eq!(tetra.positions.iter().filter(|p| p.z == 1.0).count(), 3);
         assert_eq!(beyond(&tetra, 1.0), 1);
+        // The octahedron is outward, cut by near 1 (equator and upper apex
+        // beyond, lower apex below), and the fold edge lies on its equator
+        // edge x + y = 1 between (1,0) and (0,1).
+        let octahedron = fold_octahedron();
+        assert!(signed_volume(&octahedron) > 0.0);
+        assert_eq!(beyond(&octahedron, 1.0), 5);
+        assert_eq!(octahedron.positions[5].z, 0.0);
+        let (a, b) = ([0.75, 0.25], [0.25, 0.75]);
+        assert_eq!(a[0] + a[1], 1.0);
+        assert_eq!(b[0] + b[1], 1.0);
+        // The floor quad lies inside the tetrahedron's base: x + y <= 1.
+        assert!(sheet_quad(0.1, 0.1, 0.4, 0.4, 0.0)
+            .positions
+            .iter()
+            .all(|p| p.x + p.y <= 1.0));
     }
 
     #[test]
@@ -1150,7 +1244,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(names.len(), 19);
+        assert_eq!(names.len(), 21);
     }
 
     #[test]

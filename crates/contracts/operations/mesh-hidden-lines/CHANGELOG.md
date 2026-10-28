@@ -14,8 +14,8 @@ caret rule for `0.x` versions.
 - Conformance cases for near-plane caps (#138): a solid cut by the near
   plane hides what lies below its cap, a sheet is never capped, a shared
   diagonal needs the perturbation, a plane at the top of a solid cuts
-  nothing, and a cut solid with a face in the plane is refused as
-  `Degenerate` naming it.
+  nothing, a cut solid with a face in the plane is drawn, and a fold under
+  an equator edge needs the orientation of the perturbation.
 
 ## [0.1.0] - 2026-10-28
 

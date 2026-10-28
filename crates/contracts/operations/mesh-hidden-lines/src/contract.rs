@@ -16,11 +16,11 @@ pub struct MeshId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshRole {
     /// Closed, consistently wound two-manifold. A near clipping plane that
-    /// cuts it leaves a cap that occludes: a point nearer than the plane is
-    /// hidden by the cap when the point of the plane above it is inside the
-    /// solid. A provider refuses a cut solid, naming it, with `Degenerate`
-    /// when one of its triangles meets the near plane along the image of a
-    /// drawn edge (a face in the plane, or a cut line under the edge).
+    /// cuts it (some vertex beyond the plane, `W > near`, and some not)
+    /// leaves a cap that occludes: a point with `W < near`, farther from the
+    /// viewer than the plane, is hidden by the cap when the point of the plane
+    /// above it is inside the solid. A face of the solid in the near plane is
+    /// no special case: it hides what lies below it itself.
     Solid,
     /// Edge-manifold with consistent winding, open or closed. Never capped.
     Sheet,

@@ -117,11 +117,6 @@ impl<'a> Solver<'a> {
         Ok(classify(constraint, a, b))
     }
 
-    /// Whether `constraint` is zero along the whole edge.
-    pub(crate) fn identically_zero(&mut self, constraint: &Constraint) -> GeomResult<bool> {
-        Ok(self.sides(constraint)? == (Ordering::Equal, Ordering::Equal))
-    }
-
     /// `span ∩ {constraint holds}` for an image-side constraint, with the
     /// image point perturbed by `δ = (ε, ε²)` where the constraint is zero
     /// along the whole edge. The perturbed point is strictly on one side of
