@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.23",
+      "released": "0.3.24",
       "released_date": "2026-10-28",
       "role": "algorithm.construction",
-      "version": "0.3.23"
+      "version": "0.3.24"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
@@ -319,10 +319,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.35",
+      "released": "0.3.36",
       "released_date": "2026-10-28",
       "role": "execution.orchestration",
-      "version": "0.3.35"
+      "version": "0.3.36"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",

@@ -97,7 +97,7 @@ axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", v
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.17" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.6" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.23" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.24" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.2" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.11" }
@@ -128,7 +128,7 @@ axiolid-numeric = { path = "crates/algorithms/numeric", version = "0.1.3" }
 axiolid-linear-intersection = { path = "crates/algorithms/query/intersection/linear", version = "0.3.1", default-features = false }
 axiolid-ray-mesh = { path = "crates/algorithms/query/intersection/ray-mesh", version = "0.4.0", default-features = false }
 axiolid-reference = { path = "crates/algorithms/reference", version = "0.3.11" }
-axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.35" }
+axiolid-mesh-compile = { path = "crates/execution/compile", version = "0.3.36" }
 # axiolid-oracle is publish = false (test-only oracle crate, tools/oracle) and
 # only ever used as a dev-dependency. No version pin here: Cargo strips a
 # versionless path dev-dependency when packaging, so downstream crates that

@@ -689,6 +689,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.24 - 2026-10-28
+
+### Fixed
+
+- `profile_rings` ends every contour segment at its exact joint (#365). The
+  first and last point of a flattened segment are its endpoints, not
+  samples. Where two segments meet within the linear tolerance, both now
+  produce one bit-identical vertex, the more exactly stated of the two:
+  a line's endpoint at parameter 0 (its origin), a polyline vertex, any
+  other line endpoint (`origin + direction * t` rounds), a curved endpoint;
+  a tie keeps the earlier segment's end. An arc ending on the revolution
+  axis used to land at `x ~ 6e-17` (its end re-evaluated as
+  `centre + r (cos s, sin s)`), and a line ending there was rounded too, so
+  a half-disc was refused at a full turn as a pinch and a partial turn
+  meshed degenerate triangles. The snap distance is a rounding error (or a
+  gap within the tolerance); `profile_deviation` adds it to its bound as it
+  does a merged point. Ring vertices may move by an ulp wherever segments
+  meet.
+
 ### 0.3.23 - 2026-10-28
 
 ### Changed
@@ -3714,6 +3733,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.36 - 2026-10-28
+
+### Fixed
+
+- A mesh `Revolution` of a contour with an arc ending on the axis (a half-
+  or quarter-disc) compiles closed with one vertex per pole, in a full and
+  a partial turn, instead of being refused as a pinch (#365); the flattened
+  profile now ends segments at their exact joints (`axiolid-construct`).
 
 ### 0.3.35 - 2026-10-28
 

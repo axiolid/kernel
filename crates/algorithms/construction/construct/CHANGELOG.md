@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.24] - 2026-10-28
+
 ### Fixed
 
 - `profile_rings` ends every contour segment at its exact joint (#365). The
