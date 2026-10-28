@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A mesh `Revolution` whose profile crosses or touches the axis now fails
+  with a typed error (`InvalidInput`, `UnsupportedInput`) instead of
+  compiling a self-intersecting solid (#351, from `axiolid-construct`).
+
 ## [0.3.32] - 2026-10-28
 
 ### Changed

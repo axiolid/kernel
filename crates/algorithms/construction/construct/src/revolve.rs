@@ -47,9 +47,11 @@
 //! Every span of a revolution is the first span rotated, so the twist is
 //! measured once.
 
-use axiolid_contracts::{GeomError, GeomResult};
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
+use axiolid_contracts::{GeomError, GeomResult, Operation};
+use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
+use axiolid_guarantees::{Certified, Sign};
 use axiolid_mesh::TriMesh;
+use axiolid_predicates::orient2d;
 
 use crate::profile::Rings;
 
@@ -140,6 +142,59 @@ fn bounded_steps(
     }
 }
 
+/// Refuse rings that lie on both sides of the axis, or touch it (#351).
+///
+/// Decided when the axis lies in the profile's plane, where "side" is
+/// meaningful: each vertex is classified by the exact `orient2d` against the
+/// axis line, with no tolerance. Vertices strictly on both sides are a
+/// crossing (the swept solid passes through itself) and `InvalidInput`; a
+/// vertex on the axis, which includes an edge lying on it, collapses the
+/// swept wall to a line and is `UnsupportedInput`, as in the exact path
+/// (`revolve_exact`). An edge cannot meet the axis between two vertices
+/// without one of those two cases. An axis leaving the plane is a twisted
+/// sweep the module notes bound separately and is not judged here.
+fn check_axis_side(rings: &Rings, axis_origin: Point3, axis_direction: Vec3) -> GeomResult<()> {
+    if axis_direction.z != 0.0 || axis_origin.z != 0.0 {
+        return Ok(());
+    }
+    let a = Point2::new(axis_origin.x, axis_origin.y);
+    let b = Point2::new(a.x + axis_direction.x, a.y + axis_direction.y);
+    let (mut positive, mut negative, mut on_axis) = (false, false, false);
+    for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
+        match orient2d(a, b, *p) {
+            Certified::Certain {
+                sign: Sign::Positive,
+                ..
+            } => positive = true,
+            Certified::Certain {
+                sign: Sign::Negative,
+                ..
+            } => negative = true,
+            Certified::Certain {
+                sign: Sign::Zero, ..
+            } => on_axis = true,
+            _ => {
+                return Err(GeomError::InvalidInput(
+                    "profile side of the revolution axis could not be decided".to_owned(),
+                ))
+            }
+        }
+    }
+    if positive && negative {
+        return Err(GeomError::InvalidInput(
+            "revolved profile crosses the axis: its rings lie on both sides".to_owned(),
+        ));
+    }
+    if on_axis {
+        return Err(GeomError::UnsupportedInput {
+            backend: crate::BACKEND_ID,
+            operation: Operation::Sweep,
+            input: "revolution of a profile touching the axis",
+        });
+    }
+    Ok(())
+}
+
 /// Revolve a profile about an axis into a closed solid.
 ///
 /// A full turn wraps its rings by index, so the seam shares vertices by
@@ -151,7 +206,8 @@ fn bounded_steps(
 /// `tolerance.linear()` of the mesh (see the module notes for the proof);
 /// the rings' own distance from a curved profile is the caller's to add.
 /// A budget that needs more than 4096 steps round the axis is refused with
-/// `BudgetExceeded`.
+/// `BudgetExceeded`. A profile with vertices on both sides of an in-plane
+/// axis is `InvalidInput`; one touching the axis is `UnsupportedInput`.
 pub fn revolve(
     rings: &Rings,
     axis_origin: Point3,
@@ -170,6 +226,7 @@ pub fn revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
+    check_axis_side(rings, axis_origin, axis_direction)?;
     let dir = axis_direction / len;
     // Widest distance from the axis governs the angular step: a point at
     // radius r traces a circle of that radius.

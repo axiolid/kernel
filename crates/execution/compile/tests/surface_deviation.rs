@@ -278,6 +278,37 @@ fn rect(x: Scalar, y: Scalar) -> Profile {
     })
 }
 
+#[test]
+fn a_revolution_whose_profile_crosses_or_touches_the_axis_is_refused() {
+    // The profile spans x in -0.1..0.1: an axis at x = 0 crosses it, an
+    // axis at x = -0.1 runs along its left edge (#351).
+    let compile_about = |axis_x: Scalar| {
+        let mut builder = GeometryGraphBuilder::new();
+        let root = revolution_about(
+            &mut builder,
+            rect(0.2, 0.3),
+            Point3::new(axis_x, 0.0, 0.0),
+            Vec3::Y,
+            TAU,
+        );
+        let graph = builder.finish(vec![root]).expect("a valid graph");
+        ReferenceMeshCompiler::new(BoolmeshBoolean::new()).compile_mesh(
+            &graph,
+            root,
+            &ExecutionOptions::new(Tolerance::MILLIMETRE),
+        )
+    };
+    assert!(matches!(
+        compile_about(0.0),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        compile_about(-0.1),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    assert!(compile_about(-0.3).is_ok());
+}
+
 /// The rectangle's corners in the order its rings list them.
 fn corners(x: Scalar, y: Scalar) -> [Point2; 4] {
     let (hx, hy) = (x / 2.0, y / 2.0);

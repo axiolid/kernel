@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `revolve` (the mesh path) refuses a profile whose rings lie on both sides
+  of an in-plane axis (`InvalidInput`) or touch it (`UnsupportedInput`),
+  decided with the exact `orient2d`; it used to sweep a self-intersecting or
+  degenerate solid and return it as valid (#351).
+
 ## [0.3.21] - 2026-10-28
 
 ### Changed
