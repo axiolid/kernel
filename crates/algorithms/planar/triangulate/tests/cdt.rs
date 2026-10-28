@@ -519,3 +519,145 @@ fn long_constraints_through_a_point_cloud_are_recovered_and_the_rest_restored() 
         }
     }
 }
+
+/// Whether some triangle of `tri` has the edge `(a, b)`.
+fn has_edge(tri: &axiolid_triangulate::Triangulation, a: u32, b: u32) -> bool {
+    tri.triangles()
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .any(|t| t.contains(&a) && t.contains(&b))
+}
+
+#[test]
+fn a_constraint_through_a_vertex_is_split_there() {
+    // A hull edge through a point on it.
+    let hull = [
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(2.0, 0.0),
+    ];
+    let tri = triangulate(&hull, &[Constraint::new(0, 1)]).expect("split, not refused");
+    assert_eq!(
+        tri.constraints(),
+        [Constraint::new(0, 4), Constraint::new(1, 4)]
+    );
+    assert!(has_edge(&tri, 0, 4) && has_edge(&tri, 4, 1));
+    assert_all_ccw(&tri);
+
+    // An interior constraint through a point on it.
+    let inner = [
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(1.0, 1.0),
+        p(3.0, 3.0),
+        p(2.0, 2.0),
+    ];
+    let tri = triangulate(&inner, &[Constraint::new(4, 5)]).expect("split, not refused");
+    assert!(has_edge(&tri, 4, 6) && has_edge(&tri, 6, 5));
+
+    // The same with neighbours around the line.
+    let mut crowded = inner.to_vec();
+    crowded.extend([p(2.0, 2.4), p(2.0, 1.6), p(1.5, 2.0), p(2.6, 2.0)]);
+    let tri = triangulate(&crowded, &[Constraint::new(4, 5)]).expect("split, not refused");
+    assert!(has_edge(&tri, 4, 6) && has_edge(&tri, 6, 5));
+    assert_all_ccw(&tri);
+
+    // A breakline ending inside another constraint (a T).
+    let tee = [
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(4.0, 4.0),
+        p(0.0, 4.0),
+        p(2.0, 0.0),
+        p(2.0, 2.0),
+    ];
+    let tri = triangulate(&tee, &[Constraint::new(0, 1), Constraint::new(4, 5)])
+        .expect("a T is not a crossing");
+    assert!(has_edge(&tri, 0, 4) && has_edge(&tri, 4, 1) && has_edge(&tri, 4, 5));
+}
+
+#[test]
+fn an_axis_parallel_constraint_through_a_vertex_is_split() {
+    // The bounding box is flat in one axis: the closed box must still hold
+    // the vertex on the segment.
+    let pts = [
+        p(0.0, 0.0),
+        p(6.0, 0.0),
+        p(3.0, 3.0),
+        p(3.0, -3.0),
+        p(2.0, 0.0),
+        p(4.0, 0.0),
+    ];
+    let tri = triangulate(&pts, &[Constraint::new(0, 1)]).expect("split");
+    assert!(has_edge(&tri, 0, 4) && has_edge(&tri, 4, 5) && has_edge(&tri, 5, 1));
+    let vertical = [
+        p(0.0, 0.0),
+        p(0.0, 6.0),
+        p(3.0, 3.0),
+        p(-3.0, 3.0),
+        p(0.0, 2.0),
+        p(0.0, 4.0),
+    ];
+    let tri = triangulate(&vertical, &[Constraint::new(0, 1)]).expect("split");
+    assert!(has_edge(&tri, 0, 4) && has_edge(&tri, 4, 5) && has_edge(&tri, 5, 1));
+}
+
+#[test]
+fn pieces_follow_the_constraint_whichever_way_it_is_given() {
+    // Along 0 -> 1 the vertices are 5 then 4; the constraint is given both
+    // ways round, on a rising and on a falling line.
+    let pts = [
+        p(0.0, 0.0),
+        p(6.0, 6.0),
+        p(6.0, 0.0),
+        p(0.0, 6.0),
+        p(4.0, 4.0),
+        p(1.0, 1.0),
+    ];
+    for c in [Constraint::new(0, 1), Constraint { a: 1, b: 0 }] {
+        let tri = triangulate(&pts, &[c]).expect("split");
+        assert_eq!(
+            tri.constraints(),
+            [
+                Constraint::new(0, 5),
+                Constraint::new(1, 4),
+                Constraint::new(4, 5)
+            ]
+        );
+        assert!(has_edge(&tri, 0, 5) && has_edge(&tri, 5, 4) && has_edge(&tri, 4, 1));
+    }
+    let falling = [
+        p(6.0, 0.0),
+        p(0.0, 6.0),
+        p(0.0, 0.0),
+        p(6.0, 6.0),
+        p(1.0, 5.0),
+        p(5.0, 1.0),
+    ];
+    let tri = triangulate(&falling, &[Constraint::new(0, 1)]).expect("split");
+    assert!(has_edge(&tri, 0, 5) && has_edge(&tri, 5, 4) && has_edge(&tri, 4, 1));
+}
+
+#[test]
+fn crossing_constraints_are_still_refused() {
+    let pts = [
+        p(0.0, 0.0),
+        p(4.0, 4.0),
+        p(4.0, 0.0),
+        p(0.0, 4.0),
+        p(1.0, 3.5),
+    ];
+    let err = triangulate(&pts, &[Constraint::new(0, 1), Constraint::new(2, 3)]).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            axiolid_triangulate::TriangulationError::CrossingConstraints { .. }
+        ),
+        "{err:?}"
+    );
+}

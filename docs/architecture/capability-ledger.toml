@@ -925,8 +925,8 @@ id = "E1"
 area = "triangulation"
 name = "2D Delaunay / constrained Delaunay"
 level = "implemented"
-summary = "Constrained Delaunay triangulation with certified incircle/orient2d predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints. A symbolic vertex at infinity closes the hull during the build, so the output covers the exact convex hull (2n - 2 - h triangles, collinear hull points kept, #299). Exactly coincident input points are merged and reported (input index to kept vertex); a constraint between two of them is refused by name (#300)."
-evidence = ["crates/algorithms/planar/triangulate/src/build.rs::triangulate", "crates/algorithms/planar/triangulate/src/recover.rs", "crates/algorithms/planar/triangulate/tests/hull.rs", "crates/algorithms/planar/triangulate/tests/duplicates.rs", "scripts/probe_triangulate_adjacency_mutants.py"]
+summary = "Constrained Delaunay triangulation with certified incircle/orient2d predicates (exact arithmetic on demand), every constraint edge preserved as a union of output edges, empty-circumcircle away from constraints. A symbolic vertex at infinity closes the hull during the build, so the output covers the exact convex hull (2n - 2 - h triangles, collinear hull points kept, #299). Exactly coincident input points are merged and reported (input index to kept vertex); a constraint between two of them is refused by name (#300). A constraint through input vertices is split at them and recovered as the pieces between (#360)."
+evidence = ["crates/algorithms/planar/triangulate/src/build.rs::triangulate", "crates/algorithms/planar/triangulate/src/recover.rs", "crates/algorithms/planar/triangulate/tests/hull.rs", "crates/algorithms/planar/triangulate/tests/duplicates.rs", "scripts/probe_triangulate_adjacency_mutants.py", "scripts/probe_triangulate_domain_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKMesh/BRepMesh"]
 cgal = ["Triangulation_2"]
 

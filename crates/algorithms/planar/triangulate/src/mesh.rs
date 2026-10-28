@@ -51,14 +51,17 @@ pub enum TriangulationError {
         /// The offending index.
         index: u32,
     },
-    /// A constraint could not be recovered after insertion.
+    /// Two constraint pieces cross; a constraint is split at the vertices
+    /// on it first.
     ///
-    /// Only reachable when two constraints cross: an edge cannot survive if
-    /// another required edge passes through it. The crossing point would have
-    /// to be inserted as a vertex, which changes the caller's input, so this
-    /// is reported instead of silently repaired.
+    /// Only reachable when two constraints cross at a point that is no
+    /// input vertex: an edge cannot survive if another required edge passes
+    /// through it. The crossing point would have to be inserted as a
+    /// vertex, which changes the caller's input, so this is reported
+    /// instead of silently repaired. A constraint that runs through input
+    /// vertices, or ends on another constraint, is not a crossing.
     CrossingConstraints {
-        /// First endpoint of the constraint that could not be recovered.
+        /// First endpoint of the piece that could not be recovered.
         a: u32,
         /// Second endpoint.
         b: u32,
@@ -156,7 +159,8 @@ impl Triangulation {
 
     /// The constraint edges this triangulation was built to honour, between
     /// kept vertices: an endpoint that was merged into a coincident point
-    /// is replaced by the kept index.
+    /// is replaced by the kept index. A constraint through input vertices
+    /// is listed as the pieces between them, each an edge of the output.
     #[must_use]
     pub fn constraints(&self) -> &[Constraint] {
         &self.constraints

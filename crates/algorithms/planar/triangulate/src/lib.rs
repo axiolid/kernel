@@ -23,7 +23,8 @@
 //! - exactly coincident input points become one vertex, and the merge is
 //!   reported ([`Triangulation::merged_points`]); a constraint between two
 //!   of them is refused by name,
-//! - every constraint edge survives as a union of output edges,
+//! - every constraint edge survives as a union of output edges (one that
+//!   runs through input vertices is split at them),
 //! - the result is Delaunay away from the constraints (empty-circumcircle,
 //!   decided by the certified `incircle` predicate rather than by a
 //!   floating-point circumcircle test),

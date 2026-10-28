@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A constraint that passes exactly through input vertices, or ends on another
+  constraint, is split at the vertices on it and recovered as the pieces
+  between them, instead of being refused as `CrossingConstraints`;
+  `Triangulation::constraints` lists the pieces (#360).
+
 ## [0.3.5] - 2026-10-28
 
 ### Changed

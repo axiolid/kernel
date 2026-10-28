@@ -16,7 +16,7 @@ use axiolid_core::Point2;
 
 use crate::adjacency::{debug_check, link, note_update, twins};
 use crate::mesh::{Triangulation, TriangulationError, NO_HALFEDGE};
-use crate::{in_circumcircle, turns_left, Constraint};
+use crate::{collinear, in_circumcircle, turns_left, Constraint};
 
 impl Triangulation {
     /// Rebuild the halfedge twin array from the triangle list.
@@ -37,17 +37,106 @@ impl Triangulation {
     }
 }
 
-/// Force every constraint edge into the triangulation.
-pub(crate) fn recover_constraints(tri: &mut Triangulation) -> Result<(), TriangulationError> {
-    let constraints = tri.constraints.clone();
-    for c in constraints {
+/// The constraints that were split, each with the vertices it runs through.
+///
+/// A constraint is a union of output edges, so one that passes exactly
+/// through input vertices is recovered as the chain of pieces between them
+/// (#360). Only constraints that were split are listed; any other is the
+/// single edge between its endpoints.
+#[derive(Debug, Clone, Default)]
+#[expect(dead_code, reason = "read by triangulate_domain (#353)")]
+pub(crate) struct Splits(Vec<(Constraint, Vec<u32>)>);
+
+#[expect(dead_code, reason = "read by triangulate_domain (#353)")]
+impl Splits {
+    /// The vertices from `c.a` to `c.b` that `c` was split into, endpoints
+    /// included, or `None` when `c` was not split.
+    pub(crate) fn chain(&self, c: Constraint) -> Option<&[u32]> {
+        self.0
+            .binary_search_by_key(&c, |(key, _)| *key)
+            .ok()
+            .map(|i| self.0[i].1.as_slice())
+    }
+}
+
+/// Force every constraint edge into the triangulation, splitting a
+/// constraint at the kept vertices on it first.
+///
+/// `tri.constraints` becomes the sorted, deduplicated pieces before any is
+/// recovered, so no recovery flips a piece of a later constraint.
+pub(crate) fn recover_constraints(tri: &mut Triangulation) -> Result<Splits, TriangulationError> {
+    let mut is_vertex = vec![true; tri.points.len()];
+    for m in &tri.merged {
+        is_vertex[m.input as usize] = false;
+    }
+    let mut splits = Vec::new();
+    let mut pieces = Vec::new();
+    for &c in &tri.constraints {
+        if c.a == c.b || tri.has_edge(c.a, c.b) {
+            pieces.push(c);
+            continue;
+        }
+        let mut chain = vec![c.a];
+        chain.extend(vertices_on(tri, &is_vertex, c.a, c.b));
+        chain.push(c.b);
+        pieces.extend(chain.windows(2).map(|w| Constraint::new(w[0], w[1])));
+        if chain.len() > 2 {
+            splits.push((c, chain));
+        }
+    }
+    pieces.sort_unstable();
+    pieces.dedup();
+    tri.constraints = pieces;
+    for c in tri.constraints.clone() {
         if tri.has_edge(c.a, c.b) {
             continue;
         }
         recover_one(tri, c)?;
     }
     restore_delaunay(tri);
-    Ok(())
+    Ok(Splits(splits))
+}
+
+/// The kept vertices strictly inside the segment `a`-`b`, ordered from `a`
+/// to `b`.
+///
+/// A merged duplicate is not a vertex (`is_vertex` is false): its kept twin
+/// is the one on the segment. The test is the closed bounding box, then the
+/// exact collinearity predicate, so a vertex exactly on the segment is
+/// found and one off it by any amount is not.
+///
+/// TODO(#355): one pass over every vertex per missing constraint.
+pub(crate) fn vertices_on(tri: &Triangulation, is_vertex: &[bool], a: u32, b: u32) -> Vec<u32> {
+    let (pa, pb) = (tri.points[a as usize], tri.points[b as usize]);
+    let (lo_x, hi_x) = (pa.x.min(pb.x), pa.x.max(pb.x));
+    let (lo_y, hi_y) = (pa.y.min(pb.y), pa.y.max(pb.y));
+    let mut hits: Vec<u32> = (0..tri.points.len() as u32)
+        .filter(|&v| {
+            let q = tri.points[v as usize];
+            is_vertex[v as usize]
+                && v != a
+                && v != b
+                && lo_x <= q.x
+                && q.x <= hi_x
+                && lo_y <= q.y
+                && q.y <= hi_y
+                && collinear(pa, pb, q)
+        })
+        .collect();
+    // On one line the lexicographic order is the order along it.
+    let key = |v: &u32| {
+        let q = tri.points[*v as usize];
+        (q.x, q.y)
+    };
+    hits.sort_by(|u, v| {
+        key(u)
+            .partial_cmp(&key(v))
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
+    if (pa.x, pa.y) > (pb.x, pb.y) {
+        hits.reverse();
+    }
+    hits
 }
 
 /// Make every unconstrained edge locally Delaunay again.

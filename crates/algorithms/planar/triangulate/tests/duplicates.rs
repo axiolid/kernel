@@ -262,3 +262,24 @@ fn a_constraint_between_coincident_points_is_refused_by_name() {
     // Without that constraint, the same points triangulate.
     check("free pair", &points, &[Constraint::new(0, 4)]);
 }
+
+#[test]
+fn a_duplicate_point_on_a_constraint_splits_it_at_the_kept_vertex() {
+    // Points 4 and 5 share a position on the segment 0-1: only the lower
+    // index is a vertex, so the constraint splits there and not at 5.
+    let points = [
+        p(0.0, 0.0),
+        p(4.0, 0.0),
+        p(2.0, 3.0),
+        p(2.0, -3.0),
+        p(2.0, 0.0),
+        p(2.0, 0.0),
+    ];
+    let tri = triangulate(&points, &[Constraint::new(0, 1)]).expect("split");
+    assert_covers_hull("duplicate on a constraint", &points, &tri);
+    assert_eq!(tri.merged_points().len(), 1);
+    assert_eq!(
+        tri.constraints(),
+        [Constraint::new(0, 4), Constraint::new(1, 4)]
+    );
+}
