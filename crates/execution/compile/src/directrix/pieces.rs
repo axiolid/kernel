@@ -39,8 +39,19 @@ pub(crate) fn pieces(
     range: Option<(Scalar, Scalar)>,
     options: &ExecutionOptions,
 ) -> GeomResult<Option<PiecePath>> {
-    let pieces = resolve(graph, id, range, options, 0)?;
+    let pieces = exact_pieces(graph, id, range, options)?;
     Ok(pieces.filter(|p| p.closed || !matches!(p.pieces.as_slice(), [PathPiece::Arc { .. }])))
+}
+
+/// [`pieces`] without the lone-arc exception: a fixed-reference sweep
+/// along one arc is a chain of one piece (#122).
+pub(crate) fn exact_pieces(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<Option<PiecePath>> {
+    resolve(graph, id, range, options, 0)
 }
 
 type Resolved = Option<PiecePath>;

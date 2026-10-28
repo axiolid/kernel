@@ -2,6 +2,7 @@
 //!
 //! See the parent module for what each path's bound rests on.
 
+use axiolid_construct::pipe::{fixed_reference_twist, PathPiece};
 use axiolid_construct::profile::{profile_deviation, ProfileDeviation};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
@@ -157,40 +158,53 @@ pub(crate) fn of_solid(
             parameter_range,
         } => {
             let deviation = profile(*id, half)?;
-            let kind = crate::directrix::kind(graph, *directrix, *parameter_range, options)?;
-            match kind {
-                // A fixed frame translated along a line: the walls are the
-                // profile's chords, moved.
-                DirectrixKind::Segment => (
-                    DeviationPath::FixedReferenceSweep,
-                    "segment",
-                    proven(deviation, 0.0),
-                ),
-                // #231: with the reference normal to the arc's plane the
-                // stations are rotations of one ring about the arc's axis.
-                DirectrixKind::Arc(circle)
-                    if circle
-                        .frame
-                        .x
-                        .cross(circle.frame.y)
-                        .normalize_or_zero()
-                        .cross(reference_direction.normalize_or_zero())
-                        .length()
-                        <= 1e-9 =>
-                {
+            // A tangent-continuous chain of segments and arcs is swept
+            // piece by piece (#122): proven when no arc twists the frame.
+            if let Some(path) =
+                crate::directrix::exact_pieces(graph, *directrix, *parameter_range, options)?
+            {
+                let twists =
+                    fixed_reference_twist(&path.pieces, *reference_direction, tolerance.angular())
+                        .is_some();
+                if twists {
                     (
                         DeviationPath::FixedReferenceSweep,
-                        "circular arc",
-                        proven(deviation, half),
+                        "",
+                        DeviationBound::Unbounded(
+                            "fixed-reference sweep: the frame twists along an arc oblique to the reference",
+                        ),
+                    )
+                } else {
+                    let walls = if matches!(path.pieces.as_slice(), [PathPiece::Segment { .. }]) {
+                        0.0
+                    } else {
+                        half
+                    };
+                    (
+                        DeviationPath::FixedReferenceSweep,
+                        "segments and arcs",
+                        proven(deviation, walls),
                     )
                 }
-                _ => (
-                    DeviationPath::FixedReferenceSweep,
-                    "",
-                    DeviationBound::Unbounded(
-                        "fixed-reference sweep: frame law along this directrix is not bounded",
+            } else {
+                // Sampled directrices: a curve that is a segment in all but
+                // spelling (a straight elevated curve) keeps its fixed frame;
+                // the rest are not bounded.
+                let kind = crate::directrix::kind(graph, *directrix, *parameter_range, options)?;
+                match kind {
+                    DirectrixKind::Segment => (
+                        DeviationPath::FixedReferenceSweep,
+                        "segment",
+                        proven(deviation, 0.0),
                     ),
-                ),
+                    _ => (
+                        DeviationPath::FixedReferenceSweep,
+                        "",
+                        DeviationBound::Unbounded(
+                            "fixed-reference sweep: frame law along this directrix is not bounded",
+                        ),
+                    ),
+                }
             }
         }
         SolidOperation::SurfaceCurveSweep { .. } => (

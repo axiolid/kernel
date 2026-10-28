@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- A fixed-reference sweep along a tangent-continuous chain of segments and
+  circular arcs, open or closed, is proven within the chord budget (the
+  profile's share plus half the budget for the walls, none along one
+  segment) when the reference is normal to the plane of every arc or lies
+  in it; the deviation report names it "segments and arcs" (#122).
+  An arc oblique to the reference is still swept as sampled and reported
+  unbounded.
+
+### Changed
+
+- A fixed-reference sweep refuses a corner in its directrix by name, as the
+  format requires a tangent-continuous directrix, and sweeps a closed
+  directrix without caps (#122).
+
+### Fixed
+
+- A swept disk wider than the bend of a lone arc it follows is refused
+  instead of meshed into a tube that folds through the bend's axis (#122).
+
 ## [0.3.36] - 2026-10-28
 
 ### Fixed

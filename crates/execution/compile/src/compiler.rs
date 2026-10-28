@@ -1085,15 +1085,38 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                     *fillet_radius,
                     chord_error(options),
                 ),
-                None => axiolid_construct::sweep::swept_disk_within(
-                    |chord| {
-                        self.directrix_sampled(graph, *directrix, *parameter_range, options, chord)
-                    },
-                    *radius,
-                    *inner_radius,
-                    *fillet_radius,
-                    chord_error(options),
-                ),
+                None => {
+                    // The conic path checks only the radii; a disk wider
+                    // than a lone arc's bend would mesh into a tube that
+                    // folds through the bend's axis (#122).
+                    if let Some(path) = crate::directrix::exact_pieces(
+                        graph,
+                        *directrix,
+                        *parameter_range,
+                        options,
+                    )? {
+                        if let [arc @ axiolid_construct::pipe::PathPiece::Arc { .. }] =
+                            path.pieces.as_slice()
+                        {
+                            axiolid_construct::pipe::check_disk_along(arc, *radius)?;
+                        }
+                    }
+                    axiolid_construct::sweep::swept_disk_within(
+                        |chord| {
+                            self.directrix_sampled(
+                                graph,
+                                *directrix,
+                                *parameter_range,
+                                options,
+                                chord,
+                            )
+                        },
+                        *radius,
+                        *inner_radius,
+                        *fillet_radius,
+                        chord_error(options),
+                    )
+                }
             },
             SolidOperation::FixedReferenceSweep {
                 profile,
@@ -1103,6 +1126,27 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
             } => {
                 let half = 0.5 * chord_error(options);
                 let rings = self.rings_of(graph, *profile, half, options, "sweep profile")?;
+                // A tangent-continuous chain of segments and arcs is swept
+                // piece by piece with a proven bound, a corner refused (#122);
+                // an arc oblique to the reference, or any other family, is
+                // swept as sampled.
+                if let Some(path) =
+                    crate::directrix::exact_pieces(graph, *directrix, *parameter_range, options)?
+                {
+                    let plan = axiolid_construct::pipe::fixed_reference_plan(
+                        &path.pieces,
+                        path.closed,
+                        *reference_direction,
+                        axiolid_construct::pipe::ring_reach(&rings),
+                        chord_error(options),
+                        options.tolerance(),
+                    )?;
+                    if let axiolid_construct::pipe::FixedReferencePlan::Untwisted(chain) = plan {
+                        return axiolid_construct::pipe::fixed_reference_along_pieces(
+                            &rings, &chain,
+                        );
+                    }
+                }
                 axiolid_construct::sweep::fixed_reference_sweep_within(
                     &rings,
                     |chord| {
