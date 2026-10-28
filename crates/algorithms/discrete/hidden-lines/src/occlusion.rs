@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Aabb2;
 
+use crate::caps::{hidden_by_caps, Cap};
 use crate::decide::decide;
 use crate::edges::{DrawEdge, Tri};
 use crate::param::{Param, Solver, Span};
@@ -28,6 +29,32 @@ pub(crate) struct Scene<'a> {
     pub near: Option<f64>,
     pub far: Option<f64>,
     pub region: Option<Aabb2>,
+    /// The solids the near plane cuts.
+    pub caps: &'a [Cap],
+}
+
+/// Why an edge could not be resolved.
+#[derive(Debug)]
+pub(crate) struct Refusal {
+    /// Position in the request of the mesh at fault, when it is not the
+    /// edge's own.
+    pub mesh: Option<usize>,
+    pub error: GeomError,
+}
+
+impl Refusal {
+    pub(crate) fn mesh(mesh: usize, error: GeomError) -> Self {
+        Self {
+            mesh: Some(mesh),
+            error,
+        }
+    }
+}
+
+impl From<GeomError> for Refusal {
+    fn from(error: GeomError) -> Self {
+        Self { mesh: None, error }
+    }
 }
 
 /// A piece of an edge with one visibility.
@@ -60,7 +87,7 @@ pub(crate) fn resolve(
     edge: &DrawEdge,
     max_pairs: usize,
     work: &mut Work,
-) -> GeomResult<Resolved> {
+) -> Result<Resolved, Refusal> {
     let [start, end] = edge.ends;
     let mut solver = Solver::new(scene.verts, start, end);
     let result = resolve_with(
@@ -80,7 +107,7 @@ fn resolve_with(
     edge: &DrawEdge,
     max_pairs: usize,
     pairs: &mut usize,
-) -> GeomResult<Resolved> {
+) -> Result<Resolved, Refusal> {
     let [start, end] = edge.ends;
     let verts = scene.verts;
     for axis in 0..2 {
@@ -120,7 +147,8 @@ fn resolve_with(
         if *pairs >= max_pairs {
             return Err(GeomError::BudgetExceeded {
                 resource: "hidden-line candidate pairs",
-            });
+            }
+            .into());
         }
         *pairs += 1;
         if tri.sigma == Ordering::Equal {
@@ -128,6 +156,12 @@ fn resolve_with(
                 solver.insert(&mut hidden, span)?;
             }
         } else if let Some(span) = facing(solver, scene, tri, kept)? {
+            solver.insert(&mut hidden, span)?;
+        }
+    }
+
+    if let Some(near) = scene.near {
+        for span in hidden_by_caps(solver, scene, edge, near, kept, pairs, max_pairs)? {
             solver.insert(&mut hidden, span)?;
         }
     }
@@ -375,6 +409,7 @@ mod tests {
             near: None,
             far: None,
             region: None,
+            caps: &[],
         };
         match resolve(&scene, &edge, usize::MAX, &mut Work::default()).expect("resolved") {
             Resolved::Pieces(pieces) => pieces

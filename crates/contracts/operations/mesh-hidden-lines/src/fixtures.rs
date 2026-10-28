@@ -643,7 +643,143 @@ pub(crate) fn cases() -> Vec<Case> {
     });
     cases.push(cropped);
 
+    // Near-plane caps. The big box B = [0,1]^2 x [0,2] holds the small box
+    // S = [0.25,0.75]^2 x [0,0.5]. Near 1 cuts B (its top at 2 is removed)
+    // and leaves a cap over [0,1]^2 at depth 1, in front of S's top at 0.5.
+    // S's four top edges (vertices 4..8, each of length 0.5, 2 in all) are
+    // hidden by the cap alone: B's top face is removed, and its walls are
+    // seen edge-on away from them. B's twelve edges are 4 verticals (points)
+    // and 4 top edges (removed whole, clipped); S has 4 verticals (points).
+    let capped_top = |name, big_role, hidden_by_cap: Visibility, near: f64, clipped: usize| {
+        let edges = [(4, 5), (5, 6), (6, 7), (4, 7)]
+            .into_iter()
+            .map(|(a, b)| {
+                let corner = |i: u32| {
+                    let p = capped_inner().positions[i as usize];
+                    [p.x, p.y]
+                };
+                EdgePieces {
+                    edge: edge(2, a, b),
+                    kind: Silhouette,
+                    pieces: vec![piece(hidden_by_cap, corner(a), corner(b))],
+                }
+            })
+            .collect();
+        case(
+            name,
+            vec![
+                Fixture {
+                    id: MeshId(1),
+                    role: big_role,
+                    mesh: capped_outer(),
+                },
+                solid(2, capped_inner()),
+            ],
+            plan(plan_frame()).with_near(near),
+            crease_half(),
+            Expect {
+                edges,
+                selected_edges: Some(24),
+                point_edges: Some(8),
+                clipped_edges: Some(clipped),
+                ..Expect::default()
+            },
+        )
+    };
+    cases.push(capped_top(
+        "near cap of a solid",
+        MeshRole::Solid,
+        Hidden,
+        1.0,
+        4,
+    ));
+    // The same B declared a sheet is never capped: S's top is visible.
+    cases.push(capped_top(
+        "near cap not built for a sheet",
+        MeshRole::Sheet,
+        Visible,
+        1.0,
+        4,
+    ));
+    // Near 2 touches B's top face but cuts nothing: no vertex is beyond the
+    // plane, so B is whole, its top face at depth 2 hides S's top, and no
+    // edge is clipped.
+    cases.push(capped_top(
+        "near plane at the top of a solid",
+        MeshRole::Solid,
+        Hidden,
+        2.0,
+        0,
+    ));
+
+    // The sheet triangle below the cap has one edge, (0,1), along the
+    // diagonal 4-6 that B's two top triangles share. A ray through the image
+    // of that edge crosses B's top once, but both triangles contain the
+    // diagonal; the perturbed point is in exactly one of them (parity odd),
+    // so the whole triangle, inside B's image, is hidden. Edges: B 12 + 3;
+    // points 4; clipped 4.
+    let [t0, t1, t2] = diagonal_triangle_corners();
+    let hidden_edge = |a: u32, b: u32, from: [f64; 3], to: [f64; 3]| EdgePieces {
+        edge: edge(2, a, b),
+        kind: Boundary,
+        pieces: vec![piece(Hidden, [from[0], from[1]], [to[0], to[1]])],
+    };
+    cases.push(case(
+        "near cap on a shared diagonal",
+        vec![solid(1, capped_outer()), sheet(2, diagonal_triangle())],
+        plan(plan_frame()).with_near(1.0),
+        crease_half(),
+        Expect {
+            edges: vec![
+                hidden_edge(0, 1, t0, t1),
+                hidden_edge(0, 2, t0, t2),
+                hidden_edge(1, 2, t1, t2),
+            ],
+            selected_edges: Some(15),
+            point_edges: Some(4),
+            clipped_edges: Some(4),
+            ..Expect::default()
+        },
+    ));
+
     cases
+}
+
+/// The big box of the cap cases: `[0,1]^2 x [0,2]`.
+fn capped_outer() -> TriMesh {
+    box_mesh([0.0, 0.0, 0.0], [1.0, 1.0, 2.0])
+}
+
+/// The small box inside it: `[0.25,0.75]^2 x [0,0.5]`.
+fn capped_inner() -> TriMesh {
+    box_mesh([0.25, 0.25, 0.0], [0.75, 0.75, 0.5])
+}
+
+/// Corners of the sheet triangle at depth 0.5 whose first edge runs along
+/// the diagonal of `capped_outer`'s top.
+fn diagonal_triangle_corners() -> [[f64; 3]; 3] {
+    [[0.2, 0.2, 0.5], [0.8, 0.8, 0.5], [0.8, 0.2, 0.5]]
+}
+
+fn diagonal_triangle() -> TriMesh {
+    TriMesh::new(
+        diagonal_triangle_corners()
+            .iter()
+            .map(|c| Point3::new(c[0], c[1], c[2]))
+            .collect(),
+        vec![0, 1, 2],
+    )
+}
+
+/// Tetrahedron whose base lies in the plane `z = 1` and whose apex is at
+/// `z = 3`: the near plane 1 cuts it with the cap on top of the base.
+fn base_in_near_plane() -> TriMesh {
+    tetrahedron([
+        Point3::new(0.0, 0.0, 1.0),
+        Point3::new(1.0, 0.0, 1.0),
+        Point3::new(0.0, 1.0, 1.0),
+        Point3::new(0.0, 0.0, 3.0),
+    ])
 }
 
 /// The ridge of the interpenetration scene: R0, R1 and the two low points.
@@ -725,6 +861,21 @@ pub(crate) fn refusals() -> Vec<Refusal> {
     };
     output.limits.max_output_segments = 1;
     refusals.push(output);
+    // A sheet below a cut tetrahedron: the tetrahedron's base is in the near
+    // plane, so its cap cannot be told from the base, and the refusal names
+    // the tetrahedron, not the sheet whose edge is resolved first.
+    refusals.push(Refusal {
+        name: "face in the near plane of a solid",
+        meshes: vec![
+            sheet(1, sheet_quad(-1.0, -1.0, 2.0, 2.0, 0.0)),
+            solid(2, base_in_near_plane()),
+        ],
+        view: plan(plan_frame()).with_near(1.0),
+        edges: crease_half(),
+        limits: limits(),
+        accepts: |e| matches!(e, GeomError::Degenerate(_)),
+        mesh: Some(MeshId(2)),
+    });
     let mut pairs = Refusal {
         name: "candidate limit",
         meshes: vec![solid(1, unit_cube())],
@@ -934,6 +1085,40 @@ mod tests {
     }
 
     #[test]
+    fn cap_fixtures_match_their_arithmetic() {
+        let (outer, inner) = (capped_outer(), capped_inner());
+        // Near 1 cuts B (vertices at 0 and 2) and misses S (all at or below
+        // 0.5); near 2 is the top of B: nothing is beyond it.
+        let beyond =
+            |mesh: &TriMesh, near: f64| mesh.positions.iter().filter(|p| p.z > near).count();
+        assert_eq!((beyond(&outer, 1.0), beyond(&inner, 1.0)), (4, 0));
+        assert_eq!(beyond(&outer, 2.0), 0);
+        // S's top is inside B's image and below the cap: 4 edges of 0.5.
+        assert!(inner.positions[4..]
+            .iter()
+            .all(|p| (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y) && p.z == 0.5));
+        assert_eq!(4.0 * (0.75 - 0.25), 2.0);
+        // B's top is triangulated along 4-6, the diagonal (0,0)-(1,1).
+        let top: Vec<&[u32]> = outer.indices.as_chunks::<3>().0[2..4]
+            .iter()
+            .map(|t| t.as_slice())
+            .collect();
+        assert!(top.iter().all(|t| t.contains(&4) && t.contains(&6)));
+        // The sheet triangle's first edge lies on that diagonal, inside B's
+        // image, below the near plane.
+        let [a, b, c] = diagonal_triangle_corners();
+        assert_eq!(a[0], a[1]);
+        assert_eq!(b[0], b[1]);
+        assert!(c[0] == b[0] && c[1] == a[1]);
+        assert!([a, b, c].iter().all(|p| p[2] < 1.0));
+        // The tetrahedron is outward, its base in z = 1 and its apex beyond.
+        let tetra = base_in_near_plane();
+        assert!(signed_volume(&tetra) > 0.0);
+        assert_eq!(tetra.positions.iter().filter(|p| p.z == 1.0).count(), 3);
+        assert_eq!(beyond(&tetra, 1.0), 1);
+    }
+
+    #[test]
     fn every_case_is_well_formed() {
         let mut names = std::collections::BTreeSet::new();
         for case in cases() {
@@ -965,7 +1150,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(names.len(), 15);
+        assert_eq!(names.len(), 19);
     }
 
     #[test]

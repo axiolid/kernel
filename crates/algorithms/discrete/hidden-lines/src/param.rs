@@ -14,7 +14,7 @@ use std::cmp::Ordering;
 use axiolid_contracts::GeomResult;
 
 use crate::decide::decide;
-use crate::recipe::{Constraint, RootOrder, ValueSign};
+use crate::recipe::{Constraint, Delta, Kind, RootOrder, ValueSign};
 use crate::view::Vert;
 
 /// The root of a constraint whose end values have opposite signs, so it lies
@@ -59,6 +59,24 @@ pub(crate) enum Holds {
     After(Root),
 }
 
+/// Where a constraint holds, from its signs at the two ends.
+fn classify(constraint: &Constraint, a: Ordering, b: Ordering) -> Holds {
+    let root = |diff| Root {
+        constraint: *constraint,
+        diff,
+    };
+    match (a, b) {
+        (Ordering::Equal, Ordering::Equal) if constraint.strict => Holds::Nowhere,
+        (Ordering::Equal, Ordering::Equal) => Holds::Everywhere,
+        (Ordering::Greater, Ordering::Less) => Holds::Before(root(Ordering::Greater)),
+        (Ordering::Less, Ordering::Greater) => Holds::After(root(Ordering::Less)),
+        (Ordering::Less | Ordering::Equal, Ordering::Less | Ordering::Equal) => Holds::Nowhere,
+        (Ordering::Greater | Ordering::Equal, Ordering::Greater | Ordering::Equal) => {
+            Holds::Everywhere
+        }
+    }
+}
+
 /// Decides signs and orders parameters along one edge.
 pub(crate) struct Solver<'a> {
     pub verts: &'a [Vert],
@@ -78,38 +96,69 @@ impl<'a> Solver<'a> {
         }
     }
 
+    /// The signs of `constraint` at the edge's two ends.
+    fn sides(&mut self, constraint: &Constraint) -> GeomResult<(Ordering, Ordering)> {
+        let mut at = |vertex| {
+            decide(
+                &ValueSign {
+                    verts: self.verts,
+                    constraint,
+                    at: vertex,
+                },
+                &mut self.escalations,
+            )
+        };
+        Ok((at(self.start)?, at(self.end)?))
+    }
+
     /// Where `constraint` holds along the edge.
     pub(crate) fn holds(&mut self, constraint: &Constraint) -> GeomResult<Holds> {
-        let a = decide(
-            &ValueSign {
-                verts: self.verts,
-                constraint,
-                at: self.start,
-            },
-            &mut self.escalations,
-        )?;
-        let b = decide(
-            &ValueSign {
-                verts: self.verts,
-                constraint,
-                at: self.end,
-            },
-            &mut self.escalations,
-        )?;
-        let root = |diff| Root {
-            constraint: *constraint,
-            diff,
+        let (a, b) = self.sides(constraint)?;
+        Ok(classify(constraint, a, b))
+    }
+
+    /// Whether `constraint` is zero along the whole edge.
+    pub(crate) fn identically_zero(&mut self, constraint: &Constraint) -> GeomResult<bool> {
+        Ok(self.sides(constraint)? == (Ordering::Equal, Ordering::Equal))
+    }
+
+    /// `span ∩ {constraint holds}` for an image-side constraint, with the
+    /// image point perturbed by `δ = (ε, ε²)` where the constraint is zero
+    /// along the whole edge. The perturbed point is strictly on one side of
+    /// the line `p'q'`: `orient2d(p, q, P + δ) = orient2d(p, q, P) - dy·ε +
+    /// dx·ε²` with `(dx, dy) = q' - p'`, so the side is `-sign(dy)` and, when
+    /// `dy` is zero, `sign(dx)`.
+    pub(crate) fn clip_perturbed(
+        &mut self,
+        span: Span,
+        constraint: &Constraint,
+    ) -> GeomResult<Option<Span>> {
+        let (a, b) = self.sides(constraint)?;
+        let Kind::ImageSide { p, q, neg } = constraint.kind else {
+            unreachable!("only image-side constraints are perturbed");
         };
-        Ok(match (a, b) {
-            (Ordering::Equal, Ordering::Equal) if constraint.strict => Holds::Nowhere,
-            (Ordering::Equal, Ordering::Equal) => Holds::Everywhere,
-            (Ordering::Greater, Ordering::Less) => Holds::Before(root(Ordering::Greater)),
-            (Ordering::Less, Ordering::Greater) => Holds::After(root(Ordering::Less)),
-            (Ordering::Less | Ordering::Equal, Ordering::Less | Ordering::Equal) => Holds::Nowhere,
-            (Ordering::Greater | Ordering::Equal, Ordering::Greater | Ordering::Equal) => {
-                Holds::Everywhere
-            }
-        })
+        if (a, b) != (Ordering::Equal, Ordering::Equal) {
+            return self.apply(span, classify(constraint, a, b));
+        }
+        let mut delta = |axis| {
+            decide(
+                &Delta {
+                    verts: self.verts,
+                    from: p,
+                    to: q,
+                    axis,
+                },
+                &mut self.escalations,
+            )
+        };
+        let (dx, dy) = (delta(0)?, delta(1)?);
+        let side = if dy == Ordering::Equal {
+            dx
+        } else {
+            dy.reverse()
+        };
+        let side = if neg { side.reverse() } else { side };
+        Ok((side == Ordering::Greater).then_some(span))
     }
 
     /// The exact order of two parameters.
@@ -169,7 +218,12 @@ impl<'a> Solver<'a> {
 
     /// `span ∩ {constraint holds}`, if it has positive length.
     pub(crate) fn clip(&mut self, span: Span, constraint: &Constraint) -> GeomResult<Option<Span>> {
-        let (lo, hi) = match self.holds(constraint)? {
+        let holds = self.holds(constraint)?;
+        self.apply(span, holds)
+    }
+
+    fn apply(&mut self, span: Span, holds: Holds) -> GeomResult<Option<Span>> {
+        let (lo, hi) = match holds {
             Holds::Nowhere => return Ok(None),
             Holds::Everywhere => return Ok(Some(span)),
             Holds::Before(root) => (span.lo, self.earlier(span.hi, Param::Root(root))?),

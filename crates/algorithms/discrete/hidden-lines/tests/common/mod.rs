@@ -6,8 +6,8 @@ use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_hidden_lines::ScalarHiddenLines;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
-    EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest,
-    MeshHiddenLines, MeshId, MeshRole, OrthographicView, Visibility,
+    EdgeSelection, HiddenLineError, HiddenLineLimits, HiddenLineMesh, HiddenLineOutcome,
+    HiddenLineRequest, MeshHiddenLines, MeshId, MeshRole, OrthographicView, Visibility,
 };
 
 /// The twelve edges of a box mesh built by [`box_mesh`], as ascending vertex
@@ -97,18 +97,24 @@ pub fn solids(meshes: &[TriMesh]) -> Vec<HiddenLineMesh<'_>> {
         .collect()
 }
 
+pub fn try_draw(
+    provider: &dyn MeshHiddenLines,
+    meshes: &[HiddenLineMesh<'_>],
+    view: OrthographicView,
+) -> Result<HiddenLineOutcome, HiddenLineError> {
+    let request = HiddenLineRequest::new(meshes, view, EdgeSelection::new(Some(0.5)), LIMITS);
+    let options = axiolid_contracts::ExecutionOptions::new(
+        axiolid_core::Tolerance::new(1e-9, 1e-9).expect("tolerance"),
+    );
+    provider.hidden_lines(&request, &options)
+}
+
 pub fn draw(
     provider: &dyn MeshHiddenLines,
     meshes: &[HiddenLineMesh<'_>],
     view: OrthographicView,
 ) -> HiddenLineOutcome {
-    let request = HiddenLineRequest::new(meshes, view, EdgeSelection::new(Some(0.5)), LIMITS);
-    let options = axiolid_contracts::ExecutionOptions::new(
-        axiolid_core::Tolerance::new(1e-9, 1e-9).expect("tolerance"),
-    );
-    provider
-        .hidden_lines(&request, &options)
-        .unwrap_or_else(|error| panic!("{error}"))
+    try_draw(provider, meshes, view).unwrap_or_else(|error| panic!("{error}"))
 }
 
 pub fn scalar() -> ScalarHiddenLines {

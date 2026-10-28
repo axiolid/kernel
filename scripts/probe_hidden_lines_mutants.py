@@ -13,6 +13,7 @@ PAR = "crates/algorithms/discrete/hidden-lines/src/param.rs"
 DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
 OUT = "crates/algorithms/discrete/hidden-lines/src/output.rs"
 PRO = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
+CAP = "crates/algorithms/discrete/hidden-lines/src/caps.rs"
 TESTS = ["-p", "axiolid-hidden-lines"]
 
 MUTANTS = [
@@ -71,8 +72,8 @@ MUTANTS = [
      '            if diff == Ordering::Less {\n                order = order.reverse();',
      '            if false && diff == Ordering::Less {\n                order = order.reverse();', TESTS),
     ('identically zero constraint ignores strictness', PAR,
-     '            (Ordering::Equal, Ordering::Equal) if constraint.strict => Holds::Nowhere,',
-     '            (Ordering::Equal, Ordering::Equal) if false => Holds::Nowhere,', TESTS),
+     '        (Ordering::Equal, Ordering::Equal) if constraint.strict => Holds::Nowhere,',
+     '        (Ordering::Equal, Ordering::Equal) if false => Holds::Nowhere,', TESTS),
     ('undecided filter read as zero', DEC,
      '    *escalations += 1;\n    match expr.sign_in::<Dyadic>() {',
      '    *escalations += 1;\n    match Some(Sign::Zero).filter(|_| expr.sign_in::<Dyadic>().is_some()) {', TESTS),
@@ -98,6 +99,19 @@ MUTANTS = [
     ('edge-on wall ignores near', OCC,
      '    let Some(near) = scene.near else {',
      '    let Some(near) = scene.near.filter(|_| false) else {', TESTS),
+    # Near-plane caps.
+    ('caps ignored', OCC,
+     '        for span in hidden_by_caps(solver, scene, edge, near, kept, pairs, max_pairs)? {',
+     '        for span in hidden_by_caps(solver, scene, edge, near, kept, pairs, max_pairs)?\n            .into_iter()\n            .filter(|_| false)\n        {', TESTS),
+    ('perturbation replaced by closed coverage', PAR,
+     '        Ok((side == Ordering::Greater).then_some(span))',
+     '        Ok((side == Ordering::Greater || true).then_some(span))', TESTS),
+    ('near tie decided instead of refused', CAP,
+     '            if solver.identically_zero(&above)? {',
+     '            if false && solver.identically_zero(&above)? {', TESTS),
+    ('caps applied to sheets', PRO,
+     '                (Some(near), MeshRole::Solid) => {',
+     '                (Some(near), _) => {', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=3600, reject_uncompiled=True)

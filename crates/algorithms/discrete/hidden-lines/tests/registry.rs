@@ -2,10 +2,11 @@
 
 mod common;
 
-use axiolid_contracts::{ExecutionOptions, GeomError, Operation};
+use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{Point3, Tolerance};
 use axiolid_dispatch::MeshHiddenLinesRegistry;
 use axiolid_hidden_lines::ScalarHiddenLines;
+use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeKind, EdgeSelection, HiddenLineMesh, HiddenLineRequest, MeshId, MeshRole, OrthographicView,
     Visibility,
@@ -80,30 +81,47 @@ fn the_isometric_cube_through_the_registry_has_the_analytic_kinds() {
 }
 
 #[test]
-fn a_near_plane_through_a_solid_is_refused_and_names_the_mesh() {
+fn a_near_plane_through_a_solid_caps_it() {
+    // The cube is cut at 0.5: its top ring is removed and the cap hides the
+    // bottom ring.
     let cube = box_mesh([0.0; 3], [1.0; 3]);
     let sheet = box_mesh([5.0; 3], [6.0; 3]);
     let meshes = [
         HiddenLineMesh::new(MeshId(4), MeshRole::Sheet, &sheet),
         HiddenLineMesh::new(MeshId(9), MeshRole::Solid, &cube),
     ];
-    let request = HiddenLineRequest::new(
-        &meshes,
-        OrthographicView::new(plan_frame()).with_near(0.5),
-        EdgeSelection::new(Some(0.5)),
-        LIMITS,
+    let outcome = registry()
+        .hidden_lines(&plan_request(&meshes, 0.5), &options())
+        .expect("drawn");
+    assert_eq!(outcome.evidence.visible_segments, 0);
+    assert_eq!(outcome.evidence.hidden_segments, 4);
+    assert!(outcome.segments.iter().all(|s| s.source.mesh == MeshId(9)));
+}
+
+#[test]
+fn a_face_in_the_near_plane_is_refused_naming_the_solid() {
+    // The base of the tetrahedron lies in the plane W = 1 and its apex is
+    // beyond it: the cap and the base coincide.
+    let tetra = TriMesh::new(
+        vec![
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(0.0, 1.0, 1.0),
+            Point3::new(0.0, 0.0, 3.0),
+        ],
+        vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3],
     );
+    let under = box_mesh([-1.0, -1.0, -1.0], [2.0, 2.0, 0.0]);
+    let meshes = [
+        HiddenLineMesh::new(MeshId(3), MeshRole::Sheet, &under),
+        HiddenLineMesh::new(MeshId(7), MeshRole::Solid, &tetra),
+    ];
     let error = registry()
-        .hidden_lines(&request, &options())
+        .hidden_lines(&plan_request(&meshes, 1.0), &options())
         .expect_err("refused");
-    assert_eq!(error.mesh, Some(MeshId(9)));
-    assert!(matches!(
-        error.error,
-        GeomError::UnsupportedInput {
-            operation: Operation::MeshHiddenLines,
-            ..
-        }
-    ));
+    // The sheet's edge is resolved first, yet the refusal names the solid.
+    assert_eq!(error.mesh, Some(MeshId(7)));
+    assert!(matches!(&error.error, GeomError::Degenerate(m) if m.contains("meets the near plane")));
 }
 
 fn plan_request<'a>(meshes: &'a [HiddenLineMesh<'a>], near: f64) -> HiddenLineRequest<'a> {
@@ -128,18 +146,21 @@ fn a_near_plane_beyond_a_solid_draws_it() {
 }
 
 #[test]
-fn only_the_solid_that_the_near_plane_cuts_is_named() {
+fn only_the_solid_that_the_near_plane_cuts_is_capped() {
     let low = box_mesh([0.0; 3], [1.0; 3]);
     let tall = box_mesh([2.0, 0.0, 0.0], [3.0, 1.0, 3.0]);
     let meshes = [
         HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &low),
         HiddenLineMesh::new(MeshId(2), MeshRole::Solid, &tall),
     ];
-    let error = registry()
+    let outcome = registry()
         .hidden_lines(&plan_request(&meshes, 2.0), &options())
-        .expect_err("refused");
-    assert_eq!(error.mesh, Some(MeshId(2)));
-    assert!(matches!(error.error, GeomError::UnsupportedInput { .. }));
+        .expect("drawn");
+    // The low cube is drawn whole (4 visible top, 4 hidden bottom); the tall
+    // one only shows its bottom ring, hidden by its cap.
+    assert_eq!(outcome.evidence.visible_segments, 4);
+    assert_eq!(outcome.evidence.hidden_segments, 8);
+    assert_eq!(outcome.evidence.clipped_edges, 4);
 }
 
 #[test]

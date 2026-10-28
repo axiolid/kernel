@@ -8,8 +8,11 @@ cannot decide; no tolerance enters a decision, and the output endpoints are
 the exact points rounded once. It refuses what it cannot decide with a typed
 error that names the mesh. Candidate pairs are found by a bounding-box scan that is quadratic in edges
 times triangles; the examined pairs are bounded by `max_candidate_pairs`. A
-near clipping plane that cuts a `Solid` mesh is refused, naming it, until the
-cap of a cut solid is built; a solid wholly beyond the plane is removed.
+near clipping plane that cuts a `Solid` mesh leaves a cap that occludes, decided
+by exact ray parity with a symbolic perturbation of the image point; a cut solid
+with a face in the plane, or whose cut line runs along the image of a drawn
+edge, is refused as `Degenerate`, naming it. A solid wholly beyond the plane is
+removed.
 It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
 ```bash

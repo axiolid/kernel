@@ -87,9 +87,20 @@ and closed (`far <= W <= near`); an optional crop region is a box in the image.
 - **Point edges.** A selected edge whose image is a single point (a vertical
   edge in plan) is counted in `point_edges` only, before clipping: it is not
   drawn and is never counted as clipped.
-- **Near-plane caps** of closed solids occlude, by parity with a symbolic
-  perturbation of the image point. This is a later stage; until then a near
-  plane that cuts a `Solid` is refused as unsupported input.
+- **Near-plane caps** of closed solids occlude. A solid is cut when a vertex
+  has `W > near` and another `W <= near`. A point of an edge nearer than the
+  plane is hidden by the cap when the point of the plane above it,
+  `(U, V, near)`, lies in the solid: a ray from it towards the viewer
+  crosses the solid's triangles nearer than the plane an odd number of
+  times. The crossings are counted with the image point perturbed by
+  `δ = (ε, ε²)`, so a point on an image edge or on the diagonal two
+  triangles share lies in exactly one of them: for an identically zero image
+  side with `(dx, dy) = q' - p'` the perturbed side is `-sign(dy)`, or
+  `sign(dx)` when `dy` is zero, times the triangle's orientation. Triangles
+  seen edge-on cover no area and do not count. Sheets are never capped. A cut
+  solid with a triangle whose plane meets the near plane along the image of a
+  drawn edge (a face in the plane, or a cut line under the edge) is refused
+  as `Degenerate` naming the solid: the cap and that triangle tie.
 - **Evidence** counts selected, point, clipped and collapsed edges, candidate
   pairs and exact escalations, so a consumer can tell how hard a drawing was.
 
@@ -121,12 +132,11 @@ vertices", "hidden-line source triangles", "hidden-line candidate pairs",
 "hidden-line output segments", "memory"), `Cancelled`, `Unsupported`. A mesh
 whose index count is not a multiple of three, or that has no triangles, is
 `InvalidInput` naming the mesh (the section registry refuses the same).
-The first provider also refuses a near plane that cuts a `Solid`, with
-`UnsupportedInput { input: "near clip through a capped solid" }` naming that
-solid's mesh; this refusal goes away when caps land. `UnsupportedInput` does
-not fall back to another provider, by intent: the provider supports the
-operation but not this input, and the caller should see that. A provider
-refusal naming a mesh that is not in the request is a contract violation of
+A near plane that cuts a `Solid` is drawn with the solid's cap; the one
+refusal is the tie described above. `UnsupportedInput` does not fall back to
+another provider, by intent: a provider that supports the operation but not
+an input is not asked to hand it on, and the caller should see that. A
+provider refusal naming a mesh that is not in the request is a contract violation of
 the registry, not a refusal passed on. There
 is no undecided visibility in the first version; `Visibility` is
 non-exhaustive so one can be added.
@@ -174,7 +184,7 @@ row C16 stays narrow.
 
 **Follow-ups / risks to watch**
 
-- Scalar provider, near-plane caps, a spatial index for candidates.
+- A spatial index for candidates.
 - Oblique clip half-spaces with caps; coplanar faces of capped solids (#359).
 - Hidden lines in the application bundle and the C ABI.
 - Exact B-rep and smooth-silhouette hidden-line removal.

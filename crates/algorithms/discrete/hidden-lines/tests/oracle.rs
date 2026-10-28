@@ -8,20 +8,28 @@
 //! the provider. Coverage is checked per edge: the visible and hidden pieces
 //! add up to the edge's image.
 //!
+//! A near plane removes what lies beyond it and caps the solids it cuts. The
+//! oracle counts, with an upward ray from the sampled point's image at the
+//! near depth, the crossings of each cut solid's triangles above the plane;
+//! an odd count is inside the solid, so the cap covers the sample.
+//!
 //! Scenes are seeded boxes on a 1/8 grid, some rotated (by generic angles,
 //! so no face is edge-on only up to rounding noise), in the plan view,
 //! the four elevations, the isometric view and one oblique view.
 
 mod common;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+use axiolid_contracts::GeomError;
 use axiolid_core::{Frame3, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{OrthographicView, Visibility};
 use common::{
-    box_mesh, draw, frame, isometric_frame, looking_along, plan_frame, scalar, solids, BOX_EDGES,
+    box_mesh, draw, frame, isometric_frame, looking_along, plan_frame, scalar, solids, try_draw,
+    BOX_EDGES,
 };
 
 type V3 = [f64; 3];
@@ -112,6 +120,11 @@ struct Oracle {
     tris: Vec<Vec<[usize; 3]>>,
     margin: f64,
     flat: f64,
+    near: Option<f64>,
+    /// Per mesh: whether the near plane cuts it.
+    cut: Vec<bool>,
+    /// Whether the last verdict was a hidden one decided by a cap alone.
+    by_cap: Cell<bool>,
 }
 
 /// The sampled point: image point `q` of the edge `a`-`b` with end vertices
@@ -137,7 +150,7 @@ enum Cover {
 }
 
 impl Oracle {
-    fn new(meshes: &[TriMesh], frame: &Frame3) -> Self {
+    fn new(meshes: &[TriMesh], frame: &Frame3, near: Option<f64>) -> Self {
         let verts: Vec<Vec<V3>> = meshes
             .iter()
             .map(|m| {
@@ -166,11 +179,20 @@ impl Oracle {
             .flatten()
             .flat_map(|v| v.iter().map(|c| c.abs()))
             .fold(1.0f64, f64::max);
+        let cut = verts
+            .iter()
+            .map(|vs| {
+                near.is_some_and(|n| vs.iter().any(|v| v[2] > n) && vs.iter().any(|v| v[2] <= n))
+            })
+            .collect();
         Self {
             verts,
             tris,
             margin: 1e-9 * size,
             flat: 1e-12 * size * size,
+            near,
+            cut,
+            by_cap: Cell::new(false),
         }
     }
 
@@ -225,11 +247,53 @@ impl Oracle {
                 }
             }
         }
+        let by_triangles = hidden;
+        if let Some(near) = self.near {
+            for (mi, cut) in self.cut.iter().enumerate() {
+                if !cut {
+                    continue;
+                }
+                match self.cap_parity(mi, near, q) {
+                    None => return Verdict::Ambiguous,
+                    Some(false) => {}
+                    // Equal depth does not occlude, and a sample at the
+                    // plane is a tie.
+                    Some(true) if wp < near - m => hidden = true,
+                    Some(true) => return Verdict::Ambiguous,
+                }
+            }
+        }
+        self.by_cap.set(hidden && !by_triangles);
         if hidden {
             Verdict::Hidden
         } else {
             Verdict::Visible
         }
+    }
+
+    /// Whether `(q, near)` is inside mesh `mi`: the parity of the crossings
+    /// of an upward ray with its triangles above the near plane. `None` when
+    /// the ray grazes an image edge or a crossing is at the plane.
+    fn cap_parity(&self, mi: usize, near: f64, q: [f64; 2]) -> Option<bool> {
+        let m = self.margin;
+        let mut crossings = 0;
+        for tri in &self.tris[mi] {
+            let v = tri.map(|i| self.verts[mi][i]);
+            let area2 = (v[1][0] - v[0][0]) * (v[2][1] - v[0][1])
+                - (v[1][1] - v[0][1]) * (v[2][0] - v[0][0]);
+            if area2.abs() <= self.flat {
+                continue;
+            }
+            let (cover, w) = self.cover_and_depth(&v, area2, q);
+            match cover {
+                Cover::Out => {}
+                Cover::In if w > near + m => crossings += 1,
+                Cover::In if w < near - m => {}
+                Cover::Edge if w < near - m => {}
+                Cover::In | Cover::Edge => return None,
+            }
+        }
+        Some(crossings % 2 == 1)
     }
 
     /// A triangle with an image area: coverage by signed distances to its
@@ -241,6 +305,19 @@ impl Oracle {
         q: [f64; 2],
         rule: &dyn Fn(Cover, f64) -> Option<bool>,
     ) -> Option<bool> {
+        let m = self.margin;
+        let (cover, w) = self.cover_and_depth(v, area2, q);
+        match (rule(cover, w), self.near) {
+            // A point beyond the near plane is removed; one at it is a tie.
+            (Some(true), Some(near)) if w > near + m => Some(false),
+            (Some(true), Some(near)) if w >= near - m => None,
+            (verdict, _) => verdict,
+        }
+    }
+
+    /// Where `q` is against a triangle's image, and the depth of its plane
+    /// there.
+    fn cover_and_depth(&self, v: &[V3; 3], area2: f64, q: [f64; 2]) -> (Cover, f64) {
         let orient = |p: &V3, r: &V3, s: [f64; 2]| {
             (r[0] - p[0]) * (s[1] - p[1]) - (r[1] - p[1]) * (s[0] - p[0])
         };
@@ -260,7 +337,7 @@ impl Oracle {
         let l0 = orient(&v[1], &v[2], q) / orient(&v[1], &v[2], [v[0][0], v[0][1]]);
         let l1 = orient(&v[2], &v[0], q) / orient(&v[2], &v[0], [v[1][0], v[1][1]]);
         let l2 = 1.0 - l0 - l1;
-        rule(cover, l0 * v[0][2] + l1 * v[1][2] + l2 * v[2][2])
+        (cover, l0 * v[0][2] + l1 * v[1][2] + l2 * v[2][2])
     }
 
     /// A triangle seen edge-on: its edges along the sampled edge's line, each
@@ -277,6 +354,8 @@ impl Oracle {
         let (a, b, q) = (sample.a, sample.b, sample.q);
         let (va, vb) = sample.ends;
         let mut any = false;
+        // The shallowest depth the fibre reaches over `q`.
+        let mut lowest = f64::INFINITY;
         for k in 0..3 {
             let (i, j) = (k, (k + 1) % 3);
             if own && [tri[i], tri[j]].iter().all(|x| *x == a || *x == b) {
@@ -301,13 +380,22 @@ impl Oracle {
             } else {
                 Cover::Edge
             };
-            match rule(cover, c[2] + s * (e[2] - c[2])) {
+            let w = c[2] + s * (e[2] - c[2]);
+            if !matches!(cover, Cover::Out) {
+                lowest = lowest.min(w);
+            }
+            match rule(cover, w) {
                 None => return None,
                 Some(true) => any = true,
                 Some(false) => {}
             }
         }
-        Some(any)
+        // The fibre hides only through points the near plane keeps.
+        match self.near {
+            Some(near) if any && lowest >= near - m && lowest <= near + m => None,
+            Some(near) if lowest > near + m => Some(false),
+            _ => Some(any),
+        }
     }
 }
 
@@ -319,18 +407,56 @@ struct Tally {
     segments: usize,
     robust: usize,
     ambiguous: usize,
+    /// Robust samples hidden by a cap alone.
+    capped: usize,
+    /// Scenes the provider refused as a tie.
+    refused: usize,
     seconds: f64,
 }
 
-fn check(seed: u64, name: &str, view_frame: Frame3, tally: &mut Tally) {
+/// The depth halfway through the extent of one of the scene's boxes, so
+/// that the near plane cuts it.
+fn mid_depth(seed: u64, meshes: &[TriMesh], view_frame: &Frame3) -> f64 {
+    let mut rng = Lcg(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1);
+    let mesh = &meshes[rng.below(meshes.len() as u64) as usize];
+    let depths = mesh
+        .positions
+        .iter()
+        .map(|p| (*p - view_frame.origin).dot(view_frame.z));
+    let lo = depths.clone().fold(f64::INFINITY, f64::min);
+    let hi = depths.fold(f64::NEG_INFINITY, f64::max);
+    (lo + hi) / 2.0
+}
+
+fn check(seed: u64, name: &str, view_frame: Frame3, with_near: bool, tally: &mut Tally) {
     let meshes = scene(seed);
-    let oracle = Oracle::new(&meshes, &view_frame);
+    let near = with_near.then(|| mid_depth(seed, &meshes, &view_frame));
+    let oracle = Oracle::new(&meshes, &view_frame, near);
     let input = solids(&meshes);
+    let mut view = OrthographicView::new(view_frame);
+    if let Some(near) = near {
+        view = view.with_near(near);
+    }
     let started = Instant::now();
-    let outcome = draw(&scalar(), &input, OrthographicView::new(view_frame));
+    let context = format!("scene {seed}, view {name}, near {near:?}");
+    let outcome = if near.is_some() {
+        match try_draw(&scalar(), &input, view) {
+            Ok(outcome) => outcome,
+            // A face in the near plane, or a cut line under a drawn edge, is
+            // a tie the provider refuses.
+            Err(error) if matches!(error.error, GeomError::Degenerate(_)) => {
+                assert!(error.mesh.is_some(), "{context}: {error}");
+                tally.refused += 1;
+                tally.scenes += 1;
+                return;
+            }
+            Err(error) => panic!("{context}: {error}"),
+        }
+    } else {
+        draw(&scalar(), &input, view)
+    };
     tally.seconds += started.elapsed().as_secs_f64();
     tally.scenes += 1;
-    let context = format!("scene {seed}, view {name}");
 
     // Coverage: pieces of one edge add up to its image; only box edges, and
     // exactly those whose image is not a point, are drawn.
@@ -346,7 +472,20 @@ fn check(seed: u64, name: &str, view_frame: Frame3, tally: &mut Tally) {
                 [d.dot(view_frame.x), d.dot(view_frame.y)]
             };
             let (p, r) = (image(edge[0]), image(edge[1]));
-            let length = ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2)).sqrt();
+            let mut length = ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2)).sqrt();
+            if let Some(near) = near {
+                // Only the part of the edge not beyond the near plane.
+                let depth =
+                    |i: u32| (mesh.positions[i as usize] - view_frame.origin).dot(view_frame.z);
+                let (wa, wb) = (depth(edge[0]), depth(edge[1]));
+                let at = (near - wa) / (wb - wa);
+                length *= match (wa <= near, wb <= near) {
+                    (true, true) => 1.0,
+                    (false, false) => 0.0,
+                    (true, false) => at,
+                    (false, true) => 1.0 - at,
+                };
+            }
             let got = covered.remove(&(index as u64 + 1, edge));
             if length > 1e-9 {
                 let got = got.unwrap_or_else(|| panic!("{context}: edge {edge:?} not drawn"));
@@ -354,6 +493,8 @@ fn check(seed: u64, name: &str, view_frame: Frame3, tally: &mut Tally) {
                     (got - length).abs() < 1e-9,
                     "{context}: edge {edge:?} covers {got} of {length}"
                 );
+            } else if near.is_some() {
+                // Wholly beyond the plane, or a point in the image.
             } else {
                 assert!(got.is_none(), "{context}: point edge {edge:?} drawn");
             }
@@ -379,6 +520,9 @@ fn check(seed: u64, name: &str, view_frame: Frame3, tally: &mut Tally) {
                 Verdict::Ambiguous => tally.ambiguous += 1,
                 verdict => {
                     tally.robust += 1;
+                    if oracle.by_cap.get() {
+                        tally.capped += 1;
+                    }
                     assert_eq!(verdict, expected, "{context}: {segment:?} at {fraction}");
                 }
             }
@@ -393,7 +537,7 @@ fn the_provider_agrees_with_an_independent_ray_cast() {
     for (name, view_frame) in views() {
         let mut tally = Tally::default();
         for seed in 1..=SEEDS {
-            check(seed, name, view_frame, &mut tally);
+            check(seed, name, view_frame, false, &mut tally);
         }
         eprintln!(
             "{name:>9}: {} scenes, {} samples, {} robust, {} ambiguous, {:.3} s",
@@ -419,4 +563,76 @@ fn the_provider_agrees_with_an_independent_ray_cast() {
             tally.segments
         );
     }
+}
+
+#[test]
+fn caps_of_cut_solids_agree_with_an_independent_ray_parity() {
+    const SEEDS: u64 = 40;
+    let (mut capped, mut scenes, mut refused) = (0, 0, 0);
+    for (name, view_frame) in views() {
+        let mut tally = Tally::default();
+        for seed in 1..=SEEDS {
+            check(seed, name, view_frame, true, &mut tally);
+        }
+        eprintln!(
+            "{name:>9}: {} cut scenes ({} refused), {} samples, {} robust, {} by a cap, \
+             {} ambiguous, {:.3} s",
+            tally.scenes,
+            tally.refused,
+            tally.segments,
+            tally.robust,
+            tally.capped,
+            tally.ambiguous,
+            tally.seconds
+        );
+        assert!(
+            tally.robust >= 50,
+            "{name}: only {} robust samples",
+            tally.robust
+        );
+        capped += tally.capped;
+        scenes += tally.scenes;
+        refused += tally.refused;
+    }
+    // The caps decide a good share of the samples, and ties are rare.
+    assert!(capped >= 200, "only {capped} samples are hidden by a cap");
+    assert!(
+        refused * 10 <= scenes,
+        "{refused} of {scenes} scenes refused"
+    );
+}
+
+#[test]
+fn a_cut_through_a_slab_at_a_rail_top_does_not_hide_the_rail() {
+    // The slab [0,4]^2 x [0,2] is cut at depth 1, the top face of a rail
+    // [3,6] x [1,1.5] x [0,1] that lies partly under the slab's image. The
+    // rail is not cut: its top face is in the plane, at equal depth with the
+    // slab's cap, which does not occlude it.
+    let slab = box_mesh([0.0, 0.0, 0.0], [4.0, 4.0, 2.0]);
+    let rail = box_mesh([3.0, 1.0, 0.0], [6.0, 1.5, 1.0]);
+    let meshes = [slab, rail];
+    let input = solids(&meshes);
+    let outcome = draw(
+        &scalar(),
+        &input,
+        OrthographicView::new(plan_frame()).with_near(1.0),
+    );
+    let top = |visibility| {
+        outcome
+            .segments
+            .iter()
+            .filter(|s| s.source.mesh.0 == 2 && s.source.vertices[0] >= 4)
+            .filter(|s| s.visibility == visibility)
+            .map(|s| (s.end - s.start).length())
+            .sum::<f64>()
+    };
+    assert!((top(Visibility::Visible) - 7.0).abs() < 1e-12);
+    assert_eq!(top(Visibility::Hidden), 0.0);
+    // The slab's own bottom ring is under its cap.
+    let slab_visible = outcome
+        .segments
+        .iter()
+        .filter(|s| s.source.mesh.0 == 1 && s.visibility == Visibility::Visible)
+        .count();
+    assert_eq!(slab_visible, 0);
 }

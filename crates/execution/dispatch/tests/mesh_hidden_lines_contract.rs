@@ -760,7 +760,7 @@ fn only_unsupported_or_unavailable_providers_fall_back() {
             Err(GeomError::UnsupportedInput {
                 backend: BackendId::new("first"),
                 operation: Operation::MeshHiddenLines,
-                input: "near clip through a capped solid",
+                input: "oblique clip plane",
             }
             .into())
         }),

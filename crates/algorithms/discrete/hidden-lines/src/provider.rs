@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, GeomResult, Operation, ScratchRequirement,
+    ExecutionTarget, GeomError, GeomResult, ScratchRequirement,
 };
 use axiolid_core::{Frame3, SpaceFrame, Tolerance};
 use axiolid_mesh::try_audit_mesh;
@@ -14,6 +14,7 @@ use axiolid_mesh_hidden_lines_contract::{
     HiddenLineSegment, MeshHiddenLines, MeshRole, SourceEdge, Visibility,
 };
 
+use crate::caps::Cap;
 use crate::decide::decide;
 use crate::edges::{collect, DrawEdge, MeshEdges, Tri};
 use crate::occlusion::{resolve, Resolved, Scene, Work};
@@ -29,13 +30,14 @@ use crate::view::Vert;
 /// triangle whose bounding box can matter, so the cost grows with edges times
 /// triangles; `max_candidate_pairs` bounds it.
 ///
-/// Refused by name: a near clipping plane that cuts a [`MeshRole::Solid`]
-/// (some vertex strictly nearer than the plane and some at or beyond it; the
-/// cap of a cut solid occludes and is not built yet). The first such solid in
-/// request order is named. A solid wholly beyond the plane is removed: it
-/// neither occludes nor is drawn. A failure to produce an endpoint (a
-/// coordinate beyond the binary64 range) is `Degenerate` and names the mesh
-/// of the edge.
+/// A near clipping plane that cuts a [`MeshRole::Solid`] leaves a cap that
+/// occludes (decided by ray parity with a symbolic perturbation of the image
+/// point); a solid wholly beyond the plane is removed: it neither occludes
+/// nor is drawn. Refused by name, with the solid's mesh: a cut solid with a
+/// triangle that meets the near plane along the image of a drawn edge (a face
+/// in the plane, or a cut line under the edge), which would tie the cap with
+/// that triangle. A failure to produce an endpoint (a coordinate beyond the
+/// binary64 range) is `Degenerate` and names the mesh of the edge.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScalarHiddenLines;
 
@@ -87,6 +89,7 @@ impl MeshHiddenLines for ScalarHiddenLines {
             .map_err(|_| memory())?;
         let mut tris: Vec<Tri> = Vec::new();
         let mut edges: Vec<DrawEdge> = Vec::new();
+        let mut caps: Vec<Cap> = Vec::new();
         let mut escalations = 0;
         let frame = &request.view.frame;
         for (index, entry) in request.meshes.iter().enumerate() {
@@ -96,20 +99,14 @@ impl MeshHiddenLines for ScalarHiddenLines {
                 })
             })?;
             verts.extend(entry.mesh.positions.iter().map(|p| Vert::new(*p, frame)));
-            if let (Some(near), MeshRole::Solid) = (request.view.near, entry.role) {
-                if cut_by_near(&verts[base as usize..], near, &mut escalations)
-                    .map_err(|error| HiddenLineError::mesh(entry.id, error))?
-                {
-                    return Err(HiddenLineError::mesh(
-                        entry.id,
-                        GeomError::UnsupportedInput {
-                            backend: Self::ID,
-                            operation: Operation::MeshHiddenLines,
-                            input: "near clip through a capped solid",
-                        },
-                    ));
+            let cut = match (request.view.near, entry.role) {
+                (Some(near), MeshRole::Solid) => {
+                    cut_by_near(&verts[base as usize..], near, &mut escalations)
+                        .map_err(|error| HiddenLineError::mesh(entry.id, error))?
                 }
-            }
+                _ => false,
+            };
+            let first_triangle = tris.len();
             let input = MeshEdges {
                 index,
                 id: entry.id,
@@ -126,6 +123,12 @@ impl MeshHiddenLines for ScalarHiddenLines {
                 &mut tris,
                 &mut edges,
             )?;
+            if cut {
+                caps.push(Cap {
+                    mesh: index,
+                    tris: first_triangle..tris.len(),
+                });
+            }
         }
         debug_assert_eq!(tris.len(), total_triangles);
 
@@ -135,6 +138,7 @@ impl MeshHiddenLines for ScalarHiddenLines {
             near: request.view.near,
             far: request.view.far,
             region: request.region,
+            caps: &caps,
         };
         let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
         evidence.selected_edges = edges.len();
@@ -144,9 +148,10 @@ impl MeshHiddenLines for ScalarHiddenLines {
             options.check_cancelled()?;
             let id = request.meshes[edge.mesh].id;
             let resolved = resolve(&scene, edge, request.limits.max_candidate_pairs, &mut work)
-                .map_err(|error| match error {
-                    GeomError::Degenerate(_) => HiddenLineError::mesh(id, error),
-                    other => HiddenLineError::from(other),
+                .map_err(|refusal| match (refusal.mesh, refusal.error) {
+                    (Some(index), error) => HiddenLineError::mesh(request.meshes[index].id, error),
+                    (None, error @ GeomError::Degenerate(_)) => HiddenLineError::mesh(id, error),
+                    (None, error) => HiddenLineError::from(error),
                 })?;
             let pieces = match resolved {
                 Resolved::Point => {
