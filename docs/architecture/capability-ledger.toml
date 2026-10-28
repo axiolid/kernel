@@ -161,7 +161,7 @@ number = 137
 [[issue]]
 key = "hidden-line-drawing"
 title = "Hidden-line removal and 2D projection drawings of solids"
-priority = "Low"
+priority = "High"
 effort = "High"
 number = 138
 
