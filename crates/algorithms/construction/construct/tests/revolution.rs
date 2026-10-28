@@ -173,36 +173,219 @@ fn a_hole_crossing_the_axis_is_invalid_input() {
     assert!(matches!(turn(&r, FULL), Err(GeomError::InvalidInput(_))));
 }
 
-#[test]
-fn a_vertex_on_the_axis_is_unsupported() {
-    let r = rings(
-        vec![
-            Point2::new(0.0, 0.0),
-            Point2::new(2.0, 0.0),
-            Point2::new(2.0, 1.0),
-        ],
-        vec![],
-    );
-    assert!(matches!(
-        turn(&r, FULL),
-        Err(GeomError::UnsupportedInput { .. })
-    ));
+// --- Profiles touching the axis (#363) ---
+
+use axiolid_measure::proximity::closest_point_on_triangle;
+use axiolid_mesh::audit_mesh;
+
+const AXIS_CHORD: Scalar = 1e-3;
+
+/// Assert the structural facts of a touching revolution: closed, consistently
+/// wound, no degenerate triangle, no duplicate vertex and none unreferenced.
+fn assert_sound(mesh: &TriMesh) {
+    let health = audit_mesh(mesh, tol_for(1e-9));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
+    let mut seen = std::collections::HashSet::new();
+    for p in &mesh.positions {
+        assert!(
+            seen.insert([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]),
+            "duplicate vertex {p:?}"
+        );
+    }
+    let mut used = vec![false; mesh.positions.len()];
+    for i in &mesh.indices {
+        used[*i as usize] = true;
+    }
+    assert!(used.iter().all(|u| *u), "an unreferenced vertex");
+}
+
+/// A closed full-turn wall of `S` stations over a four-point profile has
+/// `4 S` vertices and `8 S` triangles: nothing was welded or collapsed.
+fn assert_unwelded(mesh: &TriMesh) {
+    assert_eq!(mesh.positions.len() * 2, mesh.indices.len() / 3);
+}
+
+/// Number of vertices on the axis x = z = 0.
+fn on_axis(mesh: &TriMesh) -> usize {
+    mesh.positions
+        .iter()
+        .filter(|p| p.x == 0.0 && p.z == 0.0)
+        .count()
+}
+
+/// Pappus volume of the full turn about the Y axis of a polygon on one side:
+/// `2*pi*|integral of x dA|`, with `integral x dA = sum (x0 + x1) cross / 6`.
+fn pappus(ring: &[Point2]) -> Scalar {
+    let mut moment = 0.0;
+    for k in 0..ring.len() {
+        let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+        moment += (p.x + q.x) * (p.x * q.y - q.x * p.y) / 6.0;
+    }
+    FULL * moment.abs()
+}
+
+fn revolve_touching(ring: &[Point2], angle: Scalar) -> TriMesh {
+    turn_with(&rings(ring.to_vec(), vec![]), angle, AXIS_CHORD)
+        .expect("a touching profile revolves")
+}
+
+fn turn_with(r: &Rings, angle: Scalar, chord: Scalar) -> Result<TriMesh, GeomError> {
+    revolve(r, Point3::ZERO, Vec3::Y, angle, tol_for(chord))
+}
+
+/// The inscribed polygon of the right half of the unit disk, closed along
+/// the axis.
+fn half_disk(k: usize) -> Vec<Point2> {
+    (0..=k)
+        .map(|i| {
+            let t = core::f64::consts::PI * i as Scalar / k as Scalar;
+            Point2::new(t.sin(), -t.cos())
+        })
+        .map(|p| Point2::new(if p.x < 1e-12 { 0.0 } else { p.x }, p.y))
+        .collect()
+}
+
+/// A right triangle with one leg on the axis.
+fn cone() -> Vec<Point2> {
+    vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(2.0, 0.0),
+        Point2::new(0.0, 1.0),
+    ]
+}
+
+fn pie_cylinder() -> Vec<Point2> {
+    square(0.0, 2.0, 0.0, 1.0)
+}
+
+/// Largest distance from the surface the rings sweep, sampled off the mesh's
+/// own stations, to the mesh. Edges lying on the axis sweep nothing.
+fn surface_deviation(ring: &[Point2], angle: Scalar, mesh: &TriMesh) -> Scalar {
+    let triangles: Vec<[Point3; 3]> = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| t.map(|i| mesh.positions[i as usize]))
+        .collect();
+    let mut worst: Scalar = 0.0;
+    for k in 0..ring.len() {
+        let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+        if p.x == 0.0 && q.x == 0.0 {
+            continue;
+        }
+        for i in 0..4 {
+            let x = (i as Scalar + 0.37) / 4.0;
+            let (r, y) = (p.x + (q.x - p.x) * x, p.y + (q.y - p.y) * x);
+            for j in 0..48 {
+                let t = angle * (j as Scalar + 0.41) / 48.0;
+                let point = Point3::new(r * t.cos(), y, -r * t.sin());
+                let near = triangles
+                    .iter()
+                    .map(|tri| {
+                        point.distance(closest_point_on_triangle(point, *tri).expect("closest"))
+                    })
+                    .fold(Scalar::INFINITY, Scalar::min);
+                worst = worst.max(near);
+            }
+        }
+    }
+    worst
 }
 
 #[test]
-fn an_edge_on_the_axis_is_unsupported() {
-    let r = rings(square(0.0, 2.0, 0.0, 1.0), vec![]);
-    for angle in [FULL, 1.0] {
-        assert!(matches!(
-            turn(&r, angle),
-            Err(GeomError::UnsupportedInput { .. })
-        ));
+fn a_half_disk_revolves_to_a_closed_sphere_like_mesh() {
+    let ring = half_disk(16);
+    let mesh = revolve_touching(&ring, FULL);
+    assert_sound(&mesh);
+    // The two poles are one vertex each, not one per station.
+    assert_eq!(on_axis(&mesh), 2);
+    let (want, got) = (pappus(&ring), volume(&mesh, tol_for(AXIS_CHORD)));
+    assert!(got < want, "inscribed sweep: {got} vs {want}");
+    assert!((want - got) / want < 3.0 * AXIS_CHORD, "{got} vs {want}");
+    assert!(surface_deviation(&ring, FULL, &mesh) <= AXIS_CHORD);
+}
+
+#[test]
+fn a_rectangle_on_the_axis_revolves_to_a_closed_cylinder() {
+    let ring = pie_cylinder();
+    let mesh = revolve_touching(&ring, FULL);
+    assert_sound(&mesh);
+    // The axis edge sweeps nothing: both ends are single vertices and no
+    // wall triangle spans them.
+    assert_eq!(on_axis(&mesh), 2);
+    let (want, got) = (pappus(&ring), volume(&mesh, tol_for(AXIS_CHORD)));
+    assert!(got < want && (want - got) / want < 3.0 * AXIS_CHORD);
+    assert!(surface_deviation(&ring, FULL, &mesh) <= AXIS_CHORD);
+}
+
+#[test]
+fn a_right_triangle_with_a_leg_on_the_axis_revolves_to_a_cone() {
+    let ring = cone();
+    let mesh = revolve_touching(&ring, FULL);
+    assert_sound(&mesh);
+    assert_eq!(on_axis(&mesh), 2);
+    let want = core::f64::consts::PI * 4.0 / 3.0;
+    assert!((pappus(&ring) - want).abs() < 1e-12);
+    let got = volume(&mesh, tol_for(AXIS_CHORD));
+    assert!(got < pappus(&ring) && (pappus(&ring) - got) / want < 3.0 * AXIS_CHORD);
+    assert!(surface_deviation(&ring, FULL, &mesh) <= AXIS_CHORD);
+}
+
+#[test]
+fn a_profile_touching_at_one_vertex_is_closed_and_meets_the_axis_once() {
+    // The apex sits between the two rim points: a cylinder of radius 1 and
+    // height 2 with a double cone taken out. Edge-manifold: the apex is one
+    // shared vertex of a fan on each nappe.
+    let ring = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(1.0, -1.0),
+        Point2::new(1.0, 1.0),
+    ];
+    let mesh = revolve_touching(&ring, FULL);
+    assert_sound(&mesh);
+    assert_eq!(on_axis(&mesh), 1);
+    let (want, got) = (pappus(&ring), volume(&mesh, tol_for(AXIS_CHORD)));
+    assert!(got < want && (want - got) / want < 3.0 * AXIS_CHORD);
+    assert!(surface_deviation(&ring, FULL, &mesh) <= AXIS_CHORD);
+}
+
+#[test]
+fn partial_turns_of_touching_profiles_are_closed_and_share_the_axis_vertices() {
+    for (ring, axis) in [(pie_cylinder(), 2), (half_disk(16), 2), (cone(), 2)] {
+        for angle in [core::f64::consts::FRAC_PI_2, 1.0, 4.0] {
+            let mesh = revolve_touching(&ring, angle);
+            assert_sound(&mesh);
+            // Start cap, wall and end cap meet at one vertex per axis point.
+            assert_eq!(on_axis(&mesh), axis);
+            let want = pappus(&ring) * angle / FULL;
+            let got = volume(&mesh, tol_for(AXIS_CHORD));
+            // The caps and the axis make the partial solid exact up to the
+            // chord term of the arc.
+            assert!(
+                (want - got).abs() / want < 3.0 * AXIS_CHORD,
+                "{angle}: {got} vs {want}"
+            );
+            assert!(surface_deviation(&ring, angle, &mesh) <= AXIS_CHORD);
+        }
     }
 }
 
 #[test]
-fn a_hole_touching_the_axis_is_unsupported() {
-    let clear = rings(
+fn a_negative_angle_winds_a_touching_solid_outward_too() {
+    for ring in [pie_cylinder(), half_disk(16), cone()] {
+        for angle in [-FULL, -1.0] {
+            let mesh = revolve_touching(&ring, angle);
+            assert_sound(&mesh);
+            let want = pappus(&ring) * angle.abs() / FULL;
+            assert!((want - volume(&mesh, tol_for(AXIS_CHORD))).abs() / want < 3.0 * AXIS_CHORD);
+        }
+    }
+}
+
+#[test]
+fn a_profile_with_a_hole_clear_of_the_axis_is_unaffected() {
+    let r = rings(
         square(1.0, 6.0, 0.0, 4.0),
         vec![vec![
             Point2::new(1.5, 1.0),
@@ -210,8 +393,16 @@ fn a_hole_touching_the_axis_is_unsupported() {
             Point2::new(2.0, 2.0),
         ]],
     );
-    assert!(turn(&clear, FULL).is_ok());
-    let touching = rings(
+    let mesh = turn(&r, FULL).expect("revolves");
+    assert_sound(&mesh);
+    assert_eq!(on_axis(&mesh), 0);
+}
+
+#[test]
+fn a_hole_vertex_on_the_axis_follows_the_same_exact_rule() {
+    // The hole pokes out of the outer ring, a malformed input; the exact
+    // rule still welds its on-axis vertex to one mesh vertex.
+    let r = rings(
         square(1.0, 6.0, 0.0, 4.0),
         vec![vec![
             Point2::new(0.0, 1.0),
@@ -219,10 +410,22 @@ fn a_hole_touching_the_axis_is_unsupported() {
             Point2::new(2.0, 2.0),
         ]],
     );
-    assert!(matches!(
-        turn(&touching, FULL),
-        Err(GeomError::UnsupportedInput { .. })
-    ));
+    if let Ok(mesh) = turn(&r, FULL) {
+        assert_eq!(on_axis(&mesh), 1);
+    }
+}
+
+#[test]
+fn touching_profiles_keep_the_budget_of_the_widest_radius() {
+    // A point on the axis traces no circle, so the step count is that of
+    // the same profile with the axis edge moved off by nothing: widest
+    // radius governs. Halving the budget grows the stations, not the poles.
+    let ring = half_disk(16);
+    let coarse = turn_with(&rings(ring.clone(), vec![]), FULL, 1e-2).expect("coarse");
+    let fine = turn_with(&rings(ring, vec![]), FULL, 1e-3).expect("fine");
+    assert!(fine.positions.len() > coarse.positions.len());
+    assert_eq!(on_axis(&coarse), 2);
+    assert_eq!(on_axis(&fine), 2);
 }
 
 #[test]
@@ -282,10 +485,9 @@ fn a_tilted_axis_is_judged_by_its_own_line() {
         ],
         vec![],
     );
-    assert!(matches!(
-        tilt(&touching),
-        Err(GeomError::UnsupportedInput { .. })
-    ));
+    // The vertex (1, 1) lies on the axis: meshed once, not refused (#363).
+    let mesh = tilt(&touching).expect("a touching profile revolves");
+    assert_sound(&mesh);
 }
 
 #[test]
@@ -321,16 +523,17 @@ fn an_axis_parallel_to_the_plane_and_offset_is_checked_for_crossing_only() {
     assert!(matches!(at(0.5, &across), Err(GeomError::InvalidInput(_))));
     // A vertex on the projected axis is 0.5 from the real one: no touch.
     let on_projection = rings(square(0.0, 2.0, 0.0, 1.0), vec![]);
-    assert!(at(0.5, &on_projection).is_ok());
+    let clear = at(0.5, &on_projection).expect("no touch");
+    assert_sound(&clear);
+    assert_unwelded(&clear);
     // Placement noise does not switch the check off or make it offset.
     assert!(matches!(
         at(1e-17, &across),
         Err(GeomError::InvalidInput(_))
     ));
-    assert!(matches!(
-        at(1e-17, &on_projection),
-        Err(GeomError::UnsupportedInput { .. })
-    ));
+    let touching = at(1e-17, &on_projection).expect("an on-axis edge is meshed");
+    assert_sound(&touching);
+    assert_eq!(on_axis(&touching), 2);
 }
 
 #[test]
@@ -346,5 +549,7 @@ fn an_axis_leaning_out_of_the_plane_is_not_judged_by_its_projection() {
         FULL,
         tol_for(1e-3),
     );
-    assert!(mesh.is_ok(), "{mesh:?}");
+    let mesh = mesh.expect("revolves");
+    assert_sound(&mesh);
+    assert_unwelded(&mesh);
 }

@@ -46,6 +46,24 @@ pub fn place(rings: &Rings, mut f: impl FnMut(Point2) -> Point3) -> Station {
 /// vertices by position, so a differing ring length has no meaningful
 /// pairing and is refused rather than silently truncated.
 pub fn loft(rings: &Rings, stations: &[Station], closed: bool) -> GeomResult<TriMesh> {
+    loft_welded(rings, stations, closed, &[])
+}
+
+/// [`loft`] with some ring points welded across stations (#363).
+///
+/// `welded[f]` marks the `f`-th ring point (outer ring first, then each hole,
+/// the order of a [`Station`]) as fixed under the sweep, as a point on a
+/// revolution axis is: its stations coincide, so they share one vertex, taken
+/// from the last station. A wall quad with one welded end collapses to its
+/// one triangle that is not degenerate; a quad with both ends welded lies
+/// along the fixed line and emits nothing. Caps index the shared vertices, so
+/// the solid stays closed. An empty `welded` welds nothing.
+pub(crate) fn loft_welded(
+    rings: &Rings,
+    stations: &[Station],
+    closed: bool,
+    welded: &[bool],
+) -> GeomResult<TriMesh> {
     if stations.len() < 2 {
         return Err(GeomError::InvalidInput(format!(
             "a loft needs at least two stations, got {}",
@@ -62,10 +80,35 @@ pub fn loft(rings: &Rings, stations: &[Station], closed: bool) -> GeomResult<Tri
         }
     }
     let per_station: usize = shape.iter().sum();
+    if !welded.is_empty() && welded.len() != per_station {
+        return Err(GeomError::InvalidInput(
+            "welded flags must cover every ring point".to_owned(),
+        ));
+    }
+    let is_welded = |f: usize| welded.get(f).copied().unwrap_or(false);
+    // `id[s * per_station + f]` is the vertex of ring point `f` at station
+    // `s`; a welded point has one vertex, placed at the last station.
     let mut positions: Vec<Point3> = Vec::with_capacity(stations.len() * per_station);
-    for s in stations {
-        for ring in &s.loops {
-            positions.extend(ring.iter().copied());
+    let mut id: Vec<u32> = vec![0; stations.len() * per_station];
+    let mut shared: Vec<Option<u32>> = vec![None; per_station];
+    let last_station = &stations[stations.len() - 1];
+    for (s, station) in stations.iter().enumerate() {
+        let mut f = 0;
+        for (ring, last_ring) in station.loops.iter().zip(&last_station.loops) {
+            for (point, last_point) in ring.iter().zip(last_ring) {
+                id[s * per_station + f] = match (is_welded(f), shared[f]) {
+                    (true, Some(v)) => v,
+                    (welded_here, _) => {
+                        let v = positions.len() as u32;
+                        positions.push(if welded_here { *last_point } else { *point });
+                        if welded_here {
+                            shared[f] = Some(v);
+                        }
+                        v
+                    }
+                };
+                f += 1;
+            }
         }
     }
     // A closed loft wraps onto station 0; an open one stops one short.
@@ -82,13 +125,19 @@ pub fn loft(rings: &Rings, stations: &[Station], closed: bool) -> GeomResult<Tri
         for m in shape.iter() {
             for k in 0..*m {
                 let kn = (k + 1) % *m;
-                let (a, b) = ((a0 + base + k) as u32, (a0 + base + kn) as u32);
-                let (c, d) = ((b0 + base + k) as u32, (b0 + base + kn) as u32);
+                let (fk, fkn) = (base + k, base + kn);
+                let (a, b) = (id[a0 + fk], id[a0 + fkn]);
+                let (c, d) = (id[b0 + fk], id[b0 + fkn]);
                 // Both rings wind the same way here. A hole ring is already
                 // stored clockwise (profile.rs keeps holes reversed), which
                 // is what turns its wall normal inward; flipping the index
                 // order as well would invert it a second time.
-                indices.extend([a, b, d, a, d, c]);
+                match (is_welded(fk), is_welded(fkn)) {
+                    (false, false) => indices.extend([a, b, d, a, d, c]),
+                    (true, false) => indices.extend([a, b, d]),
+                    (false, true) => indices.extend([a, d, c]),
+                    (true, true) => {}
+                }
             }
             base += *m;
         }
@@ -103,10 +152,12 @@ pub fn loft(rings: &Rings, stations: &[Station], closed: bool) -> GeomResult<Tri
                 points.len()
             )));
         }
-        let last = ((stations.len() - 1) * per_station) as u32;
+        let last = (stations.len() - 1) * per_station;
         for t in &tris {
-            indices.extend([t[0], t[2], t[1]]);
-            indices.extend([last + t[0], last + t[1], last + t[2]]);
+            let first = t.map(|f| id[f as usize]);
+            let end = t.map(|f| id[last + f as usize]);
+            indices.extend([first[0], first[2], first[1]]);
+            indices.extend([end[0], end[1], end[2]]);
         }
     }
     Ok(TriMesh::new(positions, indices))

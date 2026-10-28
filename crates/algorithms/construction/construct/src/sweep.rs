@@ -124,7 +124,12 @@ pub fn tapered_revolve(
         outer: start.outer.iter().chain(&end.outer).copied().collect(),
         holes: start.holes.iter().chain(&end.holes).cloned().collect(),
     };
-    crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?;
+    // TODO(#364): the tapered loft does not collapse axis vertices yet.
+    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?
+        .contains(&true)
+    {
+        return Err(crate::revolve::touching_unsupported());
+    }
     let far = blend_rings(start, end, 1.0)?;
     let mut max_r: Scalar = 0.0;
     let starts = start.outer.iter().chain(start.holes.iter().flatten());

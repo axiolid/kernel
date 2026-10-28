@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `revolve` meshes a profile touching an in-plane axis instead of refusing
+  it (#363): a cylinder, cone or sphere from a rectangle, triangle or
+  half-disk on the axis, and their partial turns, come out closed,
+  consistently wound and free of degenerate triangles. A vertex exactly on
+  the axis (the exact sign is zero) is one mesh vertex shared by every
+  station and by both caps; its quads collapse to triangles and a profile
+  edge along the axis emits nothing. The chord bound and the step count are
+  unchanged. A profile crossing the axis is still `InvalidInput`.
+  `tapered_revolve` keeps its `UnsupportedInput` refusal for a profile
+  touching the axis (#364).
+
 ## [0.3.22] - 2026-10-28
 
 ### Fixed

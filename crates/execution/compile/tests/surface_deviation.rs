@@ -279,9 +279,10 @@ fn rect(x: Scalar, y: Scalar) -> Profile {
 }
 
 #[test]
-fn a_revolution_whose_profile_crosses_or_touches_the_axis_is_refused() {
+fn a_revolution_whose_profile_crosses_the_axis_is_refused_and_one_touching_it_is_meshed() {
     // The profile spans x in -0.1..0.1: an axis at x = 0 crosses it, an
-    // axis at x = -0.1 runs along its left edge (#351).
+    // axis at x = -0.1 runs along its left edge, which meshes a closed cylinder
+    // (#351, #363).
     let compile_about = |axis_x: Scalar| {
         let mut builder = GeometryGraphBuilder::new();
         let root = revolution_about(
@@ -302,10 +303,10 @@ fn a_revolution_whose_profile_crosses_or_touches_the_axis_is_refused() {
         compile_about(0.0),
         Err(GeomError::InvalidInput(_))
     ));
-    assert!(matches!(
-        compile_about(-0.1),
-        Err(GeomError::UnsupportedInput { .. })
-    ));
+    let touching = compile_about(-0.1).expect("a touching profile is meshed");
+    let health =
+        axiolid_mesh::audit_mesh(&touching, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
     assert!(compile_about(-0.3).is_ok());
 }
 

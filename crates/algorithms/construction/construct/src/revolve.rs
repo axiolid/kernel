@@ -46,6 +46,23 @@
 //!
 //! Every span of a revolution is the first span rotated, so the twist is
 //! measured once.
+//!
+//! # Vertices on the axis (#363)
+//!
+//! A ring vertex exactly on an in-plane axis (the exact `side_of_axis` sign
+//! is zero) is fixed under the rotation, so all its stations coincide. It
+//! gets one mesh vertex, shared by every station and by both caps of a
+//! partial turn. Its quads collapse: the one with a single axis end keeps the
+//! triangle that is not degenerate, and the one with both ends on the axis (a
+//! profile edge lying along it) sweeps nothing and emits nothing; an axis
+//! edge of a partial turn is then an edge between the two caps. The bound
+//! above is untouched. A point at radius 0 traces no circle, so the step
+//! count, which the largest radius governs, is unchanged. A collapsed quad is
+//! the triangle `(a, b, d)` or `(a, d, c)` with `a = c` or `b = d`, which the
+//! patch bound `min(|b - a|, |c - a|)` of `loft::quad_deviation` covers
+//! exactly, as it did before the vertices were merged. Merging moves no
+//! vertex: the shared one is the profile point itself, which every station's
+//! rotated copy equals up to rounding.
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
@@ -163,62 +180,70 @@ fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
     expansion_sign(&sum)
 }
 
-/// Refuse rings that lie on both sides of the axis, or touch it (#351).
+/// Refuse rings that lie on both sides of the axis, and report which touch
+/// it (#351, #363).
 ///
 /// Decided when the axis lies in the profile's plane, where "side" is
 /// meaningful: each vertex is classified by the exact sign of its cross
 /// product with the axis direction, with no tolerance band. Vertices
 /// strictly on both sides are a crossing (the swept solid passes through
-/// itself) and `InvalidInput`; a vertex on the axis, which includes an edge
-/// lying on it, collapses the swept wall to a line and is
-/// `UnsupportedInput`, as in the exact path (`revolve_exact`). An edge
-/// cannot meet the axis between two vertices without one of those two
-/// cases.
+/// itself) and `InvalidInput`. A vertex on the axis, which includes an edge
+/// lying on it, is not an error: the result holds `true` at its index in the
+/// flat ring order (outer ring, then each hole) and [`revolve`] meshes it
+/// once. An edge cannot meet the axis between two vertices without one of
+/// those two cases.
 ///
 /// "In the plane" follows the exact path: the axis origin and direction
 /// leave it only beyond `tolerance.linear()` in z, so placement noise does
 /// not switch the check off. An axis parallel to the plane but offset from
 /// it is checked for crossing only: no ring point reaches the axis, since
-/// its radius stays at least the offset. An axis leaning out of the plane
-/// is unchecked and tracked in #362.
+/// its radius stays at least the offset, so nothing is reported. An axis
+/// leaning out of the plane is unchecked and tracked in #362.
 pub(crate) fn check_axis_side(
     rings: &Rings,
     axis_origin: Point3,
     axis_direction: Vec3,
     tolerance: Tolerance,
-) -> GeomResult<()> {
+) -> GeomResult<Vec<bool>> {
+    let count = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
     // TODO(#362): an axis leaning out of the profile plane is not judged.
     if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
-        return Ok(());
+        return Ok(vec![false; count]);
     }
     let offset = axis_origin.z.abs() > tolerance.linear();
     let a = Point2::new(axis_origin.x, axis_origin.y);
-    let (mut positive, mut negative, mut on_axis) = (false, false, false);
+    let (mut positive, mut negative) = (false, false);
+    let mut on_axis = Vec::with_capacity(count);
     for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
         if !(p.x.is_finite() && p.y.is_finite()) {
             return Err(GeomError::InvalidInput(
                 "revolved profile must have finite vertices".to_owned(),
             ));
         }
-        match side_of_axis(a, axis_direction, *p) {
+        let side = side_of_axis(a, axis_direction, *p);
+        match side {
             Sign::Positive => positive = true,
             Sign::Negative => negative = true,
-            _ => on_axis = true,
+            _ => {}
         }
+        on_axis.push(side == Sign::Zero && !offset);
     }
     if positive && negative {
         return Err(GeomError::InvalidInput(
             "revolved profile crosses the axis: its rings lie on both sides".to_owned(),
         ));
     }
-    if on_axis && !offset {
-        return Err(GeomError::UnsupportedInput {
-            backend: crate::BACKEND_ID,
-            operation: Operation::Sweep,
-            input: "revolution of a profile touching the axis",
-        });
+    Ok(on_axis)
+}
+
+/// The refusal for a family that cannot yet mesh a profile touching the
+/// axis (#363).
+pub(crate) fn touching_unsupported() -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: Operation::Sweep,
+        input: "revolution of a profile touching the axis",
     }
-    Ok(())
 }
 
 /// Revolve a profile about an axis into a closed solid.
@@ -233,7 +258,8 @@ pub(crate) fn check_axis_side(
 /// the rings' own distance from a curved profile is the caller's to add.
 /// A budget that needs more than 4096 steps round the axis is refused with
 /// `BudgetExceeded`. A profile with vertices on both sides of an in-plane
-/// axis is `InvalidInput`; one touching the axis is `UnsupportedInput`.
+/// axis is `InvalidInput`. A vertex on the axis is meshed once, the point
+/// being fixed under the rotation (see the module notes).
 pub fn revolve(
     rings: &Rings,
     axis_origin: Point3,
@@ -252,7 +278,7 @@ pub fn revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
-    check_axis_side(rings, axis_origin, axis_direction, tolerance)?;
+    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance)?;
     let dir = axis_direction / len;
     // Widest distance from the axis governs the angular step: a point at
     // radius r traces a circle of that radius.
@@ -275,7 +301,7 @@ pub fn revolve(
             })
         })
         .collect();
-    let mut mesh = crate::loft::loft(rings, &stations, full)?;
+    let mut mesh = crate::loft::loft_welded(rings, &stations, full, &on_axis)?;
     // The station order above (end of the sweep first) winds the walls
     // outward for a positive angle about `dir`. A negative angle sweeps the
     // other way round, so the same order winds them inward instead (#221):
