@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.34] - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ## [0.3.33] - 2026-10-28
 
 ### Fixed

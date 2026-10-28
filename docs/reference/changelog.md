@@ -589,6 +589,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-capi
 
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -628,6 +635,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-constraint2d
+
+### 0.1.2 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.1.1 - 2026-10-28
 
@@ -1527,6 +1541,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-core
 
+### 0.3.4 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -1558,6 +1579,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-curve
+
+### 0.3.11 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.10 - 2026-10-28
 
@@ -2669,6 +2697,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-field
 
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -2688,6 +2723,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-field-ops
+
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.2 - 2026-10-28
 
@@ -2891,6 +2933,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-linear
 
+### 0.3.4 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.3 - 2026-10-28
 
 ### Changed
@@ -2940,6 +2989,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-measure
+
+### 0.3.13 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.12 - 2026-10-28
 
@@ -3280,6 +3336,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh
 
+### 0.3.5 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -3557,6 +3620,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.34 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.33 - 2026-10-28
 
@@ -5207,6 +5277,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-model
 
+### 0.3.16 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.15 - 2026-10-28
 
 ### Changed
@@ -5498,6 +5575,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-numeric
+
+### 0.1.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.1.2 - 2026-10-28
 
@@ -6428,6 +6512,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-pointcloud
 
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -6448,6 +6539,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-pointcloud-reconstruction-contract
 
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -6467,6 +6565,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-pointcloud-reconstruction-sdf
+
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.2 - 2026-10-28
 
@@ -7018,6 +7123,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-spatial
 
+### 0.3.5 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -7065,6 +7177,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-surface
 
+### 0.3.5 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+
 ### 0.3.4 - 2026-10-28
 
 ### Changed
@@ -7102,6 +7221,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-tessellation-contract
+
+### 0.3.3 - 2026-10-28
+
+### Changed
+
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 ### 0.3.2 - 2026-10-28
 

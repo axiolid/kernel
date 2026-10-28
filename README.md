@@ -117,4 +117,4 @@ The workspace also carries feature-isolation and mutation probes. See [Contribut
 
 ## License
 
-Axiolid is dual-licensed under the [Mozilla Public License 2.0](LICENSE) or a [commercial licence](LICENSE-COMMERCIAL) from the copyright holder (`MPL-2.0 OR LicenseRef-Commercial`); `axiolid-mesh-boolean-boolmesh` is MPL-2.0 only. Under MPL-2.0, separate application files may remain proprietary. Contributions are accepted under the contributor terms in the [licensing guide](https://axiolid.github.io/kernel/guide/licensing#contributor-terms).
+Axiolid is dual-licensed under the [Mozilla Public License 2.0](LICENSE) or a [commercial licence](LICENSE-COMMERCIAL) from rheonda UG (haftungsbeschränkt) (`MPL-2.0 OR LicenseRef-Commercial`); `axiolid-mesh-boolean-boolmesh` is MPL-2.0 only. Under MPL-2.0, separate application files may remain proprietary. Contributions are accepted under the contributor terms in the [licensing guide](https://axiolid.github.io/kernel/guide/licensing#contributor-terms).

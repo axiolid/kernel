@@ -1,6 +1,6 @@
 # Licensing Axiolid
 
-Axiolid is dual-licensed: **`MPL-2.0 OR LicenseRef-Commercial`**. You may use it under the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/), or under a separate commercial licence from the copyright holder ([ADR 0089](../adr/0089-dual-licence-with-a-commercial-option.md)). The canonical texts are [LICENSE](https://github.com/axiolid/kernel/blob/main/LICENSE) and [LICENSE-COMMERCIAL](https://github.com/axiolid/kernel/blob/main/LICENSE-COMMERCIAL).
+Axiolid is dual-licensed: **`MPL-2.0 OR LicenseRef-Commercial`**. You may use it under the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/), or under a separate commercial licence from rheonda UG (haftungsbeschränkt) ([ADR 0089](../adr/0089-dual-licence-with-a-commercial-option.md)). The canonical texts are [LICENSE](https://github.com/axiolid/kernel/blob/main/LICENSE) and [LICENSE-COMMERCIAL](https://github.com/axiolid/kernel/blob/main/LICENSE-COMMERCIAL).
 
 One package is the exception. `axiolid-mesh-boolean-boolmesh` contains absorbed upstream code with a third-party copyright holder ([ADR 0047](../adr/0047-absorb-mesh-boolean.md)), so it is **MPL-2.0 only**.
 
@@ -20,7 +20,7 @@ This avoids LGPL’s usual static-linking/relinking friction in Rust while still
 
 ## Under a commercial licence
 
-A commercial licence is a written agreement with the copyright holder. Its terms are those of the agreement, for example covering modified Axiolid files that you do not want to publish. `LICENSE-COMMERCIAL` only records that the option exists; it grants nothing by itself. To ask for one, open a discussion or contact the maintainer through the [repository](https://github.com/axiolid/kernel).
+Commercial licences are granted by [rheonda UG (haftungsbeschränkt)](https://github.com/rheonda), with the copyright holder's permission. A commercial licence is a written agreement with rheonda UG (haftungsbeschränkt). Its terms are those of the agreement, for example covering modified Axiolid files that you do not want to publish. `LICENSE-COMMERCIAL` only records that the option exists; it grants nothing by itself. To ask for one, contact rheonda UG (haftungsbeschränkt).
 
 The commercial option never covers third-party code that Axiolid contains under its original licence, such as the absorbed mesh boolean.
 

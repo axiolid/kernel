@@ -8,7 +8,7 @@ Reference pointcloud reconstruction: signed-distance field from samples, extract
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-10-28) |
 | crates.io | [`axiolid-pointcloud-reconstruction-sdf`](https://crates.io/crates/axiolid-pointcloud-reconstruction-sdf) |
 | Facade | [`axiolid`](./axiolid) feature `pointcloud-provider` |
 | Layer | providers (`provider.pointcloud`) |
@@ -38,14 +38,11 @@ replace it behind the same contract.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-10-28):
 
 ### Changed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 Full history: [`crates/providers/pointcloud/sdf/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/providers/pointcloud/sdf/CHANGELOG.md)

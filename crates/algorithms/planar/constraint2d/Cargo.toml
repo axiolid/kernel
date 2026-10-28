@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-constraint2d"
 description = "Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -8,7 +8,7 @@ Acceleration structures: BVH and uniform point grid, and their queries; barycent
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-28) |
+| Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-spatial`](https://crates.io/crates/axiolid-spatial) |
 | Facade | [`axiolid`](./axiolid) feature `spatial` |
 | Layer | algorithms (`algorithm.query`) |
@@ -25,14 +25,11 @@ Deterministic, callback-based spatial acceleration: a median-split BVH over boun
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-28):
+Latest release, 0.3.5 (2026-10-28):
 
 ### Changed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 Full history: [`crates/algorithms/query/spatial/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/spatial/CHANGELOG.md)

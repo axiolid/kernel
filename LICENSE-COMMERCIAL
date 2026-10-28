@@ -3,15 +3,16 @@ LicenseRef-Commercial
 
 Axiolid is dual-licensed. You may use it under the Mozilla Public License
 2.0 (see LICENSE), or under a separate commercial licence agreed in writing
-with the copyright holder.
+with rheonda UG (haftungsbeschränkt).
 
-A commercial licence is available from the copyright holder, Friedrich
-Schrödter (GitHub: GeneralPawz). Ask through
-https://github.com/axiolid/kernel.
+Copyright: Friedrich Schrödter. Commercial licences are available from
+rheonda UG (haftungsbeschränkt) (https://github.com/rheonda), which
+licenses Axiolid commercially with the copyright holder's permission.
 
-Only a signed written agreement with the copyright holder grants a
-commercial licence. This file grants no rights by itself. Without such an
-agreement, Axiolid is available to you under MPL-2.0 only.
+Only a signed written agreement with rheonda UG (haftungsbeschränkt)
+grants a commercial licence. This file grants no rights by itself.
+Without such an agreement, Axiolid is available to you under MPL-2.0
+only.
 
 The commercial option does not cover third-party code that Axiolid contains
 under its original licence. In particular, the absorbed mesh boolean in

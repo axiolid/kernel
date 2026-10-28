@@ -29,10 +29,13 @@ Every crate's licence is the SPDX expression
 `MPL-2.0`.
 
 - `LICENSE` stays the MPL-2.0 text. `LICENSE-COMMERCIAL` defines the
-  `LicenseRef-Commercial` reference. It says a commercial licence is
-  available from the copyright holder by signed written agreement, grants
-  nothing itself, and excludes third-party code. It names no licensee:
-  each grant is its own agreement.
+  `LicenseRef-Commercial` reference. It says commercial licences are
+  available from rheonda UG (haftungsbeschränkt), which licenses Axiolid commercially with the
+  copyright holder's permission, by signed written agreement; it grants
+  nothing itself and excludes third-party code. (Amended 2026-10-28: the
+  first version named only the copyright holder.)
+- The package metadata names rheonda UG (haftungsbeschränkt) as `authors` in
+  `[workspace.package]`.
 - Contributions come in under contributor terms in
   `docs/guide/licensing.md`. The contributor keeps the copyright, licenses
   the contribution under MPL-2.0, and grants the holder a licence to use
@@ -48,7 +51,7 @@ Every crate's licence is the SPDX expression
 | --- | --- |
 | Stay MPL-2.0 only | Linking is fine, but a user who ships modified files has no way to avoid publishing them. |
 | Relicense to a permissive licence | Gives up the requirement that distributed kernel improvements stay open. |
-| Name the licensee in the repository | A grant is a private agreement; the repository only has to say that the option exists. |
+| Name only the copyright holder as licensor | Superseded on 2026-10-28: commercial licences come from rheonda UG (haftungsbeschränkt), so the repository says so. |
 | A separate signed CLA (bot, signatures) | More process than a single-maintainer project needs today. The terms apply on submission and can become a signed CLA if outside contributions grow. |
 | Release every crate now | Sixty releases for metadata alone; the next normal releases carry it (#358). |
 

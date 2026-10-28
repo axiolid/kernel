@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.15 (2026-10-28) |
+| Latest release | 0.3.16 (2026-10-28) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,14 +54,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.15 (2026-10-28):
+Latest release, 0.3.16 (2026-10-28):
 
 ### Changed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

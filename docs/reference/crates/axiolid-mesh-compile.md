@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.33 (2026-10-28) |
+| Latest release | 0.3.34 (2026-10-28) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,15 +78,11 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.33 (2026-10-28):
+Latest release, 0.3.34 (2026-10-28):
 
-### Fixed
+### Changed
 
-- A mesh `Revolution` or `TaperedRevolution` whose profile crosses the axis
-  now fails with `InvalidInput` instead of compiling a self-intersecting
-  solid, and one touching it with `UnsupportedInput` instead of compiling a
-  degenerate solid, for full and partial turns alike (#351, from
-  `axiolid-construct`; proper meshing of touching profiles is tracked in
-  #363).
+- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
+  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

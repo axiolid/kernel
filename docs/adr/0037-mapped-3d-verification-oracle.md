@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-03
-- **Deciders:** point-grey
+- **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 
 ## Context
