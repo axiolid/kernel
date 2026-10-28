@@ -2,8 +2,8 @@
 //!
 //! See the parent module for what each path's bound rests on.
 
-use axiolid_construct::pipe::{fixed_reference_twist, PathPiece};
-use axiolid_construct::profile::{profile_deviation, ProfileDeviation};
+use axiolid_construct::pipe::{fixed_reference_plan, ring_reach, FixedReferencePlan};
+use axiolid_construct::profile::{profile_deviation, profile_rings, ProfileDeviation};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult};
 use axiolid_core::{Point3, Scalar, Vec3};
 use axiolid_curve::Curve3;
@@ -159,32 +159,41 @@ pub(crate) fn of_solid(
         } => {
             let deviation = profile(*id, half)?;
             // A tangent-continuous chain of segments and arcs is swept
-            // piece by piece (#122): proven when no arc twists the frame.
-            if let Some(path) =
-                crate::directrix::exact_pieces(graph, *directrix, *parameter_range, options)?
-            {
-                let twists =
-                    fixed_reference_twist(&path.pieces, *reference_direction, tolerance.angular())
-                        .is_some();
-                if twists {
-                    (
+            // piece by piece (#122): proven when no arc twists the frame
+            // past what the walls pay for.
+            if let Some(path) = crate::directrix::fixed_reference_pieces(
+                graph,
+                *directrix,
+                *parameter_range,
+                options,
+            )? {
+                let reach = match graph.get(*id) {
+                    Some(GeometryNode::Profile(shape)) => {
+                        ring_reach(&profile_rings(shape, half, tolerance)?)
+                    }
+                    _ => 0.0,
+                };
+                let plan = fixed_reference_plan(
+                    &path.pieces,
+                    path.closed,
+                    *reference_direction,
+                    reach,
+                    chord,
+                    tolerance,
+                )?;
+                match plan {
+                    FixedReferencePlan::Untwisted(chain) => (
+                        DeviationPath::FixedReferenceSweep,
+                        "segments and arcs",
+                        proven(deviation, chain.walls()),
+                    ),
+                    _ => (
                         DeviationPath::FixedReferenceSweep,
                         "",
                         DeviationBound::Unbounded(
                             "fixed-reference sweep: the frame twists along an arc oblique to the reference",
                         ),
-                    )
-                } else {
-                    let walls = if matches!(path.pieces.as_slice(), [PathPiece::Segment { .. }]) {
-                        0.0
-                    } else {
-                        half
-                    };
-                    (
-                        DeviationPath::FixedReferenceSweep,
-                        "segments and arcs",
-                        proven(deviation, walls),
-                    )
+                    ),
                 }
             } else {
                 // Sampled directrices: a curve that is a segment in all but

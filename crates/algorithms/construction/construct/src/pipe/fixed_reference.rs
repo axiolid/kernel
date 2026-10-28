@@ -22,6 +22,30 @@
 //! within `chord / 2` of the triangles, a lone segment within nothing. The
 //! caller adds the rings' own distance from a curved profile.
 //!
+//! # The twist term
+//!
+//! A reference that only nearly is normal to the plane or in it is no
+//! exception to be waved through: the exact frame then turns about the
+//! tangent off the rotation-minimising stations by an angle `delta` that
+//! grows along the arc. Both frames lie in the plane of the arc's axis `n`
+//! and the tangent's in-plane normal `nu`; the rotation-minimising one at
+//! fixed coordinates `(a, q(0))`, the exact one at `(a, q(phi))`, with `a`
+//! the reference's component along `n` and `q` its component along `nu`.
+//! The angle between them is monotone in `q`, so its largest value is read
+//! at the arc's ends and where `q` has an extremum (`arc_twist`). A profile
+//! vertex at `reach` from the origin moves by at most `2 reach sin(delta/2)`
+//! between the two, and that is added to the walls' share of the budget. A
+//! term above an eighth of the budget leaves the arc to the sampled sweep
+//! ([`FixedReferencePlan::Twisting`], reported unbounded).
+//!
+//! Each piece starts from the exact frame at its own start, not carried over
+//! a joint. At a kink `theta`, within the joint tolerance, the re-seeded
+//! frame turns about the tangent by about `theta cot(beta)` against the
+//! previous piece's end, `beta` being the reference's angle to the tangent.
+//! That and the previous arc's twist at its end are paid by the first span
+//! of the next piece; above a quarter of the budget the joint is refused as
+//! a corner for this reference.
+//!
 //! # Refusals
 //!
 //! The IFC rule is that the directrix of a fixed-reference sweep shall be
@@ -34,11 +58,10 @@
 //! is refused: the solid would fold through it, and the revolution would
 //! pinch.
 //!
-//! An arc oblique to the reference (neither normal to it nor containing it)
-//! twists the frame about the tangent, and the fixed-reference frame is no
-//! longer the rotation-minimising one: [`fixed_reference_plan`] reports it
-//! as [`FixedReferencePlan::Twisting`] and the caller sweeps it as sampled
-//! and reports it unbounded; nothing here vouches for it.
+//! An arc oblique to the reference twists the frame about the tangent by
+//! more than the term allows: [`fixed_reference_plan`] reports it as
+//! [`FixedReferencePlan::Twisting`] and the caller sweeps it as sampled and
+//! reports it unbounded; nothing here vouches for it.
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Scalar, Tolerance, Vec3};
@@ -63,24 +86,58 @@ pub enum FixedReferencePlan {
     },
 }
 
-/// A chain checked for a fixed-reference sweep.
+/// A chain checked for a fixed-reference sweep; only [`fixed_reference_plan`]
+/// makes one, so a chain in hand has passed its checks.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct FixedReferenceChain {
+    pieces: Vec<PathPiece>,
+    reference: Vec3,
+    closed: bool,
+    chord: Scalar,
+    reach: Scalar,
+    walls: Scalar,
+}
+
+impl FixedReferenceChain {
     /// The pieces, in the direction of travel.
-    pub pieces: Vec<PathPiece>,
+    #[must_use]
+    pub fn pieces(&self) -> &[PathPiece] {
+        &self.pieces
+    }
+
     /// The unit reference direction.
-    pub reference: Vec3,
-    /// Whether the last piece ends where the first starts (the path's own
-    /// flag, or its end within the linear tolerance of its start).
-    pub closed: bool,
+    #[must_use]
+    pub const fn reference(&self) -> Vec3 {
+        self.reference
+    }
+
+    /// Whether the last piece joins the first as a loop (see
+    /// [`fixed_reference_plan`]).
+    #[must_use]
+    pub const fn closed(&self) -> bool {
+        self.closed
+    }
+
     /// The chord budget of the walls.
-    pub chord: Scalar,
+    #[must_use]
+    pub const fn chord(&self) -> Scalar {
+        self.chord
+    }
+
     /// The profile's furthest ring vertex from its origin.
-    pub reach: Scalar,
+    #[must_use]
+    pub const fn reach(&self) -> Scalar {
+        self.reach
+    }
+
     /// The proven distance of the walls from the exact surface: zero for
-    /// exactly one segment, else half the chord budget.
-    pub walls: Scalar,
+    /// exactly one segment, else half the chord budget plus the largest
+    /// twist term of an arc (see the module notes).
+    #[must_use]
+    pub const fn walls(&self) -> Scalar {
+        self.walls
+    }
 }
 
 /// The furthest ring vertex from the profile's origin.
@@ -98,41 +155,53 @@ fn refuse(what: String) -> GeomError {
     GeomError::InvalidInput(format!("fixed-reference sweep: {what}"))
 }
 
-/// How an arc lies to the reference.
-enum Lie {
-    /// The reference is normal to the arc's plane.
-    Normal,
-    /// The reference lies in the arc's plane.
-    InPlane,
-    /// Neither: the frame twists.
-    Oblique,
+/// The largest share of the chord budget the exact frame's twist off the
+/// rotation-minimising one may take before an arc is left to the sampled
+/// sweep, and the share of it a joint's re-seeding may take together with
+/// its kink.
+const TWIST_SHARE: Scalar = 0.125;
+const JOINT_SHARE: Scalar = 0.25;
+
+/// The turn about the tangent between the exact fixed-reference frame and
+/// the rotation-minimising frame carried from the arc's start, largest over
+/// the arc and at its end.
+///
+/// With `n` the axis, `a` the reference's component along it and `q(phi)`
+/// the reference's component along the in-plane normal `nu(phi)` of the
+/// tangent, both frames lie in the plane of `n` and `nu`: the rotation-
+/// minimising one at fixed coordinates `(a, q(0))`, the exact one at
+/// `(a, q(phi))`, `q(phi) = rho sin(alpha - phi)` for the in-plane part
+/// `rho`. The angle is monotone in `q`, so its largest value is at an end of
+/// the arc or where `q` has an extremum.
+fn arc_twist(piece: &PathPiece, r: Vec3) -> (Scalar, Scalar) {
+    let PathPiece::Arc { axis, angle, .. } = *piece else {
+        return (0.0, 0.0);
+    };
+    let t0 = piece.start_tangent();
+    let e2 = (axis * angle.signum()).cross(t0);
+    let p = r - axis * r.dot(axis);
+    let a = r.dot(axis).abs();
+    let (qc, qs) = (p.dot(e2), p.dot(t0));
+    let q = |phi: Scalar| qc * phi.cos() - qs * phi.sin();
+    let theta = |phi: Scalar| q(phi).atan2(a);
+    let turned = angle.abs();
+    let alpha = qc.atan2(qs);
+    let first = (alpha - core::f64::consts::FRAC_PI_2).rem_euclid(core::f64::consts::PI);
+    let start = theta(0.0);
+    let end = (theta(turned) - start).abs();
+    let largest = (0..3)
+        .map(|j| first + j as Scalar * core::f64::consts::PI)
+        .filter(|phi| *phi <= turned)
+        .map(|phi| (theta(phi) - start).abs())
+        .fold(end, Scalar::max);
+    let safe = 1.0 + 1e-9;
+    (largest * safe, end * safe)
 }
 
-fn lie(axis: Vec3, reference: Vec3, angular: Scalar) -> Lie {
-    let (across, along) = (reference.cross(axis).length(), reference.dot(axis).abs());
-    if across.atan2(along) <= angular {
-        Lie::Normal
-    } else if along.atan2(across) <= angular {
-        Lie::InPlane
-    } else {
-        Lie::Oblique
-    }
-}
-
-/// The first arc oblique to `reference` (a direction, normalised here) by
-/// more than `angular` from both its normal and its plane: where the frame
-/// twists.
-#[must_use]
-pub fn fixed_reference_twist(
-    pieces: &[PathPiece],
-    reference: Vec3,
-    angular: Scalar,
-) -> Option<usize> {
-    let r = reference.normalize_or_zero();
-    pieces.iter().position(|piece| match *piece {
-        PathPiece::Arc { axis, .. } => matches!(lie(axis, r, angular), Lie::Oblique),
-        _ => false,
-    })
+/// How far a profile vertex at `reach` moves when turned by `delta` about
+/// the tangent.
+fn twist_term(reach: Scalar, delta: Scalar) -> Scalar {
+    2.0 * reach * (0.5 * delta).min(core::f64::consts::FRAC_PI_2).sin()
 }
 
 /// The smallest angle between `reference` and the line of the tangent over
@@ -170,11 +239,22 @@ pub fn reference_clearance(piece: &PathPiece, reference: Vec3) -> Scalar {
 /// Check a chain of pieces for a fixed-reference sweep of a profile of
 /// `reach` at wall budget `chord` and decide whether the bound is proven.
 ///
+/// `closed` is whether the path declares itself a loop (a closed polyline):
+/// its closing joint is then checked like any other. An undeclared chain is
+/// a loop all the same when its last piece ends where its first starts, to
+/// rounding, and the joint there is tangent continuous (a full circle, a
+/// composite closing on itself); where it is not, the ends just meet and the
+/// chain is open, nothing refused.
+///
 /// Refused by name, in this order: no pieces or a reference, chord or reach
 /// that is zero or not finite; a malformed piece; a joint with a gap above a
-/// quarter of `chord` or a corner (the closing joint of a loop included);
-/// a segment, or an arc normal to or containing the reference, that comes
-/// within the angular tolerance of the reference's direction.
+/// quarter of `chord` or a corner; a piece whose tangent comes within the
+/// angular tolerance of the reference's direction; a joint whose kink
+/// turns the re-seeded profile (by about the kink times the cotangent of the
+/// reference's angle to the tangent) further than a quarter of `chord` at
+/// `reach`. An arc whose exact frame twists off the rotation-minimising one
+/// by more than an eighth of `chord` at `reach` is reported
+/// [`FixedReferencePlan::Twisting`]; a smaller twist is added to the walls.
 pub fn fixed_reference_plan(
     pieces: &[PathPiece],
     closed: bool,
@@ -204,10 +284,14 @@ pub fn fixed_reference_plan(
     }
     let angular = tolerance.angular();
     let m = pieces.len();
-    let loops =
-        closed || pieces[m - 1].end_point().distance(pieces[0].start_point()) <= tolerance.linear();
     let allowed = joint_tolerance(chord, reach);
-    for k in 0..if loops { m } else { m - 1 } {
+    let rounding = 1e-12 * pieces.iter().map(PathPiece::length).sum::<Scalar>();
+    let (last, first) = (&pieces[m - 1], &pieces[0]);
+    let loops = closed
+        || (last.end_point().distance(first.start_point()) <= rounding
+            && turn(last.end_tangent(), first.start_tangent()) <= allowed);
+    let joints = if loops { m } else { m - 1 };
+    for k in 0..joints {
         let (a, b) = (&pieces[k], &pieces[(k + 1) % m]);
         let gap = a.end_point().distance(b.start_point());
         if gap > 0.25 * chord {
@@ -224,13 +308,6 @@ pub fn fixed_reference_plan(
         }
     }
     for (i, piece) in pieces.iter().enumerate() {
-        let straight = match *piece {
-            PathPiece::Arc { axis, .. } => !matches!(lie(axis, r, angular), Lie::Oblique),
-            PathPiece::Segment { .. } => true,
-        };
-        if !straight {
-            continue;
-        }
         let clearance = reference_clearance(piece, r);
         if clearance <= angular {
             return Err(refuse(format!(
@@ -239,13 +316,37 @@ pub fn fixed_reference_plan(
             )));
         }
     }
-    if let Some(piece) = fixed_reference_twist(pieces, r, angular) {
-        return Ok(FixedReferencePlan::Twisting { piece });
+    let mut twist: Scalar = 0.0;
+    let mut ends = vec![0.0; m];
+    for (i, piece) in pieces.iter().enumerate() {
+        let (largest, end) = arc_twist(piece, r);
+        let term = twist_term(reach, largest);
+        if term > TWIST_SHARE * chord {
+            return Ok(FixedReferencePlan::Twisting { piece: i });
+        }
+        twist = twist.max(term);
+        ends[i] = twist_term(reach, end);
+    }
+    for k in 0..joints {
+        let (a, b) = (&pieces[k], &pieces[(k + 1) % m]);
+        let (ta, tb) = (a.end_tangent(), b.start_tangent());
+        let xa = Frame::from_reference(a.end_point(), ta, r)?.x;
+        let xb = Frame::from_reference(b.start_point(), tb, r)?.x;
+        let kink = turn(ta, tb);
+        let reseed = turn(super::least_rotation(xa, ta, tb), xb);
+        let shift = reach * (kink + reseed) + ends[k];
+        if shift > JOINT_SHARE * chord {
+            return Err(refuse(format!(
+                "joint {k} turns the profile by {reseed} rad for this reference (a kink of \
+                 {kink} rad), moving it {shift}: a corner for this reference, above a quarter \
+                 of the chord budget {chord}"
+            )));
+        }
     }
     let walls = if matches!(pieces, [PathPiece::Segment { .. }]) {
         0.0
     } else {
-        0.5 * chord
+        0.5 * chord + twist
     };
     Ok(FixedReferencePlan::Untwisted(FixedReferenceChain {
         pieces: pieces.to_vec(),
@@ -298,8 +399,25 @@ fn check_shape(i: usize, piece: &PathPiece) -> GeomResult<()> {
     Ok(())
 }
 
+/// The budget errors a piece's refinement raises, worded for this sweep.
+fn named(error: GeomError) -> GeomError {
+    match error {
+        GeomError::BudgetExceeded {
+            resource: "swept disk directrix refinement",
+        } => GeomError::BudgetExceeded {
+            resource: "fixed-reference sweep directrix refinement",
+        },
+        GeomError::BudgetExceeded {
+            resource: "swept disk bend steps",
+        } => GeomError::BudgetExceeded {
+            resource: "fixed-reference sweep bend steps",
+        },
+        other => other,
+    }
+}
+
 /// Sweep `rings` along a planned chain so that every point of the exact
-/// surface lies within `chain.walls` of the mesh (see the module notes).
+/// surface lies within `chain.walls()` of the mesh (see the module notes).
 ///
 /// Each piece starts from the fixed-reference frame at its own start, never
 /// carried across a joint; consecutive pieces share one station, and a loop
@@ -308,9 +426,9 @@ pub fn fixed_reference_along_pieces(
     rings: &Rings,
     chain: &FixedReferenceChain,
 ) -> GeomResult<TriMesh> {
-    let reference = chain.reference;
-    let share = 0.5 * chain.chord;
-    for (i, piece) in chain.pieces.iter().enumerate() {
+    let reference = chain.reference();
+    let share = 0.5 * chain.chord();
+    for (i, piece) in chain.pieces().iter().enumerate() {
         if let PathPiece::Arc { centre, start, .. } = *piece {
             let frame = Frame::from_reference(start, piece.start_tangent(), reference)?;
             let bend = (start - centre).length();
@@ -330,11 +448,11 @@ pub fn fixed_reference_along_pieces(
             }
         }
     }
-    let m = chain.pieces.len();
+    let m = chain.pieces().len();
     let mut stations: Vec<Station> = Vec::new();
-    for (i, piece) in chain.pieces.iter().enumerate() {
+    for (i, piece) in chain.pieces().iter().enumerate() {
         let seed = Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;
-        let closing = chain.closed && i + 1 == m;
+        let closing = chain.closed() && i + 1 == m;
         let close = match (closing, stations.first()) {
             (false, _) => Close::Open,
             (true, Some(first)) => Close::To(first),
@@ -356,17 +474,18 @@ pub fn fixed_reference_along_pieces(
             sample,
             rings,
             seed,
-            chain.reach,
+            chain.reach(),
             share,
             stations.last(),
             [None, None],
             close,
-        )?;
+        )
+        .map_err(named)?;
         let skip = usize::from(!stations.is_empty());
         let keep = placed.len() - usize::from(closing);
         stations.extend(placed.into_iter().take(keep).skip(skip));
     }
-    let mut mesh = loft::loft(rings, &stations, chain.closed)?;
+    let mut mesh = loft::loft(rings, &stations, chain.closed())?;
     if matches!(crate::extrude::outward_orientation(&mesh), Some(false)) {
         for triangle in mesh.indices.as_chunks_mut::<3>().0 {
             triangle.swap(1, 2);
@@ -459,22 +578,52 @@ mod tests {
     }
 
     #[test]
-    fn an_arc_is_oblique_just_beyond_the_angular_tolerance() {
-        let a = tol().angular();
-        let lean = |theta: Scalar| Vec3::new(0.0, theta.sin(), theta.cos());
-        let tilt = |theta: Scalar| Vec3::new(theta.cos(), 0.0, theta.sin());
+    fn an_arc_pays_for_the_twist_of_its_lean() {
+        let (reach, exact) = (0.07, 0.5 * CHORD);
+        let walls = |pieces: &[PathPiece], reference: Vec3| match fixed_reference_plan(
+            pieces,
+            false,
+            reference,
+            reach,
+            CHORD,
+            tol(),
+        )
+        .unwrap()
+        {
+            FixedReferencePlan::Untwisted(chain) => Some(chain.walls()),
+            FixedReferencePlan::Twisting { .. } => None,
+        };
         let pieces = [arc(1.0)];
-        for (reference, twists) in [
-            (lean(a * (1.0 - 1e-6)), false),
-            (lean(a * (1.0 + 1e-6)), true),
-            (tilt(a * (1.0 - 1e-6)), false),
-            (tilt(a * (1.0 + 1e-6)), true),
+        assert_eq!(walls(&pieces, Vec3::Z), Some(exact));
+        for lean in [
+            |l: Scalar| Vec3::new(0.0, l.sin(), l.cos()),
+            |l: Scalar| Vec3::new(l.sin(), 0.0, l.cos()),
         ] {
-            let found = fixed_reference_twist(&pieces, reference, a);
-            assert_eq!(found, twists.then_some(0), "{reference:?}");
+            // A small lean is paid for: at most the rim's chord at twice
+            // the lean, and more than nothing.
+            let small = 1e-4;
+            let w = walls(&pieces, lean(small)).expect("untwisted");
+            assert!(w > exact && w <= exact + reach * 2.0 * small * 1.01, "{w}");
+            // A large one is left to the sampled sweep.
+            assert_eq!(walls(&pieces, lean(1e-2)), None);
         }
         let twisting = plan(&pieces, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         assert_eq!(twisting, FixedReferencePlan::Twisting { piece: 0 });
+    }
+
+    #[test]
+    fn the_twist_is_the_measured_turn_of_the_exact_frame() {
+        // A reference leaning from the normal by `lean`: over a quarter turn
+        // the exact frame turns off the rotation-minimising one by the lean.
+        let lean: Scalar = 9e-4;
+        let r = Vec3::new(lean.sin(), 0.0, lean.cos());
+        let (largest, end) = arc_twist(&arc(FRAC_PI_2), r);
+        assert!((largest - lean).abs() < 1e-9 && (end - lean).abs() < 1e-9);
+        // Over a full turn it peaks at twice the lean, where q changes sign.
+        let (largest, _) = arc_twist(&arc(TAU), r);
+        assert!((largest - 2.0 * lean).abs() < 1e-8, "{largest}");
+        // Exactly normal: none.
+        assert_eq!(arc_twist(&arc(1.0), Vec3::Z), (0.0, 0.0));
     }
 
     #[test]
@@ -550,6 +699,19 @@ mod tests {
         // An in-plane arc whose tangent reaches the reference.
         let message = refusal(plan(&[arc(PI + 0.5)], Vec3::new(1.0, 1.0, 0.0)));
         assert!(message.contains("piece 0"), "{message}");
+        // A kink within the joint tolerance that turns the re-seeded profile
+        // far: the reference nearly along the tangent.
+        let kinked = [
+            segment([0.0; 3], [1.0, 0.0, 0.0]),
+            segment([1.0, 0.0, 0.0], [2.0, 0.003, 0.0]),
+        ];
+        let flat = Vec3::new(0.05f64.cos(), 0.0, 0.05f64.sin());
+        let message = refusal(plan(&kinked, flat));
+        assert!(
+            message.contains("joint 0") && message.contains("corner for this reference"),
+            "{message}"
+        );
+        assert!(plan(&kinked, Vec3::Z).is_ok());
     }
 
     #[test]
@@ -557,7 +719,7 @@ mod tests {
         let one = segment([0.0; 3], [1.0, 0.0, 0.0]);
         let two = segment([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
         let walls = |pieces: &[PathPiece]| match plan(pieces, Vec3::Z).unwrap() {
-            FixedReferencePlan::Untwisted(chain) => chain.walls,
+            FixedReferencePlan::Untwisted(chain) => chain.walls(),
             other => panic!("{other:?}"),
         };
         assert_eq!(walls(&[one]), 0.0);
@@ -582,7 +744,7 @@ mod tests {
     #[test]
     fn a_full_circle_with_a_normal_reference_is_a_closed_torus() {
         let chain = untwisted(&[arc(TAU)], false, Vec3::Z);
-        assert!(chain.closed);
+        assert!(chain.closed());
         let mesh = fixed_reference_along_pieces(&square(-0.05, 0.05), &chain).unwrap();
         // Area times the centreline length (a centred profile).
         let got = volume(&mesh);

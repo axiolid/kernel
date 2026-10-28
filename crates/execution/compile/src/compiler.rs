@@ -1130,9 +1130,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 // piece by piece with a proven bound, a corner refused (#122);
                 // an arc oblique to the reference, or any other family, is
                 // swept as sampled.
-                if let Some(path) =
-                    crate::directrix::exact_pieces(graph, *directrix, *parameter_range, options)?
-                {
+                if let Some(path) = crate::directrix::fixed_reference_pieces(
+                    graph,
+                    *directrix,
+                    *parameter_range,
+                    options,
+                )? {
                     let plan = axiolid_construct::pipe::fixed_reference_plan(
                         &path.pieces,
                         path.closed,

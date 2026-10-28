@@ -54,6 +54,48 @@ pub(crate) fn exact_pieces(
     resolve(graph, id, range, options, 0)
 }
 
+/// [`exact_pieces`] for a fixed-reference sweep: its refusals say so.
+pub(crate) fn fixed_reference_pieces(
+    graph: &GeometryGraph,
+    id: NodeId,
+    range: Option<(Scalar, Scalar)>,
+    options: &ExecutionOptions,
+) -> GeomResult<Option<PiecePath>> {
+    exact_pieces(graph, id, range, options).map_err(|error| match error {
+        GeomError::InvalidInput(what) => {
+            GeomError::InvalidInput(format!("fixed-reference sweep: {what}"))
+        }
+        GeomError::Degenerate(what) => {
+            GeomError::Degenerate(format!("fixed-reference sweep: {what}"))
+        }
+        GeomError::UnsupportedInput {
+            backend,
+            operation,
+            input,
+        } => GeomError::UnsupportedInput {
+            backend,
+            operation,
+            input: match input {
+                "a swept disk along a composite holding a closed polyline" => {
+                    "a fixed-reference sweep along a composite holding a closed polyline"
+                }
+                "a parameter range on a swept disk along a closed polyline" => {
+                    "a parameter range on a fixed-reference sweep along a closed polyline"
+                }
+                other => other,
+            },
+        },
+        GeomError::BudgetExceeded { resource } => GeomError::BudgetExceeded {
+            resource: if resource == "directrix relation depth" {
+                "fixed-reference sweep directrix relation depth"
+            } else {
+                resource
+            },
+        },
+        other => other,
+    })
+}
+
 type Resolved = Option<PiecePath>;
 
 /// Open pieces.

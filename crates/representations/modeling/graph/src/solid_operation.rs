@@ -91,7 +91,7 @@ pub enum SolidOperation {
     /// oblique to the reference as sampled and reports it unbounded. It
     /// refuses a corner, a reference parallel to the tangent, a gap between
     /// pieces and a profile that reaches an arc's axis by name. A closed
-    /// directrix is swept without caps.
+    /// chain it proves is swept without caps.
     FixedReferenceSweep {
         profile: NodeId,
         directrix: NodeId,

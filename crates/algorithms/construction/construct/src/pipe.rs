@@ -191,8 +191,8 @@ mod band;
 mod fixed_reference;
 pub use band::MitreBand;
 pub use fixed_reference::{
-    fixed_reference_along_pieces, fixed_reference_plan, fixed_reference_twist, reference_clearance,
-    ring_reach, FixedReferenceChain, FixedReferencePlan,
+    fixed_reference_along_pieces, fixed_reference_plan, reference_clearance, ring_reach,
+    FixedReferenceChain, FixedReferencePlan,
 };
 
 /// One smooth piece of a swept disk's directrix.

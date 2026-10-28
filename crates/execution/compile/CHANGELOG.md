@@ -15,20 +15,26 @@ caret rule for `0.x` versions.
   circular arcs, open or closed, is proven within the chord budget (the
   profile's share plus half the budget for the walls, none along one
   segment) when the reference is normal to the plane of every arc or lies
-  in it; the deviation report names it "segments and arcs" (#122).
-  An arc oblique to the reference is still swept as sampled and reported
-  unbounded.
+  in it, plus the twist of a reference that only nearly is; the deviation
+  report names it "segments and arcs" (#122). An arc whose twist is more
+  than an eighth of the budget (oblique to the reference) is still swept as
+  sampled and reported unbounded.
 
 ### Changed
 
 - A fixed-reference sweep refuses a corner in its directrix by name, as the
-  format requires a tangent-continuous directrix, and sweeps a closed
-  directrix without caps (#122).
+  format requires a tangent-continuous directrix (#122). A closed chain
+  proven by the segment and arc path is swept without caps; a twisting one
+  is still swept as sampled and capped. The deviation detail of a proven
+  segment or arc is now "segments and arcs".
 
 ### Fixed
 
 - A swept disk wider than the bend of a lone arc it follows is refused
   instead of meshed into a tube that folds through the bend's axis (#122).
+- A fixed-reference sweep along a circle whose frame is not orthonormal
+  (an ellipse in all but name) is reported unbounded, where it was reported
+  proven although it is swept as sampled (#122).
 
 ## [0.3.36] - 2026-10-28
 

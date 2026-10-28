@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use axiolid_contracts::{ExecutionOptions, GeomError};
-use axiolid_core::{Frame3, Point2, Point3, Scalar, Tolerance, Vec3};
-use axiolid_curve::{Circle3, Curve3, Polyline3};
+use axiolid_core::{Frame3, Interval, Point2, Point3, Scalar, Tolerance, Vec2, Vec3};
+use axiolid_curve::{Circle3, Curve2, Curve3, Line2, Polyline3};
 use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -26,7 +26,9 @@ use axiolid_model::{
     CurveRelation, CurveSegment, GeometryGraphBuilder, GeometryNode, NodeId, SolidOperation,
     Transition, TrimSelector, TrimmingPreference,
 };
-use axiolid_profile::{CircleProfile, Profile, RectangleProfile};
+use axiolid_profile::{
+    CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
+};
 
 /// The budgets the sweeps are checked at: 1 mm, 0.1 mm, and an explicit
 /// chord budget finer than the linear tolerance.
@@ -342,6 +344,8 @@ struct Shape {
     region: Vec<Point2>,
     area: Scalar,
     perimeter: Scalar,
+    /// The area's centroid in the profile plane.
+    centroid: Point2,
 }
 
 fn rect(x: Scalar, y: Scalar) -> Shape {
@@ -382,6 +386,7 @@ fn rect(x: Scalar, y: Scalar) -> Shape {
         region,
         area: x * y,
         perimeter: 2.0 * (x + y),
+        centroid: Point2::new(0.0, 0.0),
     }
 }
 
@@ -410,6 +415,73 @@ fn annulus(radius: Scalar, thickness: Scalar) -> Shape {
         region,
         area: PI * (radius * radius - inner * inner),
         perimeter: TAU * (radius + inner),
+        centroid: Point2::new(0.0, 0.0),
+    }
+}
+
+/// An L-section offset from the origin: no symmetry, so a profile turned
+/// half a turn about the tangent lands far from the exact surface.
+fn l_section() -> Shape {
+    let corners = [
+        Point2::new(0.02, 0.0),
+        Point2::new(0.08, 0.0),
+        Point2::new(0.08, 0.02),
+        Point2::new(0.04, 0.02),
+        Point2::new(0.04, 0.06),
+        Point2::new(0.02, 0.06),
+    ];
+    let n = corners.len();
+    let segments = (0..n)
+        .map(|k| {
+            let (p, q) = (corners[k], corners[(k + 1) % n]);
+            ProfileSegment {
+                curve: Curve2::Line(Line2 {
+                    origin: p,
+                    direction: Vec2::new(q.x - p.x, q.y - p.y),
+                }),
+                domain: Interval::UNIT,
+                same_sense: true,
+            }
+        })
+        .collect();
+    let mut boundary = Vec::new();
+    let mut perimeter = 0.0;
+    for k in 0..n {
+        let (p, q) = (corners[k], corners[(k + 1) % n]);
+        perimeter += p.distance(q);
+        boundary.extend((0..40).map(|i| {
+            let t = (i as Scalar + 0.5) / 40.0;
+            Point2::new(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t)
+        }));
+    }
+    // The bar x 0.02..0.08, y 0..0.02 and the stem x 0.02..0.04, y 0.02..0.06.
+    let grid = |x0: Scalar, x1: Scalar, y0: Scalar, y1: Scalar| {
+        (0..20).flat_map(move |i| {
+            (0..20).map(move |j| {
+                Point2::new(
+                    x0 + (x1 - x0) * (i as Scalar + 0.5) / 20.0,
+                    y0 + (y1 - y0) * (j as Scalar + 0.5) / 20.0,
+                )
+            })
+        })
+    };
+    let region = grid(0.02, 0.08, 0.0, 0.02)
+        .chain(grid(0.02, 0.04, 0.02, 0.06))
+        .collect();
+    let (bar, stem) = (0.06 * 0.02, 0.02 * 0.04);
+    Shape {
+        profile: Profile::Contour(ContourProfile {
+            outer: Contour::new(segments),
+            holes: Vec::new(),
+        }),
+        boundary,
+        region,
+        area: bar + stem,
+        perimeter,
+        centroid: Point2::new(
+            (bar * 0.05 + stem * 0.03) / (bar + stem),
+            (bar * 0.01 + stem * 0.04) / (bar + stem),
+        ),
     }
 }
 
@@ -462,14 +534,39 @@ fn sweep(
     .unwrap()
 }
 
-/// The volume is the profile's area times the centreline length, up to
-/// the budget over the surface.
-fn assert_volume(name: &str, mesh: &TriMesh, shape: &Shape, length: Scalar, budget: Scalar) {
+/// The volume is the profile's area times the length of its centroid's path
+/// (Pappus for each bend, the centroid placed by the fixed-reference law),
+/// up to the budget over the surface.
+fn assert_volume(
+    name: &str,
+    mesh: &TriMesh,
+    shape: &Shape,
+    legs: &[Leg],
+    reference: Vec3,
+    budget: Scalar,
+) {
     let got = axiolid_measure::volume_properties(mesh, Tolerance::new(1e-9, 1e-9).unwrap())
         .unwrap_or_else(|e| panic!("{name}: not a closed two-manifold: {e:?}"))
         .signed_volume;
-    let want = shape.area * length;
-    let surface = shape.perimeter * length + 2.0 * shape.area;
+    let mut path = 0.0;
+    for leg in legs {
+        path += match *leg {
+            Leg::Straight { length, .. } => length,
+            Leg::Bend {
+                centre,
+                axis,
+                from,
+                angle,
+            } => {
+                let t = leg.tangent(0.0);
+                let x = (reference - t * t.dot(reference)).normalize();
+                let c = from + x * shape.centroid.x + t.cross(x) * shape.centroid.y - centre;
+                (c - axis * c.dot(axis)).length() * angle.abs()
+            }
+        };
+    }
+    let want = shape.area * path;
+    let surface = shape.perimeter * length_of(legs) + 2.0 * shape.area;
     assert!(
         got > 0.0 && (got - want).abs() <= surface * budget,
         "{name}: volume {got} against {want} (surface {surface}, budget {budget:e})"
@@ -489,7 +586,7 @@ fn check_chain(name: &str, legs: &[Leg], reference: Vec3, shape: &Shape, closed:
         );
         assert_within(name, &mesh, &exact, budget);
         assert_watertight(name, &mesh);
-        assert_volume(name, &mesh, shape, length_of(legs), budget);
+        assert_volume(name, &mesh, shape, legs, reference, budget);
         assert!(report.meets_requested(), "{name}: {report:?}");
     }
 }
@@ -514,6 +611,17 @@ fn a_rectangle_swept_along_a_tangent_chain_stays_within_the_budget() {
 }
 
 #[test]
+fn an_asymmetric_profile_keeps_its_side_along_a_tangent_chain() {
+    check_chain(
+        "L-section along line-arc-line",
+        &line_arc_line(),
+        Vec3::Z,
+        &l_section(),
+        false,
+    );
+}
+
+#[test]
 fn a_profile_with_arcs_and_a_hole_stays_within_the_budget() {
     check_chain(
         "annulus along line-arc-line",
@@ -527,21 +635,18 @@ fn a_profile_with_arcs_and_a_hole_stays_within_the_budget() {
 #[test]
 fn a_curved_beam_with_an_in_plane_reference_stays_within_the_budget() {
     // One arc of 2 rad about Z; the reference is the arc's mid radial
-    // direction, so the profile's +y maps to -Z along all of it.
+    // direction, so the profile's +y maps to -Z along all of it. The
+    // L-section is asymmetric: the mesh must put its flange on the exact
+    // side, which only the right sign of the seed does.
     let legs = Turtle::new(Point3::new(2.0, 0.0, 0.0), Vec3::Y)
         .bend(Vec3::Z, 2.0, 2.0)
         .legs;
     let reference = Vec3::new(1.0f64.cos(), 1.0f64.sin(), 0.0);
-    for s in [0.0, 0.3, 1.0] {
-        let t = legs[0].tangent(s);
-        let x = (reference - t * t.dot(reference)).normalize();
-        assert!((t.cross(x).dot(Vec3::Z).abs() - 1.0).abs() < 1e-12);
-    }
     check_chain(
         "curved beam, in-plane reference",
         &legs,
         reference,
-        &rect(0.1, 0.08),
+        &l_section(),
         false,
     );
 }
@@ -560,7 +665,7 @@ fn an_in_plane_reference_along_a_chain_is_re_seeded_at_each_piece() {
         "in-plane reference along line-arc-line",
         &legs,
         Vec3::new(-1.0, 1.0, 0.0),
-        &rect(0.04, 0.06),
+        &l_section(),
         false,
     );
 }
@@ -572,7 +677,7 @@ fn an_arch_in_a_vertical_plane_stays_within_the_budget() {
         .bend(-Vec3::Y, 0.5, PI)
         .straight(0.6)
         .legs;
-    check_chain("arch", &legs, Vec3::Y, &rect(0.05, 0.07), false);
+    check_chain("arch", &legs, Vec3::Y, &l_section(), false);
 }
 
 #[test]
@@ -887,4 +992,126 @@ fn a_disk_wider_than_a_lone_arcs_bend_is_refused() {
     refusal(disk(0.1), "equals the bend radius");
     let (mesh, _) = compile(disk(0.05), &options(1e-3));
     assert_watertight("narrow disk on a lone arc", &mesh);
+}
+
+// --- a reference that only nearly is normal to the arc ----------------------
+
+#[test]
+fn a_leaning_reference_is_paid_for_or_left_unbounded() {
+    let tolerance = Tolerance::new(1e-4, 1e-3).unwrap();
+    let options = ExecutionOptions::new(tolerance);
+    let chord = 1e-4;
+    let shape = rect(0.2, 0.2);
+    let legs = [Leg::Bend {
+        centre: Point3::ZERO,
+        axis: Vec3::Z,
+        from: Point3::new(1.0, 0.0, 0.0),
+        angle: FRAC_PI_2,
+    }];
+    let build = |reference: Vec3| {
+        let profile = shape.profile.clone();
+        move |b: &mut GeometryGraphBuilder| {
+            let directrix = composite(b, &legs);
+            sweep(b, profile, directrix, reference, None)
+        }
+    };
+    // The exact frame twists off the rotation-minimising stations by the
+    // lean, which at the profile's corners is more than the walls' share:
+    // never a bound the mesh misses.
+    let lean = 9e-4f64;
+    let (mesh, report) = compile(build(Vec3::new(lean.sin(), 0.0, lean.cos())), &options);
+    assert_eq!(report.bound, None, "{report:?}");
+    assert!(!mesh.indices.is_empty());
+    // A small lean is proven, its twist added to the walls.
+    let lean = 5e-5f64;
+    let reference = Vec3::new(lean.sin(), 0.0, lean.cos());
+    let (mesh, report) = compile(build(reference), &options);
+    let bound = report.bound.expect("a proven bound");
+    let reach = 0.1f64.hypot(0.1);
+    assert!(
+        bound > 0.5 * chord && bound <= 0.5 * chord + reach * 2.0 * lean * 1.01,
+        "{report:?}"
+    );
+    let exact = samples(&legs, reference, &shape, true);
+    assert_within("slightly leaning reference", &mesh, &exact, bound);
+}
+
+#[test]
+fn a_kink_that_swings_a_nearly_tangent_reference_is_a_corner_for_it() {
+    // 0.003 rad is within the joint tolerance of this profile and budget,
+    // but with the reference 0.05 rad off the tangent the re-seeded profile
+    // turns by about 0.06 rad.
+    let build = |reference: Vec3| {
+        move |b: &mut GeometryGraphBuilder| {
+            let path = polyline(b, &[[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.003, 0.0]], false);
+            sweep(b, rect(0.1, 0.1).profile, path, reference, None)
+        }
+    };
+    let flat = Vec3::new(0.05f64.cos(), 0.0, 0.05f64.sin());
+    refusal(build(flat), "corner for this reference");
+    let (mesh, _) = compile(build(Vec3::Z), &options(1e-3));
+    assert!(!mesh.indices.is_empty());
+}
+
+#[test]
+fn a_slit_ring_is_open_not_a_loop_with_a_gap() {
+    // Its ends are 5e-4 apart, above a quarter of the budget: a loop would
+    // refuse the gap, but nothing declared a loop, so the C-ring is swept
+    // open, with caps, as it was before.
+    let (mesh, report) = compile(
+        |b| {
+            let path = circle(b, 1.0);
+            sweep(
+                b,
+                rect(0.02, 0.02).profile,
+                path,
+                Vec3::Z,
+                Some((0.0, TAU - 5e-4)),
+            )
+        },
+        &options(1e-3),
+    );
+    assert_watertight("slit ring", &mesh);
+    assert!(report.meets_requested(), "{report:?}");
+}
+
+#[test]
+fn a_teardrop_closing_at_a_corner_is_open_not_refused() {
+    // Two tangent lines from the apex round a long arc: every interior joint
+    // is tangent continuous, and the end meets the start exactly at a corner.
+    // Nothing declared a loop, and a loop would refuse that corner.
+    let apex = Point3::ZERO;
+    let centre = Point3::new(2.0, 0.0, 0.0);
+    let (below, above) = (
+        centre + Vec3::new(-0.5, -(0.75f64.sqrt()), 0.0),
+        centre + Vec3::new(-0.5, 0.75f64.sqrt(), 0.0),
+    );
+    let length = 3.0f64.sqrt();
+    let legs = [
+        Leg::Straight {
+            from: apex,
+            dir: (below - apex).normalize(),
+            length,
+        },
+        Leg::Bend {
+            centre,
+            axis: Vec3::Z,
+            from: below,
+            angle: 4.0 * PI / 3.0,
+        },
+        Leg::Straight {
+            from: above,
+            dir: (apex - above).normalize(),
+            length,
+        },
+    ];
+    let (mesh, report) = compile(
+        |b| {
+            let path = composite(b, &legs);
+            sweep(b, rect(0.02, 0.02).profile, path, Vec3::Z, None)
+        },
+        &options(1e-3),
+    );
+    assert_watertight("teardrop", &mesh);
+    assert!(report.meets_requested(), "{report:?}");
 }
