@@ -99,7 +99,9 @@ fn cube_top_in_the_plane_is_one_region_below() {
     );
     assert_eq!(result.evidence.in_plane_triangles, 2);
     assert_eq!(result.evidence.touching_edges, 0);
-    assert_eq!(result.evidence.in_plane_pairs, 0, "the two share an edge");
+    // The two triangles overlap in bounding box: one candidate pair, counted
+    // although they share an edge and need no overlap test.
+    assert_eq!(result.evidence.in_plane_pairs, 1);
 }
 
 #[test]
@@ -148,6 +150,21 @@ fn a_transversal_plane_still_gives_the_closed_contour() {
         ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
     );
     assert_eq!(result.evidence.closed_chains, 1);
+}
+
+#[test]
+fn a_mirrored_frame_still_gets_a_counter_clockwise_contour() {
+    // Frame x = X, y = -Y at z = 0.5: local (x, y) is model (x, -y). The
+    // contour is oriented exactly from the triangle windings, not from a float
+    // area: counter-clockwise from its smallest corner (0,-1), the face
+    // diagonals' crossing points dropped as exactly coplanar.
+    let mirrored = frame(Point3::new(0.0, 0.0, 0.5), Vec3::X, -Vec3::Y);
+    let result = section(&cube(), mirrored).expect("section");
+    assert_eq!(result.chains.len(), 1);
+    assert_eq!(
+        result.chains[0].points,
+        ring(&[(0.0, -1.0), (1.0, -1.0), (1.0, 0.0), (0.0, 0.0)])
+    );
 }
 
 #[test]
@@ -270,6 +287,70 @@ fn region_budgets_and_cancellation_are_enforced() {
 
 fn request_for_cube() -> SectionRequest {
     request(horizontal(1.0))
+}
+
+#[test]
+fn registration_runs_the_region_suite_for_a_provider_that_claims_it() {
+    // Delegates everything to the reference provider but answers wrongly.
+    #[derive(Debug)]
+    struct Wrong;
+    impl axiolid_contracts::Backend for Wrong {
+        fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+            ScalarSection::new().descriptor()
+        }
+    }
+    impl MeshPlaneSection for Wrong {
+        fn section(
+            &self,
+            mesh: &TriMesh,
+            frame: Frame3,
+            limits: SectionLimits,
+            options: &ExecutionOptions,
+        ) -> Result<axiolid_mesh_section_contract::SectionOutcome, GeomError> {
+            ScalarSection::new().section(mesh, frame, limits, options)
+        }
+        fn section_request(
+            &self,
+            mesh: &TriMesh,
+            request: &SectionRequest,
+            options: &ExecutionOptions,
+        ) -> Result<PlaneSection, GeomError> {
+            let mut answer = ScalarSection::new().section_request(mesh, request, options)?;
+            answer.regions.clear();
+            Ok(answer)
+        }
+    }
+    // Delegates only the legacy method: the default section_request refuses.
+    #[derive(Debug)]
+    struct Legacy;
+    impl axiolid_contracts::Backend for Legacy {
+        fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+            ScalarSection::new().descriptor()
+        }
+    }
+    impl MeshPlaneSection for Legacy {
+        fn section(
+            &self,
+            mesh: &TriMesh,
+            frame: Frame3,
+            limits: SectionLimits,
+            options: &ExecutionOptions,
+        ) -> Result<axiolid_mesh_section_contract::SectionOutcome, GeomError> {
+            ScalarSection::new().section(mesh, frame, limits, options)
+        }
+    }
+
+    let mut registry = MeshPlaneSectionRegistry::new();
+    registry
+        .register_request_conformant(0, ScalarSection::new())
+        .expect("the reference provider is conformant");
+    registry
+        .register_request_conformant(0, Legacy)
+        .expect("a provider that does not claim the method passes");
+    let report = registry
+        .register_request_conformant(0, Wrong)
+        .expect_err("a claimed wrong answer is rejected");
+    assert!(report.claimed && !report.is_success());
 }
 
 #[test]

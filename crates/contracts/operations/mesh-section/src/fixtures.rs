@@ -204,6 +204,36 @@ fn parapet_with_post() -> TriMesh {
     b.finish()
 }
 
+/// Slab `[0,3]^2 x [0,1]` with a triangular post over A = (0,0), F = (2,1),
+/// E = (1,2) for `z` in `[1,2]`; A is also a corner of the slab.
+///
+/// The slab top is the square minus the post footprint, in five triangles
+/// counter-clockwise from above: (A,B,F), (B,C,F), (C,E,F), (C,D,E) and
+/// (D,A,E) with B = (3,0), C = (3,3), D = (0,3). Their areas are 1.5 each,
+/// 7.5 in all, which is 9 minus the footprint's 1.5. The post is one closed
+/// solid with the slab: its walls start on the footprint edges, which the
+/// slab top borders in the opposite direction.
+fn slab_with_corner_post() -> TriMesh {
+    let (a, b, c, d) = ([0.0, 0.0], [3.0, 0.0], [3.0, 3.0], [0.0, 3.0]);
+    let (e, f) = ([1.0, 2.0], [2.0, 1.0]);
+    let at = |p: [f64; 2], z: f64| [p[0], p[1], z];
+    let mut m = Builder::default();
+    y_minus(&mut m, 0.0, (0.0, 3.0), (0.0, 1.0));
+    y_plus(&mut m, 3.0, (0.0, 3.0), (0.0, 1.0));
+    x_minus(&mut m, 0.0, (0.0, 3.0), (0.0, 1.0));
+    x_plus(&mut m, 3.0, (0.0, 3.0), (0.0, 1.0));
+    z_minus(&mut m, 0.0, (0.0, 3.0), (0.0, 3.0));
+    for [p, q, r] in [[a, b, f], [b, c, f], [c, e, f], [c, d, e], [d, a, e]] {
+        m.tri([at(p, 1.0), at(q, 1.0), at(r, 1.0)]);
+    }
+    // The footprint A, F, E is counter-clockwise; each wall is outward.
+    for (p, q) in [(a, f), (f, e), (e, a)] {
+        m.quad([at(p, 1.0), at(q, 1.0), at(q, 2.0), at(p, 2.0)]);
+    }
+    m.tri([at(a, 2.0), at(f, 2.0), at(e, 2.0)]);
+    m.finish()
+}
+
 /// Triangular prism whose lower edge is `v0 - v3` and whose top is the
 /// quadrilateral `v1 v2 v5 v4` at `z = 1`.
 fn prism() -> TriMesh {
@@ -364,6 +394,37 @@ pub(crate) fn cases() -> Vec<Case> {
                     region(Above, square(-1.0, 0.0, 0.0, 0.1), vec![]),
                 ],
                 4,
+                0,
+            )),
+        },
+        // The slab top at z = 1 is the five triangles above, all facing +z:
+        // one component. Its boundary is the square A B C D and the footprint
+        // A E F, which meet at A, so the boundary is one weakly simple ring
+        // visiting A twice: A B C D A E F. A is the smallest point in every
+        // ascending order, so the outer/hole decision falls to a descending
+        // order. The two rotations starting at A are [A B C D A E F] and
+        // [A E F A B C D]; (1,2) sorts before (3,0), so the second is
+        // canonical. No chains: the post walls border the top.
+        Case {
+            name: "slab with a post touching its corner",
+            mesh: slab_with_corner_post(),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![],
+                vec![region(
+                    Below,
+                    ring(&[
+                        (0.0, 0.0),
+                        (1.0, 2.0),
+                        (2.0, 1.0),
+                        (0.0, 0.0),
+                        (3.0, 0.0),
+                        (3.0, 3.0),
+                        (0.0, 3.0),
+                    ]),
+                    vec![],
+                )],
+                5,
                 0,
             )),
         },

@@ -30,7 +30,9 @@
 //! every ring has at least three points and starts at its lexicographically
 //! smallest point. Holes are sorted by point sequence, regions by
 //! `(side, outer)`. Rings may touch at vertices but never cross, and regions
-//! of one side have disjoint interiors. A self-intersecting mesh is not
+//! of one side have disjoint interiors. Where a hole or a footprint touches the
+//! outer boundary at a vertex, the region has one weakly simple outer ring that
+//! visits that vertex twice, and no hole. A self-intersecting mesh is not
 //! certified (ADR 0033). The registry does not check ring orientation: a
 //! floating-point area sign is unreliable far from the origin (#274); the
 //! conformance suite checks it on fixtures.

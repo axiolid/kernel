@@ -71,7 +71,7 @@ impl Projection {
 
     /// Exact orientation of three points of the plane in the frame's own
     /// `(x, y)` sense: positive when they turn counter-clockwise there.
-    fn orient(self, a: Point3, b: Point3, c: Point3) -> GeomResult<Sign> {
+    pub(super) fn orient(self, a: Point3, b: Point3, c: Point3) -> GeomResult<Sign> {
         let projected = orient_sign(self.flat(a), self.flat(b), self.flat(c))?;
         Ok(sign_times(projected, self.frame_sign))
     }
@@ -115,7 +115,7 @@ impl InPlaneTriangle {
     }
 }
 
-fn corners(mesh: &TriMesh, vertices: [u32; 3]) -> GeomResult<[Point3; 3]> {
+pub(super) fn corners(mesh: &TriMesh, vertices: [u32; 3]) -> GeomResult<[Point3; 3]> {
     let mut points = [Point3::ZERO; 3];
     for (slot, vertex) in points.iter_mut().zip(vertices) {
         *slot = mesh.positions[mesh_index(vertex)?];
@@ -205,7 +205,8 @@ impl BoundingBox {
 ///
 /// A sweep over `u` proposes pairs whose bounding boxes overlap. Two
 /// triangles of the same facing that share a mesh edge lie on opposite sides
-/// of it and are skipped. Every other pair is decided by a separating-axis
+/// of it and are not tested. Every candidate pair counts against `max_pairs`,
+/// tested or not. Every other pair is decided by a separating-axis
 /// test: counter-clockwise triangles have disjoint interiors when some edge
 /// of one has all three vertices of the other on or to its right.
 pub(super) fn check_overlaps(
@@ -248,6 +249,12 @@ pub(super) fn check_overlaps(
             if boxes[j].min_v > boxes[i].max_v || boxes[i].min_v > boxes[j].max_v {
                 continue;
             }
+            pairs += 1;
+            if pairs > max_pairs {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "section in-plane pairs",
+                });
+            }
             let (first, second) = (set.triangles[i], set.triangles[j]);
             let shared = first
                 .vertices
@@ -256,12 +263,6 @@ pub(super) fn check_overlaps(
                 .count();
             if shared >= 2 && first.facing == second.facing {
                 continue;
-            }
-            pairs += 1;
-            if pairs > max_pairs {
-                return Err(GeomError::BudgetExceeded {
-                    resource: "section in-plane pairs",
-                });
             }
             if interiors_overlap(&flat[i], &flat[j])? {
                 return Err(refuse(if first.facing == second.facing {
@@ -410,7 +411,7 @@ fn trace_cycles(
 }
 
 /// Whether `point` lies strictly between `a` and `b` on their common line.
-fn strictly_between(a: Point3, point: Point3, b: Point3) -> bool {
+pub(super) fn strictly_between(a: Point3, point: Point3, b: Point3) -> bool {
     let within = |a: f64, p: f64, b: f64| a.min(b) <= p && p <= a.max(b);
     point != a
         && point != b
@@ -419,52 +420,91 @@ fn strictly_between(a: Point3, point: Point3, b: Point3) -> bool {
         && within(a.z, point.z, b.z)
 }
 
-/// Lexicographic order of model-space points, then by source vertex.
-fn corner_order(mesh: &TriMesh, left: u32, right: u32) -> GeomResult<Ordering> {
+/// Lexicographic orders of model-space points tried for the extreme vertex of
+/// a ring: every permutation of the axes, ascending, then descending.
+const EXTREME_ORDERS: [([usize; 3], bool); 12] = [
+    ([0, 1, 2], false),
+    ([0, 2, 1], false),
+    ([1, 0, 2], false),
+    ([1, 2, 0], false),
+    ([2, 0, 1], false),
+    ([2, 1, 0], false),
+    ([0, 1, 2], true),
+    ([0, 2, 1], true),
+    ([1, 0, 2], true),
+    ([1, 2, 0], true),
+    ([2, 0, 1], true),
+    ([2, 1, 0], true),
+];
+
+/// Lexicographic order of model-space points by the axes of `order`, then by
+/// source vertex.
+fn corner_order(
+    mesh: &TriMesh,
+    (axes, descending): ([usize; 3], bool),
+    left: u32,
+    right: u32,
+) -> GeomResult<Ordering> {
     let (a, b) = (
         mesh.positions[mesh_index(left)?],
         mesh.positions[mesh_index(right)?],
     );
-    Ok(a.x
-        .total_cmp(&b.x)
-        .then_with(|| a.y.total_cmp(&b.y))
-        .then_with(|| a.z.total_cmp(&b.z))
-        .then(left.cmp(&right)))
+    let coordinate = |point: Point3, axis: usize| match axis {
+        0 => point.x,
+        1 => point.y,
+        _ => point.z,
+    };
+    let mut order = axes
+        .iter()
+        .map(|&axis| coordinate(a, axis).total_cmp(&coordinate(b, axis)))
+        .find(|order| order.is_ne())
+        .unwrap_or(Ordering::Equal);
+    if descending {
+        order = order.reverse();
+    }
+    Ok(order.then(left.cmp(&right)))
 }
 
 /// Whether the cycle is the outer boundary of its component, by the exact
-/// turn at its lexicographically smallest vertex.
+/// turn at its extreme vertex.
+///
+/// The minimum of a lexicographic order is a convex corner. The first order
+/// whose minimum the ring visits once decides; a ring that touches itself at
+/// every extreme (a weakly simple ring) is refused.
 fn is_outer(
     mesh: &TriMesh,
     projection: Projection,
     facing: Sign,
     ring: &[u32],
 ) -> GeomResult<bool> {
-    let mut smallest = 0;
-    for index in 1..ring.len() {
-        if corner_order(mesh, ring[index], ring[smallest])?.is_lt() {
-            smallest = index;
+    for order in EXTREME_ORDERS {
+        let mut smallest = 0;
+        for index in 1..ring.len() {
+            if corner_order(mesh, order, ring[index], ring[smallest])?.is_lt() {
+                smallest = index;
+            }
         }
+        let vertex = ring[smallest];
+        if ring.iter().filter(|&&corner| corner == vertex).count() != 1 {
+            continue;
+        }
+        let previous = ring[(smallest + ring.len() - 1) % ring.len()];
+        let next = ring[(smallest + 1) % ring.len()];
+        let [a, b, c] = corners(mesh, [previous, vertex, next])?;
+        // The extreme vertex is a convex corner: its turn is counter-clockwise
+        // for an outer ring of an up-facing component and for a hole of a
+        // down-facing one; the facing product separates the cases.
+        return match sign_times(projection.orient(a, b, c)?, facing) {
+            Sign::Positive => Ok(true),
+            Sign::Negative => Ok(false),
+            _ => Err(GeomError::Degenerate(
+                "in-plane region boundary has a spike at its extreme vertex".into(),
+            )),
+        };
     }
-    let vertex = ring[smallest];
-    if ring.iter().filter(|&&corner| corner == vertex).count() != 1 {
-        return Err(GeomError::Degenerate(
-            "in-plane region boundary visits its extreme vertex twice".into(),
-        ));
-    }
-    let previous = ring[(smallest + ring.len() - 1) % ring.len()];
-    let next = ring[(smallest + 1) % ring.len()];
-    let [a, b, c] = corners(mesh, [previous, vertex, next])?;
-    // The extreme vertex is a convex corner: its turn is counter-clockwise
-    // for an outer ring of an up-facing component and for a hole of a
-    // down-facing one; the facing product separates the cases.
-    match sign_times(projection.orient(a, b, c)?, facing) {
-        Sign::Positive => Ok(true),
-        Sign::Negative => Ok(false),
-        _ => Err(GeomError::Degenerate(
-            "in-plane region boundary has a spike at its extreme vertex".into(),
-        )),
-    }
+    Err(GeomError::Degenerate(
+        "in-plane region boundary visits every extreme vertex twice".into(),
+    ))
 }
 
 /// Drop vertices that lie strictly between their neighbours on a line,

@@ -17,18 +17,20 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{PlaneSection, PlaneSectionEvidence, SectionRequest};
 
-use super::chains::assemble_chains;
+use super::chains::{assemble_chains, ChainContext};
 use super::regions::{build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection};
 use super::{
     check_source_limits, classify_vertices, insert_segment, internal_topology_error, mesh_index,
     opposite, EdgeKey, ExactSectionPlane, NodeKey, Segment,
 };
+use crate::orient3::orient3d;
 
 /// A triangle incident to a mesh edge that lies in the plane.
 #[derive(Debug, Clone, Copy)]
 enum Incidence {
-    /// An off-plane triangle with its third vertex on this side.
-    Off(Sign),
+    /// An off-plane triangle with its third vertex on this side; the cut along
+    /// the edge runs from the first vertex to the second.
+    Off(Sign, u32, u32),
     /// An in-plane triangle.
     In,
 }
@@ -50,6 +52,13 @@ pub(super) fn plane_section(
     let mut segments = BTreeSet::<Segment>::new();
     let mut on_plane_edges = BTreeMap::<EdgeKey, Vec<Incidence>>::new();
     let mut in_plane = Vec::new();
+    // Per segment, whether the cut runs from its first node to its second with
+    // the solid on its left. The triangles are outward oriented, so the cut
+    // leaves a triangle's boundary where the winding goes from above the plane
+    // (negative `orient3d`) to below it, and enters where it goes back up.
+    let mut directions = BTreeMap::<Segment, bool>::new();
+    // Third vertices of the triangles on each crossing edge.
+    let mut crossing_thirds = BTreeMap::<EdgeKey, Vec<u32>>::new();
     for (triangle_index, triangle) in mesh.triangles().enumerate() {
         options.check_cancelled()?;
         let vertices = [
@@ -81,14 +90,22 @@ pub(super) fn plane_section(
                     .filter_map(|(index, sign)| (sign == Sign::Zero).then_some(index));
                 let left = zeros.next().ok_or_else(internal_topology_error)?;
                 let right = zeros.next().ok_or_else(internal_topology_error)?;
-                let third = signs
-                    .into_iter()
-                    .find(|&sign| sign != Sign::Zero)
+                let corner = (0..3)
+                    .find(|&corner| signs[corner] != Sign::Zero)
                     .ok_or_else(internal_topology_error)?;
+                let third = signs[corner];
+                // The winding order of the two on-plane vertices. Above the
+                // plane the cut follows it; below, it runs against it.
+                let (first, second) = (triangle[(corner + 1) % 3], triangle[(corner + 2) % 3]);
+                let (from, to) = if third == Sign::Negative {
+                    (first, second)
+                } else {
+                    (second, first)
+                };
                 on_plane_edges
                     .entry(EdgeKey::new(left, right))
                     .or_default()
-                    .push(Incidence::Off(third));
+                    .push(Incidence::Off(third, from, to));
             }
             1 => {
                 let zero_corner = (0..3)
@@ -101,11 +118,22 @@ pub(super) fn plane_section(
                     _ => return Err(internal_topology_error()),
                 };
                 if opposite(signs[first], signs[second]) {
-                    let segment = Segment::new(
-                        NodeKey::Vertex(triangle[zero_corner]),
-                        NodeKey::Edge(EdgeKey::new(triangle[first], triangle[second])),
-                    )?;
+                    let vertex = NodeKey::Vertex(triangle[zero_corner]);
+                    let edge = EdgeKey::new(triangle[first], triangle[second]);
+                    let segment = Segment::new(vertex, NodeKey::Edge(edge))?;
                     insert_segment(&mut segments, segment, limits)?;
+                    // The winding runs zero corner, next, previous; the edge
+                    // is crossed from the next to the previous vertex.
+                    let next = (zero_corner + 1) % 3;
+                    if signs[next] == Sign::Negative {
+                        record_direction(&mut directions, NodeKey::Edge(edge), vertex)?;
+                    } else {
+                        record_direction(&mut directions, vertex, NodeKey::Edge(edge))?;
+                    }
+                    crossing_thirds
+                        .entry(edge)
+                        .or_default()
+                        .push(triangle[zero_corner]);
                 }
             }
             0 => {
@@ -116,14 +144,25 @@ pub(super) fn plane_section(
                         if crossing_count >= crossing.len() {
                             return Err(internal_topology_error());
                         }
+                        let edge = EdgeKey::new(triangle[left], triangle[right]);
+                        // The cut starts on the edge that goes from above to below.
                         crossing[crossing_count] =
-                            Some(NodeKey::Edge(EdgeKey::new(triangle[left], triangle[right])));
+                            Some((NodeKey::Edge(edge), signs[left] == Sign::Negative));
+                        crossing_thirds
+                            .entry(edge)
+                            .or_default()
+                            .push(triangle[3 - left - right]);
                         crossing_count += 1;
                     }
                 }
                 match (crossing[0], crossing[1]) {
-                    (Some(first), Some(second)) => {
+                    (Some((first, first_starts)), Some((second, _))) => {
                         insert_segment(&mut segments, Segment::new(first, second)?, limits)?;
+                        if first_starts {
+                            record_direction(&mut directions, first, second)?;
+                        } else {
+                            record_direction(&mut directions, second, first)?;
+                        }
                     }
                     (None, None) => {}
                     _ => return Err(internal_topology_error()),
@@ -137,18 +176,23 @@ pub(super) fn plane_section(
     for (edge, incidences) in on_plane_edges {
         options.check_cancelled()?;
         match incidences.as_slice() {
-            [Incidence::Off(first), Incidence::Off(second)] => {
+            [Incidence::Off(first, from, to), Incidence::Off(second, _, _)] => {
                 if opposite(*first, *second) {
                     insert_segment(
                         &mut segments,
                         Segment::new(NodeKey::Vertex(edge.0), NodeKey::Vertex(edge.1))?,
                         limits,
                     )?;
+                    record_direction(
+                        &mut directions,
+                        NodeKey::Vertex(*from),
+                        NodeKey::Vertex(*to),
+                    )?;
                 } else {
                     touching_edges += 1;
                 }
             }
-            [Incidence::In, Incidence::Off(_)] | [Incidence::Off(_), Incidence::In] => {}
+            [Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {}
             [Incidence::In, Incidence::In] => {}
             _ => {
                 return Err(GeomError::NotManifold(format!(
@@ -190,12 +234,18 @@ pub(super) fn plane_section(
         request.region_limits,
         options,
     )?;
+    let coplanar_edges = coplanar_crossing_edges(mesh, &crossing_thirds)?;
     let chains = assemble_chains(
-        mesh,
-        frame,
-        &classifications,
+        &ChainContext {
+            mesh,
+            frame,
+            classifications: &classifications,
+            projection,
+            directions: &directions,
+            coplanar_edges: &coplanar_edges,
+            region_vertices: &region_vertices,
+        },
         &segments,
-        &region_vertices,
         limits,
         options,
     )?;
@@ -204,4 +254,40 @@ pub(super) fn plane_section(
         .with_source_counts(in_plane_triangles, touching_edges, in_plane_pairs)
         .with_output(&chains, &regions);
     Ok(PlaneSection::new(frame, chains, regions, evidence))
+}
+
+/// Record that the cut runs from `from` to `to`.
+fn record_direction(
+    directions: &mut BTreeMap<Segment, bool>,
+    from: NodeKey,
+    to: NodeKey,
+) -> GeomResult<()> {
+    let segment = Segment::new(from, to)?;
+    directions.insert(segment, from == segment.0);
+    Ok(())
+}
+
+/// Crossing edges whose two triangles are exactly coplanar: the four vertices
+/// have a zero `orient3d`.
+fn coplanar_crossing_edges(
+    mesh: &TriMesh,
+    thirds: &BTreeMap<EdgeKey, Vec<u32>>,
+) -> GeomResult<BTreeSet<EdgeKey>> {
+    let mut coplanar = BTreeSet::new();
+    for (edge, thirds) in thirds {
+        let [first, second] = thirds.as_slice() else {
+            continue;
+        };
+        let point = |index: u32| -> GeomResult<_> { Ok(mesh.positions[mesh_index(index)?]) };
+        let certified = orient3d(
+            point(edge.0)?,
+            point(edge.1)?,
+            point(*first)?,
+            point(*second)?,
+        );
+        if certified.sign() == Some(Sign::Zero) {
+            coplanar.insert(*edge);
+        }
+    }
+    Ok(coplanar)
 }

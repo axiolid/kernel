@@ -69,6 +69,7 @@ pub enum RegionConformanceFailure {
 
 /// Result of [`RegionConformanceSuite::run`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct RegionConformanceReport {
     /// Every failure found.
     pub failures: Vec<RegionConformanceFailure>,

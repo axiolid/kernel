@@ -47,8 +47,8 @@ MUTANTS = [
     ),
     (
         'region edge emits a cut segment', Q,
-        '[Incidence::In, Incidence::Off(_)] | [Incidence::Off(_), Incidence::In] => {}',
-        '[Incidence::In, Incidence::Off(_)] | [Incidence::Off(_), Incidence::In] => {\n'
+        '[Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {}',
+        '[Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {\n'
         '                ' + SEGMENT + '\n            }',
         TESTS,
     ),
@@ -76,11 +76,6 @@ MUTANTS = [
         'overlap refusals swapped', R,
         'return Err(refuse(if first.facing == second.facing {',
         'return Err(refuse(if first.facing != second.facing {', TESTS,
-    ),
-    (
-        'shared-edge pair counted', R,
-        'if shared >= 2 && first.facing == second.facing {',
-        'if false && shared >= 2 && first.facing == second.facing {', TESTS,
     ),
     (
         'pair budget unchecked', R,
@@ -124,6 +119,30 @@ MUTANTS = [
         'saddle vertex accepted', C,
         '(_, 1) | (_, 2) => {}',
         '(_, 1) | (_, 2) | (NodeKey::Vertex(_), _) => {}', TESTS,
+    ),
+    (
+        'protected chain vertex simplified', C,
+        'if ctx.region_vertices.contains(&vertex) {',
+        'if false && ctx.region_vertices.contains(&vertex) {', TESTS,
+    ),
+    (
+        'open chain endpoints simplified', C,
+        'if !ring && (index == 0 || index == last) {',
+        'if false && !ring && (index == 0 || index == last) {', TESTS,
+    ),
+    (
+        'edge node dropped without coplanarity', C,
+        'NodeKey::Edge(edge) => Ok(ctx.coplanar_edges.contains(&edge)),',
+        'NodeKey::Edge(_) => Ok(true),', TESTS,
+    ),
+    (
+        'closed chain direction ignored', C,
+        'if forward == Some(false) {', 'if false && forward == Some(false) {', TESTS,
+    ),
+    (
+        'pinched extreme vertex has no fallback order', R,
+        'for order in EXTREME_ORDERS {',
+        'for order in EXTREME_ORDERS.into_iter().take(1) {', TESTS,
     ),
 ]
 

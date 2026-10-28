@@ -14,12 +14,11 @@ use axiolid_mesh_section_contract::{
     ChainEnd, SectionChain, SectionContour, SectionLimits, REFUSED_SADDLE_VERTEX,
 };
 
-use super::regions::canonical_rotation;
+use super::regions::{canonical_rotation, corners, strictly_between, Projection};
 use super::{
     internal_topology_error, node_point, point_order, project_local, sequence_order, signed_area,
-    simplify_collinear, Classification, NodeKey, ScalarSection, Segment,
+    simplify_collinear, Classification, EdgeKey, NodeKey, ScalarSection, Segment,
 };
-use crate::orientation::orient2d;
 
 pub(super) fn assemble_contours(
     mesh: &TriMesh,
@@ -134,22 +133,44 @@ pub(super) fn assemble_contours(
     Ok(contours)
 }
 
+/// What chain assembly needs besides the segments.
+pub(super) struct ChainContext<'a> {
+    pub(super) mesh: &'a TriMesh,
+    pub(super) frame: Frame3,
+    pub(super) classifications: &'a [Classification],
+    pub(super) projection: Projection,
+    /// Per segment: whether the cut runs from its first node to its second,
+    /// with the solid on the left (counter-clockwise in the frame). Decided
+    /// from the exact vertex signs of the segment's triangle.
+    pub(super) directions: &'a BTreeMap<Segment, bool>,
+    /// Crossing edges whose two triangles are exactly coplanar: the cut points
+    /// on either side of such an edge's node are collinear with it.
+    pub(super) coplanar_edges: &'a BTreeSet<EdgeKey>,
+    /// Vertices of in-plane triangles.
+    pub(super) region_vertices: &'a BTreeSet<u32>,
+}
+
 /// Open and closed chains of the cut segments of a request (ADR 0091).
 ///
 /// A vertex node of degree one ends an open chain; it must be a vertex of an
 /// in-plane triangle, where the chain meets a region boundary. A vertex node
-/// of degree above two is a saddle and is refused by name. Points of vertices
-/// listed in `region_vertices` are never simplified away, so a chain end
-/// stays bit-identical to the region vertex it meets.
+/// of degree above two is a saddle and is refused by name.
+///
+/// Simplification and orientation are exact, decided on source data. A closed
+/// chain is made counter-clockwise by the segment directions. A node is
+/// dropped only when its two cut segments are exactly collinear: a vertex node
+/// between two vertex nodes with a zero `orient2d`, or an edge node whose two
+/// triangles are exactly coplanar (`orient3d`). Vertices of in-plane triangles
+/// are never dropped, so a chain end stays bit-identical to the region vertex
+/// it meets, and the ends of an open chain are never dropped.
 pub(super) fn assemble_chains(
-    mesh: &TriMesh,
-    frame: Frame3,
-    classifications: &[Classification],
+    ctx: &ChainContext<'_>,
     segments: &BTreeSet<Segment>,
-    region_vertices: &BTreeSet<u32>,
     limits: SectionLimits,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<SectionChain>> {
+    let (mesh, frame, classifications) = (ctx.mesh, ctx.frame, ctx.classifications);
+    let region_vertices = ctx.region_vertices;
     let mut adjacency = BTreeMap::<NodeKey, Vec<NodeKey>>::new();
     for &Segment(left, right) in segments {
         adjacency.entry(left).or_default().push(right);
@@ -206,14 +227,8 @@ pub(super) fn assemble_chains(
         if !(is_region_vertex(start) && is_region_vertex(current)) {
             return Err(internal_topology_error());
         }
+        let nodes = simplify_nodes(ctx, nodes, false)?;
         let mut points = chain_points(mesh, frame, classifications, &nodes)?;
-        let mut protected: Vec<bool> = nodes.iter().map(|&node| is_region_vertex(node)).collect();
-        simplify_chain(
-            &mut points,
-            &mut protected,
-            options.tolerance().linear(),
-            false,
-        );
         if points.len() < 2 || has_adjacent_duplicate(&points, false) {
             return Err(GeomError::Degenerate(
                 "section chain collapsed under projection".into(),
@@ -271,28 +286,14 @@ pub(super) fn assemble_chains(
                 "section contour has fewer than three source-topology nodes".into(),
             ));
         }
-        let mut points = chain_points(mesh, frame, classifications, &nodes)?;
-        let mut protected: Vec<bool> = nodes.iter().map(|&node| is_region_vertex(node)).collect();
-        simplify_chain(
-            &mut points,
-            &mut protected,
-            options.tolerance().linear(),
-            true,
-        );
-        if points.len() < 3 {
+        orient_nodes(ctx, &mut nodes)?;
+        let nodes = simplify_nodes(ctx, nodes, true)?;
+        if nodes.len() < 3 {
             return Err(GeomError::Degenerate(
                 "section contour collapsed below three vertices".into(),
             ));
         }
-        let area = signed_area(&points);
-        if !area.is_finite() || area == 0.0 {
-            return Err(GeomError::Degenerate(
-                "section contour has no finite signed area".into(),
-            ));
-        }
-        if area < 0.0 {
-            points[1..].reverse();
-        }
+        let points = chain_points(mesh, frame, classifications, &nodes)?;
         if has_adjacent_duplicate(&points, true) {
             return Err(GeomError::Degenerate(
                 "section chain collapsed under projection".into(),
@@ -355,40 +356,209 @@ fn has_adjacent_duplicate(points: &[Point2], ring: bool) -> bool {
     (0..pairs).any(|index| points[index] == points[(index + 1) % points.len()])
 }
 
-/// The legacy collinear simplification, with `protected` points kept and, for
-/// an open chain, its two ends kept as well.
-fn simplify_chain(points: &mut Vec<Point2>, protected: &mut Vec<bool>, tolerance: f64, ring: bool) {
-    loop {
-        let minimum = if ring { 3 } else { 2 };
-        if points.len() <= minimum {
-            return;
+/// Make a closed chain run counter-clockwise by its segment directions; the
+/// directions of all its segments must agree.
+fn orient_nodes(ctx: &ChainContext<'_>, nodes: &mut [NodeKey]) -> GeomResult<()> {
+    let mut forward = None;
+    for index in 0..nodes.len() {
+        let (from, to) = (nodes[index], nodes[(index + 1) % nodes.len()]);
+        let segment = Segment::new(from, to)?;
+        let runs_forward = ctx
+            .directions
+            .get(&segment)
+            .map(|&first_to_second| first_to_second == (from == segment.0))
+            .ok_or_else(internal_topology_error)?;
+        match forward {
+            None => forward = Some(runs_forward),
+            Some(known) if known != runs_forward => {
+                return Err(GeomError::NotManifold(
+                    "section chain segments disagree on their direction".into(),
+                ))
+            }
+            Some(_) => {}
         }
-        let range = if ring {
-            0..points.len()
-        } else {
-            1..points.len() - 1
+    }
+    if forward == Some(false) {
+        nodes.reverse();
+    }
+    Ok(())
+}
+
+/// Whether the cut segments on both sides of a node are exactly collinear,
+/// so the node can go without moving the polyline.
+fn is_droppable(
+    ctx: &ChainContext<'_>,
+    previous: NodeKey,
+    node: NodeKey,
+    next: NodeKey,
+) -> GeomResult<bool> {
+    match node {
+        NodeKey::Edge(edge) => Ok(ctx.coplanar_edges.contains(&edge)),
+        NodeKey::Vertex(vertex) => {
+            if ctx.region_vertices.contains(&vertex) {
+                return Ok(false);
+            }
+            let (NodeKey::Vertex(before), NodeKey::Vertex(after)) = (previous, next) else {
+                return Ok(false);
+            };
+            let [a, b, c] = corners(ctx.mesh, [before, vertex, after])?;
+            Ok(ctx.projection.orient(a, b, c)? == Sign::Zero && strictly_between(a, b, c))
+        }
+    }
+}
+
+/// Drop every node of a chain whose two cut segments are exactly collinear.
+/// Collinearity is judged on the original neighbours: a dropped neighbour lies
+/// on the same line, so one pass suffices. An open chain keeps its ends.
+fn simplify_nodes(
+    ctx: &ChainContext<'_>,
+    nodes: Vec<NodeKey>,
+    ring: bool,
+) -> GeomResult<Vec<NodeKey>> {
+    let last = nodes.len() - 1;
+    let mut kept = Vec::with_capacity(nodes.len());
+    for (index, &node) in nodes.iter().enumerate() {
+        if !ring && (index == 0 || index == last) {
+            kept.push(node);
+            continue;
+        }
+        let previous = nodes[(index + nodes.len() - 1) % nodes.len()];
+        let next = nodes[(index + 1) % nodes.len()];
+        if !is_droppable(ctx, previous, node, next)? {
+            kept.push(node);
+        }
+    }
+    Ok(kept)
+}
+
+#[cfg(test)]
+mod tests {
+    use axiolid_core::{Point3, Tolerance, Vec3};
+
+    use super::super::ExactSectionPlane;
+    use super::*;
+
+    /// Source vertices on the plane z = 0, all cut-segment nodes:
+    /// 0 = (0,0), 1 = (1,0), 2 = (2,0), 3 = (2,1), 4 = (0,1), 5 = (-1,0).
+    /// Vertex 1 lies exactly between 0 and 2, on the line y = 0.
+    struct Fixture {
+        mesh: TriMesh,
+        frame: Frame3,
+        projection: Projection,
+    }
+
+    fn fixture() -> Fixture {
+        let positions = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 1.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+        ]
+        .map(|(x, y)| Point3::new(x, y, 0.0))
+        .to_vec();
+        let frame = Frame3 {
+            origin: Point3::ZERO,
+            x: Vec3::X,
+            y: Vec3::Y,
+            z: Vec3::Z,
         };
-        let mut removed = false;
-        for index in range {
-            if protected[index] {
-                continue;
-            }
-            let previous = points[(index + points.len() - 1) % points.len()];
-            let current = points[index];
-            let next = points[(index + 1) % points.len()];
-            let chord = next - previous;
-            let scale = chord.length();
-            let cross = (current - previous).perp_dot(chord).abs();
-            let within_tolerance = scale > 0.0 && cross <= tolerance * scale;
-            if orient2d(previous, current, next).sign() == Some(Sign::Zero) || within_tolerance {
-                points.remove(index);
-                protected.remove(index);
-                removed = true;
-                break;
-            }
+        let plane = ExactSectionPlane::new(frame).expect("plane");
+        Fixture {
+            mesh: TriMesh::new(positions, vec![]),
+            frame,
+            projection: Projection::new(&plane).expect("projection"),
         }
-        if !removed {
-            return;
+    }
+
+    fn vertex(index: u32) -> NodeKey {
+        NodeKey::Vertex(index)
+    }
+
+    /// Chains of the given vertex path, run in the given direction.
+    fn chains(path: &[u32], closed: bool, region_vertices: &[u32]) -> Vec<SectionChain> {
+        let fixture = fixture();
+        let region_vertices: BTreeSet<u32> = region_vertices.iter().copied().collect();
+        let mut segments = BTreeSet::new();
+        let mut directions = BTreeMap::new();
+        let count = if closed { path.len() } else { path.len() - 1 };
+        for index in 0..count {
+            let (from, to) = (vertex(path[index]), vertex(path[(index + 1) % path.len()]));
+            let segment = Segment::new(from, to).expect("segment");
+            directions.insert(segment, from == segment.0);
+            segments.insert(segment);
         }
+        let coplanar_edges = BTreeSet::new();
+        let ctx = ChainContext {
+            mesh: &fixture.mesh,
+            frame: fixture.frame,
+            classifications: &[],
+            projection: fixture.projection,
+            directions: &directions,
+            coplanar_edges: &coplanar_edges,
+            region_vertices: &region_vertices,
+        };
+        let options = ExecutionOptions::new(Tolerance::METRE);
+        assemble_chains(
+            &ctx,
+            &segments,
+            SectionLimits::new(100, 100, 100, 10),
+            &options,
+        )
+        .expect("chains")
+    }
+
+    fn points(chain: &SectionChain) -> Vec<(f64, f64)> {
+        chain.points.iter().map(|p| (p.x, p.y)).collect()
+    }
+
+    #[test]
+    fn a_closed_chain_drops_an_exactly_collinear_vertex_unless_it_is_protected() {
+        // 0 -> 1 -> 2 -> 3 -> 4 is counter-clockwise; vertex 1 is collinear.
+        let path = [0, 1, 2, 3, 4];
+        let plain = chains(&path, true, &[]);
+        assert_eq!(
+            points(&plain[0]),
+            [(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)]
+        );
+        let kept = chains(&path, true, &[1]);
+        assert_eq!(
+            points(&kept[0]),
+            [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)]
+        );
+    }
+
+    #[test]
+    fn an_open_chain_keeps_its_ends_and_a_protected_vertex_it_passes_through() {
+        // The ends are region vertices; the middle one is collinear.
+        let plain = chains(&[0, 1, 2], false, &[0, 2]);
+        assert_eq!(points(&plain[0]), [(0.0, 0.0), (2.0, 0.0)]);
+        let through = chains(&[0, 1, 2], false, &[0, 1, 2]);
+        assert_eq!(points(&through[0]), [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]);
+    }
+
+    #[test]
+    fn the_ends_of_an_open_chain_are_never_candidates() {
+        // 0 lies between 5 and 1, so a ring would drop it; an open chain's
+        // end must stay.
+        let fixture = fixture();
+        let region_vertices = BTreeSet::new();
+        let coplanar_edges = BTreeSet::new();
+        let directions = BTreeMap::new();
+        let ctx = ChainContext {
+            mesh: &fixture.mesh,
+            frame: fixture.frame,
+            classifications: &[],
+            projection: fixture.projection,
+            directions: &directions,
+            coplanar_edges: &coplanar_edges,
+            region_vertices: &region_vertices,
+        };
+        let nodes = vec![vertex(0), vertex(1), vertex(5)];
+        assert_eq!(
+            simplify_nodes(&ctx, nodes.clone(), false).expect("nodes"),
+            nodes
+        );
     }
 }

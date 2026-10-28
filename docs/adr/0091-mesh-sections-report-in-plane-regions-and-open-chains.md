@@ -49,7 +49,17 @@ back past one that does not implement it. All new types are
   same-facing in-plane triangles sharing an edge form a component, boundary
   edges are linked into rings by fan order at each vertex, and the outer ring
   is told from a hole by the exact turn at its lexicographically smallest
-  vertex.
+  vertex. A ring that visits that vertex twice (a footprint or hole touching
+  the outer boundary at a corner) is decided at the next lexicographic
+  extreme; such a region has one weakly simple outer ring and no hole.
+- **Exact chains.** A closed chain is made counter-clockwise from the exact
+  vertex signs of its triangles: the cut leaves a triangle where the winding
+  goes from above the plane to below it. A node is dropped only when its two
+  cut segments are exactly collinear: a vertex node between two vertex nodes
+  with a zero `orient2d`, or an edge node whose two triangles are exactly
+  coplanar (`orient3d` of their four vertices). The nodes of in-plane
+  triangles and the ends of an open chain are never dropped. No tolerance and
+  no rounded coordinate takes part in a decision.
 - **Refusals by name.** Overlapping in-plane faces of one side, in-plane faces
   of opposite sides that overlap, and a saddle vertex (more than two cut
   segments at one vertex) are `UnsupportedInput` with the constants
@@ -63,6 +73,9 @@ back past one that does not implement it. All new types are
   ring starts and orders, budgets and evidence counts. It does not check ring
   orientation, since a floating-point area sign is unreliable far from the
   origin (#274); the conformance suite checks orientation on fixtures.
+  `register_request_conformant` registers a provider after both suites and
+  rejects a claimed failure; a provider that does not claim the method passes
+  on the base suite.
 - **Conformance.** `RegionConformanceSuite` runs hand-derived fixtures: a cube
   through its top and bottom, a square frame with a hole, a parapet with a
   post rising out of it (the railing case), edge and point contact, and the

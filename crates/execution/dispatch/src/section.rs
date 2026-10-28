@@ -9,7 +9,10 @@ use axiolid_core::Frame3;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh, TriMesh};
 use axiolid_mesh_contracts::SolidRequirements;
 use axiolid_mesh_section_contract::{
-    conformance::{ConformanceReport, ConformanceSuite},
+    conformance::{
+        ConformanceReport, ConformanceSuite, RegionConformanceFailure, RegionConformanceReport,
+        RegionConformanceSuite,
+    },
     MeshPlaneSection, PlaneSection, SectionLimits, SectionOutcome, SectionRequest,
 };
 
@@ -58,6 +61,36 @@ impl MeshPlaneSectionRegistry {
         P: MeshPlaneSection + 'static,
     {
         let report = ConformanceSuite::run(&provider);
+        if !report.is_success() {
+            return Err(Box::new(report));
+        }
+        self.register(priority, provider);
+        Ok(())
+    }
+
+    /// Validate a provider with both conformance suites before registration:
+    /// the base suite, then, when the provider claims `section_request`, the
+    /// region suite. A provider that does not claim the method passes on the
+    /// base suite alone. Failures of either suite are in the report.
+    pub fn register_request_conformant<P>(
+        &mut self,
+        priority: i32,
+        provider: P,
+    ) -> Result<(), Box<RegionConformanceReport>>
+    where
+        P: MeshPlaneSection + 'static,
+    {
+        let mut report = RegionConformanceSuite::run(&provider);
+        // The region suite runs the base suite itself once the method is
+        // claimed; otherwise the base failures are added here.
+        if !report.claimed {
+            report.failures.extend(
+                ConformanceSuite::run(&provider)
+                    .failures
+                    .into_iter()
+                    .map(RegionConformanceFailure::Base),
+            );
+        }
         if !report.is_success() {
             return Err(Box::new(report));
         }

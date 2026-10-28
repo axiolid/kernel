@@ -16,6 +16,8 @@ caret rule for `0.x` versions.
   the frame, chain and ring invariants, canonical order, budgets (in-plane
   regions, region vertices, in-plane pairs) and evidence counts (ADR 0091,
   #359).
+- `MeshPlaneSectionRegistry::register_request_conformant` also runs the
+  region suite and rejects a claimed failure (#359).
 
 ## [0.3.6] - 2026-10-28
 
