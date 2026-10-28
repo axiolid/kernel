@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-hidden-lines"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-hidden-lines-contract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

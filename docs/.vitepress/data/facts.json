@@ -238,10 +238,10 @@
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
-      "released": "0.1.0",
+      "released": "0.1.1",
       "released_date": "2026-10-28",
       "role": "algorithm.discrete",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     "axiolid-inspect": {
       "description": "Mesh queries: clearance, containment, ray casting, and genus",
@@ -346,10 +346,10 @@
       "description": "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
-      "released": "0.1.0",
+      "released": "0.1.1",
       "released_date": "2026-10-28",
       "role": "contract.operation",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     "axiolid-mesh-section-contract": {
       "description": "Portable mesh plane-section request, result, and evidence contract",

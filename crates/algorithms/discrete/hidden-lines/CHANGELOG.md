@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-28
+
 ### Changed
 
 - The near-plane caps of closed solids occlude (#138, ADR 0090): a

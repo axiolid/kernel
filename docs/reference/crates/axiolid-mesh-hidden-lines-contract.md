@@ -8,7 +8,7 @@ Portable orthographic hidden-line drawing request, result, and conformance contr
 
 | | |
 | --- | --- |
-| Latest release | 0.1.0 (2026-10-28) |
+| Latest release | 0.1.1 (2026-10-28) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -31,15 +31,14 @@ implement `MeshHiddenLines`, and `axiolid-dispatch` selects one. See ADR 0090.
 
 ## Changes
 
-Latest release, 0.1.0 (2026-10-28):
+Latest release, 0.1.1 (2026-10-28):
 
 ### Added
 
-- The `MeshHiddenLines` operation contract (ADR 0090, #138): an
-  orthographic view with optional near and far clipping, a 2D crop region,
-  boundary, silhouette and crease edge selection, explicit limits,
-  visible and hidden segments naming their source edge, evidence counts,
-  `HiddenLineError` (a `GeomError` plus the mesh at fault), and a
-  conformance suite with self-contained fixtures.
+- Conformance cases for near-plane caps (#138): a solid cut by the near
+  plane hides what lies below its cap, a sheet is never capped, a shared
+  diagonal needs the perturbation, a plane at the top of a solid cuts
+  nothing, a cut solid with a face in the plane is drawn, and a fold under
+  an equator edge needs the orientation of the perturbation.
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

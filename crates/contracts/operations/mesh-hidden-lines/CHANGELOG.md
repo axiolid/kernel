@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-28
+
 ### Added
 
 - Conformance cases for near-plane caps (#138): a solid cut by the near

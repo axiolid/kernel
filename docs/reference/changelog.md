@@ -2872,6 +2872,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-hidden-lines
 
+### 0.1.1 - 2026-10-28
+
+### Changed
+
+- The near-plane caps of closed solids occlude (#138, ADR 0090): a
+  `Solid` that the near plane cuts no longer fails as `UnsupportedInput`.
+  A point with `W < near` (farther than the plane) is hidden when the point
+  of the plane above it lies in the solid, by exact ray parity with a
+  symbolic perturbation of the image point. A face of a cut solid in the
+  near plane is drawn, not refused.
+
 ### 0.1.0 - 2026-10-28
 
 ### Added
@@ -5296,6 +5307,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-hidden-lines-contract
+
+### 0.1.1 - 2026-10-28
+
+### Added
+
+- Conformance cases for near-plane caps (#138): a solid cut by the near
+  plane hides what lies below its cap, a sheet is never capped, a shared
+  diagonal needs the perturbation, a plane at the top of a solid cuts
+  nothing, a cut solid with a face in the plane is drawn, and a fold under
+  an equator edge needs the orientation of the perturbation.
 
 ### 0.1.0 - 2026-10-28
 

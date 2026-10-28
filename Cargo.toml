@@ -90,7 +90,7 @@ axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.1" }
 axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.3.2" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.3.2" }
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.3.1" }
-axiolid-hidden-lines = { path = "crates/algorithms/discrete/hidden-lines", version = "0.1.0" }
+axiolid-hidden-lines = { path = "crates/algorithms/discrete/hidden-lines", version = "0.1.1" }
 axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.3.1" }
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.2" }
 axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", version = "0.1.0" }
@@ -143,7 +143,7 @@ axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boole
 axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.3.3" }
 axiolid-curve-evaluate-contract = { path = "crates/contracts/operations/curve-evaluate", version = "0.3.7" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.3.1" }
-axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.0" }
+axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.1" }
 axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.6", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.3.2", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.3.1", default-features = false }
