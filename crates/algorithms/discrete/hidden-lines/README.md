@@ -6,9 +6,10 @@ meshes in an orthographic view. Visibility is decided exactly in the view's
 affine frame, with the interval filter first and dyadic big integers when it
 cannot decide; no tolerance enters a decision, and the output endpoints are
 the exact points rounded once. It refuses what it cannot decide with a typed
-error that names the mesh. It tests every edge against every triangle that
-can matter, so the cost grows with edges times triangles, and a near clipping
-plane through a `Solid` mesh is refused until the cap of a cut solid is built.
+error that names the mesh. Candidate pairs are found by a bounding-box scan that is quadratic in edges
+times triangles; the examined pairs are bounded by `max_candidate_pairs`. A
+near clipping plane that cuts a `Solid` mesh is refused, naming it, until the
+cap of a cut solid is built; a solid wholly beyond the plane is removed.
 It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
 ```bash

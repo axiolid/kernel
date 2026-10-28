@@ -1,10 +1,11 @@
 //! The scalar exact hidden-line provider.
 
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use axiolid_contracts::{
     Backend, BackendDescriptor, BackendId, CancellationGranularity, ExecutionOptions,
-    ExecutionTarget, GeomError, Operation, ScratchRequirement,
+    ExecutionTarget, GeomError, GeomResult, Operation, ScratchRequirement,
 };
 use axiolid_core::{Frame3, SpaceFrame, Tolerance};
 use axiolid_mesh::try_audit_mesh;
@@ -13,9 +14,11 @@ use axiolid_mesh_hidden_lines_contract::{
     HiddenLineSegment, MeshHiddenLines, MeshRole, SourceEdge, Visibility,
 };
 
+use crate::decide::decide;
 use crate::edges::{collect, DrawEdge, MeshEdges, Tri};
 use crate::occlusion::{resolve, Resolved, Scene, Work};
 use crate::output::endpoint;
+use crate::recipe::{Constraint, Kind, ValueSign};
 use crate::view::Vert;
 
 /// Portable exact orthographic hidden-line provider.
@@ -26,8 +29,13 @@ use crate::view::Vert;
 /// triangle whose bounding box can matter, so the cost grows with edges times
 /// triangles; `max_candidate_pairs` bounds it.
 ///
-/// Refused by name: a near clipping plane with any [`MeshRole::Solid`] in the
-/// request (the cap of a cut solid occludes, and is not built yet).
+/// Refused by name: a near clipping plane that cuts a [`MeshRole::Solid`]
+/// (some vertex strictly nearer than the plane and some at or beyond it; the
+/// cap of a cut solid occludes and is not built yet). The first such solid in
+/// request order is named. A solid wholly beyond the plane is removed: it
+/// neither occludes nor is drawn. A failure to produce an endpoint (a
+/// coordinate beyond the binary64 range) is `Degenerate` and names the mesh
+/// of the edge.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScalarHiddenLines;
 
@@ -72,23 +80,6 @@ impl MeshHiddenLines for ScalarHiddenLines {
             options.check_cancelled()?;
             audit(entry, options)?;
         }
-        if request.view.near.is_some() {
-            if let Some(solid) = request
-                .meshes
-                .iter()
-                .find(|entry| entry.role == MeshRole::Solid)
-            {
-                return Err(HiddenLineError::mesh(
-                    solid.id,
-                    GeomError::UnsupportedInput {
-                        backend: Self::ID,
-                        operation: Operation::MeshHiddenLines,
-                        input: "near clip through a capped solid",
-                    },
-                ));
-            }
-        }
-
         let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
         let mut verts: Vec<Vert> = Vec::new();
         verts
@@ -105,6 +96,20 @@ impl MeshHiddenLines for ScalarHiddenLines {
                 })
             })?;
             verts.extend(entry.mesh.positions.iter().map(|p| Vert::new(*p, frame)));
+            if let (Some(near), MeshRole::Solid) = (request.view.near, entry.role) {
+                if cut_by_near(&verts[base as usize..], near, &mut escalations)
+                    .map_err(|error| HiddenLineError::mesh(entry.id, error))?
+                {
+                    return Err(HiddenLineError::mesh(
+                        entry.id,
+                        GeomError::UnsupportedInput {
+                            backend: Self::ID,
+                            operation: Operation::MeshHiddenLines,
+                            input: "near clip through a capped solid",
+                        },
+                    ));
+                }
+            }
             let input = MeshEdges {
                 index,
                 id: entry.id,
@@ -155,16 +160,44 @@ impl MeshHiddenLines for ScalarHiddenLines {
                 Resolved::Pieces(pieces) => pieces,
             };
             let [start, end] = edge.ends;
+            let source = SourceEdge {
+                mesh: id,
+                vertices: edge.local,
+            };
+            let first = segments.len();
+            // A collapsed piece since the last pushed segment: its neighbours
+            // of one visibility are one piece after rounding.
+            let mut collapsed = false;
             for piece in pieces {
                 if piece.hidden && !request.edges.hidden {
+                    collapsed = false;
                     continue;
                 }
-                let from = endpoint(&verts, start, end, piece.lo)?;
-                let to = endpoint(&verts, start, end, piece.hi)?;
+                let round = |param| {
+                    endpoint(&verts, start, end, param)
+                        .map_err(|error| HiddenLineError::mesh(id, error))
+                };
+                let (from, to) = (round(piece.lo)?, round(piece.hi)?);
                 if from == to {
                     evidence.collapsed_segments += 1;
+                    collapsed = true;
                     continue;
                 }
+                let visibility = if piece.hidden {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Visible
+                };
+                if collapsed && segments.len() > first {
+                    let count = segments.len();
+                    let last = &mut segments[count - 1];
+                    if last.visibility == visibility {
+                        last.end = to;
+                        collapsed = false;
+                        continue;
+                    }
+                }
+                collapsed = false;
                 if segments.len() >= request.limits.max_output_segments {
                     return Err(GeomError::BudgetExceeded {
                         resource: "hidden-line output segments",
@@ -172,29 +205,48 @@ impl MeshHiddenLines for ScalarHiddenLines {
                     .into());
                 }
                 segments.try_reserve(1).map_err(|_| memory())?;
-                let visibility = if piece.hidden {
-                    evidence.hidden_segments += 1;
-                    Visibility::Hidden
-                } else {
-                    evidence.visible_segments += 1;
-                    Visibility::Visible
-                };
                 segments.push(HiddenLineSegment::new(
-                    SourceEdge {
-                        mesh: id,
-                        vertices: edge.local,
-                    },
-                    edge.kind,
-                    visibility,
-                    from,
-                    to,
+                    source, edge.kind, visibility, from, to,
                 ));
+            }
+        }
+        for segment in &segments {
+            match segment.visibility {
+                Visibility::Hidden => evidence.hidden_segments += 1,
+                _ => evidence.visible_segments += 1,
             }
         }
         evidence.candidate_pairs = work.candidate_pairs;
         evidence.exact_escalations = work.escalations + escalations;
         Ok(HiddenLineOutcome::new(request.view, segments, evidence))
     }
+}
+
+/// Whether the plane `W = near` cuts the vertices: one has `W > near` and one
+/// has `W <= near`, each decided exactly.
+fn cut_by_near(verts: &[Vert], near: f64, escalations: &mut usize) -> GeomResult<bool> {
+    let (mut beyond, mut kept) = (false, false);
+    for at in 0..verts.len() as u32 {
+        let constraint = Constraint::new(Kind::BelowNear(near), false);
+        let side = decide(
+            &ValueSign {
+                verts,
+                constraint: &constraint,
+                at,
+            },
+            escalations,
+        )?;
+        // `near - W`: negative means beyond the plane.
+        if side == Ordering::Less {
+            beyond = true;
+        } else {
+            kept = true;
+        }
+        if beyond && kept {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Request-level checks. Returns the total positions and triangles.
@@ -302,7 +354,7 @@ fn validate_frame(frame: &Frame3, tolerance: Tolerance) -> Result<(), HiddenLine
 fn audit(entry: &HiddenLineMesh<'_>, options: &ExecutionOptions) -> Result<(), HiddenLineError> {
     let refuse = |error: GeomError| HiddenLineError::mesh(entry.id, error);
     let health = try_audit_mesh(entry.mesh, options.tolerance())
-        .map_err(|_| refuse(GeomError::BudgetExceeded { resource: "memory" }))?;
+        .map_err(|_| HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" }))?;
     if let Some((triangle, index)) = health.first_invalid_index {
         return Err(refuse(GeomError::InvalidInput(format!(
             "triangle {triangle} references position {index}, but the mesh has {}",

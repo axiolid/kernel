@@ -17,6 +17,7 @@ MUTANTS = [
     ('view change accepted', R, '    if outcome.view != request.view {', '    if false && outcome.view != request.view {', TESTS),
     ('segment order unchecked', R, '        if previous.is_some_and(|last| last > key) {', '        if false && previous.is_some_and(|last| last > key) {', TESTS),
     ('hidden emitted when not requested', R, '            Visibility::Hidden if request.edges.hidden => hidden += 1,', '            Visibility::Hidden => hidden += 1,', TESTS),
+    ('same-visibility neighbours accepted', R, '        if request.edges.hidden\n            && previous == Some(key)', '        if false\n            && previous == Some(key)', TESTS),
     ('refusal loses its mesh id', R, '        let refuse = |error: GeomError| HiddenLineError::mesh(entry.id, error);', '        let refuse = |error: GeomError| HiddenLineError::request(error);', TESTS),
     ('refusal naming a foreign mesh accepted', R, '                if !request.meshes.iter().any(|entry| entry.id == *id) {', '                if false && !request.meshes.iter().any(|entry| entry.id == *id) {', TESTS),
     ('edge kind change accepted', R, '        if previous == Some(key) && previous_kind != Some(segment.kind) {', '        if false && previous == Some(key) && previous_kind != Some(segment.kind) {', TESTS),

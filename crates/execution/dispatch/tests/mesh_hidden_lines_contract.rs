@@ -556,7 +556,13 @@ fn outcome_violations_are_caught() {
         ("one edge with two kinds", |_, o| {
             let mut second = segment(MeshId(1), [0, 1]);
             second.kind = EdgeKind::Crease;
+            second.visibility = Visibility::Hidden;
             o.segments.push(second);
+            o.evidence.hidden_segments = 1;
+            Ok(())
+        }),
+        ("adjacent pieces of one edge with one visibility", |_, o| {
+            o.segments.push(segment(MeshId(1), [0, 1]));
             o.evidence.visible_segments = 2;
             Ok(())
         }),
@@ -579,12 +585,15 @@ fn ordered_segments_are_accepted() {
     let meshes = [mesh(1, MeshRole::Solid, &a), mesh(2, MeshRole::Solid, &b)];
     let request = HiddenLineRequest::new(&meshes, view(), selection(), limits());
     let outcome = registry(&calls, |_, o| {
-        // Non-decreasing: equal keys (an edge split into pieces), then a
-        // larger edge, then the next mesh.
-        o.segments.push(segment(MeshId(1), [0, 1]));
+        // Non-decreasing: equal keys (an edge split into pieces of
+        // alternating visibility), then a larger edge, then the next mesh.
+        let mut hidden = segment(MeshId(1), [0, 1]);
+        hidden.visibility = Visibility::Hidden;
+        o.segments.push(hidden);
         o.segments.push(segment(MeshId(1), [0, 2]));
         o.segments.push(segment(MeshId(2), [0, 1]));
-        o.evidence.visible_segments = 4;
+        o.evidence.visible_segments = 3;
+        o.evidence.hidden_segments = 1;
         Ok(())
     })
     .hidden_lines(&request, &options())

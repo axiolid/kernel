@@ -9,12 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-28
-
 ### Added
 
 - `ScalarHiddenLines`, the exact scalar provider for `MeshHiddenLines`
   (ADR 0090, #138): boundary, silhouette and crease edges of triangle
   meshes split into visible and hidden pieces by exact interval and dyadic
   decisions, with endpoints that are the exact points rounded once. A near
-  clipping plane through a `Solid` mesh is refused as `UnsupportedInput`.
+  clipping plane that cuts a `Solid` mesh is refused as `UnsupportedInput`
+  naming it.

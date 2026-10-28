@@ -105,3 +105,59 @@ fn a_near_plane_through_a_solid_is_refused_and_names_the_mesh() {
         }
     ));
 }
+
+fn plan_request<'a>(meshes: &'a [HiddenLineMesh<'a>], near: f64) -> HiddenLineRequest<'a> {
+    HiddenLineRequest::new(
+        meshes,
+        OrthographicView::new(plan_frame()).with_near(near),
+        EdgeSelection::new(Some(0.5)),
+        LIMITS,
+    )
+}
+
+#[test]
+fn a_near_plane_beyond_a_solid_draws_it() {
+    let cube = box_mesh([0.0; 3], [1.0; 3]);
+    let meshes = [HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &cube)];
+    let outcome = registry()
+        .hidden_lines(&plan_request(&meshes, 5.0), &options())
+        .expect("drawn");
+    assert_eq!(outcome.evidence.clipped_edges, 0);
+    assert_eq!(outcome.evidence.visible_segments, 4);
+    assert_eq!(outcome.evidence.hidden_segments, 4);
+}
+
+#[test]
+fn only_the_solid_that_the_near_plane_cuts_is_named() {
+    let low = box_mesh([0.0; 3], [1.0; 3]);
+    let tall = box_mesh([2.0, 0.0, 0.0], [3.0, 1.0, 3.0]);
+    let meshes = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &low),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Solid, &tall),
+    ];
+    let error = registry()
+        .hidden_lines(&plan_request(&meshes, 2.0), &options())
+        .expect_err("refused");
+    assert_eq!(error.mesh, Some(MeshId(2)));
+    assert!(matches!(error.error, GeomError::UnsupportedInput { .. }));
+}
+
+#[test]
+fn a_solid_wholly_beyond_the_near_plane_is_removed() {
+    let low = box_mesh([0.0; 3], [1.0; 3]);
+    let beyond = box_mesh([0.0, 0.0, 3.0], [1.0, 1.0, 4.0]);
+    let alone = [HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &low)];
+    let both = [
+        HiddenLineMesh::new(MeshId(1), MeshRole::Solid, &low),
+        HiddenLineMesh::new(MeshId(2), MeshRole::Solid, &beyond),
+    ];
+    let expected = registry()
+        .hidden_lines(&plan_request(&alone, 2.0), &options())
+        .expect("drawn");
+    let outcome = registry()
+        .hidden_lines(&plan_request(&both, 2.0), &options())
+        .expect("drawn");
+    // It does not occlude the cube below it and draws nothing itself.
+    assert_eq!(outcome.segments, expected.segments);
+    assert_eq!(outcome.evidence.clipped_edges, 8);
+}

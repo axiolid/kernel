@@ -108,7 +108,7 @@ pub(crate) fn collect(
     edges: &mut Vec<DrawEdge>,
 ) -> Result<(), HiddenLineError> {
     let refuse = |error: GeomError| HiddenLineError::mesh(input.id, error);
-    let memory = || refuse(GeomError::BudgetExceeded { resource: "memory" });
+    let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
     let first_tri = tris.len();
     let count = input.mesh.triangle_count();
     tris.try_reserve(count).map_err(|_| memory())?;

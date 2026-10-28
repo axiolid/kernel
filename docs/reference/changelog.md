@@ -2820,19 +2820,6 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 - `RepairReport::attribute_fates` names every input channel's fate.
 
 
-## axiolid-hidden-lines
-
-### 0.1.0 - 2026-10-28
-
-### Added
-
-- `ScalarHiddenLines`, the exact scalar provider for `MeshHiddenLines`
-  (ADR 0090, #138): boundary, silhouette and crease edges of triangle
-  meshes split into visible and hidden pieces by exact interval and dyadic
-  decisions, with endpoints that are the exact points rounded once. A near
-  clipping plane through a `Solid` mesh is refused as `UnsupportedInput`.
-
-
 ## axiolid-inspect
 
 ### 0.3.7 - 2026-10-28

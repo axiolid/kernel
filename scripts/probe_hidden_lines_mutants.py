@@ -86,9 +86,18 @@ MUTANTS = [
     ('output limit unchecked', PRO,
      '                if segments.len() >= request.limits.max_output_segments {',
      '                if false && segments.len() >= request.limits.max_output_segments {', TESTS),
-    ('near clip through a solid accepted', PRO,
-     '        if request.view.near.is_some() {\n            if let Some(solid)',
-     '        if false && request.view.near.is_some() {\n            if let Some(solid)', TESTS),
+    ('near clip through a cut solid accepted', PRO,
+     '        if beyond && kept {',
+     '        if false && beyond && kept {', TESTS),
+    ('near clip refuses an uncut solid', PRO,
+     '        if beyond && kept {',
+     '        if beyond || kept {', TESTS),
+    ('collapsed neighbours not merged', PRO,
+     '                    if last.visibility == visibility {',
+     '                    if false && last.visibility == visibility {', TESTS),
+    ('edge-on wall ignores near', OCC,
+     '    let Some(near) = scene.near else {',
+     '    let Some(near) = scene.near.filter(|_| false) else {', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=3600, reject_uncompiled=True)

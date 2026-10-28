@@ -21,7 +21,8 @@ caret rule for `0.x` versions.
   budget and topology checks before dispatch, outcome validation, fallback
   only on unsupported or unavailable providers, and refusals that name the
   mesh at fault (ADR 0090, #138). `axiolid-hidden-lines` is the first
-  provider behind it.
+  provider behind it. Adjacent pieces of one source edge must differ in
+  visibility when hidden pieces are requested.
 
 ## [0.3.5] - 2026-10-28
 

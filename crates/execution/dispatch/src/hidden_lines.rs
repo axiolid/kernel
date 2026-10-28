@@ -354,6 +354,7 @@ fn validate_outcome(
     };
     let mut previous: Option<(usize, [u32; 2])> = None;
     let mut previous_kind = None;
+    let mut previous_visibility = None;
     let mut visible = 0usize;
     let mut hidden = 0usize;
     for segment in &outcome.segments {
@@ -394,8 +395,20 @@ fn validate_outcome(
         if previous == Some(key) && previous_kind != Some(segment.kind) {
             return Err(violation("pieces of one source edge differ in edge kind"));
         }
+        // With hidden pieces omitted, two visible pieces may be neighbours
+        // along the edge with a hidden one between; otherwise a piece is
+        // maximal, so neighbours differ.
+        if request.edges.hidden
+            && previous == Some(key)
+            && previous_visibility == Some(segment.visibility)
+        {
+            return Err(violation(
+                "adjacent pieces of one source edge have the same visibility",
+            ));
+        }
         previous = Some(key);
         previous_kind = Some(segment.kind);
+        previous_visibility = Some(segment.visibility);
     }
     let triangles = source_totals(request.meshes).1;
     let evidence = &outcome.evidence;

@@ -238,8 +238,8 @@
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
-      "released": "0.1.0",
-      "released_date": "2026-10-28",
+      "released": null,
+      "released_date": null,
       "role": "algorithm.discrete",
       "version": "0.1.0"
     },
