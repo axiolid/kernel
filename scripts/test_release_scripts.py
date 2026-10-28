@@ -212,6 +212,31 @@ version = "0.1.0"
                 with self.assertRaisesRegex(SystemExit, "archive mismatch"):
                     publish.reproduce_publish_dry_run(package, archive, {})
 
+    def test_publish_dry_run_archive_is_found_where_cargo_199_writes_it(self) -> None:
+        package = {"name": "crate", "version": "0.1.0"}
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target" / "package"
+            target.mkdir(parents=True)
+            archive = target / "crate-0.1.0.crate"
+            archive.write_bytes(b"package bytes")
+            moved = target / "tmp-crate" / "crate-0.1.0.crate"
+
+            def fake_run(command, **kwargs):
+                moved.parent.mkdir(exist_ok=True)
+                moved.write_bytes(b"package bytes")
+                return SimpleNamespace(returncode=0, stdout="")
+
+            with mock.patch.object(publish.subprocess, "run", side_effect=fake_run):
+                self.assertEqual(publish.reproduce_publish_dry_run(package, archive, {}), moved)
+
+            def no_archive(command, **kwargs):
+                return SimpleNamespace(returncode=0, stdout="")
+
+            archive.write_bytes(b"package bytes")
+            with mock.patch.object(publish.subprocess, "run", side_effect=no_archive):
+                with self.assertRaisesRegex(SystemExit, "produced no archive"):
+                    publish.reproduce_publish_dry_run(package, archive, {})
+
     def test_prepare_archive_fails_closed_on_permanent_error(self) -> None:
         package = {"name": "leaf", "version": "0.1.0"}
         args = SimpleNamespace(max_attempts=1, dependency_wait=0, rate_limit_wait=0)

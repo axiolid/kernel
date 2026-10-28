@@ -239,7 +239,11 @@ def reproduce_publish_dry_run(
     version = package["version"]
     expected_bytes = archive.read_bytes()
     expected_checksum = archive_checksum(archive)
-    archive.unlink()
+    # Cargo 1.99 writes the dry-run archive to `package/tmp-crate/` and
+    # leaves `package/` to `cargo package`; older releases wrote both there.
+    candidates = (archive, archive.parent / "tmp-crate" / archive.name)
+    for candidate in candidates:
+        candidate.unlink(missing_ok=True)
     result = subprocess.run(
         [CARGO, "publish", "-p", name, "--locked", "--dry-run", "--quiet", *verify_features(name)],
         cwd=ROOT,
@@ -252,7 +256,8 @@ def reproduce_publish_dry_run(
         print(result.stdout, end="", flush=True)
     if result.returncode != 0:
         raise SystemExit(f"cargo publish --dry-run failed for {name} {version}")
-    if not archive.is_file():
+    archive = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if archive is None:
         raise SystemExit(f"cargo publish --dry-run produced no archive for {name} {version}")
     reproduced_checksum = archive_checksum(archive)
     if reproduced_checksum != expected_checksum or archive.read_bytes() != expected_bytes:
