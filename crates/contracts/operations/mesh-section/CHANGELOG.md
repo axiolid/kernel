@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SectionRequest`, `PlaneSection` and the provided `MeshPlaneSection` methods
+  `section_request` and `request_scratch_requirement`: faces lying in the
+  cutting plane come back as `InPlaneRegion`s with an `InPlaneSide`, cut curves
+  are transversal `SectionChain`s (open ones end on a region), and touching
+  edges are counted in `PlaneSectionEvidence`. A provider that does not
+  implement the method refuses with `Unsupported`. The refusal names are
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES`, `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`
+  and `REFUSED_SADDLE_VERTEX`. Additive (ADR 0091, #359).
+- `conformance::RegionConformanceSuite` runs hand-derived fixtures for the
+  method, among them a cube through its top face, a frame with a hole and a
+  parapet with a post (#359).
+
 ## [0.3.2] - 2026-10-28
 
 ### Changed

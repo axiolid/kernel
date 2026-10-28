@@ -872,8 +872,8 @@ id = "D16"
 area = "mesh"
 name = "mesh plane section / slicing"
 level = "implemented"
-summary = "ScalarSection/MeshPlaneSection produce closed plane-local contours from source-topology stitching of outward-oriented closed solids; explicitly fails closed on coplanar overlap and open/non-manifold input (no region nesting claimed)."
-evidence = ["crates/algorithms/reference/src/section.rs::ScalarSection", "crates/contracts/operations/mesh-section/src/conformance.rs"]
+summary = "ScalarSection/MeshPlaneSection produce closed plane-local contours from source-topology stitching of outward-oriented closed solids. The opt-in section_request (ADR 0091, #359) reports faces lying in the plane as regions with a side (Below/Above) and holes, keeps cut chains to transversal crossings (an open chain may end on a region) and counts touching edges. Refused by name: overlapping in-plane faces, in-plane faces of opposite sides that overlap, and saddle vertices; open/non-manifold input stays refused until sheets land."
+evidence = ["crates/algorithms/reference/src/section.rs::ScalarSection", "crates/algorithms/reference/src/section/regions.rs::build_regions", "crates/algorithms/reference/src/section/chains.rs::assemble_chains", "crates/contracts/operations/mesh-section/src/conformance.rs", "crates/contracts/operations/mesh-section/src/region_conformance.rs::RegionConformanceSuite", "scripts/probe_section_regions_mutants.py"]
 occt = ["src/ModelingAlgorithms/TKBO/BRepAlgoAPI"]
 cgal = ["PMP_Boolean_operations"]
 

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-01
 - Package ownership amended by: [0035](./0035-nested-ownership-and-capability-contracts.md)
+- Amended by: [0091](./0091-mesh-sections-report-in-plane-regions-and-open-chains.md)
 
 ## Context
 

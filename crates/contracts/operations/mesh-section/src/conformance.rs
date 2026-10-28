@@ -6,6 +6,9 @@ use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Frame3, Point3, Tolerance, Vec3};
 use axiolid_mesh::TriMesh;
 
+pub use crate::region_conformance::{
+    RegionConformanceFailure, RegionConformanceReport, RegionConformanceSuite,
+};
 use crate::{MeshPlaneSection, SectionLimits};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,7 +145,7 @@ impl ConformanceSuite {
     }
 }
 
-fn unit_cube() -> TriMesh {
+pub(crate) fn unit_cube() -> TriMesh {
     TriMesh::new(
         vec![
             Point3::new(0.0, 0.0, 0.0),

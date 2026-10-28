@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `Application::section_mesh_request` sections a closed oriented mesh and
+  reports faces lying in the plane as regions with a side (ADR 0091, #359).
+
 ## [0.4.3] - 2026-10-28
 
 ### Added

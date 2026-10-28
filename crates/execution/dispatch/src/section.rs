@@ -10,11 +10,12 @@ use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh, TriMesh};
 use axiolid_mesh_contracts::SolidRequirements;
 use axiolid_mesh_section_contract::{
     conformance::{ConformanceReport, ConformanceSuite},
-    MeshPlaneSection, SectionLimits, SectionOutcome,
+    MeshPlaneSection, PlaneSection, SectionLimits, SectionOutcome, SectionRequest,
 };
 
 use crate::device::matches_device;
 use crate::frame::validate_frame;
+use crate::section_request::validate_plane_section;
 
 #[derive(Debug, Clone)]
 struct RegisteredSection {
@@ -124,6 +125,77 @@ impl MeshPlaneSectionRegistry {
                 Ok(outcome) => {
                     validate_outcome(descriptor.id, mesh, frame, limits, &outcome)?;
                     return Ok(outcome);
+                }
+                Err(error @ (GeomError::Unsupported { .. } | GeomError::Unavailable { .. })) => {
+                    last_retryable = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_retryable.unwrap_or(GeomError::Unsupported {
+            backend: BackendId::new("mesh-section-registry"),
+            operation: Operation::MeshPlaneSection,
+        }))
+    }
+
+    /// Validate and execute one request that reports faces lying in the
+    /// plane as regions (ADR 0091).
+    ///
+    /// The source must be a closed, consistently wound, outward oriented
+    /// two-manifold, as for [`section`](Self::section). A provider without
+    /// `section_request` refuses with `Unsupported`, which falls back to the
+    /// next provider; every other error fails immediately.
+    pub fn section_request(
+        &self,
+        mesh: &TriMesh,
+        request: &SectionRequest,
+        options: &ExecutionOptions,
+    ) -> GeomResult<PlaneSection> {
+        options.check_cancelled()?;
+        validate_source_shape(mesh, request.frame, request.limits, options)?;
+
+        let mut has_matching_provider = false;
+        let mut has_budgeted_provider = false;
+        for entry in &self.providers {
+            let descriptor = entry.provider.descriptor();
+            if matches_device(options.device(), descriptor.id, descriptor.target) {
+                has_matching_provider = true;
+                has_budgeted_provider |= section_scratch_fits(
+                    entry.provider.request_scratch_requirement(),
+                    mesh,
+                    options,
+                );
+            }
+        }
+        if !has_matching_provider {
+            return Err(GeomError::Unsupported {
+                backend: BackendId::new("mesh-section-registry"),
+                operation: Operation::MeshPlaneSection,
+            });
+        }
+        if !has_budgeted_provider {
+            return Err(GeomError::BudgetExceeded { resource: "memory" });
+        }
+
+        validate_source_topology(mesh, options)?;
+
+        let mut last_retryable = None;
+        for entry in &self.providers {
+            let descriptor = entry.provider.descriptor();
+            if !matches_device(options.device(), descriptor.id, descriptor.target)
+                || !section_scratch_fits(
+                    entry.provider.request_scratch_requirement(),
+                    mesh,
+                    options,
+                )
+            {
+                continue;
+            }
+            match entry.provider.section_request(mesh, request, options) {
+                Ok(section) => {
+                    validate_plane_section(descriptor.id, mesh, request, &section)?;
+                    return Ok(section);
                 }
                 Err(error @ (GeomError::Unsupported { .. } | GeomError::Unavailable { .. })) => {
                     last_retryable = Some(error);

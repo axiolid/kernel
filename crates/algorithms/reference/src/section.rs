@@ -3,6 +3,20 @@
 //! Topology is classified from the exact binary64 plane equation. Geometry is
 //! emitted in the caller's plane frame, with source-edge connectivity preserved;
 //! no tolerance-based point welding is used.
+//!
+//! Two entry points share the exact vertex classification and segment
+//! building:
+//!
+//! - `section` is the legacy path. A face lying in the plane is refused as
+//!   degenerate, and its messages are part of its contract.
+//! - `section_request` (ADR 0091) reports faces lying in the plane as
+//!   regions with a side, keeps cut curves to transversal crossings, and
+//!   counts touching edges. `request` orchestrates it, `regions` traces the
+//!   region boundaries and `chains` assembles open and closed chains.
+
+mod chains;
+mod regions;
+mod request;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,11 +27,12 @@ use axiolid_contracts::{
 use axiolid_core::{Frame3, Point2, Point3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    MeshPlaneSection, SectionContour, SectionEvidence, SectionLimits, SectionOutcome,
+    MeshPlaneSection, PlaneSection, SectionEvidence, SectionLimits, SectionOutcome, SectionRequest,
 };
 
 use crate::orient3::orient3d;
 use crate::orientation::orient2d;
+use chains::assemble_contours;
 
 /// Portable deterministic mesh plane-section oracle.
 #[derive(Debug, Default, Clone, Copy)]
@@ -49,8 +64,27 @@ impl MeshPlaneSection for ScalarSection {
         }
     }
 
+    fn request_scratch_requirement(&self) -> ScratchRequirement {
+        // The legacy bound plus the directed-edge map of the in-plane
+        // triangles (key, value and tree overhead), the overlap sweep order,
+        // component and boundary state, and region rings: about 1 KiB per
+        // element, where an element is a position or a triangle.
+        ScratchRequirement::PerElement {
+            bytes_per_element: 1024,
+        }
+    }
+
     fn cancellation_granularity(&self) -> CancellationGranularity {
         CancellationGranularity::Incremental
+    }
+
+    fn section_request(
+        &self,
+        mesh: &TriMesh,
+        request: &SectionRequest,
+        options: &ExecutionOptions,
+    ) -> GeomResult<PlaneSection> {
+        request::plane_section(mesh, request, options)
     }
 
     fn section(
@@ -64,14 +98,7 @@ impl MeshPlaneSection for ScalarSection {
         check_source_limits(mesh, limits)?;
 
         let plane = ExactSectionPlane::new(frame)?;
-        let mut classifications = Vec::new();
-        classifications
-            .try_reserve_exact(mesh.positions.len())
-            .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
-        for &point in &mesh.positions {
-            let classification = plane.classify(point)?;
-            classifications.push(classification);
-        }
+        let classifications = classify_vertices(mesh, plane)?;
 
         let mut segments = BTreeSet::<Segment>::new();
         let mut on_plane_edges = BTreeMap::<EdgeKey, Vec<Sign>>::new();
@@ -248,6 +275,19 @@ impl ExactSectionPlane {
     }
 }
 
+/// Exact plane side and signed distance of every source position.
+fn classify_vertices(mesh: &TriMesh, plane: ExactSectionPlane) -> GeomResult<Vec<Classification>> {
+    let mut classifications = Vec::new();
+    classifications
+        .try_reserve_exact(mesh.positions.len())
+        .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
+    for &point in &mesh.positions {
+        let classification = plane.classify(point)?;
+        classifications.push(classification);
+    }
+    Ok(classifications)
+}
+
 fn opposite(left: Sign, right: Sign) -> bool {
     matches!(
         (left, right),
@@ -301,119 +341,6 @@ fn insert_segment(
     }
     segments.insert(segment);
     Ok(())
-}
-
-fn assemble_contours(
-    mesh: &TriMesh,
-    frame: Frame3,
-    classifications: &[Classification],
-    segments: &BTreeSet<Segment>,
-    limits: SectionLimits,
-    options: &ExecutionOptions,
-) -> GeomResult<Vec<SectionContour>> {
-    let mut adjacency = BTreeMap::<NodeKey, Vec<NodeKey>>::new();
-    for &Segment(left, right) in segments {
-        adjacency.entry(left).or_default().push(right);
-        adjacency.entry(right).or_default().push(left);
-    }
-    for neighbours in adjacency.values_mut() {
-        neighbours.sort_unstable();
-        if neighbours.len() != 2 {
-            return Err(GeomError::NotManifold(format!(
-                "section graph has degree {}, expected 2",
-                neighbours.len()
-            )));
-        }
-    }
-
-    let mut visited = BTreeSet::<Segment>::new();
-    let mut contours = Vec::new();
-    for &start in adjacency.keys() {
-        let start_is_complete = adjacency[&start].iter().try_fold(true, |complete, &next| {
-            let segment = Segment::new(start, next)?;
-            Ok::<bool, GeomError>(complete && visited.contains(&segment))
-        })?;
-        if start_is_complete {
-            continue;
-        }
-        options.check_cancelled()?;
-        if contours.len() >= limits.max_contours {
-            return Err(GeomError::BudgetExceeded {
-                resource: "section contours",
-            });
-        }
-        let mut nodes = Vec::new();
-        let mut previous = None;
-        let mut current = start;
-        loop {
-            if nodes.len() >= limits.max_output_vertices {
-                return Err(GeomError::BudgetExceeded {
-                    resource: "section output vertices",
-                });
-            }
-            nodes.push(current);
-            let neighbours = adjacency
-                .get(&current)
-                .ok_or_else(internal_topology_error)?;
-            let next = match previous {
-                None => neighbours[0],
-                Some(previous) if neighbours[0] == previous => neighbours[1],
-                Some(_) => neighbours[0],
-            };
-            let edge = Segment::new(current, next)?;
-            if !visited.insert(edge) && next != start {
-                return Err(GeomError::NotManifold(
-                    "section graph revisited an edge before closing a contour".into(),
-                ));
-            }
-            previous = Some(current);
-            current = next;
-            if current == start {
-                break;
-            }
-            if nodes.len() > segments.len() {
-                return Err(internal_topology_error());
-            }
-        }
-        if nodes.len() < 3 {
-            return Err(GeomError::Degenerate(
-                "section contour has fewer than three source-topology nodes".into(),
-            ));
-        }
-        let mut points = Vec::new();
-        points
-            .try_reserve_exact(nodes.len())
-            .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
-        for node in nodes {
-            let world = node_point(mesh, classifications, node)?;
-            let local = world - frame.origin;
-            let point = Point2::new(local.dot(frame.x), local.dot(frame.y));
-            if !point.is_finite() {
-                return Err(GeomError::Degenerate(
-                    "section projection exceeded finite arithmetic".into(),
-                ));
-            }
-            points.push(point);
-        }
-        simplify_collinear(&mut points, options.tolerance().linear());
-        if points.len() < 3 {
-            return Err(GeomError::Degenerate(
-                "section contour collapsed below three vertices".into(),
-            ));
-        }
-        let area = signed_area(&points);
-        if !area.is_finite() || area == 0.0 {
-            return Err(GeomError::Degenerate(
-                "section contour has no finite signed area".into(),
-            ));
-        }
-        if area < 0.0 {
-            points[1..].reverse();
-        }
-        contours.push(SectionContour::new(points));
-    }
-    contours.sort_by(|left, right| point_order(&left.points[0], &right.points[0]));
-    Ok(contours)
 }
 
 fn mesh_index(index: u32) -> GeomResult<usize> {
@@ -497,6 +424,15 @@ fn point_order(left: &Point2, right: &Point2) -> std::cmp::Ordering {
         .then_with(|| left.y.total_cmp(&right.y))
 }
 
+/// Lexicographic order of point sequences; a prefix sorts first.
+fn sequence_order(left: &[Point2], right: &[Point2]) -> std::cmp::Ordering {
+    left.iter()
+        .zip(right)
+        .map(|(a, b)| point_order(a, b))
+        .find(|order| order.is_ne())
+        .unwrap_or_else(|| left.len().cmp(&right.len()))
+}
+
 fn check_source_limits(mesh: &TriMesh, limits: SectionLimits) -> GeomResult<()> {
     if mesh.positions.len() > limits.max_source_vertices {
         return Err(GeomError::BudgetExceeded {
@@ -515,6 +451,39 @@ fn internal_topology_error() -> GeomError {
     GeomError::BackendContractViolation {
         backend: ScalarSection::ID,
         detail: "internal section topology state is inconsistent".into(),
+    }
+}
+
+/// Plane-local coordinates of a model-space point. Chain points and region
+/// vertices both go through this one function, so a chain end that lies on a
+/// region boundary is bit-identical to the region vertex.
+fn project_local(frame: Frame3, world: Point3) -> GeomResult<Point2> {
+    let local = world - frame.origin;
+    let point = Point2::new(local.dot(frame.x), local.dot(frame.y));
+    if point.is_finite() {
+        Ok(point)
+    } else {
+        Err(GeomError::Degenerate(
+            "section projection exceeded finite arithmetic".into(),
+        ))
+    }
+}
+
+/// The exact sign of `orient2d`, refusing an uncertain predicate.
+fn orient_sign(a: Point2, b: Point2, c: Point2) -> GeomResult<Sign> {
+    orient2d(a, b, c).sign().ok_or_else(|| {
+        GeomError::Degenerate("certified orientation predicate returned an uncertain sign".into())
+    })
+}
+
+/// Product of two signs.
+fn sign_times(left: Sign, right: Sign) -> Sign {
+    if left == Sign::Zero || right == Sign::Zero {
+        Sign::Zero
+    } else if left == right {
+        Sign::Positive
+    } else {
+        Sign::Negative
     }
 }
 

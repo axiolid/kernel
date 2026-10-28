@@ -338,3 +338,271 @@ fn source_and_scratch_limits_block_dispatch() {
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
+
+// ---- section_request (ADR 0091) -------------------------------------------
+
+mod request {
+    use super::*;
+    use axiolid_mesh_section_contract::{
+        ChainEnd, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence, RegionLimits,
+        SectionChain, SectionRequest,
+    };
+
+    fn pts(points: &[(f64, f64)]) -> Vec<Point2> {
+        points.iter().map(|&(x, y)| Point2::new(x, y)).collect()
+    }
+
+    fn request_with(limits: SectionLimits, region_limits: RegionLimits) -> SectionRequest {
+        SectionRequest::new(frame(), limits, region_limits)
+    }
+
+    fn request() -> SectionRequest {
+        request_with(limits(), RegionLimits::new(100, 1_000, 1_000))
+    }
+
+    /// A valid answer: a closed chain, an open chain, and a region with two holes.
+    fn valid(mesh: &TriMesh, request: &SectionRequest) -> PlaneSection {
+        let chains = vec![
+            SectionChain::closed(pts(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])),
+            SectionChain::open(
+                pts(&[(0.5, 0.0), (0.5, 0.5)]),
+                ChainEnd::InPlaneRegion,
+                ChainEnd::InPlaneRegion,
+            ),
+        ];
+        let regions = vec![InPlaneRegion::new(
+            InPlaneSide::Below,
+            pts(&[(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]),
+            vec![
+                pts(&[(0.1, 0.1), (0.1, 0.2), (0.2, 0.2)]),
+                pts(&[(0.5, 0.5), (0.5, 0.6), (0.6, 0.6)]),
+            ],
+        )];
+        let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
+            .with_source_counts(2, 1, 3)
+            .with_output(&chains, &regions);
+        PlaneSection::new(request.frame, chains, regions, evidence)
+    }
+
+    type Mutation = fn(&mut PlaneSection);
+
+    #[derive(Debug)]
+    struct Scripted {
+        mutate: Mutation,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Backend for Scripted {
+        fn descriptor(&self) -> BackendDescriptor {
+            BackendDescriptor::new(
+                BackendId::new("section-scripted"),
+                ExecutionTarget::PortableCpu,
+            )
+        }
+    }
+
+    impl MeshPlaneSection for Scripted {
+        fn section(
+            &self,
+            _mesh: &TriMesh,
+            _frame: Frame3,
+            _limits: SectionLimits,
+            _options: &ExecutionOptions,
+        ) -> GeomResult<SectionOutcome> {
+            Err(GeomError::Degenerate("legacy path not under test".into()))
+        }
+
+        fn request_scratch_requirement(&self) -> ScratchRequirement {
+            ScratchRequirement::None
+        }
+
+        fn section_request(
+            &self,
+            mesh: &TriMesh,
+            request: &SectionRequest,
+            _options: &ExecutionOptions,
+        ) -> GeomResult<PlaneSection> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mut section = valid(mesh, request);
+            (self.mutate)(&mut section);
+            Ok(section)
+        }
+    }
+
+    fn run(mutate: fn(&mut PlaneSection), request: &SectionRequest) -> GeomResult<PlaneSection> {
+        let mut registry = MeshPlaneSectionRegistry::new();
+        registry.register(
+            0,
+            Scripted {
+                mutate,
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        registry.section_request(&cube(), request, &options())
+    }
+
+    #[test]
+    fn a_valid_answer_passes_unchanged() {
+        let section = run(|_| {}, &request()).expect("valid");
+        assert_eq!(section, valid(&cube(), &request()));
+    }
+
+    #[test]
+    fn each_broken_invariant_is_a_contract_violation() {
+        let cases: Vec<(&str, Mutation)> = vec![
+            ("frame", |s| s.frame.origin = Vec3::new(0.0, 0.0, 9.0)),
+            ("closed chain too short", |s| s.chains[0].points.truncate(2)),
+            ("open chain too short", |s| s.chains[1].points.truncate(1)),
+            ("chain non-finite", |s| {
+                s.chains[0].points[2] = Point2::new(f64::NAN, 1.0)
+            }),
+            ("chain duplicate", |s| {
+                s.chains[0].points[1] = s.chains[0].points[0]
+            }),
+            ("closed chain wrap duplicate", |s| {
+                s.chains[0].points[3] = s.chains[0].points[0]
+            }),
+            ("open chain duplicate", |s| {
+                s.chains[1].points[1] = s.chains[1].points[0]
+            }),
+            ("closed chain start", |s| s.chains[0].points.rotate_left(1)),
+            ("open chain direction", |s| s.chains[1].points.reverse()),
+            ("chain order", |s| s.chains.reverse()),
+            ("ring too short", |s| s.regions[0].holes[0].truncate(2)),
+            ("ring non-finite", |s| {
+                s.regions[0].outer[1] = Point2::new(f64::INFINITY, 0.0)
+            }),
+            ("ring duplicate", |s| {
+                s.regions[0].holes[0][1] = s.regions[0].holes[0][0]
+            }),
+            ("ring start", |s| s.regions[0].outer.rotate_left(1)),
+            ("hole order", |s| s.regions[0].holes.reverse()),
+            ("region order", |s| {
+                let mut second = s.regions[0].clone();
+                second.outer = pts(&[(-1.0, 0.0), (0.0, -1.0), (0.0, 0.5)]);
+                second.holes.clear();
+                s.regions.push(second);
+            }),
+            ("side order", |s| {
+                let mut second = s.regions[0].clone();
+                second.side = InPlaneSide::Above;
+                s.regions.insert(0, second);
+            }),
+            ("evidence source", |s| s.evidence.source_triangles += 1),
+            ("evidence chains", |s| s.evidence.open_chains += 1),
+            ("evidence regions", |s| s.evidence.region_vertices += 1),
+            ("evidence in-plane", |s| s.evidence.in_plane_triangles = 13),
+        ];
+        for (name, mutate) in cases {
+            let error = run(mutate, &request()).expect_err(name);
+            assert!(
+                matches!(error, GeomError::BackendContractViolation { .. }),
+                "{name}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn budgets_are_enforced_on_the_answer() {
+        let regions = RegionLimits::new(100, 1_000, 1_000);
+        let chain_points = 4 + 2;
+        let ring_points = 4 + 3 + 3;
+        let cases = [
+            (
+                request_with(SectionLimits::new(1_000, 1_000, 1_000, 1), regions),
+                "section contours",
+            ),
+            (
+                request_with(
+                    SectionLimits::new(1_000, 1_000, chain_points - 1, 10),
+                    regions,
+                ),
+                "section output vertices",
+            ),
+            (
+                request_with(limits(), RegionLimits::new(0, 1_000, 1_000)),
+                "section in-plane regions",
+            ),
+            (
+                request_with(limits(), RegionLimits::new(10, ring_points - 1, 1_000)),
+                "section in-plane region vertices",
+            ),
+            (
+                request_with(limits(), RegionLimits::new(10, 1_000, 2)),
+                "section in-plane pairs",
+            ),
+        ];
+        for (request, resource) in cases {
+            match run(|_| {}, &request) {
+                Err(GeomError::BudgetExceeded { resource: got }) => assert_eq!(got, resource),
+                other => panic!("{resource}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_solid_request_refuses_an_open_mesh_before_dispatch() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = MeshPlaneSectionRegistry::new();
+        registry.register(
+            0,
+            Scripted {
+                mutate: |_| {},
+                calls: Arc::clone(&calls),
+            },
+        );
+        let open_sheet = TriMesh::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y], vec![0, 1, 2]);
+        assert!(matches!(
+            registry.section_request(&open_sheet, &request(), &options()),
+            Err(GeomError::NotManifold(_))
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Implements only the legacy method, so the default refuses.
+    #[derive(Debug)]
+    struct Legacy;
+
+    impl Backend for Legacy {
+        fn descriptor(&self) -> BackendDescriptor {
+            BackendDescriptor::new(
+                BackendId::new("section-legacy"),
+                ExecutionTarget::PortableCpu,
+            )
+        }
+    }
+
+    impl MeshPlaneSection for Legacy {
+        fn section(
+            &self,
+            _mesh: &TriMesh,
+            _frame: Frame3,
+            _limits: SectionLimits,
+            _options: &ExecutionOptions,
+        ) -> GeomResult<SectionOutcome> {
+            Err(GeomError::Degenerate("legacy path not under test".into()))
+        }
+    }
+
+    #[test]
+    fn unsupported_falls_back_to_the_next_provider() {
+        let mut registry = MeshPlaneSectionRegistry::new();
+        registry.register(5, Legacy);
+        assert!(matches!(
+            registry.section_request(&cube(), &request(), &options()),
+            Err(GeomError::Unsupported { .. })
+        ));
+        let calls = Arc::new(AtomicUsize::new(0));
+        registry.register(
+            1,
+            Scripted {
+                mutate: |_| {},
+                calls: Arc::clone(&calls),
+            },
+        );
+        registry
+            .section_request(&cube(), &request(), &options())
+            .expect("falls back past the provider without the method");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}

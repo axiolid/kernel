@@ -23,7 +23,8 @@ use axiolid_mesh_boolean_contract::{
     conformance::ConformanceReport as BooleanConformanceReport, BooleanOutcome,
 };
 use axiolid_mesh_section_contract::{
-    conformance::ConformanceReport as SectionConformanceReport, SectionLimits, SectionOutcome,
+    conformance::ConformanceReport as SectionConformanceReport, PlaneSection, SectionLimits,
+    SectionOutcome, SectionRequest,
 };
 use axiolid_profile::Profile;
 #[cfg(not(all(feature = "ray-mesh", feature = "spatial")))]
@@ -418,6 +419,27 @@ impl Application {
     ) -> Result<SectionOutcome, ApplicationError> {
         self.section
             .section(mesh, frame, limits, options)
+            .map_err(|source| {
+                self.geometry_error(
+                    Operation::MeshPlaneSection,
+                    self.section_provider.unwrap_or(APPLICATION_ID),
+                    options.tolerance(),
+                    source,
+                )
+            })
+    }
+
+    /// Section a closed oriented mesh, reporting faces that lie in the plane
+    /// as regions with a side and cut curves as transversal crossings only
+    /// (ADR 0091). The provider must implement `section_request`.
+    pub fn section_mesh_request(
+        &self,
+        mesh: &TriMesh,
+        request: &SectionRequest,
+        options: &ExecutionOptions,
+    ) -> Result<PlaneSection, ApplicationError> {
+        self.section
+            .section_request(mesh, request, options)
             .map_err(|source| {
                 self.geometry_error(
                     Operation::MeshPlaneSection,

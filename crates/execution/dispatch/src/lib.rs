@@ -22,6 +22,8 @@ mod hidden_lines;
 mod reconstruction;
 #[cfg(feature = "mesh-section")]
 mod section;
+#[cfg(feature = "mesh-section")]
+mod section_request;
 
 #[cfg(feature = "mesh-boolean")]
 pub use boolean::MeshBooleanRegistry;

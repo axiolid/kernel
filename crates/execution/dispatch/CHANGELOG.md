@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshPlaneSectionRegistry::section_request`: the source checks of `section`,
+  fallback only on unsupported or unavailable providers, and outcome checks of
+  the frame, chain and ring invariants, canonical order, budgets (in-plane
+  regions, region vertices, in-plane pairs) and evidence counts (ADR 0091,
+  #359).
+
 ## [0.3.6] - 2026-10-28
 
 ### Fixed

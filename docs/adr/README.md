@@ -75,3 +75,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0088](./0088-planar-overlay-takes-a-memory-budget.md) | The planar overlay takes a memory budget from ExecutionOptions |
 | [0089](./0089-dual-licence-with-a-commercial-option.md) | Axiolid is dual-licensed with a commercial option |
 | [0090](./0090-mesh-hidden-line-drawings.md) | Mesh hidden-line drawings decide visibility exactly in the view's affine frame |
+| [0091](./0091-mesh-sections-report-in-plane-regions-and-open-chains.md) | Mesh sections report in-plane faces as regions and cut curves as chains |

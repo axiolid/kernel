@@ -1,10 +1,13 @@
 //! Portable mesh plane-section provider contract.
 
 use axiolid_contracts::{
-    Backend, CancellationGranularity, ExecutionOptions, GeomResult, ScratchRequirement,
+    Backend, CancellationGranularity, ExecutionOptions, GeomError, GeomResult, Operation,
+    ScratchRequirement,
 };
 use axiolid_core::{Frame3, Point2};
 use axiolid_mesh::TriMesh;
+
+use crate::request::{PlaneSection, SectionRequest};
 
 /// Hard bounds for one mesh section request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,4 +151,28 @@ pub trait MeshPlaneSection: Backend {
         limits: SectionLimits,
         options: &ExecutionOptions,
     ) -> GeomResult<SectionOutcome>;
+
+    /// Scratch needed beyond inputs and result by
+    /// [`section_request`](Self::section_request). Defaults to
+    /// [`scratch_requirement`](Self::scratch_requirement).
+    fn request_scratch_requirement(&self) -> ScratchRequirement {
+        self.scratch_requirement()
+    }
+
+    /// Intersect one validated mesh with the request frame's local XY plane,
+    /// reporting faces lying in the plane as regions (ADR 0091). Providers
+    /// that do not implement it refuse with `Unsupported`, which lets the
+    /// registry fall back to the next provider.
+    fn section_request(
+        &self,
+        mesh: &TriMesh,
+        request: &SectionRequest,
+        options: &ExecutionOptions,
+    ) -> GeomResult<PlaneSection> {
+        let _ = (mesh, request, options);
+        Err(GeomError::Unsupported {
+            backend: self.descriptor().id,
+            operation: Operation::MeshPlaneSection,
+        })
+    }
 }

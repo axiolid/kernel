@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ScalarSection::section_request`: faces lying in the plane become regions
+  with a side and holes, found by exact orientation predicates on the source
+  coordinates; cut curves are transversal chains, open ones ending on a region;
+  touching edges are counted. Overlapping in-plane faces and saddle vertices
+  are refused by name (ADR 0091, #359).
+
 ## [0.3.10] - 2026-10-28
 
 ### Changed

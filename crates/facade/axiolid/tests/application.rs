@@ -113,3 +113,47 @@ fn descriptor_reports_selected_providers_and_exactness() {
         })
         .expect("exact extrusion advertised");
 }
+
+#[test]
+fn section_request_reports_a_face_in_the_plane_as_a_region() {
+    use axiolid::core::{Frame3, Point2};
+    use axiolid::mesh_section::conformance::RegionConformanceSuite;
+    use axiolid::mesh_section::{InPlaneSide, RegionLimits, SectionLimits, SectionRequest};
+    use axiolid_reference::ScalarSection;
+
+    let application = ApplicationBuilder::new()
+        .with_portable_section()
+        .expect("scalar section passes registration conformance")
+        .build();
+    let options = ExecutionOptions::new(Tolerance::new(1.0e-9, 1.0e-12).expect("valid tolerance"));
+    // The plane z = 1 contains the top face of the unit cube.
+    let frame = Frame3 {
+        origin: Point3::new(0.0, 0.0, 1.0),
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    };
+    let request = SectionRequest::new(
+        frame,
+        SectionLimits::new(100, 100, 100, 10),
+        RegionLimits::new(10, 100, 100),
+    );
+    let section = application
+        .section_mesh_request(&cube([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]), &request, &options)
+        .expect("section request");
+    assert!(section.chains.is_empty());
+    assert_eq!(section.regions.len(), 1);
+    assert_eq!(section.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        section.regions[0].outer,
+        vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(0.0, 1.0),
+        ]
+    );
+
+    let report = RegionConformanceSuite::run(&ScalarSection::new());
+    assert!(report.claimed && report.is_success(), "{report}");
+}
