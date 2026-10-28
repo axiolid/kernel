@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.31 (2026-10-20) |
+| Latest release | 0.3.32 (2026-10-28) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,20 +78,23 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.31 (2026-10-20):
+Latest release, 0.3.32 (2026-10-28):
 
 ### Changed
 
-- A B-rep face without a surface reports its slab width whenever its
-  corners are not exactly coplanar (#343, ADR 0080 amendment
-  2026-10-20). Within the linear tolerance of its fit plane it reported a
-  proven `0`, so faceted IFC walls whose faces lie up to `4e-10` m off
-  their plane read as exact. Coplanarity is now decided in exact
-  arithmetic on the stored corners (certified `orient3d`), and a face that
-  fails it reports `Certified(w)` under `"non-planar face without a
-  surface"`, the width #261 computes, however small; `0` now means
-  planar. An exactly coplanar face, tilted or not, still reports `0`; a
-  face warped beyond the tolerance reports what it did, and authored
-  polygon faces keep their tolerance rule.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
+
+### Fixed
+
+- An edge without a p-curve that leaves its B-spline face's surface by more
+  than the linear tolerance is refused by name ("leaves its B-spline face's
+  surface"), where the certified search ran out of budget refining toward
+  the parameter resolution and reported `BudgetExceeded` (#320, ADR 0086
+  amendment). A sample whose strict search overruns its budget is retried at
+  the model tolerance and accepted when that pass proves it unique.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

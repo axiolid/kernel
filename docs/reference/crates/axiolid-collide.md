@@ -8,7 +8,7 @@ Convex collision queries: separating axis, overlap, and separation distance.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-28) |
 | crates.io | [`axiolid-collide`](https://crates.io/crates/axiolid-collide) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_collide/index.html) · [docs.rs](https://docs.rs/axiolid-collide) |
@@ -24,11 +24,14 @@ Convex collision queries by the separating axis theorem: whether two convex shap
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-28):
 
 ### Changed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/query/collide/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/collide/CHANGELOG.md)

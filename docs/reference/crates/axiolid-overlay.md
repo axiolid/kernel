@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.19 (2026-10-20) |
+| Latest release | 0.3.20 (2026-10-28) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -81,79 +81,14 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.19 (2026-10-20):
-
-### Added
-
-- `overlay_within` and `union_soup_within` take `OverlayOptions` and the
-  caller's `ExecutionOptions` (#338, ADR 0088): the tolerance is the
-  options', and with `ExecutionOptions::with_memory_budget` the
-  subdivision charges what it is about to hold before allocating it and is
-  refused with `OverlayRefusal::BudgetExceeded { needed, budget }` as soon
-  as the charges pass the budget. `OverlayRefusal::Invalid` carries every
-  refusal `overlay_with` and `union_soup_with` make. Without a budget
-  nothing new is refused, and an admitted call gives the unbudgeted result
-  bit for bit. `tests/grown_soup.rs` measures with a counting allocator
-  that a call never holds more heap than its budget, admitted or refused,
-  and that four times the unbudgeted high-water mark is admitted. The
-  crate now depends on `axiolid-contracts`.
+Latest release, 0.3.20 (2026-10-28):
 
 ### Changed
 
-- Ring validation no longer compares every pair of a ring's edges (#341).
-  A ring of more than 32 edges asks the crate's box tree for the pairs
-  whose boxes, grown by the tolerance, overlap, and the unchanged exact
-  `segments_intersect` decides each, in the old order: the refusals, their
-  order and the first pair found are as before, which a test checks
-  against the all-pairs search on rings valid, crossing, touching and
-  within the tolerance. And a `Region` carries the proof that its rings
-  are valid under the tolerance it was built with: `Region::new` sets it,
-  and a boolean on regions and the disc morphology set it from their
-  settled output, so `Region::union`, `intersection` and `difference`
-  under the same tolerance validate no ring again (holes are still checked
-  against their outer rings). A region translated, or used under another
-  tolerance, is validated as before; the proof is not part of `Region`
-  equality. Measured with `cargo bench -p axiolid-overlay --bench
-  ring_validation` (release), on a 40 m by 30 m floor with toothed walls:
-  `Region::new` at 10,000, 50,000 and 100,000 corners took 0.17 s, 4.2 s
-  and 17 s and now takes 0.006 s, 0.028 s and 0.059 s; a
-  `Region::difference` with a 1 m square took 0.20 s, 4.4 s and 18 s per
-  call and now takes 0.029 s, 0.18 s and 0.38 s.
-  `scripts/probe_ring_validation_mutants.py` lists the faults the tests
-  must catch.
-
-### Fixed
-
-- A soup of grown triangles whose union is one polygon no longer needs
-  gigabytes (#338). axioval/engine's soup -- the strips of a faceted bar,
-  each corner grown by a circumscribed 16-gon, hulled and fanned -- took
-  4.1 GB and 26 s for `union_soup` at 128 facets and 1.9 GB and 10 s for
-  `overlay(Intersection)`, and at 256 facets, and for the soup's union
-  with itself at 128, failed to allocate. Three causes, each fixed with
-  results unchanged:
-  - The chain reduction walked the whole soup once and gave up on every
-    ring when one cycle crossed itself: two overlapping hulls sharing
-    vertices let the walk pass from one into the other. It now reduces
-    such a soup group by group, the rings joined by edges given each way,
-    so every fan becomes its hull's outline.
-  - Edges with the same two ends (hulls' flat sides lined up on one line
-    and split there by the snap) were paired with one another for every
-    copy. Only the first copy keeps their pieces, so the later copies are
-    no longer paired among themselves.
-  - Where many edges meet at one vertex, every pair recorded the vertex
-    for both edges. A point at an edge's own end is no longer recorded
-    for that edge: it is its first or last stop, and the rings met there
-    are never read.
-
-  Measured with `cargo bench -p axiolid-overlay --bench grown_soup`
-  (release, peak resident memory): circumscribed `union_soup` at 64, 128
-  and 256 facets takes 0.08 s, 0.32 s and 1.6 s at 22 MB, 64 MB and
-  245 MB, and the intersection 0.09 s, 0.37 s and 1.8 s at 24 MB, 70 MB
-  and 254 MB, against 0.07 s, 0.32 s and 0.94 s at 20 MB, 58 MB and
-  217 MB for the inscribed soup. The self-union at 256 facets takes 5.5 s
-  at 482 MB. Every output that completed before is the same bit for bit,
-  pinned by hash in `tests/grown_soup.rs`.
-  `scripts/probe_grown_soup_mutants.py` lists the faults the tests must
-  catch.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

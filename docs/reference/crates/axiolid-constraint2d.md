@@ -8,7 +8,7 @@ Apollonius and tangent-circle constructions: circles tangent to three points, li
 
 | | |
 | --- | --- |
-| Latest release | 0.1.0 (2026-10-02) |
+| Latest release | 0.1.1 (2026-10-28) |
 | crates.io | [`axiolid-constraint2d`](https://crates.io/crates/axiolid-constraint2d) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_constraint2d/index.html) · [docs.rs](https://docs.rs/axiolid-constraint2d) |
@@ -26,19 +26,14 @@ Apollonius and tangent-circle constructions (#159, ledger row B14): every circle
 
 ## Changes
 
-Latest release, 0.1.0 (2026-10-02):
+Latest release, 0.1.1 (2026-10-28):
 
-### Added
+### Changed
 
-- `tangent_circles` (#159, ledger row B14): every circle tangent to three
-  given points, lines or circles, in any combination (Apollonius' problem
-  and its degenerate cases), returning every real solution. Each of the
-  three constraints may independently require internal or external
-  tangency for a circle constraint, or either side for a line constraint,
-  enumerated as sign choices; solutions are deduplicated and sorted for a
-  deterministic order. Refused by name: non-finite input, a non-positive
-  circle radius, a zero line direction, and a configuration whose
-  elimination system is singular for every sign choice (three coincident
-  or otherwise inseparable constraints).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/planar/constraint2d/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/constraint2d/CHANGELOG.md)

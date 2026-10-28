@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.1 (2026-10-10) |
+| Latest release | 0.4.2 (2026-10-28) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -127,13 +127,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.1 (2026-10-10):
+Latest release, 0.4.2 (2026-10-28):
 
-### Added
+### Changed
 
-- A `serde` feature (#267, ADR 0085) forwarding to the `serde` feature of
-  every representation package already in the build; with `model` it
-  brings the geometry graph's versioned JSON and CBOR wire format
-  (`axiolid::model::wire`). It enables no representation by itself.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

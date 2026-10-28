@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.14 (2026-10-16) |
+| Latest release | 0.3.15 (2026-10-28) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,28 +54,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.14 (2026-10-16):
-
-### Added
-
-- `SolidOperation::BoundedHalfSpaceAlongZ` (#321), a new variant with
-  `BoundedHalfSpace`'s fields: the kept side of the plane within the prism
-  of the boundary along the placement's `z`, infinite both ways and at any
-  angle to the plane, the boundary at `placement * (u, v, 0)` as written.
-  This is how IFC's `IfcPolygonalBoundedHalfSpace` bounds its half-space,
-  by its `Position`. `BoundedHalfSpace` keeps its fields and meaning. The
-  builder validates the new variant's references as the old one's.
-  `SolidOperation` is `#[non_exhaustive]`, so the variant is additive.
-- Wire format 1.4 (ADR 0085): the variant lifts a payload to 1.4, and a
-  1.3 or older payload holding it is refused as
-  `WireError::UnknownKind { kind: "BoundedHalfSpaceAlongZ" }`. A graph
-  without it is written byte for byte as before, labelled 1.0 to 1.3.
-  Golden `tests/wire/v1.4/every-kind.json`.
+Latest release, 0.3.15 (2026-10-28):
 
 ### Changed
 
-- `BoundedHalfSpace.placement` is documented as read whole (#322): its
-  `x` projected into the plane fixes the rotation, and its scale, shear
-  and handedness shape the boundary; only a degenerate frame is refused.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

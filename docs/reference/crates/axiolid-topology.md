@@ -8,7 +8,7 @@ Typed-handle B-rep topology independent of curve and surface implementations.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-10) |
+| Latest release | 0.3.3 (2026-10-28) |
 | crates.io | [`axiolid-topology`](https://crates.io/crates/axiolid-topology) |
 | Facade | [`axiolid`](./axiolid) feature `topology` |
 | Layer | representations (`representation.topology`) |
@@ -44,15 +44,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-10):
+Latest release, 0.3.3 (2026-10-28):
 
-### Added
+### Changed
 
-- An optional `serde` feature, off by default, deriving `Serialize` and
-  `Deserialize` for `BRep`, its entities and its typed handles (as
-  plain indices): the values the geometry graph's versioned
-  wire format carries (#267, ADR 0085). Enums are externally tagged by
-  their variant names and unknown fields are refused. No default-build
-  change.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/representations/topology/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/topology/CHANGELOG.md)

@@ -8,7 +8,7 @@ General exact B-rep booleans over analytic faces (ADR 0075).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.11 (2026-10-18) |
+| Latest release | 0.1.12 (2026-10-28) |
 | crates.io | [`axiolid-brep-boolean`](https://crates.io/crates/axiolid-brep-boolean) |
 | Layer | algorithms (`algorithm.construction`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_brep_boolean/index.html) · [docs.rs](https://docs.rs/axiolid-brep-boolean) |
@@ -51,47 +51,14 @@ results against them.
 
 ## Changes
 
-Latest release, 0.1.11 (2026-10-18):
+Latest release, 0.1.12 (2026-10-28):
 
-### Added
+### Changed
 
-- `FINER_FACTOR` and `BooleanReport::finer` (#332): a boolean refused at
-  the caller's tolerance is cut again at `2^-10` times it, and its report
-  says so. `BooleanReport::merged` keeps the flag.
-
-### Fixed
-
-- Curved walls with abutting openings are cut (#332). Where one
-  opening's radial side reaches a few micrometres, or just under the
-  tolerance, past its neighbour's, the two side planes are turned by more
-  than the angular tolerance and lie within the linear one in the wall:
-  read within the tolerance, a region on one of them was "a point too
-  close to a face boundary to classify", and the sections' cuts merged at
-  a point on neither face's boundary, so the faces did not sew. Such a
-  boolean is now cut again at the finer tolerance, where the sides are
-  apart and decided by the exact predicates. A split face's piece ends
-  now weld into one vertex only where they also lie within the tolerance
-  on the surface: the relative slack in parameters spans `7 um` of an
-  arc of radius `24`, and welded two vertices a split had kept apart
-  ("two pieces leave a vertex of a split face in one direction"). A wall
-  of radii `6` to `6.25` less five wedge openings, abutting by `15 um`
-  and `0.6 mm`, and one of radii `24` to `24.1` whose openings abut by
-  `7 um`, are cut at the closed-form volume (within `1e-9`), every
-  reading within the finer tolerance. A boolean that succeeds at the caller's tolerance is
-  unchanged; one refused at both returns the first refusal. A web hole
-  half a tolerance off a filleted flange, refused as an
-  `UnsupportedContact` before, is now cut at the finer tolerance at the
-  reference volume.
-- A box whose face touches a curved wall's inner cylinder along a ruling
-  is cut at the caller's tolerance (#327). Every point of the box's face
-  near the ruling lay within the tolerance of the cylinder and was not
-  classified ("a point lies too close to a face boundary to classify").
-  Where no point of a region decides with the ray's start read within
-  tolerance, its points are classified again reading the start exactly:
-  on a support only within the rounding floor, but for the faces read as
-  the point's own support. The quarter ring of radii `4.8` to `5` less a
-  box on the tangent plane, or a unit in the last place either side of
-  it, is cut at the closed-form volume (within `1e-12`), its report
-  within `1e-14`.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/construction/brep-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/brep-boolean/CHANGELOG.md)

@@ -8,7 +8,7 @@ Portable graph-to-exact-B-rep compilation contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.1 (2026-09-28) |
+| Latest release | 0.3.2 (2026-10-28) |
 | crates.io | [`axiolid-exact-compile-contract`](https://crates.io/crates/axiolid-exact-compile-contract) |
 | Layer | contracts (`contract.operation`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_exact_compile_contract/index.html) · [docs.rs](https://docs.rs/axiolid-exact-compile-contract) |
@@ -30,11 +30,14 @@ only; `axiolid-mesh-compile` provides an implementation.
 
 ## Changes
 
-Latest release, 0.3.1 (2026-09-28):
+Latest release, 0.3.2 (2026-10-28):
 
 ### Changed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/contracts/operations/exact-compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/exact-compile/CHANGELOG.md)

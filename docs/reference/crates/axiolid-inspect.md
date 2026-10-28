@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-14) |
+| Latest release | 0.3.7 (2026-10-28) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,20 +30,14 @@ Queries over triangle meshes: clearance between meshes, point containment and wi
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-14):
+Latest release, 0.3.7 (2026-10-28):
 
-### Fixed
+### Changed
 
-- `intersection_volume` and `difference_volume` (#313) no longer collapse
-  to the trivial `[0, V]` for bodies that touch flush within rounding. A
-  face that is vertical but for a rounding residue casts a sliver of
-  shadow whose plane has a slope near `1e30`, and its term's enclosure
-  spanned more than either solid. Each term is now also intersected with
-  the a priori bound `[0, min(area f', area g') * (min(zmax_f, zmax_g) -
-  base)]`, which holds however the arithmetic is conditioned. On a sink
-  cabinet standing in its room, from the public buildingSMART IFC4
-  building-architecture sample, the shared volume goes from
-  `[0, 0.8008000000000190]` to a bracket `5.9e-14` wide, and the
-  difference from `[0, 0.8008]` to `[0, 5.9e-14]`.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

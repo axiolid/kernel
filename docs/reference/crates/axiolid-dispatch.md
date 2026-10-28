@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-14) |
+| Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -50,12 +50,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-14):
+Latest release, 0.3.5 (2026-10-28):
 
-### Fixed
+### Changed
 
-- The mesh-section registry uses the shared device matching instead of its
-  own copy, so a build with only the `mesh-section` feature no longer warns
-  that the shared one is unused, and the routing rules cannot drift apart.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

@@ -8,7 +8,7 @@ Edge-collapse mesh decimation with a bounded, reported deviation.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-09-30) |
+| Latest release | 0.3.3 (2026-10-28) |
 | crates.io | [`axiolid-decimate`](https://crates.io/crates/axiolid-decimate) |
 | Layer | algorithms (`algorithm.discrete`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_decimate/index.html) · [docs.rs](https://docs.rs/axiolid-decimate) |
@@ -34,12 +34,14 @@ is the edge midpoint. For adding triangles instead, see `axiolid-refine`.
 
 ## Changes
 
-Latest release, 0.3.2 (2026-09-30):
+Latest release, 0.3.3 (2026-10-28):
 
-### Added
+### Changed
 
-- A test whose collapse passes the link condition and is refused by the
-  normal-inversion guard, with `scripts/probe_decimate_mutants.py` showing
-  that dropping either guard turns the suite red (#201).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/discrete/decimate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/decimate/CHANGELOG.md)

@@ -8,7 +8,7 @@ Numeric substrate: bracketed and polynomial root finding, adaptive quadrature, d
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-10-02) |
+| Latest release | 0.1.2 (2026-10-28) |
 | crates.io | [`axiolid-numeric`](https://crates.io/crates/axiolid-numeric) |
 | Layer | algorithms (`algorithm.numeric`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_numeric/index.html) · [docs.rs](https://docs.rs/axiolid-numeric) |
@@ -43,18 +43,14 @@ Gauss-Legendre rule in `axiolid-evaluate`, the interpolation solve in
 
 ## Changes
 
-Latest release, 0.1.1 (2026-10-02):
+Latest release, 0.1.2 (2026-10-28):
 
-### Added
+### Changed
 
-- `SparseMatrix`: compressed sparse rows assembled from triplets, with
-  duplicates summed in input order so storage and products do not depend
-  on triplet order.
-- `conjugate_gradient`: Jacobi-preconditioned conjugate gradients for a
-  sparse symmetric positive definite system (#129). Convergence is judged
-  on the recomputed true residual, a spent budget is reported as
-  `Status::BudgetExhausted` and refused by `converged()`, and an
-  asymmetric matrix, a non-positive diagonal or a direction of
-  non-positive curvature is refused by name.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/numeric/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/numeric/CHANGELOG.md)

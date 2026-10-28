@@ -8,7 +8,7 @@ Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c).
 
 | | |
 | --- | --- |
-| Latest release | 0.1.2 (2026-09-28) |
+| Latest release | 0.1.3 (2026-10-28) |
 | crates.io | [`axiolid-exact`](https://crates.io/crates/axiolid-exact) |
 | Layer | algorithms (`algorithm.reference`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_exact/index.html) · [docs.rs](https://docs.rs/axiolid-exact) |
@@ -39,11 +39,14 @@ about a *constructed* point (a crossing, a line/circle hit), use this crate.
 
 ## Changes
 
-Latest release, 0.1.2 (2026-09-28):
+Latest release, 0.1.3 (2026-10-28):
 
 ### Changed
 
-- The crates.io page is this crate's own `README.md`, with links to its
-  API documentation, its reference page and the source (ADR 0078).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/exact/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/exact/CHANGELOG.md)

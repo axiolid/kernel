@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.20 (2026-10-20) |
+| Latest release | 0.3.21 (2026-10-28) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -65,20 +65,14 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.20 (2026-10-20):
+Latest release, 0.3.21 (2026-10-28):
 
-### Fixed
+### Changed
 
-- `section_lower::rectangle_contour` accepts a corner radius equal to its
-  half-extent after unit conversion (#339). A radius above its limit by at
-  most four relative epsilons of the smaller half-extent the limit is cut
-  from is rounding and is snapped onto the limit, for the outer and the
-  inner radius alike; one wider than that (a micrometre, say) is still
-  refused by name. buildingSMART's IFC4 Annex E `air-terminal-element.ifc`
-  tube (24 x 24 in, 2 in wall, 10 in inner fillet, in metres) used to be
-  refused with "inner corner radius must lie in [0, 0.25399999999999995],
-  got 0.254" and now builds with a fully rounded core. The structural
-  sections have no such bound: their radii meet only the shared router's
-  edge check, which already allows `1e-12`.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

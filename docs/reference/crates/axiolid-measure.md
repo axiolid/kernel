@@ -8,7 +8,7 @@ Metric properties: area, volume, centroid, moments of inertia.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-20) |
+| Latest release | 0.3.12 (2026-10-28) |
 | crates.io | [`axiolid-measure`](https://crates.io/crates/axiolid-measure) |
 | Facade | [`axiolid`](./axiolid) feature `measure` |
 | Layer | algorithms (`algorithm.query`) |
@@ -40,31 +40,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-20):
+Latest release, 0.3.12 (2026-10-28):
 
-### Fixed
+### Changed
 
-- `exact_properties` measures a solid far from the world origin correctly
-  (#343). Its cone fields were integrated about the world origin, so on a
-  national grid each term grew with the cube of a `5.6e6` m reach and the
-  noise floor of every curved-face integral was set from that reach: a
-  `0.57 m^3` box at `(6.0e5, 5.6e6, 204.5)` measured `0.544` to
-  `0.664 m^3` depending on the last bits of its placement, a wall less
-  flush openings up to 5 % off, each without an error. The solid is now
-  moved to the centre of its vertices' bounding box and integrated there,
-  and the centroid and second moments (still about the world origin) are
-  shifted back by the parallel-axis terms. Such a solid measures its
-  closed form to its input's own grid (`9.3e-10` m at `5.6e6`); one at
-  the origin measures as before up to rounding. A B-rep the translation
-  refuses (an elevated or banked alignment curve) is integrated in place
-  about the same point: a curved face far out may then be refused as not
-  converged, never measured looser.
-- `second_moments` (and so `MeshMeasure`'s `second_moment_diagonal`) sums
-  about the mesh's first vertex and shifts the moments back to the origin
-  by the parallel-axis terms, as `volume_properties` already did (#343).
-  About the world origin each term grew with the fifth power of the
-  distance: a unit box at `(6.0e5, 5.6e6, 204.5)` measured
-  `360016800160` against `360016800196.08` and lost its central moments
-  entirely. It now matches the closed form to rounding.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/query/measure/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/measure/CHANGELOG.md)

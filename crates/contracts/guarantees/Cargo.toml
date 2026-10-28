@@ -1,7 +1,7 @@
 [package]
 name = "axiolid-guarantees"
 description = "Certified-value and escalation vocabulary for geometry contracts"
-version = "0.3.1"
+version = "0.3.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-28
+
 ### Changed
 
 - The minimum supported Rust version is now 1.99 (was 1.88), and the

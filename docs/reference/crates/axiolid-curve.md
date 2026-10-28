@@ -8,7 +8,7 @@ Exact, format-neutral curve values: lines, conics, B-splines, natural-equation a
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-13) |
+| Latest release | 0.3.10 (2026-10-28) |
 | crates.io | [`axiolid-curve`](https://crates.io/crates/axiolid-curve) |
 | Facade | [`axiolid`](./axiolid) feature `curves` |
 | Layer | representations (`representation.atomic`) |
@@ -52,21 +52,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-13):
+Latest release, 0.3.10 (2026-10-28):
 
-### Added
+### Changed
 
-- Curve-path piece bounds at a parameter or a point (#304, ADR 0082
-  amendment): `PathBound { Parameter, Point }` and the fields
-  `PathPiece::start_bound` and `PathPiece::end_bound`, set by
-  `PathPiece::between_parameters(curve, t0, t1)`,
-  `PathPiece::bounded(curve, start, end)`, `PathPiece::with_start` and
-  `PathPiece::with_end`, leave a span's start or end distance to the
-  evaluator, which resolves a point to its parameter and a parameter to its
-  distance in the curve's station measure; so a caller without a provider
-  can build a trim of an ellipse or a B-spline at interior parameters or
-  points. The `start` or `end` beside a bound holds an infinity, which
-  nothing reads; `PathPiece::length` is infinite and `PathPiece::is_stated`
-  false for a bounded piece (an offset over a bounded base included).
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/representations/analytic/curve/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/curve/CHANGELOG.md)

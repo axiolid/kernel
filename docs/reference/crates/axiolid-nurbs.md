@@ -8,7 +8,7 @@ General polynomial and rational B-spline analysis and transformation algorithms.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-10) |
+| Latest release | 0.3.7 (2026-10-28) |
 | crates.io | [`axiolid-nurbs`](https://crates.io/crates/axiolid-nurbs) |
 | Facade | [`axiolid`](./axiolid) feature `nurbs` |
 | Layer | algorithms (`algorithm.parametric`) |
@@ -42,20 +42,19 @@ it uses `axiolid-evaluate` for evaluation rather than reimplementing it.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-10):
+Latest release, 0.3.7 (2026-10-28):
 
-### Added
+### Changed
 
-- `exact_surface_intersection` cuts an elliptical cylinder by a plane in
-  closed form (#287): the ellipse its conjugate semi-diameters span (a
-  circle where they are exactly perpendicular and equal), or one or two
-  rulings for a plane along the axis, cased exactly
-  (`Derivation::EllipticalCylinderPlaneSection`,
-  `Derivation::EllipticalCylinderPlaneRulings`). It was a ruled section.
-- Two cylinders, circular or elliptical, at least one elliptical, on
-  exactly parallel axes meet in the rulings over the exactly isolated
-  roots of a half-angle quartic
-  (`Derivation::ParallelEllipticalCylinderRulings`, #287). The pair was
-  refused.
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
+
+### Fixed
+
+- `invert_surface_certified` and `invert_periodic_surface_certified` refuse
+  an off-surface point as `OffSurface` once the certified lower bound
+  exceeds the tolerance, where they returned `BudgetExceeded` from refining
+  the retained boxes down to the parameter resolution (#320). Projection is
+  unchanged.
 
 Full history: [`crates/algorithms/parametric/nurbs/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/nurbs/CHANGELOG.md)

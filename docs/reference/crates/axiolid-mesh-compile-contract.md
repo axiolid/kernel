@@ -8,7 +8,7 @@ Portable graph-to-mesh compilation contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-14) |
+| Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-mesh-compile-contract`](https://crates.io/crates/axiolid-mesh-compile-contract) |
 | Facade | [`axiolid`](./axiolid) feature `graph-compile` |
 | Layer | contracts (`contract.operation`) |
@@ -34,19 +34,14 @@ is the exact counterpart.
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-14):
+Latest release, 0.3.5 (2026-10-28):
 
-### Added
+### Changed
 
-- `PolylineCompiler::compile_polyline` (#311): a curve node compiled to a
-  3D polyline, a separate operation rather than a second output kind of
-  `compile_mesh`, whose signature stays as it is. `PolylineOutcome`
-  carries the vertices, whether the curve closes, and a `ChordDeviation`
-  reported the way a mesh's deviation is: the requested chord budget and
-  a certified upper bound on the distance from every point of the exact
-  curve to the polyline, with `meets_requested`. The bound is never
-  absent: a curve a compiler cannot bound is refused by name.
-- A direct dependency on `axiolid-core` for `Point3` and `Scalar`; it was
-  already in this crate's closure through `axiolid-mesh`.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/contracts/operations/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/compile/CHANGELOG.md)

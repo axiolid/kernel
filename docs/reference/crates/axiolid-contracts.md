@@ -8,7 +8,7 @@ Common backend-neutral execution and diagnostic contracts.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-04) |
+| Latest release | 0.3.4 (2026-10-28) |
 | crates.io | [`axiolid-contracts`](https://crates.io/crates/axiolid-contracts) |
 | Facade | [`axiolid`](./axiolid) feature `contracts` |
 | Layer | contracts (`contract.common`) |
@@ -31,27 +31,14 @@ provider selection or fallback, which belong to `axiolid-dispatch`.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-04):
-
-### Added
-
-- `ScratchRequirement::Affine { base_bytes, bytes_per_element,
-  bytes_per_worker }` (#226): at most `base + per_element * elements +
-  per_worker * workers`. A purely per-element bound cannot be an upper
-  bound for an operation with fixed setup cost or one that runs on a
-  thread pool, whose workers each cost memory however small the input is.
-  Additive: the enum is `#[non_exhaustive]`.
-- `ScratchRequirement::upper_bound_bytes_on(elements, workers)` and
-  `ScratchRequirement::fits_budget_on(options, elements, workers)`, for a
-  caller that knows the width the operation runs on.
-- `Parallelism::worker_bound`: the most workers a preference allows
-  (`Serial` 1, `Threads(n)` n, `Auto` the available parallelism).
+Latest release, 0.3.4 (2026-10-28):
 
 ### Changed
 
-- `ScratchRequirement::fits_budget` charges a per-worker term for
-  `Parallelism::worker_bound` of the options. `upper_bound_bytes` reports
-  `None` for an affine requirement with a per-worker term, which has no
-  bound without a worker count. Existing variants are unchanged.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/contracts/common/base/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/common/base/CHANGELOG.md)

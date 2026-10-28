@@ -8,7 +8,7 @@ Portable mesh boolean request, result, evidence, and conformance contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-13) |
+| Latest release | 0.3.4 (2026-10-28) |
 | crates.io | [`axiolid-mesh-boolean-contract`](https://crates.io/crates/axiolid-mesh-boolean-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-boolean` |
 | Layer | contracts (`contract.operation`) |
@@ -32,16 +32,14 @@ implement it, and `axiolid-dispatch` chooses between them.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-13):
+Latest release, 0.3.4 (2026-10-28):
 
 ### Changed
 
-- `MeshBoolean::scratch_requirement` says what it means for the batch
-  methods (#259): the bound of each boolean on that step's operands, not of
-  the batch in its input triangles. A provider whose batch holds
-  intermediates or runs booleans concurrently charges each step when its
-  operands exist and refuses with `BudgetExceeded` before the first that
-  does not fit, so the registry's check before a batch is necessary, not
-  sufficient.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/contracts/operations/mesh-boolean/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-boolean/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-10-28
+
 ### Changed
 
 - The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):

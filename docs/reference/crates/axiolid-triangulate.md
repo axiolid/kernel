@@ -8,7 +8,7 @@ Constrained Delaunay triangulation with bounded quality refinement.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-12) |
+| Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-triangulate`](https://crates.io/crates/axiolid-triangulate) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_triangulate/index.html) · [docs.rs](https://docs.rs/axiolid-triangulate) |
@@ -26,51 +26,14 @@ Constrained Delaunay triangulation with bounded quality refinement. The output c
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-12):
+Latest release, 0.3.5 (2026-10-28):
 
-### Added
+### Changed
 
-- `MergedPoint` and `Triangulation::merged_points` (#300): the input
-  points merged into an exactly coincident one, each as its input index and
-  the kept index that stands for it (the lowest input index at that
-  position), in ascending input order.
-- `TriangulationError::CoincidentConstraint { a, b }` (#300): a constraint
-  whose two endpoints are distinct input points at exactly the same
-  position. Merged, they are one vertex, and the constraint would be an
-  edge from it to itself.
-
-### Fixed
-
-- `triangulate` merges exactly coincident input points instead of
-  splitting each into the mesh at its twin's position (#300), which left
-  zero-area and overlapping triangles that used one directed edge twice --
-  in a 3x3 grid with its first row repeated, edge (3, 10) twice -- and
-  reported nothing. A point found at a vertex already inserted is recorded
-  as merged into it; the triangles and `Triangulation::constraints` use the
-  kept indices, `points` still holds every input point, and
-  `merged_points` reports the merge, so it is lossless. Duplicates in free
-  points, outlines, holes and constraints triangulate validly; a constraint
-  between two coincident points is refused by name. A constraint from an
-  index to itself is unchanged.
-- The debug adjacency check no longer skips a triangle list with a
-  repeated directed edge; it panics on one (#300). Only duplicate points
-  produced such lists, and they are merged now.
-
-- `triangulate` covers the exact convex hull of its input (#299). The
-  build bracketed the points with a finite super triangle (32 times their
-  span) and dropped every triangle touching it, which lost the thin hull
-  triangles whose circumcircles reached its corners -- 3,977 instead of
-  3,979 triangles for 2,000 random points, with nothing reported. The hull
-  is now closed by one symbolic vertex at infinity, decided by the
-  predicates without coordinates, so the output always has `2n - 2 - h`
-  triangles for `n` points with `h` on the hull boundary, collinear ones
-  included, and its boundary is the exact hull. Constrained triangulations
-  recover their constraints in that complete triangulation.
-- Where the Delaunay triangulation is unique (no four points cocircular)
-  and the old build kept every hull triangle, the output is the same set of
-  triangles as before; their order in the list changes, because the build
-  starts from the first three points that span a triangle instead of from
-  the super triangle. With cocircular points either build may choose a
-  different, equally Delaunay triangulation.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/planar/triangulate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/triangulate/CHANGELOG.md)

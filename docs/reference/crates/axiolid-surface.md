@@ -8,7 +8,7 @@ Exact, format-neutral surface values: planes, quadrics, tori, and B-spline patch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-10) |
+| Latest release | 0.3.4 (2026-10-28) |
 | crates.io | [`axiolid-surface`](https://crates.io/crates/axiolid-surface) |
 | Facade | [`axiolid`](./axiolid) feature `surfaces` |
 | Layer | representations (`representation.atomic`) |
@@ -44,14 +44,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-10):
+Latest release, 0.3.4 (2026-10-28):
 
-### Added
+### Changed
 
-- An optional `serde` feature, off by default, deriving `Serialize` and
-  `Deserialize` for `Surface` and its elementary surfaces: the values the geometry graph's versioned
-  wire format carries (#267, ADR 0085). Enums are externally tagged by
-  their variant names and unknown fields are refused. No default-build
-  change.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/representations/analytic/surface/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/analytic/surface/CHANGELOG.md)

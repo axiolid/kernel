@@ -8,7 +8,7 @@ Acceleration structures: BVH and uniform point grid, and their queries; barycent
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-09-30) |
+| Latest release | 0.3.4 (2026-10-28) |
 | crates.io | [`axiolid-spatial`](https://crates.io/crates/axiolid-spatial) |
 | Facade | [`axiolid`](./axiolid) feature `spatial` |
 | Layer | algorithms (`algorithm.query`) |
@@ -25,19 +25,14 @@ Deterministic, callback-based spatial acceleration: a median-split BVH over boun
 
 ## Changes
 
-Latest release, 0.3.3 (2026-09-30):
+Latest release, 0.3.4 (2026-10-28):
 
-### Added
+### Changed
 
-- Wachspress and discrete harmonic coordinates (#143, ledger row H5):
-  `wachspress_coordinates2` and `discrete_harmonic_coordinates2`, both for a
-  strictly convex polygon (refused by name otherwise, `BarycentricError::NotConvex`),
-  positive and smooth inside, boundary-linear on the edges, and refused as
-  `BarycentricError::Undefined` at a pole (a denominator vanishing on the
-  line through a non-adjacent edge, or discrete harmonic's own collinear
-  fan angle). And `mean_value_coordinates3` (Floater, Kos and Reimers 2005),
-  extending mean-value coordinates to a closed triangle mesh in space, one
-  weight per vertex, exact at vertices and on a face's own plane inside its
-  triangle.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/query/spatial/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/spatial/CHANGELOG.md)

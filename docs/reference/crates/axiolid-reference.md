@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-18) |
+| Latest release | 0.3.10 (2026-10-28) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,13 +46,14 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-18):
+Latest release, 0.3.10 (2026-10-28):
 
-### Fixed
+### Changed
 
-- Requires `axiolid-evaluate` 0.3.17, whose certified frame laws and
-  intrinsic positions it re-exports and `axiolid-mesh-compile` 0.3.28 uses
-  through it. 0.3.8 accepted any 0.3.12 or later, so a lockfile holding an
-  older `axiolid-evaluate` did not build `axiolid-mesh-compile` 0.3.28.
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
+- The minimum supported Rust version is now 1.99 (was 1.88), and the
+  workspace builds on Rust 1.99.1 (#349).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)
