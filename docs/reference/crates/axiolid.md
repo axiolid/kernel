@@ -41,6 +41,7 @@ Default: none.
 | `curves` | `linear`, [`axiolid-curve`](./axiolid-curve) |
 | `discrete` | `integration`, `mesh`, `profiles`, `primitives`, `tessellation`, `spatial`, `ray-mesh`, `measure`, `mesh-boolean`, `mesh-section`, `generate`, `cpu` |
 | `dispatch-mesh-boolean` | `mesh-boolean`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-boolean` |
+| `dispatch-mesh-hidden-lines` | `mesh-hidden-lines`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-hidden-lines` |
 | `dispatch-mesh-section` | `mesh-section`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/mesh-section` |
 | `dispatch-pointcloud-reconstruction` | `pointcloud-reconstruction`, [`axiolid-dispatch`](./axiolid-dispatch), `axiolid-dispatch/pointcloud-reconstruction` |
 | `evaluate` | `curves`, `surfaces`, [`axiolid-evaluate`](./axiolid-evaluate) |
@@ -59,6 +60,7 @@ Default: none.
 | `mesh` | [`axiolid-mesh`](./axiolid-mesh) |
 | `mesh-boolean` | `mesh-contracts`, [`axiolid-mesh-boolean-contract`](./axiolid-mesh-boolean-contract) |
 | `mesh-contracts` | `contracts`, `mesh`, [`axiolid-mesh-contracts`](./axiolid-mesh-contracts) |
+| `mesh-hidden-lines` | `contracts`, `mesh`, [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract) |
 | `mesh-section` | `mesh-contracts`, [`axiolid-mesh-section-contract`](./axiolid-mesh-section-contract) |
 | `model` | `mesh`, `profiles`, `curves`, `surfaces`, `topology`, `primitives`, [`axiolid-model`](./axiolid-model) |
 | `nurbs` | `curves`, `surfaces`, `evaluate`, [`axiolid-nurbs`](./axiolid-nurbs) |
@@ -106,6 +108,7 @@ Default: none.
 - [`axiolid-mesh-boolean-contract`](./axiolid-mesh-boolean-contract)
 - [`axiolid-mesh-compile-contract`](./axiolid-mesh-compile-contract)
 - [`axiolid-mesh-contracts`](./axiolid-mesh-contracts)
+- [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract)
 - [`axiolid-mesh-section-contract`](./axiolid-mesh-section-contract)
 - [`axiolid-model`](./axiolid-model)
 - [`axiolid-nurbs`](./axiolid-nurbs)

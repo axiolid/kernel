@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- The `MESH_HIDDEN_LINES` capability identifier
+  (`org.axiolid.geometry.mesh-hidden-lines.v1`) and the
+  `Operation::MeshHiddenLines` diagnostic variant, for the hidden-line
+  drawing contract (ADR 0090, #138).
+
 ## [0.3.4] - 2026-10-28
 
 ### Changed

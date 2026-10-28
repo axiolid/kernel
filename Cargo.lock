@@ -111,6 +111,7 @@ dependencies = [
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-compile-contract",
  "axiolid-mesh-contracts",
+ "axiolid-mesh-hidden-lines-contract",
  "axiolid-mesh-section-contract",
  "axiolid-model",
  "axiolid-nurbs",
@@ -351,6 +352,7 @@ dependencies = [
  "axiolid-mesh",
  "axiolid-mesh-boolean-contract",
  "axiolid-mesh-contracts",
+ "axiolid-mesh-hidden-lines-contract",
  "axiolid-mesh-section-contract",
  "axiolid-pointcloud",
  "axiolid-pointcloud-reconstruction-contract",
@@ -567,6 +569,15 @@ dependencies = [
 [[package]]
 name = "axiolid-mesh-contracts"
 version = "0.3.2"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-mesh",
+]
+
+[[package]]
+name = "axiolid-mesh-hidden-lines-contract"
+version = "0.1.0"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

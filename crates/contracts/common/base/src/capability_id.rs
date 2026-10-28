@@ -34,6 +34,12 @@ pub mod capability_ids {
         CapabilityId::from_static("org.axiolid.geometry.mesh-boolean.v1");
     pub const MESH_SECTION: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.mesh-section.v1");
+    /// Orthographic hidden-line drawing of triangle meshes.
+    ///
+    /// Visibility is decided exactly in the view's own frame; the
+    /// operation draws edges, it never rasterises (ADR 0090).
+    pub const MESH_HIDDEN_LINES: CapabilityId =
+        CapabilityId::from_static("org.axiolid.geometry.mesh-hidden-lines.v1");
     /// Point-sampled geometry reconstructed into a discrete surface.
     ///
     /// Distinct from [`MESH_BOOLEAN`] and friends because the input is not a
@@ -77,6 +83,7 @@ pub mod capability_ids {
         TESSELLATE,
         MESH_BOOLEAN,
         MESH_SECTION,
+        MESH_HIDDEN_LINES,
         MESH_VALIDATE,
         MESH_MEASURE,
         RAY_MESH,

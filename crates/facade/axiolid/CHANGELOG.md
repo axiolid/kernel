@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `mesh-hidden-lines` and `dispatch-mesh-hidden-lines` features, with the
+  `axiolid::mesh_hidden_lines` module: the orthographic hidden-line
+  drawing contract and its registry (ADR 0090, #138). Opt-in; no provider
+  ships yet and the bundles do not include it.
+
 ## [0.4.2] - 2026-10-28
 
 ### Changed

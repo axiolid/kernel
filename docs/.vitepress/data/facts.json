@@ -333,6 +333,15 @@
       "role": "contract.common.mesh",
       "version": "0.3.2"
     },
+    "axiolid-mesh-hidden-lines-contract": {
+      "description": "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes",
+      "layer": "contracts",
+      "path": "crates/contracts/operations/mesh-hidden-lines",
+      "released": null,
+      "released_date": null,
+      "role": "contract.operation",
+      "version": "0.1.0"
+    },
     "axiolid-mesh-section-contract": {
       "description": "Portable mesh plane-section request, result, and evidence contract",
       "layer": "contracts",
@@ -577,6 +586,7 @@
           "axiolid-mesh-boolean-contract",
           "axiolid-mesh-compile-contract",
           "axiolid-mesh-contracts",
+          "axiolid-mesh-hidden-lines-contract",
           "axiolid-mesh-section-contract",
           "axiolid-pointcloud-reconstruction-contract",
           "axiolid-tessellation-contract"
@@ -646,6 +656,6 @@
         "title": "Facade"
       }
     ],
-    "total": 60
+    "total": 61
   }
 }

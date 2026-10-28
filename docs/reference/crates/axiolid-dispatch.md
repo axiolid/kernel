@@ -10,7 +10,7 @@ Provider registration, ordering, fallback, and execution policy.
 | --- | --- |
 | Latest release | 0.3.5 (2026-10-28) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
-| Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
+| Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_dispatch/index.html) · [docs.rs](https://docs.rs/axiolid-dispatch) |
 | Source | [`crates/execution/dispatch/`](https://github.com/axiolid/kernel/tree/main/crates/execution/dispatch) |
@@ -18,7 +18,8 @@ Provider registration, ordering, fallback, and execution policy.
 ## Overview
 
 Runtime registries for operation providers: `MeshBooleanRegistry`,
-`MeshPlaneSectionRegistry` and `PointcloudReconstructionRegistry`, each
+`MeshPlaneSectionRegistry`, `MeshHiddenLinesRegistry` and
+`PointcloudReconstructionRegistry`, each
 behind its own feature. A registry owns provider ordering, device matching,
 fallback to the next provider, and memory-budget admission. It defines no
 request or result types: those live in the operation-contract crates, and
@@ -32,6 +33,7 @@ Default: none.
 | Feature | Enables |
 | --- | --- |
 | `mesh-boolean` | [`axiolid-core`](./axiolid-core), [`axiolid-mesh`](./axiolid-mesh), [`axiolid-mesh-contracts`](./axiolid-mesh-contracts), [`axiolid-mesh-boolean-contract`](./axiolid-mesh-boolean-contract) |
+| `mesh-hidden-lines` | [`axiolid-core`](./axiolid-core), [`axiolid-mesh`](./axiolid-mesh), [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract) |
 | `mesh-section` | [`axiolid-core`](./axiolid-core), [`axiolid-mesh`](./axiolid-mesh), [`axiolid-mesh-contracts`](./axiolid-mesh-contracts), [`axiolid-mesh-section-contract`](./axiolid-mesh-section-contract) |
 | `parallel` | [`axiolid-backend-cpu`](./axiolid-backend-cpu), `axiolid-backend-cpu/parallel` |
 | `pointcloud-reconstruction` | [`axiolid-pointcloud`](./axiolid-pointcloud), [`axiolid-pointcloud-reconstruction-contract`](./axiolid-pointcloud-reconstruction-contract) |
@@ -44,6 +46,7 @@ Default: none.
 - [`axiolid-mesh`](./axiolid-mesh)
 - [`axiolid-mesh-boolean-contract`](./axiolid-mesh-boolean-contract)
 - [`axiolid-mesh-contracts`](./axiolid-mesh-contracts)
+- [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract)
 - [`axiolid-mesh-section-contract`](./axiolid-mesh-section-contract)
 - [`axiolid-pointcloud`](./axiolid-pointcloud)
 - [`axiolid-pointcloud-reconstruction-contract`](./axiolid-pointcloud-reconstruction-contract)

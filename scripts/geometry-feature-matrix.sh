@@ -34,8 +34,8 @@ step "axiolid facade: model + serde" cargo check -q -p axiolid --no-default-feat
 features=(
     mesh profiles curves surfaces topology primitives model
     evaluate nurbs tessellation spatial ray-mesh measure overlay field field-ops field-navigation heal
-    contracts mesh-contracts mesh-boolean mesh-section graph-compile
-    dispatch-mesh-boolean dispatch-mesh-section generate
+    contracts mesh-contracts mesh-boolean mesh-section mesh-hidden-lines graph-compile
+    dispatch-mesh-boolean dispatch-mesh-section dispatch-mesh-hidden-lines generate
     cpu parallel simd gpu
     standard discrete parametric advanced full
 )
@@ -56,10 +56,12 @@ step "shared mesh contracts" cargo test -q -p axiolid-mesh-contracts
 step "tessellation contract" cargo test -q -p axiolid-tessellation-contract
 step "mesh boolean contract" cargo test -q -p axiolid-mesh-boolean-contract
 step "mesh section contract" cargo test -q -p axiolid-mesh-section-contract
+step "mesh hidden-lines contract" cargo test -q -p axiolid-mesh-hidden-lines-contract
 step "mesh compile contract" cargo test -q -p axiolid-mesh-compile-contract
 step "dispatch: identity only" cargo check -q -p axiolid-dispatch --no-default-features
 step "dispatch: mesh boolean" cargo test -q -p axiolid-dispatch --no-default-features --features mesh-boolean
 step "dispatch: mesh section" cargo test -q -p axiolid-dispatch --no-default-features --features mesh-section
+step "dispatch: mesh hidden lines" cargo test -q -p axiolid-dispatch --no-default-features --features mesh-hidden-lines
 step "dispatch: all" cargo test -q -p axiolid-dispatch --all-features
 
 step "CPU context: portable" \

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axiolid_contracts::{
     BackendId, ExecutionOptions, GeomError, GeomResult, Operation, ScratchRequirement,
 };
-use axiolid_core::{Frame3, SpaceFrame, Tolerance};
+use axiolid_core::Frame3;
 use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh, TriMesh};
 use axiolid_mesh_contracts::SolidRequirements;
 use axiolid_mesh_section_contract::{
@@ -14,6 +14,7 @@ use axiolid_mesh_section_contract::{
 };
 
 use crate::device::matches_device;
+use crate::frame::validate_frame;
 
 #[derive(Debug, Clone)]
 struct RegisteredSection {
@@ -159,7 +160,12 @@ fn validate_source_shape(
             "section source mesh has no triangles".into(),
         ));
     }
-    validate_frame(frame, options.tolerance().angular())?;
+    if !mesh.indices.len().is_multiple_of(3) {
+        return Err(GeomError::InvalidInput(
+            "section source mesh index count is not a multiple of three".into(),
+        ));
+    }
+    validate_frame(frame, options.tolerance().angular(), "section frame")?;
 
     Ok(())
 }
@@ -199,19 +205,6 @@ fn section_scratch_fits(
     // Audit and provider phases are sequential, so their peak is the maximum,
     // not their sum. Output storage is outside the scratch budget by contract.
     audit_bytes.max(provider_bytes) <= budget
-}
-
-fn validate_frame(frame: Frame3, angular_tolerance: f64) -> GeomResult<()> {
-    // Structural frame validity cannot be relaxed into zero/scaled axes by a
-    // coarse geometric tolerance, so the caller's angular tolerance is capped
-    // here before it reaches the shared validator. Tighter caller tolerances
-    // still apply; looser ones do not.
-    let limit = angular_tolerance.clamp(128.0 * f64::EPSILON, 1.0e-6);
-    let tolerance = Tolerance::new(limit, limit)
-        .map_err(|_| GeomError::InvalidInput("section frame tolerance is invalid".into()))?;
-    SpaceFrame::new(frame.origin, frame.x, frame.y, frame.z, tolerance)
-        .map(|_| ())
-        .map_err(|error| GeomError::InvalidInput(format!("section frame is invalid: {error}")))
 }
 
 fn validate_outcome(

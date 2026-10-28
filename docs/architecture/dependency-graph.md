@@ -48,6 +48,7 @@ graph TD
     axiolid_mesh_compile["axiolid-mesh-compile\nexecution.orchestration"]
     axiolid_mesh_compile_contract["axiolid-mesh-compile-contract\ncontract.operation"]
     axiolid_mesh_contracts["axiolid-mesh-contracts\ncontract.common.mesh"]
+    axiolid_mesh_hidden_lines_contract["axiolid-mesh-hidden-lines-contract\ncontract.operation"]
     axiolid_mesh_section_contract["axiolid-mesh-section-contract\ncontract.operation"]
     axiolid_minkowski["axiolid-minkowski\nalgorithm.discrete"]
     axiolid_model["axiolid-model\nrepresentation.graph"]
@@ -93,6 +94,7 @@ graph TD
     axiolid --> axiolid_mesh_boolean_contract
     axiolid --> axiolid_mesh_compile_contract
     axiolid --> axiolid_mesh_contracts
+    axiolid --> axiolid_mesh_hidden_lines_contract
     axiolid --> axiolid_mesh_section_contract
     axiolid --> axiolid_model
     axiolid --> axiolid_nurbs
@@ -214,6 +216,7 @@ graph TD
     axiolid_dispatch --> axiolid_mesh
     axiolid_dispatch --> axiolid_mesh_boolean_contract
     axiolid_dispatch --> axiolid_mesh_contracts
+    axiolid_dispatch --> axiolid_mesh_hidden_lines_contract
     axiolid_dispatch --> axiolid_mesh_section_contract
     axiolid_dispatch --> axiolid_pointcloud
     axiolid_dispatch --> axiolid_pointcloud_reconstruction_contract
@@ -310,6 +313,9 @@ graph TD
     axiolid_mesh_contracts --> axiolid_contracts
     axiolid_mesh_contracts --> axiolid_core
     axiolid_mesh_contracts --> axiolid_mesh
+    axiolid_mesh_hidden_lines_contract --> axiolid_contracts
+    axiolid_mesh_hidden_lines_contract --> axiolid_core
+    axiolid_mesh_hidden_lines_contract --> axiolid_mesh
     axiolid_mesh_section_contract --> axiolid_contracts
     axiolid_mesh_section_contract --> axiolid_core
     axiolid_mesh_section_contract --> axiolid_mesh

@@ -74,3 +74,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0087](./0087-disc-morphology-has-an-exact-and-a-fast-mode.md) | Disc morphology has an exact and a fast mode |
 | [0088](./0088-planar-overlay-takes-a-memory-budget.md) | The planar overlay takes a memory budget from ExecutionOptions |
 | [0089](./0089-dual-licence-with-a-commercial-option.md) | Axiolid is dual-licensed with a commercial option |
+| [0090](./0090-mesh-hidden-line-drawings.md) | Mesh hidden-line drawings decide visibility exactly in the view's affine frame |

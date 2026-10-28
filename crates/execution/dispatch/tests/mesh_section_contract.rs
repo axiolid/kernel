@@ -144,6 +144,26 @@ fn registry_rejects_open_or_dirty_solids_before_dispatch() {
 }
 
 #[test]
+fn registry_rejects_a_partial_triangle_before_dispatch() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let registry = registry(Arc::clone(&calls), ScratchRequirement::None);
+    // Two indices are no triangle: the mesh must not pass as an empty solid.
+    let two = TriMesh::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y], vec![0, 1]);
+    assert!(matches!(
+        registry.section(&two, frame(), limits(), &options()),
+        Err(GeomError::InvalidInput(_))
+    ));
+    // A cube with a stray trailing index is refused too.
+    let mut cube = cube();
+    cube.indices.push(0);
+    assert!(matches!(
+        registry.section(&cube, frame(), limits(), &options()),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn registry_rejects_non_finite_signed_volume_before_dispatch() {
     let calls = Arc::new(AtomicUsize::new(0));
     let registry = registry(Arc::clone(&calls), ScratchRequirement::None);

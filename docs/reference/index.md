@@ -4,7 +4,7 @@
 
 # Crate reference
 
-Axiolid publishes 60 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
+Axiolid publishes 61 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
 
 Every page here is generated from the crate itself: its manifest, its crate documentation and its changelog. Sections follow the layers of the [crate map](/architecture/crate-map).
 
@@ -42,6 +42,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.4 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.5 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.2 | Shared mesh admissibility contracts |
+| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | not released | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.2 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.2 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.2 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |

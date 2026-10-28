@@ -306,12 +306,25 @@ pub mod mesh_section {
     pub use axiolid_mesh_section_contract::*;
 }
 
+/// Orthographic hidden-line drawings of triangle meshes.
+///
+/// The contract and its types; no provider ships yet (ADR 0090), so a caller
+/// supplies its own.
+#[cfg(feature = "mesh-hidden-lines")]
+pub mod mesh_hidden_lines {
+    pub use axiolid_mesh_hidden_lines_contract::*;
+}
+
 #[cfg(feature = "graph-compile")]
 pub mod graph_compile {
     pub use axiolid_mesh_compile_contract::*;
 }
 
-#[cfg(any(feature = "dispatch-mesh-boolean", feature = "dispatch-mesh-section"))]
+#[cfg(any(
+    feature = "dispatch-mesh-boolean",
+    feature = "dispatch-mesh-section",
+    feature = "dispatch-mesh-hidden-lines"
+))]
 pub mod dispatch {
     pub use axiolid_dispatch::*;
 }

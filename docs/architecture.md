@@ -50,6 +50,7 @@ Portable seams are split by operation:
 
 - `axiolid-mesh-boolean-contract`;
 - `axiolid-mesh-section-contract`;
+- `axiolid-mesh-hidden-lines-contract`;
 - `axiolid-mesh-compile-contract`;
 - `axiolid-tessellation-contract`.
 

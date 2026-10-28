@@ -24,6 +24,7 @@ members = [
     "crates/contracts/operations/pointcloud-reconstruction",
     "crates/contracts/operations/curve-evaluate",
     "crates/contracts/operations/mesh-section",
+    "crates/contracts/operations/mesh-hidden-lines",
     "crates/contracts/operations/tessellate",
     "crates/algorithms/predicates",
     "crates/algorithms/exact",
@@ -140,6 +141,7 @@ axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boole
 axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.3.1" }
 axiolid-curve-evaluate-contract = { path = "crates/contracts/operations/curve-evaluate", version = "0.3.7" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.3.1" }
+axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.0" }
 axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.4", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.3.2", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.3.1", default-features = false }

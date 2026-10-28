@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `MeshPlaneSectionRegistry` refuses a mesh whose index count is not a
+  multiple of three with `InvalidInput`; it used to drop the partial
+  triangle and could accept the rest as a closed solid.
+
+### Added
+
+- `MeshHiddenLinesRegistry` behind the `mesh-hidden-lines` feature: shape,
+  budget and topology checks before dispatch, outcome validation, fallback
+  only on unsupported or unavailable providers, and refusals that name the
+  mesh at fault (ADR 0090, #138).
+
 ## [0.3.5] - 2026-10-28
 
 ### Changed
