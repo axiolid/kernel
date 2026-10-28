@@ -13,7 +13,7 @@
 //! Each ring is tagged [`RingKind::Outer`] or [`RingKind::Hole`] and may be
 //! given either way round. It is normalised (outer counter-clockwise, hole
 //! clockwise), and then every piece of its boundary adds one to the winding
-//! of the region on its inner side. The domain is the set of triangles with
+//! of the region on its left. The domain is the set of triangles with
 //! winding exactly 1: inside one outer ring (or inside an island of a hole,
 //! which is an outer ring again) and in no hole.
 //!
@@ -44,7 +44,8 @@
 //! visit one vertex twice. Its edges become constraints, so a ring edge
 //! through input vertices is split at them like any constraint (#360), and
 //! a breakline that crosses a ring edge between vertices is refused as
-//! [`TriangulationError::CrossingConstraints`].
+//! [`TriangulationError::CrossingConstraints`]. Any two crossing
+//! breaklines are refused too, even outside the domain.
 //!
 //! The orientation of a ring is read exactly at its lexicographically
 //! lowest vertex, which is always a convex corner. The fold check (both
@@ -487,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn the_lowest_vertex_is_never_a_fold_or_a_touch() {
+    fn orientation_is_read_at_a_reflex_first_vertex() {
         // A reflex first vertex: the orientation is read at the lowest
         // vertex (0, 0), a convex corner, whichever way the ring is listed.
         let pts = vec![

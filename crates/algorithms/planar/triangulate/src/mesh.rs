@@ -236,6 +236,7 @@ impl Triangulation {
     /// kept vertices: an endpoint that was merged into a coincident point
     /// is replaced by the kept index. A constraint through input vertices
     /// is listed as the pieces between them, each an edge of the output.
+    /// For a domain triangulation, pieces outside the domain are dropped.
     #[must_use]
     pub fn constraints(&self) -> &[Constraint] {
         &self.constraints
@@ -254,7 +255,8 @@ impl Triangulation {
 
     /// The kept vertices that no triangle uses, ascending: the points of a
     /// domain triangulation that lie outside the domain (or inside a hole)
-    /// and were dropped. Empty for a hull triangulation, where every kept
+    /// and were dropped, and ring vertices that bound no domain triangle
+    /// (an outline corner covered by a hole). Empty for a hull triangulation, where every kept
     /// point is a corner. A merged point is not listed; see
     /// [`merged_points`](Self::merged_points).
     #[must_use]

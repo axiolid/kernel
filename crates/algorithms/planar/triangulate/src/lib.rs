@@ -27,7 +27,8 @@
 //!   reported ([`Triangulation::merged_points`]); a constraint between two
 //!   of them is refused by name,
 //! - every constraint edge survives as a union of output edges (one that
-//!   runs through input vertices is split at them),
+//!   runs through input vertices is split at them; `triangulate_domain`
+//!   keeps only the pieces inside the domain),
 //! - the result is Delaunay away from the constraints (empty-circumcircle,
 //!   decided by the certified `incircle` predicate rather than by a
 //!   floating-point circumcircle test),

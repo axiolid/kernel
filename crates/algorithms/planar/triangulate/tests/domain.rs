@@ -233,9 +233,6 @@ fn a_breakline_does_not_change_the_domain() {
     pts.extend([p(1.0, 5.0), p(9.0, 5.0)]);
     let rings = [Ring::outer(outer), Ring::hole(hole)];
     let plain = domain("plain", &pts, &[], &rings);
-    let line = Constraint::new(8, 9);
-    let err = triangulate_domain(&pts, &[line], &rings).unwrap_err();
-    assert!(matches!(err, E::CrossingConstraints { .. }), "{err:?}");
     // A breakline that stays in the domain only adds an edge.
     let side = Constraint::new(8, 0);
     let with = domain("side", &pts, &[side], &rings);

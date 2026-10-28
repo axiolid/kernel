@@ -119,6 +119,9 @@ pub fn triangulate_refined(
 
 /// Refine an existing triangulation in place.
 ///
+/// A triangulation from `triangulate_domain` stays within its domain: a
+/// Steiner point is inserted only inside a domain triangle.
+///
 /// # Errors
 ///
 /// Propagates [`TriangulationError`] if a re-triangulation step fails.
@@ -129,7 +132,7 @@ pub fn refine(
     let threshold = quality.min_angle_degrees.to_radians().cos();
     let mut inserted = 0usize;
     // Triangles whose circumcentre cannot be inserted (it falls outside the
-    // hull, or the triangle is degenerate). Skipping them individually is the
+    // domain (or hull), or the triangle is degenerate). Skipping them individually is the
     // difference between "this one sliver is unfixable" and "stop refining":
     // abandoning the whole loop on the first such triangle left every other
     // fixable sliver in the mesh untouched.
@@ -143,8 +146,8 @@ pub fn refine(
             skipped.push(bad);
             continue;
         };
-        // Only insert strictly inside the existing hull. A circumcentre
-        // outside it would need boundary splitting, which moves a constraint
+        // Only insert strictly inside the existing mesh: the hull, or the
+        // domain of a `triangulate_domain` result. A circumcentre outside it would need boundary splitting, which moves a constraint
         // edge -- forbidden here, and the reason this stays "interior-only".
         if !inside_hull(tri, centre) {
             skipped.push(bad);
@@ -264,10 +267,11 @@ fn circumcentre(tri: &Triangulation, t: usize) -> Option<Point2> {
     }
 }
 
-/// Whether `p` lies inside some existing triangle.
+/// Whether `p` lies strictly inside some existing triangle (so inside the
+/// domain, for a domain triangulation).
 ///
 /// Used as the interior test for candidate Steiner points: a point inside a
-/// triangle is inside the hull by construction, and the mesh is small enough
+/// triangle is inside the mesh by construction, and the mesh is small enough
 /// at refinement scale that the linear scan is not the bottleneck.
 fn inside_hull(tri: &Triangulation, p: Point2) -> bool {
     (0..tri.triangle_count()).any(|t| {

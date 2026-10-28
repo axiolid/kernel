@@ -278,6 +278,10 @@ pub fn assert_domain(name: &str, points: &[Point2], rings: &[Ring], tri: &Triang
         let c: Vec<Pt> = t.iter().map(|&v| pts[v as usize]).collect();
         let q = (c[0].0 + c[1].0 + c[2].0, c[0].1 + c[1].1 + c[2].1);
         assert!(
+            cross(c[0], c[1], c[2]) > 0,
+            "{name}: triangle {t:?} is not counter-clockwise"
+        );
+        assert!(
             !on_ring(q),
             "{name}: triangle {t:?} has its centroid on a ring"
         );
