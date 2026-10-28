@@ -535,10 +535,10 @@
       "description": "Constrained Delaunay triangulation with bounded quality refinement",
       "layer": "algorithms",
       "path": "crates/algorithms/planar/triangulate",
-      "released": "0.3.5",
+      "released": "0.3.6",
       "released_date": "2026-10-28",
       "role": "algorithm.planar",
-      "version": "0.3.5"
+      "version": "0.3.6"
     }
   },
   "crates": {

@@ -8,7 +8,7 @@ Constrained Delaunay triangulation with bounded quality refinement.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.5 (2026-10-28) |
+| Latest release | 0.3.6 (2026-10-28) |
 | crates.io | [`axiolid-triangulate`](https://crates.io/crates/axiolid-triangulate) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_triangulate/index.html) · [docs.rs](https://docs.rs/axiolid-triangulate) |
@@ -26,14 +26,30 @@ Constrained Delaunay triangulation with bounded quality refinement. The output o
 
 ## Changes
 
-Latest release, 0.3.5 (2026-10-28):
+Latest release, 0.3.6 (2026-10-28):
+
+### Added
+
+- `triangulate_domain`, with `Ring` and `RingKind`: a constrained Delaunay
+  triangulation of the area inside outer rings and outside holes, by an
+  exact winding-number flood fill. Rings may share vertices and edges and be
+  listed either way round; points outside the domain are dropped and listed
+  by the new `Triangulation::outside_points` (#353).
+- `TriangulationError` variants `RingOutOfRange`, `TooFewRingVertices`,
+  `RepeatedRingVertex`, `FoldedRing`, `MisnestedRing` and `EmptyDomain`
+  (#353).
 
 ### Changed
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `refine` honours the domain of a `triangulate_domain` result: it
+  re-triangulates inside the rings instead of re-expanding to the hull
+  (#353).
+
+### Fixed
+
+- A constraint that passes exactly through input vertices, or ends on another
+  constraint, is split at the vertices on it and recovered as the pieces
+  between them, instead of being refused as `CrossingConstraints`;
+  `Triangulation::constraints` lists the pieces (#360).
 
 Full history: [`crates/algorithms/planar/triangulate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/triangulate/CHANGELOG.md)

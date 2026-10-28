@@ -7134,6 +7134,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-triangulate
 
+### 0.3.6 - 2026-10-28
+
+### Added
+
+- `triangulate_domain`, with `Ring` and `RingKind`: a constrained Delaunay
+  triangulation of the area inside outer rings and outside holes, by an
+  exact winding-number flood fill. Rings may share vertices and edges and be
+  listed either way round; points outside the domain are dropped and listed
+  by the new `Triangulation::outside_points` (#353).
+- `TriangulationError` variants `RingOutOfRange`, `TooFewRingVertices`,
+  `RepeatedRingVertex`, `FoldedRing`, `MisnestedRing` and `EmptyDomain`
+  (#353).
+
+### Changed
+
+- `refine` honours the domain of a `triangulate_domain` result: it
+  re-triangulates inside the rings instead of re-expanding to the hull
+  (#353).
+
+### Fixed
+
+- A constraint that passes exactly through input vertices, or ends on another
+  constraint, is split at the vertices on it and recovered as the pieces
+  between them, instead of being refused as `CrossingConstraints`;
+  `Triangulation::constraints` lists the pieces (#360).
+
 ### 0.3.5 - 2026-10-28
 
 ### Changed
