@@ -73,3 +73,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0086](./0086-curved-faces-invert-their-edges-without-pcurves.md) | Curved faces without pcurves invert their shared edge samples |
 | [0087](./0087-disc-morphology-has-an-exact-and-a-fast-mode.md) | Disc morphology has an exact and a fast mode |
 | [0088](./0088-planar-overlay-takes-a-memory-budget.md) | The planar overlay takes a memory budget from ExecutionOptions |
+| [0089](./0089-dual-licence-with-a-commercial-option.md) | Axiolid is dual-licensed with a commercial option |

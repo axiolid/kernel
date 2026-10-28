@@ -4,7 +4,9 @@ description = "boolmesh-backed MeshBoolean provider"
 version = "0.3.6"
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# Absorbed upstream code with a third-party copyright holder (ADR 0047):
+# MPL-2.0 only, without the commercial option the rest of the workspace has.
+license = "MPL-2.0"
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"

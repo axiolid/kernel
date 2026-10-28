@@ -202,6 +202,7 @@ def copy_payload(stage: Path, artifact_dir: Path, values: dict[str, str]) -> Non
         stage / "include/axiolid.h",
     )
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
+    shutil.copy2(ROOT / "LICENSE-COMMERCIAL", stage / "LICENSE-COMMERCIAL")
     shared_destination = stage / values["shared_location"]
     shared_destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(artifact_dir / values["shared"], shared_destination)

@@ -298,6 +298,7 @@ def verify_files(files: dict[str, bytes], allow_dirty: bool) -> tuple[str, dict]
         )
     required = {
         "LICENSE",
+        "LICENSE-COMMERCIAL",
         "include/axiolid.h",
         "lib/cmake/Axiolid/AxiolidConfig.cmake",
         "lib/cmake/Axiolid/AxiolidConfigVersion.cmake",

@@ -8,6 +8,10 @@ Axiolid values small, proven boundaries over broad claims. A change is not compl
 functionality and optimizations start as **discussions**, papercuts and bugs are
 **issues**, and every decision is recorded rather than silently dropped.
 
+## Licence of contributions
+
+Axiolid is `MPL-2.0 OR LicenseRef-Commercial`. Submitting a contribution means you agree to the [contributor terms](./licensing.md#contributor-terms): you keep your copyright, and the copyright holder may also license your contribution commercially.
+
 ## Local checks
 
 ```bash

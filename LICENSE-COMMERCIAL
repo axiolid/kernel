@@ -1,0 +1,19 @@
+LicenseRef-Commercial
+=====================
+
+Axiolid is dual-licensed. You may use it under the Mozilla Public License
+2.0 (see LICENSE), or under a separate commercial licence agreed in writing
+with the copyright holder.
+
+A commercial licence is available from the copyright holder, Friedrich
+Schrödter (GitHub: GeneralPawz). Ask through
+https://github.com/axiolid/kernel.
+
+Only a signed written agreement with the copyright holder grants a
+commercial licence. This file grants no rights by itself. Without such an
+agreement, Axiolid is available to you under MPL-2.0 only.
+
+The commercial option does not cover third-party code that Axiolid contains
+under its original licence. In particular, the absorbed mesh boolean in
+crates/providers/mesh/boolmesh/src/csg is MPL-2.0 only (ADR 0047), and the
+package axiolid-mesh-boolean-boolmesh is licensed MPL-2.0 only.

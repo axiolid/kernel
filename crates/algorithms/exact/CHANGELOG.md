@@ -11,6 +11,9 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
+  a commercial licence is available from the copyright holder
+  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
 - The minimum supported Rust version is now 1.99 (was 1.88), and the
   workspace builds on Rust 1.99.1 (#349).
 

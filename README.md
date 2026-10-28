@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://axiolid.github.io/kernel/"><img alt="Documentation" src="https://img.shields.io/badge/docs-Axiolid-111827?style=flat-square"></a>
   <a href="https://github.com/axiolid/kernel/actions/workflows/docs.yml"><img alt="Documentation deployment" src="https://github.com/axiolid/kernel/actions/workflows/docs.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MPL-2.0 license" src="https://img.shields.io/badge/license-MPL--2.0-2563eb?style=flat-square"></a>
+  <a href="https://axiolid.github.io/kernel/guide/licensing"><img alt="MPL-2.0 or commercial license" src="https://img.shields.io/badge/license-MPL--2.0%20or%20commercial-2563eb?style=flat-square"></a>
   <img alt="MSRV Rust 1.99" src="https://img.shields.io/badge/MSRV-1.99-b7410e?style=flat-square">
 </p>
 
@@ -117,4 +117,4 @@ The workspace also carries feature-isolation and mutation probes. See [Contribut
 
 ## License
 
-Axiolid is licensed under [Mozilla Public License 2.0](LICENSE). Separate application files may remain proprietary; see the [licensing guide](https://axiolid.github.io/kernel/guide/licensing).
+Axiolid is dual-licensed under the [Mozilla Public License 2.0](LICENSE) or a [commercial licence](LICENSE-COMMERCIAL) from the copyright holder (`MPL-2.0 OR LicenseRef-Commercial`); `axiolid-mesh-boolean-boolmesh` is MPL-2.0 only. Under MPL-2.0, separate application files may remain proprietary. Contributions are accepted under the contributor terms in the [licensing guide](https://axiolid.github.io/kernel/guide/licensing#contributor-terms).

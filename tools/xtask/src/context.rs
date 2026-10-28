@@ -191,6 +191,7 @@ const ROOT_FILES: &[&str] = &[
     "Cargo.lock",
     "Cargo.toml",
     "LICENSE",
+    "LICENSE-COMMERCIAL",
     "README.md",
     "rust-toolchain.toml",
 ];

@@ -28,6 +28,7 @@ class NativePackagingTests(unittest.TestCase):
         root = "axiolid-native-v0.1.1-x86_64-unknown-linux-gnu"
         relative = {
             "LICENSE": b"license",
+            "LICENSE-COMMERCIAL": b"commercial",
             "include/axiolid.h": b"header",
             "lib/cmake/Axiolid/AxiolidConfig.cmake": b"config",
             "lib/cmake/Axiolid/AxiolidConfigVersion.cmake": b"version",
