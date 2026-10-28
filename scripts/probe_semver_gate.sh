@@ -3,7 +3,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 TARGET=crates/foundation/core/src/bounds.rs
-BAK="${TMPDIR:-/tmp}/semverprobe.bak"
+BAK="${TMPDIR:-/tmp}/semverprobe.$$.bak"
 cp "$TARGET" "$BAK"
 restore() { cp "$BAK" "$TARGET"; rm -f "$BAK"; }
 trap restore EXIT

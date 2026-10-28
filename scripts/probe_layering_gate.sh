@@ -14,7 +14,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 GATE=(cargo xtask architecture check)
-BAK="${TMPDIR:-/tmp}/layering_mut.bak"
+BAK="${TMPDIR:-/tmp}/layering_mut.$$.bak"
 fail=0
 
 # Content hash of every source/manifest in `crates/`, so we can prove the probe
@@ -27,7 +27,7 @@ BEFORE="$(snapshot)"
 
 # Run the gate; echo "GREEN" or "RED".
 run_gate() {
-    if "${GATE[@]}" >"${TMPDIR:-/tmp}/layering_mut_out.txt" 2>&1; then echo GREEN; else echo RED; fi
+    if "${GATE[@]}" >"${TMPDIR:-/tmp}/layering_mut_out.$$.txt" 2>&1; then echo GREEN; else echo RED; fi
 }
 
 # mutate <label> <manifest> <line-to-append-to-[dependencies]> <expected>

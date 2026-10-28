@@ -4,7 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 BUILD_RS=crates/facade/axiolid-capi/build.rs
-BACKUP="${TMPDIR:-/tmp}/build.rs.bak"
+BACKUP="${TMPDIR:-/tmp}/build.rs.$$.bak"
 target_dir="${CARGO_TARGET_DIR:-target}"
 fail=0
 

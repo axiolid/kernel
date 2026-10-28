@@ -3,7 +3,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 PAGE=docs/capabilities.md
-BAK="${TMPDIR:-/tmp}/capprobe.bak"
+BAK="${TMPDIR:-/tmp}/capprobe.$$.bak"
 cp "$PAGE" "$BAK"
 restore() { cp "$BAK" "$PAGE"; rm -f "$BAK"; }
 trap restore EXIT
