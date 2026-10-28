@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.3 (2026-10-28) |
+| Latest release | 0.4.4 (2026-10-28) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -132,15 +132,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.3 (2026-10-28):
+Latest release, 0.4.4 (2026-10-28):
 
 ### Added
 
-- `mesh-hidden-lines` and `dispatch-mesh-hidden-lines` features, with the
-  `axiolid::mesh_hidden_lines` module: the orthographic hidden-line
-  drawing contract and its registry (ADR 0090, #138). Opt-in; the bundles
-  do not include it.
-- `hidden-lines-provider` feature: `axiolid::mesh_hidden_lines::ScalarHiddenLines`,
-  the exact scalar provider (`axiolid-hidden-lines`, #138).
+- `Application::section_mesh_request` sections a closed oriented mesh and
+  reports faces lying in the plane as regions with a side (ADR 0091, #359).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

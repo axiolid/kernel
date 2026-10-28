@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.2 (2026-10-28) |
+| Latest release | 0.3.3 (2026-10-28) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -34,14 +34,20 @@ that may end on a region, and touching edges are counted (ADR 0091).
 
 ## Changes
 
-Latest release, 0.3.2 (2026-10-28):
+Latest release, 0.3.3 (2026-10-28):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `SectionRequest`, `PlaneSection` and the provided `MeshPlaneSection` methods
+  `section_request` and `request_scratch_requirement`: faces lying in the
+  cutting plane come back as `InPlaneRegion`s with an `InPlaneSide`, cut curves
+  are transversal `SectionChain`s (open ones end on a region), and touching
+  edges are counted in `PlaneSectionEvidence`. A provider that does not
+  implement the method refuses with `Unsupported`. The refusal names are
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES`, `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`
+  and `REFUSED_SADDLE_VERTEX`. Additive (ADR 0091, #359).
+- `conformance::RegionConformanceSuite` runs hand-derived fixtures for the
+  method, among them a cube through its top face, a frame with a hole and a
+  parapet with a post (#359).
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

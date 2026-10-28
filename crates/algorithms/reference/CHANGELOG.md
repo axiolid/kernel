@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-10-28
+
 ### Added
 
 - `ScalarSection::section_request`: faces lying in the plane become regions

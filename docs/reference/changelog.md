@@ -8,6 +8,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.4 - 2026-10-28
+
+### Added
+
+- `Application::section_mesh_request` sections a closed oriented mesh and
+  reports faces lying in the plane as regions with a side (ADR 0091, #359).
+
 ### 0.4.3 - 2026-10-28
 
 ### Added
@@ -2047,6 +2054,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-dispatch
+
+### 0.3.7 - 2026-10-28
+
+### Added
+
+- `MeshPlaneSectionRegistry::section_request`: the source checks of `section`,
+  fallback only on unsupported or unavailable providers, and outcome checks of
+  the frame, chain and ring invariants, canonical order, budgets (in-plane
+  regions, region vertices, in-plane pairs) and evidence counts (ADR 0091,
+  #359).
+- `MeshPlaneSectionRegistry::register_request_conformant` also runs the
+  region suite and rejects a claimed failure (#359).
 
 ### 0.3.6 - 2026-10-28
 
@@ -5332,6 +5351,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-section-contract
 
+### 0.3.3 - 2026-10-28
+
+### Added
+
+- `SectionRequest`, `PlaneSection` and the provided `MeshPlaneSection` methods
+  `section_request` and `request_scratch_requirement`: faces lying in the
+  cutting plane come back as `InPlaneRegion`s with an `InPlaneSide`, cut curves
+  are transversal `SectionChain`s (open ones end on a region), and touching
+  edges are counted in `PlaneSectionEvidence`. A provider that does not
+  implement the method refuses with `Unsupported`. The refusal names are
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES`, `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`
+  and `REFUSED_SADDLE_VERTEX`. Additive (ADR 0091, #359).
+- `conformance::RegionConformanceSuite` runs hand-derived fixtures for the
+  method, among them a cube through its top face, a frame with a hole and a
+  parapet with a post (#359).
+
 ### 0.3.2 - 2026-10-28
 
 ### Changed
@@ -6866,6 +6901,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.11 - 2026-10-28
+
+### Added
+
+- `ScalarSection::section_request`: faces lying in the plane become regions
+  with a side and holes, found by exact orientation predicates on the source
+  coordinates; cut curves are transversal chains, open ones ending on a region,
+  oriented and simplified exactly (no tolerance);
+  touching edges are counted. Overlapping in-plane faces and saddle vertices
+  are refused by name (ADR 0091, #359).
 
 ### 0.3.10 - 2026-10-28
 

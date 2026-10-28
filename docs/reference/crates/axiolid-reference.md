@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-10-28) |
+| Latest release | 0.3.11 (2026-10-28) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,14 +46,15 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.10 (2026-10-28):
+Latest release, 0.3.11 (2026-10-28):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- `ScalarSection::section_request`: faces lying in the plane become regions
+  with a side and holes, found by exact orientation predicates on the source
+  coordinates; cut curves are transversal chains, open ones ending on a region,
+  oriented and simplified exactly (no tolerance);
+  touching edges are counted. Overlapping in-plane faces and saddle vertices
+  are refused by name (ADR 0091, #359).
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

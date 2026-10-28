@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-28) |
+| Latest release | 0.3.7 (2026-10-28) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,21 +53,16 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-28):
-
-### Fixed
-
-- `MeshPlaneSectionRegistry` refuses a mesh whose index count is not a
-  multiple of three with `InvalidInput`; it used to drop the partial
-  triangle and could accept the rest as a closed solid.
+Latest release, 0.3.7 (2026-10-28):
 
 ### Added
 
-- `MeshHiddenLinesRegistry` behind the `mesh-hidden-lines` feature: shape,
-  budget and topology checks before dispatch, outcome validation, fallback
-  only on unsupported or unavailable providers, and refusals that name the
-  mesh at fault (ADR 0090, #138). `axiolid-hidden-lines` is the first
-  provider behind it. Adjacent pieces of one source edge must differ in
-  visibility when hidden pieces are requested.
+- `MeshPlaneSectionRegistry::section_request`: the source checks of `section`,
+  fallback only on unsupported or unavailable providers, and outcome checks of
+  the frame, chain and ring invariants, canonical order, budgets (in-plane
+  regions, region vertices, in-plane pairs) and evidence counts (ADR 0091,
+  #359).
+- `MeshPlaneSectionRegistry::register_request_conformant` also runs the
+  region suite and rejects a claimed failure (#359).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

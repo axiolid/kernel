@@ -43,7 +43,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.5 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.2 | Shared mesh admissibility contracts |
 | [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.1 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
-| [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.2 | Portable mesh plane-section request, result, and evidence contract |
+| [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.3 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.3 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.3 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |
 
@@ -75,7 +75,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-predicates`](./crates/axiolid-predicates) | `algorithm.reference` | 0.3.4 | Certified exact-arithmetic geometric predicates |
 | [`axiolid-project`](./crates/axiolid-project) | `algorithm.planar` | 0.3.2 | Projection of triangle meshes onto a plane, and prism intersection |
 | [`axiolid-ray-mesh`](./crates/axiolid-ray-mesh) | `algorithm.query` | 0.4.1 | Narrow-phase ray/triangle-mesh nearest-hit intersection |
-| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.10 | Portable scalar reference implementation and certified predicates |
+| [`axiolid-reference`](./crates/axiolid-reference) | `algorithm.reference` | 0.3.11 | Portable scalar reference implementation and certified predicates |
 | [`axiolid-refine`](./crates/axiolid-refine) | `algorithm.discrete` | 0.3.3 | Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces |
 | [`axiolid-route`](./crates/axiolid-route) | `algorithm.planar` | 0.3.8 | Exact planar shortest path over a visibility graph |
 | [`axiolid-spatial`](./crates/axiolid-spatial) | `algorithm.query` | 0.3.5 | Acceleration structures: BVH and uniform point grid, and their queries; barycentric and mean-value coordinates. |
@@ -95,12 +95,12 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.3 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.2 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.6 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.7 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.35 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 
 | Crate | Role | Latest release | Description |
 | --- | --- | --- | --- |
-| [`axiolid`](./crates/axiolid) | `facade` | 0.4.3 | Feature-gated facade for Axiolid's format-neutral geometry stack |
+| [`axiolid`](./crates/axiolid) | `facade` | 0.4.4 | Feature-gated facade for Axiolid's format-neutral geometry stack |
 | [`axiolid-capi`](./crates/axiolid-capi) | `facade.native-c` | 0.3.3 | Versioned, memory-safe C ABI for the Axiolid application facade. |
