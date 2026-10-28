@@ -7,6 +7,7 @@
 
 use axiolid_construct::profile::profile_rings;
 use axiolid_construct::sweep;
+use axiolid_contracts::GeomError;
 use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
 use axiolid_measure::volume_properties;
 use axiolid_mesh::TriMesh;
@@ -401,4 +402,39 @@ fn a_sectioned_spine_with_equal_sections_is_an_extrusion() {
         "sectioned spine {got} vs {want}"
     );
     assert!(sweep::sectioned_spine(&sections[..1]).is_err());
+}
+
+#[test]
+fn a_tapered_revolution_crossing_or_touching_the_axis_is_refused() {
+    // Both ends are judged, and together: a section that is clear of the
+    // axis at each end but on opposite sides crosses it in between (#351).
+    let tol = tol_for(1e-3);
+    let at = |x: Scalar| {
+        let mut rings = profile_rings(&rect(1.0, 2.0), 1e-3, tol).expect("rings");
+        for p in &mut rings.outer {
+            p.x += x;
+        }
+        rings
+    };
+    let turn = |a: &_, b: &_| {
+        sweep::tapered_revolve(a, b, Point3::ZERO, Vec3::Y, core::f64::consts::PI, tol)
+    };
+    assert!(turn(&at(4.0), &at(5.0)).is_ok());
+    assert!(matches!(
+        turn(&at(0.0), &at(4.0)),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        turn(&at(4.0), &at(0.0)),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        turn(&at(4.0), &at(-4.0)),
+        Err(GeomError::InvalidInput(_))
+    ));
+    // The end ring's left edge lies on the axis.
+    assert!(matches!(
+        turn(&at(4.0), &at(0.5)),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
 }

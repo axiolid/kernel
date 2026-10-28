@@ -49,9 +49,10 @@
 
 use axiolid_contracts::{GeomError, GeomResult, Operation};
 use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
-use axiolid_guarantees::{Certified, Sign};
+use axiolid_guarantees::Sign;
 use axiolid_mesh::TriMesh;
-use axiolid_predicates::orient2d;
+use axiolid_predicates::arithmetic::{expansion_sign, expansion_sum};
+use axiolid_predicates::two_product;
 
 use crate::profile::Rings;
 
@@ -142,42 +143,67 @@ fn bounded_steps(
     }
 }
 
+/// Exact sign of `d x (p - a)`, the side of `p` of the line through `a`
+/// along `d`: `d.x*p.y - d.x*a.y - d.y*p.x + d.y*a.x`, summed as expansions.
+///
+/// Not `orient2d(a, a + d, p)`: `a + d` rounds, which tilts the line it
+/// decides against.
+fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
+    let term = |x: Scalar, y: Scalar, negate: bool| {
+        let (product, error) = two_product(x, y);
+        if negate {
+            [-error, -product]
+        } else {
+            [error, product]
+        }
+    };
+    let mut sum = expansion_sum(&term(d.x, p.y, false), &term(d.x, a.y, true));
+    sum = expansion_sum(&sum, &term(d.y, p.x, true));
+    sum = expansion_sum(&sum, &term(d.y, a.x, false));
+    expansion_sign(&sum)
+}
+
 /// Refuse rings that lie on both sides of the axis, or touch it (#351).
 ///
 /// Decided when the axis lies in the profile's plane, where "side" is
-/// meaningful: each vertex is classified by the exact `orient2d` against the
-/// axis line, with no tolerance. Vertices strictly on both sides are a
-/// crossing (the swept solid passes through itself) and `InvalidInput`; a
-/// vertex on the axis, which includes an edge lying on it, collapses the
-/// swept wall to a line and is `UnsupportedInput`, as in the exact path
-/// (`revolve_exact`). An edge cannot meet the axis between two vertices
-/// without one of those two cases. An axis leaving the plane is a twisted
-/// sweep the module notes bound separately and is not judged here.
-fn check_axis_side(rings: &Rings, axis_origin: Point3, axis_direction: Vec3) -> GeomResult<()> {
-    if axis_direction.z != 0.0 || axis_origin.z != 0.0 {
+/// meaningful: each vertex is classified by the exact sign of its cross
+/// product with the axis direction, with no tolerance band. Vertices
+/// strictly on both sides are a crossing (the swept solid passes through
+/// itself) and `InvalidInput`; a vertex on the axis, which includes an edge
+/// lying on it, collapses the swept wall to a line and is
+/// `UnsupportedInput`, as in the exact path (`revolve_exact`). An edge
+/// cannot meet the axis between two vertices without one of those two
+/// cases.
+///
+/// "In the plane" follows the exact path: the axis origin and direction
+/// leave it only beyond `tolerance.linear()` in z, so placement noise does
+/// not switch the check off. An axis parallel to the plane but offset from
+/// it is checked for crossing only: no ring point reaches the axis, since
+/// its radius stays at least the offset. An axis leaning out of the plane
+/// is unchecked and tracked in #362.
+pub(crate) fn check_axis_side(
+    rings: &Rings,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<()> {
+    // TODO(#362): an axis leaning out of the profile plane is not judged.
+    if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
         return Ok(());
     }
+    let offset = axis_origin.z.abs() > tolerance.linear();
     let a = Point2::new(axis_origin.x, axis_origin.y);
-    let b = Point2::new(a.x + axis_direction.x, a.y + axis_direction.y);
     let (mut positive, mut negative, mut on_axis) = (false, false, false);
     for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
-        match orient2d(a, b, *p) {
-            Certified::Certain {
-                sign: Sign::Positive,
-                ..
-            } => positive = true,
-            Certified::Certain {
-                sign: Sign::Negative,
-                ..
-            } => negative = true,
-            Certified::Certain {
-                sign: Sign::Zero, ..
-            } => on_axis = true,
-            _ => {
-                return Err(GeomError::InvalidInput(
-                    "profile side of the revolution axis could not be decided".to_owned(),
-                ))
-            }
+        if !(p.x.is_finite() && p.y.is_finite()) {
+            return Err(GeomError::InvalidInput(
+                "revolved profile must have finite vertices".to_owned(),
+            ));
+        }
+        match side_of_axis(a, axis_direction, *p) {
+            Sign::Positive => positive = true,
+            Sign::Negative => negative = true,
+            _ => on_axis = true,
         }
     }
     if positive && negative {
@@ -185,7 +211,7 @@ fn check_axis_side(rings: &Rings, axis_origin: Point3, axis_direction: Vec3) -> 
             "revolved profile crosses the axis: its rings lie on both sides".to_owned(),
         ));
     }
-    if on_axis {
+    if on_axis && !offset {
         return Err(GeomError::UnsupportedInput {
             backend: crate::BACKEND_ID,
             operation: Operation::Sweep,
@@ -226,7 +252,7 @@ pub fn revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
-    check_axis_side(rings, axis_origin, axis_direction)?;
+    check_axis_side(rings, axis_origin, axis_direction, tolerance)?;
     let dir = axis_direction / len;
     // Widest distance from the axis governs the angular step: a point at
     // radius r traces a circle of that radius.

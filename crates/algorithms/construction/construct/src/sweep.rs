@@ -116,6 +116,15 @@ pub fn tapered_revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
+    // The blend is linear in each vertex and a half-plane is convex, so
+    // vertices strictly on one side at both ends stay there throughout.
+    // Judging both profiles' vertices together also refuses a section that
+    // starts on one side and ends on the other (#351).
+    let ends = Rings {
+        outer: start.outer.iter().chain(&end.outer).copied().collect(),
+        holes: start.holes.iter().chain(&end.holes).cloned().collect(),
+    };
+    crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance)?;
     let far = blend_rings(start, end, 1.0)?;
     let mut max_r: Scalar = 0.0;
     let starts = start.outer.iter().chain(start.holes.iter().flatten());

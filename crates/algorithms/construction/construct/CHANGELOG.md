@@ -11,10 +11,17 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
-- `revolve` (the mesh path) refuses a profile whose rings lie on both sides
-  of an in-plane axis (`InvalidInput`) or touch it (`UnsupportedInput`),
-  decided with the exact `orient2d`; it used to sweep a self-intersecting or
-  degenerate solid and return it as valid (#351).
+- `revolve` and `tapered_revolve` (the mesh path) refuse a profile whose
+  vertices lie on both sides of an in-plane axis (`InvalidInput`), judged by
+  an exact sign with no tolerance band; they used to sweep a
+  self-intersecting solid and return it as valid. A tapered revolution
+  judges the start and end sections together (#351).
+- A profile touching the axis is now refused (`UnsupportedInput`) for full
+  and partial turns alike, as the exact path does for full turns. This
+  includes cylinders, cones and spheres revolved from a profile with an edge
+  or vertex on the axis, and pie-slice partial turns, which used to mesh
+  with degenerate triangles; meshing them properly is tracked in #363. An
+  axis leaning out of the profile plane is still unchecked (#362).
 
 ## [0.3.21] - 2026-10-28
 

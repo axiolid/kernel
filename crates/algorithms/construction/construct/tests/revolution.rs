@@ -163,7 +163,9 @@ fn a_profile_crossing_the_axis_is_invalid_input() {
 
 #[test]
 fn a_hole_crossing_the_axis_is_invalid_input() {
-    // The outer ring is one-sided; only the hole reaches across.
+    // The outer ring is one-sided; only the hole reaches across. The hole
+    // pokes out of the outer ring, which is a malformed input; the check
+    // judges every ring's vertices and refuses it as crossing regardless.
     let r = rings(
         square(1.0, 6.0, 0.0, 4.0),
         vec![square(-0.5, 2.0, 1.0, 2.0)],
@@ -284,4 +286,65 @@ fn a_tilted_axis_is_judged_by_its_own_line() {
         tilt(&touching),
         Err(GeomError::UnsupportedInput { .. })
     ));
+}
+
+#[test]
+fn a_tilted_axis_with_a_large_offset_is_decided_without_rounding() {
+    // `origin + direction` rounds in f64 here and tilts the line enough to
+    // put a one-sided triangle across it. Checked with rationals: all three
+    // vertices lie strictly right of the axis through (1000.1, 0) along
+    // (0.6, 0.8).
+    let r = rings(
+        vec![
+            Point2::new(1006.1, 8.0),
+            Point2::new(1010.0, 0.0),
+            Point2::new(1010.0, 8.0),
+        ],
+        vec![],
+    );
+    let mesh = revolve(
+        &r,
+        Point3::new(1000.1, 0.0, 0.0),
+        Vec3::new(0.6, 0.8, 0.0),
+        FULL,
+        tol_for(1e-3),
+    );
+    assert!(mesh.is_ok(), "{mesh:?}");
+}
+
+#[test]
+fn an_axis_parallel_to_the_plane_and_offset_is_checked_for_crossing_only() {
+    let at =
+        |z: Scalar, r: &Rings| revolve(r, Point3::new(0.0, 0.0, z), Vec3::Y, FULL, tol_for(1e-3));
+    // Crossing is still refused above the plane.
+    let across = rings(square(-1.0, 2.0, 0.0, 1.0), vec![]);
+    assert!(matches!(at(0.5, &across), Err(GeomError::InvalidInput(_))));
+    // A vertex on the projected axis is 0.5 from the real one: no touch.
+    let on_projection = rings(square(0.0, 2.0, 0.0, 1.0), vec![]);
+    assert!(at(0.5, &on_projection).is_ok());
+    // Placement noise does not switch the check off or make it offset.
+    assert!(matches!(
+        at(1e-17, &across),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        at(1e-17, &on_projection),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+}
+
+#[test]
+fn an_axis_leaning_out_of_the_plane_is_not_judged_by_its_projection() {
+    // The ring's edge x = 0 lies on the axis's projection into the plane,
+    // but the axis itself passes 1 m or more clear of it. Whether such a
+    // sweep crosses itself is not decided here (TODO(#362)).
+    let r = rings(square(0.0, 2.0, 1.0, 2.0), vec![]);
+    let mesh = revolve(
+        &r,
+        Point3::ZERO,
+        Vec3::new(0.0, 1.0, 0.5),
+        FULL,
+        tol_for(1e-3),
+    );
+    assert!(mesh.is_ok(), "{mesh:?}");
 }
