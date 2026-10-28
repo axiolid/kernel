@@ -5,8 +5,11 @@
 //! These assert the properties the crate promises, not a fixed triangle list:
 //! a different but equally valid triangulation must not fail the suite.
 
+mod common;
+
 use axiolid_core::Point2;
 use axiolid_triangulate::{triangulate, triangulate_refined, Constraint, Quality, RefineOutcome};
+use common::assert_constrained_delaunay;
 
 fn p(x: f64, y: f64) -> Point2 {
     Point2::new(x, y)
@@ -319,51 +322,6 @@ fn refinement_preserves_constraints() {
         v.contains(&0) && v.contains(&2)
     });
     assert!(present, "refinement destroyed a constraint edge");
-}
-
-/// Every unconstrained edge between two triangles is locally Delaunay: the
-/// vertex across it lies outside (or on) the circumcircle, exactly.
-fn assert_constrained_delaunay(tri: &axiolid_triangulate::Triangulation) {
-    use axiolid_guarantees::Sign;
-    use std::collections::HashMap;
-    let t = tri.triangles();
-    let pts = tri.points();
-    let constrained: std::collections::BTreeSet<Constraint> =
-        tri.constraints().iter().copied().collect();
-    let mut across: HashMap<(u32, u32), u32> = HashMap::new();
-    for k in 0..tri.triangle_count() {
-        for i in 0..3 {
-            across.insert(
-                (t[3 * k + i], t[3 * k + (i + 1) % 3]),
-                t[3 * k + (i + 2) % 3],
-            );
-        }
-    }
-    for (&(u, v), &apex) in &across {
-        if constrained.contains(&Constraint::new(u, v)) {
-            continue;
-        }
-        if let Some(&other) = across.get(&(v, u)) {
-            let s = axiolid_predicates::incircle(
-                pts[u as usize],
-                pts[v as usize],
-                pts[apex as usize],
-                pts[other as usize],
-            );
-            let inside = matches!(
-                s,
-                axiolid_guarantees::Certified::Certain {
-                    sign: Sign::Positive,
-                    ..
-                }
-            );
-            assert!(
-                !inside,
-                "edge {u}-{v} is not locally Delaunay: {:?} {:?} apex {:?} other {:?}",
-                pts[u as usize], pts[v as usize], pts[apex as usize], pts[other as usize]
-            );
-        }
-    }
 }
 
 #[test]

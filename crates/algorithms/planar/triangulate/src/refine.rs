@@ -27,6 +27,7 @@
 use axiolid_core::Point2;
 
 use crate::build::triangulate;
+use crate::domain::rebuild;
 use crate::mesh::{Triangulation, TriangulationError};
 use crate::{collinear, Constraint};
 
@@ -152,7 +153,7 @@ pub fn refine(
         let mut points = tri.points.clone();
         points.push(centre);
         let constraints = tri.constraints.clone();
-        let candidate = triangulate(&points, &constraints)?;
+        let candidate = rebuild(&points, &constraints, tri.domain.as_deref())?;
         // Refinement must never hand back a worse mesh than it was given.
         // Inserting the circumcentre of a sliver whose small angle is pinned
         // by input vertices can create an even thinner triangle beside it --

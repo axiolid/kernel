@@ -44,10 +44,8 @@ impl Triangulation {
 /// (#360). Only constraints that were split are listed; any other is the
 /// single edge between its endpoints.
 #[derive(Debug, Clone, Default)]
-#[expect(dead_code, reason = "read by triangulate_domain (#353)")]
 pub(crate) struct Splits(Vec<(Constraint, Vec<u32>)>);
 
-#[expect(dead_code, reason = "read by triangulate_domain (#353)")]
 impl Splits {
     /// The vertices from `c.a` to `c.b` that `c` was split into, endpoints
     /// included, or `None` when `c` was not split.

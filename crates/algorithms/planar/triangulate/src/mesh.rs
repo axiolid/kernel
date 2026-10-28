@@ -20,6 +20,7 @@
 
 use axiolid_core::Point2;
 
+use crate::domain::Ring;
 use crate::Constraint;
 
 /// Sentinel for "no neighbour across this halfedge".
@@ -79,6 +80,55 @@ pub enum TriangulationError {
         /// Second endpoint, as an input index.
         b: u32,
     },
+    /// A ring referenced a vertex index that does not exist.
+    RingOutOfRange {
+        /// Position of the ring in the ring list.
+        ring: u32,
+        /// The offending index.
+        index: u32,
+    },
+    /// A ring has fewer than three vertices, so it encloses nothing.
+    TooFewRingVertices {
+        /// Position of the ring in the ring list.
+        ring: u32,
+    },
+    /// A ring visits the same vertex twice.
+    ///
+    /// Two indices at one position count as one vertex, and so does
+    /// repeating the first index at the end to close the ring: a ring is
+    /// closed implicitly.
+    RepeatedRingVertex {
+        /// Position of the ring in the ring list.
+        ring: u32,
+        /// The later of the two occurrences, as an input index.
+        index: u32,
+    },
+    /// A ring doubles back on itself at a vertex.
+    ///
+    /// Both neighbours of the vertex lie on one side of it on a common
+    /// line, so the ring has a zero-width spike (or no area at all) there.
+    FoldedRing {
+        /// Position of the ring in the ring list.
+        ring: u32,
+        /// The vertex where the ring folds, as an input index.
+        index: u32,
+    },
+    /// The rings nest in a way that is neither inside nor outside: a region
+    /// has a winding other than 0 or 1.
+    ///
+    /// A hole outside every outer ring, a hole inside a hole, a hole listed
+    /// twice and an outer ring inside another all end here. Rings (or a
+    /// ring and itself) that cross between vertices are refused earlier, as
+    /// [`CrossingConstraints`](Self::CrossingConstraints).
+    MisnestedRing {
+        /// The lowest-numbered ring that carries the boundary crossed into
+        /// the region.
+        ring: u32,
+        /// The winding of that region.
+        winding: i32,
+    },
+    /// The rings enclose no triangle, so the domain is empty.
+    EmptyDomain,
 }
 
 impl core::fmt::Display for TriangulationError {
@@ -98,6 +148,25 @@ impl core::fmt::Display for TriangulationError {
             Self::CoincidentConstraint { a, b } => {
                 write!(f, "constraint ({a}, {b}) joins two coincident points")
             }
+            Self::RingOutOfRange { ring, index } => {
+                write!(f, "ring {ring} references out-of-range vertex {index}")
+            }
+            Self::TooFewRingVertices { ring } => {
+                write!(f, "ring {ring} has fewer than three vertices")
+            }
+            Self::RepeatedRingVertex { ring, index } => {
+                write!(f, "ring {ring} visits vertex {index} twice")
+            }
+            Self::FoldedRing { ring, index } => {
+                write!(f, "ring {ring} doubles back on itself at vertex {index}")
+            }
+            Self::MisnestedRing { ring, winding } => {
+                write!(
+                    f,
+                    "ring {ring} borders a region of winding {winding}, not 0 or 1"
+                )
+            }
+            Self::EmptyDomain => write!(f, "the rings enclose no triangle"),
         }
     }
 }
@@ -131,6 +200,12 @@ pub struct Triangulation {
     pub(crate) constraints: Vec<Constraint>,
     /// Coincident input points merged into a kept one, by input index.
     pub(crate) merged: Vec<MergedPoint>,
+    /// Kept vertices that no triangle uses, ascending; set by the domain
+    /// filter.
+    pub(crate) outside: Vec<u32>,
+    /// The rings the triangles were filtered by, so refinement can filter
+    /// again; `None` for a hull triangulation.
+    pub(crate) domain: Option<Vec<Ring>>,
 }
 
 impl Triangulation {
@@ -175,6 +250,16 @@ impl Triangulation {
     #[must_use]
     pub fn merged_points(&self) -> &[MergedPoint] {
         &self.merged
+    }
+
+    /// The kept vertices that no triangle uses, ascending: the points of a
+    /// domain triangulation that lie outside the domain (or inside a hole)
+    /// and were dropped. Empty for a hull triangulation, where every kept
+    /// point is a corner. A merged point is not listed; see
+    /// [`merged_points`](Self::merged_points).
+    #[must_use]
+    pub fn outside_points(&self) -> &[u32] {
+        &self.outside
     }
 
     /// Whether `edge` is a constraint.

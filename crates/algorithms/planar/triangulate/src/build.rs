@@ -66,9 +66,10 @@ use axiolid_guarantees::Sign;
 use axiolid_predicates::orient2d;
 
 use crate::adjacency::{debug_check, link, note_update};
+use crate::domain::{check_ring_sizes, check_rings, Ring};
 use crate::hint::CellHints;
 use crate::mesh::{MergedPoint, Triangulation, TriangulationError, NO_HALFEDGE};
-use crate::recover::recover_constraints;
+use crate::recover::{recover_constraints, Splits};
 use crate::{decided, in_circumcircle, turns_left, Constraint};
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,30 @@ pub fn triangulate(
     points: &[Point2],
     constraints: &[Constraint],
 ) -> Result<Triangulation, TriangulationError> {
+    build(points, constraints, None).map(|built| built.tri)
+}
+
+/// A built triangulation with what the domain filter needs from the build.
+pub(crate) struct Built {
+    pub(crate) tri: Triangulation,
+    /// The constraints that were split, and where.
+    pub(crate) splits: Splits,
+    /// The vertex each input point is: itself, or the coincident point it
+    /// was merged into.
+    pub(crate) kept: Vec<u32>,
+}
+
+/// The shared build of [`triangulate`] and `triangulate_domain`.
+///
+/// `rings` is `None` for the plain hull triangulation. The checks run in a
+/// fixed order, so the same bad input always reports the same error: too
+/// few points, constraint range, ring range and size, empty ring list,
+/// collinear points, coincident constraints, ring shape, then recovery.
+pub(crate) fn build(
+    points: &[Point2],
+    constraints: &[Constraint],
+    rings: Option<&[Ring]>,
+) -> Result<Built, TriangulationError> {
     if points.len() < 3 {
         return Err(TriangulationError::TooFewPoints);
     }
@@ -105,16 +130,23 @@ pub fn triangulate(
             return Err(TriangulationError::ConstraintOutOfRange { index });
         }
     }
+    if let Some(rings) = rings {
+        check_ring_sizes(rings, count)?;
+    }
     if !has_non_collinear_triple(points) {
         return Err(TriangulationError::AllPointsCollinear);
     }
 
     let mut state = Builder::new(points);
     state.insert_all(first_triangle(points))?;
-    let constraints = state.carry_over(constraints)?;
-    let mut triangulation = state.finish(points, &constraints);
-    recover_constraints(&mut triangulation)?;
-    Ok(triangulation)
+    let mut constraints = state.carry_over(constraints)?;
+    if let Some(rings) = rings {
+        constraints.extend(check_rings(points, &state.kept, rings)?);
+    }
+    let kept = state.kept.clone();
+    let mut tri = state.finish(points, &constraints);
+    let splits = recover_constraints(&mut tri)?;
+    Ok(Built { tri, splits, kept })
 }
 
 /// Whether the input contains three points that are not collinear.
@@ -628,6 +660,8 @@ impl Builder {
             triangles,
             halfedges: Vec::new(),
             constraints: sorted,
+            outside: Vec::new(),
+            domain: None,
             merged: (0..self.kept.len() as u32)
                 .filter(|&v| self.kept[v as usize] != v)
                 .map(|v| MergedPoint {

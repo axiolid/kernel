@@ -17,9 +17,12 @@
 //! This crate replaces "some valid triangulation" with a triangulation whose
 //! quality is *stated and checked*:
 //!
-//! - the triangles cover the exact convex hull of the input, collinear
+//! - [`triangulate`] covers the exact convex hull of the input, collinear
 //!   hull points included (a symbolic vertex at infinity closes the hull
 //!   during the build, so no thin hull triangle is lost),
+//! - [`triangulate_domain`] keeps exactly the triangles inside the outer
+//!   rings and outside the holes it is given, and reports the points it
+//!   dropped ([`Triangulation::outside_points`]),
 //! - exactly coincident input points become one vertex, and the merge is
 //!   reported ([`Triangulation::merged_points`]); a constraint between two
 //!   of them is refused by name,
@@ -49,12 +52,14 @@ use axiolid_predicates::{incircle, orient2d};
 
 mod adjacency;
 mod build;
+mod domain;
 mod hint;
 mod mesh;
 mod recover;
 mod refine;
 
 pub use build::triangulate;
+pub use domain::{triangulate_domain, Ring, RingKind};
 pub use mesh::{MergedPoint, Triangulation, TriangulationError};
 pub use refine::{refine, triangulate_refined, Quality, RefineOutcome};
 

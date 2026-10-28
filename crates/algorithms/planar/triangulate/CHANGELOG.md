@@ -9,6 +9,23 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `triangulate_domain`, with `Ring` and `RingKind`: a constrained Delaunay
+  triangulation of the area inside outer rings and outside holes, by an
+  exact winding-number flood fill. Rings may share vertices and edges and be
+  listed either way round; points outside the domain are dropped and listed
+  by the new `Triangulation::outside_points` (#353).
+- `TriangulationError` variants `RingOutOfRange`, `TooFewRingVertices`,
+  `RepeatedRingVertex`, `FoldedRing`, `MisnestedRing` and `EmptyDomain`
+  (#353).
+
+### Changed
+
+- `refine` honours the domain of a `triangulate_domain` result: it
+  re-triangulates inside the rings instead of re-expanding to the hull
+  (#353).
+
 ### Fixed
 
 - A constraint that passes exactly through input vertices, or ends on another
