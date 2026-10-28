@@ -13,11 +13,12 @@
 //!
 //! Module map: `view` (the affine map), `recipe` (the sign questions),
 //! `param` (parameters along an edge and their interval algebra), `edges`
-//! (topology and edge kinds), `occlusion` (one edge against the triangles), `caps` (the cross-sections
+//! (topology and edge kinds), `broad` (candidate triangles from a BVH), `occlusion` (one edge against the triangles), `caps` (the cross-sections
 //! of solids a near plane cuts),
 //! `output` (correctly rounded endpoints), `provider` (validation and the
 //! provider itself).
 
+mod broad;
 mod caps;
 mod decide;
 mod edges;

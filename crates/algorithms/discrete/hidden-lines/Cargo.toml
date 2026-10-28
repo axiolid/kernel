@@ -16,6 +16,7 @@ axiolid-exact.workspace = true
 axiolid-guarantees.workspace = true
 axiolid-mesh.workspace = true
 axiolid-mesh-hidden-lines-contract.workspace = true
+axiolid-spatial.workspace = true
 num-bigint.workspace = true
 
 [dev-dependencies]
@@ -36,4 +37,5 @@ allowed-internal-dependencies = [
     "axiolid-guarantees",
     "axiolid-mesh",
     "axiolid-mesh-hidden-lines-contract",
+    "axiolid-spatial",
 ]

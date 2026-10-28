@@ -9,6 +9,10 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Candidate triangles for an edge, and the cap triangles of a cut solid, come from an `axiolid-spatial` BVH over view-space boxes instead of a linear scan. The predicate, the candidate set, its ascending order and `candidate_pairs` are unchanged (#138).
+
 ## [0.1.1] - 2026-10-28
 
 ### Changed

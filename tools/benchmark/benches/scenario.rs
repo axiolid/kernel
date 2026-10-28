@@ -16,6 +16,12 @@ use axiolid::application::Application;
 use axiolid::contracts::ExecutionOptions;
 use axiolid_benchmark::workload;
 use axiolid_core::{Frame3, Point3, Tolerance, Vec3};
+use axiolid_hidden_lines::ScalarHiddenLines;
+use axiolid_mesh::TriMesh;
+use axiolid_mesh_hidden_lines_contract::{
+    EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
+    MeshRole, OrthographicView, Visibility,
+};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
@@ -125,5 +131,96 @@ fn mesh_section(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(scenarios, wall_subtraction, mesh_section);
+/// A closed, outward-wound box.
+fn hidden_line_box(min: [f64; 3], max: [f64; 3]) -> TriMesh {
+    let (x0, y0, z0, x1, y1, z1) = (min[0], min[1], min[2], max[0], max[1], max[2]);
+    TriMesh::new(
+        vec![
+            Point3::new(x0, y0, z0),
+            Point3::new(x1, y0, z0),
+            Point3::new(x1, y1, z0),
+            Point3::new(x0, y1, z0),
+            Point3::new(x0, y0, z1),
+            Point3::new(x1, y0, z1),
+            Point3::new(x1, y1, z1),
+            Point3::new(x0, y1, z1),
+        ],
+        vec![
+            0, 3, 2, 0, 2, 1, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7,
+            6, 3, 0, 4, 3, 4, 7,
+        ],
+    )
+}
+
+/// Hidden-line drawing of a 20 x 20 grid of boxes (#138).
+///
+/// A building-like layout: every cell holds a column of height 1 to 3 with a
+/// gap to its neighbours. In the isometric view every box overlaps its
+/// neighbours in the image; the cut plan sets the near plane at mid-height
+/// (2.0), so the taller columns are capped and the lower ones drawn whole.
+fn hidden_lines(criterion: &mut Criterion) {
+    let provider = ScalarHiddenLines::new();
+    let options = ExecutionOptions::new(tolerance());
+    let meshes: Vec<TriMesh> = (0..400_usize)
+        .map(|k| {
+            let (i, j) = ((k % 20) as f64, (k / 20) as f64);
+            let height = 1.0 + ((k * 7 + (k / 20) * 3) % 5) as f64 * 0.5;
+            hidden_line_box([i, j, 0.0], [i + 0.75, j + 0.75, height])
+        })
+        .collect();
+    let entries: Vec<HiddenLineMesh<'_>> = meshes
+        .iter()
+        .enumerate()
+        .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
+        .collect();
+    let limits = HiddenLineLimits::new(400, 3_200, 4_800, 100_000_000, 10_000_000);
+    let (s2, s6, s3) = (
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0 / 6.0_f64.sqrt(),
+        1.0 / 3.0_f64.sqrt(),
+    );
+    let isometric = OrthographicView::new(Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::new(s2, -s2, 0.0),
+        y: Vec3::new(s6, s6, -2.0 * s6),
+        z: Vec3::new(s3, s3, s3),
+    });
+    let plan = OrthographicView::new(Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    })
+    .with_near(2.0);
+    let mut group = criterion.benchmark_group("scenario/hidden-lines");
+    group.sample_size(10);
+
+    for (name, view) in [("isometric", isometric), ("cut-plan", plan)] {
+        let request = HiddenLineRequest::new(&entries, view, EdgeSelection::new(Some(0.5)), limits);
+        // A drawing with nothing visible, or nothing hidden, would time
+        // beautifully; require both before timing.
+        let outcome = provider
+            .hidden_lines(&request, &options)
+            .expect("the grid draws");
+        for visibility in [Visibility::Visible, Visibility::Hidden] {
+            assert!(
+                outcome.segments.iter().any(|s| s.visibility == visibility),
+                "{name}: no {visibility:?} segment"
+            );
+        }
+        group.throughput(Throughput::Elements(outcome.evidence.selected_edges as u64));
+        group.bench_function(name, |bencher| {
+            bencher.iter(|| {
+                black_box(
+                    provider
+                        .hidden_lines(black_box(&request), &options)
+                        .expect("the grid draws"),
+                )
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(scenarios, wall_subtraction, mesh_section, hidden_lines);
 criterion_main!(scenarios);

@@ -130,11 +130,13 @@ graph TD
     axiolid_benchmark --> axiolid_curve
     axiolid_benchmark --> axiolid_exact_compile_contract
     axiolid_benchmark --> axiolid_guarantees
+    axiolid_benchmark --> axiolid_hidden_lines
     axiolid_benchmark --> axiolid_measure
     axiolid_benchmark --> axiolid_mesh
     axiolid_benchmark --> axiolid_mesh_boolean_boolmesh
     axiolid_benchmark --> axiolid_mesh_compile
     axiolid_benchmark --> axiolid_mesh_compile_contract
+    axiolid_benchmark --> axiolid_mesh_hidden_lines_contract
     axiolid_benchmark --> axiolid_model
     axiolid_benchmark --> axiolid_overlay
     axiolid_benchmark --> axiolid_predicates
@@ -251,6 +253,7 @@ graph TD
     axiolid_hidden_lines --> axiolid_guarantees
     axiolid_hidden_lines --> axiolid_mesh
     axiolid_hidden_lines --> axiolid_mesh_hidden_lines_contract
+    axiolid_hidden_lines --> axiolid_spatial
     axiolid_inspect --> axiolid_core
     axiolid_inspect --> axiolid_exact
     axiolid_inspect --> axiolid_guarantees

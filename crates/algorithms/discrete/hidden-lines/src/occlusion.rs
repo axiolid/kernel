@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Aabb2;
 
+use crate::broad::{Broad, Query};
 use crate::caps::{hidden_by_caps, Cap};
 use crate::decide::decide;
 use crate::edges::{DrawEdge, Tri};
@@ -31,6 +32,8 @@ pub(crate) struct Scene<'a> {
     pub region: Option<Aabb2>,
     /// The solids the near plane cuts.
     pub caps: &'a [Cap],
+    /// The broad phase over `tris`.
+    pub broad: &'a Broad,
 }
 
 /// A piece of an edge with one visibility.
@@ -113,13 +116,13 @@ fn resolve_with(
     };
 
     let mut hidden: Vec<Span> = Vec::new();
-    for tri in scene.tris {
-        if !tri.bounds.image_overlaps(&edge.bounds)
-            || tri.bounds.hi[2] < edge.bounds.lo[2]
-            || scene.near.is_some_and(|near| tri.bounds.lo[2] > near)
-        {
-            continue;
-        }
+    let query = Query {
+        image: edge.bounds,
+        w_lo: edge.bounds.lo[2],
+        w_hi: scene.near.unwrap_or(f64::INFINITY),
+    };
+    for t in scene.broad.candidates(scene.tris, &query) {
+        let tri = &scene.tris[t];
         if *pairs >= max_pairs {
             return Err(GeomError::BudgetExceeded {
                 resource: "hidden-line candidate pairs",
@@ -378,6 +381,7 @@ mod tests {
             kind: axiolid_mesh_hidden_lines_contract::EdgeKind::Crease,
             bounds: Bounds::of(&verts, &ends),
         };
+        let broad = Broad::build(&tris);
         let scene = Scene {
             verts: &verts,
             tris: &tris,
@@ -385,6 +389,7 @@ mod tests {
             far: None,
             region: None,
             caps: &[],
+            broad: &broad,
         };
         match resolve(&scene, &edge, usize::MAX, &mut Work::default()).expect("resolved") {
             Resolved::Pieces(pieces) => pieces

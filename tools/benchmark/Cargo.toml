@@ -32,6 +32,9 @@ criterion.workspace = true
 axiolid-brep.workspace = true
 axiolid-contracts.workspace = true
 axiolid-exact-compile-contract.workspace = true
+# The hidden-line scenario (#138) draws a grid of boxes with the scalar provider.
+axiolid-hidden-lines.workspace = true
+axiolid-mesh-hidden-lines-contract.workspace = true
 axiolid-measure = { workspace = true, features = ["exact"] }
 axiolid-mesh-compile.workspace = true
 # The boolean deviation benchmark (#314) compiles meshes with boolmesh.
@@ -67,6 +70,8 @@ allowed-internal-dependencies = [
     "axiolid-brep",
     "axiolid-contracts",
     "axiolid-exact-compile-contract",
+    "axiolid-hidden-lines",
+    "axiolid-mesh-hidden-lines-contract",
     "axiolid-mesh-compile",
     "axiolid-mesh-boolean-boolmesh",
     "axiolid-mesh-compile-contract",

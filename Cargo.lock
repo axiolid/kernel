@@ -171,11 +171,13 @@ dependencies = [
  "axiolid-curve",
  "axiolid-exact-compile-contract",
  "axiolid-guarantees",
+ "axiolid-hidden-lines",
  "axiolid-measure",
  "axiolid-mesh",
  "axiolid-mesh-boolean-boolmesh",
  "axiolid-mesh-compile",
  "axiolid-mesh-compile-contract",
+ "axiolid-mesh-hidden-lines-contract",
  "axiolid-model",
  "axiolid-overlay",
  "axiolid-predicates",
@@ -442,6 +444,7 @@ dependencies = [
  "axiolid-guarantees",
  "axiolid-mesh",
  "axiolid-mesh-hidden-lines-contract",
+ "axiolid-spatial",
  "num-bigint",
 ]
 

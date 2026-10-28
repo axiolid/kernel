@@ -14,6 +14,7 @@ use axiolid_mesh_hidden_lines_contract::{
     HiddenLineSegment, MeshHiddenLines, MeshRole, SourceEdge, Visibility,
 };
 
+use crate::broad::Broad;
 use crate::caps::Cap;
 use crate::decide::decide;
 use crate::edges::{collect, DrawEdge, MeshEdges, Tri};
@@ -26,9 +27,11 @@ use crate::view::Vert;
 ///
 /// Visibility is decided exactly in the view's affine frame: nothing is
 /// rounded before a decision, only the endpoints of the output pieces are
-/// (each the exact point rounded once). It tests every edge against every
-/// triangle whose bounding box can matter, so the cost grows with edges times
-/// triangles; `max_candidate_pairs` bounds it.
+/// (each the exact point rounded once). For every edge it examines the
+/// triangles whose view-space bounding box can matter, found in an
+/// `axiolid-spatial` BVH; in the worst case (everything overlaps in the
+/// image) the cost still grows with edges times triangles, and
+/// `max_candidate_pairs` bounds it.
 ///
 /// A near clipping plane that cuts a [`MeshRole::Solid`] leaves a cap that
 /// occludes (decided by ray parity with a symbolic perturbation of the image
@@ -128,6 +131,7 @@ impl MeshHiddenLines for ScalarHiddenLines {
         }
         debug_assert_eq!(tris.len(), total_triangles);
 
+        let broad = Broad::build(&tris);
         let scene = Scene {
             verts: &verts,
             tris: &tris,
@@ -135,6 +139,7 @@ impl MeshHiddenLines for ScalarHiddenLines {
             far: request.view.far,
             region: request.region,
             caps: &caps,
+            broad: &broad,
         };
         let mut evidence = HiddenLineEvidence::input_mesh(request.meshes.len(), total_triangles);
         evidence.selected_edges = edges.len();

@@ -26,6 +26,7 @@ use std::ops::Range;
 
 use axiolid_contracts::{GeomError, GeomResult};
 
+use crate::broad::Query;
 use crate::edges::DrawEdge;
 use crate::occlusion::Scene;
 use crate::param::{Param, Solver, Span};
@@ -50,14 +51,19 @@ pub(crate) fn hidden_by_caps(
     max_pairs: usize,
 ) -> GeomResult<Vec<Span>> {
     let mut hidden: Vec<Span> = Vec::new();
+    let query = Query {
+        image: edge.bounds,
+        w_lo: near,
+        w_hi: f64::INFINITY,
+    };
+    let found = scene.broad.candidates(scene.tris, &query);
     for cap in scene.caps {
         let mut ends: Vec<Param> = Vec::new();
-        for t in cap.tris.clone() {
+        let first = found.partition_point(|&t| t < cap.tris.start);
+        let last = found.partition_point(|&t| t < cap.tris.end);
+        for &t in &found[first..last] {
             let tri = &scene.tris[t];
-            if tri.sigma == Ordering::Equal
-                || tri.bounds.hi[2] < near
-                || !tri.bounds.image_overlaps(&edge.bounds)
-            {
+            if tri.sigma == Ordering::Equal {
                 continue;
             }
             if *pairs >= max_pairs {

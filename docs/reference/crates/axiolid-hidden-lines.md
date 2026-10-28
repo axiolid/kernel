@@ -23,8 +23,9 @@ meshes in an orthographic view. Visibility is decided exactly in the view's
 affine frame, with the interval filter first and dyadic big integers when it
 cannot decide; no tolerance enters a decision, and the output endpoints are
 the exact points rounded once. It refuses what it cannot decide with a typed
-error that names the mesh. Candidate pairs are found by a bounding-box scan that is quadratic in edges
-times triangles; the examined pairs are bounded by `max_candidate_pairs`. A
+error that names the mesh. Candidate pairs are found in an `axiolid-spatial` BVH over view-space boxes
+(worst case still edges times triangles); the examined pairs are bounded by
+`max_candidate_pairs`. A
 near clipping plane that cuts a `Solid` mesh leaves a cap that occludes, decided
 by exact ray parity with a symbolic perturbation of the image point; a face of a
 cut solid in the plane needs no special case. A solid wholly beyond the plane is
@@ -39,6 +40,7 @@ It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 - [`axiolid-guarantees`](./axiolid-guarantees)
 - [`axiolid-mesh`](./axiolid-mesh)
 - [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract)
+- [`axiolid-spatial`](./axiolid-spatial)
 
 ## Changes
 

@@ -12,6 +12,7 @@ EDG = "crates/algorithms/discrete/hidden-lines/src/edges.rs"
 PAR = "crates/algorithms/discrete/hidden-lines/src/param.rs"
 DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
 OUT = "crates/algorithms/discrete/hidden-lines/src/output.rs"
+BRD = "crates/algorithms/discrete/hidden-lines/src/broad.rs"
 PRO = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
 TESTS = ["-p", "axiolid-hidden-lines"]
 
@@ -115,6 +116,10 @@ MUTANTS = [
     ('caps applied to sheets', PRO,
      '                (Some(near), MeshRole::Solid) => {',
      '                (Some(near), _) => {', TESTS),
+    # The broad phase.
+    ('BVH probe misses touching boxes', BRD,
+     '                    max: Point3::new(query.image.hi[0], query.image.hi[1], query.w_hi),',
+     '                    max: Point3::new(query.image.hi[0].next_down(), query.image.hi[1], query.w_hi),', TESTS),
 ]
 
 probe_lib.main(MUTANTS, timeout=3600, reject_uncompiled=True)
