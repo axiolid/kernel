@@ -28,7 +28,9 @@ PLAN = ["-p", "axiolid-construct", "--lib", "fixed_reference"]
 
 MUTANTS = [
     ('twisting arcs not left to the sampled sweep', FR, '        if term > TWIST_SHARE * chord {', '        if false {', [CHAIN]),
-    ('twist term dropped from the walls', FR, '        0.5 * chord + twist', '        0.5 * chord', [CHAIN, PLAN]),
+    ('twist not taken out of the span share', FR, '    let share = 0.5 * chain.chord() - chain.twist();', '    let share = 0.5 * chain.chord();', [CHAIN, PLAN]),
+    ('twist term not kept in the chain', FR, '        walls,\n        twist,\n    }))', '        walls,\n        twist: 0.0,\n    }))', [PLAN]),
+    ('twist read at the arc end only', FR, '        let term = twist_term(reach, largest);', '        let term = twist_term(reach, end);', [PLAN]),
     ('joint re-seed left unchecked', FR, '        if shift > JOINT_SHARE * chord {', '        if false {', [CHAIN, PLAN]),
     ('a corner closing an undeclared chain made a loop', FR, '            && turn(last.end_tangent(), first.start_tangent()) <= allowed);', '            );', [CHAIN]),
     ('seed negated', FR, '        let seed = Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;', '        let seed = -Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;', [CHAIN]),
@@ -41,7 +43,7 @@ MUTANTS = [
     ('fold check without its slack', FR, '                + share;\n', '                + 0.0;\n', [CHAIN]),
     ('frame carried across pieces', FR, '        let seed = Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;', '        let first = &chain.pieces[0];\n        let seed = Frame::from_reference(first.start_point(), first.start_tangent(), reference)?.x;', [CHAIN]),
     ('loop lofted open', FR, '    let mut mesh = loft::loft(rings, &stations, chain.closed())?;', '    let mut mesh = loft::loft(rings, &stations, false)?;', [CHAIN]),
-    ('no wall term for a chain', FR, '    } else {\n        0.5 * chord + twist\n    };', '    } else {\n        twist\n    };', [PLAN]),
+    ('no wall term for a chain', FR, '    } else {\n        0.5 * chord\n    };', '    } else {\n        0.0\n    };', [PLAN]),
     ('lone arc swept disk not checked for a fold', C, '                            axiolid_construct::pipe::check_disk_along(arc, *radius)?;', '                            let _ = (arc, radius);', [CHAIN]),
 ]
 

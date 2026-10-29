@@ -15,10 +15,11 @@ caret rule for `0.x` versions.
   circular arcs, open or closed, is proven within the chord budget (the
   profile's share plus half the budget for the walls, none along one
   segment) when the reference is normal to the plane of every arc or lies
-  in it, plus the twist of a reference that only nearly is; the deviation
-  report names it "segments and arcs" (#122). An arc whose twist is more
-  than an eighth of the budget (oblique to the reference) is still swept as
-  sampled and reported unbounded.
+  in it; the twist of a reference that only nearly is comes out of the
+  walls' half, so the sum stays within the budget; the deviation report
+  names it "segments and arcs" (#122). An arc whose twist is more than an
+  eighth of the budget (oblique to the reference) is still swept as sampled
+  and reported unbounded.
 
 ### Changed
 

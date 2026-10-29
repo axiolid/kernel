@@ -18,14 +18,15 @@ caret rule for `0.x` versions.
   plane of every arc or lies in it, each arc is an exact revolution of the
   placed profile and each segment a prism, so the swept disk's per-piece
   proof carries over; a reference that only nearly is pays its measured
-  twist of the exact frame off those stations in the walls
-  (`FixedReferenceChain::walls`), and an arc whose twist exceeds an eighth
+  twist of the exact frame off those stations out of the walls' half of the
+  budget (`FixedReferenceChain::twist`), and an arc whose twist exceeds an eighth
   of the budget is reported as twisting (`FixedReferencePlan::Twisting`),
   which nothing here bounds. A corner (also one a re-seeded profile turns
   too far at, for a reference near the tangent), a reference parallel to
   the tangent, a gap and a profile that folds through a bend's axis are
   refused by name. A chain is a loop when the path declares itself closed
-  or ends exactly where it starts with a tangent-continuous closing joint.
+  or ends within the linear tolerance (and a quarter of the budget) of
+  where it starts with a tangent-continuous closing joint.
   Also `reference_clearance`, `ring_reach` and `pipe::check_disk_along`,
   which refuses a disk wider than a lone arc's bend.
 

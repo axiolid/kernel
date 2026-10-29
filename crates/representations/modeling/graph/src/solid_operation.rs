@@ -87,8 +87,11 @@ pub enum SolidOperation {
     ///
     /// The reference compiler proves its chord budget along a chain of
     /// segments and circular arcs, open or closed, when the reference is
-    /// normal to the plane of every arc or lies in it; it sweeps an arc
-    /// oblique to the reference as sampled and reports it unbounded. It
+    /// normal to the plane of every arc or lies in it, or leans off by a
+    /// twist of the frame the walls' half of the budget pays for (up to an
+    /// eighth of the budget at the profile's furthest vertex); it sweeps an
+    /// arc oblique to the reference beyond that as sampled and reports it
+    /// unbounded. It
     /// refuses a corner, a reference parallel to the tangent, a gap between
     /// pieces and a profile that reaches an arc's axis by name. A closed
     /// chain it proves is swept without caps.

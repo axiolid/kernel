@@ -34,7 +34,7 @@
 //! The angle between them is monotone in `q`, so its largest value is read
 //! at the arc's ends and where `q` has an extremum (`arc_twist`). A profile
 //! vertex at `reach` from the origin moves by at most `2 reach sin(delta/2)`
-//! between the two, and that is added to the walls' share of the budget. A
+//! between the two, and that comes out of the walls' half of the budget, which stays `chord / 2`. A
 //! term above an eighth of the budget leaves the arc to the sampled sweep
 //! ([`FixedReferencePlan::Twisting`], reported unbounded).
 //!
@@ -97,6 +97,7 @@ pub struct FixedReferenceChain {
     chord: Scalar,
     reach: Scalar,
     walls: Scalar,
+    twist: Scalar,
 }
 
 impl FixedReferenceChain {
@@ -132,11 +133,20 @@ impl FixedReferenceChain {
     }
 
     /// The proven distance of the walls from the exact surface: zero for
-    /// exactly one segment, else half the chord budget plus the largest
-    /// twist term of an arc (see the module notes).
+    /// exactly one segment, else half the chord budget, of which the arcs'
+    /// largest twist term ([`Self::twist`]) is paid first and the spans get
+    /// the rest.
     #[must_use]
     pub const fn walls(&self) -> Scalar {
         self.walls
+    }
+
+    /// The largest distance a profile vertex moves between the exact frame
+    /// and the rotation-minimising stations on any arc (see the module
+    /// notes); within an eighth of the chord budget.
+    #[must_use]
+    pub const fn twist(&self) -> Scalar {
+        self.twist
     }
 }
 
@@ -241,20 +251,22 @@ pub fn reference_clearance(piece: &PathPiece, reference: Vec3) -> Scalar {
 ///
 /// `closed` is whether the path declares itself a loop (a closed polyline):
 /// its closing joint is then checked like any other. An undeclared chain is
-/// a loop all the same when its last piece ends where its first starts, to
-/// rounding, and the joint there is tangent continuous (a full circle, a
+/// a loop all the same when its last piece ends within the smaller of the
+/// linear tolerance and a quarter of `chord` of where its first starts, and
+/// the joint there is tangent continuous (a full circle, a
 /// composite closing on itself); where it is not, the ends just meet and the
 /// chain is open, nothing refused.
 ///
 /// Refused by name, in this order: no pieces or a reference, chord or reach
 /// that is zero or not finite; a malformed piece; a joint with a gap above a
 /// quarter of `chord` or a corner; a piece whose tangent comes within the
-/// angular tolerance of the reference's direction; a joint whose kink
-/// turns the re-seeded profile (by about the kink times the cotangent of the
-/// reference's angle to the tangent) further than a quarter of `chord` at
-/// `reach`. An arc whose exact frame twists off the rotation-minimising one
-/// by more than an eighth of `chord` at `reach` is reported
-/// [`FixedReferencePlan::Twisting`]; a smaller twist is added to the walls.
+/// angular tolerance of the reference's direction. Then an arc whose exact
+/// frame twists off the rotation-minimising one by more than an eighth of
+/// `chord` at `reach` makes the plan [`FixedReferencePlan::Twisting`]; a
+/// smaller twist comes out of the walls' half of the budget. Last, a joint
+/// whose kink turns the re-seeded profile (by about the kink times the
+/// cotangent of the reference's angle to the tangent) further than a quarter
+/// of `chord` at `reach` is refused.
 pub fn fixed_reference_plan(
     pieces: &[PathPiece],
     closed: bool,
@@ -285,10 +297,10 @@ pub fn fixed_reference_plan(
     let angular = tolerance.angular();
     let m = pieces.len();
     let allowed = joint_tolerance(chord, reach);
-    let rounding = 1e-12 * pieces.iter().map(PathPiece::length).sum::<Scalar>();
+    let closing_gap = tolerance.linear().min(0.25 * chord);
     let (last, first) = (&pieces[m - 1], &pieces[0]);
     let loops = closed
-        || (last.end_point().distance(first.start_point()) <= rounding
+        || (last.end_point().distance(first.start_point()) <= closing_gap
             && turn(last.end_tangent(), first.start_tangent()) <= allowed);
     let joints = if loops { m } else { m - 1 };
     for k in 0..joints {
@@ -346,7 +358,7 @@ pub fn fixed_reference_plan(
     let walls = if matches!(pieces, [PathPiece::Segment { .. }]) {
         0.0
     } else {
-        0.5 * chord + twist
+        0.5 * chord
     };
     Ok(FixedReferencePlan::Untwisted(FixedReferenceChain {
         pieces: pieces.to_vec(),
@@ -355,6 +367,7 @@ pub fn fixed_reference_plan(
         chord,
         reach,
         walls,
+        twist,
     }))
 }
 
@@ -427,7 +440,7 @@ pub fn fixed_reference_along_pieces(
     chain: &FixedReferenceChain,
 ) -> GeomResult<TriMesh> {
     let reference = chain.reference();
-    let share = 0.5 * chain.chord();
+    let share = 0.5 * chain.chord() - chain.twist();
     for (i, piece) in chain.pieces().iter().enumerate() {
         if let PathPiece::Arc { centre, start, .. } = *piece {
             let frame = Frame::from_reference(start, piece.start_tangent(), reference)?;
@@ -590,25 +603,51 @@ mod tests {
         )
         .unwrap()
         {
-            FixedReferencePlan::Untwisted(chain) => Some(chain.walls()),
+            FixedReferencePlan::Untwisted(chain) => Some((chain.walls(), chain.twist())),
             FixedReferencePlan::Twisting { .. } => None,
         };
         let pieces = [arc(1.0)];
-        assert_eq!(walls(&pieces, Vec3::Z), Some(exact));
+        assert_eq!(walls(&pieces, Vec3::Z), Some((exact, 0.0)));
         for lean in [
             |l: Scalar| Vec3::new(0.0, l.sin(), l.cos()),
             |l: Scalar| Vec3::new(l.sin(), 0.0, l.cos()),
         ] {
-            // A small lean is paid for: at most the rim's chord at twice
-            // the lean, and more than nothing.
+            // A small lean is paid for out of the walls' half: at most the
+            // rim's chord at twice the lean, and more than nothing.
             let small = 1e-4;
-            let w = walls(&pieces, lean(small)).expect("untwisted");
-            assert!(w > exact && w <= exact + reach * 2.0 * small * 1.01, "{w}");
+            let (w, twist) = walls(&pieces, lean(small)).expect("untwisted");
+            assert_eq!(w, exact);
+            assert!(
+                twist > 0.0 && twist <= reach * 2.0 * small * 1.01,
+                "{twist}"
+            );
             // A large one is left to the sampled sweep.
             assert_eq!(walls(&pieces, lean(1e-2)), None);
         }
         let twisting = plan(&pieces, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         assert_eq!(twisting, FixedReferencePlan::Twisting { piece: 0 });
+    }
+
+    #[test]
+    fn a_twist_peaking_inside_the_arc_is_paid_for() {
+        // Over a full turn, or a turn and a bit, the exact frame is off by
+        // up to twice the lean inside the arc, while at the end alone it is
+        // not: the end alone would pay too little.
+        let lean: Scalar = 1e-4;
+        let r = Vec3::new(lean.sin(), 0.0, lean.cos());
+        for angle in [TAU, PI + 0.5] {
+            let FixedReferencePlan::Untwisted(chain) = plan(&[arc(angle)], r).unwrap() else {
+                panic!("twisting")
+            };
+            let (largest, end) = arc_twist(&arc(angle), r);
+            assert!(end < 0.95 * largest, "{angle}: {end} {largest}");
+            assert!(chain.twist() >= twist_term(0.07, largest) * 0.999);
+            assert!(
+                chain.twist() > 1.5 * twist_term(0.07, lean),
+                "{}",
+                chain.twist()
+            );
+        }
     }
 
     #[test]
@@ -774,6 +813,37 @@ mod tests {
         let length = 4.0 + 2.0 * PI;
         let got = volume(&mesh);
         assert!((got - 0.01 * length).abs() < 0.01 * length * 1e-2, "{got}");
+    }
+
+    #[test]
+    fn the_twist_comes_out_of_the_fold_slack() {
+        // The spans get the walls' half less the twist, and so does the fold
+        // slack: a profile whose depth plus that is just below the bend
+        // radius is swept, one at the full half would be refused.
+        let lean: Scalar = 5e-5;
+        let r = Vec3::new(lean.sin(), 0.0, lean.cos());
+        let at = |lowest: Scalar| {
+            let rings = Rings {
+                outer: vec![
+                    Point2::new(-1e-4, lowest),
+                    Point2::new(1e-4, lowest),
+                    Point2::new(1e-4, 0.0),
+                    Point2::new(-1e-4, 0.0),
+                ],
+                holes: Vec::new(),
+            };
+            let plan =
+                fixed_reference_plan(&[arc(1.0)], false, r, ring_reach(&rings), CHORD, tol());
+            let Ok(FixedReferencePlan::Untwisted(chain)) = plan else {
+                panic!("{plan:?}")
+            };
+            (chain.twist(), fixed_reference_along_pieces(&rings, &chain))
+        };
+        let (twist, _) = at(-0.9);
+        assert!(twist > 0.0);
+        let lowest = -(1.0 - 0.5 * CHORD + 0.5 * twist);
+        let (_, mesh) = at(lowest);
+        assert!(mesh.is_ok(), "{mesh:?}");
     }
 
     #[test]

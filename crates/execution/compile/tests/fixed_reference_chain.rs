@@ -1022,14 +1022,13 @@ fn a_leaning_reference_is_paid_for_or_left_unbounded() {
     let (mesh, report) = compile(build(Vec3::new(lean.sin(), 0.0, lean.cos())), &options);
     assert_eq!(report.bound, None, "{report:?}");
     assert!(!mesh.indices.is_empty());
-    // A small lean is proven, its twist added to the walls.
+    // A small lean is proven, its twist paid out of the walls' half.
     let lean = 5e-5f64;
     let reference = Vec3::new(lean.sin(), 0.0, lean.cos());
     let (mesh, report) = compile(build(reference), &options);
     let bound = report.bound.expect("a proven bound");
-    let reach = 0.1f64.hypot(0.1);
     assert!(
-        bound > 0.5 * chord && bound <= 0.5 * chord + reach * 2.0 * lean * 1.01,
+        bound == 0.5 * chord && report.meets_requested(),
         "{report:?}"
     );
     let exact = samples(&legs, reference, &shape, true);
@@ -1114,4 +1113,62 @@ fn a_teardrop_closing_at_a_corner_is_open_not_refused() {
     );
     assert_watertight("teardrop", &mesh);
     assert!(report.meets_requested(), "{report:?}");
+}
+
+#[test]
+fn a_paid_for_lean_stays_within_the_budget() {
+    // The profile's own chording takes up to half the budget, the walls the
+    // other half with the lean's twist inside it: the sum never passes it.
+    let chord = 1e-4;
+    let options = ExecutionOptions::new(Tolerance::new(1e-4, 1e-3).unwrap());
+    let shape = annulus(0.06, 0.02);
+    let legs = [Leg::Bend {
+        centre: Point3::ZERO,
+        axis: Vec3::Z,
+        from: Point3::new(1.0, 0.0, 0.0),
+        angle: FRAC_PI_2,
+    }];
+    let lean = 5e-5f64;
+    let reference = Vec3::new(lean.sin(), 0.0, lean.cos());
+    let (mesh, report) = compile(
+        |b| {
+            let directrix = composite(b, &legs);
+            sweep(b, shape.profile.clone(), directrix, reference, None)
+        },
+        &options,
+    );
+    let bound = report.bound.expect("a proven bound");
+    assert!(report.meets_requested() && bound <= chord, "{report:?}");
+    let exact = samples(&legs, reference, &shape, true);
+    assert_within("annulus on a leaning reference", &mesh, &exact, bound);
+}
+
+#[test]
+fn a_closing_point_off_by_rounding_is_still_a_loop() {
+    // The last bend falls 1e-8 short of the start: far below the 1 mm
+    // tolerance and a quarter of the budget, and tangent continuous there,
+    // so the stadium is a loop swept without caps.
+    let legs = Turtle::new(Point3::new(0.0, -0.5, 0.0), Vec3::X)
+        .straight(1.0)
+        .bend(Vec3::Z, 0.5, PI)
+        .straight(1.0)
+        .bend(Vec3::Z, 0.5, PI - 2e-8)
+        .legs;
+    let shape = rect(0.05, 0.05);
+    let (mesh, _) = compile(
+        |b| {
+            let path = composite(b, &legs);
+            sweep(b, shape.profile.clone(), path, Vec3::Z, None)
+        },
+        &options(1e-3),
+    );
+    assert_watertight("nearly closed stadium", &mesh);
+    // Only a cap has all three corners in the start's plane, x = 0.
+    let in_start_plane = mesh
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .any(|t| t.iter().all(|i| mesh.positions[*i as usize].x.abs() < 1e-7));
+    assert!(!in_start_plane, "the loop has a cap");
 }
