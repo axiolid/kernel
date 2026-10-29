@@ -226,7 +226,10 @@ put there, is refused as before. What a consumer does about shells that are
 unfused by an ulp after its own placement transform is open (#377).
 
 **Cost.** Building a point is about two degree-3 dyadic determinants. A
-rotated cable ladder (two rails, ten rungs) in plan took about 0.7 ms per
-request in release instead of 0.2 ms before. Only exactly degenerate cases
+cable ladder (two rails, ten rungs) in plan took about 0.25 ms per request in
+release against 0.18 ms before this change. Points whose coordinates are
+binary64 (source vertices, and crossings that happen to be exact, such as
+those of an edge that does not move in a coordinate) take a fast path with
+`orient2d` and plain comparisons; without it the request took 0.67 ms. Only exactly degenerate cases
 (contacts, shared collinear edges) reach `Dyadic`. The nesting stays quadratic
 in the worst case.

@@ -158,7 +158,7 @@ pub(super) fn build_cut_regions(
         }
         let mut nodes = Vec::with_capacity(ring.len());
         for &node in &ring {
-            nodes.push(exact.node(ctx.mesh, node)?);
+            nodes.push(exact.node(ctx.mesh, ctx.classifications, node)?);
         }
         for index in 0..nodes.len() {
             if exact.same(nodes[index], nodes[(index + 1) % nodes.len()])? {
@@ -216,7 +216,7 @@ mod tests {
     use axiolid_mesh_section_contract::SectionRole;
 
     use super::super::regions::Projection;
-    use super::super::ExactSectionPlane;
+    use super::super::{classify_vertices, ExactSectionPlane};
     use super::*;
 
     /// Source vertices on the plane z = 0, all cut-segment nodes:
@@ -273,10 +273,11 @@ mod tests {
             .collect();
         let region_vertices: BTreeSet<u32> = region_vertices.iter().copied().collect();
         let ring_vertices: BTreeSet<u32> = ring_vertices.iter().copied().collect();
+        let classifications = classify_vertices(&mesh, plane).expect("classes");
         let chains = ChainContext {
             mesh: &mesh,
             frame,
-            classifications: &[],
+            classifications: &classifications,
             projection: Projection::new(&plane).expect("projection"),
             directions: &directions,
             coplanar_edges: &BTreeSet::new(),
