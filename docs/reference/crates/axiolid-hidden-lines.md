@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.1 (2026-10-28) |
+| Latest release | 0.1.2 (2026-10-29) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -44,15 +44,10 @@ It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
 ## Changes
 
-Latest release, 0.1.1 (2026-10-28):
+Latest release, 0.1.2 (2026-10-29):
 
 ### Changed
 
-- The near-plane caps of closed solids occlude (#138, ADR 0090): a
-  `Solid` that the near plane cuts no longer fails as `UnsupportedInput`.
-  A point with `W < near` (farther than the plane) is hidden when the point
-  of the plane above it lies in the solid, by exact ray parity with a
-  symbolic perturbation of the image point. A face of a cut solid in the
-  near plane is drawn, not refused.
+- Candidate triangles for an edge, and the cap triangles of a cut solid, come from an `axiolid-spatial` BVH over view-space boxes instead of a linear scan. The predicate, the candidate set, its ascending order and `candidate_pairs` are unchanged (#138). Wall clock from `scenario/hidden-lines` (`cargo bench -p axiolid-benchmark --bench scenario -- hidden-lines`, which times the BVH and the linear scan, `ScanHiddenLines`, on each case; a loaded shared machine, so read these as ranges), linear scan / BVH: isometric 20x20 boxes 412 / 389 ms (a reviewer's run: 459 / 426), cut plan 20x20 174 / 140 ms (117 / 100; very noisy), isometric 50x50 3.34 / 2.52 s (3.62 / 2.88), cut plan 50x50 1.59 / 0.76 s (1.67 / 0.82). The gain is small at 400 boxes, because exact evaluation of the candidates dominates there, and 25-30% (isometric) to about 50% (cut plan) at 2,500.
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)

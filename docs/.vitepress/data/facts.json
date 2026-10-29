@@ -238,10 +238,10 @@
       "description": "Exact scalar hidden-line drawings of triangle meshes in orthographic views",
       "layer": "algorithms",
       "path": "crates/algorithms/discrete/hidden-lines",
-      "released": "0.1.1",
-      "released_date": "2026-10-28",
+      "released": "0.1.2",
+      "released_date": "2026-10-29",
       "role": "algorithm.discrete",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     "axiolid-inspect": {
       "description": "Mesh queries: clearance, containment, ray casting, and genus",

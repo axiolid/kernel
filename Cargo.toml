@@ -90,7 +90,7 @@ axiolid-heal = { path = "crates/algorithms/repair/heal", version = "0.3.1" }
 axiolid-brep-audit = { path = "crates/algorithms/repair/brep-audit", version = "0.3.2" }
 axiolid-decimate = { path = "crates/algorithms/discrete/decimate", version = "0.3.2" }
 axiolid-decompose = { path = "crates/algorithms/discrete/decompose", version = "0.3.1" }
-axiolid-hidden-lines = { path = "crates/algorithms/discrete/hidden-lines", version = "0.1.1" }
+axiolid-hidden-lines = { path = "crates/algorithms/discrete/hidden-lines", version = "0.1.2" }
 axiolid-minkowski = { path = "crates/algorithms/discrete/minkowski", version = "0.3.1" }
 axiolid-refine = { path = "crates/algorithms/discrete/refine", version = "0.3.2" }
 axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", version = "0.1.0" }
