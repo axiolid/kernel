@@ -52,8 +52,6 @@ pub(crate) enum Cut {
     /// These cut regions; the output otherwise equals the plain request's,
     /// which may be a refusal the cut request must repeat.
     Regions(Vec<CutRegion>),
-    /// Only this refusal.
-    Refused(&'static str),
     /// `GeomError::InvalidInput`: a sheet has no cut.
     Invalid,
 }

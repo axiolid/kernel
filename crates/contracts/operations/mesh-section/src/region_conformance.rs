@@ -275,17 +275,7 @@ fn check_cut_case(
     }
     match (&case.cut, first) {
         (Cut::Invalid, Err(GeomError::InvalidInput(_))) => {}
-        (Cut::Refused(family), Err(error)) if is_refusal(&error, family) => {}
         (Cut::Regions(_), Err(error)) if plain.as_ref().is_err_and(|p| same_error(p, &error)) => {}
-        (Cut::Refused(family), Err(error)) => {
-            report
-                .failures
-                .push(RegionConformanceFailure::WrongRefusal {
-                    case: name,
-                    expected: family,
-                    actual: error.to_string(),
-                });
-        }
         (_, Err(error)) => {
             report
                 .failures
@@ -302,7 +292,7 @@ fn check_cut_case(
                 report.failures.push(wrong);
             }
         }
-        (Cut::Refused(_) | Cut::Invalid, Ok(_)) => report.failures.push(wrong),
+        (Cut::Invalid, Ok(_)) => report.failures.push(wrong),
     }
 }
 
