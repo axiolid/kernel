@@ -8,6 +8,13 @@ budgets, and the registry checks of the answer. A mutant must turn a test red:
 the hand-derived cases of `tests/section_request.rs`, the region conformance
 suite, the unit tests of the ring tracing and nesting, or the registry tests
 of `mesh_section_contract.rs`.
+
+Not mutated, because no input reaches the difference: the mixed-containment
+and tied-container refusals (a ring with vertices strictly inside and outside
+another needs a crossing or contact, which the sweep refuses first), the
+same-ring clause of the contact rule (the local test also sees both passages
+of a repeated vertex), and the order of the two local tests (a crossing is seen
+from both rings).
 """
 import probe_lib
 
@@ -83,11 +90,6 @@ MUTANTS = [
         '(false, Some(_)) => {}', TESTS,
     ),
     (
-        'mixed containment accepted', N,
-        '                (false, true) => {}\n                _ => return Err(refused()),',
-        '                (false, true) => {}\n                _ => {}', TESTS,
-    ),
-    (
         'winding walk counts upward edges against the point', N,
         'if b.y > point.y && side == Sign::Positive {',
         'if b.y > point.y && side == Sign::Negative {', TESTS,
@@ -118,12 +120,62 @@ MUTANTS = [
         '    if false && outer_count > limits.max_regions {', TESTS,
     ),
     (
-        'registry accepts an answer without the requested cut regions', D,
-        '        (Some(_), None) => Err(violation(\n'
-        '            backend,\n'
-        '            "provider did not trace the requested cut regions",\n'
-        '        )),',
-        '        (Some(_), None) => Ok(()),', TESTS,
+        'registry does not fall back past a provider that ignores the request',
+        "crates/execution/dispatch/src/section.rs",
+        'Ok(section) if request.cut_regions.is_some() && section.cut_regions.is_none() => {',
+        'Ok(section) if false && request.cut_regions.is_some() && section.cut_regions.is_none() => {',
+        TESTS,
+    ),
+    (
+        'registry cut region budget unchecked', D,
+        '            if cut_regions.len() > limits.max_regions {',
+        '            if false && cut_regions.len() > limits.max_regions {', TESTS,
+    ),
+    (
+        'registry cut pair budget unchecked', D,
+        '            if section.evidence.cut_pairs > limits.max_pairs {',
+        '            if false && section.evidence.cut_pairs > limits.max_pairs {', TESTS,
+    ),
+    (
+        'conformance accepts rings that do not cover the chains',
+        "crates/contracts/operations/mesh-section/src/region_conformance.rs",
+        'fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool {',
+        'fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool {\n'
+        '    if true {\n        return true;\n    }', TESTS,
+    ),
+    (
+        'ring edges of one ring never compared', N,
+        '                if gap == 1 || gap == length - 1 {',
+        '                if true {', TESTS,
+    ),
+    (
+        'contact between rings never crosses', N,
+        '    Ok(inside && outside)',
+        '    Ok(false)', TESTS,
+    ),
+    (
+        'spike accepted', N,
+        '        refuse_spikes(&ring.points)?;',
+        '        let _ = ring;', TESTS,
+    ),
+    (
+        'hole inside a hole accepted', N,
+        '(true, Some(container)) if !rings[container].hole => {',
+        '(true, Some(container)) => {', TESTS,
+    ),
+    (
+        'unequal degrees not an internal error', K,
+        '        if out != inn {',
+        '        if false && out != inn {', TESTS,
+    ),
+    (
+        'ring without area taken for a hole', K,
+        '            _ => {\n'
+        '                return Err(GeomError::Degenerate(\n'
+        '                    "cut region ring has no signed area".into(),\n'
+        '                ))\n'
+        '            }',
+        '            _ => holes.push(canonical_rotation(points)),', TESTS,
     ),
     (
         'registry accepts cut regions that were not requested', D,

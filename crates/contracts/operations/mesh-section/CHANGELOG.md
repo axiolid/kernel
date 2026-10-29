@@ -21,7 +21,9 @@ caret rule for `0.x` versions.
 - `RegionConformanceSuite` runs every case again with cut regions requested,
   adds the L-step, wall at a sill, wall at a head, stepped slab, pocket floor
   and nested tubes fixtures, and reports `cut_regions_claimed`;
-  `RegionConformanceFailure::WrongCutRegions`.
+  `RegionConformanceFailure::WrongCutRegions`. A provider that answers the
+  first solid case without cut regions predates them and is not claimed; one
+  that returns them and later drops them fails.
 
 ### Fixed
 

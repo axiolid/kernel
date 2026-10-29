@@ -25,6 +25,11 @@
 //!   starts at its lexicographically smallest point (`x`, then `y`, by
 //!   `total_cmp`). Holes are sorted by point sequence, regions by `outer`.
 //! - Rings never cross and regions have disjoint interiors.
+//! - A ring keeps a collinear vertex only where something else does: a
+//!   junction of a chain and a region edge, a vertex that a region ring keeps,
+//!   or a chain vertex that chain simplification keeps (a vertex of an
+//!   in-plane triangle, or a node whose neighbours are not exactly collinear).
+//!   Any other vertex between two collinear neighbours is dropped.
 //! - Every closed chain of a solid is a cut ring, bit for bit. Every open
 //!   chain with both ends on a region is a contiguous run of exactly one cut
 //!   ring, forward or reversed. Every cut ring vertex is bit-identical to a

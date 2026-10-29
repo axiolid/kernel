@@ -9,8 +9,9 @@
 //! twice and the results must be identical.
 //!
 //! Every case runs a second time with cut regions requested (ADR 0092). A
-//! provider whose first such request returns `Unsupported` does not claim
-//! them (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
+//! provider whose first such request returns `Unsupported`, or an answer
+//! without cut regions (it predates them), does not claim them
+//! (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
 //! the answer must equal the plain one, plus the fixture's cut regions and
 //! the cut evidence; a plain refusal must be repeated; a sheet is invalid
 //! input; and the cut rings must cover the chains bit for bit.
@@ -176,7 +177,11 @@ impl RegionConformanceSuite {
             let first = provider.section_request(&case.mesh, &cut_request, &options);
             if case.role == SectionRole::Solid
                 && !seen_solid
-                && matches!(first, Err(GeomError::Unsupported { .. }))
+                && match &first {
+                    Err(error) => matches!(error, GeomError::Unsupported { .. }),
+                    // A provider that predates cut regions ignores the request.
+                    Ok(section) => section.cut_regions.is_none(),
+                }
             {
                 report.cut_regions_claimed = false;
                 continue;

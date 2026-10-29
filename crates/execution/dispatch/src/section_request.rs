@@ -8,8 +8,10 @@
 //! origin (#274); the conformance suite checks it on fixtures.
 //!
 //! Cut regions (ADR 0092) are checked when, and only when, the request asked
-//! for them: a provider that ignores the request, or answers one that did not
-//! ask, violates the contract. Their rings follow the in-plane region checks,
+//! for them: a provider that answers a request that did not ask violates the
+//! contract. One that ignores a request (`cut_regions` is `None`) predates the
+//! feature; the registry (`section.rs`) treats it as `Unsupported` and tries
+//! the next provider, so this check never sees that case. Their rings follow the in-plane region checks,
 //! and a cut request is refused for a sheet before any provider runs.
 //!
 //! The source topology depends on the request's role: a solid is closed and
@@ -191,6 +193,7 @@ fn check_cut_regions(
 ) -> GeomResult<()> {
     match (request.cut_regions, &section.cut_regions) {
         (None, None) => Ok(()),
+        // The registry falls back past a provider without cut regions.
         (Some(_), None) => Err(violation(
             backend,
             "provider did not trace the requested cut regions",

@@ -14,7 +14,9 @@ caret rule for `0.x` versions.
 - `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider
   must answer them exactly when asked, with canonical rings, budgets and
   evidence, and no `Both` region; a sheet request with cut regions is refused
-  before dispatch (ADR 0092, #372).
+  before dispatch (ADR 0092, #372). A provider that ignores the request and
+  answers with `cut_regions: None` is treated as `Unsupported`, so the next
+  provider is tried and a registry without one refuses.
 
 ## [0.3.8] - 2026-10-29
 

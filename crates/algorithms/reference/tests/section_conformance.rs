@@ -129,16 +129,54 @@ fn a_provider_that_refuses_cut_regions_passes_and_reports_it() {
 }
 
 #[test]
-fn a_provider_that_drops_the_cut_regions_fails() {
+fn a_provider_that_ignores_cut_regions_does_not_claim_them() {
     let report = RegionConformanceSuite::run(&CutHook {
         hook: |answer| {
             answer.map(|mut section| {
                 section.cut_regions = None;
+                section.evidence = section.evidence.with_cut_pairs(0).with_cut_output(&[]);
+                section
+            })
+        },
+    });
+    assert!(report.claimed && report.is_success(), "{report}");
+    assert!(!report.cut_regions_claimed);
+}
+
+#[test]
+fn a_provider_that_claims_cut_regions_and_then_drops_them_fails() {
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |answer| {
+            answer.map(|mut section| {
+                // The first case has none; a later one loses its regions.
+                if section
+                    .cut_regions
+                    .as_ref()
+                    .is_some_and(|cut| !cut.is_empty())
+                {
+                    section.cut_regions = None;
+                }
                 section
             })
         },
     });
     assert!(report.cut_regions_claimed && !report.is_success());
+}
+
+#[test]
+fn a_provider_whose_rings_differ_from_the_chains_in_the_last_bit_fails() {
+    // Within the fixtures' comparison tolerance, but not bit for bit.
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |answer| {
+            answer.map(|mut section| {
+                if let Some(region) = section.cut_regions.as_mut().and_then(|cut| cut.first_mut()) {
+                    region.outer[0].x += 1.0e-12;
+                }
+                section
+            })
+        },
+    });
+    assert!(!report.is_success());
 }
 
 #[test]

@@ -550,23 +550,50 @@ mod request {
     }
 
     #[test]
-    fn cut_regions_must_be_answered_exactly_when_requested() {
-        // The evidence is made to agree, so only the missing answer is wrong.
-        let ignored = run(
-            |s| {
-                s.cut_regions = None;
-                s.evidence = s.evidence.with_cut_pairs(0).with_cut_output(&[]);
-            },
-            &cut_request(),
-        )
-        .expect_err("ignored");
-        let unasked = run(|s| s.cut_regions = Some(Vec::new()), &request()).expect_err("unasked");
-        for error in [ignored, unasked] {
-            assert!(
-                matches!(error, GeomError::BackendContractViolation { .. }),
-                "{error:?}"
-            );
+    fn cut_regions_that_were_not_requested_are_a_contract_violation() {
+        let error = run(|s| s.cut_regions = Some(Vec::new()), &request()).expect_err("unasked");
+        assert!(
+            matches!(error, GeomError::BackendContractViolation { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_provider_that_ignores_the_cut_request_is_unsupported_and_the_next_one_answers() {
+        fn ignores(s: &mut PlaneSection) {
+            s.cut_regions = None;
+            s.evidence = s.evidence.with_cut_pairs(0).with_cut_output(&[]);
         }
+        let ignoring = || Scripted {
+            mutate: ignores,
+            calls: Arc::new(AtomicUsize::new(0)),
+        };
+        // Alone, it is refused as unsupported: the request fails closed.
+        let mut alone = MeshPlaneSectionRegistry::new();
+        alone.register(0, ignoring());
+        assert!(matches!(
+            alone.section_request(&cube(), &cut_request(), &options()),
+            Err(GeomError::Unsupported { .. })
+        ));
+        // A provider below it that traces the cut is used instead.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut both = MeshPlaneSectionRegistry::new();
+        both.register(5, ignoring());
+        both.register(
+            1,
+            Scripted {
+                mutate: |_| {},
+                calls: Arc::clone(&calls),
+            },
+        );
+        let section = both
+            .section_request(&cube(), &cut_request(), &options())
+            .expect("falls back");
+        assert_eq!(section, valid(&cube(), &cut_request()));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // Without a cut request the ignoring provider answers as before.
+        both.section_request(&cube(), &request(), &options())
+            .expect("plain request");
     }
 
     #[test]

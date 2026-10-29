@@ -232,6 +232,14 @@ impl MeshPlaneSectionRegistry {
                 continue;
             }
             match entry.provider.section_request(mesh, request, options) {
+                // A provider from before cut regions ignores the request and
+                // answers without them: it does not support the request.
+                Ok(section) if request.cut_regions.is_some() && section.cut_regions.is_none() => {
+                    last_retryable = Some(GeomError::Unsupported {
+                        backend: descriptor.id,
+                        operation: Operation::MeshPlaneSection,
+                    });
+                }
                 Ok(section) => {
                     validate_plane_section(descriptor.id, mesh, request, boundary_edges, &section)?;
                     return Ok(section);

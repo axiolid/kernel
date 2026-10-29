@@ -170,7 +170,12 @@ pub trait MeshPlaneSection: Backend {
     ///
     /// A provider that does not trace cut regions refuses a request that has
     /// them with `Unsupported`; the suite then reports
-    /// `cut_regions_claimed == false`.
+    /// `cut_regions_claimed == false`. A provider written before cut regions
+    /// existed ignores the request and answers with `cut_regions == None`: the
+    /// registry treats that answer as `Unsupported` and tries the next
+    /// provider, and the suite treats it on the first solid case as not
+    /// claimed. A provider that returns cut regions on one case and drops them
+    /// on another fails the suite.
     fn section_request(
         &self,
         mesh: &TriMesh,
