@@ -506,34 +506,137 @@ fn named(error: &GeomError, part: &str) {
     );
 }
 
+impl Graph {
+    fn revolution(
+        &mut self,
+        profile: Profile,
+        axis_origin: Point3,
+        axis: Vec3,
+        angle: f64,
+    ) -> NodeId {
+        let profile = self.push(GeometryNode::Profile(profile));
+        self.push(GeometryNode::SolidOperation(SolidOperation::Revolution {
+            profile,
+            axis_origin,
+            axis_direction: axis,
+            angle,
+        }))
+    }
+}
+
+/// A full torus of minor radius `0.1` about the wall frame's line `x = -1`
+/// along `y` (major radius `1`), and a `4 x 3 x 3` box whose face `x = -1`
+/// cuts it through its axis: half of the torus lies in the box. The box is
+/// the subject, or the tool when `tool`.
+fn torus_and_box(g: &mut Graph, operator: BooleanOperator, tool: bool) -> NodeId {
+    let torus = g.revolution(
+        Profile::Circle(CircleProfile {
+            radius: 0.1,
+            thickness: None,
+        }),
+        Point3::new(-1.0, 0.0, 0.0),
+        Vec3::Y,
+        2.0 * PI,
+    );
+    let torus = g.instance(torus, building());
+    let block = g.extrusion(rect(4.0, 3.0), 3.0);
+    let block = g.instance(
+        block,
+        building() * Transform3::from_translation(Vec3::new(1.0, 0.0, -1.5)),
+    );
+    if tool {
+        g.boolean(block, torus, operator)
+    } else {
+        g.boolean(torus, block, operator)
+    }
+}
+
+/// The torus' volume `2 pi^2 R r^2`, and the box's.
+const TORUS: f64 = 2.0 * PI * PI * 0.01;
+const BLOCK: f64 = 4.0 * 3.0 * 3.0;
+
 #[test]
-fn a_tool_that_is_not_an_extrusion_is_refused_by_name() {
+fn a_torus_cut_through_its_axis_is_exact_as_subject_and_as_tool() {
+    for tool in [false, true] {
+        let mut g = Graph::new();
+        let common = torus_and_box(&mut g, BooleanOperator::Intersection, tool);
+        check(g, common, TORUS / 2.0, &[]);
+        let mut g = Graph::new();
+        let joined = torus_and_box(&mut g, BooleanOperator::Union, tool);
+        check(g, joined, BLOCK + TORUS / 2.0, &[]);
+    }
+    // The box with the half torus cut out of its face.
     let mut g = Graph::new();
-    let wall = g.wall(building());
-    let profile = g.push(GeometryNode::Profile(Profile::Circle(CircleProfile {
-        radius: 0.2,
-        thickness: None,
-    })));
-    let ring = g.push(GeometryNode::SolidOperation(SolidOperation::Revolution {
-        profile,
-        axis_origin: Point3::new(-1.0, 0.0, 0.0),
-        axis_direction: Vec3::Y,
-        angle: 2.0 * PI,
-    }));
-    let ring = g.instance(ring, building());
-    let cut = g.minus(wall, ring);
-    named(&refusal(g, cut), "not an extrusion");
+    let cut = torus_and_box(&mut g, BooleanOperator::Difference, true);
+    check(g, cut, BLOCK - TORUS / 2.0, &[]);
+    // The torus without the half in the box.
+    let mut g = Graph::new();
+    let rest = torus_and_box(&mut g, BooleanOperator::Difference, false);
+    check(g, rest, TORUS / 2.0, &[]);
 }
 
 #[test]
-fn a_tool_that_is_itself_a_boolean_is_refused_by_name() {
+fn a_ring_turned_from_a_rectangle_is_cut_from_a_wall_as_a_groove() {
+    // A full turn of a rectangle off the axis is a tube of two cylinders
+    // and two annuli; 0.075 of its height sinks into the wall's face.
+    let mut g = Graph::new();
+    let wall = g.wall(building());
+    let ring = g.revolution(
+        rect(0.1, 0.15),
+        Point3::new(-0.3, 0.0, 0.0),
+        Vec3::Y,
+        2.0 * PI,
+    );
+    let ring = g.instance(
+        ring,
+        building() * Transform3::from_translation(Vec3::new(0.3, 0.15, 1.5)),
+    );
+    let cut = g.minus(wall, ring);
+    let groove = PI * (0.35 * 0.35 - 0.25 * 0.25) * 0.075;
+    check(g, cut, L * T * H - groove, &[]);
+}
+
+#[test]
+fn a_tool_the_exact_compiler_refuses_is_refused_by_name() {
+    // A solid cylinder turned from a rectangle on the axis degenerates.
+    let mut g = Graph::new();
+    let wall = g.wall(building());
+    let solid = g.revolution(
+        rect(0.4, 0.15),
+        Point3::new(-0.2, 0.0, 0.0),
+        Vec3::Y,
+        2.0 * PI,
+    );
+    let solid = g.instance(solid, building());
+    let cut = g.minus(wall, solid);
+    named(&refusal(g, cut), "touching or crossing the axis");
+    // A tapered revolution is not compiled exactly.
+    let mut g = Graph::new();
+    let wall = g.wall(building());
+    let profile = g.push(GeometryNode::Profile(rect(0.4, 0.15)));
+    let tapered = g.push(GeometryNode::SolidOperation(
+        SolidOperation::TaperedRevolution {
+            start_profile: profile,
+            end_profile: profile,
+            axis_origin: Point3::new(-1.0, 0.0, 0.0),
+            axis_direction: Vec3::Y,
+            angle: PI,
+        },
+    ));
+    let cut = g.minus(wall, tapered);
+    named(&refusal(g, cut), "tapered revolution");
+}
+
+#[test]
+fn a_tool_that_is_itself_a_boolean_is_cut_exactly() {
+    // A frame (a `1 x 1` opening less a `0.5 x 0.5` one) through the wall.
     let mut g = Graph::new();
     let wall = g.wall(building());
     let a = g.opening(rect(1.0, 1.0), 1.0, (0.0, 1.0), 0.5, building());
     let b = g.opening(rect(0.5, 0.5), 1.0, (0.0, 1.0), 0.5, building());
     let tool = g.minus(a, b);
     let cut = g.minus(wall, tool);
-    named(&refusal(g, cut), "tool that is not a placed extrusion");
+    check(g, cut, L * T * H - 0.225, &[]);
 }
 
 #[test]

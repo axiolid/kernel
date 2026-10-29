@@ -22,8 +22,8 @@ PLACED = ["-p", "axiolid-mesh-compile", "--test", "exact_placed_boolean"]
 MEASURED = ["-p", "axiolid-mesh-compile", "--test", "boolean_deviation"]
 
 REFUSE = (
-    "        let tool = self.placed(right)?;\n",
-    "        let tool = self.placed(right)?;\n"
+    "        let subject = self.compile(left)?;\n",
+    "        let subject = self.compile(left)?;\n"
     "        if operator == BooleanOperator::{op} {{\n"
     "            return Err(unsupported(\n"
     '                "exact union or intersection of placed operands",\n'

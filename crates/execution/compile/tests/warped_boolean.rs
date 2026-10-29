@@ -614,22 +614,19 @@ fn a_chain_of_cuts_carries_the_slab_width() {
 }
 
 /// Where the exact boolean cannot take the flattened operand, the report
-/// names why, and still names the warp: here the tool is itself a
-/// boolean, which the exact compiler refuses.
+/// names why, and still names the warp: here the tool is a
+/// primitive, which the exact compiler refuses.
 #[test]
 fn a_refused_flattened_boolean_is_unbounded_by_name() {
     let mut g = GeometryGraphBuilder::new();
     let warped = g
         .push(GeometryNode::PolygonMesh(authored_box(LIFTED)))
         .unwrap();
-    let a = tool(&mut g);
-    let shifted = g
-        .push(GeometryNode::Instance(Instance {
-            source: a,
-            transform: Transform3::from_translation(Vec3::new(0.0, 0.0, 0.25)),
-        }))
+    let tool = g
+        .push(GeometryNode::Primitive(
+            axiolid_primitive::Primitive::Sphere { radius: 0.2 },
+        ))
         .unwrap();
-    let tool = boolean(&mut g, a, shifted, BooleanOperator::Union);
     let root = boolean(&mut g, warped, tool, BooleanOperator::Difference);
     let graph = g.finish(vec![root]).unwrap();
     let (_, report) = ReferenceMeshCompiler::new(BoolmeshBoolean::new())
@@ -639,7 +636,7 @@ fn a_refused_flattened_boolean_is_unbounded_by_name() {
     let refused: Vec<_> = report.unbounded().collect();
     assert_eq!(refused.len(), 1, "{report:?}");
     assert!(
-        matches!(refused[0].bound, DeviationBound::Unbounded(reason) if reason.contains("tool")),
+        matches!(refused[0].bound, DeviationBound::Unbounded(reason) if reason.contains("primitive")),
         "{report:?}"
     );
     assert!(contribution(&report, DeviationPath::AuthoredMesh, WARPED_AUTHORED).is_some());
@@ -661,7 +658,7 @@ fn the_exact_compiler_still_refuses_a_mesh_operand() {
         .compile_exact(&graph, root, &options(1e-3))
         .unwrap_err();
     assert!(
-        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("not an extrusion")),
+        matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains("polygon mesh")),
         "{error:?}"
     );
 }

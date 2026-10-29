@@ -73,6 +73,22 @@ impl Graph {
         }))
     }
 
+    fn revolution(
+        &mut self,
+        profile: Profile,
+        axis_origin: Point3,
+        axis_direction: Vec3,
+        angle: Scalar,
+    ) -> NodeId {
+        let profile = self.push(GeometryNode::Profile(profile));
+        self.push(GeometryNode::SolidOperation(SolidOperation::Revolution {
+            profile,
+            axis_origin,
+            axis_direction,
+            angle,
+        }))
+    }
+
     fn place(&mut self, source: NodeId, transform: Transform3) -> NodeId {
         self.push(GeometryNode::Instance(Instance { source, transform }))
     }
@@ -741,11 +757,96 @@ fn a_union_of_a_cut_wall_and_a_column_is_certified() {
     assert!(bound <= 1e-3, "{bound}");
 }
 
-#[test]
-fn a_union_whose_tool_is_a_boolean_stays_unbounded_by_name() {
-    // The tool restriction is #326, not the operator.
+/// A box `0.4 x 0.5 x 6` and a quarter-turn revolution of a circle of
+/// radius `0.1` about an axis 1 m away (the issue's repro, #378): a bent
+/// tube of torus faces, its start disc in the box's bottom plane, turned
+/// down (`up` false: it only touches the box) or up through the box.
+fn box_and_bent_tube(g: &mut Graph, operator: BooleanOperator, up: bool) -> NodeId {
+    let a = g.extrusion(rect(0.4, 0.5), 6.0);
+    let axis = if up { Vec3::NEG_Y } else { Vec3::Y };
+    let b = g.revolution(circle(0.1), Point3::new(-1.0, 0.0, 0.0), axis, FRAC_PI_2);
+    g.boolean(a, b, operator)
+}
+
+/// The certified bound, measured against exact samples; `limit` times the
+/// budget at most (the cut of an intersection can land a hair beyond it).
+fn assert_bent_tube(operator: BooleanOperator, up: bool, limit: Scalar, name: &str) {
     let options = options(1e-3);
-    let (_, _, _, report, _) = compile(
+    let case = compile(|g| box_and_bent_tube(g, operator, up), &options);
+    let (bound, _) = assert_measured(name, case, &options, 2.0);
+    assert!(bound <= limit * 1e-3, "{name}: {bound}");
+}
+
+#[test]
+fn a_box_united_with_a_quarter_turn_revolution_is_certified() {
+    assert_bent_tube(BooleanOperator::Union, false, 1.0, "box union tube below");
+    assert_bent_tube(BooleanOperator::Union, true, 1.0, "box union tube above");
+}
+
+#[test]
+fn a_box_minus_a_quarter_turn_revolution_is_certified() {
+    assert_bent_tube(BooleanOperator::Difference, true, 1.0, "box minus tube");
+}
+
+#[test]
+fn a_box_intersected_with_a_quarter_turn_revolution_is_certified() {
+    assert_bent_tube(
+        BooleanOperator::Intersection,
+        true,
+        1.1,
+        "box intersect tube",
+    );
+}
+
+#[test]
+fn a_placed_revolution_united_with_a_placed_box_is_certified() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let a = g.extrusion(rect(0.4, 0.5), 6.0);
+            let a = g.place(a, building());
+            let b = g.revolution(circle(0.1), Point3::new(-1.0, 0.0, 0.0), Vec3::Y, FRAC_PI_2);
+            let b = g.place(b, building());
+            g.boolean(a, b, BooleanOperator::Union)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("placed box union bent tube", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
+fn a_ring_groove_turned_from_a_rectangle_is_certified() {
+    // A full-turn revolution of a rectangle (a tube) cut from a wall as a
+    // ring groove: the revolution is the tool.
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let wall = g.extrusion(rect(2.0, 0.3), 3.0);
+            let wall = g.place(wall, building());
+            let ring = g.revolution(
+                rect(0.1, 0.15),
+                Point3::new(-0.3, 0.0, 0.0),
+                Vec3::Y,
+                2.0 * PI,
+            );
+            let ring = g.place(
+                ring,
+                building() * Transform3::from_translation(Vec3::new(0.3, 0.15, 1.5)),
+            );
+            g.boolean(wall, ring, BooleanOperator::Difference)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("wall minus turned ring", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
+fn a_union_whose_tool_is_a_boolean_is_certified() {
+    // A boolean is a compiled solid like any other, as the tool too (#326).
+    let options = options(1e-3);
+    let case = compile(
         |g| {
             let a = g.extrusion(rect(1.0, 1.0), 1.0);
             let tool = wall_with_round_window(g);
@@ -753,11 +854,7 @@ fn a_union_whose_tool_is_a_boolean_stays_unbounded_by_name() {
         },
         &options,
     );
-    assert_eq!(report.bound, None);
-    assert_eq!(
-        report.contributions[0].bound,
-        DeviationBound::Unbounded("exact boolean tool that is not a placed extrusion")
-    );
+    assert_measured("box union cut wall", case, &options, 2.0);
 }
 
 /// A wall `6 x 0.25 x 3` minus a window `1.25 x 1.5` flush with both its

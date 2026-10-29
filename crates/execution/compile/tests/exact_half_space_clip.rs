@@ -598,7 +598,7 @@ fn unsupported_clips_are_refused_by_name() {
     let wall = g.wall(placement);
     let roof = g.half_space(plane, true, placement, true);
     let swapped = g.boolean(roof, wall, BooleanOperator::Intersection);
-    named(&refusal(g, swapped), "not an extrusion");
+    named(&refusal(g, swapped), "half-space");
 
     let mut g = Graph::new();
     let roof = g.half_space(plane, true, placement, true);

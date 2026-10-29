@@ -11,12 +11,15 @@
 //! - Two bare sharp rectangles extruded along `+z`, without placements,
 //!   keep the prism path (`boolean_prisms_exact`): it decides the plan
 //!   with integer predicates and takes every operator.
-//! - A boolean of any operator (#376) whose subject is a placed extrusion,
-//!   or the result of another boolean compiled here, and whose tool is a
-//!   placed extrusion, runs the general exact B-rep boolean of ADR 0075
+//! - A boolean of any operator but the symmetric difference (#376) runs the
+//!   general exact B-rep boolean of ADR 0075
 //!   (`axiolid_brep_boolean::boolean`) on the two operands' exact B-reps,
-//!   each placed by [`ExactBRep::transformed`]. Openings compose:
-//!   `((wall - o1) - o2) - o3` is three such differences.
+//!   each placed by [`ExactBRep::transformed`]. An operand, subject or
+//!   tool, is whatever [`ExactCompilation::compile`] builds exactly (#378):
+//!   an extrusion, a revolution (its cylinders, cones and tori), another
+//!   boolean, or whatever else it builds exactly, under any rigid
+//!   placement. Openings compose: `((wall - o1) - o2) - o3` is three such
+//!   differences.
 //!
 //! The coaxial arc-prism path is not used for placed operands. It would
 //! take only a single-ring subject in a shared frame, so it serves the first
@@ -27,11 +30,12 @@
 //!
 //! # Refused, by name
 //!
-//! An operand that is not a placed extrusion (a revolution, a swept disk,
-//! a mesh), a tool that is itself a boolean, a scaled or sheared
-//! placement, and every configuration the general boolean cannot build
-//! exactly ([`BooleanError`]) are `GeomError::UnsupportedInput` naming the
-//! case. A boolean that leaves
+//! An operand the exact compiler refuses (a primitive, a tapered
+//! revolution, a mesh, a half-space as subject) is refused with its own
+//! family named. So are a symmetric difference of placed operands, a scaled
+//! or sheared placement, and every configuration the general boolean cannot
+//! build exactly ([`BooleanError`]): `GeomError::UnsupportedInput` naming
+//! the case. A boolean that leaves
 //! nothing (a difference that removes the whole subject, disjoint
 //! operands' intersection) is `GeomError::Degenerate`. Nothing is meshed.
 //!
@@ -54,19 +58,6 @@ use axiolid_profile::Profile;
 
 use super::{remap_construction_error, unsupported, ExactCompilation};
 
-/// What a boolean operand is once its placements are read through.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Placed {
-    /// An extrusion, under zero or more rigid placements.
-    Extrusion,
-    /// Another boolean, under zero or more rigid placements.
-    Boolean,
-    /// A mesh operand taken as the exact polyhedron of its triangles,
-    /// under zero or more rigid placements: only when the compilation
-    /// flattens meshes for a boolean's report (#266).
-    Mesh,
-}
-
 impl ExactCompilation<'_> {
     pub(super) fn compile_boolean(
         &mut self,
@@ -82,19 +73,12 @@ impl ExactCompilation<'_> {
             return boolean_prisms_exact(&subject, &tool, operator, self.options.tolerance())
                 .map_err(remap_construction_error);
         }
-        // The subject may be a placed extrusion or an earlier cut (a placed
-        // boolean, which compiles or refuses by itself); the tool is read
-        // through its placements too.
-        self.placed(left)?;
-        let tool = self.placed(right)?;
         if operator == BooleanOperator::SymmetricDifference {
             return Err(unsupported("exact symmetric difference of placed operands"));
         }
-        if !matches!(tool, Placed::Extrusion | Placed::Mesh) {
-            return Err(unsupported(
-                "exact boolean tool that is not a placed extrusion",
-            ));
-        }
+        // Each operand is whatever the exact compiler compiles, read
+        // through its placements (#378): a refusal is the operand's own,
+        // named by its family.
         let subject = self.compile(left)?;
         let tool = self.compile(right)?;
         let (body, report) =
@@ -106,39 +90,6 @@ impl ExactCompilation<'_> {
             )?;
         self.boolean_report = Some(report);
         Ok(body)
-    }
-
-    /// Read an operand through its placements.
-    fn placed(&self, mut id: NodeId) -> GeomResult<Placed> {
-        // A graph is acyclic by construction, but the walk is bounded anyway
-        // so a malformed one is an error, not a hang.
-        for _ in 0..=self.graph.len() {
-            let node = self.graph.get(id).ok_or_else(|| {
-                GeomError::InvalidInput(format!("operand {id:?} does not belong to this graph"))
-            })?;
-            match node {
-                GeometryNode::Instance(instance) => id = instance.source,
-                GeometryNode::SolidOperation(SolidOperation::Extrusion { .. }) => {
-                    return Ok(Placed::Extrusion)
-                }
-                GeometryNode::SolidOperation(SolidOperation::Boolean { .. }) => {
-                    return Ok(Placed::Boolean)
-                }
-                GeometryNode::PolygonMesh(_) | GeometryNode::TriMesh(_) | GeometryNode::BRep(_)
-                    if self.flatten =>
-                {
-                    return Ok(Placed::Mesh)
-                }
-                _ => {
-                    return Err(unsupported(
-                        "exact boolean operand that is not an extrusion",
-                    ))
-                }
-            }
-        }
-        Err(GeomError::InvalidInput(
-            "exact boolean operand placements form a cycle".to_owned(),
-        ))
     }
 
     /// The operand as a prism, when it is a bare sharp filled rectangle

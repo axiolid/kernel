@@ -14,7 +14,7 @@
 //! So no bound is derived from the operands' bounds here.
 //!
 //! Instead, where [`ReferenceExactCompiler`] builds the exact result of the
-//! same boolean node (booleans of placed extrusions, #228, #376, and whatever
+//! same boolean node (booleans of placed extrusions and revolutions, #228, #376, #378, and whatever
 //! it compiles exactly later), the distance from that exact B-rep's surface
 //! to the boolean's mesh is certified directly, by the branch and bound of
 //! [`crate::certify`] over every face of the exact result:
@@ -139,10 +139,9 @@
 //!
 //! # Unbounded, by name
 //!
-//! A boolean the exact compiler refuses (a tool that is not a placed
-//! extrusion, an operand that is neither a placed extrusion nor a mesh it
-//! flattens, a configuration the general boolean cannot build) carries the
-//! refusal's name. A face whose
+//! A boolean the exact compiler refuses (an operand it does not compile
+//! exactly, a symmetric difference, a configuration the general boolean
+//! cannot build) carries the refusal's name. A face whose
 //! surface family has no derivative bounds, whose pcurve family has no
 //! certified chord bound, or whose loops do not close in its parameters
 //! within the gap admitted above (a periodic face trimmed by two separate

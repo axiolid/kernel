@@ -838,3 +838,37 @@ Tests: `tests/exact_placed_boolean.rs` (volumes of a union and an
 intersection, the degenerate intersection, the symmetric difference),
 `tests/boolean_deviation.rs` (a column united with a box, overlapping and
 disjoint walls); probe `scripts/probe_placed_union_mutants.py`.
+
+## Amendment 2026-10-29: revolutions, and any compiled operand (#378)
+
+The exact compiler refused every operand but a placed extrusion, so a box
+united with a bent tube (a quarter-turn revolution of a circle) had an
+unbounded deviation.
+
+- **Decision.** `compile_boolean` no longer classifies its operands. Subject
+  and tool are whatever `ExactCompilation::compile` builds exactly,
+  through their placements: extrusions, revolutions, booleans, and what else
+  it builds exactly. What `compile` refuses, it refuses by
+  name (a primitive, a tapered revolution, a mesh, a half-space as subject,
+  a full-turn profile touching the axis); the general boolean refuses its
+  own configurations as before.
+- **The tool restriction was historical.** The first landing (#228) took
+  a placed extrusion as the tool because openings were the only case; the
+  general boolean never distinguished subject from tool. A boolean as
+  tool is built the same way (#326, first point).
+- **Measurement.** The deviation measurement bounds every face of the exact
+  result with `SurfaceBoundOracle`, whose torus bounds (`du` the largest
+  ring radius, `dv` the minor radius, and the second partials) are certified
+  like the cylinder's, so a revolution's tori, cones and cylinders are
+  measured with no new case. The torus tests compare the reported bound with
+  densely sampled exact points.
+- **Search.** The branch and bound stopped at 10% above its lower bound
+  even when the budget fell inside that gap, so a mesh within the budget
+  could report just over it. It now tightens while the lower bound is under
+  the budget and the upper bound over it.
+
+Tests: `tests/exact_placed_boolean.rs` (a torus cut through its axis, as
+subject and as tool, with the closed-form volumes; a ring groove; a boolean
+as tool), `tests/boolean_deviation.rs` (the issue's box and bent tube under
+each operator, a placed pair, a ring groove); probe
+`scripts/probe_revolution_operand_mutants.py`.

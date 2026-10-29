@@ -6,8 +6,8 @@ it resolves instances and collections, composes transforms, tessellates
 profiles, sweeps, B-reps and authored meshes, and hands booleans to whichever
 `MeshBoolean` provider it is given. `ReferenceExactCompiler` compiles the
 families it supports to exact B-reps, places instances under rigid
-transforms, cuts placed openings from placed extrusions with the general
-exact boolean, clips them by half-spaces through the same boolean, and
+transforms, unites, intersects and cuts placed extrusions, revolutions and
+booleans with the general exact boolean, clips them by half-spaces through the same boolean, and
 refuses the rest by name. `ReferenceMeshCompiler` also compiles curve
 nodes (atomic 2D and 3D curves, their trims, composites and offsets,
 open profiles, and their placements) to polylines within a certified chord

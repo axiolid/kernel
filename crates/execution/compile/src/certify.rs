@@ -22,7 +22,9 @@
 //! Cells are split, worst upper bound first, until the worst is within 10%
 //! of the best lower bound (or a tenth of the target, below which the gap
 //! does not matter), or below a level the caller says is enough
-//! (`certify_within`), or the work budget runs out. The returned value is
+//! (`certify_within`), or the work budget runs out. A bound within 10% of
+//! the lower bound but over the level, while the lower bound is under it,
+//! is not settled: the level decides. The returned value is
 //! the worst upper bound over all cells, so stopping early only loosens it.
 //!
 //! A long tube's mesh (#252) is long, thin quads, each split along a
@@ -264,7 +266,13 @@ fn certify_with(
         ((0.1 * target).max(enough), SMALLEST * target)
     };
     while let Some(top) = heap.pop() {
-        let settled = top.upper <= (TIGHT * lower).max(stop)
+        // Within TIGHT of the lower bound is tight enough, unless the
+        // budget falls inside that gap: a worst case under the budget
+        // whose bound is just over it is a miss only by the search's slack,
+        // so it tightens until the budget settles it (#378).
+        let straddles = lower <= enough && enough < top.upper;
+        let settled = top.upper <= stop
+            || (top.upper <= TIGHT * lower && !straddles)
             || (search.affine && top.upper <= enough && lower.max(search.shown) > DEVIATING * stop);
         let cell = top.cell;
         let patch = patches[cell.patch];

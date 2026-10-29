@@ -9,6 +9,27 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The exact boolean takes any operand the exact compiler compiles exactly,
+  as subject or as tool, read through its placements: an extrusion, a
+  revolution (its cylinders, cones and tori), another boolean, or whatever
+  else it compiles exactly, instead of refusing all but a placed extrusion
+  ("exact boolean operand that is not an extrusion", "exact boolean tool that
+  is not a placed extrusion"). A box united with a quarter-turn revolution of
+  a circle, and its difference and intersection, are certified by
+  `compile_mesh_with_deviation` like an extrusion's: the measurement covers
+  the torus faces as it does planes and cylinders. An operand the exact
+  compiler refuses is refused with its own family named ("primitive",
+  "tapered revolution", "polygon mesh", "half-space", a full-turn profile
+  touching the axis). A tool that is a boolean is exact now too (#326's
+  first point) (#378).
+- The deviation search no longer stops at 10% above its lower bound when
+  that gap straddles the requested budget: it tightens until the budget
+  settles it, so a mesh whose true deviation is within the budget is
+  certified within it (a torus' tessellation at `1e-3` measured `0.95e-3`
+  and was reported `1.004e-3`) (#378).
+
 ## [0.3.39] - 2026-10-29
 
 ### Changed
