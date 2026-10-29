@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0091](./0091-mesh-sections-report-in-plane-regions-and-open-chains.md)
+- **Amended by:** [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md)
 
 ## Context
 
@@ -140,6 +141,8 @@ and no `semver-exceptions` entry.
 
 - Pair the boundary edges at a pinch vertex by angle instead of refusing.
 - `Both` regions (ADR 0091, landing 3) must say what the cut means there.
+  Decided in [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md):
+  a `Both` region is a cut region.
 
 ## Relation to existing code
 

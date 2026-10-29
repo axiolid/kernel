@@ -5,7 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0033](./0033-mesh-plane-section-contract.md)
-- **Amended by:** [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md)
+- **Amended by:** [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md), [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md)
 
 ## Context
 
@@ -152,7 +152,9 @@ is sectioned too. All additions are non-breaking.
 **Follow-ups / risks to watch**
 
 - Landing 3 (maintainer decision): `Both` and the merge of overlapping
-  same-side faces, through `axiolid-overlay` or a focused provider.
+  same-side faces, through `axiolid-overlay` or a focused provider. Done
+  differently in [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md):
+  an exact arrangement in the reference module, no `axiolid-overlay`.
 - Landing 4: pair cut segments at a saddle vertex by fan order.
 
 ## Relation to existing code

@@ -11,9 +11,10 @@ caret rule for `0.x` versions.
 
 ### Changed
 
-- `MeshPlaneSectionRegistry::section_request` carries
-  `PlaneSectionEvidence::in_plane_crossings` into the evidence it derives
-  from the answer (ADR 0093, #366).
+- `MeshPlaneSectionRegistry::section_request` no longer refuses cut regions
+  returned beside a `Both` region; it checks that each `Both` region equals
+  one cut region, and carries `PlaneSectionEvidence::in_plane_crossings` into
+  the evidence it derives from the answer (ADR 0093, #366).
 
 ## [0.3.9] - 2026-10-29
 

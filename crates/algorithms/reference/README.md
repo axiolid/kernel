@@ -2,7 +2,8 @@
 
 The portable scalar reference implementation that every optimized backend
 is differentially tested against (ADR 0012): a solid boolean oracle, an
-exact-sign mesh plane-section oracle, triangle/triangle and
+exact-sign mesh plane-section oracle (in-plane faces merged on an exact
+arrangement, ADR 0093), triangle/triangle and
 segment/triangle relations, clash detection, convex hulls, polygon
 triangulation and tessellation. It favours readability over speed: no
 intrinsics, threading, feature gates or `unsafe`. It is also a convenience

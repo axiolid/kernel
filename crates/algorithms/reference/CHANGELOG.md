@@ -16,11 +16,20 @@ caret rule for `0.x` versions.
   only share a boundary segment form one region, and where faces of both
   sides coincide the region is `InPlaneSide::Both`. It no longer returns
   `REFUSED_OVERLAPPING_IN_PLANE_FACES` or
-  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES` for a plain request, reports
-  `in_plane_crossings`, and counts segment, coverage and hole pairs in
-  `in_plane_pairs`. A cut request with a `Both` region is still refused
-  (ADR 0093, #366).
-- The request scratch bound is 2560 bytes per element (was 1536).
+  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`. Every `Both` region is a cut region
+  when cut regions are requested; a `Both` ring that visits a vertex twice is
+  refused as pinched, and a region edge that bounds the cut with in-plane
+  faces on the cut's side of it as crossing cut rings. It reports
+  `in_plane_crossings`, and `in_plane_pairs` counts segment, piece-triangle
+  and hole containment pairs (ADR 0093, #366).
+- The request scratch bound is 2560 bytes per element (was 1536), and the
+  crossings of in-plane edges are charged against the memory budget as they
+  are created.
+
+### Added
+
+- Bench `section_in_plane`: the in-plane faces of a section request in wall
+  clock.
 
 ## [0.3.14] - 2026-10-29
 

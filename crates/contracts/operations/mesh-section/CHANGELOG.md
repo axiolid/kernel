@@ -14,6 +14,18 @@ caret rule for `0.x` versions.
 - `PlaneSectionEvidence::in_plane_crossings` and
   `with_in_plane_crossings`: the distinct points, other than source vertices,
   where in-plane source edges cross (ADR 0093, #366).
+- Fixtures for stacked boxes, tubes and an L-step block, whose faces coincide
+  in the plane, and for `Both` regions as cut regions.
+
+### Changed
+
+- Documentation: the classes of the plane (`Below`, `Above`, `Both`) and that
+  regions have pairwise disjoint interiors; every `InPlaneSide::Both` region
+  is a cut region, equal to it bit for bit, and a provider may still refuse
+  overlapping in-plane faces by name. `in_plane_pairs` and
+  `RegionLimits::max_in_plane_pairs` count candidate pairs examined for the
+  in-plane faces, not only overlap tests. The region conformance suite checks
+  that every `Both` region is a cut region.
 
 ## [0.3.6] - 2026-10-29
 

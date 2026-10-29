@@ -27,7 +27,8 @@ that may end on a region, and touching edges are counted (ADR 0091). With
 `SectionRole::Sheet` the mesh may be open, and a chain may end on the mesh
 boundary. `SectionRequest::with_cut_regions` also returns the cut of a solid,
 where its material lies on both sides of the plane, as closed regions (ADR
-0092).
+0092). Faces in the plane may overlap: they merge into regions of `Below`,
+`Above` or `Both`, and a `Both` region is a cut region (ADR 0093).
 
 ## Depends on
 
