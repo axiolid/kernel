@@ -10,7 +10,7 @@
 //! - `footprint on a grid`: the 8,192-triangle grid with one square of the
 //!   opposite facing over its middle.
 //! - `skew grids`: two sheets of 24 x 24 cells in one plane, the second turned
-//!   by 7 degrees and facing the other way: about five thousand crossings.
+//!   by 7 degrees and facing the other way: about three thousand crossings.
 //!
 //! Run: `cargo bench -p axiolid-reference --bench section_in_plane`
 
