@@ -1075,10 +1075,10 @@ fn a_slit_ring_is_open_not_a_loop_with_a_gap() {
 }
 
 #[test]
-fn a_teardrop_closing_at_a_corner_is_open_not_refused() {
+fn a_teardrop_closing_at_a_corner_is_refused() {
     // Two tangent lines from the apex round a long arc: every interior joint
     // is tangent continuous, and the end meets the start exactly at a corner.
-    // Nothing declared a loop, and a loop would refuse that corner.
+    // Swept open its two end caps would share the apex and cross (#375).
     let apex = Point3::ZERO;
     let centre = Point3::new(2.0, 0.0, 0.0);
     let (below, above) = (
@@ -1104,15 +1104,65 @@ fn a_teardrop_closing_at_a_corner_is_open_not_refused() {
             length,
         },
     ];
-    let (mesh, report) = compile(
+    refusal(
         |b| {
             let path = composite(b, &legs);
             sweep(b, rect(0.02, 0.02).profile, path, Vec3::Z, None)
         },
-        &options(1e-3),
+        "ends at its start with a corner",
     );
-    assert_watertight("teardrop", &mesh);
-    assert!(report.meets_requested(), "{report:?}");
+}
+
+/// The arc through three points, as a bend about Z or -Z.
+fn arc_through(from: Point3, via: Point3, to: Point3) -> Leg {
+    let (a, b, c) = (from, via, to);
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    let (a2, b2, c2) = (
+        a.x * a.x + a.y * a.y,
+        b.x * b.x + b.y * b.y,
+        c.x * c.x + c.y * c.y,
+    );
+    let centre = Point3::new(
+        (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+        (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
+        0.0,
+    );
+    let angle_of = |p: Point3| (p.y - centre.y).atan2(p.x - centre.x);
+    let counter_clockwise = d > 0.0;
+    let turn = if counter_clockwise {
+        (angle_of(c) - angle_of(a)).rem_euclid(TAU)
+    } else {
+        (angle_of(a) - angle_of(c)).rem_euclid(TAU)
+    };
+    Leg::Bend {
+        centre,
+        axis: if counter_clockwise { Vec3::Z } else { -Vec3::Z },
+        from,
+        angle: turn,
+    }
+}
+
+#[test]
+fn a_chain_closing_on_its_start_with_a_corner_is_refused() {
+    // rheonda/cad's repro (#375): a line, then two arcs, the last ending
+    // exactly at the start with a 53 degree corner.
+    let p = |x: Scalar, y: Scalar| Point3::new(x, y, 0.0);
+    let legs = [
+        Leg::Straight {
+            from: p(0.0, 0.0),
+            dir: Vec3::X,
+            length: 1.0,
+        },
+        arc_through(p(1.0, 0.0), p(2.0, 1.0), p(1.0, 2.0)),
+        arc_through(p(1.0, 2.0), p(-0.25, 0.75), p(0.0, 0.0)),
+    ];
+    refusal(
+        |b| {
+            let path = composite(b, &legs);
+            sweep(b, rect(0.02, 0.02).profile, path, Vec3::Z, None)
+        },
+        "ends at its start with a corner",
+    );
 }
 
 #[test]

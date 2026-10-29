@@ -32,7 +32,7 @@ MUTANTS = [
     ('twist term not kept in the chain', FR, '        walls,\n        twist,\n    }))', '        walls,\n        twist: 0.0,\n    }))', [PLAN]),
     ('twist read at the arc end only', FR, '        let term = twist_term(reach, largest);', '        let term = twist_term(reach, end);', [PLAN]),
     ('joint re-seed left unchecked', FR, '        if shift > JOINT_SHARE * chord {', '        if false {', [CHAIN, PLAN]),
-    ('a corner closing an undeclared chain made a loop', FR, '            && turn(last.end_tangent(), first.start_tangent()) <= allowed);', '            );', [CHAIN]),
+    ('a corner closing on the start not refused', FR, '    if !closed && touches && closing_turn > allowed {', '    if false {', [CHAIN]),
     ('seed negated', FR, '        let seed = Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;', '        let seed = -Frame::from_reference(piece.start_point(), piece.start_tangent(), reference)?.x;', [CHAIN]),
     ('reference negated in the plan', FR, '        reference: r,', '        reference: -r,', [CHAIN]),
     ('clearance check disabled', FR, '        if clearance <= angular {', '        if false {', [CHAIN]),

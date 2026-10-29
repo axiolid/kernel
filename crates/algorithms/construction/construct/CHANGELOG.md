@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A fixed-reference chain that ends at its start with a corner (a closing
+  gap within the loop distance, a closing joint not tangent continuous) is
+  refused by name; swept open, its two end caps crossed (#375).
+
 ## [0.3.25] - 2026-10-29
 
 ### Added

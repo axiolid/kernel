@@ -254,8 +254,8 @@ pub fn reference_clearance(piece: &PathPiece, reference: Vec3) -> Scalar {
 /// a loop all the same when its last piece ends within the smaller of the
 /// linear tolerance and a quarter of `chord` of where its first starts, and
 /// the joint there is tangent continuous (a full circle, a
-/// composite closing on itself); where it is not, the ends just meet and the
-/// chain is open, nothing refused.
+/// composite closing on itself); where it is not, the chain is refused by
+/// name, as its two end caps would cross.
 ///
 /// Refused by name, in this order: no pieces or a reference, chord or reach
 /// that is zero or not finite; a malformed piece; a joint with a gap above a
@@ -299,9 +299,16 @@ pub fn fixed_reference_plan(
     let allowed = joint_tolerance(chord, reach);
     let closing_gap = tolerance.linear().min(0.25 * chord);
     let (last, first) = (&pieces[m - 1], &pieces[0]);
-    let loops = closed
-        || (last.end_point().distance(first.start_point()) <= closing_gap
-            && turn(last.end_tangent(), first.start_tangent()) <= allowed);
+    let touches = last.end_point().distance(first.start_point()) <= closing_gap;
+    let closing_turn = turn(last.end_tangent(), first.start_tangent());
+    if !closed && touches && closing_turn > allowed {
+        // Open, its two end caps would share the point and cross.
+        return Err(refuse(format!(
+            "the chain ends at its start with a corner of {closing_turn} rad, above {allowed}: \
+             the directrix must be tangent continuous"
+        )));
+    }
+    let loops = closed || (touches && closing_turn <= allowed);
     let joints = if loops { m } else { m - 1 };
     for k in 0..joints {
         let (a, b) = (&pieces[k], &pieces[(k + 1) % m]);

@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- A fixed-reference sweep along a chain that ends at its start with a
+  corner is refused by name instead of being swept open with crossing end
+  caps (#375).
+
 ## [0.3.37] - 2026-10-29
 
 ### Added
