@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.40] - 2026-10-29
+
 ### Changed
 
 - The exact boolean takes any operand the exact compiler compiles exactly,

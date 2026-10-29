@@ -3808,6 +3808,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.40 - 2026-10-29
+
+### Changed
+
+- The exact boolean takes any operand the exact compiler compiles exactly,
+  as subject or as tool, read through its placements: an extrusion, a
+  revolution (its cylinders, cones and tori), another boolean, or whatever
+  else it compiles exactly, instead of refusing all but a placed extrusion
+  ("exact boolean operand that is not an extrusion", "exact boolean tool that
+  is not a placed extrusion"). A box united with a quarter-turn revolution of
+  a circle is certified by `compile_mesh_with_deviation` within the budget;
+  its difference and intersection are measured like an extrusion's, and an
+  oblique cut of faceted operands can exceed the budget (#380). The
+  measurement covers the torus faces as it does planes and cylinders. An operand the exact
+  compiler refuses is refused with its own family named ("primitive",
+  "tapered revolution", "polygon mesh", "half-space", a full-turn profile
+  touching the axis). A tool that is a boolean is exact now too: the
+  tool is compiled exactly, and what cannot be compiled is refused by name
+  (#326's triage decision). Its half-space-intersection example is still
+  refused by `compile_clip` (#378).
+- The deviation search no longer stops at 10% above its lower bound when
+  that gap straddles the requested budget: it keeps tightening while the
+  bound straddles the budget, within the cell cap and the resolution floor
+  (it can still stop above the budget), so a mesh whose true deviation is
+  within the budget is usually certified within it (a torus' tessellation at `1e-3` measured `0.95e-3`
+  and was reported `1.004e-3`) (#378).
+
 ### 0.3.39 - 2026-10-29
 
 ### Changed

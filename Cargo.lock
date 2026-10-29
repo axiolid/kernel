@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.39"
+version = "0.3.40"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

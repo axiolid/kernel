@@ -319,10 +319,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.39",
+      "released": "0.3.40",
       "released_date": "2026-10-29",
       "role": "execution.orchestration",
-      "version": "0.3.39"
+      "version": "0.3.40"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",

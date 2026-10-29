@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.39 (2026-10-29) |
+| Latest release | 0.3.40 (2026-10-29) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,20 +78,31 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.39 (2026-10-29):
+Latest release, 0.3.40 (2026-10-29):
 
 ### Changed
 
-- The exact compiler builds the union and the intersection of placed
-  extrusions (and of placed booleans, as subjects), as it did the
-  difference, through the general boolean; the deviation report certifies
-  their meshes against that result like a difference's, the same measured
-  bound, instead of `Unbounded("exact union or intersection of placed
-  operands")`, so a circular column united with a box at chord `1e-3`
-  reports a Certified bound within the budget. A tool that is itself a boolean
-  is still refused by name (#326). An intersection that leaves nothing
-  is `Degenerate` naming its operator, no longer "difference" (a union
-  cannot leave nothing). A symmetric difference of placed operands is
-  refused by name (#376).
+- The exact boolean takes any operand the exact compiler compiles exactly,
+  as subject or as tool, read through its placements: an extrusion, a
+  revolution (its cylinders, cones and tori), another boolean, or whatever
+  else it compiles exactly, instead of refusing all but a placed extrusion
+  ("exact boolean operand that is not an extrusion", "exact boolean tool that
+  is not a placed extrusion"). A box united with a quarter-turn revolution of
+  a circle is certified by `compile_mesh_with_deviation` within the budget;
+  its difference and intersection are measured like an extrusion's, and an
+  oblique cut of faceted operands can exceed the budget (#380). The
+  measurement covers the torus faces as it does planes and cylinders. An operand the exact
+  compiler refuses is refused with its own family named ("primitive",
+  "tapered revolution", "polygon mesh", "half-space", a full-turn profile
+  touching the axis). A tool that is a boolean is exact now too: the
+  tool is compiled exactly, and what cannot be compiled is refused by name
+  (#326's triage decision). Its half-space-intersection example is still
+  refused by `compile_clip` (#378).
+- The deviation search no longer stops at 10% above its lower bound when
+  that gap straddles the requested budget: it keeps tightening while the
+  bound straddles the budget, within the cell cap and the resolution floor
+  (it can still stop above the budget), so a mesh whose true deviation is
+  within the budget is usually certified within it (a torus' tessellation at `1e-3` measured `0.95e-3`
+  and was reported `1.004e-3`) (#378).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)
