@@ -696,6 +696,29 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.25 - 2026-10-29
+
+### Added
+
+- `pipe::fixed_reference_plan` and `pipe::fixed_reference_along_pieces`
+  sweep a profile with a fixed reference direction along a
+  tangent-continuous chain of segments and circular arcs, open or closed,
+  within the chord budget (#122). Where the reference is normal to the
+  plane of every arc or lies in it, each arc is an exact revolution of the
+  placed profile and each segment a prism, so the swept disk's per-piece
+  proof carries over; a reference that only nearly is pays its measured
+  twist of the exact frame off those stations out of the walls' half of the
+  budget (`FixedReferenceChain::twist`), and an arc whose twist exceeds an eighth
+  of the budget is reported as twisting (`FixedReferencePlan::Twisting`),
+  which nothing here bounds. A corner (also one a re-seeded profile turns
+  too far at, for a reference near the tangent), a reference parallel to
+  the tangent, a gap and a profile that folds through a bend's axis are
+  refused by name. A chain is a loop when the path declares itself closed
+  or ends within the linear tolerance (and a quarter of the budget) of
+  where it starts with a tangent-continuous closing joint.
+  Also `reference_clearance`, `ring_reach` and `pipe::check_disk_along`,
+  which refuses a disk wider than a lone arc's bend.
+
 ### 0.3.24 - 2026-10-28
 
 ### Fixed
@@ -3758,6 +3781,36 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-compile
 
+### 0.3.37 - 2026-10-29
+
+### Added
+
+- A fixed-reference sweep along a tangent-continuous chain of segments and
+  circular arcs, open or closed, is proven within the chord budget (the
+  profile's share plus half the budget for the walls, none along one
+  segment) when the reference is normal to the plane of every arc or lies
+  in it; the twist of a reference that only nearly is comes out of the
+  walls' half, so the sum stays within the budget; the deviation report
+  names it "segments and arcs" (#122). An arc whose twist is more than an
+  eighth of the budget (oblique to the reference) is still swept as sampled
+  and reported unbounded.
+
+### Changed
+
+- A fixed-reference sweep refuses a corner in its directrix by name, as the
+  format requires a tangent-continuous directrix (#122). A closed chain
+  proven by the segment and arc path is swept without caps; a twisting one
+  is still swept as sampled and capped. The deviation detail of a proven
+  segment or arc is now "segments and arcs".
+
+### Fixed
+
+- A swept disk wider than the bend of a lone arc it follows is refused
+  instead of meshed into a tube that folds through the bend's axis (#122).
+- A fixed-reference sweep along a circle whose frame is not orthonormal
+  (an ellipse in all but name) is reported unbounded, where it was reported
+  proven although it is swept as sampled (#122).
+
 ### 0.3.36 - 2026-10-28
 
 ### Fixed
@@ -5473,6 +5526,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-model
+
+### 0.3.17 - 2026-10-29
+
+### Changed
+
+- The documentation of `SolidOperation::FixedReferenceSweep` states the
+  frame law, the tangent-continuity requirement, how `parameter_range` is
+  read, and what the reference compiler proves, reports unbounded and
+  refuses (#122).
 
 ### 0.3.16 - 2026-10-28
 

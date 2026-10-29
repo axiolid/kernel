@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.37] - 2026-10-29
+
 ### Added
 
 - A fixed-reference sweep along a tangent-continuous chain of segments and

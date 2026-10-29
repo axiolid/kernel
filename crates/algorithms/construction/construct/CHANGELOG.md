@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.25] - 2026-10-29
+
 ### Added
 
 - `pipe::fixed_reference_plan` and `pipe::fixed_reference_along_pieces`

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-10-29
+
 ### Changed
 
 - The documentation of `SolidOperation::FixedReferenceSweep` states the

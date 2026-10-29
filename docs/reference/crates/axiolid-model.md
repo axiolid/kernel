@@ -8,7 +8,7 @@ Format-neutral geometry item tree. The currency between a format reader and a ke
 
 | | |
 | --- | --- |
-| Latest release | 0.3.16 (2026-10-28) |
+| Latest release | 0.3.17 (2026-10-29) |
 | crates.io | [`axiolid-model`](https://crates.io/crates/axiolid-model) |
 | Facade | [`axiolid`](./axiolid) feature `model` |
 | Layer | representations (`representation.graph`) |
@@ -54,11 +54,13 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.16 (2026-10-28):
+Latest release, 0.3.17 (2026-10-29):
 
 ### Changed
 
-- The package metadata names rheonda UG (haftungsbeschränkt) as author, and commercial
-  licences are available from rheonda UG (haftungsbeschränkt) (`LICENSE-COMMERCIAL`, ADR 0089).
+- The documentation of `SolidOperation::FixedReferenceSweep` states the
+  frame law, the tangent-continuity requirement, how `parameter_range` is
+  read, and what the reference compiler proves, reports unbounded and
+  refuses (#122).
 
 Full history: [`crates/representations/modeling/graph/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/representations/modeling/graph/CHANGELOG.md)

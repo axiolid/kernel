@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.24 (2026-10-28) |
+| Latest release | 0.3.25 (2026-10-29) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -68,23 +68,27 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.24 (2026-10-28):
+Latest release, 0.3.25 (2026-10-29):
 
-### Fixed
+### Added
 
-- `profile_rings` ends every contour segment at its exact joint (#365). The
-  first and last point of a flattened segment are its endpoints, not
-  samples. Where two segments meet within the linear tolerance, both now
-  produce one bit-identical vertex, the more exactly stated of the two:
-  a line's endpoint at parameter 0 (its origin), a polyline vertex, any
-  other line endpoint (`origin + direction * t` rounds), a curved endpoint;
-  a tie keeps the earlier segment's end. An arc ending on the revolution
-  axis used to land at `x ~ 6e-17` (its end re-evaluated as
-  `centre + r (cos s, sin s)`), and a line ending there was rounded too, so
-  a half-disc was refused at a full turn as a pinch and a partial turn
-  meshed degenerate triangles. The snap distance is a rounding error (or a
-  gap within the tolerance); `profile_deviation` adds it to its bound as it
-  does a merged point. Ring vertices may move by an ulp wherever segments
-  meet.
+- `pipe::fixed_reference_plan` and `pipe::fixed_reference_along_pieces`
+  sweep a profile with a fixed reference direction along a
+  tangent-continuous chain of segments and circular arcs, open or closed,
+  within the chord budget (#122). Where the reference is normal to the
+  plane of every arc or lies in it, each arc is an exact revolution of the
+  placed profile and each segment a prism, so the swept disk's per-piece
+  proof carries over; a reference that only nearly is pays its measured
+  twist of the exact frame off those stations out of the walls' half of the
+  budget (`FixedReferenceChain::twist`), and an arc whose twist exceeds an eighth
+  of the budget is reported as twisting (`FixedReferencePlan::Twisting`),
+  which nothing here bounds. A corner (also one a re-seeded profile turns
+  too far at, for a reference near the tangent), a reference parallel to
+  the tangent, a gap and a profile that folds through a bend's axis are
+  refused by name. A chain is a loop when the path declares itself closed
+  or ends within the linear tolerance (and a quarter of the budget) of
+  where it starts with a tangent-continuous closing joint.
+  Also `reference_clearance`, `ring_reach` and `pipe::check_disk_along`,
+  which refuses a disk wider than a lone arc's bend.
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)
