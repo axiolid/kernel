@@ -1,0 +1,176 @@
+"""Mutation probe for the merge of in-plane faces (#366, ADR 0093).
+
+Each mutant breaks one decision of the exact arrangement of the in-plane
+faces or of what is built on it: the class of a side (`Both`), the interior
+test of a piece in a triangle, the side a carrier covers, where the source
+edges are cut (proper crossings, an end inside the other segment, equal
+points joined), the half-edge walk and the fan order that link boundary
+pieces into rings, which collinear vertices stay, the owner of a hole, and
+how `Both` regions join the cut (their rings, the pinch refusal, the
+cut-side check, the registry check and the carried evidence). The budgets
+(coverage pairs, the memory charge) and the output position of a crossing are
+mutated too. A mutant must turn a test red: the hand-derived cases of
+`tests/section_request.rs`, the region conformance suite, the unit tests of
+the arrangement and of the regions, or the registry tests of
+`mesh_section_contract.rs`.
+
+Not mutated, because no input reaches the difference: the conformance check
+that every `Both` region is a cut region (the fixtures pin the exact cut
+regions, which already contain them), and the conformance rule that an open
+chain also running along a `Both` ring is counted once (a chain of transversal
+crossings never runs along a region ring).
+"""
+import probe_lib
+
+A = "crates/algorithms/reference/src/section/arrangement.rs"
+R = "crates/algorithms/reference/src/section/regions.rs"
+Q = "crates/algorithms/reference/src/section/request.rs"
+D = "crates/execution/dispatch/src/section_request.rs"
+TESTS = [
+    ["-p", "axiolid-reference", "--test", "section_request"],
+    ["-p", "axiolid-reference", "--test", "section_conformance"],
+    ["-p", "axiolid-reference", "--lib", "section"],
+    ["-p", "axiolid-dispatch", "--all-features", "--test", "mesh_section_contract"],
+]
+
+MUTANTS = [
+    (
+        'Both mapped to Below', A,
+        '(true, true) => Self::Both,', '(true, true) => Self::Below,', TESTS,
+    ),
+    (
+        'interior test strict', A,
+        'if start == Sign::Negative || end == Sign::Negative {',
+        'if start != Sign::Positive || end != Sign::Positive {', TESTS,
+    ),
+    (
+        'carrier side flipped', A,
+        [
+            ('Sign::Positive => cover(piece, true, false, triangles[triangle].facing),',
+             'Sign::Positive => cover(piece, false, true, triangles[triangle].facing),'),
+            ('Sign::Negative => cover(piece, false, true, triangles[triangle].facing),',
+             'Sign::Negative => cover(piece, true, false, triangles[triangle].facing),'),
+        ],
+        TESTS,
+    ),
+    (
+        'proper crossings skipped', A,
+        '            if proper {', '            if false && proper {', TESTS,
+    ),
+    (
+        'ends of the later segment never split the earlier', A,
+        [
+            ('if around[0] == Sign::Zero && exact.strictly_between(a, c, b)? {',
+             'if false && around[0] == Sign::Zero && exact.strictly_between(a, c, b)? {'),
+            ('if around[1] == Sign::Zero && exact.strictly_between(a, d, b)? {',
+             'if false && around[1] == Sign::Zero && exact.strictly_between(a, d, b)? {'),
+        ],
+        TESTS,
+    ),
+    (
+        'ends of the earlier segment never split the later', A,
+        [
+            ('if around[2] == Sign::Zero && exact.strictly_between(c, a, d)? {',
+             'if false && around[2] == Sign::Zero && exact.strictly_between(c, a, d)? {'),
+            ('if around[3] == Sign::Zero && exact.strictly_between(c, b, d)? {',
+             'if false && around[3] == Sign::Zero && exact.strictly_between(c, b, d)? {'),
+        ],
+        TESTS,
+    ),
+    (
+        'coincident source vertices not joined', A,
+        '        if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        '            points.union(pair[0], pair[1]);',
+        '        if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        '            let _ = pair;',
+        TESTS,
+    ),
+    (
+        'equal points along a segment not joined', A,
+        '            if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        '                points.union(pair[0], pair[1]);',
+        '            if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        '                let _ = pair;',
+        TESTS,
+    ),
+    (
+        'pieces starting inside a triangle never tested', A,
+        '    for &triangle in &triangle_order {', '    for &triangle in triangle_order.iter().take(0) {', TESTS,
+    ),
+    (
+        'triangles starting inside a piece never tested', A,
+        '    for &piece in &piece_order {', '    for &piece in piece_order.iter().take(0) {', TESTS,
+    ),
+    (
+        'coverage pairs not counted', A,
+        '        count_pair(pairs, max_pairs)?;\n        let (from, to) = (',
+        '        let (from, to) = (', TESTS,
+    ),
+    (
+        'memory charge disabled', A,
+        'Some(needed) if needed <= budget => Ok(()),', 'Some(_) => Ok(()),', TESTS,
+    ),
+    (
+        'crossing output position ignores the parameter', A,
+        'let t = exact.segment_parameter(ends)?;', 'let t = 0.5;', TESTS,
+    ),
+    (
+        'counter-clockwise next instead of clockwise', R,
+        'let spoke = fan[(index + fan.len() - step) % fan.len()];',
+        'let spoke = fan[(index + step) % fan.len()];', TESTS,
+    ),
+    (
+        'fan order reversed within a half', R,
+        [
+            ('Sign::Positive => Ok(std::cmp::Ordering::Less),',
+             'Sign::Positive => Ok(std::cmp::Ordering::Greater),'),
+            ('Sign::Negative => Ok(std::cmp::Ordering::Greater),',
+             'Sign::Negative => Ok(std::cmp::Ordering::Less),'),
+        ],
+        TESTS,
+    ),
+    (
+        'collinear vertex where other boundary meets dropped', R,
+        '        if protected || keep.on_boundary[vertex] != 2 {',
+        '        if protected {', TESTS,
+    ),
+    (
+        'hole owned by the outermost container', R,
+        'if !within(exact, &rings[candidate], &rings[other])? {',
+        'if !within(exact, &rings[other], &rings[candidate])? {', TESTS,
+    ),
+    (
+        'pinch of a Both ring never noticed', R,
+        'both_pinched |= distinct.len() != ring.nodes.len();',
+        'both_pinched |= distinct.is_empty();', TESTS,
+    ),
+    (
+        'Both rings reversed for the cut', R,
+        '                nodes: outer.nodes.clone(),',
+        '                nodes: outer.nodes.iter().rev().copied().collect(),', TESTS,
+    ),
+    (
+        'Both rings not passed to the cut', Q,
+        '                both_rings,\n                cut_limits,',
+        '                Vec::new(),\n                cut_limits,', TESTS,
+    ),
+    (
+        'pinched Both ring not refused', Q,
+        '            if both_pinched {', '            if false && both_pinched {', TESTS,
+    ),
+    (
+        'covered cut side not refused', Q,
+        '                    .any(|&class| class != Class::Empty)',
+        '                    .any(|_| false)', TESTS,
+    ),
+    (
+        'registry accepts a Both region that is not a cut region', D,
+        '                if !is_cut {', '                if false && !is_cut {', TESTS,
+    ),
+    (
+        'registry drops the in-plane crossings from the evidence', D,
+        '        .with_in_plane_crossings(evidence.in_plane_crossings)\n', '', TESTS,
+    ),
+]
+
+probe_lib.main(MUTANTS, timeout=1800, reject_uncompiled=True)

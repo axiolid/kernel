@@ -281,10 +281,10 @@ MUTANTS = [
         '        (None, Some(_)) => Ok(()),', TESTS,
     ),
     (
-        'registry accepts cut regions beside a Both region', D,
-        '.any(|region| region.side == InPlaneSide::Both)',
-        '.any(|_| false)', TESTS,
+        'registry accepts a Both region that is not a cut region', D,
+        '                if !is_cut {', '                if false && !is_cut {', TESTS,
     ),
+
     (
         'registry lets a sheet request reach the provider', D,
         '    if request.cut_regions.is_some() && request.role == SectionRole::Sheet {',

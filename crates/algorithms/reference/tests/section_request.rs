@@ -1162,3 +1162,179 @@ fn a_collinear_vertex_where_other_boundary_meets_is_kept() {
         ring(&[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)])
     );
 }
+
+// ---- `Both` regions are cut regions (#366) ------------------------------------
+
+fn parts_of(mesh: &TriMesh) -> (Vec<Point3>, Vec<u32>) {
+    (mesh.positions.clone(), mesh.indices.clone())
+}
+
+#[test]
+fn the_cut_of_an_l_step_with_a_block_in_its_notch_has_two_regions_in_every_frame() {
+    // The block [1,2] x [0,1] x [1,2] sits on the ledge, its own shell.
+    let block = cuboid((1.0, 2.0), (0.0, 1.0), (1.0, 2.0));
+    let mesh = combine(&[parts_of(&l_step()), block]);
+    for k in 1..=200 {
+        let section = cut(&mesh, turned(k, 201, 1.0))
+            .unwrap_or_else(|error| panic!("frame {k} refused: {error:?}"));
+        assert_eq!(section.cut_regions.expect("cut regions").len(), 2, "{k}");
+    }
+}
+
+#[test]
+fn stacked_boxes_with_crossing_diagonals_cut_to_their_footprint() {
+    // The lower top's diagonal runs (0,0)-(1,1), the upper bottom's runs
+    // (1,0)-(0,1): they cross at the centre, a binary64 point.
+    let flipped = [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)];
+    let mesh = combine(&[
+        cuboid((0.0, 1.0), (0.0, 1.0), (0.0, 1.0)),
+        prism(&flipped, (1.0, 2.0)),
+    ]);
+    let section = cut(&mesh, horizontal(1.0)).expect("section");
+    assert_eq!(sizes(&section, InPlaneSide::Both), [(4, vec![])]);
+    assert_eq!(section.regions.len(), 1);
+    assert_eq!(section.evidence.in_plane_crossings, 1);
+    assert_eq!(
+        section.cut_regions.expect("cut regions")[0].outer,
+        section.regions[0].outer
+    );
+}
+
+#[test]
+fn the_cut_of_a_diamond_across_an_edge_is_its_both_region_bit_for_bit() {
+    let mesh = diamond_on_a_square();
+    for k in 1..=200 {
+        let section = cut(&mesh, turned(k, 201, 1.0))
+            .unwrap_or_else(|error| panic!("frame {k} refused: {error:?}"));
+        let both: Vec<_> = section
+            .regions
+            .iter()
+            .filter(|region| region.side == InPlaneSide::Both)
+            .collect();
+        let cut_regions = section.cut_regions.expect("cut regions");
+        assert_eq!(both.len(), 1, "{k}");
+        assert_eq!(cut_regions.len(), 1, "{k}");
+        assert_eq!(cut_regions[0].outer, both[0].outer, "{k}");
+        assert_eq!(cut_regions[0].holes, both[0].holes, "{k}");
+    }
+}
+
+/// A slab `[0,3]^2 x [0,1]` with a triangular pocket A = (0,0), F = (2,1),
+/// E = (1,2) sunk to `z = 0.5`; A is also a corner of the slab, so the top
+/// is a square with a notch that touches its corner.
+fn slab_with_corner_pocket() -> (Vec<Point3>, Vec<u32>) {
+    let (mut positions, mut indices) = cuboid((0.0, 3.0), (0.0, 3.0), (0.0, 1.0));
+    // Drop the top face; the corners 4 = A, 5 = B, 6 = C, 7 = D stay.
+    indices.drain(6..12);
+    let mut add = |x: f64, y: f64, z: f64| {
+        positions.push(Point3::new(x, y, z));
+        u32::try_from(positions.len() - 1).expect("small fixture")
+    };
+    let (e, f) = (add(1.0, 2.0, 1.0), add(2.0, 1.0, 1.0));
+    let (a_low, e_low, f_low) = (add(0.0, 0.0, 0.5), add(1.0, 2.0, 0.5), add(2.0, 1.0, 0.5));
+    let (a, b, c, d) = (4, 5, 6, 7);
+    for [p, q, r] in [[a, b, f], [b, c, f], [c, e, f], [c, d, e], [d, a, e]] {
+        indices.extend([p, q, r]);
+    }
+    // The walls face into the pocket, to the left of each rim edge, and the
+    // floor faces up.
+    for (p, q, p_low, q_low) in [
+        (a, f, a_low, f_low),
+        (f, e, f_low, e_low),
+        (e, a, e_low, a_low),
+    ] {
+        indices.extend([p, q, q_low, p, q_low, p_low]);
+    }
+    indices.extend([a_low, f_low, e_low]);
+    (positions, indices)
+}
+
+#[test]
+fn a_both_ring_that_touches_itself_is_refused_for_the_cut_only() {
+    // A lid [0,3]^2 x [1,2] over the slab: Both is the slab top, whose ring
+    // visits the corner (0,0) twice; Above is the pocket's opening.
+    let mesh = combine(&[
+        slab_with_corner_pocket(),
+        cuboid((0.0, 3.0), (0.0, 3.0), (1.0, 2.0)),
+    ]);
+    let plain = registry()
+        .section_request(&mesh, &request(horizontal(1.0)), &options())
+        .expect("the plain answer");
+    let both: Vec<_> = plain
+        .regions
+        .iter()
+        .filter(|region| region.side == InPlaneSide::Both)
+        .collect();
+    assert_eq!(both.len(), 1);
+    assert_eq!(both[0].outer.len(), 7);
+    let corner = Point2::new(0.0, 0.0);
+    assert_eq!(both[0].outer.iter().filter(|&&p| p == corner).count(), 2);
+    let refused = registry().section_request(&mesh, &cut_request(horizontal(1.0)), &options());
+    assert!(matches!(
+        refused,
+        Err(GeomError::UnsupportedInput {
+            input: axiolid_mesh_section_contract::REFUSED_PINCHED_CUT_REGION,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_cut_side_covered_by_in_plane_faces_is_refused_as_crossing() {
+    // The block [0.5,2] x [0,1] x [1,2] overlaps the column of the L-step in
+    // volume: its bottom covers the plane beside the ledge's jamb, where the
+    // cut lies. The plain answer sees nothing wrong.
+    let block = cuboid((0.5, 2.0), (0.0, 1.0), (1.0, 2.0));
+    let mesh = combine(&[parts_of(&l_step()), block]);
+    registry()
+        .section_request(&mesh, &request(horizontal(1.0)), &options())
+        .expect("the plain answer");
+    assert!(is_refused_as_crossing(registry().section_request(
+        &mesh,
+        &cut_request(horizontal(1.0)),
+        &options()
+    )));
+}
+
+/// A flat square annulus at height `z`, facing up: `outer` minus `inner` as
+/// eight triangles, one trapezoid per side.
+fn annulus(outer: Span, inner: Span, z: f64) -> (Vec<Point3>, Vec<u32>) {
+    let corners = |(low, high): Span| [(low, low), (high, low), (high, high), (low, high)];
+    let (o, i) = (corners(outer), corners(inner));
+    let mut positions: Vec<Point3> = o.iter().map(|&(x, y)| Point3::new(x, y, z)).collect();
+    positions.extend(i.iter().map(|&(x, y)| Point3::new(x, y, z)));
+    let mut indices = Vec::new();
+    for k in 0..4_u32 {
+        let n = (k + 1) % 4;
+        indices.extend([k, n, 4 + n, k, 4 + n, 4 + k]);
+    }
+    (positions, indices)
+}
+
+#[test]
+fn an_annulus_inside_the_hole_of_another_keeps_its_own_hole() {
+    // The hole [3,4]^2 lies in the inner annulus and in the outer one's
+    // outline; it belongs to the innermost outer ring, [2,5]^2.
+    let flat = combine(&[
+        annulus((0.0, 7.0), (1.0, 6.0), 0.0),
+        annulus((2.0, 5.0), (3.0, 4.0), 0.0),
+    ]);
+    let result = sheet(&flat, horizontal(0.0)).expect("sheet");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(
+        result.regions[0].outer,
+        ring(&[(0.0, 0.0), (7.0, 0.0), (7.0, 7.0), (0.0, 7.0)])
+    );
+    assert_eq!(
+        result.regions[0].holes,
+        [ring(&[(1.0, 1.0), (1.0, 6.0), (6.0, 6.0), (6.0, 1.0)])]
+    );
+    assert_eq!(
+        result.regions[1].outer,
+        ring(&[(2.0, 2.0), (5.0, 2.0), (5.0, 5.0), (2.0, 5.0)])
+    );
+    assert_eq!(
+        result.regions[1].holes,
+        [ring(&[(3.0, 3.0), (3.0, 4.0), (4.0, 4.0), (4.0, 3.0)])]
+    );
+}

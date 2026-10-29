@@ -163,12 +163,43 @@ fn a_provider_that_claims_cut_regions_and_then_drops_them_fails() {
     assert!(report.cut_regions_claimed && !report.is_success());
 }
 
+/// Whether the answer has a `Both` region.
+fn has_both(section: &axiolid_mesh_section_contract::PlaneSection) -> bool {
+    section
+        .regions
+        .iter()
+        .any(|region| region.side == axiolid_mesh_section_contract::InPlaneSide::Both)
+}
+
 #[test]
 fn a_provider_whose_rings_differ_from_the_chains_in_the_last_bit_fails() {
-    // Within the fixtures' comparison tolerance, but not bit for bit.
+    // Within the fixtures' comparison tolerance, but not bit for bit. Only
+    // answers without a `Both` region are changed, so the relation of the
+    // rings to the chains is the only thing that can notice.
     let report = RegionConformanceSuite::run(&CutHook {
         hook: |answer| {
             answer.map(|mut section| {
+                if has_both(&section) {
+                    return section;
+                }
+                if let Some(region) = section.cut_regions.as_mut().and_then(|cut| cut.first_mut()) {
+                    region.outer[0].x += 1.0e-12;
+                }
+                section
+            })
+        },
+    });
+    assert!(!report.is_success());
+}
+
+#[test]
+fn a_provider_whose_cut_region_differs_from_a_both_region_in_the_last_bit_fails() {
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |answer| {
+            answer.map(|mut section| {
+                if !has_both(&section) {
+                    return section;
+                }
                 if let Some(region) = section.cut_regions.as_mut().and_then(|cut| cut.first_mut()) {
                     region.outer[0].x += 1.0e-12;
                 }

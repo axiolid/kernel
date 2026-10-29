@@ -104,20 +104,28 @@ fn output(
 struct Builder {
     positions: Vec<Point3>,
     indices: Vec<u32>,
+    /// Vertices before this one belong to earlier shells and are not shared.
+    shell: usize,
 }
 
 impl Builder {
     fn vertex(&mut self, p: [f64; 3]) -> u32 {
         let point = Point3::new(p[0], p[1], p[2]);
-        let index = self
-            .positions
+        let index = self.positions[self.shell..]
             .iter()
             .position(|&q| q == point)
+            .map(|found| found + self.shell)
             .unwrap_or_else(|| {
                 self.positions.push(point);
                 self.positions.len() - 1
             });
         u32::try_from(index).expect("fixture index fits u32")
+    }
+
+    /// Start another shell: its vertices are not shared with the earlier
+    /// ones, even where they lie at the same position.
+    fn next_shell(&mut self) {
+        self.shell = self.positions.len();
     }
 
     fn tri(&mut self, p: [[f64; 3]; 3]) {
@@ -211,6 +219,49 @@ fn frame_prism() -> TriMesh {
     b.finish()
 }
 
+/// Two boxes `[0,1]^3` and `[0,1]^2 x [1,2]`, one on the other, each its own
+/// shell: their faces at z = 1 coincide.
+fn stacked_boxes() -> TriMesh {
+    let mut b = Builder::default();
+    add_box(&mut b, (0.0, 1.0), (0.0, 1.0), (0.0, 1.0));
+    b.next_shell();
+    add_box(&mut b, (0.0, 1.0), (0.0, 1.0), (1.0, 2.0));
+    b.finish()
+}
+
+/// Two square tubes `[0,3]^2` minus `[1,2]^2`, one on the other (`z` in
+/// `[0,1]` and `[1,2]`), each its own shell.
+fn stacked_tubes() -> TriMesh {
+    let mut b = Builder::default();
+    add_annulus_prism(&mut b, (0.0, 3.0), (1.0, 2.0), (0.0, 1.0));
+    b.next_shell();
+    add_annulus_prism(&mut b, (0.0, 3.0), (1.0, 2.0), (1.0, 2.0));
+    b.finish()
+}
+
+/// The L-step profile (0,0) (2,0) (2,1) (1,1) (1,2) (0,2) in `(x, z)` over
+/// `y` in `[0,1]`, and a block `[1,2] x [0,1] x [1,2]` in its notch, each its
+/// own shell: the block's bottom coincides with the ledge top at z = 1.
+fn l_step_with_block() -> TriMesh {
+    let mut b = Builder::default();
+    add_extruded_profile(
+        &mut b,
+        &[
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 2.0),
+            (0.0, 2.0),
+        ],
+        &[[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]],
+        (0.0, 1.0),
+    );
+    b.next_shell();
+    add_box(&mut b, (1.0, 2.0), (0.0, 1.0), (1.0, 2.0));
+    b.finish()
+}
+
 /// Two nested tubes: `[0,7]^2` minus `[1,6]^2` and `[2,5]^2` minus `[3,4]^2`,
 /// `z` in `[0,1]`. The second tube stands in the hole of the first without
 /// touching it.
@@ -227,9 +278,20 @@ fn nested_tubes() -> TriMesh {
 /// back copy is reversed; each profile edge `p -> q` becomes the outward side
 /// quad `p@y0, p@y1, q@y1, q@y0`. With `n` profile vertices and `t`
 /// triangles: `2n` vertices, `2t + 2n` triangles, `3t + 3n` edges.
-fn extruded_profile(profile: &[(f64, f64)], triangles: &[[usize; 3]], (y0, y1): Span) -> TriMesh {
-    let at = |index: usize, y: f64| [profile[index].0, y, profile[index].1];
+fn extruded_profile(profile: &[(f64, f64)], triangles: &[[usize; 3]], span: Span) -> TriMesh {
     let mut b = Builder::default();
+    add_extruded_profile(&mut b, profile, triangles, span);
+    b.finish()
+}
+
+/// The shell of `extruded_profile`, added to a builder.
+fn add_extruded_profile(
+    b: &mut Builder,
+    profile: &[(f64, f64)],
+    triangles: &[[usize; 3]],
+    (y0, y1): Span,
+) {
+    let at = |index: usize, y: f64| [profile[index].0, y, profile[index].1];
     for &[p, q, r] in triangles {
         b.tri([at(p, y0), at(q, y0), at(r, y0)]);
         b.tri([at(p, y1), at(r, y1), at(q, y1)]);
@@ -238,7 +300,6 @@ fn extruded_profile(profile: &[(f64, f64)], triangles: &[[usize; 3]], (y0, y1): 
         let to = (from + 1) % profile.len();
         b.quad([at(from, y0), at(from, y1), at(to, y1), at(to, y0)]);
     }
-    b.finish()
 }
 
 /// A block `[0,3]^2 x [0,2]` with a pocket `[1,2]^2` from `z = 2` down to
@@ -702,12 +763,14 @@ pub(crate) fn cases() -> Vec<Case> {
         // two shells in one mesh. At z = 1 the slab top (+z, Below) covers
         // the box bottom (-z, Above): faces of opposite sides overlap. A
         // provider may refuse, or report the slab top minus the footprint as
-        // a Below region with a hole and the footprint as Both.
+        // a Below region with a hole and the footprint as Both. The
+        // footprint has material on both sides, so it is the cut. The
+        // footprint's diagonal runs along the slab's: no edges cross.
         Case {
             name: "box on a slab",
             role: SectionRole::Solid,
             boundary_edges: 0,
-            cut: Cut::Refused(REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES),
+            cut: Cut::Regions(vec![CutRegion::new(square(1.0, 1.0, 2.0, 2.0), vec![])]),
             mesh: boxes(&[
                 ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
                 ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
@@ -728,6 +791,115 @@ pub(crate) fn cases() -> Vec<Case> {
                     4,
                     0,
                 ),
+            ),
+        },
+        // Boxes [0,1]^3 and [0,1]^2 x [1,2], one on the other, as separate
+        // shells. At z = 1 the top of the lower box (+z) and the bottom of the
+        // upper box (-z) coincide: one Both region, the unit square, and the
+        // cut. The same triangulation: nothing crosses.
+        Case {
+            name: "stacked boxes",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(unit_square(), vec![])]),
+            mesh: stacked_boxes(),
+            frame: h(1.0),
+            expected: Expected::OutputOrRefused(
+                REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+                output(vec![], vec![region(Both, unit_square(), vec![])], 4, 0),
+            ),
+        },
+        // Boxes [0,2] x [0,1] x [0,1] and [1,3] x [0,1] x [1,2]: the top of
+        // the first (+z) covers [0,2] x [0,1], the bottom of the second (-z)
+        // covers [1,3] x [0,1]. Below is [0,1] x [0,1], Above [2,3] x [0,1]
+        // and Both [1,2] x [0,1], which is the cut. The first top's diagonal
+        // (0,0)-(2,1) crosses the second bottom's edge x = 1 at (1,0.5); the
+        // second's diagonal (1,0)-(3,1) crosses x = 2 at (2,0.5).
+        Case {
+            name: "offset stacked boxes",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(square(1.0, 0.0, 2.0, 1.0), vec![])]),
+            mesh: boxes(&[
+                ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
+                ((1.0, 3.0), (0.0, 1.0), (1.0, 2.0)),
+            ]),
+            frame: h(1.0),
+            expected: Expected::OutputOrRefused(
+                REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+                output(
+                    vec![],
+                    vec![
+                        region(Below, square(0.0, 0.0, 1.0, 1.0), vec![]),
+                        region(Above, square(2.0, 0.0, 3.0, 1.0), vec![]),
+                        region(Both, square(1.0, 0.0, 2.0, 1.0), vec![]),
+                    ],
+                    4,
+                    0,
+                )
+                .crossings(2),
+            ),
+        },
+        // Two square tubes [0,3]^2 minus [1,2]^2, one on the other (z in
+        // [0,1] and [1,2]). The top annulus of the lower and the bottom
+        // annulus of the upper tube coincide, 8 triangles each: one Both
+        // region with a hole, and the cut.
+        Case {
+            name: "stacked tubes",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(
+                square(0.0, 0.0, 3.0, 3.0),
+                vec![ring(&[(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)])],
+            )]),
+            mesh: stacked_tubes(),
+            frame: h(1.0),
+            expected: Expected::OutputOrRefused(
+                REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+                output(
+                    vec![],
+                    vec![region(
+                        Both,
+                        square(0.0, 0.0, 3.0, 3.0),
+                        vec![ring(&[(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)])],
+                    )],
+                    16,
+                    0,
+                ),
+            ),
+        },
+        // The L-step of the next case with a block [1,2] x [0,1] x [1,2]
+        // sitting in its notch, a separate shell: the block's bottom (-z)
+        // coincides with the ledge top (+z) in [1,2] x [0,1], a Both region.
+        // The column is cut as before: the open chain (1,0) (0,0) (0,1) (1,1)
+        // between the region's corners. The cut is the unit square, closed
+        // along the jamb x = 1, and the Both square beside it, which share
+        // that edge in opposite directions. The ledge top's diagonal
+        // (2,0)-(1,1) crosses the block bottom's diagonal (1,0)-(2,1) at
+        // (1.5, 0.5).
+        Case {
+            name: "L-step with a block in the notch",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            cut: Cut::Regions(vec![
+                CutRegion::new(unit_square(), vec![]),
+                CutRegion::new(square(1.0, 0.0, 2.0, 1.0), vec![]),
+            ]),
+            mesh: l_step_with_block(),
+            frame: h(1.0),
+            expected: Expected::OutputOrRefused(
+                REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+                output(
+                    vec![SectionChain::open(
+                        ring(&[(1.0, 0.0), (0.0, 0.0), (0.0, 1.0), (1.0, 1.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    )],
+                    vec![region(Both, square(1.0, 0.0, 2.0, 1.0), vec![])],
+                    4,
+                    0,
+                )
+                .crossings(1),
             ),
         },
         // Boxes [0,2] x [0,1] x [0,1] and [1,3] x [0,1] x [0,1] overlap in

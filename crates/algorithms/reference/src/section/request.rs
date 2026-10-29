@@ -11,6 +11,11 @@
 //!   emitted;
 //! - an in-plane triangle: a region boundary, never a cut.
 //!
+//! In-plane faces are merged on an exact arrangement (`arrangement`,
+//! `regions`, ADR 0093). A cut request also refuses a `Both` region that
+//! touches itself, and a region edge that bounds the cut while in-plane faces
+//! cover the plane on the cut's side of it.
+//!
 //! A `SectionRole::Sheet` may be open. A mesh edge lying in the plane with one
 //! incident triangle is then either a region boundary (the triangle is in the
 //! plane) or a touching edge (it is off the plane), and a chain can end on a
@@ -22,11 +27,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    InPlaneSide, PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole,
-    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole, REFUSED_CROSSING_CUT_RINGS,
+    REFUSED_PINCHED_CUT_REGION,
 };
 
-use super::arrangement::InPlaneArrangement;
+use super::arrangement::{Class, InPlaneArrangement};
 use super::chains::{assemble_chains, ChainContext};
 use super::cut_regions::{build_cut_regions, CutInputs};
 use super::plane_points::PlanePoints;
@@ -45,6 +50,15 @@ enum Incidence {
     Off(Sign, u32, u32),
     /// An in-plane triangle with its facing.
     In(Sign),
+}
+
+/// A refusal of the cut by name.
+fn refused(input: &'static str) -> GeomError {
+    GeomError::UnsupportedInput {
+        backend: ScalarSection::ID,
+        operation: Operation::MeshPlaneSection,
+        input,
+    }
 }
 
 /// Whether a region edge bounds the cut (ADR 0092): the off-plane triangle
@@ -278,8 +292,8 @@ pub(super) fn plane_section(
     let Regions {
         regions,
         ring_vertices,
-        both_rings: _,
-        both_pinched: _,
+        both_rings,
+        both_pinched,
         pairs: in_plane_pairs,
     } = build_regions(
         mesh,
@@ -290,17 +304,6 @@ pub(super) fn plane_section(
         request.region_limits,
         options,
     )?;
-    if request.cut_regions.is_some()
-        && regions
-            .iter()
-            .any(|region| region.side == InPlaneSide::Both)
-    {
-        return Err(GeomError::UnsupportedInput {
-            backend: ScalarSection::ID,
-            operation: Operation::MeshPlaneSection,
-            input: REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
-        });
-    }
     let coplanar_edges = coplanar_crossing_edges(mesh, &crossing_thirds)?;
     let chain_context = ChainContext {
         mesh,
@@ -318,6 +321,24 @@ pub(super) fn plane_section(
     let (cut_regions, cut_pairs) = match request.cut_regions {
         None => (None, 0),
         Some(cut_limits) => {
+            // The rings of a `Both` region are cut rings, so they cannot
+            // touch themselves.
+            if both_pinched {
+                return Err(refused(REFUSED_PINCHED_CUT_REGION));
+            }
+            // A region edge bounds the cut only if nothing covers the plane
+            // on the cut's side of it: in-plane faces there mean the shells
+            // overlap in volume.
+            for &(from, to) in &cut_edges {
+                options.check_cancelled()?;
+                if arrangement
+                    .left_of(from, to)?
+                    .iter()
+                    .any(|&class| class != Class::Empty)
+                {
+                    return Err(refused(REFUSED_CROSSING_CUT_RINGS));
+                }
+            }
             let (cut, pairs) = build_cut_regions(
                 &CutInputs {
                     chains: &chain_context,
@@ -326,7 +347,7 @@ pub(super) fn plane_section(
                     region_ring_vertices: &ring_vertices,
                 },
                 &mut exact,
-                Vec::new(),
+                both_rings,
                 cut_limits,
                 options,
             )?;
