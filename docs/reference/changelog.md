@@ -5507,6 +5507,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-section-contract
 
+### 0.3.6 - 2026-10-29
+
+### Changed
+
+- Documentation of `CutRegion`: the invariant that rings never cross, and the
+  exactness section, now say that the decisions are made on exact source
+  points (source vertices in the plane and exact crossings of source edges),
+  and that the returned points are those computed in binary64, so rings that
+  touch may cross by rounding error (ADR 0092, #377).
+
 ### 0.3.5 - 2026-10-29
 
 ### Added
@@ -7105,6 +7115,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.14 - 2026-10-29
+
+### Fixed
+
+- Cut rings are decided on exact source points: crossing, contact,
+  containment and outer or hole no longer use the returned coordinates, which
+  the projection to a turned frame and the edge interpolation round. Shells
+  that touch in the source are no longer refused as crossing under a turned
+  frame or an oblique section. An overlap that is in the input is still
+  refused. The returned coordinates are unchanged (ADR 0092, #377).
+
+### Changed
+
+- Depends on `axiolid-exact` for the exact points of the cut.
 
 ### 0.3.13 - 2026-10-29
 

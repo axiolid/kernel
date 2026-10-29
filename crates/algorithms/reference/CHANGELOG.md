@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-10-29
+
 ### Fixed
 
 - Cut rings are decided on exact source points: crossing, contact,

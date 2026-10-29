@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-29
+
 ### Changed
 
 - Documentation of `CutRegion`: the invariant that rings never cross, and the

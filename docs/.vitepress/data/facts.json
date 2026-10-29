@@ -355,10 +355,10 @@
       "description": "Portable mesh plane-section request, result, and evidence contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-section",
-      "released": "0.3.5",
+      "released": "0.3.6",
       "released_date": "2026-10-29",
       "role": "contract.operation",
-      "version": "0.3.5"
+      "version": "0.3.6"
     },
     "axiolid-minkowski": {
       "description": "Minkowski sum and difference of planar-faced solids",
@@ -481,10 +481,10 @@
       "description": "Portable scalar reference implementation and certified predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
-      "released": "0.3.13",
+      "released": "0.3.14",
       "released_date": "2026-10-29",
       "role": "algorithm.reference",
-      "version": "0.3.13"
+      "version": "0.3.14"
     },
     "axiolid-refine": {
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",

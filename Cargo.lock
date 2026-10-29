@@ -604,7 +604,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-section-contract"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
