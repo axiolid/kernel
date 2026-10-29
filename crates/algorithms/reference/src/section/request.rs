@@ -26,7 +26,10 @@ use axiolid_mesh_section_contract::{
 };
 
 use super::chains::{assemble_chains, ChainContext};
-use super::regions::{build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection};
+use super::cut_regions::{build_cut_regions, CutInputs};
+use super::regions::{
+    build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection, Regions,
+};
 use super::{
     check_source_limits, classify_vertices, insert_segment, internal_topology_error, mesh_index,
     opposite, EdgeKey, ExactSectionPlane, NodeKey, ScalarSection, Segment,
@@ -39,8 +42,16 @@ enum Incidence {
     /// An off-plane triangle with its third vertex on this side; the cut along
     /// the edge runs from the first vertex to the second.
     Off(Sign, u32, u32),
-    /// An in-plane triangle.
-    In,
+    /// An in-plane triangle with its facing.
+    In(Sign),
+}
+
+/// Whether a region edge bounds the cut (ADR 0092): the off-plane triangle
+/// next to it leaves the plane on the side opposite the region's material.
+/// `facing` is positive for a face whose material lies below the plane, and
+/// `third` is negative for a triangle that rises above it.
+fn region_edge_borders_cut(facing: Sign, third: Sign) -> bool {
+    opposite(facing, third)
 }
 
 pub(super) fn plane_section(
@@ -66,6 +77,11 @@ pub(super) fn plane_section(
             })
         }
     };
+    if sheet && request.cut_regions.is_some() {
+        return Err(GeomError::InvalidInput(
+            "cut regions need SectionRole::Solid: a sheet has no inside".into(),
+        ));
+    }
     let boundary = if sheet {
         Boundary::of(mesh, options)?
     } else {
@@ -93,17 +109,15 @@ pub(super) fn plane_section(
         let zero_count = signs.iter().filter(|&&sign| sign == Sign::Zero).count();
         match zero_count {
             3 => {
-                in_plane.push(InPlaneTriangle::new(
-                    mesh,
-                    projection,
-                    triangle_index,
-                    triangle,
-                )?);
+                let in_plane_triangle =
+                    InPlaneTriangle::new(mesh, projection, triangle_index, triangle)?;
+                let facing = in_plane_triangle.facing;
+                in_plane.push(in_plane_triangle);
                 for (from, to) in [(0, 1), (1, 2), (2, 0)] {
                     on_plane_edges
                         .entry(EdgeKey::new(triangle[from], triangle[to]))
                         .or_default()
-                        .push(Incidence::In);
+                        .push(Incidence::In(facing));
                 }
             }
             2 => {
@@ -195,6 +209,8 @@ pub(super) fn plane_section(
         }
     }
 
+    // Region edges that bound the cut, directed with the material on the left.
+    let mut cut_edges = BTreeSet::<(u32, u32)>::new();
     let mut touching_edges = 0usize;
     for (edge, incidences) in on_plane_edges {
         options.check_cancelled()?;
@@ -215,11 +231,16 @@ pub(super) fn plane_section(
                     touching_edges += 1;
                 }
             }
-            [Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {}
-            [Incidence::In, Incidence::In] => {}
+            [Incidence::In(facing), Incidence::Off(third, from, to)]
+            | [Incidence::Off(third, from, to), Incidence::In(facing)] => {
+                if region_edge_borders_cut(*facing, *third) {
+                    cut_edges.insert((*from, *to));
+                }
+            }
+            [Incidence::In(_), Incidence::In(_)] => {}
             // Boundary edges of a sheet: a region boundary, or an edge the
             // sheet touches the plane in.
-            [Incidence::In] if sheet => {}
+            [Incidence::In(_)] if sheet => {}
             [Incidence::Off(..)] if sheet => touching_edges += 1,
             _ => {
                 return Err(GeomError::NotManifold(format!(
@@ -252,7 +273,10 @@ pub(super) fn plane_section(
             NodeKey::Edge(_) => None,
         })
         .collect();
-    let regions = build_regions(
+    let Regions {
+        regions,
+        ring_vertices,
+    } = build_regions(
         mesh,
         frame,
         projection,
@@ -262,29 +286,47 @@ pub(super) fn plane_section(
         options,
     )?;
     let coplanar_edges = coplanar_crossing_edges(mesh, &crossing_thirds)?;
-    let chains = assemble_chains(
-        &ChainContext {
-            mesh,
-            frame,
-            classifications: &classifications,
-            projection,
-            directions: &directions,
-            coplanar_edges: &coplanar_edges,
-            region_vertices: &region_vertices,
-            role: request.role,
-            boundary_edges: &boundary.edges,
-            boundary_vertices: &boundary.vertices,
-        },
-        &segments,
-        limits,
-        options,
-    )?;
+    let chain_context = ChainContext {
+        mesh,
+        frame,
+        classifications: &classifications,
+        projection,
+        directions: &directions,
+        coplanar_edges: &coplanar_edges,
+        region_vertices: &region_vertices,
+        role: request.role,
+        boundary_edges: &boundary.edges,
+        boundary_vertices: &boundary.vertices,
+    };
+    let chains = assemble_chains(&chain_context, &segments, limits, options)?;
+    let (cut_regions, cut_pairs) = match request.cut_regions {
+        None => (None, 0),
+        Some(cut_limits) => {
+            let (cut, pairs) = build_cut_regions(
+                &CutInputs {
+                    chains: &chain_context,
+                    segments: &segments,
+                    region_edges: &cut_edges,
+                    region_ring_vertices: &ring_vertices,
+                },
+                cut_limits,
+                options,
+            )?;
+            (Some(cut), pairs)
+        }
+    };
 
     let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
         .with_source_counts(in_plane_triangles, touching_edges, in_plane_pairs)
         .with_role(request.role, boundary.edges.len())
-        .with_output(&chains, &regions);
-    Ok(PlaneSection::new(frame, chains, regions, evidence))
+        .with_output(&chains, &regions)
+        .with_cut_pairs(cut_pairs)
+        .with_cut_output(cut_regions.as_deref().unwrap_or_default());
+    let section = PlaneSection::new(frame, chains, regions, evidence);
+    Ok(match cut_regions {
+        Some(cut) => section.with_cut_regions(cut),
+        None => section,
+    })
 }
 
 /// The boundary of a sheet: edges used by one triangle, and their vertices.

@@ -604,6 +604,14 @@ pub(super) fn canonical_rotation(points: Vec<Point2>) -> Vec<Point2> {
         .unwrap_or(points)
 }
 
+/// The regions of a section and the source vertices their rings keep.
+#[derive(Debug)]
+pub(super) struct Regions {
+    pub(super) regions: Vec<InPlaneRegion>,
+    /// Source vertices that remain on a ring after collinear ones are dropped.
+    pub(super) ring_vertices: BTreeSet<u32>,
+}
+
 /// Regions of the in-plane triangles: one per component, with its holes.
 ///
 /// `protected` vertices (nodes of cut segments) are never simplified away,
@@ -616,18 +624,20 @@ pub(super) fn build_regions(
     protected: &BTreeSet<u32>,
     limits: RegionLimits,
     options: &ExecutionOptions,
-) -> GeomResult<Vec<InPlaneRegion>> {
+) -> GeomResult<Regions> {
     let roots = components(set, options)?;
     let cycles = trace_cycles(set, &roots, options)?;
 
     // Component root to its outer ring and holes, in plane-local points.
     let mut outers = BTreeMap::<usize, Vec<Point2>>::new();
     let mut holes = BTreeMap::<usize, Vec<Vec<Point2>>>::new();
+    let mut ring_vertices = BTreeSet::new();
     for mut cycle in cycles {
         let triangle = set.triangles[cycle.component];
         let facing = triangle.facing;
         let outer = is_outer(mesh, projection, facing, &cycle.vertices)?;
         simplify(mesh, projection, &mut cycle.vertices, protected, options)?;
+        ring_vertices.extend(cycle.vertices.iter().copied());
         let ring = plane_ring(mesh, frame, &cycle.vertices, facing == Sign::Negative)?;
         if outer {
             if outers.insert(cycle.component, ring).is_some() {
@@ -672,7 +682,10 @@ pub(super) fn build_regions(
             .cmp(&right.side)
             .then_with(|| sequence_order(&left.outer, &right.outer))
     });
-    Ok(regions)
+    Ok(Regions {
+        regions,
+        ring_vertices,
+    })
 }
 
 #[cfg(test)]
@@ -720,7 +733,7 @@ mod tests {
         )
     }
 
-    fn regions(protected: &BTreeSet<u32>) -> Vec<InPlaneRegion> {
+    fn built(protected: &BTreeSet<u32>) -> Regions {
         let (mesh, set, frame, projection) = pinched_fan();
         build_regions(
             &mesh,
@@ -732,6 +745,10 @@ mod tests {
             &ExecutionOptions::new(Tolerance::METRE),
         )
         .expect("regions")
+    }
+
+    fn regions(protected: &BTreeSet<u32>) -> Vec<InPlaneRegion> {
+        built(protected).regions
     }
 
     fn ring(points: &[(f64, f64)]) -> Vec<Point2> {
@@ -750,6 +767,13 @@ mod tests {
         assert_eq!(found[0].outer, ring(&[(0.0, 0.0), (1.0, 1.0), (0.0, 2.0)]));
         assert_eq!(found[1].outer, ring(&[(1.0, 1.0), (2.0, 0.0), (2.0, 2.0)]));
         assert!(found.iter().all(|region| region.holes.is_empty()));
+    }
+
+    #[test]
+    fn the_kept_ring_vertices_exclude_the_dropped_collinear_one() {
+        // Vertex 6 is (0,1), the collinear one on the left group.
+        assert!(!built(&BTreeSet::new()).ring_vertices.contains(&6));
+        assert!(built(&BTreeSet::from([6])).ring_vertices.contains(&6));
     }
 
     #[test]

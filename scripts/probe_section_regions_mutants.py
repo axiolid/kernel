@@ -50,9 +50,9 @@ MUTANTS = [
     ),
     (
         'region edge emits a cut segment', Q,
-        '[Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {}',
-        '[Incidence::In, Incidence::Off(..)] | [Incidence::Off(..), Incidence::In] => {\n'
-        '                ' + SEGMENT + '\n            }',
+        '                if region_edge_borders_cut(*facing, *third) {',
+        '                ' + SEGMENT + '\n'
+        '                if region_edge_borders_cut(*facing, *third) {',
         TESTS,
     ),
     (

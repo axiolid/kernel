@@ -15,8 +15,10 @@
 //!   region boundaries and `chains` assembles open and closed chains.
 
 mod chains;
+mod cut_regions;
 mod regions;
 mod request;
+mod ring_nesting;
 
 use std::collections::{BTreeMap, BTreeSet};
 

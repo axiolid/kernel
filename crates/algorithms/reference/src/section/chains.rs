@@ -382,7 +382,7 @@ fn push_chain(
     Ok(())
 }
 
-fn chain_points(
+pub(super) fn chain_points(
     mesh: &TriMesh,
     frame: Frame3,
     classifications: &[Classification],
@@ -394,7 +394,7 @@ fn chain_points(
         .collect()
 }
 
-fn has_adjacent_duplicate(points: &[Point2], ring: bool) -> bool {
+pub(super) fn has_adjacent_duplicate(points: &[Point2], ring: bool) -> bool {
     let pairs = if ring {
         points.len()
     } else {
@@ -433,7 +433,7 @@ fn orient_nodes(ctx: &ChainContext<'_>, nodes: &mut [NodeKey]) -> GeomResult<()>
 
 /// Whether the cut segments on both sides of a node are exactly collinear,
 /// so the node can go without moving the polyline.
-fn is_droppable(
+pub(super) fn is_droppable(
     ctx: &ChainContext<'_>,
     previous: NodeKey,
     node: NodeKey,
