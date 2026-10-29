@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `ScalarSection::section_request` merges the in-plane faces on an exact
+  arrangement instead of refusing overlaps: faces of one side that overlap or
+  only share a boundary segment form one region, and where faces of both
+  sides coincide the region is `InPlaneSide::Both`. It no longer returns
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES` or
+  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES` for a plain request, reports
+  `in_plane_crossings`, and counts segment, coverage and hole pairs in
+  `in_plane_pairs`. A cut request with a `Both` region is still refused
+  (ADR 0093, #366).
+- The request scratch bound is 2560 bytes per element (was 1536).
+
 ## [0.3.14] - 2026-10-29
 
 ### Fixed

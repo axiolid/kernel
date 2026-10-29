@@ -40,7 +40,7 @@ use chains::assemble_contours;
 
 /// Bytes per element declared for a request, and charged by the in-plane
 /// arrangement before it adds crossings (ADR 0088).
-const REQUEST_SCRATCH_PER_ELEMENT: usize = 1536;
+const REQUEST_SCRATCH_PER_ELEMENT: usize = 2560;
 
 /// Portable deterministic mesh plane-section oracle.
 #[derive(Debug, Default, Clone, Copy)]
@@ -76,17 +76,21 @@ impl MeshPlaneSection for ScalarSection {
         // Per element, where an element is a position or a triangle: the
         // legacy bound (512); for a sheet, the edge-use map (3 entries of
         // about 40 bytes with tree overhead, 120) and the boundary edge and
-        // vertex sets (at most 3 and 3 entries of about 24 bytes, 144); for
-        // in-plane triangles, the directed-edge map (3 entries of about 40
-        // bytes, 120), the triangles, boxes and flat copies (about 112), the
-        // sweep order and component roots (16), the boundary set (72) and
-        // the cycle and ring state (about 100). About 1.2 KiB in all,
-        // rounded up to 1536 bytes. Cut regions exist for a solid only, so
-        // their state never coexists with the sheet state (264): the cut
-        // graph (two maps, 2 entries per segment of about 48 bytes, 96), the
-        // traced paths and rings (about 64) and the nesting sweep's edges
-        // and ring bounds (about 96) add about 0.25 KiB to the 0.9 KiB that
-        // remain without the sheet state, which the bound still covers.
+        // vertex sets (at most 3 and 3 entries of about 24 bytes, 144). For
+        // in-plane triangles (a mesh has about half as many vertices as
+        // triangles and one and a half edges per triangle): the exact points
+        // and the arrangement's vertices (about 650 bytes each, 325 per
+        // triangle), the segments and pieces (about 230 and 420 bytes each,
+        // about 975), the boundary half-edges and the cycle state (about
+        // 340), and the triangle boxes and orders (about 80), about 1.7 KiB
+        // in all. Cut regions exist for a solid only, so their state never
+        // coexists with the sheet state (264): the cut graph (two maps, 2
+        // entries per segment of about 48 bytes, 96), the traced paths and
+        // rings (about 64) and the nesting sweep's edges and ring bounds
+        // (about 96) add about 0.25 KiB to the 2.2 KiB (512 + 1720) that remain without
+        // the sheet state, which the bound still covers. Crossing points of
+        // in-plane edges come on top and are charged as they are created
+        // (`arrangement`, ADR 0088). 512 + 264 + 1720 rounds up to 2560 bytes.
         ScratchRequirement::PerElement {
             bytes_per_element: REQUEST_SCRATCH_PER_ELEMENT,
         }

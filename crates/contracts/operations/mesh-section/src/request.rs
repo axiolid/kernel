@@ -70,7 +70,8 @@ pub struct RegionLimits {
     pub max_regions: usize,
     /// Maximum vertices across all output region rings.
     pub max_region_vertices: usize,
-    /// Maximum candidate pairs of in-plane triangles compared for overlap.
+    /// Maximum candidate pairs examined for the in-plane faces: overlap tests
+    /// or merging, and the containment of holes.
     pub max_in_plane_pairs: usize,
 }
 

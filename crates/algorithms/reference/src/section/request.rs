@@ -22,15 +22,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole,
+    InPlaneSide, PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole,
+    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
 };
 
+use super::arrangement::InPlaneArrangement;
 use super::chains::{assemble_chains, ChainContext};
 use super::cut_regions::{build_cut_regions, CutInputs};
 use super::plane_points::PlanePoints;
-use super::regions::{
-    build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection, Regions,
-};
+use super::regions::{build_regions, InPlaneTriangle, Projection, Regions};
 use super::{
     check_source_limits, classify_vertices, insert_segment, internal_topology_error, mesh_index,
     opposite, EdgeKey, ExactSectionPlane, NodeKey, ScalarSection, Segment,
@@ -259,11 +259,11 @@ pub(super) fn plane_section(
         .iter()
         .flat_map(|triangle| triangle.vertices)
         .collect();
-    let set = InPlaneSet::new(in_plane)?;
-    let in_plane_pairs = check_overlaps(
+    let arrangement = InPlaneArrangement::build(
         mesh,
-        projection,
-        &set,
+        &classifications,
+        &in_plane,
+        &mut exact,
         request.region_limits.max_in_plane_pairs,
         options,
     )?;
@@ -278,15 +278,29 @@ pub(super) fn plane_section(
     let Regions {
         regions,
         ring_vertices,
+        both_rings: _,
+        both_pinched: _,
+        pairs: in_plane_pairs,
     } = build_regions(
         mesh,
         frame,
-        projection,
-        &set,
+        &arrangement,
+        &exact,
         &segment_vertices,
         request.region_limits,
         options,
     )?;
+    if request.cut_regions.is_some()
+        && regions
+            .iter()
+            .any(|region| region.side == InPlaneSide::Both)
+    {
+        return Err(GeomError::UnsupportedInput {
+            backend: ScalarSection::ID,
+            operation: Operation::MeshPlaneSection,
+            input: REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+        });
+    }
     let coplanar_edges = coplanar_crossing_edges(mesh, &crossing_thirds)?;
     let chain_context = ChainContext {
         mesh,
@@ -322,6 +336,7 @@ pub(super) fn plane_section(
 
     let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
         .with_source_counts(in_plane_triangles, touching_edges, in_plane_pairs)
+        .with_in_plane_crossings(arrangement.crossings)
         .with_role(request.role, boundary.edges.len())
         .with_output(&chains, &regions)
         .with_cut_pairs(cut_pairs)

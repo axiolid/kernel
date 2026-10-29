@@ -2,9 +2,9 @@
 
 Each mutant breaks one decision of `ScalarSection::section_request`: the side
 of an in-plane face, the dropped-axis orientation, what an edge in the plane
-contributes, the overlap refusals, the fan walk that links boundary edges, the
+contributes, the arrangement's budgets, the half-edge walk that links boundary edges, the
 outer/hole decision, ring orientation and canonical form, or the chain
-normalisation. The sheet mutants break what makes an open mesh
+normalisation. The merge itself (#366) has its own probe. The sheet mutants break what makes an open mesh
 different: what a chain end lies on, the registry's topology check for a
 sheet, the fold test and the orientation of a sheet's closed chain. A mutant
 must turn a test red: the hand-derived cases of `tests/section_request.rs`,
@@ -16,6 +16,7 @@ R = "crates/algorithms/reference/src/section/regions.rs"
 Q = "crates/algorithms/reference/src/section/request.rs"
 D = "crates/execution/dispatch/src/section_request.rs"
 C = "crates/algorithms/reference/src/section/chains.rs"
+A = "crates/algorithms/reference/src/section/arrangement.rs"
 TESTS = [
     ["-p", "axiolid-reference", "--test", "section_request"],
     ["-p", "axiolid-reference", "--test", "section_conformance"],
@@ -45,8 +46,9 @@ MUTANTS = [
         'Ok(sign_times(projected, self.frame_sign))', 'Ok(projected)', TESTS,
     ),
     (
-        'side mapping swapped', R,
-        'if self.facing == Sign::Positive {', 'if self.facing != Sign::Positive {', TESTS,
+        'side mapping swapped', A,
+        'match (facing == Sign::Positive, left, right) {',
+        'match (facing != Sign::Positive, left, right) {', TESTS,
     ),
     (
         'region edge emits a cut segment', Q,
@@ -66,51 +68,23 @@ MUTANTS = [
         '                    touching_edges += 1;', '                    touching_edges += 0;', TESTS,
     ),
     (
-        'overlap check skipped', R,
-        'if interiors_overlap(&flat[i], &flat[j])? {',
-        'if false && interiors_overlap(&flat[i], &flat[j])? {', TESTS,
-    ),
-    (
-        'separating test strict', R,
-        'if orient_sign(p, q, r)? == Sign::Positive {',
-        'if orient_sign(p, q, r)? != Sign::Negative {', TESTS,
-    ),
-    (
-        'overlap refusals swapped', R,
-        'return Err(refuse(if first.facing == second.facing {',
-        'return Err(refuse(if first.facing != second.facing {', TESTS,
-    ),
-    (
-        'pair budget unchecked', R,
-        'if pairs > max_pairs {', 'if false && pairs > max_pairs {', TESTS,
-    ),
-    (
-        'fan walk ignores component', R,
-        'edge = leaving_edge(set, &boundary, edge.1, entering)?;',
-        'let _ = entering;\n'
-        '            edge = *boundary\n'
-        '                .range((edge.1, 0)..)\n'
-        '                .next()\n'
-        '                .ok_or_else(internal_topology_error)?;',
-        TESTS,
+        'pair budget unchecked', A,
+        '    if *pairs > max_pairs {', '    if false && *pairs > max_pairs {', TESTS,
     ),
     (
         'outer and hole swapped', R,
         'Sign::Positive => Ok(true),', 'Sign::Positive => Ok(false),', TESTS,
     ),
     (
-        'Above rings not reversed', R,
-        'facing == Sign::Negative)?;', 'false)?;', TESTS,
-    ),
-    (
         'collinear region vertex kept', R,
-        'if projection.orient(a, b, c)? != Sign::Zero {',
-        'if true || projection.orient(a, b, c)? != Sign::Zero {',
+        'if exact.orient(point(previous), point(vertex), point(next))? != Sign::Zero {',
+        'if true || exact.orient(point(previous), point(vertex), point(next))? != Sign::Zero {',
         TESTS,
     ),
     (
         'cut-segment node simplified away', R,
-        'if protected.contains(&ring[at]) {', 'if false && protected.contains(&ring[at]) {',
+        '        if protected || keep.on_boundary[vertex] != 2 {',
+        '        if keep.on_boundary[vertex] != 2 {',
         TESTS,
     ),
     (
@@ -170,10 +144,6 @@ MUTANTS = [
         'if health.non_manifold_edges > 0 {', TESTS,
     ),
     (
-        'fold pair skipped', R,
-        'if shared >= 2 && first.facing == second.facing {', 'if shared >= 2 {', TESTS,
-    ),
-    (
         'sheet boundary edge in the plane not counted as touching', Q,
         '[Incidence::Off(..)] if sheet => touching_edges += 1,',
         '[Incidence::Off(..)] if sheet => touching_edges += 0,',
@@ -196,8 +166,8 @@ MUTANTS = [
     ),
     (
         'pinched extreme vertex has no fallback order', R,
-        'for order in EXTREME_ORDERS {',
-        'for order in EXTREME_ORDERS.into_iter().take(1) {', TESTS,
+        'for (major, major_up, minor_up) in EXTREME_ORDERS {',
+        'for (major, major_up, minor_up) in EXTREME_ORDERS.into_iter().take(1) {', TESTS,
     ),
 ]
 

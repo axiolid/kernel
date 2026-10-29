@@ -41,6 +41,7 @@ use super::{sequence_order, ScalarSection};
 
 /// A traced ring: its exact points, and the returned coordinates of the same
 /// vertices.
+#[derive(Debug, Clone)]
 pub(super) struct TracedRing {
     pub(super) nodes: Vec<usize>,
     pub(super) points: Vec<Point2>,

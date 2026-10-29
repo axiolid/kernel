@@ -9,7 +9,6 @@ use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
     ChainEnd, CutRegion, CutRegionLimits, InPlaneSide, MeshPlaneSection, PlaneSection,
     RegionLimits, SectionLimits, SectionRequest, SectionRole, REFUSED_CROSSING_CUT_RINGS,
-    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
     REFUSED_SADDLE_VERTEX,
 };
 use axiolid_reference::ScalarSection;
@@ -100,9 +99,11 @@ fn cube_top_in_the_plane_is_one_region_below() {
     );
     assert_eq!(result.evidence.in_plane_triangles, 2);
     assert_eq!(result.evidence.touching_edges, 0);
-    // The two triangles overlap in bounding box: one candidate pair, counted
-    // although they share an edge and need no overlap test.
-    assert_eq!(result.evidence.in_plane_pairs, 1);
+    // Of the five edges (four sides and the diagonal) ten pairs, two of them
+    // apart by their boxes (opposite sides): eight segment pairs. Each side
+    // also meets the triangle that does not carry it: four more.
+    assert_eq!(result.evidence.in_plane_pairs, 8 + 4);
+    assert_eq!(result.evidence.in_plane_crossings, 0);
 }
 
 #[test]
@@ -176,30 +177,54 @@ fn a_plane_above_the_solid_gives_nothing() {
 }
 
 #[test]
-fn overlapping_faces_of_one_side_are_refused_by_name() {
+fn overlapping_faces_of_one_side_merge() {
     // Boxes [0,2] x [0,1] and [1,3] x [0,1], both to z in [0,1]: the tops
-    // overlap in [1,2] x [0,1], both facing +z.
+    // overlap in [1,2] x [0,1], both facing +z. Their union is [0,3] x [0,1];
+    // the diagonals of the two tops cross the other box's edges at x = 1 and
+    // x = 2: two crossings.
     let mesh = shells(&[
         ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
         ((1.0, 3.0), (0.0, 1.0), (0.0, 1.0)),
     ]);
-    assert_unsupported(
-        section(&mesh, horizontal(1.0)),
-        REFUSED_OVERLAPPING_IN_PLANE_FACES,
+    let result = section(&mesh, horizontal(1.0)).expect("merged");
+    assert_eq!(result.regions.len(), 1);
+    assert_eq!(result.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        result.regions[0].outer,
+        ring(&[(0.0, 0.0), (3.0, 0.0), (3.0, 1.0), (0.0, 1.0)])
     );
+    assert!(result.regions[0].holes.is_empty());
+    assert_eq!(result.evidence.in_plane_triangles, 4);
+    assert_eq!(result.evidence.in_plane_crossings, 2);
 }
 
 #[test]
-fn faces_of_opposite_sides_that_overlap_are_refused_by_name() {
-    // A slab top at z = 1 (+z) under the bottom (-z) of a box standing on it.
+fn faces_of_opposite_sides_that_overlap_split_into_below_and_both() {
+    // A slab top at z = 1 (+z) under the bottom (-z) of a box standing on it:
+    // the slab top minus the footprint is Below, with the footprint as a
+    // hole, and the footprint is Both. The footprint's diagonal runs along
+    // the slab's, so nothing crosses.
     let mesh = shells(&[
         ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
         ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
     ]);
-    assert_unsupported(
-        section(&mesh, horizontal(1.0)),
-        REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    let result = section(&mesh, horizontal(1.0)).expect("split");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(result.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        result.regions[0].outer,
+        ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)])
     );
+    assert_eq!(
+        result.regions[0].holes,
+        [ring(&[(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)])]
+    );
+    assert_eq!(result.regions[1].side, InPlaneSide::Both);
+    assert_eq!(
+        result.regions[1].outer,
+        ring(&[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)])
+    );
+    assert_eq!(result.evidence.in_plane_crossings, 0);
 }
 
 #[test]
@@ -543,11 +568,13 @@ fn a_closed_chain_of_a_sheet_is_counter_clockwise_whatever_its_facing() {
 }
 
 #[test]
-fn a_sheet_folded_flat_onto_itself_is_refused_as_faces_of_both_sides() {
+fn a_sheet_folded_flat_onto_itself_splits_into_three_regions() {
     // (0,0) (1,0) (0,1) face +z; the second triangle b -> a (1,0) (0,0)
     // (0.5,1) winds clockwise, so it faces -z and lies on the same side of
-    // the shared edge: the sheet doubles back over itself. The pair shares an
-    // edge and must still be tested.
+    // the shared edge: the sheet doubles back over itself. The edges (0,1)-(1,0)
+    // and (0,0)-(0.5,1) cross at (1/3, 2/3). The first triangle alone is
+    // Below (0,0) (1/3,2/3) (0,1), the second alone is Above (1,0) (0.5,1)
+    // (1/3,2/3), and where they overlap, (0,0) (1,0) (1/3,2/3), is Both.
     let folded = mesh_of(
         &[
             [0.0, 0.0, 0.0],
@@ -557,10 +584,28 @@ fn a_sheet_folded_flat_onto_itself_is_refused_as_faces_of_both_sides() {
         ],
         &[0, 1, 2, 1, 0, 3],
     );
-    assert_unsupported(
-        sheet(&folded, horizontal(0.0)),
-        REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
+    let result = sheet(&folded, horizontal(0.0)).expect("folded sheet");
+    let sides: Vec<_> = result.regions.iter().map(|region| region.side).collect();
+    assert_eq!(
+        sides,
+        [InPlaneSide::Below, InPlaneSide::Above, InPlaneSide::Both]
     );
+    // The crossing is rounded once: the same point in all three rings.
+    let crossing = result.regions[0].outer[1];
+    assert!((crossing.x - 1.0 / 3.0).abs() < 1e-15 && (crossing.y - 2.0 / 3.0).abs() < 1e-15);
+    assert_eq!(
+        result.regions[0].outer,
+        [Point2::new(0.0, 0.0), crossing, Point2::new(0.0, 1.0)]
+    );
+    assert_eq!(
+        result.regions[1].outer,
+        [crossing, Point2::new(1.0, 0.0), Point2::new(0.5, 1.0)]
+    );
+    assert_eq!(
+        result.regions[2].outer,
+        [Point2::new(0.0, 0.0), Point2::new(1.0, 0.0), crossing]
+    );
+    assert_eq!(result.evidence.in_plane_crossings, 1);
 }
 
 #[test]
@@ -898,5 +943,222 @@ fn a_sub_ulp_overlap_in_the_source_is_refused() {
     assert!(
         refused > 0 && accepted > 0,
         "{refused} refused, {accepted} accepted"
+    );
+}
+
+// ---- merging in-plane faces on an exact arrangement (#366) -------------------
+
+/// Concatenate meshes as separate shells.
+fn combine(parts: &[(Vec<Point3>, Vec<u32>)]) -> TriMesh {
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for (part_positions, part_indices) in parts {
+        let offset = u32::try_from(positions.len()).expect("small fixture");
+        positions.extend(part_positions.iter().copied());
+        indices.extend(part_indices.iter().map(|index| index + offset));
+    }
+    TriMesh::new(positions, indices)
+}
+
+/// A prism over a convex counter-clockwise polygon between `z.0` and `z.1`,
+/// its bottom and top fanned from the first vertex.
+fn prism(polygon: &[(f64, f64)], z: Span) -> (Vec<Point3>, Vec<u32>) {
+    let count = u32::try_from(polygon.len()).expect("small fixture");
+    let positions: Vec<Point3> = [z.0, z.1]
+        .into_iter()
+        .flat_map(|z| polygon.iter().map(move |&(x, y)| Point3::new(x, y, z)))
+        .collect();
+    let mut indices = Vec::new();
+    for corner in 1..count - 1 {
+        indices.extend([0, corner + 1, corner]);
+        indices.extend([count, count + corner, count + corner + 1]);
+    }
+    for from in 0..count {
+        let to = (from + 1) % count;
+        indices.extend([from, to, count + to, from, count + to, count + from]);
+    }
+    (positions, indices)
+}
+
+/// `mesh` turned about the vertical by `pi * k / 201` in binary64, as a
+/// consumer's world transform does.
+fn turned_mesh(mesh: &TriMesh, k: u32) -> TriMesh {
+    let (s, c) = (std::f64::consts::PI * f64::from(k) / 201.0).sin_cos();
+    let mut turned = mesh.clone();
+    for position in &mut turned.positions {
+        *position = Point3::new(
+            c * position.x - s * position.y,
+            s * position.x + c * position.y,
+            position.z,
+        );
+    }
+    turned
+}
+
+fn sizes(result: &PlaneSection, side: InPlaneSide) -> Vec<(usize, Vec<usize>)> {
+    result
+        .regions
+        .iter()
+        .filter(|region| region.side == side)
+        .map(|region| {
+            (
+                region.outer.len(),
+                region.holes.iter().map(Vec::len).collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_footprint_inside_one_slab_triangle_is_a_hole_found_by_containment() {
+    // The footprint [1,2] x [2.5,3.5] lies above the slab's diagonal, strictly
+    // inside its triangle (0,0) (4,4) (0,4): no edge of the slab meets it.
+    let mesh = shells(&[
+        ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
+        ((1.0, 2.0), (2.5, 3.5), (1.0, 2.0)),
+    ]);
+    let result = section(&mesh, horizontal(1.0)).expect("section");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(result.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        result.regions[0].holes,
+        [ring(&[(1.0, 2.5), (1.0, 3.5), (2.0, 3.5), (2.0, 2.5)])]
+    );
+    assert_eq!(result.regions[1].side, InPlaneSide::Both);
+    assert_eq!(result.evidence.in_plane_crossings, 0);
+}
+
+#[test]
+fn three_overlapping_tops_and_a_box_on_them_merge() {
+    // Tops A [0,2]^2, B [1,3] x [0,2] and C [0.5,2.5] x [1,3] at z = 1, all
+    // facing +z; the box D [1.5,2] x [0.5,2.5] stands on them. Below is the
+    // union of the tops minus D's footprint; Both is the footprint.
+    let mesh = shells(&[
+        ((0.0, 2.0), (0.0, 2.0), (0.0, 1.0)),
+        ((1.0, 3.0), (0.0, 2.0), (0.0, 1.0)),
+        ((0.5, 2.5), (1.0, 3.0), (0.0, 1.0)),
+        ((1.5, 2.0), (0.5, 2.5), (1.0, 2.0)),
+    ]);
+    let result = section(&mesh, horizontal(1.0)).expect("section");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(result.regions[0].side, InPlaneSide::Below);
+    assert_eq!(
+        result.regions[0].outer,
+        ring(&[
+            (0.0, 0.0),
+            (3.0, 0.0),
+            (3.0, 2.0),
+            (2.5, 2.0),
+            (2.5, 3.0),
+            (0.5, 3.0),
+            (0.5, 2.0),
+            (0.0, 2.0),
+        ])
+    );
+    assert_eq!(
+        result.regions[0].holes,
+        [ring(&[(1.5, 0.5), (1.5, 2.5), (2.0, 2.5), (2.0, 0.5)])]
+    );
+    assert_eq!(result.regions[1].side, InPlaneSide::Both);
+    assert_eq!(
+        result.regions[1].outer,
+        ring(&[(1.5, 0.5), (2.0, 0.5), (2.0, 2.5), (1.5, 2.5)])
+    );
+}
+
+fn diamond_on_a_square() -> TriMesh {
+    // The diamond's bottom is split on y = 1, from (1.25,1) to (2.25,1).
+    let diamond = [(1.25, 1.0), (1.75, 0.5), (2.25, 1.0), (1.75, 1.5)];
+    combine(&[
+        cuboid((0.0, 2.0), (0.0, 2.0), (0.0, 1.0)),
+        prism(&diamond, (1.0, 2.0)),
+    ])
+}
+
+fn assert_diamond(result: &PlaneSection, mirrored: bool, tag: &str) {
+    // Below is the square minus the diamond (9 points), Above the diamond
+    // beyond x = 2 (3 points), Both their overlap (5 points); the edges x = 2
+    // meets the diamond's two edges and its split diagonal: three crossings.
+    // A frame that views the plane from below swaps Below and Above.
+    let (below, above) = if mirrored {
+        (InPlaneSide::Above, InPlaneSide::Below)
+    } else {
+        (InPlaneSide::Below, InPlaneSide::Above)
+    };
+    assert_eq!(sizes(result, below), [(9, vec![])], "{tag}");
+    assert_eq!(sizes(result, above), [(3, vec![])], "{tag}");
+    assert_eq!(sizes(result, InPlaneSide::Both), [(5, vec![])], "{tag}");
+    assert_eq!(result.evidence.in_plane_crossings, 3, "{tag}");
+}
+
+#[test]
+fn a_diamond_across_an_edge_splits_in_every_frame() {
+    let mesh = diamond_on_a_square();
+    for k in 1..=200 {
+        let result = section(&mesh, turned(k, 201, 1.0)).expect("section");
+        assert_diamond(&result, k % 2 == 0, &format!("frame {k}"));
+    }
+}
+
+#[test]
+fn a_diamond_across_an_edge_splits_in_a_rotated_mesh() {
+    let mesh = diamond_on_a_square();
+    for k in 1..=200 {
+        let result = section(&turned_mesh(&mesh, k), horizontal(1.0)).expect("section");
+        assert_diamond(&result, false, &format!("mesh {k}"));
+    }
+}
+
+#[test]
+fn a_box_on_a_slab_in_a_rotated_mesh_keeps_its_hole() {
+    let mesh = shells(&[
+        ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
+        ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
+    ]);
+    for k in 1..=200 {
+        let result = section(&turned_mesh(&mesh, k), horizontal(1.0)).expect("section");
+        assert_eq!(
+            sizes(&result, InPlaneSide::Below),
+            [(4, vec![4])],
+            "mesh {k}"
+        );
+        assert_eq!(sizes(&result, InPlaneSide::Both), [(4, vec![])], "mesh {k}");
+    }
+}
+
+#[test]
+fn a_gap_of_one_ulp_between_two_tops_is_reported_exactly() {
+    // The second top starts one ulp after the first one ends: two regions,
+    // not one, and the output keeps the two different x values.
+    let edge = 1.0_f64.next_up();
+    let mesh = shells(&[
+        ((0.0, 1.0), (0.0, 1.0), (0.0, 1.0)),
+        ((edge, 2.0), (0.0, 1.0), (0.0, 1.0)),
+    ]);
+    let result = section(&mesh, horizontal(1.0)).expect("section");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(result.regions[0].outer[1], Point2::new(1.0, 0.0));
+    assert_eq!(result.regions[1].outer[0], Point2::new(edge, 0.0));
+    assert_eq!(result.evidence.in_plane_crossings, 0);
+}
+
+#[test]
+fn a_collinear_vertex_where_other_boundary_meets_is_kept() {
+    // A top [0,2] x [0,1] (Below) and the bottom of a box [1,2] x [1,2]
+    // (Above) meet along y = 1 from x = 1 to 2. The vertex (1,1) is straight
+    // on the top's boundary, but the box's corner is there too: it stays.
+    let mesh = shells(&[
+        ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
+        ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
+    ]);
+    let result = section(&mesh, horizontal(1.0)).expect("section");
+    assert_eq!(result.regions.len(), 2);
+    assert_eq!(
+        result.regions[0].outer,
+        ring(&[(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (1.0, 1.0), (0.0, 1.0)])
+    );
+    assert_eq!(
+        result.regions[1].outer,
+        ring(&[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)])
     );
 }

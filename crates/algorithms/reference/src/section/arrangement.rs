@@ -202,7 +202,7 @@ fn count_pair(pairs: &mut usize, max_pairs: usize) -> GeomResult<()> {
 }
 
 /// Sort `items` by an exact comparison that can fail.
-fn sort_exact<T: Copy>(
+pub(super) fn sort_exact<T: Copy>(
     items: &mut [T],
     mut compare: impl FnMut(T, T) -> GeomResult<std::cmp::Ordering>,
 ) -> GeomResult<()> {
@@ -716,32 +716,7 @@ fn coverage(
         order
     };
     let (piece_order, triangle_order) = (by_min_u(&piece_boxes), by_min_u(&triangle_boxes));
-    let mut candidates = Vec::new();
-    // Triangles that start inside the span of a piece, then pieces that start
-    // strictly inside the span of a triangle.
-    for &piece in &piece_order {
-        options.check_cancelled()?;
-        let start =
-            triangle_order.partition_point(|&t| triangle_boxes[t][0] < piece_boxes[piece][0]);
-        for &triangle in &triangle_order[start..] {
-            if triangle_boxes[triangle][0] > piece_boxes[piece][2] {
-                break;
-            }
-            candidates.push((piece, triangle));
-        }
-    }
-    for &triangle in &triangle_order {
-        options.check_cancelled()?;
-        let start =
-            piece_order.partition_point(|&p| piece_boxes[p][0] <= triangle_boxes[triangle][0]);
-        for &piece in &piece_order[start..] {
-            if piece_boxes[piece][0] > triangle_boxes[triangle][2] {
-                break;
-            }
-            candidates.push((piece, triangle));
-        }
-    }
-    for (piece, triangle) in candidates {
+    let mut consider = |piece: usize, triangle: usize| -> GeomResult<()> {
         options.check_cancelled()?;
         if piece_boxes[piece][1] > triangle_boxes[triangle][3]
             || triangle_boxes[triangle][1] > piece_boxes[piece][3]
@@ -749,7 +724,7 @@ fn coverage(
                 .iter()
                 .any(|&(carrier, _)| carrier == triangle)
         {
-            continue;
+            return Ok(());
         }
         count_pair(pairs, max_pairs)?;
         let (from, to) = (
@@ -766,6 +741,29 @@ fn coverage(
         };
         if contains_piece(exact, &ring, from, to)? {
             cover(piece, true, true, facing);
+        }
+        Ok(())
+    };
+    // Triangles that start inside the span of a piece, then pieces that start
+    // strictly inside the span of a triangle.
+    for &piece in &piece_order {
+        let start =
+            triangle_order.partition_point(|&t| triangle_boxes[t][0] < piece_boxes[piece][0]);
+        for &triangle in &triangle_order[start..] {
+            if triangle_boxes[triangle][0] > piece_boxes[piece][2] {
+                break;
+            }
+            consider(piece, triangle)?;
+        }
+    }
+    for &triangle in &triangle_order {
+        let start =
+            piece_order.partition_point(|&p| piece_boxes[p][0] <= triangle_boxes[triangle][0]);
+        for &piece in &piece_order[start..] {
+            if piece_boxes[piece][0] > triangle_boxes[triangle][2] {
+                break;
+            }
+            consider(piece, triangle)?;
         }
     }
     Ok(covered)

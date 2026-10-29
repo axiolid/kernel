@@ -750,7 +750,8 @@ pub(crate) fn cases() -> Vec<Case> {
                     vec![region(Below, square(0.0, 0.0, 3.0, 1.0), vec![])],
                     4,
                     0,
-                ),
+                )
+                .crossings(2),
             ),
         },
         // Cut regions (ADR 0092). The L-step is the profile (0,0) (2,0) (2,1)
