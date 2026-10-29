@@ -64,3 +64,94 @@ fn a_provider_without_sheets_passes_and_reports_it() {
     let full = RegionConformanceSuite::run(&ScalarSection);
     assert!(full.sheets_claimed);
 }
+
+/// The reference provider with a hook on the answer to a cut-region request.
+#[derive(Debug)]
+struct CutHook {
+    hook: fn(
+        axiolid_contracts::GeomResult<axiolid_mesh_section_contract::PlaneSection>,
+    ) -> axiolid_contracts::GeomResult<axiolid_mesh_section_contract::PlaneSection>,
+}
+
+impl axiolid_contracts::Backend for CutHook {
+    fn descriptor(&self) -> axiolid_contracts::BackendDescriptor {
+        ScalarSection.descriptor()
+    }
+}
+
+impl MeshPlaneSection for CutHook {
+    fn section(
+        &self,
+        mesh: &axiolid_mesh::TriMesh,
+        frame: axiolid_core::Frame3,
+        limits: axiolid_mesh_section_contract::SectionLimits,
+        options: &axiolid_contracts::ExecutionOptions,
+    ) -> axiolid_contracts::GeomResult<axiolid_mesh_section_contract::SectionOutcome> {
+        ScalarSection.section(mesh, frame, limits, options)
+    }
+
+    fn section_request(
+        &self,
+        mesh: &axiolid_mesh::TriMesh,
+        request: &axiolid_mesh_section_contract::SectionRequest,
+        options: &axiolid_contracts::ExecutionOptions,
+    ) -> axiolid_contracts::GeomResult<axiolid_mesh_section_contract::PlaneSection> {
+        let answer = ScalarSection.section_request(mesh, request, options);
+        if request.cut_regions.is_some() {
+            (self.hook)(answer)
+        } else {
+            answer
+        }
+    }
+}
+
+#[test]
+fn the_reference_provider_claims_cut_regions() {
+    let report = RegionConformanceSuite::run(&ScalarSection);
+    assert!(
+        report.cut_regions_claimed && report.is_success(),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_provider_that_refuses_cut_regions_passes_and_reports_it() {
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |_| {
+            Err(axiolid_contracts::GeomError::Unsupported {
+                backend: ScalarSection::ID,
+                operation: axiolid_contracts::Operation::MeshPlaneSection,
+            })
+        },
+    });
+    assert!(report.claimed && report.is_success(), "{report}");
+    assert!(!report.cut_regions_claimed);
+}
+
+#[test]
+fn a_provider_that_drops_the_cut_regions_fails() {
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |answer| {
+            answer.map(|mut section| {
+                section.cut_regions = None;
+                section
+            })
+        },
+    });
+    assert!(report.cut_regions_claimed && !report.is_success());
+}
+
+#[test]
+fn a_provider_that_reverses_a_cut_ring_fails() {
+    let report = RegionConformanceSuite::run(&CutHook {
+        hook: |answer| {
+            answer.map(|mut section| {
+                if let Some(region) = section.cut_regions.as_mut().and_then(|cut| cut.first_mut()) {
+                    region.outer.reverse();
+                }
+                section
+            })
+        },
+    });
+    assert!(!report.is_success());
+}

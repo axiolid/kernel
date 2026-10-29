@@ -11,6 +11,7 @@
 use axiolid_core::{Frame3, Point2, Point3, Vec3};
 use axiolid_mesh::TriMesh;
 
+use crate::cut::CutRegion;
 use crate::request::{
     ChainEnd, InPlaneRegion, InPlaneSide, SectionChain, SectionRole,
     REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
@@ -36,6 +37,17 @@ pub(crate) struct Output {
     pub touching_edges: usize,
 }
 
+/// What a cut-region request must produce.
+pub(crate) enum Cut {
+    /// These cut regions; the output otherwise equals the plain request's,
+    /// which may be a refusal the cut request must repeat.
+    Regions(Vec<CutRegion>),
+    /// Only this refusal.
+    Refused(&'static str),
+    /// `GeomError::InvalidInput`: a sheet has no cut.
+    Invalid,
+}
+
 /// One named fixture.
 pub(crate) struct Case {
     pub name: &'static str,
@@ -45,6 +57,8 @@ pub(crate) struct Case {
     /// Mesh edges used by one triangle only, counted by hand; zero for a solid.
     pub boundary_edges: usize,
     pub expected: Expected,
+    /// What the same request must return with cut regions.
+    pub cut: Cut,
 }
 
 fn h(z: f64) -> Frame3 {
@@ -154,31 +168,121 @@ fn boxes(parts: &[(Span, Span, Span)]) -> TriMesh {
     b.finish()
 }
 
-/// Square annulus prism: outer `[0,3]^2`, inner `[1,2]^2`, `z` in `[0,1]`.
+/// Square annulus prism: outer `[o0,o1]^2`, inner `[i0,i1]^2`, `z` in `[z0,z1]`.
 ///
 /// 16 vertices and 32 triangles (8 per annulus face, 8 per wall ring): with
 /// 48 edges `V - E + F = 0`, a torus.
-fn frame_prism() -> TriMesh {
-    let outer = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)];
-    let inner = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)];
+fn add_annulus_prism(b: &mut Builder, (o0, o1): Span, (i0, i1): Span, (z0, z1): Span) {
+    let outer = [(o0, o0), (o1, o0), (o1, o1), (o0, o1)];
+    let inner = [(i0, i0), (i1, i0), (i1, i1), (i0, i1)];
     let at = |(x, y): (f64, f64), z: f64| [x, y, z];
-    let mut b = Builder::default();
     for k in 0..4 {
         let n = (k + 1) % 4;
         // Top annulus, normal +z: one trapezoid per side, split on o_k - i_n.
-        b.tri([at(outer[k], 1.0), at(outer[n], 1.0), at(inner[n], 1.0)]);
-        b.tri([at(outer[k], 1.0), at(inner[n], 1.0), at(inner[k], 1.0)]);
+        b.tri([at(outer[k], z1), at(outer[n], z1), at(inner[n], z1)]);
+        b.tri([at(outer[k], z1), at(inner[n], z1), at(inner[k], z1)]);
         // Bottom annulus, normal -z: the same triangles reversed.
-        b.tri([at(outer[k], 0.0), at(inner[n], 0.0), at(outer[n], 0.0)]);
-        b.tri([at(outer[k], 0.0), at(inner[k], 0.0), at(inner[n], 0.0)]);
+        b.tri([at(outer[k], z0), at(inner[n], z0), at(outer[n], z0)]);
+        b.tri([at(outer[k], z0), at(inner[k], z0), at(inner[n], z0)]);
         // Outer wall faces away from the axis.
-        b.tri([at(outer[k], 0.0), at(outer[n], 0.0), at(outer[n], 1.0)]);
-        b.tri([at(outer[k], 0.0), at(outer[n], 1.0), at(outer[k], 1.0)]);
+        b.tri([at(outer[k], z0), at(outer[n], z0), at(outer[n], z1)]);
+        b.tri([at(outer[k], z0), at(outer[n], z1), at(outer[k], z1)]);
         // Inner wall faces into the hole.
-        b.tri([at(inner[k], 0.0), at(inner[n], 1.0), at(inner[n], 0.0)]);
-        b.tri([at(inner[k], 0.0), at(inner[k], 1.0), at(inner[n], 1.0)]);
+        b.tri([at(inner[k], z0), at(inner[n], z1), at(inner[n], z0)]);
+        b.tri([at(inner[k], z0), at(inner[k], z1), at(inner[n], z1)]);
+    }
+}
+
+/// Square annulus prism: outer `[0,3]^2`, inner `[1,2]^2`, `z` in `[0,1]`.
+fn frame_prism() -> TriMesh {
+    let mut b = Builder::default();
+    add_annulus_prism(&mut b, (0.0, 3.0), (1.0, 2.0), (0.0, 1.0));
+    b.finish()
+}
+
+/// Two nested tubes: `[0,7]^2` minus `[1,6]^2` and `[2,5]^2` minus `[3,4]^2`,
+/// `z` in `[0,1]`. The second tube stands in the hole of the first without
+/// touching it.
+fn nested_tubes() -> TriMesh {
+    let mut b = Builder::default();
+    add_annulus_prism(&mut b, (0.0, 7.0), (1.0, 6.0), (0.0, 1.0));
+    add_annulus_prism(&mut b, (2.0, 5.0), (3.0, 4.0), (0.0, 1.0));
+    b.finish()
+}
+
+/// A prism over a profile in `(x, z)`, extruded over `y`. `profile` is
+/// counter-clockwise in `(x, z)` and `triangles` triangulates it. The front
+/// (`y` smallest) copy keeps the profile's winding, which faces `-y`; the
+/// back copy is reversed; each profile edge `p -> q` becomes the outward side
+/// quad `p@y0, p@y1, q@y1, q@y0`. With `n` profile vertices and `t`
+/// triangles: `2n` vertices, `2t + 2n` triangles, `3t + 3n` edges.
+fn extruded_profile(profile: &[(f64, f64)], triangles: &[[usize; 3]], (y0, y1): Span) -> TriMesh {
+    let at = |index: usize, y: f64| [profile[index].0, y, profile[index].1];
+    let mut b = Builder::default();
+    for &[p, q, r] in triangles {
+        b.tri([at(p, y0), at(q, y0), at(r, y0)]);
+        b.tri([at(p, y1), at(r, y1), at(q, y1)]);
+    }
+    for from in 0..profile.len() {
+        let to = (from + 1) % profile.len();
+        b.quad([at(from, y0), at(from, y1), at(to, y1), at(to, y0)]);
     }
     b.finish()
+}
+
+/// A block `[0,3]^2 x [0,2]` with a pocket `[1,2]^2` from `z = 2` down to
+/// `z = 1`: 16 vertices (8 block corners, 4 pocket rim, 4 pocket floor) and
+/// 28 triangles (8 block walls, 2 bottom, 8 top annulus, 8 pocket walls, 2
+/// floor); `V - E + F = 16 - 42 + 28 = 2`.
+fn pocket_block() -> TriMesh {
+    let (all, deep) = ((0.0, 3.0), (0.0, 2.0));
+    let (pocket, wall) = ((1.0, 2.0), (1.0, 2.0));
+    let mut b = Builder::default();
+    y_minus(&mut b, 0.0, all, deep);
+    y_plus(&mut b, 3.0, all, deep);
+    x_minus(&mut b, 0.0, all, deep);
+    x_plus(&mut b, 3.0, all, deep);
+    z_minus(&mut b, 0.0, all, all);
+    // Top annulus at z = 2, normal +z, around the pocket opening.
+    let outer = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)];
+    let inner = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)];
+    let at = |(x, y): (f64, f64)| [x, y, 2.0];
+    for k in 0..4 {
+        let n = (k + 1) % 4;
+        b.tri([at(outer[k]), at(outer[n]), at(inner[n])]);
+        b.tri([at(outer[k]), at(inner[n]), at(inner[k])]);
+    }
+    // Pocket walls face into the pocket; the floor faces up.
+    x_plus(&mut b, 1.0, pocket, wall);
+    x_minus(&mut b, 2.0, pocket, wall);
+    y_plus(&mut b, 1.0, pocket, wall);
+    y_minus(&mut b, 2.0, pocket, wall);
+    z_plus(&mut b, 1.0, pocket, pocket);
+    b.finish()
+}
+
+/// The two chains around the piers of the wall fixtures.
+fn pier_chains() -> Vec<SectionChain> {
+    let open = |points: &[(f64, f64)]| {
+        SectionChain::open(
+            ring(points),
+            ChainEnd::InPlaneRegion,
+            ChainEnd::InPlaneRegion,
+        )
+    };
+    vec![
+        open(&[(1.0, 0.0), (0.0, 0.0), (0.0, 0.25), (1.0, 0.25)]),
+        open(&[(2.0, 0.0), (3.0, 0.0), (3.0, 0.25), (2.0, 0.25)]),
+    ]
+}
+
+/// The two piers of the wall fixtures as cut regions.
+fn pier_cuts() -> Vec<CutRegion> {
+    let pier = |x0: f64, x1: f64| ring(&[(x0, 0.0), (x1, 0.0), (x1, 0.25), (x0, 0.25)]);
+    vec![
+        CutRegion::new(pier(0.0, 1.0), vec![]),
+        CutRegion::new(pier(2.0, 3.0), vec![]),
+    ]
 }
 
 /// A parapet `[0,3] x [0,0.1] x [0,1]` with a post `[1,1.1] x [0,0.1]`
@@ -385,6 +489,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "cube through its top face",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: crate::conformance::unit_cube(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -399,6 +504,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "cube through its bottom face",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: crate::conformance::unit_cube(),
             frame: h(0.0),
             expected: Expected::Output(output(
@@ -415,6 +521,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "frame top with a hole",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: frame_prism(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -440,6 +547,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "parapet with a post",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(square(1.0, 0.0, 1.1, 0.1), vec![])]),
             mesh: parapet_with_post(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -474,6 +582,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "parapet with a post seen from behind",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(square(-1.1, 0.0, -1.0, 0.1), vec![])]),
             mesh: parapet_with_post(),
             frame: Frame3 {
                 origin: Point3::new(0.0, 0.0, 1.0),
@@ -514,6 +623,10 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "slab with a post touching its corner",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![CutRegion::new(
+                ring(&[(0.0, 0.0), (2.0, 1.0), (1.0, 2.0)]),
+                vec![],
+            )]),
             mesh: slab_with_corner_post(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -542,6 +655,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "prism touching along an edge",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: prism(),
             frame: h(0.0),
             expected: Expected::Output(output(vec![], vec![], 0, 1)),
@@ -552,6 +666,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "prism top",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: prism(),
             frame: h(1.0),
             expected: Expected::Output(output(
@@ -567,6 +682,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "point touch",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: octahedron(),
             frame: h(1.0),
             expected: Expected::Output(output(vec![], vec![], 0, 0)),
@@ -580,6 +696,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "box on a slab",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Refused(REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES),
             mesh: boxes(&[
                 ((0.0, 4.0), (0.0, 4.0), (0.0, 1.0)),
                 ((1.0, 2.0), (1.0, 2.0), (1.0, 2.0)),
@@ -609,6 +726,7 @@ pub(crate) fn cases() -> Vec<Case> {
             name: "overlapping boxes",
             role: SectionRole::Solid,
             boundary_edges: 0,
+            cut: Cut::Regions(vec![]),
             mesh: boxes(&[
                 ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
                 ((1.0, 3.0), (0.0, 1.0), (0.0, 1.0)),
@@ -624,6 +742,242 @@ pub(crate) fn cases() -> Vec<Case> {
                 ),
             ),
         },
+        // Cut regions (ADR 0092). The L-step is the profile (0,0) (2,0) (2,1)
+        // (1,1) (1,2) (0,2) in (x, z), extruded over y in [0,1]: a column
+        // x in [0,1] up to z = 2 beside a ledge x in [1,2] topped at z = 1.
+        // At z = 1 the ledge top faces +z: a Below region [1,2] x [0,1], two
+        // triangles. The column is cut: its front and back faces cross the
+        // plane along y = 0 and y = 1 (the mid-face crossing on the diagonal
+        // is collinear and goes), and its wall x = 0 crosses at x = 0. One
+        // open chain (1,0) (0,0) (0,1) (1,1) runs from the region's corner
+        // (1,0) to its corner (1,1). The ledge's jamb x = 1 rises from the
+        // region edge (1,0)-(1,1), away from the material below, so the cut
+        // lies across that edge: the cut ring is the chain closed along it,
+        // [0,1] x [0,1], counter-clockwise from (0,0).
+        Case {
+            name: "L-step through a ledge top",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: extruded_profile(
+                &[
+                    (0.0, 0.0),
+                    (2.0, 0.0),
+                    (2.0, 1.0),
+                    (1.0, 1.0),
+                    (1.0, 2.0),
+                    (0.0, 2.0),
+                ],
+                &[[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]],
+                (0.0, 1.0),
+            ),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![SectionChain::open(
+                    ring(&[(1.0, 0.0), (0.0, 0.0), (0.0, 1.0), (1.0, 1.0)]),
+                    ChainEnd::InPlaneRegion,
+                    ChainEnd::InPlaneRegion,
+                )],
+                vec![region(Below, square(1.0, 0.0, 2.0, 1.0), vec![])],
+                2,
+                0,
+            )),
+            cut: Cut::Regions(vec![CutRegion::new(unit_square(), vec![])]),
+        },
+        // A wall of thickness 0.25 (y in [0,0.25]) with a sill: the U profile
+        // (0,0) (3,0) (3,2) (2,2) (2,1) (1,1) (1,2) (0,2) in (x, z). At z = 1
+        // the sill top between the piers faces +z: a Below region
+        // [1,2] x [0,0.25]. Each pier is cut across: the chains (1,0) (0,0)
+        // (0,0.25) (1,0.25) and (2,0) (3,0) (3,0.25) (2,0.25). The jambs x = 1
+        // and x = 2 rise from the region edges, so the cuts are the two piers
+        // [0,1] x [0,0.25] and [2,3] x [0,0.25]; the region lies between them.
+        Case {
+            name: "wall at a sill",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: extruded_profile(
+                &[
+                    (0.0, 0.0),
+                    (3.0, 0.0),
+                    (3.0, 2.0),
+                    (2.0, 2.0),
+                    (2.0, 1.0),
+                    (1.0, 1.0),
+                    (1.0, 2.0),
+                    (0.0, 2.0),
+                ],
+                &[
+                    [0, 1, 4],
+                    [1, 2, 3],
+                    [1, 3, 4],
+                    [0, 4, 5],
+                    [0, 5, 6],
+                    [0, 6, 7],
+                ],
+                (0.0, 0.25),
+            ),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                pier_chains(),
+                vec![region(Below, square(1.0, 0.0, 2.0, 0.25), vec![])],
+                2,
+                0,
+            )),
+            cut: Cut::Regions(pier_cuts()),
+        },
+        // The same wall with a door: the profile (0,0) (1,0) (1,1) (2,1)
+        // (2,0) (3,0) (3,2) (0,2). At z = 1 the lintel underside between the
+        // jambs faces -z: an Above region [1,2] x [0,0.25]. The jambs fall
+        // from its edges, so the chains and the cut piers are those of the
+        // sill.
+        Case {
+            name: "wall at a head",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: extruded_profile(
+                &[
+                    (0.0, 0.0),
+                    (1.0, 0.0),
+                    (1.0, 1.0),
+                    (2.0, 1.0),
+                    (2.0, 0.0),
+                    (3.0, 0.0),
+                    (3.0, 2.0),
+                    (0.0, 2.0),
+                ],
+                &[
+                    [0, 1, 2],
+                    [0, 2, 7],
+                    [2, 3, 7],
+                    [3, 6, 7],
+                    [3, 4, 5],
+                    [3, 5, 6],
+                ],
+                (0.0, 0.25),
+            ),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                pier_chains(),
+                vec![region(Above, square(1.0, 0.0, 2.0, 0.25), vec![])],
+                2,
+                0,
+            )),
+            cut: Cut::Regions(pier_cuts()),
+        },
+        // A stepped slab: the profile (0,0) (3,0) (3,0.5) (5,0.5) (5,1) (2,1)
+        // (2,0.5) (0,0.5), y in [0,1], cut at z = 0.5. The lower part's top
+        // [0,2] x [0,1] faces +z (Below, two triangles) and the upper part's
+        // underside [3,5] x [0,1] faces -z (Above, two). Between them, x in
+        // [2,3], the slab is solid across the plane: the cut. Its front and
+        // back faces hold the mesh edge (2,0.5)-(3,0.5) in the plane between
+        // a triangle below and one above: the chains (2,0) (3,0) and
+        // (2,1) (3,1), each from one region to the other. The riser x = 2
+        // rises from the Below edge and the riser x = 3 falls from the Above
+        // edge, so both bound the cut [2,3] x [0,1].
+        Case {
+            name: "stepped slab",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: extruded_profile(
+                &[
+                    (0.0, 0.0),
+                    (3.0, 0.0),
+                    (3.0, 0.5),
+                    (5.0, 0.5),
+                    (5.0, 1.0),
+                    (2.0, 1.0),
+                    (2.0, 0.5),
+                    (0.0, 0.5),
+                ],
+                &[
+                    [0, 1, 2],
+                    [0, 2, 6],
+                    [0, 6, 7],
+                    [2, 3, 4],
+                    [2, 4, 5],
+                    [2, 5, 6],
+                ],
+                (0.0, 1.0),
+            ),
+            frame: h(0.5),
+            expected: Expected::Output(output(
+                vec![
+                    SectionChain::open(
+                        ring(&[(2.0, 0.0), (3.0, 0.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                    SectionChain::open(
+                        ring(&[(2.0, 1.0), (3.0, 1.0)]),
+                        ChainEnd::InPlaneRegion,
+                        ChainEnd::InPlaneRegion,
+                    ),
+                ],
+                vec![
+                    region(Below, square(0.0, 0.0, 2.0, 1.0), vec![]),
+                    region(Above, square(3.0, 0.0, 5.0, 1.0), vec![]),
+                ],
+                4,
+                0,
+            )),
+            cut: Cut::Regions(vec![CutRegion::new(square(2.0, 0.0, 3.0, 1.0), vec![])]),
+        },
+        // A block [0,3]^2 x [0,2] with a pocket [1,2]^2 from z = 2 down to
+        // z = 1 (16 vertices, 28 triangles). At z = 1 the pocket floor faces
+        // +z: a Below region [1,2]^2, two triangles. The block's walls cross
+        // the plane along the closed chain [0,3]^2. The pocket walls rise
+        // from the floor edges, so the cut is the square with the floor as a
+        // hole, clockwise from (1,1).
+        Case {
+            name: "pocket floor",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: pocket_block(),
+            frame: h(1.0),
+            expected: Expected::Output(output(
+                vec![SectionChain::closed(square(0.0, 0.0, 3.0, 3.0))],
+                vec![region(Below, square(1.0, 1.0, 2.0, 2.0), vec![])],
+                2,
+                0,
+            )),
+            cut: Cut::Regions(vec![CutRegion::new(
+                square(0.0, 0.0, 3.0, 3.0),
+                vec![ring(&[(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)])],
+            )]),
+        },
+        // Two nested tubes, annulus prisms [0,7]^2 minus [1,6]^2 and
+        // [2,5]^2 minus [3,4]^2, z in [0,1], cut at z = 0.5. Four closed
+        // chains: the outer walls run counter-clockwise and the inner walls
+        // clockwise, keeping the material on the left. The cut is two
+        // regions, each a ring with a hole; the inner tube lies in the hole
+        // of the outer one.
+        Case {
+            name: "nested tubes",
+            role: SectionRole::Solid,
+            boundary_edges: 0,
+            mesh: nested_tubes(),
+            frame: h(0.5),
+            expected: Expected::Output(output(
+                vec![
+                    SectionChain::closed(square(0.0, 0.0, 7.0, 7.0)),
+                    SectionChain::closed(ring(&[(1.0, 1.0), (1.0, 6.0), (6.0, 6.0), (6.0, 1.0)])),
+                    SectionChain::closed(square(2.0, 2.0, 5.0, 5.0)),
+                    SectionChain::closed(ring(&[(3.0, 3.0), (3.0, 4.0), (4.0, 4.0), (4.0, 3.0)])),
+                ],
+                vec![],
+                0,
+                0,
+            )),
+            cut: Cut::Regions(vec![
+                CutRegion::new(
+                    square(0.0, 0.0, 7.0, 7.0),
+                    vec![ring(&[(1.0, 1.0), (1.0, 6.0), (6.0, 6.0), (6.0, 1.0)])],
+                ),
+                CutRegion::new(
+                    square(2.0, 2.0, 5.0, 5.0),
+                    vec![ring(&[(3.0, 3.0), (3.0, 4.0), (4.0, 4.0), (4.0, 3.0)])],
+                ),
+            ]),
+        },
         // Sheets (open meshes). Terrain on the plane x = 0.5 (local (x, y) =
         // model (y, z)): only cell column i = 0 is cut. Its edges crossing
         // x = 0.5 are v00-v10 at (y, z) = (0, 1), the diagonal v00-v11 at
@@ -638,6 +992,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: terrain(),
             frame: plane_x(0.5),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 8,
             expected: Expected::Output(output(
                 vec![SectionChain::open(
@@ -663,6 +1018,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: terrain(),
             frame: plane_x(1.0),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 8,
             expected: Expected::Output(output(
                 vec![SectionChain::open(
@@ -683,6 +1039,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: square_sheet(false),
             frame: h(0.0),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 4,
             expected: Expected::Output(output(
                 vec![],
@@ -702,6 +1059,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: square_sheet(true),
             frame: h(0.0),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 4,
             expected: Expected::Output(output(
                 vec![],
@@ -723,6 +1081,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: annulus_sheet(),
             frame: h(0.0),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 8,
             expected: Expected::Output(output(
                 vec![],
@@ -743,6 +1102,7 @@ pub(crate) fn cases() -> Vec<Case> {
             mesh: saddle_sheet(),
             frame: h(0.0),
             role: SectionRole::Sheet,
+            cut: Cut::Invalid,
             boundary_edges: 4,
             expected: Expected::Refused(REFUSED_SADDLE_VERTEX),
         },

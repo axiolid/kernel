@@ -7,6 +7,13 @@
 //! faces, and sheets (terrain, a sheet in the plane, an annulus, a saddle). A provider whose first case returns `Unsupported` does not claim
 //! the method: the report passes with `claimed == false`. Every case runs
 //! twice and the results must be identical.
+//!
+//! Every case runs a second time with cut regions requested (ADR 0092). A
+//! provider whose first such request returns `Unsupported` does not claim
+//! them (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
+//! the answer must equal the plain one, plus the fixture's cut regions and
+//! the cut evidence; a plain refusal must be repeated; a sheet is invalid
+//! input; and the cut rings must cover the chains bit for bit.
 
 use core::fmt;
 
@@ -14,7 +21,8 @@ use axiolid_contracts::{ExecutionOptions, GeomError, Operation};
 use axiolid_core::{Point2, Tolerance};
 
 use crate::conformance::{ConformanceFailure, ConformanceSuite};
-use crate::fixtures::{cases, Case, Expected, Output};
+use crate::cut::{CutRegion, CutRegionLimits};
+use crate::fixtures::{cases, Case, Cut, Expected, Output};
 use crate::request::{
     ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, RegionLimits, SectionChain,
     SectionRequest, SectionRole,
@@ -61,6 +69,11 @@ pub enum RegionConformanceFailure {
         /// What happened instead.
         actual: String,
     },
+    /// The cut regions, or the answer around them, differ from the fixture's.
+    WrongCutRegions {
+        /// Fixture name.
+        case: &'static str,
+    },
     /// Two runs of one case differ.
     NonDeterministic {
         /// Fixture name.
@@ -81,6 +94,10 @@ pub struct RegionConformanceReport {
     /// `false`, the first sheet case returned `Unsupported` and the sheet
     /// cases were skipped; the report can still pass.
     pub sheets_claimed: bool,
+    /// Whether the provider also traces cut regions. When `false`, the first
+    /// cut-region request returned `Unsupported` and the cut checks were
+    /// skipped; the report can still pass.
+    pub cut_regions_claimed: bool,
 }
 
 impl RegionConformanceReport {
@@ -100,7 +117,12 @@ impl fmt::Display for RegionConformanceReport {
             } else {
                 " (sheets not claimed)"
             };
-            write!(f, "conformant{sheets}")
+            let cuts = if self.cut_regions_claimed {
+                ""
+            } else {
+                " (cut regions not claimed)"
+            };
+            write!(f, "conformant{sheets}{cuts}")
         } else {
             write!(f, "{:?}", self.failures)
         }
@@ -117,10 +139,13 @@ impl RegionConformanceSuite {
             failures: Vec::new(),
             claimed: true,
             sheets_claimed: true,
+            cut_regions_claimed: true,
         };
         let mut seen_sheet = false;
         let limits = SectionLimits::new(4096, 8192, 16384, 64);
         let region_limits = RegionLimits::new(64, 4096, 1 << 20);
+        let cut_limits = CutRegionLimits::new(64, 4096, 1 << 20);
+        let mut seen_solid = false;
         let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("valid tolerance"));
         for (index, case) in cases().iter().enumerate() {
             if case.role == SectionRole::Sheet && !report.sheets_claimed {
@@ -142,7 +167,23 @@ impl RegionConformanceSuite {
                 return report;
             }
             let second = provider.section_request(&case.mesh, &request, &options);
+            let plain = first.clone();
             check_case(case, first, second, &mut report);
+            if !report.cut_regions_claimed {
+                continue;
+            }
+            let cut_request = request.with_cut_regions(cut_limits);
+            let first = provider.section_request(&case.mesh, &cut_request, &options);
+            if case.role == SectionRole::Solid
+                && !seen_solid
+                && matches!(first, Err(GeomError::Unsupported { .. }))
+            {
+                report.cut_regions_claimed = false;
+                continue;
+            }
+            seen_solid |= case.role == SectionRole::Solid;
+            let second = provider.section_request(&case.mesh, &cut_request, &options);
+            check_cut_case(case, &plain, first, second, &mut report);
         }
         for failure in ConformanceSuite::run(provider).failures {
             report
@@ -204,6 +245,158 @@ fn check_case(
                 });
         }
     }
+}
+
+/// Check the answer to a cut-region request against the plain answer.
+fn check_cut_case(
+    case: &Case,
+    plain: &Result<PlaneSection, GeomError>,
+    first: Result<PlaneSection, GeomError>,
+    second: Result<PlaneSection, GeomError>,
+    report: &mut RegionConformanceReport,
+) {
+    let name = case.name;
+    let wrong = RegionConformanceFailure::WrongCutRegions { case: name };
+    let stable = match (&first, &second) {
+        (Ok(a), Ok(b)) => a == b,
+        (Err(a), Err(b)) => a.to_string() == b.to_string(),
+        _ => false,
+    };
+    if !stable {
+        report
+            .failures
+            .push(RegionConformanceFailure::NonDeterministic { case: name });
+    }
+    match (&case.cut, first) {
+        (Cut::Invalid, Err(GeomError::InvalidInput(_))) => {}
+        (Cut::Refused(family), Err(error)) if is_refusal(&error, family) => {}
+        (Cut::Regions(_), Err(error)) if plain.as_ref().is_err_and(|p| same_error(p, &error)) => {}
+        (Cut::Refused(family), Err(error)) => {
+            report
+                .failures
+                .push(RegionConformanceFailure::WrongRefusal {
+                    case: name,
+                    expected: family,
+                    actual: error.to_string(),
+                });
+        }
+        (_, Err(error)) => {
+            report
+                .failures
+                .push(RegionConformanceFailure::ReturnedError {
+                    case: name,
+                    error: error.to_string(),
+                });
+        }
+        (Cut::Regions(expected), Ok(got)) => {
+            if !plain
+                .as_ref()
+                .is_ok_and(|plain| cut_answer_matches(case, plain, expected, &got))
+            {
+                report.failures.push(wrong);
+            }
+        }
+        (Cut::Refused(_) | Cut::Invalid, Ok(_)) => report.failures.push(wrong),
+    }
+}
+
+fn same_error(left: &GeomError, right: &GeomError) -> bool {
+    left.to_string() == right.to_string()
+}
+
+/// Whether a cut answer is the plain one plus the expected cut regions, with
+/// matching evidence, and its rings cover the chains.
+fn cut_answer_matches(
+    case: &Case,
+    plain: &PlaneSection,
+    expected: &[CutRegion],
+    got: &PlaneSection,
+) -> bool {
+    let Some(cut) = got.cut_regions.as_deref() else {
+        return false;
+    };
+    let evidence = got.evidence;
+    let derived = PlaneSectionEvidence::input_mesh(case.mesh.triangle_count())
+        .with_source_counts(
+            plain.evidence.in_plane_triangles,
+            plain.evidence.touching_edges,
+            plain.evidence.in_plane_pairs,
+        )
+        .with_role(case.role, case.boundary_edges)
+        .with_output(&got.chains, &got.regions)
+        .with_cut_pairs(evidence.cut_pairs)
+        .with_cut_output(cut);
+    got.frame == plain.frame
+        && got.chains == plain.chains
+        && got.regions == plain.regions
+        && cut_regions_match(expected, cut)
+        && evidence == derived
+        && cut_rings_cover_the_chains(got, cut)
+}
+
+fn cut_regions_match(expected: &[CutRegion], got: &[CutRegion]) -> bool {
+    expected.len() == got.len()
+        && expected.iter().zip(got).all(|(e, g)| {
+            points_match(&e.outer, &g.outer)
+                && e.holes.len() == g.holes.len()
+                && e.holes
+                    .iter()
+                    .zip(&g.holes)
+                    .all(|(eh, gh)| points_match(eh, gh))
+        })
+}
+
+/// The bit-for-bit relations between chains, regions and cut rings: every
+/// closed chain is a ring; every open chain with both ends on a region is a
+/// contiguous run of exactly one ring, forward or reversed; every ring
+/// vertex is a chain point or a region vertex.
+fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool {
+    let rings: Vec<&Vec<Point2>> = cut
+        .iter()
+        .flat_map(|region| std::iter::once(&region.outer).chain(&region.holes))
+        .collect();
+    let closed_chains_are_rings = section
+        .chains
+        .iter()
+        .filter(|chain| chain.is_closed())
+        .all(|chain| rings.iter().any(|ring| **ring == chain.points));
+    let open_chains_are_runs = section
+        .chains
+        .iter()
+        .filter(|chain| chain.ends == Some([ChainEnd::InPlaneRegion; 2]))
+        .all(|chain| {
+            let mut backwards = chain.points.clone();
+            backwards.reverse();
+            rings
+                .iter()
+                .filter(|ring| is_run(ring, &chain.points) || is_run(ring, &backwards))
+                .count()
+                == 1
+        });
+    let known = |point: &Point2| {
+        section
+            .chains
+            .iter()
+            .any(|chain| chain.points.contains(point))
+            || section.regions.iter().any(|region| {
+                std::iter::once(&region.outer)
+                    .chain(&region.holes)
+                    .any(|ring| ring.contains(point))
+            })
+    };
+    closed_chains_are_rings
+        && open_chains_are_runs
+        && rings.iter().all(|ring| ring.iter().all(known))
+}
+
+/// Whether `run` is a contiguous cyclic run of `ring`, in ring order.
+fn is_run(ring: &[Point2], run: &[Point2]) -> bool {
+    run.len() <= ring.len()
+        && (0..ring.len()).any(|start| {
+            run.iter()
+                .enumerate()
+                .all(|(offset, point)| ring[(start + offset) % ring.len()] == *point)
+        })
 }
 
 fn is_refusal(error: &GeomError, family: &str) -> bool {
