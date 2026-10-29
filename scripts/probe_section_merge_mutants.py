@@ -40,8 +40,11 @@ MUTANTS = [
     ),
     (
         'interior test strict', A,
-        'if start == Sign::Negative || end == Sign::Negative {',
-        'if start != Sign::Positive || end != Sign::Positive {', TESTS,
+        [
+            ('        if start == Sign::Negative {', '        if start != Sign::Positive {'),
+            ('        if end == Sign::Negative {', '        if end != Sign::Positive {'),
+        ],
+        TESTS,
     ),
     (
         'carrier side flipped', A,
@@ -100,11 +103,15 @@ MUTANTS = [
     ),
     (
         'pieces starting inside a triangle never tested', A,
-        '    for &triangle in &triangle_order {', '    for &triangle in triangle_order.iter().take(0) {', TESTS,
+        '    for (&triangle, held) in triangle_order.iter().zip(&triangle_swept) {',
+        '    for (&triangle, held) in triangle_order.iter().zip(&triangle_swept).take(0) {',
+        TESTS,
     ),
     (
         'triangles starting inside a piece never tested', A,
-        '    for &piece in &piece_order {', '    for &piece in piece_order.iter().take(0) {', TESTS,
+        '    for (&piece, held) in piece_order.iter().zip(&piece_swept) {',
+        '    for (&piece, held) in piece_order.iter().zip(&piece_swept).take(0) {',
+        TESTS,
     ),
     (
         'coverage pairs not counted', A,
