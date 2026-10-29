@@ -16,9 +16,7 @@ the arrangement and of the regions, or the registry tests of
 
 Not mutated, because no input reaches the difference: the conformance check
 that every `Both` region is a cut region (the fixtures pin the exact cut
-regions, which already contain them), and the conformance rule that an open
-chain also running along a `Both` ring is counted once (a chain of transversal
-crossings never runs along a region ring).
+regions, which already contain them).
 """
 import probe_lib
 
@@ -174,6 +172,28 @@ MUTANTS = [
         'covered cut side not refused', Q,
         '                    .any(|&class| class != Class::Empty)',
         '                    .any(|_| false)', TESTS,
+    ),
+    (
+        'hole containment pairs not counted', R,
+        '            count_pair(&mut pairs, limits.max_in_plane_pairs)?;\n'
+        '            if within(exact, &rings[hole], &rings[candidate])? {',
+        '            if within(exact, &rings[hole], &rings[candidate])? {', TESTS,
+    ),
+    (
+        'innermost container pairs not counted', R,
+        '                count_pair(&mut pairs, limits.max_in_plane_pairs)?;\n'
+        '                if !within(exact, &rings[candidate], &rings[other])? {',
+        '                if !within(exact, &rings[candidate], &rings[other])? {', TESTS,
+    ),
+    (
+        'collapsed ring accepted', R,
+        '            || (0..local.len()).any(|index| local[index] == local[(index + 1) % local.len()])',
+        '            || false', TESTS,
+    ),
+    (
+        'piece pruned by the outer box of its crossings', A,
+        'let (core, held) = (&piece_cores[piece], &triangle_boxes[triangle]);',
+        'let (core, held) = (&piece_boxes[piece], &triangle_boxes[triangle]);', TESTS,
     ),
     (
         'registry accepts a Both region that is not a cut region', D,

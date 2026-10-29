@@ -1338,3 +1338,81 @@ fn an_annulus_inside_the_hole_of_another_keeps_its_own_hole() {
         [ring(&[(3.0, 3.0), (3.0, 4.0), (4.0, 4.0), (4.0, 3.0)])]
     );
 }
+
+// ---- guards of the merge (#366) ----------------------------------------------
+
+#[test]
+fn a_crossing_that_rounds_onto_a_neighbouring_vertex_is_refused_as_collapsed() {
+    // The edge (0,1)-(2^60,2) crosses the vertical edge x = 1 at
+    // (1, 1 + 2^-60), which is exact in the arrangement and rounds to (1,1),
+    // the vertex next to it on the same ring.
+    let far = 2.0_f64.powi(60);
+    let flat = mesh_of(
+        &[
+            [0.0, 1.0, 0.0],
+            [far, 2.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [5.0, 3.0, 0.0],
+            [1.0, 3.0, 0.0],
+        ],
+        &[0, 1, 2, 3, 4, 5],
+    );
+    match sheet(&flat, horizontal(0.0)) {
+        Err(GeomError::Degenerate(message)) => {
+            assert_eq!(message, "in-plane region collapsed under projection");
+        }
+        other => panic!("expected a collapsed region, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_piece_held_by_a_triangle_whose_box_touches_a_crossing_is_covered() {
+    // The slanted edge (0,0)-(3,1) crosses the vertical edge x = 1 at
+    // (1, 1/3), which is not a binary64 point. The triangle B starts at
+    // v = fl(1/3), below the crossing, and holds the piece above it, so its
+    // box must not be pruned by the crossing's enclosure. With B the piece is
+    // interior; the outline has no vertex there.
+    let low = 1.0_f64 / 3.0;
+    let flat = mesh_of(
+        &[
+            [0.0, 0.0, 0.0],
+            [3.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [3.0, -1.0, 0.0],
+            [1.0, 0.9, 0.0],
+            [0.5, low, 0.0],
+            [2.0, low, 0.0],
+            [1.0, 2.0, 0.0],
+        ],
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+    );
+    let result = sheet(&flat, horizontal(0.0)).expect("sheet");
+    assert_eq!(result.evidence.in_plane_crossings, 8);
+    assert_eq!(result.regions.len(), 1, "{:?}", result.regions);
+    assert!(result.regions[0].holes.is_empty());
+}
+
+#[test]
+fn the_hole_containment_pairs_count_against_the_budget() {
+    let flat = combine(&[
+        annulus((0.0, 7.0), (1.0, 6.0), 0.0),
+        annulus((2.0, 5.0), (3.0, 4.0), 0.0),
+    ]);
+    let full = sheet(&flat, horizontal(0.0)).expect("sheet");
+    let pairs = full.evidence.in_plane_pairs;
+    assert_eq!(pairs, 133);
+    let mut limited = request(horizontal(0.0)).with_role(SectionRole::Sheet);
+    limited.region_limits = RegionLimits::new(100, 1_000, pairs);
+    assert!(ScalarSection::new()
+        .section_request(&flat, &limited, &options())
+        .is_ok());
+    limited.region_limits = RegionLimits::new(100, 1_000, pairs - 1);
+    assert!(matches!(
+        ScalarSection::new().section_request(&flat, &limited, &options()),
+        Err(GeomError::BudgetExceeded {
+            resource: "section in-plane pairs"
+        })
+    ));
+}
