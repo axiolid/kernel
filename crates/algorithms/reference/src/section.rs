@@ -14,6 +14,7 @@
 //!   counts touching edges. `request` orchestrates it, `regions` traces the
 //!   region boundaries and `chains` assembles open and closed chains.
 
+mod arrangement;
 mod chains;
 mod cut_regions;
 mod plane_points;
@@ -36,6 +37,10 @@ use axiolid_mesh_section_contract::{
 use crate::orient3::orient3d;
 use crate::orientation::orient2d;
 use chains::assemble_contours;
+
+/// Bytes per element declared for a request, and charged by the in-plane
+/// arrangement before it adds crossings (ADR 0088).
+const REQUEST_SCRATCH_PER_ELEMENT: usize = 1536;
 
 /// Portable deterministic mesh plane-section oracle.
 #[derive(Debug, Default, Clone, Copy)]
@@ -83,7 +88,7 @@ impl MeshPlaneSection for ScalarSection {
         // and ring bounds (about 96) add about 0.25 KiB to the 0.9 KiB that
         // remain without the sheet state, which the bound still covers.
         ScratchRequirement::PerElement {
-            bytes_per_element: 1536,
+            bytes_per_element: REQUEST_SCRATCH_PER_ELEMENT,
         }
     }
 
