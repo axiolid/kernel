@@ -327,6 +327,7 @@ fn cut_answer_matches(
             plain.evidence.touching_edges,
             plain.evidence.in_plane_pairs,
         )
+        .with_in_plane_crossings(plain.evidence.in_plane_crossings)
         .with_role(case.role, case.boundary_edges)
         .with_output(&got.chains, &got.regions)
         .with_cut_pairs(evidence.cut_pairs)
@@ -439,6 +440,7 @@ fn check_output(
             expected.touching_edges,
             evidence.in_plane_pairs,
         )
+        .with_in_plane_crossings(expected.in_plane_crossings)
         .with_role(case.role, case.boundary_edges)
         .with_output(&got.chains, &got.regions);
     if evidence != derived || !evidence.is_derived_from_input_mesh() {

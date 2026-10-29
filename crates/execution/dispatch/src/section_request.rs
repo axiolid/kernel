@@ -384,6 +384,7 @@ pub(crate) fn validate_plane_section(
             evidence.touching_edges,
             evidence.in_plane_pairs,
         )
+        .with_in_plane_crossings(evidence.in_plane_crossings)
         .with_role(request.role, boundary_edges)
         .with_output(&section.chains, &section.regions)
         .with_cut_pairs(if request.cut_regions.is_some() {

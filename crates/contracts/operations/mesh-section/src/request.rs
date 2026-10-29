@@ -240,8 +240,12 @@ pub struct PlaneSectionEvidence {
     pub in_plane_triangles: usize,
     /// Plane edges that only touch the plane: nothing is emitted for them.
     pub touching_edges: usize,
-    /// Candidate pairs of in-plane triangles compared for overlap.
+    /// Candidate pairs examined for the in-plane faces: segment pairs and
+    /// piece-triangle pairs of the merge, and region containment pairs.
     pub in_plane_pairs: usize,
+    /// Distinct points, other than source vertices, where in-plane source
+    /// edges cross.
+    pub in_plane_crossings: usize,
     /// Output closed chains.
     pub closed_chains: usize,
     /// Output open chains.
@@ -272,6 +276,7 @@ impl PlaneSectionEvidence {
             in_plane_triangles: 0,
             touching_edges: 0,
             in_plane_pairs: 0,
+            in_plane_crossings: 0,
             closed_chains: 0,
             open_chains: 0,
             chain_vertices: 0,
@@ -293,6 +298,13 @@ impl PlaneSectionEvidence {
         self.in_plane_triangles = in_plane_triangles;
         self.touching_edges = touching_edges;
         self.in_plane_pairs = in_plane_pairs;
+        self
+    }
+
+    /// Record the distinct points, other than source vertices, where
+    /// in-plane source edges cross.
+    pub const fn with_in_plane_crossings(mut self, in_plane_crossings: usize) -> Self {
+        self.in_plane_crossings = in_plane_crossings;
         self
     }
 

@@ -35,6 +35,16 @@ pub(crate) struct Output {
     pub regions: Vec<InPlaneRegion>,
     pub in_plane_triangles: usize,
     pub touching_edges: usize,
+    /// Distinct points, other than source vertices, where in-plane edges cross.
+    pub in_plane_crossings: usize,
+}
+
+impl Output {
+    /// The in-plane edge crossings the merge finds.
+    pub(crate) fn crossings(mut self, in_plane_crossings: usize) -> Self {
+        self.in_plane_crossings = in_plane_crossings;
+        self
+    }
 }
 
 /// What a cut-region request must produce.
@@ -85,6 +95,7 @@ fn output(
         regions,
         in_plane_triangles,
         touching_edges,
+        in_plane_crossings: 0,
     }
 }
 

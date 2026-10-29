@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `PlaneSectionEvidence::in_plane_crossings` and
+  `with_in_plane_crossings`: the distinct points, other than source vertices,
+  where in-plane source edges cross (ADR 0093, #366).
+
 ## [0.3.6] - 2026-10-29
 
 ### Changed

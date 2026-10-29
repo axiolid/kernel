@@ -97,6 +97,7 @@ fn evidence_counts_follow_the_output() {
     let regions = vec![InPlaneRegion::new(InPlaneSide::Above, square(), vec![hole])];
     let evidence = PlaneSectionEvidence::input_mesh(12)
         .with_source_counts(2, 1, 3)
+        .with_in_plane_crossings(4)
         .with_output(&chains, &regions);
     assert!(evidence.is_derived_from_input_mesh());
     assert_eq!(evidence.source_triangles, 12);
@@ -108,11 +109,13 @@ fn evidence_counts_follow_the_output() {
         ),
         (2, 1, 3)
     );
+    assert_eq!(evidence.in_plane_crossings, 4);
     assert_eq!((evidence.closed_chains, evidence.open_chains), (1, 1));
     assert_eq!(evidence.chain_vertices, 6);
     assert_eq!((evidence.regions, evidence.region_vertices), (1, 7));
 
     let empty = PlaneSectionEvidence::input_mesh(3);
+    assert_eq!(empty.in_plane_crossings, 0);
     assert_eq!(empty.with_output(&[], &[]), empty);
     assert_eq!((empty.role, empty.boundary_edges), (SectionRole::Solid, 0));
     let sheet = empty.with_role(SectionRole::Sheet, 8);

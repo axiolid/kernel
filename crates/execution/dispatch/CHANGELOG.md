@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- `MeshPlaneSectionRegistry::section_request` carries
+  `PlaneSectionEvidence::in_plane_crossings` into the evidence it derives
+  from the answer (ADR 0093, #366).
+
 ## [0.3.9] - 2026-10-29
 
 ### Added
