@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.37 (2026-10-29) |
+| Latest release | 0.3.38 (2026-10-29) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,34 +78,12 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.37 (2026-10-29):
-
-### Added
-
-- A fixed-reference sweep along a tangent-continuous chain of segments and
-  circular arcs, open or closed, is proven within the chord budget (the
-  profile's share plus half the budget for the walls, none along one
-  segment) when the reference is normal to the plane of every arc or lies
-  in it; the twist of a reference that only nearly is comes out of the
-  walls' half, so the sum stays within the budget; the deviation report
-  names it "segments and arcs" (#122). An arc whose twist is more than an
-  eighth of the budget (oblique to the reference) is still swept as sampled
-  and reported unbounded.
-
-### Changed
-
-- A fixed-reference sweep refuses a corner in its directrix by name, as the
-  format requires a tangent-continuous directrix (#122). A closed chain
-  proven by the segment and arc path is swept without caps; a twisting one
-  is still swept as sampled and capped. The deviation detail of a proven
-  segment or arc is now "segments and arcs".
+Latest release, 0.3.38 (2026-10-29):
 
 ### Fixed
 
-- A swept disk wider than the bend of a lone arc it follows is refused
-  instead of meshed into a tube that folds through the bend's axis (#122).
-- A fixed-reference sweep along a circle whose frame is not orthonormal
-  (an ellipse in all but name) is reported unbounded, where it was reported
-  proven although it is swept as sampled (#122).
+- A fixed-reference sweep along a chain that ends at its start with a
+  corner is refused by name instead of being swept open with crossing end
+  caps (#375).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

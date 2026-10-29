@@ -696,6 +696,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.26 - 2026-10-29
+
+### Fixed
+
+- A fixed-reference chain that ends at its start with a corner (a closing
+  gap within the loop distance, a closing joint not tangent continuous) is
+  refused by name; swept open, its two end caps crossed (#375).
+
 ### 0.3.25 - 2026-10-29
 
 ### Added
@@ -3780,6 +3788,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.38 - 2026-10-29
+
+### Fixed
+
+- A fixed-reference sweep along a chain that ends at its start with a
+  corner is refused by name instead of being swept open with crossing end
+  caps (#375).
 
 ### 0.3.37 - 2026-10-29
 

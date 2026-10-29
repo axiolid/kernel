@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.25 (2026-10-29) |
+| Latest release | 0.3.26 (2026-10-29) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -68,27 +68,12 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.25 (2026-10-29):
+Latest release, 0.3.26 (2026-10-29):
 
-### Added
+### Fixed
 
-- `pipe::fixed_reference_plan` and `pipe::fixed_reference_along_pieces`
-  sweep a profile with a fixed reference direction along a
-  tangent-continuous chain of segments and circular arcs, open or closed,
-  within the chord budget (#122). Where the reference is normal to the
-  plane of every arc or lies in it, each arc is an exact revolution of the
-  placed profile and each segment a prism, so the swept disk's per-piece
-  proof carries over; a reference that only nearly is pays its measured
-  twist of the exact frame off those stations out of the walls' half of the
-  budget (`FixedReferenceChain::twist`), and an arc whose twist exceeds an eighth
-  of the budget is reported as twisting (`FixedReferencePlan::Twisting`),
-  which nothing here bounds. A corner (also one a re-seeded profile turns
-  too far at, for a reference near the tangent), a reference parallel to
-  the tangent, a gap and a profile that folds through a bend's axis are
-  refused by name. A chain is a loop when the path declares itself closed
-  or ends within the linear tolerance (and a quarter of the budget) of
-  where it starts with a tangent-continuous closing joint.
-  Also `reference_clearance`, `ring_reach` and `pipe::check_disk_along`,
-  which refuses a disk wider than a lone arc's bend.
+- A fixed-reference chain that ends at its start with a corner (a closing
+  gap within the loop distance, a closing joint not tangent continuous) is
+  refused by name; swept open, its two end caps crossed (#375).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

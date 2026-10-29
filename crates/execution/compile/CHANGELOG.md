@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.38] - 2026-10-29
+
 ### Fixed
 
 - A fixed-reference sweep along a chain that ends at its start with a
