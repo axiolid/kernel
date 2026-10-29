@@ -7,9 +7,10 @@ use axiolid_core::{Frame3, Point2, Point3, Tolerance, Vec3};
 use axiolid_dispatch::MeshPlaneSectionRegistry;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
-    ChainEnd, InPlaneSide, MeshPlaneSection, PlaneSection, RegionLimits, SectionLimits,
-    SectionRequest, SectionRole, REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES,
-    REFUSED_OVERLAPPING_IN_PLANE_FACES, REFUSED_SADDLE_VERTEX,
+    ChainEnd, CutRegion, CutRegionLimits, InPlaneSide, MeshPlaneSection, PlaneSection,
+    RegionLimits, SectionLimits, SectionRequest, SectionRole, REFUSED_CROSSING_CUT_RINGS,
+    REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES, REFUSED_OVERLAPPING_IN_PLANE_FACES,
+    REFUSED_SADDLE_VERTEX,
 };
 use axiolid_reference::ScalarSection;
 
@@ -582,4 +583,182 @@ fn a_registry_refuses_a_sheet_with_inconsistent_winding() {
         registry.section_request(&mesh, &request, &options()),
         Err(GeomError::NotManifold(_))
     ));
+}
+
+// ---- cut regions (ADR 0092) -----------------------------------------------
+
+/// A prism: the `(x, z)` profile, counter-clockwise, extruded along `y` from
+/// `0` to `depth`. `triangles` triangulates the profile.
+fn extruded(profile: &[(f64, f64)], triangles: &[[u32; 3]], depth: f64) -> TriMesh {
+    let count = u32::try_from(profile.len()).expect("small fixture");
+    let mut positions: Vec<Point3> = profile
+        .iter()
+        .map(|&(x, z)| Point3::new(x, 0.0, z))
+        .collect();
+    positions.extend(profile.iter().map(|&(x, z)| Point3::new(x, depth, z)));
+    let mut indices = Vec::new();
+    for &[a, b, c] in triangles {
+        indices.extend([a, b, c]);
+        indices.extend([a + count, c + count, b + count]);
+    }
+    for from in 0..count {
+        let to = (from + 1) % count;
+        indices.extend([from, from + count, to + count, from, to + count, to]);
+    }
+    TriMesh::new(positions, indices)
+}
+
+/// The L-shaped step of the issue: a column `x` in `[0, 1]` up to `z = 2`
+/// beside a ledge `x` in `[1, 2]` whose top lies at `z = 1`.
+fn l_step() -> TriMesh {
+    extruded(
+        &[
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 2.0),
+            (0.0, 2.0),
+        ],
+        &[[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]],
+        1.0,
+    )
+}
+
+fn cut_request(frame: Frame3) -> SectionRequest {
+    request(frame).with_cut_regions(CutRegionLimits::new(100, 1_000, 1_000))
+}
+
+fn registry() -> MeshPlaneSectionRegistry {
+    let mut registry = MeshPlaneSectionRegistry::new();
+    registry.register(0, ScalarSection::new());
+    registry
+}
+
+fn is_refused_as_crossing(result: Result<PlaneSection, GeomError>) -> bool {
+    matches!(
+        result,
+        Err(GeomError::UnsupportedInput {
+            input: REFUSED_CROSSING_CUT_RINGS,
+            ..
+        })
+    )
+}
+
+#[test]
+fn the_cut_of_an_l_step_closes_along_the_region_edge() {
+    // The plane z = 1 is the top of the ledge: a Below region [1,2] x [0,1].
+    // The column is cut across [0,1] x [0,1]; the ledge's jamb edge x = 1
+    // bounds it, so the ring runs along the chain and back along that edge.
+    let mesh = l_step();
+    let plain = registry()
+        .section_request(&mesh, &request(horizontal(1.0)), &options())
+        .expect("plain request");
+    assert_eq!(plain.cut_regions, None);
+    assert_eq!(plain.regions.len(), 1);
+    assert_eq!(plain.regions[0].side, InPlaneSide::Below);
+
+    let cut = registry()
+        .section_request(&mesh, &cut_request(horizontal(1.0)), &options())
+        .expect("cut request");
+    assert_eq!(cut.chains, plain.chains);
+    assert_eq!(cut.regions, plain.regions);
+    assert_eq!(
+        cut.cut_regions,
+        Some(vec![CutRegion::new(
+            ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
+            vec![],
+        )])
+    );
+    assert_eq!(
+        (cut.evidence.cut_regions, cut.evidence.cut_region_vertices),
+        (1, 4)
+    );
+}
+
+#[test]
+fn a_cut_inside_a_face_needs_no_region_edge() {
+    let section = registry()
+        .section_request(&cube(), &cut_request(horizontal(0.5)), &options())
+        .expect("cut request");
+    assert_eq!(
+        section.cut_regions,
+        Some(vec![CutRegion::new(
+            ring(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
+            vec![],
+        )])
+    );
+}
+
+#[test]
+fn the_cube_top_in_the_plane_has_no_cut() {
+    let section = registry()
+        .section_request(&cube(), &cut_request(horizontal(1.0)), &options())
+        .expect("cut request");
+    assert_eq!(section.regions.len(), 1);
+    assert_eq!(section.cut_regions, Some(vec![]));
+}
+
+#[test]
+fn crossing_shells_are_refused_for_the_cut_only() {
+    let plus = shells(&[
+        ((0.0, 3.0), (1.0, 2.0), (0.0, 1.0)),
+        ((1.0, 2.0), (0.0, 3.0), (0.0, 1.0)),
+    ]);
+    registry()
+        .section_request(&plus, &request(horizontal(0.5)), &options())
+        .expect("the plain request does not look at the cut");
+    assert!(is_refused_as_crossing(registry().section_request(
+        &plus,
+        &cut_request(horizontal(0.5)),
+        &options()
+    )));
+}
+
+#[test]
+fn overlapping_boxes_with_collinear_edges_are_refused() {
+    let overlapping = shells(&[
+        ((0.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
+        ((1.0, 3.0), (0.0, 1.0), (0.0, 1.0)),
+    ]);
+    assert!(is_refused_as_crossing(registry().section_request(
+        &overlapping,
+        &cut_request(horizontal(0.5)),
+        &options()
+    )));
+}
+
+#[test]
+fn a_sheet_has_no_cut() {
+    let sheet = cut_request(horizontal(0.5)).with_role(SectionRole::Sheet);
+    let error = registry()
+        .section_request(&cube(), &sheet, &options())
+        .expect_err("a sheet has no inside");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+    let error = ScalarSection::new()
+        .section_request(&cube(), &sheet, &options())
+        .expect_err("the provider refuses it too");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+}
+
+#[test]
+fn cut_region_budgets_are_enforced() {
+    let neighbours = shells(&[
+        ((0.0, 1.0), (0.0, 1.0), (0.0, 1.0)),
+        ((1.0, 2.0), (0.0, 1.0), (0.0, 1.0)),
+    ]);
+    for (limits, resource) in [
+        (CutRegionLimits::new(1, 1_000, 1_000), "section cut regions"),
+        (
+            CutRegionLimits::new(10, 7, 1_000),
+            "section cut region vertices",
+        ),
+        (CutRegionLimits::new(10, 1_000, 0), "section cut pairs"),
+    ] {
+        let request = request(horizontal(0.5)).with_cut_regions(limits);
+        assert_eq!(
+            ScalarSection::new().section_request(&neighbours, &request, &options()),
+            Err(GeomError::BudgetExceeded { resource })
+        );
+    }
 }
