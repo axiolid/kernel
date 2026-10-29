@@ -5,10 +5,12 @@
 //! [`SectionRequest::with_cut_regions`](crate::SectionRequest::with_cut_regions)
 //! also reports the cut as [`CutRegion`]s. The cut is the closure of the plane
 //! points that have the solid's material on both sides: its interior meets the
-//! plane there. In-plane faces are not part of it; they stay
-//! [`InPlaneRegion`](crate::InPlaneRegion)s with their side. A region edge
-//! bounds the cut where the off-plane triangle next to it leaves the plane on
-//! the side opposite the region's material.
+//! plane there. In-plane faces of one side are not part of it; they stay
+//! [`InPlaneRegion`](crate::InPlaneRegion)s with their side. Where faces of
+//! both sides coincide the material is on both sides, so every
+//! [`Both`](crate::InPlaneSide::Both) region is a cut region, equal to it bit
+//! for bit. A region edge bounds the cut where the off-plane triangle next to
+//! it leaves the plane on the side opposite the region's material.
 //!
 //! A consumer therefore needs no topology of its own: a cut just below the
 //! plane is the cut regions together with the `Below` regions, and a cut just
@@ -40,11 +42,14 @@
 //!   Any other vertex between two collinear neighbours is dropped.
 //! - Every closed chain of a solid is a cut ring, bit for bit. Every open
 //!   chain with both ends on a region is a contiguous run of exactly one cut
-//!   ring, forward or reversed. Every cut ring vertex is bit-identical to a
-//!   chain point or a region ring vertex.
-//! - A provider that reports a [`Both`](crate::InPlaneSide::Both) region
-//!   refuses a cut-region request with
-//!   [`REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`](crate::REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES).
+//!   ring, forward or reversed; it may also run along a
+//!   [`Both`](crate::InPlaneSide::Both) ring it touches, which is not
+//!   counted. Every cut ring vertex is bit-identical to a chain point or a
+//!   region ring vertex.
+//! - Every [`Both`](crate::InPlaneSide::Both) region is a cut region: the
+//!   same outer ring and the same holes, bit for bit. Where such a region
+//!   meets transversal cut area it is a separate cut region that shares the
+//!   boundary in the opposite direction.
 //!
 //! # Exactness
 //!

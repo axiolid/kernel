@@ -629,10 +629,18 @@ mod request {
             ("evidence cut vertices", |s| {
                 s.evidence.cut_region_vertices += 1
             }),
-            ("both sides", |s| {
+            ("a Both region that is not a cut region", |s| {
                 s.regions[0].side = InPlaneSide::Both;
                 s.evidence = s.evidence.with_output(&s.chains, &s.regions);
             }),
+            (
+                "a Both region whose holes differ from its cut region",
+                |s| {
+                    let cut = &s.cut_regions.as_ref().unwrap()[0];
+                    s.regions[0] = InPlaneRegion::new(InPlaneSide::Both, cut.outer.clone(), vec![]);
+                    s.evidence = s.evidence.with_output(&s.chains, &s.regions);
+                },
+            ),
         ];
         for (name, mutate) in cases {
             let error = run(mutate, &cut_request()).expect_err(name);
@@ -641,6 +649,30 @@ mod request {
                 "{name}: {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_both_region_equal_to_a_cut_region_is_accepted() {
+        let section = run(
+            |s| {
+                let cut = &s.cut_regions.as_ref().unwrap()[0];
+                s.regions[0] =
+                    InPlaneRegion::new(InPlaneSide::Both, cut.outer.clone(), cut.holes.clone());
+                s.evidence = s.evidence.with_output(&s.chains, &s.regions);
+            },
+            &cut_request(),
+        )
+        .expect("a Both region is a cut region");
+        assert_eq!(section.regions[0].side, InPlaneSide::Both);
+        // Without cut regions requested the registry does not look for one.
+        run(
+            |s| {
+                s.regions[0].side = InPlaneSide::Both;
+                s.evidence = s.evidence.with_output(&s.chains, &s.regions);
+            },
+            &request(),
+        )
+        .expect("a Both region needs no cut region when none was asked for");
     }
 
     #[test]

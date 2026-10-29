@@ -14,7 +14,8 @@
 //! (`cut_regions_claimed == false`) and the rest is skipped. Otherwise
 //! the answer must equal the plain one, plus the fixture's cut regions and
 //! the cut evidence; a plain refusal must be repeated; a sheet is invalid
-//! input; and the cut rings must cover the chains bit for bit.
+//! input; the cut rings must cover the chains bit for bit; and every `Both`
+//! region must be a cut region.
 
 use core::fmt;
 
@@ -25,8 +26,8 @@ use crate::conformance::{ConformanceFailure, ConformanceSuite};
 use crate::cut::{CutRegion, CutRegionLimits};
 use crate::fixtures::{cases, Case, Cut, Expected, Output};
 use crate::request::{
-    ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, RegionLimits, SectionChain,
-    SectionRequest, SectionRole,
+    ChainEnd, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence, RegionLimits,
+    SectionChain, SectionRequest, SectionRole,
 };
 use crate::{MeshPlaneSection, SectionLimits};
 
@@ -338,6 +339,19 @@ fn cut_answer_matches(
         && cut_regions_match(expected, cut)
         && evidence == derived
         && cut_rings_cover_the_chains(got, cut)
+        && both_regions_are_cut_regions(got, cut)
+}
+
+/// Every `Both` region is a cut region: equal outer ring and holes.
+fn both_regions_are_cut_regions(section: &PlaneSection, cut: &[CutRegion]) -> bool {
+    section
+        .regions
+        .iter()
+        .filter(|region| region.side == InPlaneSide::Both)
+        .all(|region| {
+            cut.iter()
+                .any(|cut| cut.outer == region.outer && cut.holes == region.holes)
+        })
 }
 
 fn cut_regions_match(expected: &[CutRegion], got: &[CutRegion]) -> bool {
@@ -366,6 +380,18 @@ fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool
         .iter()
         .filter(|chain| chain.is_closed())
         .all(|chain| rings.iter().any(|ring| **ring == chain.points));
+    // A ring that is a `Both` region's own is not the chain's.
+    let is_both_ring = |ring: &Vec<Point2>| {
+        section
+            .regions
+            .iter()
+            .filter(|region| region.side == InPlaneSide::Both)
+            .any(|region| {
+                std::iter::once(&region.outer)
+                    .chain(&region.holes)
+                    .any(|candidate| candidate == ring)
+            })
+    };
     let open_chains_are_runs = section
         .chains
         .iter()
@@ -375,6 +401,7 @@ fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool
             backwards.reverse();
             rings
                 .iter()
+                .filter(|ring| !is_both_ring(ring))
                 .filter(|ring| is_run(ring, &chain.points) || is_run(ring, &backwards))
                 .count()
                 == 1

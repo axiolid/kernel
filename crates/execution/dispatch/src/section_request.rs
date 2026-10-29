@@ -203,16 +203,6 @@ fn check_cut_regions(
             "provider returned cut regions that were not requested",
         )),
         (Some(limits), Some(cut_regions)) => {
-            if section
-                .regions
-                .iter()
-                .any(|region| region.side == InPlaneSide::Both)
-            {
-                return Err(violation(
-                    backend,
-                    "cut regions were returned beside in-plane faces of both sides",
-                ));
-            }
             if cut_regions.len() > limits.max_regions {
                 return Err(GeomError::BudgetExceeded {
                     resource: "section cut regions",
@@ -250,6 +240,21 @@ fn check_cut_regions(
                 return Err(GeomError::BudgetExceeded {
                     resource: "section cut pairs",
                 });
+            }
+            // A Both region has material on both sides: a cut region. The
+            // cut regions are sorted by their outer ring, so a binary search
+            // finds it; rounding is not a reason to look elsewhere (#274).
+            for region in section
+                .regions
+                .iter()
+                .filter(|region| region.side == InPlaneSide::Both)
+            {
+                let is_cut = cut_regions
+                    .binary_search_by(|cut| sequence_cmp(&cut.outer, &region.outer))
+                    .is_ok_and(|found| cut_regions[found].holes == region.holes);
+                if !is_cut {
+                    return Err(violation(backend, "a Both region is not a cut region"));
+                }
             }
             Ok(())
         }

@@ -29,6 +29,21 @@
 //! sheet is the side its face's back lies on. The evidence reports the role
 //! and the number of boundary edges.
 //!
+//! # In-plane regions
+//!
+//! Faces lying in the plane may overlap, and faces of different shells may
+//! meet in it. Let `Up` be the union of the in-plane faces whose material lies
+//! below the plane ([`InPlaneSide::Below`]) and `Down` the union of the others.
+//! A point of the plane is `Below` when it is in `Up` and not in `Down`,
+//! `Above` when it is in `Down` and not in `Up`, and `Both` when it is in
+//! both: a region of the plane with material on both sides. A region is a
+//! maximal edge-connected part of one class, so faces of one side that overlap
+//! or only share a boundary segment form one region, and the regions depend
+//! on the covered area, not on how it is triangulated. A provider that does
+//! not merge may refuse overlapping faces by name
+//! ([`REFUSED_OVERLAPPING_IN_PLANE_FACES`],
+//! [`REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`]) instead (ADR 0093, #366).
+//!
 //! # Output invariants
 //!
 //! All points are finite and in the plane frame. A closed chain has at least
@@ -43,7 +58,7 @@
 //! every ring has at least three points and starts at its lexicographically
 //! smallest point. Holes are sorted by point sequence, regions by
 //! `(side, outer)`. Rings may touch at vertices but never cross, and regions
-//! of one side have disjoint interiors. Where a hole or a footprint touches the
+//! have pairwise disjoint interiors. Where a hole or a footprint touches the
 //! outer boundary at a vertex, the region has one weakly simple outer ring that
 //! visits that vertex twice, and no hole. A self-intersecting mesh is not
 //! certified (ADR 0033). The registry does not check ring orientation: a
@@ -202,7 +217,9 @@ pub enum InPlaneSide {
     Below,
     /// The face normal opposes the frame's `+z`; the material lies on `+z`.
     Above,
-    /// Faces of both facings coincide. The first provider refuses this.
+    /// Faces of both facings coincide: the plane has material on both sides
+    /// here. With cut regions requested, every `Both` region is a cut region
+    /// (see [`CutRegion`]).
     Both,
 }
 
@@ -241,8 +258,8 @@ pub struct PlaneSectionEvidence {
     pub in_plane_triangles: usize,
     /// Plane edges that only touch the plane: nothing is emitted for them.
     pub touching_edges: usize,
-    /// Candidate pairs examined for the in-plane faces: segment pairs and
-    /// piece-triangle pairs of the merge, and region containment pairs.
+    /// Candidate pairs examined for the in-plane faces: overlap tests, or the
+    /// segment, piece-triangle and hole containment pairs of a merge.
     pub in_plane_pairs: usize,
     /// Distinct points, other than source vertices, where in-plane source
     /// edges cross.
