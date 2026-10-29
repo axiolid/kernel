@@ -32,9 +32,11 @@
 //! # Output invariants
 //!
 //! All points are finite and in the plane frame. A closed chain has at least
-//! three points, runs counter-clockwise, starts at its lexicographically
+//! three points, starts at its lexicographically
 //! smallest point (`x`, then `y`, by `total_cmp`) and has no adjacent
-//! duplicates, wrap-around included. An open chain has at least two points,
+//! duplicates, wrap-around included. A closed chain of a solid keeps the
+//! material on its left: counter-clockwise around a cut, clockwise around a
+//! hole. An open chain has at least two points,
 //! no adjacent duplicates, and `points[0] < points[last]`. Chains are sorted
 //! by their point sequences, a closed chain before an open one at a tie.
 //! A region's outer ring is counter-clockwise and its holes are clockwise;
@@ -51,6 +53,7 @@
 use axiolid_core::{Frame3, Point2};
 
 use crate::contract::{SectionLimits, SectionSource};
+use crate::cut::{CutRegion, CutRegionLimits};
 
 /// Refusal detail: in-plane faces of one side overlap each other.
 pub const REFUSED_OVERLAPPING_IN_PLANE_FACES: &str = "overlapping in-plane faces of one side";
@@ -113,6 +116,8 @@ pub struct SectionRequest {
     pub region_limits: RegionLimits,
     /// What the mesh is; [`SectionRole::Solid`] unless set.
     pub role: SectionRole,
+    /// Cut-region bounds; `None` unless set, which requests no cut regions.
+    pub cut_regions: Option<CutRegionLimits>,
 }
 
 impl SectionRequest {
@@ -123,6 +128,7 @@ impl SectionRequest {
             limits,
             region_limits,
             role: SectionRole::Solid,
+            cut_regions: None,
         }
     }
 
@@ -130,6 +136,13 @@ impl SectionRequest {
     #[must_use]
     pub const fn with_role(mut self, role: SectionRole) -> Self {
         self.role = role;
+        self
+    }
+
+    /// Also report the cut as closed regions (ADR 0092).
+    #[must_use]
+    pub const fn with_cut_regions(mut self, limits: CutRegionLimits) -> Self {
+        self.cut_regions = Some(limits);
         self
     }
 }
@@ -239,6 +252,12 @@ pub struct PlaneSectionEvidence {
     pub regions: usize,
     /// Points across all output region rings.
     pub region_vertices: usize,
+    /// Output cut regions.
+    pub cut_regions: usize,
+    /// Points across all output cut region rings.
+    pub cut_region_vertices: usize,
+    /// Candidate pairs compared while nesting the cut rings.
+    pub cut_pairs: usize,
 }
 
 impl PlaneSectionEvidence {
@@ -258,6 +277,9 @@ impl PlaneSectionEvidence {
             chain_vertices: 0,
             regions: 0,
             region_vertices: 0,
+            cut_regions: 0,
+            cut_region_vertices: 0,
+            cut_pairs: 0,
         }
     }
 
@@ -294,6 +316,22 @@ impl PlaneSectionEvidence {
         self
     }
 
+    /// Record the candidate pairs compared while nesting the cut rings.
+    pub const fn with_cut_pairs(mut self, cut_pairs: usize) -> Self {
+        self.cut_pairs = cut_pairs;
+        self
+    }
+
+    /// Record the counts of the output cut regions.
+    pub fn with_cut_output(mut self, cut_regions: &[CutRegion]) -> Self {
+        self.cut_regions = cut_regions.len();
+        self.cut_region_vertices = cut_regions
+            .iter()
+            .map(|region| region.outer.len() + region.holes.iter().map(Vec::len).sum::<usize>())
+            .sum();
+        self
+    }
+
     /// Whether this result came from the discrete input mesh.
     pub const fn is_derived_from_input_mesh(self) -> bool {
         matches!(self.source, SectionSource::InputMesh)
@@ -310,6 +348,8 @@ pub struct PlaneSection {
     pub chains: Vec<SectionChain>,
     /// Regions of faces lying in the plane.
     pub regions: Vec<InPlaneRegion>,
+    /// Closed regions of the cut; `None` when none were requested.
+    pub cut_regions: Option<Vec<CutRegion>>,
     /// Source and output counts.
     pub evidence: PlaneSectionEvidence,
 }
@@ -326,7 +366,15 @@ impl PlaneSection {
             frame,
             chains,
             regions,
+            cut_regions: None,
             evidence,
         }
+    }
+
+    /// Attach the cut regions of a request that asked for them.
+    #[must_use]
+    pub fn with_cut_regions(mut self, cut_regions: Vec<CutRegion>) -> Self {
+        self.cut_regions = Some(cut_regions);
+        self
     }
 }

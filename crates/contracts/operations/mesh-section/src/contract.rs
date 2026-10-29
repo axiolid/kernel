@@ -167,6 +167,10 @@ pub trait MeshPlaneSection: Backend {
     /// A provider may implement `SectionRole::Solid` only: it then refuses a
     /// `SectionRole::Sheet` request with `Unsupported`, and the region
     /// conformance suite reports `sheets_claimed == false` instead of failing.
+    ///
+    /// A provider that does not trace cut regions refuses a request that has
+    /// them with `Unsupported`; the suite then reports
+    /// `cut_regions_claimed == false`.
     fn section_request(
         &self,
         mesh: &TriMesh,
