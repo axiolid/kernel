@@ -75,7 +75,12 @@ impl MeshPlaneSection for ScalarSection {
         // bytes, 120), the triangles, boxes and flat copies (about 112), the
         // sweep order and component roots (16), the boundary set (72) and
         // the cycle and ring state (about 100). About 1.2 KiB in all,
-        // rounded up to 1536 bytes.
+        // rounded up to 1536 bytes. Cut regions exist for a solid only, so
+        // their state never coexists with the sheet state (264): the cut
+        // graph (two maps, 2 entries per segment of about 48 bytes, 96), the
+        // traced paths and rings (about 64) and the nesting sweep's edges
+        // and ring bounds (about 96) add about 0.25 KiB to the 0.9 KiB that
+        // remain without the sheet state, which the bound still covers.
         ScratchRequirement::PerElement {
             bytes_per_element: 1536,
         }

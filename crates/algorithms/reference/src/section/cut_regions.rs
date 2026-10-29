@@ -334,6 +334,13 @@ mod tests {
     }
 
     #[test]
+    fn a_ring_with_no_area_is_degenerate() {
+        // Vertex 1 is protected, so the three collinear vertices stay.
+        let flat = trace(positions(), &[(&[0, 1, 2], true)], &[], &[], &[1]);
+        assert!(matches!(flat, Err(GeomError::Degenerate(_))), "{flat:?}");
+    }
+
+    #[test]
     fn a_pinch_is_refused_by_name() {
         // Two triangles share vertex 1: it has two outgoing edges.
         let pinch = trace(

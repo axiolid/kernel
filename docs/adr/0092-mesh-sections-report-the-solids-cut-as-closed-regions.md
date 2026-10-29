@@ -68,7 +68,13 @@ and no `semver-exceptions` entry.
   the other is strictly inside. The innermost container decides: an outer ring
   has no container or lies in a hole; a hole lies in an outer ring, which owns
   it. Candidate edge pairs of a bounding-box sweep and ring pairs of the
-  containment test share one budget (`CutRegionLimits::max_pairs`).
+  containment test share one budget (`CutRegionLimits::max_pairs`). Where
+  two rings touch, the directions in which one leaves the contact point are
+  classified, with exact `orient2d`, against the material side of the other;
+  directions on both sides mean the rings cross there and are refused, while
+  neighbours that share an edge with opposite directions pass. Two
+  non-adjacent edges of one ring that touch (a repeated vertex) and a spike
+  are refused.
 - **Refusals by name.** `REFUSED_PINCHED_CUT_REGION` where the cut boundary
   touches itself at a vertex, so the pairing at that vertex is not unique.
   `REFUSED_CROSSING_CUT_RINGS` where rings cross, overlap along an edge with
@@ -85,7 +91,10 @@ and no `semver-exceptions` entry.
   answer without them, or with unrequested ones, is a contract violation. The
   rings get the checks of in-plane regions (cardinality, finiteness, adjacent
   duplicates, canonical start and order), the budgets and the evidence counts
-  (`cut_regions`, `cut_region_vertices`, `cut_pairs`). A sheet request is
+  (`cut_regions`, `cut_region_vertices`, `cut_pairs`). A provider from before
+  this feature ignores the request and answers with `cut_regions == None`; the
+  registry treats that as `Unsupported` and tries the next provider, so the
+  request still fails closed when none traces the cut. A sheet request is
   refused before dispatch. Orientation is not checked there (#274).
 - **Conformance.** The region suite runs every fixture again with cut regions
   requested. A provider whose first such request returns `Unsupported` does
@@ -118,9 +127,11 @@ and no `semver-exceptions` entry.
 - Outer or hole and nesting use the returned coordinates, not source data;
   overlapping shells that the audit cannot see are refused when detected and
   otherwise stay uncertified.
-- The crossing and containment tests are argued complete for polygon overlap,
-  not proven; a ring pair that touches only at a vertex while crossing there
-  can pass when no bounding box encloses the other.
+- The crossing, contact and containment tests are argued complete for polygon
+  overlap, not proven. Contacts are decided locally and exactly: rings that
+  cross through a shared vertex or a vertex on an edge are refused, as are a
+  repeated vertex and a spike in one ring. What remains uncertified is an
+  overlap of shells that no ring edge reveals (ADR 0033).
 - The nesting is quadratic in the worst case; the reference is an oracle, not
   a performance tier.
 

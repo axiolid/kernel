@@ -5,7 +5,15 @@
 //!
 //! 1. A crossing sweep over the ring edges, by bounding boxes. A proper
 //!    crossing, or a collinear overlap of positive length whose edges run the
-//!    same way (the material then lies on the same side), refuses the cut.
+//!    same way (the material then lies on the same side), refuses the cut. So
+//!    does any contact between two non-adjacent edges of one ring (a repeated
+//!    vertex), and a spike, where two adjacent edges fold back on each other.
+//!    A contact between two rings is a local test at the contact point `p`:
+//!    the directions in which one ring leaves `p` are classified against the
+//!    material side of the other (its two edges at a vertex, its half-plane on
+//!    an edge). Directions on both sides refuse the cut: the rings cross
+//!    through `p`. Rings that only touch, as neighbours sharing an edge with
+//!    opposite directions do, pass.
 //! 2. Containment: ring `r` lies in ring `s` when every vertex of `r` that is
 //!    not on `s` is strictly inside it. A mixed answer, or one with no
 //!    decisive vertex, refuses the cut.
@@ -112,6 +120,10 @@ pub(super) fn nest_rings(
                 let mut tied = containers[index].iter().filter(|&&c| depth(c) == deepest);
                 match (tied.next(), tied.next()) {
                     (Some(&only), None) => Some(only),
+                    // Two unrelated containers of equal depth would have to
+                    // overlap each other, and the sweep and the containment
+                    // test refuse that first. Kept as a guard, not reachable
+                    // by a test.
                     _ => return Err(refused()),
                 }
             }
@@ -162,6 +174,9 @@ fn refuse_crossings(
     pairs: &mut usize,
     options: &ExecutionOptions,
 ) -> GeomResult<()> {
+    for ring in rings {
+        refuse_spikes(&ring.points)?;
+    }
     let mut edges = Vec::new();
     for (ring_index, ring) in rings.iter().enumerate() {
         for index in 0..ring.points.len() {
@@ -204,9 +219,142 @@ fn refuse_crossings(
             if edges_conflict(first, second)? {
                 return Err(refused());
             }
+            for contact in contacts(first, second)? {
+                if first.ring == second.ring
+                    || crosses_through(&rings[first.ring], &rings[second.ring], contact)?
+                    || crosses_through(&rings[second.ring], &rings[first.ring], contact)?
+                {
+                    return Err(refused());
+                }
+            }
         }
     }
     Ok(())
+}
+
+/// Refuse a vertex whose two edges are collinear and fold back: the middle
+/// point must lie strictly between the outer two.
+fn refuse_spikes(ring: &[Point2]) -> GeomResult<()> {
+    for index in 0..ring.len() {
+        let (before, at, after) = (
+            ring[(index + ring.len() - 1) % ring.len()],
+            ring[index],
+            ring[(index + 1) % ring.len()],
+        );
+        if orient_sign(before, at, after)? == Sign::Zero && !strictly_between(before, at, after) {
+            return Err(refused());
+        }
+    }
+    Ok(())
+}
+
+/// Whether collinear `at` lies strictly between `before` and `after`.
+fn strictly_between(before: Point2, at: Point2, after: Point2) -> bool {
+    let along = |p: Point2| if before.x == after.x { p.y } else { p.x };
+    let (low, high) = (
+        along(before).min(along(after)),
+        along(before).max(along(after)),
+    );
+    low < along(at) && along(at) < high
+}
+
+/// Whether `point` lies on the closed segment of `edge`.
+fn on_edge(point: Point2, edge: &Edge) -> GeomResult<bool> {
+    Ok(orient_sign(edge.start, edge.end, point)? == Sign::Zero
+        && edge.bounds[0] <= point.x
+        && point.x <= edge.bounds[2]
+        && edge.bounds[1] <= point.y
+        && point.y <= edge.bounds[3])
+}
+
+/// The points where two closed edges touch: an end of one lying on the other.
+fn contacts(first: &Edge, second: &Edge) -> GeomResult<Vec<Point2>> {
+    let mut found = Vec::new();
+    for point in [first.start, first.end] {
+        if on_edge(point, second)? {
+            found.push(point);
+        }
+    }
+    for point in [second.start, second.end] {
+        if on_edge(point, first)? {
+            found.push(point);
+        }
+    }
+    Ok(found)
+}
+
+/// How a ring passes through a point on its boundary.
+enum Passage {
+    /// At a vertex: the previous and the next vertex.
+    Vertex(Point2, Point2),
+    /// Inside an edge: its start and end.
+    Edge(Point2, Point2),
+}
+
+fn passages(ring: &[Point2], point: Point2) -> GeomResult<Vec<Passage>> {
+    let mut found = Vec::new();
+    for index in 0..ring.len() {
+        let (start, end) = (ring[index], ring[(index + 1) % ring.len()]);
+        if start == point {
+            found.push(Passage::Vertex(
+                ring[(index + ring.len() - 1) % ring.len()],
+                end,
+            ));
+        } else if end != point
+            && orient_sign(start, end, point)? == Sign::Zero
+            && strictly_between(start, point, end)
+        {
+            found.push(Passage::Edge(start, end));
+        }
+    }
+    Ok(found)
+}
+
+/// Whether `towards` lies strictly on the material side of `passage` at
+/// `point`. Material is on the left of every ring edge. A direction along an
+/// edge of the passage is not strictly inside.
+fn in_material(passage: &Passage, point: Point2, towards: Point2) -> GeomResult<bool> {
+    Ok(match *passage {
+        Passage::Edge(start, end) => orient_sign(start, end, towards)? == Sign::Positive,
+        Passage::Vertex(before, after) => match orient_sign(point, after, before)? {
+            // Convex: strictly between the next edge and the reversed previous one.
+            Sign::Positive => {
+                orient_sign(point, after, towards)? == Sign::Positive
+                    && orient_sign(point, towards, before)? == Sign::Positive
+            }
+            // Reflex: anything but the closed wedge outside the material.
+            Sign::Negative => {
+                !(orient_sign(point, before, towards)? != Sign::Negative
+                    && orient_sign(point, towards, after)? != Sign::Negative)
+            }
+            _ => orient_sign(point, after, towards)? == Sign::Positive,
+        },
+    })
+}
+
+/// Whether `mover` leaves the contact `point` on both sides of `container`'s
+/// material: some direction strictly inside it and some not.
+fn crosses_through(mover: &Ring, container: &Ring, point: Point2) -> GeomResult<bool> {
+    let mut directions = Vec::new();
+    for passage in passages(&mover.points, point)? {
+        match passage {
+            Passage::Vertex(before, after) | Passage::Edge(before, after) => {
+                directions.extend([before, after]);
+            }
+        }
+    }
+    let Some(passage) = passages(&container.points, point)?.into_iter().next() else {
+        return Ok(false);
+    };
+    let (mut inside, mut outside) = (false, false);
+    for towards in directions {
+        if in_material(&passage, point, towards)? {
+            inside = true;
+        } else {
+            outside = true;
+        }
+    }
+    Ok(inside && outside)
 }
 
 fn edges_conflict(first: &Edge, second: &Edge) -> GeomResult<bool> {
@@ -297,6 +445,9 @@ fn containers(
             match (inside, outside) {
                 (true, false) => containers[inner_index].push(outer_index),
                 (false, true) => {}
+                // Mixed: some vertices strictly inside and some strictly
+                // outside needs a crossing or a contact, which the sweep
+                // refuses first. Kept as a guard.
                 _ => return Err(refused()),
             }
         }
@@ -474,6 +625,114 @@ mod tests {
             Point2::new(3.0, 3.0),
         ];
         assert!(is_refused(nest(vec![ell, kite], vec![], 1_000)));
+    }
+
+    #[test]
+    fn a_hole_in_a_hole_is_refused() {
+        let nested = nest(
+            vec![square(0.0, 10.0, false)],
+            vec![square(1.0, 9.0, true), square(3.0, 7.0, true)],
+            1_000,
+        );
+        assert!(is_refused(nested));
+    }
+
+    #[test]
+    fn a_ring_crossing_itself_is_refused() {
+        let bow_tie = vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(4.0, 0.0),
+            Point2::new(0.0, 2.0),
+            Point2::new(4.0, 4.0),
+            Point2::new(5.0, 2.0),
+        ];
+        assert!(is_refused(nest(vec![bow_tie], vec![], 1_000)));
+    }
+
+    fn points(list: &[(f64, f64)]) -> Vec<Point2> {
+        list.iter().map(|&(x, y)| Point2::new(x, y)).collect()
+    }
+
+    #[test]
+    fn rings_crossing_through_shared_vertices_are_refused() {
+        // R's edge (4,0)-(0,4) runs inside S while its other edges leave S,
+        // and no edge crosses properly.
+        let first = nest(
+            vec![
+                points(&[(0.0, 0.0), (4.0, 0.0), (5.0, 5.0), (0.0, 4.0)]),
+                points(&[(4.0, 0.0), (0.0, 4.0), (-1.0, -1.0)]),
+            ],
+            vec![],
+            1_000,
+        );
+        assert!(is_refused(first));
+        // A hexagon and a kite share four vertices and overlap in a lens.
+        let second = nest(
+            vec![
+                points(&[
+                    (0.0, 0.0),
+                    (1.0, 0.0),
+                    (2.0, 0.5),
+                    (1.0, 1.0),
+                    (0.0, 1.0),
+                    (-1.0, 0.5),
+                ]),
+                points(&[
+                    (0.0, 0.0),
+                    (0.5, -1.0),
+                    (1.0, 0.0),
+                    (1.0, 1.0),
+                    (0.5, 2.0),
+                    (0.0, 1.0),
+                ]),
+            ],
+            vec![],
+            1_000,
+        );
+        assert!(is_refused(second));
+    }
+
+    #[test]
+    fn a_ring_that_repeats_a_vertex_is_refused() {
+        let figure = points(&[
+            (0.0, 0.0),
+            (4.0, 0.0),
+            (4.0, 4.0),
+            (2.0, 2.0),
+            (1.0, 3.0),
+            (0.0, 2.0),
+            (2.0, 2.0),
+        ]);
+        assert!(is_refused(nest(vec![figure], vec![], 1_000)));
+    }
+
+    #[test]
+    fn a_spike_is_refused_and_a_straight_vertex_is_not() {
+        let spike = points(&[
+            (0.0, 0.0),
+            (4.0, 0.0),
+            (4.0, 4.0),
+            (4.0, 5.0),
+            (4.0, 4.0),
+            (0.0, 4.0),
+        ]);
+        assert!(is_refused(nest(vec![spike], vec![], 1_000)));
+        let straight = points(&[(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
+        assert!(nest(vec![straight], vec![], 1_000).is_ok());
+        // Three collinear points fold back with all edges adjacent, so only
+        // the spike rule sees them.
+        let flat = points(&[(0.0, 0.0), (2.0, 0.0), (1.0, 0.0)]);
+        assert!(is_refused(nest(vec![flat], vec![], 1_000)));
+    }
+
+    #[test]
+    fn a_hole_touching_its_outer_ring_from_inside_is_accepted() {
+        // The hole's vertex (2,0) lies on the outer bottom edge; both of its
+        // edges lead into the material.
+        let touching = points(&[(2.0, 0.0), (1.0, 1.0), (3.0, 1.0)]);
+        let (regions, _) = nest(vec![square(0.0, 4.0, false)], vec![touching], 1_000)
+            .expect("a hole touching the outer ring");
+        assert_eq!(regions.len(), 1);
     }
 
     #[test]

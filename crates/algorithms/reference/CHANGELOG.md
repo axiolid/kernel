@@ -15,8 +15,9 @@ caret rule for `0.x` versions.
   when asked (`SectionRequest::with_cut_regions`): region edges that the cut
   lies across are found with exact source signs, linked to the cut segments
   into rings, and nested exactly on the returned coordinates. Pinches and
-  crossing rings are refused by name; a sheet request is invalid input
-  (ADR 0092, #372).
+  crossing rings are refused by name, contacts between rings are decided
+  exactly (a ring crossing another through a vertex, a repeated vertex and a
+  spike are refused); a sheet request is invalid input (ADR 0092, #372).
 
 ## [0.3.12] - 2026-10-29
 

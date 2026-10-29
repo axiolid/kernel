@@ -403,8 +403,9 @@ pub(super) fn has_adjacent_duplicate(points: &[Point2], ring: bool) -> bool {
     (0..pairs).any(|index| points[index] == points[(index + 1) % points.len()])
 }
 
-/// Make a closed chain run counter-clockwise by its segment directions; the
-/// directions of all its segments must agree.
+/// Make a closed chain keep the solid on its left by its segment directions
+/// (counter-clockwise around a cut, clockwise around a hole); the directions
+/// of all its segments must agree.
 fn orient_nodes(ctx: &ChainContext<'_>, nodes: &mut [NodeKey]) -> GeomResult<()> {
     let mut forward = None;
     for index in 0..nodes.len() {
