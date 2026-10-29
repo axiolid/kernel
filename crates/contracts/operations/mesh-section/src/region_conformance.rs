@@ -370,18 +370,6 @@ fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool
         .iter()
         .filter(|chain| chain.is_closed())
         .all(|chain| rings.iter().any(|ring| **ring == chain.points));
-    // A ring that is a `Both` region's own is not the chain's.
-    let is_both_ring = |ring: &Vec<Point2>| {
-        section
-            .regions
-            .iter()
-            .filter(|region| region.side == InPlaneSide::Both)
-            .any(|region| {
-                std::iter::once(&region.outer)
-                    .chain(&region.holes)
-                    .any(|candidate| candidate == ring)
-            })
-    };
     let open_chains_are_runs = section
         .chains
         .iter()
@@ -391,7 +379,6 @@ fn cut_rings_cover_the_chains(section: &PlaneSection, cut: &[CutRegion]) -> bool
             backwards.reverse();
             rings
                 .iter()
-                .filter(|ring| !is_both_ring(ring))
                 .filter(|ring| is_run(ring, &chain.points) || is_run(ring, &backwards))
                 .count()
                 == 1

@@ -42,10 +42,8 @@
 //!   Any other vertex between two collinear neighbours is dropped.
 //! - Every closed chain of a solid is a cut ring, bit for bit. Every open
 //!   chain with both ends on a region is a contiguous run of exactly one cut
-//!   ring, forward or reversed; it may also run along a
-//!   [`Both`](crate::InPlaneSide::Both) ring it touches, which is not
-//!   counted. Every cut ring vertex is bit-identical to a chain point or a
-//!   region ring vertex.
+//!   ring, forward or reversed. Every cut ring vertex is bit-identical to a
+//!   chain point or a region ring vertex.
 //! - Every [`Both`](crate::InPlaneSide::Both) region is a cut region: the
 //!   same outer ring and the same holes, bit for bit. Where such a region
 //!   meets transversal cut area it is a separate cut region that shares the
