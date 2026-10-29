@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.4 (2026-10-29) |
+| Latest release | 0.3.5 (2026-10-29) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -38,19 +38,28 @@ where its material lies on both sides of the plane, as closed regions (ADR
 
 ## Changes
 
-Latest release, 0.3.4 (2026-10-29):
+Latest release, 0.3.5 (2026-10-29):
 
 ### Added
 
-- `SectionRole` (`Solid`, `Sheet`) and `SectionRequest::role` with
-  `with_role`: a sheet is an open surface (terrain, a surface body), sectioned
-  with boundary edges allowed. `ChainEnd::MeshBoundary` and the evidence fields
-  `role` and `boundary_edges` (`PlaneSectionEvidence::with_role`). The default
-  stays `Solid`, today's semantics. Additive (ADR 0091, #359).
-- `RegionConformanceSuite` adds the terrain cut by a vertical plane and
-  through vertices, a sheet lying in the plane in both windings, an annulus
-  sheet and a saddle (#359). `RegionConformanceReport::sheets_claimed` is
-  `false` when the provider refuses the first sheet case with `Unsupported`;
-  the sheet cases are then skipped.
+- `SectionRequest::with_cut_regions(CutRegionLimits)` and
+  `PlaneSection::cut_regions`: the cut of a solid, where its material lies on
+  both sides of the plane, as closed `CutRegion`s (outer ring, holes) whose
+  rings run through the chain and region vertices bit for bit. Refusals
+  `REFUSED_PINCHED_CUT_REGION` and `REFUSED_CROSSING_CUT_RINGS`; evidence
+  fields `cut_regions`, `cut_region_vertices` and `cut_pairs`. Additive
+  (ADR 0092, #372).
+- `RegionConformanceSuite` runs every case again with cut regions requested,
+  adds the L-step, wall at a sill, wall at a head, stepped slab, pocket floor
+  and nested tubes fixtures, and reports `cut_regions_claimed`;
+  `RegionConformanceFailure::WrongCutRegions`. A provider that answers the
+  first solid case without cut regions predates them and is not claimed; one
+  that returns them and later drops them fails.
+
+### Fixed
+
+- The documentation said a closed chain runs counter-clockwise; a closed chain
+  of a solid keeps the material on its left, so one around a hole runs
+  clockwise.
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

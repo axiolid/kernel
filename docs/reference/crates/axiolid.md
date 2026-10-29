@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.5 (2026-10-29) |
+| Latest release | 0.4.6 (2026-10-29) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -132,11 +132,12 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.5 (2026-10-29):
+Latest release, 0.4.6 (2026-10-29):
 
 ### Added
 
-- `Application::section_mesh_request` sections open meshes when the request
-  has `SectionRole::Sheet` (ADR 0091, #359).
+- `mesh_section` exports `CutRegion`, `CutRegionLimits` and the cut-region
+  refusal names, so `Application::section_mesh_request` can return the cut of
+  a solid as closed regions (ADR 0092, #372).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

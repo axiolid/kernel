@@ -8,6 +8,14 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.6 - 2026-10-29
+
+### Added
+
+- `mesh_section` exports `CutRegion`, `CutRegionLimits` and the cut-region
+  refusal names, so `Application::section_mesh_request` can return the cut of
+  a solid as closed regions (ADR 0092, #372).
+
 ### 0.4.5 - 2026-10-29
 
 ### Added
@@ -2111,6 +2119,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-dispatch
+
+### 0.3.9 - 2026-10-29
+
+### Added
+
+- `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider
+  must answer them exactly when asked, with canonical rings, budgets and
+  evidence, and no `Both` region; a sheet request with cut regions is refused
+  before dispatch (ADR 0092, #372). A provider that ignores the request and
+  answers with `cut_regions: None` is treated as `Unsupported`, so the next
+  provider is tried and a registry without one refuses.
 
 ### 0.3.8 - 2026-10-29
 
@@ -5472,6 +5491,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-section-contract
 
+### 0.3.5 - 2026-10-29
+
+### Added
+
+- `SectionRequest::with_cut_regions(CutRegionLimits)` and
+  `PlaneSection::cut_regions`: the cut of a solid, where its material lies on
+  both sides of the plane, as closed `CutRegion`s (outer ring, holes) whose
+  rings run through the chain and region vertices bit for bit. Refusals
+  `REFUSED_PINCHED_CUT_REGION` and `REFUSED_CROSSING_CUT_RINGS`; evidence
+  fields `cut_regions`, `cut_region_vertices` and `cut_pairs`. Additive
+  (ADR 0092, #372).
+- `RegionConformanceSuite` runs every case again with cut regions requested,
+  adds the L-step, wall at a sill, wall at a head, stepped slab, pocket floor
+  and nested tubes fixtures, and reports `cut_regions_claimed`;
+  `RegionConformanceFailure::WrongCutRegions`. A provider that answers the
+  first solid case without cut regions predates them and is not claimed; one
+  that returns them and later drops them fails.
+
+### Fixed
+
+- The documentation said a closed chain runs counter-clockwise; a closed chain
+  of a solid keeps the material on its left, so one around a hole runs
+  clockwise.
+
 ### 0.3.4 - 2026-10-29
 
 ### Added
@@ -7046,6 +7089,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.13 - 2026-10-29
+
+### Added
+
+- `ScalarSection::section_request` traces the cut of a solid as closed regions
+  when asked (`SectionRequest::with_cut_regions`): region edges that the cut
+  lies across are found with exact source signs, linked to the cut segments
+  into rings, and nested exactly on the returned coordinates. Pinches and
+  crossing rings are refused by name, contacts between rings are decided
+  exactly (a ring crossing another through a vertex, a repeated vertex and a
+  spike are refused); a sheet request is invalid input (ADR 0092, #372).
 
 ### 0.3.12 - 2026-10-29
 

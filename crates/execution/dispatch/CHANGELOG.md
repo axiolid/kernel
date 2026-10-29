@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-10-29
+
 ### Added
 
 - `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider

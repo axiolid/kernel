@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.8 (2026-10-29) |
+| Latest release | 0.3.9 (2026-10-29) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,15 +53,15 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.8 (2026-10-29):
+Latest release, 0.3.9 (2026-10-29):
 
 ### Added
 
-- `MeshPlaneSectionRegistry::section_request` accepts open meshes for
-  `SectionRole::Sheet`: boundary edges are allowed, degenerate, non-manifold
-  and inconsistently wound input is refused before dispatch, the evidence must
-  echo the role and the audited `boundary_edges`, and a solid answer must not
-  end a chain on the mesh boundary, nor may any answer for a mesh without
-  boundary edges (ADR 0091, #359).
+- `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider
+  must answer them exactly when asked, with canonical rings, budgets and
+  evidence, and no `Both` region; a sheet request with cut regions is refused
+  before dispatch (ADR 0092, #372). A provider that ignores the request and
+  answers with `cut_regions: None` is treated as `Unsupported`, so the next
+  provider is tried and a registry without one refuses.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

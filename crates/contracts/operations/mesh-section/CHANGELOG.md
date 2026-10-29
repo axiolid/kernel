@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-29
+
 ### Added
 
 - `SectionRequest::with_cut_regions(CutRegionLimits)` and

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-10-29
+
 ### Added
 
 - `ScalarSection::section_request` traces the cut of a solid as closed regions
