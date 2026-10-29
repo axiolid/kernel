@@ -8,6 +8,13 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.5 - 2026-10-29
+
+### Added
+
+- `Application::section_mesh_request` sections open meshes when the request
+  has `SectionRole::Sheet` (ADR 0091, #359).
+
 ### 0.4.4 - 2026-10-28
 
 ### Added
@@ -2073,6 +2080,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-dispatch
+
+### 0.3.8 - 2026-10-29
+
+### Added
+
+- `MeshPlaneSectionRegistry::section_request` accepts open meshes for
+  `SectionRole::Sheet`: boundary edges are allowed, degenerate, non-manifold
+  and inconsistently wound input is refused before dispatch, the evidence must
+  echo the role and the audited `boundary_edges`, and a solid answer must not
+  end a chain on the mesh boundary, nor may any answer for a mesh without
+  boundary edges (ADR 0091, #359).
 
 ### 0.3.7 - 2026-10-28
 
@@ -5379,6 +5397,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-section-contract
 
+### 0.3.4 - 2026-10-29
+
+### Added
+
+- `SectionRole` (`Solid`, `Sheet`) and `SectionRequest::role` with
+  `with_role`: a sheet is an open surface (terrain, a surface body), sectioned
+  with boundary edges allowed. `ChainEnd::MeshBoundary` and the evidence fields
+  `role` and `boundary_edges` (`PlaneSectionEvidence::with_role`). The default
+  stays `Solid`, today's semantics. Additive (ADR 0091, #359).
+- `RegionConformanceSuite` adds the terrain cut by a vertical plane and
+  through vertices, a sheet lying in the plane in both windings, an annulus
+  sheet and a saddle (#359). `RegionConformanceReport::sheets_claimed` is
+  `false` when the provider refuses the first sheet case with `Unsupported`;
+  the sheet cases are then skipped.
+
 ### 0.3.3 - 2026-10-28
 
 ### Added
@@ -6929,6 +6962,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.12 - 2026-10-29
+
+### Added
+
+- `ScalarSection::section_request` sections `SectionRole::Sheet` meshes: a
+  chain ends on the mesh boundary at a crossed boundary edge or a boundary
+  vertex (`ChainEnd::MeshBoundary`), a boundary edge in the plane next to an
+  off-plane triangle is a touching edge, a sheet in the plane is a region, and
+  a sheet folded flat onto itself is refused as in-plane faces of both sides
+  (ADR 0091, #359). The request scratch bound is 1536 bytes per element.
 
 ### 0.3.11 - 2026-10-28
 

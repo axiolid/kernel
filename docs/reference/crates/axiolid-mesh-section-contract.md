@@ -8,7 +8,7 @@ Portable mesh plane-section request, result, and evidence contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.3 (2026-10-28) |
+| Latest release | 0.3.4 (2026-10-29) |
 | crates.io | [`axiolid-mesh-section-contract`](https://crates.io/crates/axiolid-mesh-section-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-section` |
 | Layer | contracts (`contract.operation`) |
@@ -36,20 +36,19 @@ boundary.
 
 ## Changes
 
-Latest release, 0.3.3 (2026-10-28):
+Latest release, 0.3.4 (2026-10-29):
 
 ### Added
 
-- `SectionRequest`, `PlaneSection` and the provided `MeshPlaneSection` methods
-  `section_request` and `request_scratch_requirement`: faces lying in the
-  cutting plane come back as `InPlaneRegion`s with an `InPlaneSide`, cut curves
-  are transversal `SectionChain`s (open ones end on a region), and touching
-  edges are counted in `PlaneSectionEvidence`. A provider that does not
-  implement the method refuses with `Unsupported`. The refusal names are
-  `REFUSED_OVERLAPPING_IN_PLANE_FACES`, `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`
-  and `REFUSED_SADDLE_VERTEX`. Additive (ADR 0091, #359).
-- `conformance::RegionConformanceSuite` runs hand-derived fixtures for the
-  method, among them a cube through its top face, a frame with a hole and a
-  parapet with a post (#359).
+- `SectionRole` (`Solid`, `Sheet`) and `SectionRequest::role` with
+  `with_role`: a sheet is an open surface (terrain, a surface body), sectioned
+  with boundary edges allowed. `ChainEnd::MeshBoundary` and the evidence fields
+  `role` and `boundary_edges` (`PlaneSectionEvidence::with_role`). The default
+  stays `Solid`, today's semantics. Additive (ADR 0091, #359).
+- `RegionConformanceSuite` adds the terrain cut by a vertical plane and
+  through vertices, a sheet lying in the plane in both windings, an annulus
+  sheet and a saddle (#359). `RegionConformanceReport::sheets_claimed` is
+  `false` when the provider refuses the first sheet case with `Unsupported`;
+  the sheet cases are then skipped.
 
 Full history: [`crates/contracts/operations/mesh-section/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-section/CHANGELOG.md)

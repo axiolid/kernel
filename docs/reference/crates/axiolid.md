@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.4 (2026-10-28) |
+| Latest release | 0.4.5 (2026-10-29) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -132,11 +132,11 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.4 (2026-10-28):
+Latest release, 0.4.5 (2026-10-29):
 
 ### Added
 
-- `Application::section_mesh_request` sections a closed oriented mesh and
-  reports faces lying in the plane as regions with a side (ADR 0091, #359).
+- `Application::section_mesh_request` sections open meshes when the request
+  has `SectionRole::Sheet` (ADR 0091, #359).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-10-28) |
+| Latest release | 0.3.12 (2026-10-29) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -46,15 +46,15 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-10-28):
+Latest release, 0.3.12 (2026-10-29):
 
 ### Added
 
-- `ScalarSection::section_request`: faces lying in the plane become regions
-  with a side and holes, found by exact orientation predicates on the source
-  coordinates; cut curves are transversal chains, open ones ending on a region,
-  oriented and simplified exactly (no tolerance);
-  touching edges are counted. Overlapping in-plane faces and saddle vertices
-  are refused by name (ADR 0091, #359).
+- `ScalarSection::section_request` sections `SectionRole::Sheet` meshes: a
+  chain ends on the mesh boundary at a crossed boundary edge or a boundary
+  vertex (`ChainEnd::MeshBoundary`), a boundary edge in the plane next to an
+  off-plane triangle is a touching edge, a sheet in the plane is a region, and
+  a sheet folded flat onto itself is refused as in-plane faces of both sides
+  (ADR 0091, #359). The request scratch bound is 1536 bytes per element.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

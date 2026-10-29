@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-29
+
 ### Added
 
 - `Application::section_mesh_request` sections open meshes when the request

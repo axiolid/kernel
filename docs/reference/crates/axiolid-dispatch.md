@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-28) |
+| Latest release | 0.3.8 (2026-10-29) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,16 +53,15 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-28):
+Latest release, 0.3.8 (2026-10-29):
 
 ### Added
 
-- `MeshPlaneSectionRegistry::section_request`: the source checks of `section`,
-  fallback only on unsupported or unavailable providers, and outcome checks of
-  the frame, chain and ring invariants, canonical order, budgets (in-plane
-  regions, region vertices, in-plane pairs) and evidence counts (ADR 0091,
-  #359).
-- `MeshPlaneSectionRegistry::register_request_conformant` also runs the
-  region suite and rejects a claimed failure (#359).
+- `MeshPlaneSectionRegistry::section_request` accepts open meshes for
+  `SectionRole::Sheet`: boundary edges are allowed, degenerate, non-manifold
+  and inconsistently wound input is refused before dispatch, the evidence must
+  echo the role and the audited `boundary_edges`, and a solid answer must not
+  end a chain on the mesh boundary, nor may any answer for a mesh without
+  boundary edges (ADR 0091, #359).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

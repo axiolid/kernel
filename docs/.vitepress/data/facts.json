@@ -4,10 +4,10 @@
       "description": "Feature-gated facade for Axiolid's format-neutral geometry stack",
       "layer": "facade",
       "path": "crates/facade/axiolid",
-      "released": "0.4.4",
-      "released_date": "2026-10-28",
+      "released": "0.4.5",
+      "released_date": "2026-10-29",
       "role": "facade",
-      "version": "0.4.4"
+      "version": "0.4.5"
     },
     "axiolid-arrangement": {
       "description": "Editable planar subdivision with persistent half-edge topology",
@@ -157,10 +157,10 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.7",
-      "released_date": "2026-10-28",
+      "released": "0.3.8",
+      "released_date": "2026-10-29",
       "role": "execution.dispatch",
-      "version": "0.3.7"
+      "version": "0.3.8"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
@@ -355,10 +355,10 @@
       "description": "Portable mesh plane-section request, result, and evidence contract",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-section",
-      "released": "0.3.3",
-      "released_date": "2026-10-28",
+      "released": "0.3.4",
+      "released_date": "2026-10-29",
       "role": "contract.operation",
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     "axiolid-minkowski": {
       "description": "Minkowski sum and difference of planar-faced solids",
@@ -481,10 +481,10 @@
       "description": "Portable scalar reference implementation and certified predicates",
       "layer": "algorithms",
       "path": "crates/algorithms/reference",
-      "released": "0.3.11",
-      "released_date": "2026-10-28",
+      "released": "0.3.12",
+      "released_date": "2026-10-29",
       "role": "algorithm.reference",
-      "version": "0.3.11"
+      "version": "0.3.12"
     },
     "axiolid-refine": {
       "description": "Mesh refinement, smoothing, isotropic remeshing, hole filling, fairing and subdivision surfaces",
