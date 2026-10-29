@@ -2,9 +2,11 @@
 
 Each mutant breaks one decision that turns the cut of a solid into closed
 regions: which region edges bound the cut and in which direction, how the
-rings are linked and simplified, the pinch refusal, the exact area sign, the
-nesting (innermost container, containment, crossings, collinear overlaps), the
-budgets, and the registry checks of the answer. A mutant must turn a test red:
+rings are linked and simplified, the pinch refusal, the exact points the rings
+are decided on (#377: the frame sign, the weight normalisation, the exact
+fallback, the box of a point), the outer-or-hole turn at the smallest vertex,
+the nesting (innermost container, containment, crossings, collinear overlaps),
+the budgets, and the registry checks of the answer. A mutant must turn a test red:
 the hand-derived cases of `tests/section_request.rs`, the region conformance
 suite, the unit tests of the ring tracing and nesting, or the registry tests
 of `mesh_section_contract.rs`.
@@ -21,6 +23,7 @@ import probe_lib
 Q = "crates/algorithms/reference/src/section/request.rs"
 K = "crates/algorithms/reference/src/section/cut_regions.rs"
 N = "crates/algorithms/reference/src/section/ring_nesting.rs"
+P = "crates/algorithms/reference/src/section/plane_points.rs"
 D = "crates/execution/dispatch/src/section_request.rs"
 TESTS = [
     ["-p", "axiolid-reference", "--test", "section_request"],
@@ -71,13 +74,59 @@ MUTANTS = [
         '(Link::Cut, Link::Cut) => false,', TESTS,
     ),
     (
-        'ring orientation by float area', K,
-        '        match exact_area_sign(&points)? {',
-        '        match if super::signed_area(&points) < 0.0 {\n'
-        '            Sign::Negative\n'
-        '        } else {\n'
-        '            Sign::Positive\n'
-        '        } {', TESTS,
+        'ring orientation by float area', N,
+        '        ring.hole = is_hole(exact, &ring.nodes)?;',
+        '        ring.hole = super::signed_area(&ring.points) < 0.0;', TESTS,
+    ),
+    (
+        'ring role taken from the first vertex, not the smallest', N,
+        '        if exact.lexicographic(nodes[index], nodes[smallest])? == Ordering::Less {',
+        '        if false && exact.lexicographic(nodes[index], nodes[smallest])? == Ordering::Less {',
+        TESTS,
+    ),
+    (
+        'orientation ignores the frame sign', P,
+        '        Ok(sign_times(sign, self.frame_sign))',
+        '        Ok(sign)', TESTS,
+    ),
+    (
+        'crossing weight not made positive', P,
+        '        if point[2].sign() == Some(Sign::Negative) {',
+        '        if false && point[2].sign() == Some(Sign::Negative) {', TESTS,
+    ),
+    (
+        'orientation fallback guesses a sign', P,
+        '            None => determinant(&a.exact, &b.exact, &c.exact)\n'
+        '                .sign()\n'
+        '                .ok_or_else(undecided)?,',
+        '            None => Sign::Positive,', TESTS,
+    ),
+    (
+        'comparison fallback guesses a sign', P,
+        '            None => difference(&a.exact, &b.exact, axis)\n'
+        '                .sign()\n'
+        '                .ok_or_else(undecided)?,',
+        '            None => Sign::Positive,', TESTS,
+    ),
+    (
+        'vertex off the plane accepted', P,
+        '        if self.plane_value(point)?.sign() != Some(Sign::Zero) {',
+        '        if false && self.plane_value(point)?.sign() != Some(Sign::Zero) {', TESTS,
+    ),
+    (
+        'edge on one side of the plane crossed', P,
+        '        if !opposite {',
+        '        if false && !opposite {', TESTS,
+    ),
+    (
+        'box of a crossing not divided by its weight', P,
+        '                enclosure[0].quotient(enclosure[2]),',
+        '                enclosure[0],', TESTS,
+    ),
+    (
+        'box pruning inverted', N,
+        '        self.core[0] >= other.bounds[0]',
+        '        self.core[0] <= other.bounds[0]', TESTS,
     ),
     (
         'innermost container taken as the outermost', N,
@@ -91,8 +140,9 @@ MUTANTS = [
     ),
     (
         'winding walk counts upward edges against the point', N,
-        'if b.y > point.y && side == Sign::Positive {',
-        'if b.y > point.y && side == Sign::Negative {', TESTS,
+        'if exact.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {',
+        'if exact.compare(b, point, 1)? == Ordering::Greater && side == Sign::Negative {',
+        TESTS,
     ),
     (
         'proper crossing accepted', N,
@@ -101,8 +151,8 @@ MUTANTS = [
     ),
     (
         'collinear overlap direction flipped', N,
-        'let same_way = (along(b) > along(a)) == (along(d) > along(c));',
-        'let same_way = (along(b) > along(a)) != (along(d) > along(c));', TESTS,
+        '        == (exact.compare(d, c, axis)? == Ordering::Greater);',
+        '        != (exact.compare(d, c, axis)? == Ordering::Greater);', TESTS,
     ),
     (
         'pair budget unchecked', N,
@@ -155,7 +205,7 @@ MUTANTS = [
     ),
     (
         'spike accepted', N,
-        '        refuse_spikes(&ring.points)?;',
+        '        refuse_spikes(exact, &ring.nodes)?;',
         '        let _ = ring;', TESTS,
     ),
     (
@@ -169,13 +219,9 @@ MUTANTS = [
         '        if false && out != inn {', TESTS,
     ),
     (
-        'ring without area taken for a hole', K,
-        '            _ => {\n'
-        '                return Err(GeomError::Degenerate(\n'
-        '                    "cut region ring has no signed area".into(),\n'
-        '                ))\n'
-        '            }',
-        '            _ => holes.push(canonical_rotation(points)),', TESTS,
+        'ring without area not refused as degenerate', K,
+        '        if !turns {',
+        '        if false && !turns {', TESTS,
     ),
     (
         'registry accepts cut regions that were not requested', D,
