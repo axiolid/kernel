@@ -305,6 +305,7 @@ pub(super) fn plane_section(
             let (cut, pairs) = build_cut_regions(
                 &CutInputs {
                     chains: &chain_context,
+                    plane,
                     segments: &segments,
                     region_edges: &cut_edges,
                     region_ring_vertices: &ring_vertices,

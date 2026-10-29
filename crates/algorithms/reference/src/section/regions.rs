@@ -69,6 +69,16 @@ impl Projection {
         project(point, self.axis)
     }
 
+    /// The dropped axis: 0 = x, 1 = y, 2 = z.
+    pub(super) fn axis(self) -> usize {
+        self.axis
+    }
+
+    /// The exact orientation of the frame's own axes after the drop.
+    pub(super) fn frame_sign(self) -> Sign {
+        self.frame_sign
+    }
+
     /// Exact orientation of three points of the plane in the frame's own
     /// `(x, y)` sense: positive when they turn counter-clockwise there.
     pub(super) fn orient(self, a: Point3, b: Point3, c: Point3) -> GeomResult<Sign> {

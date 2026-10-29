@@ -16,9 +16,10 @@
 //!    (`chains::is_droppable`), or when both are region edges and the region
 //!    ring itself dropped the vertex. A junction of a cut segment and a region
 //!    edge is a vertex of both outputs and stays.
-//! 4. A ring is an outer ring or a hole by the exact sign of its area on the
-//!    returned coordinates (an edge-crossing node has no exact binary64
-//!    position), and `ring_nesting` groups them.
+//! 4. Every node gets its exact point (`plane_points`): a source vertex in the
+//!    plane or the exact crossing of a source edge with it. `ring_nesting`
+//!    decides on those points whether a ring is an outer ring or a hole and
+//!    groups them; the returned coordinates only label the output.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,9 +27,9 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign
 use axiolid_mesh_section_contract::{CutRegion, CutRegionLimits, REFUSED_PINCHED_CUT_REGION};
 
 use super::chains::{chain_points, has_adjacent_duplicate, is_droppable, ChainContext};
-use super::regions::canonical_rotation;
-use super::ring_nesting::nest_rings;
-use super::{exact_area_sign, internal_topology_error, NodeKey, ScalarSection, Segment};
+use super::plane_points::PlanePoints;
+use super::ring_nesting::{nest_rings, TracedRing};
+use super::{internal_topology_error, ExactSectionPlane, NodeKey, ScalarSection, Segment};
 
 /// What an edge of the cut graph is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,7 @@ enum Link {
 /// What ring tracing needs besides the chain context.
 pub(super) struct CutInputs<'a> {
     pub(super) chains: &'a ChainContext<'a>,
+    pub(super) plane: ExactSectionPlane,
     pub(super) segments: &'a BTreeSet<Segment>,
     /// Region edges that bound the cut, directed with the material on the left.
     pub(super) region_edges: &'a BTreeSet<(u32, u32)>,
@@ -112,9 +114,9 @@ pub(super) fn build_cut_regions(
         }
     }
 
+    let mut exact = PlanePoints::new(&inputs.plane, ctx.projection)?;
     let mut visited = BTreeSet::<NodeKey>::new();
-    let mut outers = Vec::new();
-    let mut holes = Vec::new();
+    let mut rings = Vec::new();
     for (&start, onward) in &outgoing {
         if visited.contains(&start) {
             continue;
@@ -152,17 +154,34 @@ pub(super) fn build_cut_regions(
                 "cut region collapsed under projection".into(),
             ));
         }
-        match exact_area_sign(&points)? {
-            Sign::Positive => outers.push(canonical_rotation(points)),
-            Sign::Negative => holes.push(canonical_rotation(points)),
-            _ => {
+        let mut nodes = Vec::with_capacity(ring.len());
+        for &node in &ring {
+            nodes.push(exact.node(ctx.mesh, node)?);
+        }
+        for index in 0..nodes.len() {
+            if exact.same(nodes[index], nodes[(index + 1) % nodes.len()])? {
                 return Err(GeomError::Degenerate(
-                    "cut region ring has no signed area".into(),
-                ))
+                    "cut region collapsed under projection".into(),
+                ));
             }
         }
+        // A ring whose vertices are all collinear has no area; the nesting
+        // relies on a turn at its smallest vertex.
+        let mut turns = false;
+        for &node in &nodes[2..] {
+            if exact.orient(nodes[0], nodes[1], node)? != Sign::Zero {
+                turns = true;
+                break;
+            }
+        }
+        if !turns {
+            return Err(GeomError::Degenerate(
+                "cut region ring has no signed area".into(),
+            ));
+        }
+        rings.push(TracedRing { nodes, points });
     }
-    nest_rings(outers, holes, limits, options)
+    nest_rings(&exact, rings, limits, options)
 }
 
 /// The nodes of a traced ring that remain after dropping the redundant ones.
@@ -267,6 +286,7 @@ mod tests {
         build_cut_regions(
             &CutInputs {
                 chains: &chains,
+                plane,
                 segments: &segments,
                 region_edges: &region_edges,
                 region_ring_vertices: &ring_vertices,

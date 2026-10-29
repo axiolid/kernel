@@ -771,6 +771,7 @@ dependencies = [
  "axiolid-curve",
  "axiolid-dispatch",
  "axiolid-evaluate",
+ "axiolid-exact",
  "axiolid-guarantees",
  "axiolid-measure",
  "axiolid-mesh",

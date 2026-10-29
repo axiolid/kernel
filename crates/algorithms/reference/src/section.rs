@@ -16,6 +16,7 @@
 
 mod chains;
 mod cut_regions;
+mod plane_points;
 mod regions;
 mod request;
 mod ring_nesting;

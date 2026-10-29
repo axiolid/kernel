@@ -762,3 +762,141 @@ fn cut_region_budgets_are_enforced() {
         );
     }
 }
+
+// ---- cut regions decided on the source geometry (#377) ----------------------
+
+/// A horizontal plane at height `z`, turned about the vertical by
+/// `pi * k / total`. An even `k` is viewed from below, which mirrors the
+/// frame's own sense and gives the projection a negative frame sign.
+fn turned(k: u32, total: u32, z: f64) -> Frame3 {
+    let (s, c) = (std::f64::consts::PI * f64::from(k) / f64::from(total)).sin_cos();
+    let y = if k % 2 == 1 {
+        Vec3::new(-s, c, 0.0)
+    } else {
+        Vec3::new(s, -c, 0.0)
+    };
+    frame(Point3::new(0.0, 0.0, z), Vec3::new(c, s, 0.0), y)
+}
+
+fn cut(mesh: &TriMesh, frame: Frame3) -> Result<PlaneSection, GeomError> {
+    let request = request(frame).with_cut_regions(CutRegionLimits::new(100, 10_000, 100_000));
+    registry().section_request(mesh, &request, &options())
+}
+
+#[test]
+fn touching_shells_pass_under_every_rotated_frame() {
+    // B stands on the top face of A and touches it along y = 0.1 in the
+    // source, whatever the frame.
+    let mesh = shells(&[
+        ((0.0, 2.0), (0.0, 0.1), (0.0, 1.0)),
+        ((0.9, 1.1), (0.1, 1.0), (0.0, 1.0)),
+    ]);
+    for k in 1..=200 {
+        let section = cut(&mesh, turned(k, 201, 0.5)).unwrap_or_else(|error| {
+            panic!("frame {k} refused the touching shells: {error:?}");
+        });
+        let regions = section.cut_regions.expect("cut regions");
+        assert_eq!(regions.len(), 2, "frame {k}");
+        assert!(regions.iter().all(|region| region.holes.is_empty()));
+        assert_eq!(
+            regions
+                .iter()
+                .map(|region| region.outer.len())
+                .collect::<Vec<_>>(),
+            [4, 4],
+            "frame {k}"
+        );
+    }
+}
+
+/// A cable ladder: two rails joined by ten rungs that touch them.
+fn cable_ladder() -> TriMesh {
+    let mut parts = vec![
+        ((0.0, 3.0), (0.0, 0.06), (0.0, 0.1)),
+        ((0.0, 3.0), (0.54, 0.6), (0.0, 0.1)),
+    ];
+    for rung in 0..10 {
+        let x = 0.15 + 0.3 * f64::from(rung);
+        parts.push(((x, x + 0.03), (0.06, 0.54), (0.02, 0.05)));
+    }
+    shells(&parts)
+}
+
+#[test]
+fn a_rotated_cable_ladder_cuts_to_its_bars() {
+    let mesh = cable_ladder();
+    // The plan at rung height: two rails and ten rungs.
+    for k in 1..=100 {
+        let section = cut(&mesh, turned(k, 101, 0.035))
+            .unwrap_or_else(|error| panic!("plan frame {k} refused: {error:?}"));
+        assert_eq!(section.cut_regions.expect("cut regions").len(), 12, "{k}");
+    }
+    // A slightly oblique vertical section through the first rung: the rail
+    // ends and the rung. Its crossing nodes are not representable, so this
+    // decides on exact crossings.
+    for k in 1..=100 {
+        let phi = std::f64::consts::FRAC_PI_2 + 0.05 * (2.0 * f64::from(k) / 101.0 - 1.0);
+        let (s, c) = phi.sin_cos();
+        let vertical = frame(Point3::new(0.165, 0.3, 0.0), Vec3::new(c, s, 0.0), Vec3::Z);
+        let section = cut(&mesh, vertical)
+            .unwrap_or_else(|error| panic!("oblique frame {k} refused: {error:?}"));
+        assert_eq!(section.cut_regions.expect("cut regions").len(), 3, "{k}");
+    }
+}
+
+#[test]
+fn overlapping_shells_stay_refused_under_every_rotated_frame() {
+    let sliver = shells(&[
+        ((0.0, 2.0), (0.0, 0.1), (0.0, 1.0)),
+        ((0.9, 1.1), (0.05, 1.0), (0.0, 1.0)),
+    ]);
+    let inside = shells(&[
+        ((0.0, 2.0), (0.0, 0.1), (0.0, 1.0)),
+        ((0.9, 1.1), (0.02, 0.08), (0.0, 1.0)),
+    ]);
+    for k in 1..=200 {
+        for mesh in [&sliver, &inside] {
+            assert!(
+                is_refused_as_crossing(cut(mesh, turned(k, 201, 0.5))),
+                "frame {k}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sub_ulp_overlap_in_the_source_is_refused() {
+    // The mesh itself is rotated in binary64, as a consumer's world transform
+    // does. The rounded corners of B may fall strictly inside A; that overlap
+    // is in the input, and the cut refuses exactly when it is there.
+    let (mut refused, mut accepted) = (0, 0);
+    for k in 1..=200 {
+        let (s, c) = (std::f64::consts::PI * f64::from(k) / 201.0).sin_cos();
+        let turn = |x: f64, y: f64| Point2::new(c * x - s * y, s * x + c * y);
+        let mut mesh = shells(&[
+            ((0.0, 2.0), (0.0, 0.1), (0.0, 1.0)),
+            ((0.9, 1.1), (0.1, 1.0), (0.0, 1.0)),
+        ]);
+        for position in &mut mesh.positions {
+            let flat = turn(position.x, position.y);
+            *position = Point3::new(flat.x, flat.y, position.z);
+        }
+        let (a0, a1) = (turn(0.0, 0.1), turn(2.0, 0.1));
+        let overlaps = [turn(0.9, 0.1), turn(1.1, 0.1)].into_iter().any(|corner| {
+            axiolid_reference::orient2d(a1, a0, corner).sign()
+                == Some(axiolid_contracts::Sign::Positive)
+        });
+        let result = cut(&mesh, horizontal(0.5));
+        if overlaps {
+            assert!(is_refused_as_crossing(result), "frame {k}");
+            refused += 1;
+        } else {
+            result.unwrap_or_else(|error| panic!("frame {k} refused: {error:?}"));
+            accepted += 1;
+        }
+    }
+    assert!(
+        refused > 0 && accepted > 0,
+        "{refused} refused, {accepted} accepted"
+    );
+}

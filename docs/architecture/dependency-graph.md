@@ -397,6 +397,7 @@ graph TD
     axiolid_reference --> axiolid_curve
     axiolid_reference --> axiolid_dispatch
     axiolid_reference --> axiolid_evaluate
+    axiolid_reference --> axiolid_exact
     axiolid_reference --> axiolid_guarantees
     axiolid_reference --> axiolid_measure
     axiolid_reference --> axiolid_mesh
