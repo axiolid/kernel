@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.38 (2026-10-29) |
+| Latest release | 0.3.39 (2026-10-29) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,12 +78,20 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.38 (2026-10-29):
+Latest release, 0.3.39 (2026-10-29):
 
-### Fixed
+### Changed
 
-- A fixed-reference sweep along a chain that ends at its start with a
-  corner is refused by name instead of being swept open with crossing end
-  caps (#375).
+- The exact compiler builds the union and the intersection of placed
+  extrusions (and of placed booleans, as subjects), as it did the
+  difference, through the general boolean; the deviation report certifies
+  their meshes against that result like a difference's, the same measured
+  bound, instead of `Unbounded("exact union or intersection of placed
+  operands")`, so a circular column united with a box at chord `1e-3`
+  reports a Certified bound within the budget. A tool that is itself a boolean
+  is still refused by name (#326). An intersection that leaves nothing
+  is `Degenerate` naming its operator, no longer "difference" (a union
+  cannot leave nothing). A symmetric difference of placed operands is
+  refused by name (#376).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

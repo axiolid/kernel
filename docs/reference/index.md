@@ -96,7 +96,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.3 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.2 | GPU executor adapter contract for batched Axiolid geometry |
 | [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.9 | Provider registration, ordering, fallback, and execution policy |
-| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.38 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
+| [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.39 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade
 

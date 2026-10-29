@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.39] - 2026-10-29
+
 ### Changed
 
 - The exact compiler builds the union and the intersection of placed
