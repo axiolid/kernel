@@ -54,6 +54,11 @@ MUTANTS = [
         TESTS,
     ),
     (
+        'every pair of segments taken for one of a vertex', A,
+        '.any(|vertex| vertex == high_key.0 || vertex == high_key.1)',
+        '.any(|_| true)', TESTS,
+    ),
+    (
         'proper crossings skipped', A,
         '            if proper {', '            if false && proper {', TESTS,
     ),

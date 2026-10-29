@@ -28,7 +28,8 @@
 //! cover it, `Above` when only the others do, `Both` when both kinds do and
 //! `Empty` when none does.
 //!
-//! Candidate pairs of segments and of pieces with triangles count against
+//! Candidate pairs of segments whose boxes overlap, and of pieces with the
+//! triangles whose boxes can hold them, count against
 //! `RegionLimits::max_in_plane_pairs`. The crossing points are bounded by the
 //! pairs and charged against the memory budget as they are created.
 
@@ -473,27 +474,45 @@ fn cut_segments(
             .total_cmp(&segments[right].bounds[0])
             .then(left.cmp(&right))
     });
+    // The boxes in sweep order, to scan them without looking segments up.
+    let boxes: Vec<[f64; 4]> = order.iter().map(|&index| segments[index].bounds).collect();
     let elements = mesh.positions.len().max(mesh.triangle_count());
     let mut created = 0usize;
     for (rank, &first) in order.iter().enumerate() {
-        for &second in &order[rank + 1..] {
-            if segments[second].bounds[0] > segments[first].bounds[2] {
+        options.check_cancelled()?;
+        for (&second, held) in order[rank + 1..].iter().zip(&boxes[rank + 1..]) {
+            if held[0] > boxes[rank][2] {
                 break;
             }
-            options.check_cancelled()?;
-            if !overlap(&segments[first].bounds, &segments[second].bounds) {
+            if !overlap(&boxes[rank], held) {
                 continue;
             }
+            options.check_cancelled()?;
             count_pair(pairs, max_pairs)?;
             let (low, high) = (first.min(second), first.max(second));
             let [a, b] = segments[low].ends.map(|end| points.exact[end]);
             let [c, d] = segments[high].ends.map(|end| points.exact[end]);
-            let around = [
-                exact.orient(a, b, c)?,
-                exact.orient(a, b, d)?,
-                exact.orient(c, d, a)?,
-                exact.orient(c, d, b)?,
-            ];
+            // Segments of one source vertex meet only there, or they overlap
+            // on a line; then the far end of the shorter is a vertex of its
+            // triangle's third edge, which is examined against the longer.
+            let (low_key, high_key) = (segments[low].key, segments[high].key);
+            if [low_key.0, low_key.1]
+                .into_iter()
+                .any(|vertex| vertex == high_key.0 || vertex == high_key.1)
+            {
+                continue;
+            }
+            // Both ends of one segment strictly on one side of the other's
+            // line: they neither cross nor touch, and most pairs end here.
+            let (past_c, past_d) = (exact.orient(a, b, c)?, exact.orient(a, b, d)?);
+            if past_c == past_d && past_c != Sign::Zero {
+                continue;
+            }
+            let (past_a, past_b) = (exact.orient(c, d, a)?, exact.orient(c, d, b)?);
+            if past_a == past_b && past_a != Sign::Zero {
+                continue;
+            }
+            let around = [past_c, past_d, past_a, past_b];
             let proper = around.iter().all(|&sign| sign != Sign::Zero)
                 && around[0] != around[1]
                 && around[2] != around[3];
@@ -702,6 +721,23 @@ fn coverage(
             ])
         })
         .collect();
+    // `[min_u, min_v, max_u, max_v]` that the piece's extremes reach at least:
+    // a piece inside a triangle lies in the triangle's box.
+    let piece_cores: Vec<[f64; 4]> = ends_of
+        .iter()
+        .map(|&(a, b)| {
+            let (a, b) = (
+                exact.bounds(vertices[a].exact),
+                exact.bounds(vertices[b].exact),
+            );
+            [
+                a[2].min(b[2]),
+                a[3].min(b[3]),
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+            ]
+        })
+        .collect();
     let triangle_boxes: Vec<[f64; 4]> = corners
         .iter()
         .map(|at| union_box(&at.map(|corner| exact.bounds(points.exact[corner]))))
@@ -716,10 +752,20 @@ fn coverage(
         order
     };
     let (piece_order, triangle_order) = (by_min_u(&piece_boxes), by_min_u(&triangle_boxes));
+    // The boxes in sweep order, to scan them without looking pieces and
+    // triangles up.
+    let in_order = |order: &[usize], boxes: &[[f64; 4]]| -> Vec<[f64; 4]> {
+        order.iter().map(|&index| boxes[index]).collect()
+    };
+    let piece_swept = in_order(&piece_order, &piece_boxes);
+    let triangle_swept = in_order(&triangle_order, &triangle_boxes);
     let mut consider = |piece: usize, triangle: usize| -> GeomResult<()> {
         options.check_cancelled()?;
-        if piece_boxes[piece][1] > triangle_boxes[triangle][3]
-            || triangle_boxes[triangle][1] > piece_boxes[piece][3]
+        let (core, held) = (&piece_cores[piece], &triangle_boxes[triangle]);
+        if core[0] < held[0]
+            || core[1] < held[1]
+            || core[2] > held[2]
+            || core[3] > held[3]
             || carriers[piece]
                 .iter()
                 .any(|&(carrier, _)| carrier == triangle)
@@ -745,25 +791,30 @@ fn coverage(
         Ok(())
     };
     // Triangles that start inside the span of a piece, then pieces that start
-    // strictly inside the span of a triangle.
-    for &piece in &piece_order {
-        let start =
-            triangle_order.partition_point(|&t| triangle_boxes[t][0] < piece_boxes[piece][0]);
-        for &triangle in &triangle_order[start..] {
-            if triangle_boxes[triangle][0] > piece_boxes[piece][2] {
+    // strictly inside the span of a triangle; the boxes must overlap in `v`
+    // as well.
+    for (&piece, held) in piece_order.iter().zip(&piece_swept) {
+        options.check_cancelled()?;
+        let start = triangle_swept.partition_point(|swept| swept[0] < held[0]);
+        for (&triangle, swept) in triangle_order[start..].iter().zip(&triangle_swept[start..]) {
+            if swept[0] > held[2] {
                 break;
             }
-            consider(piece, triangle)?;
+            if swept[1] <= held[3] && held[1] <= swept[3] {
+                consider(piece, triangle)?;
+            }
         }
     }
-    for &triangle in &triangle_order {
-        let start =
-            piece_order.partition_point(|&p| piece_boxes[p][0] <= triangle_boxes[triangle][0]);
-        for &piece in &piece_order[start..] {
-            if piece_boxes[piece][0] > triangle_boxes[triangle][2] {
+    for (&triangle, held) in triangle_order.iter().zip(&triangle_swept) {
+        options.check_cancelled()?;
+        let start = piece_swept.partition_point(|swept| swept[0] <= held[0]);
+        for (&piece, swept) in piece_order[start..].iter().zip(&piece_swept[start..]) {
+            if swept[0] > held[2] {
                 break;
             }
-            consider(piece, triangle)?;
+            if swept[1] <= held[3] && held[1] <= swept[3] {
+                consider(piece, triangle)?;
+            }
         }
     }
     Ok(covered)
@@ -780,8 +831,12 @@ fn contains_piece(
     let mut on_line = false;
     for index in 0..3 {
         let (a, b) = (ring[index], ring[(index + 1) % 3]);
-        let (start, end) = (exact.orient(a, b, from)?, exact.orient(a, b, to)?);
-        if start == Sign::Negative || end == Sign::Negative {
+        let start = exact.orient(a, b, from)?;
+        if start == Sign::Negative {
+            return Ok(false);
+        }
+        let end = exact.orient(a, b, to)?;
+        if end == Sign::Negative {
             return Ok(false);
         }
         on_line |= start == Sign::Zero && end == Sign::Zero;
@@ -939,6 +994,21 @@ mod tests {
             })
             .count();
         assert_eq!(along, 3);
+    }
+
+    #[test]
+    fn collinear_segments_of_one_vertex_split_the_longer() {
+        // Both bottom edges leave (0,0): (0,0)-(2,0) lies on (0,0)-(3,0).
+        let faces = [
+            [(0.0, 0.0), (2.0, 0.0), (0.0, 1.0)],
+            [(0.0, 0.0), (3.0, 0.0), (3.0, 1.0)],
+        ];
+        let (mesh, arrangement) = arrange(&faces);
+        let (a, b) = (vertex_at(&mesh, 0.0, 0.0), vertex_at(&mesh, 3.0, 0.0));
+        assert_eq!(
+            arrangement.left_of(a, b).expect("left"),
+            [Class::Below, Class::Below]
+        );
     }
 
     #[test]
