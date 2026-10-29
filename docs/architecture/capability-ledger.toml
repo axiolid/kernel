@@ -160,10 +160,10 @@ number = 137
 
 [[issue]]
 key = "hidden-line-drawing"
-title = "Hidden-line removal and 2D projection drawings of solids"
-priority = "High"
+title = "Hidden-line drawing of exact B-rep and smooth silhouettes, oblique clip planes and the C ABI"
+priority = "Medium"
 effort = "High"
-number = 138
+number = 371
 
 [[issue]]
 key = "medial-axis-hatching"
