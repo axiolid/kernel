@@ -112,9 +112,9 @@ is sectioned too. All additions are non-breaking.
   the overlap test and is refused as faces of both sides.
 - **Closed chains.** A sheet has no inside, so the segment directions say only
   which side its faces point to. A closed chain of a sheet is made
-  counter-clockwise by the sign of its plane-local area, as the legacy path
-  does; this is the one orientation decision that is not exact, and a chain
-  without a finite non-zero area is `Degenerate`.
+  counter-clockwise by the exact sign of the signed area of the polygon it
+  returns (the cross products summed in expansion arithmetic), and a chain
+  with zero area is `Degenerate`.
 - **Conformance.** The suite adds the terrain cut by a vertical plane and
   through vertices, a sheet in the plane in both windings, an annulus sheet
   and a saddle, all with hand-derived values.
@@ -141,10 +141,6 @@ is sectioned too. All additions are non-breaking.
 
 - Elements that are soups of overlapping bodies with flush tops are refused by
   name until faces can be merged.
-- The orientation of a closed chain of a sheet uses a floating-point area, the
-  one inexact decision of the request path. It is refused when the area is zero
-  or not finite, and only a chain whose points are nearly degenerate can be
-  affected.
 - A boundary edge of a sheet lying in the plane next to an off-plane triangle
   is only counted as touching; `PlaneSection` has no field for it yet.
 - The reference implementation is quadratic in the worst case in the overlap

@@ -16,8 +16,9 @@ use axiolid_mesh_section_contract::{
 
 use super::regions::{canonical_rotation, corners, strictly_between, Projection};
 use super::{
-    internal_topology_error, node_point, point_order, project_local, sequence_order, signed_area,
-    simplify_collinear, Classification, EdgeKey, NodeKey, ScalarSection, Segment,
+    exact_area_sign, internal_topology_error, node_point, point_order, project_local,
+    sequence_order, signed_area, simplify_collinear, Classification, EdgeKey, NodeKey,
+    ScalarSection, Segment,
 };
 
 pub(super) fn assemble_contours(
@@ -326,18 +327,7 @@ pub(super) fn assemble_chains(
             ));
         }
         if ctx.role == SectionRole::Sheet {
-            // A sheet has no inside: the segment directions only say which
-            // side its faces point to. Make the chain counter-clockwise by
-            // its plane-local area, as the legacy path does.
-            let area = signed_area(&points);
-            if !area.is_finite() || area == 0.0 {
-                return Err(GeomError::Degenerate(
-                    "section chain has no finite signed area".into(),
-                ));
-            }
-            if area < 0.0 {
-                points.reverse();
-            }
+            counter_clockwise(&mut points)?;
         }
         push_chain(
             &mut chains,
@@ -352,6 +342,21 @@ pub(super) fn assemble_chains(
             .then_with(|| right.is_closed().cmp(&left.is_closed()))
     });
     Ok(chains)
+}
+
+/// Make a closed polyline counter-clockwise by the exact sign of the signed
+/// area of the polygon itself: a sheet has no inside to orient it by.
+fn counter_clockwise(points: &mut [Point2]) -> GeomResult<()> {
+    match exact_area_sign(points)? {
+        Sign::Negative => points.reverse(),
+        Sign::Positive => {}
+        _ => {
+            return Err(GeomError::Degenerate(
+                "section chain has no signed area".into(),
+            ))
+        }
+    }
+    Ok(())
 }
 
 fn push_chain(
@@ -550,6 +555,25 @@ mod tests {
             &options,
         )
         .expect("chains")
+    }
+
+    #[test]
+    fn a_closed_polyline_is_oriented_by_its_exact_area() {
+        // Counter-clockwise, 1e8 from the origin, where the float area is -2.
+        let ccw = [
+            Point2::new(100000002.228125, 100000001.5671875),
+            Point2::new(100000001.9375, 100000001.275),
+            Point2::new(100000002.615625, 100000000.5578125),
+        ];
+        assert!(signed_area(&ccw) < 0.0);
+        let mut kept = ccw;
+        counter_clockwise(&mut kept).expect("orient");
+        assert_eq!(kept, ccw);
+        let mut turned = [ccw[2], ccw[1], ccw[0]];
+        counter_clockwise(&mut turned).expect("orient");
+        assert_eq!(turned, ccw);
+        let mut flat = [ccw[0], ccw[0], ccw[1]];
+        assert!(counter_clockwise(&mut flat).is_err());
     }
 
     fn points(chain: &SectionChain) -> Vec<(f64, f64)> {

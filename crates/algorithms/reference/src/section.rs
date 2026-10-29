@@ -418,6 +418,29 @@ fn signed_area(points: &[Point2]) -> f64 {
     twice * 0.5
 }
 
+/// The exact sign of the signed area of the polygon through `points`: the sum
+/// of `x_i y_{i+1} - x_{i+1} y_i` in expansion arithmetic, with no rounding.
+/// Positive is counter-clockwise.
+fn exact_area_sign(points: &[Point2]) -> GeomResult<Sign> {
+    use axiolid_predicates::arithmetic::{expansion_sign, expansion_sum};
+    use axiolid_predicates::two_product;
+
+    let mut twice = vec![0.0];
+    for index in 0..points.len() {
+        let (current, next) = (points[index], points[(index + 1) % points.len()]);
+        if !(current.is_finite() && next.is_finite()) {
+            return Err(GeomError::Degenerate(
+                "section chain has a non-finite point".into(),
+            ));
+        }
+        let (forward, forward_error) = two_product(current.x, next.y);
+        let (backward, backward_error) = two_product(next.x, current.y);
+        twice = expansion_sum(&twice, &[forward_error, forward]);
+        twice = expansion_sum(&twice, &[-backward_error, -backward]);
+    }
+    Ok(expansion_sign(&twice))
+}
+
 fn point_order(left: &Point2, right: &Point2) -> std::cmp::Ordering {
     left.x
         .total_cmp(&right.x)
@@ -490,6 +513,23 @@ fn sign_times(left: Sign, right: Sign) -> Sign {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_area_sign_is_exact_where_the_float_area_is_wrong() {
+        // A thin triangle 1e8 from the origin: counter-clockwise, area
+        // about 0.2, while the float sum of cross products rounds to -1.
+        let points = [
+            Point2::new(100000002.228125, 100000001.5671875),
+            Point2::new(100000001.9375, 100000001.275),
+            Point2::new(100000002.615625, 100000000.5578125),
+        ];
+        assert!(signed_area(&points) < 0.0);
+        assert_eq!(exact_area_sign(&points).expect("sign"), Sign::Positive);
+        let reversed = [points[2], points[1], points[0]];
+        assert_eq!(exact_area_sign(&reversed).expect("sign"), Sign::Negative);
+        let flat = [points[0], points[0], points[1]];
+        assert_eq!(exact_area_sign(&flat).expect("sign"), Sign::Zero);
+    }
 
     #[test]
     fn exact_plane_sign_keeps_a_tiny_nonzero_binary64_offset() {

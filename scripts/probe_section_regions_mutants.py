@@ -181,8 +181,17 @@ MUTANTS = [
     ),
     (
         'sheet closed chain orientation ignored', C,
-        '            if area < 0.0 {\n                points.reverse();',
-        '            if false && area < 0.0 {\n                points.reverse();',
+        '        Sign::Negative => points.reverse(),',
+        '        Sign::Negative => {}', TESTS,
+    ),
+    (
+        'sheet chain orientation by float area', C,
+        '    match exact_area_sign(points)? {',
+        '    match if signed_area(points) < 0.0 {\n'
+        '        Sign::Negative\n'
+        '    } else {\n'
+        '        Sign::Positive\n'
+        '    } {',
         TESTS,
     ),
     (
