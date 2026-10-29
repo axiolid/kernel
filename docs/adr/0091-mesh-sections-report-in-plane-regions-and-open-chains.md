@@ -5,6 +5,7 @@
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
 - **Amends:** [0033](./0033-mesh-plane-section-contract.md)
+- **Amended by:** [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md)
 
 ## Context
 

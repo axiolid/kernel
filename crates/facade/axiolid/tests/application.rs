@@ -195,3 +195,54 @@ fn section_request_reports_a_face_in_the_plane_as_a_region() {
     let report = RegionConformanceSuite::run(&ScalarSection::new());
     assert!(report.claimed && report.is_success(), "{report}");
 }
+
+#[test]
+fn section_request_reports_the_cut_of_a_solid_as_a_closed_region() {
+    use axiolid::core::{Frame3, Point2};
+    use axiolid::mesh_section::{
+        CutRegion, CutRegionLimits, RegionLimits, SectionLimits, SectionRequest,
+    };
+
+    let application = ApplicationBuilder::new()
+        .with_portable_section()
+        .expect("scalar section passes registration conformance")
+        .build();
+    let options = ExecutionOptions::new(Tolerance::new(1.0e-9, 1.0e-12).expect("valid tolerance"));
+    // The plane z = 0.5 cuts the unit cube across its middle.
+    let frame = Frame3 {
+        origin: Point3::new(0.0, 0.0, 0.5),
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    };
+    let request = SectionRequest::new(
+        frame,
+        SectionLimits::new(100, 100, 100, 10),
+        RegionLimits::new(10, 100, 100),
+    );
+    let mesh = cube([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+    let plain = application
+        .section_mesh_request(&mesh, &request, &options)
+        .expect("plain request");
+    assert_eq!(plain.cut_regions, None);
+
+    let cut = application
+        .section_mesh_request(
+            &mesh,
+            &request.with_cut_regions(CutRegionLimits::new(10, 100, 100)),
+            &options,
+        )
+        .expect("cut request");
+    assert_eq!(
+        cut.cut_regions,
+        Some(vec![CutRegion::new(
+            vec![
+                Point2::new(0.0, 0.0),
+                Point2::new(1.0, 0.0),
+                Point2::new(1.0, 1.0),
+                Point2::new(0.0, 1.0),
+            ],
+            vec![],
+        )])
+    );
+}

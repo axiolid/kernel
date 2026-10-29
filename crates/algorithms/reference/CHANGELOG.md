@@ -9,6 +9,15 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `ScalarSection::section_request` traces the cut of a solid as closed regions
+  when asked (`SectionRequest::with_cut_regions`): region edges that the cut
+  lies across are found with exact source signs, linked to the cut segments
+  into rings, and nested exactly on the returned coordinates. Pinches and
+  crossing rings are refused by name; a sheet request is invalid input
+  (ADR 0092, #372).
+
 ## [0.3.12] - 2026-10-29
 
 ### Added

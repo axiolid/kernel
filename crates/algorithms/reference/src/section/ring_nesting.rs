@@ -455,6 +455,28 @@ mod tests {
     }
 
     #[test]
+    fn a_ring_that_leaves_its_container_through_vertices_only_is_refused() {
+        // The kite A (3,1), V (3,2), B (3,3), C (2,2) lies in the box of the
+        // L-shape. V is on the notch edge and C is the reflex corner, so no
+        // edge crosses properly, yet A is inside the L and B is outside.
+        let ell = vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(4.0, 0.0),
+            Point2::new(4.0, 2.0),
+            Point2::new(2.0, 2.0),
+            Point2::new(2.0, 4.0),
+            Point2::new(0.0, 4.0),
+        ];
+        let kite = vec![
+            Point2::new(2.0, 2.0),
+            Point2::new(3.0, 1.0),
+            Point2::new(3.0, 2.0),
+            Point2::new(3.0, 3.0),
+        ];
+        assert!(is_refused(nest(vec![ell, kite], vec![], 1_000)));
+    }
+
+    #[test]
     fn the_pair_budget_covers_the_sweep_and_the_containment_test() {
         let rings = || (vec![square(0.0, 10.0, false)], vec![square(1.0, 9.0, true)]);
         let (outers, holes) = rings();

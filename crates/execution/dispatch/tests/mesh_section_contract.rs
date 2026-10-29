@@ -551,7 +551,15 @@ mod request {
 
     #[test]
     fn cut_regions_must_be_answered_exactly_when_requested() {
-        let ignored = run(|s| s.cut_regions = None, &cut_request()).expect_err("ignored");
+        // The evidence is made to agree, so only the missing answer is wrong.
+        let ignored = run(
+            |s| {
+                s.cut_regions = None;
+                s.evidence = s.evidence.with_cut_pairs(0).with_cut_output(&[]);
+            },
+            &cut_request(),
+        )
+        .expect_err("ignored");
         let unasked = run(|s| s.cut_regions = Some(Vec::new()), &request()).expect_err("unasked");
         for error in [ignored, unasked] {
             assert!(

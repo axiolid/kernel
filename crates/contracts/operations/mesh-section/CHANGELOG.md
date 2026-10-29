@@ -9,6 +9,26 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `SectionRequest::with_cut_regions(CutRegionLimits)` and
+  `PlaneSection::cut_regions`: the cut of a solid, where its material lies on
+  both sides of the plane, as closed `CutRegion`s (outer ring, holes) whose
+  rings run through the chain and region vertices bit for bit. Refusals
+  `REFUSED_PINCHED_CUT_REGION` and `REFUSED_CROSSING_CUT_RINGS`; evidence
+  fields `cut_regions`, `cut_region_vertices` and `cut_pairs`. Additive
+  (ADR 0092, #372).
+- `RegionConformanceSuite` runs every case again with cut regions requested,
+  adds the L-step, wall at a sill, wall at a head, stepped slab, pocket floor
+  and nested tubes fixtures, and reports `cut_regions_claimed`;
+  `RegionConformanceFailure::WrongCutRegions`.
+
+### Fixed
+
+- The documentation said a closed chain runs counter-clockwise; a closed chain
+  of a solid keeps the material on its left, so one around a hole runs
+  clockwise.
+
 ## [0.3.4] - 2026-10-29
 
 ### Added

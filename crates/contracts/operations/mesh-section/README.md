@@ -8,7 +8,9 @@ plane (ADR 0033). `section_request` is the opt-in alternative: a face in the
 plane comes back as a region with a side, cut curves are transversal chains
 that may end on a region, and touching edges are counted (ADR 0091). With
 `SectionRole::Sheet` the mesh may be open, and a chain may end on the mesh
-boundary.
+boundary. `SectionRequest::with_cut_regions` also returns the cut of a solid,
+where its material lies on both sides of the plane, as closed regions (ADR
+0092).
 
 ```bash
 cargo add axiolid-mesh-section-contract

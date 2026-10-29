@@ -9,6 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `mesh_section` exports `CutRegion`, `CutRegionLimits` and the cut-region
+  refusal names, so `Application::section_mesh_request` can return the cut of
+  a solid as closed regions (ADR 0092, #372).
+
 ## [0.4.5] - 2026-10-29
 
 ### Added

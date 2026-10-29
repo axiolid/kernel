@@ -9,6 +9,13 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider
+  must answer them exactly when asked, with canonical rings, budgets and
+  evidence, and no `Both` region; a sheet request with cut regions is refused
+  before dispatch (ADR 0092, #372).
+
 ## [0.3.8] - 2026-10-29
 
 ### Added
