@@ -326,8 +326,10 @@ pub(super) fn assemble_chains(
                 "section chain collapsed under projection".into(),
             ));
         }
-        if ctx.role == SectionRole::Sheet {
-            counter_clockwise(&mut points)?;
+        match ctx.role {
+            SectionRole::Solid => {}
+            SectionRole::Sheet => counter_clockwise(&mut points)?,
+            _ => return Err(internal_topology_error()),
         }
         push_chain(
             &mut chains,
@@ -559,7 +561,8 @@ mod tests {
 
     #[test]
     fn a_closed_polyline_is_oriented_by_its_exact_area() {
-        // Counter-clockwise, 1e8 from the origin, where the float area is -2.
+        // Counter-clockwise, 1e8 from the origin, where the float area has
+        // the wrong sign (-2; twice the exact area is about 0.41).
         let ccw = [
             Point2::new(100000002.228125, 100000001.5671875),
             Point2::new(100000001.9375, 100000001.275),

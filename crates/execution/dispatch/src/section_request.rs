@@ -10,8 +10,8 @@
 //! The source topology depends on the request's role: a solid is closed and
 //! oriented, a sheet may have boundary edges but not degenerate, non-manifold
 //! or inconsistently wound ones. The evidence repeats the role and the
-//! audited number of boundary edges, and a solid has no chain end on the mesh
-//! boundary.
+//! audited number of boundary edges, and a mesh without boundary edges (a
+//! solid, or a closed sheet) has no chain end on the mesh boundary.
 
 use std::cmp::Ordering;
 
@@ -163,12 +163,14 @@ pub(crate) fn validate_plane_section(
                 .zip(chain.points.last())
                 .is_some_and(|(first, last)| point_cmp(first, last).is_lt())
         };
-        if request.role == SectionRole::Solid
+        if boundary_edges == 0
             && chain
                 .ends
                 .is_some_and(|ends| ends.contains(&ChainEnd::MeshBoundary))
         {
-            return Err(violation("a solid section chain ends on the mesh boundary"));
+            return Err(violation(
+                "a section chain ends on the mesh boundary of a mesh without one",
+            ));
         }
         if !canonical {
             return Err(violation(

@@ -514,6 +514,9 @@ mod request {
             ("solid chain ends on the mesh boundary", |s| {
                 s.chains[1].ends = Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion])
             }),
+            ("closed mesh ends a chain on the mesh boundary", |s| {
+                s.chains[1].ends = Some([ChainEnd::InPlaneRegion, ChainEnd::MeshBoundary])
+            }),
         ];
         for (name, mutate) in cases {
             let error = run(mutate, &request()).expect_err(name);
@@ -615,6 +618,20 @@ mod request {
                 "{name}: {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_closed_sheet_has_no_chain_end_on_the_mesh_boundary() {
+        let error = run_on(
+            &cube(),
+            |s| s.chains[1].ends = Some([ChainEnd::MeshBoundary, ChainEnd::InPlaneRegion]),
+            &sheet_request(),
+        )
+        .expect_err("a closed mesh has no boundary");
+        assert!(
+            matches!(error, GeomError::BackendContractViolation { .. }),
+            "{error:?}"
+        );
     }
 
     #[test]

@@ -163,6 +163,10 @@ pub trait MeshPlaneSection: Backend {
     /// reporting faces lying in the plane as regions (ADR 0091). Providers
     /// that do not implement it refuse with `Unsupported`, which lets the
     /// registry fall back to the next provider.
+    ///
+    /// A provider may implement `SectionRole::Solid` only: it then refuses a
+    /// `SectionRole::Sheet` request with `Unsupported`, and the region
+    /// conformance suite reports `sheets_claimed == false` instead of failing.
     fn section_request(
         &self,
         mesh: &TriMesh,

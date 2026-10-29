@@ -17,7 +17,7 @@ use crate::conformance::{ConformanceFailure, ConformanceSuite};
 use crate::fixtures::{cases, Case, Expected, Output};
 use crate::request::{
     ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, RegionLimits, SectionChain,
-    SectionRequest,
+    SectionRequest, SectionRole,
 };
 use crate::{MeshPlaneSection, SectionLimits};
 
@@ -77,6 +77,10 @@ pub struct RegionConformanceReport {
     /// Whether the provider implements `section_request`. When `false` the
     /// suite ran nothing else and passes.
     pub claimed: bool,
+    /// Whether the provider also sections `SectionRole::Sheet`. When
+    /// `false`, the first sheet case returned `Unsupported` and the sheet
+    /// cases were skipped; the report can still pass.
+    pub sheets_claimed: bool,
 }
 
 impl RegionConformanceReport {
@@ -91,7 +95,12 @@ impl fmt::Display for RegionConformanceReport {
         if !self.claimed {
             write!(f, "not claimed")
         } else if self.is_success() {
-            write!(f, "conformant")
+            let sheets = if self.sheets_claimed {
+                ""
+            } else {
+                " (sheets not claimed)"
+            };
+            write!(f, "conformant{sheets}")
         } else {
             write!(f, "{:?}", self.failures)
         }
@@ -107,14 +116,27 @@ impl RegionConformanceSuite {
         let mut report = RegionConformanceReport {
             failures: Vec::new(),
             claimed: true,
+            sheets_claimed: true,
         };
+        let mut seen_sheet = false;
         let limits = SectionLimits::new(4096, 8192, 16384, 64);
         let region_limits = RegionLimits::new(64, 4096, 1 << 20);
         let options = ExecutionOptions::new(Tolerance::new(1e-9, 1e-9).expect("valid tolerance"));
         for (index, case) in cases().iter().enumerate() {
+            if case.role == SectionRole::Sheet && !report.sheets_claimed {
+                continue;
+            }
             let request =
                 SectionRequest::new(case.frame, limits, region_limits).with_role(case.role);
             let first = provider.section_request(&case.mesh, &request, &options);
+            if case.role == SectionRole::Sheet
+                && !seen_sheet
+                && matches!(first, Err(GeomError::Unsupported { .. }))
+            {
+                report.sheets_claimed = false;
+                continue;
+            }
+            seen_sheet |= case.role == SectionRole::Sheet;
             if index == 0 && matches!(first, Err(GeomError::Unsupported { .. })) {
                 report.claimed = false;
                 return report;

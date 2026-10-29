@@ -19,7 +19,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
+use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{
     PlaneSection, PlaneSectionEvidence, SectionRequest, SectionRole,
@@ -29,7 +29,7 @@ use super::chains::{assemble_chains, ChainContext};
 use super::regions::{build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection};
 use super::{
     check_source_limits, classify_vertices, insert_segment, internal_topology_error, mesh_index,
-    opposite, EdgeKey, ExactSectionPlane, NodeKey, Segment,
+    opposite, EdgeKey, ExactSectionPlane, NodeKey, ScalarSection, Segment,
 };
 use crate::orient3::orient3d;
 
@@ -56,9 +56,20 @@ pub(super) fn plane_section(
     let plane = ExactSectionPlane::new(frame)?;
     let projection = Projection::new(&plane)?;
     let classifications = classify_vertices(mesh, plane)?;
-    let boundary = match request.role {
-        SectionRole::Sheet => Boundary::of(mesh, options)?,
-        _ => Boundary::default(),
+    let sheet = match request.role {
+        SectionRole::Solid => false,
+        SectionRole::Sheet => true,
+        _ => {
+            return Err(GeomError::Unsupported {
+                backend: ScalarSection::ID,
+                operation: Operation::MeshPlaneSection,
+            })
+        }
+    };
+    let boundary = if sheet {
+        Boundary::of(mesh, options)?
+    } else {
+        Boundary::default()
     };
 
     let mut segments = BTreeSet::<Segment>::new();
@@ -208,8 +219,8 @@ pub(super) fn plane_section(
             [Incidence::In, Incidence::In] => {}
             // Boundary edges of a sheet: a region boundary, or an edge the
             // sheet touches the plane in.
-            [Incidence::In] if request.role == SectionRole::Sheet => {}
-            [Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 1,
+            [Incidence::In] if sheet => {}
+            [Incidence::Off(..)] if sheet => touching_edges += 1,
             _ => {
                 return Err(GeomError::NotManifold(format!(
                     "on-plane mesh edge {:?} has {} incident triangles",

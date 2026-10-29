@@ -175,8 +175,8 @@ MUTANTS = [
     ),
     (
         'sheet boundary edge in the plane not counted as touching', Q,
-        '[Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 1,',
-        '[Incidence::Off(..)] if request.role == SectionRole::Sheet => touching_edges += 0,',
+        '[Incidence::Off(..)] if sheet => touching_edges += 1,',
+        '[Incidence::Off(..)] if sheet => touching_edges += 0,',
         TESTS,
     ),
     (

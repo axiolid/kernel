@@ -115,7 +115,9 @@ is sectioned too. All additions are non-breaking.
   counter-clockwise by the exact sign of the signed area of the polygon it
   returns (the cross products summed in expansion arithmetic), and a chain
   with zero area is `Degenerate`.
-- **Conformance.** The suite adds the terrain cut by a vertical plane and
+- **Conformance.** A provider may support solids only: when its first sheet
+  case returns `Unsupported`, the sheet cases are skipped and the report says
+  `sheets_claimed == false`; it still passes. The suite adds the terrain cut by a vertical plane and
   through vertices, a sheet in the plane in both windings, an annulus sheet
   and a saddle, all with hand-derived values.
 

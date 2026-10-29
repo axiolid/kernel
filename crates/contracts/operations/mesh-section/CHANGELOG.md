@@ -18,7 +18,9 @@ caret rule for `0.x` versions.
   stays `Solid`, today's semantics. Additive (ADR 0091, #359).
 - `RegionConformanceSuite` adds the terrain cut by a vertical plane and
   through vertices, a sheet lying in the plane in both windings, an annulus
-  sheet and a saddle (#359).
+  sheet and a saddle (#359). `RegionConformanceReport::sheets_claimed` is
+  `false` when the provider refuses the first sheet case with `Unsupported`;
+  the sheet cases are then skipped.
 
 ## [0.3.3] - 2026-10-28
 

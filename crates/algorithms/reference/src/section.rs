@@ -65,12 +65,17 @@ impl MeshPlaneSection for ScalarSection {
     }
 
     fn request_scratch_requirement(&self) -> ScratchRequirement {
-        // The legacy bound plus the directed-edge map of the in-plane
-        // triangles (key, value and tree overhead), the overlap sweep order,
-        // component and boundary state, and region rings: about 1 KiB per
-        // element, where an element is a position or a triangle.
+        // Per element, where an element is a position or a triangle: the
+        // legacy bound (512); for a sheet, the edge-use map (3 entries of
+        // about 40 bytes with tree overhead, 120) and the boundary edge and
+        // vertex sets (at most 3 and 3 entries of about 24 bytes, 144); for
+        // in-plane triangles, the directed-edge map (3 entries of about 40
+        // bytes, 120), the triangles, boxes and flat copies (about 112), the
+        // sweep order and component roots (16), the boundary set (72) and
+        // the cycle and ring state (about 100). About 1.2 KiB in all,
+        // rounded up to 1536 bytes.
         ScratchRequirement::PerElement {
-            bytes_per_element: 1024,
+            bytes_per_element: 1536,
         }
     }
 
@@ -421,10 +426,24 @@ fn signed_area(points: &[Point2]) -> f64 {
 /// The exact sign of the signed area of the polygon through `points`: the sum
 /// of `x_i y_{i+1} - x_{i+1} y_i` in expansion arithmetic, with no rounding.
 /// Positive is counter-clockwise.
+///
+/// Products are exact only inside the binary64 range, so a nonzero coordinate
+/// outside `2^-450 ..= 2^450` in magnitude (subnormal included) is refused:
+/// its products could underflow or overflow, and a wrong sign is worse than a
+/// refusal.
 fn exact_area_sign(points: &[Point2]) -> GeomResult<Sign> {
     use axiolid_predicates::arithmetic::{expansion_sign, expansion_sum};
     use axiolid_predicates::two_product;
 
+    let in_range = |value: f64| {
+        let encoded = ((value.to_bits() >> 52) & 0x7ff) as i32;
+        value == 0.0 || (encoded != 0 && (-450..=450).contains(&(encoded - 1023)))
+    };
+    if !points.iter().all(|p| in_range(p.x) && in_range(p.y)) {
+        return Err(GeomError::Degenerate(
+            "section chain coordinates are outside the exact area range".into(),
+        ));
+    }
     let mut twice = vec![0.0];
     for index in 0..points.len() {
         let (current, next) = (points[index], points[(index + 1) % points.len()]);
@@ -516,8 +535,8 @@ mod tests {
 
     #[test]
     fn the_area_sign_is_exact_where_the_float_area_is_wrong() {
-        // A thin triangle 1e8 from the origin: counter-clockwise, area
-        // about 0.2, while the float sum of cross products rounds to -1.
+        // A thin triangle 1e8 from the origin: counter-clockwise, twice its
+        // area about 0.41, while the float sum of cross products is -2.
         let points = [
             Point2::new(100000002.228125, 100000001.5671875),
             Point2::new(100000001.9375, 100000001.275),
@@ -529,6 +548,37 @@ mod tests {
         assert_eq!(exact_area_sign(&reversed).expect("sign"), Sign::Negative);
         let flat = [points[0], points[0], points[1]];
         assert_eq!(exact_area_sign(&flat).expect("sign"), Sign::Zero);
+    }
+
+    #[test]
+    fn the_area_sign_refuses_coordinates_whose_products_leave_the_range() {
+        // Products near 2^-1060 underflow: refused, not a wrong sign.
+        let tiny = [
+            Point2::new(-8.036185191855754e-160, -8.029313620019926e-160),
+            Point2::new(-8.036193993089111e-160, -8.028301829579562e-160),
+            Point2::new(-8.019240586512659e-160, -8.033664284419165e-160),
+        ];
+        assert!(matches!(
+            exact_area_sign(&tiny),
+            Err(GeomError::Degenerate(_))
+        ));
+        // Products near 1e400 overflow.
+        let huge = [
+            Point2::new(1e200, 1e200),
+            Point2::new(2e200, 1e200),
+            Point2::new(1e200, 3e200),
+        ];
+        assert!(matches!(
+            exact_area_sign(&huge),
+            Err(GeomError::Degenerate(_))
+        ));
+        // Large but inside the range stays exact.
+        let large = [
+            Point2::new(1e100, 1e100),
+            Point2::new(2e100, 1e100),
+            Point2::new(1e100, 3e100),
+        ];
+        assert_eq!(exact_area_sign(&large).expect("sign"), Sign::Positive);
     }
 
     #[test]
