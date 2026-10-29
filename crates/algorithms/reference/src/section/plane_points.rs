@@ -64,6 +64,36 @@ struct ExactPoint {
     flat: Option<Point2>,
 }
 
+/// Where a point lies relative to a ring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Location {
+    Inside,
+    Outside,
+    Boundary,
+}
+
+/// The extent of a ring, for pruning candidate pairs. Never decides.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RingBox {
+    /// `[min_u, min_v, max_u, max_v]` of the exact points, with every vertex
+    /// box at its outer limit: contains the ring.
+    bounds: [f64; 4],
+    /// The same with every vertex box at its inner limit: the extremes of the
+    /// ring reach at least this far.
+    core: [f64; 4],
+}
+
+impl RingBox {
+    /// Whether this ring can lie in `other` by their boxes: its smallest
+    /// coordinate cannot be below the box of `other`, nor its largest above.
+    pub(super) fn possibly_within(&self, other: &Self) -> bool {
+        self.core[0] >= other.bounds[0]
+            && self.core[1] >= other.bounds[1]
+            && self.core[2] <= other.bounds[2]
+            && self.core[3] <= other.bounds[3]
+    }
+}
+
 /// The exact points of one section, interned by cut node.
 pub(super) struct PlanePoints {
     origin: [Dyadic; 3],
@@ -372,6 +402,108 @@ impl PlanePoints {
     /// `[u_lo, v_lo, u_hi, v_hi]`, a sound box of the projected point.
     pub(super) fn bounds(&self, index: usize) -> [f64; 4] {
         self.points[index].bounds
+    }
+
+    /// The axis of the projection along which two distinct points of a line
+    /// differ.
+    pub(super) fn dominant(&self, a: usize, b: usize) -> GeomResult<usize> {
+        Ok(if self.compare(a, b, 0)? == Ordering::Equal {
+            1
+        } else {
+            0
+        })
+    }
+
+    /// `(low, high)` of two points along `axis`.
+    pub(super) fn ordered(&self, a: usize, b: usize, axis: usize) -> GeomResult<(usize, usize)> {
+        Ok(if self.compare(a, b, axis)? == Ordering::Greater {
+            (b, a)
+        } else {
+            (a, b)
+        })
+    }
+
+    /// Whether collinear `at` lies strictly between `before` and `after`.
+    pub(super) fn strictly_between(
+        &self,
+        before: usize,
+        at: usize,
+        after: usize,
+    ) -> GeomResult<bool> {
+        let axis = self.dominant(before, after)?;
+        let (low, high) = self.ordered(before, after, axis)?;
+        Ok(self.compare(low, at, axis)? == Ordering::Less
+            && self.compare(at, high, axis)? == Ordering::Less)
+    }
+
+    /// Whether collinear `point` lies on the closed segment `start`-`end`.
+    pub(super) fn within_segment(
+        &self,
+        point: usize,
+        start: usize,
+        end: usize,
+    ) -> GeomResult<bool> {
+        let axis = self.dominant(start, end)?;
+        let (low, high) = self.ordered(start, end, axis)?;
+        Ok(self.compare(low, point, axis)? != Ordering::Greater
+            && self.compare(point, high, axis)? != Ordering::Greater)
+    }
+
+    /// Where `point` lies relative to the closed `ring`: a crossing-number
+    /// walk with exact orientation tests.
+    ///
+    /// `orient` is in the frame's sense and the `v` comparisons are in the
+    /// projection's. When the projection mirrors the frame the walk counts the
+    /// crossings of the opposite ray, which is the winding number negated; only
+    /// zero or nonzero is used.
+    pub(super) fn locate(&self, point: usize, ring: &[usize]) -> GeomResult<Location> {
+        let mut winding = 0i32;
+        for index in 0..ring.len() {
+            let (a, b) = (ring[index], ring[(index + 1) % ring.len()]);
+            let side = self.orient(a, b, point)?;
+            if side == Sign::Zero && self.within_segment(point, a, b)? {
+                return Ok(Location::Boundary);
+            }
+            if self.compare(a, point, 1)? != Ordering::Greater {
+                if self.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {
+                    winding += 1;
+                }
+            } else if self.compare(b, point, 1)? != Ordering::Greater && side == Sign::Negative {
+                winding -= 1;
+            }
+        }
+        Ok(if winding == 0 {
+            Location::Outside
+        } else {
+            Location::Inside
+        })
+    }
+
+    /// The boxes of a ring of exact points.
+    pub(super) fn ring_box(&self, ring: &[usize]) -> RingBox {
+        let mut bounds = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        let mut core = bounds;
+        for &node in ring {
+            let [u_lo, v_lo, u_hi, v_hi] = self.bounds(node);
+            bounds = [
+                bounds[0].min(u_lo),
+                bounds[1].min(v_lo),
+                bounds[2].max(u_hi),
+                bounds[3].max(v_hi),
+            ];
+            core = [
+                core[0].min(u_hi),
+                core[1].min(v_hi),
+                core[2].max(u_lo),
+                core[3].max(v_lo),
+            ];
+        }
+        RingBox { bounds, core }
     }
 }
 

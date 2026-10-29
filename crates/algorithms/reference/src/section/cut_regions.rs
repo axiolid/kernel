@@ -29,7 +29,7 @@ use axiolid_mesh_section_contract::{CutRegion, CutRegionLimits, REFUSED_PINCHED_
 use super::chains::{chain_points, has_adjacent_duplicate, is_droppable, ChainContext};
 use super::plane_points::PlanePoints;
 use super::ring_nesting::{nest_rings, TracedRing};
-use super::{internal_topology_error, ExactSectionPlane, NodeKey, ScalarSection, Segment};
+use super::{internal_topology_error, NodeKey, ScalarSection, Segment};
 
 /// What an edge of the cut graph is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,6 @@ enum Link {
 /// What ring tracing needs besides the chain context.
 pub(super) struct CutInputs<'a> {
     pub(super) chains: &'a ChainContext<'a>,
-    pub(super) plane: ExactSectionPlane,
     pub(super) segments: &'a BTreeSet<Segment>,
     /// Region edges that bound the cut, directed with the material on the left.
     pub(super) region_edges: &'a BTreeSet<(u32, u32)>,
@@ -67,6 +66,8 @@ fn add_edge(
 /// The cut regions of a solid and the candidate pairs compared to nest them.
 pub(super) fn build_cut_regions(
     inputs: &CutInputs<'_>,
+    exact: &mut PlanePoints,
+    extra: Vec<TracedRing>,
     limits: CutRegionLimits,
     options: &ExecutionOptions,
 ) -> GeomResult<(Vec<CutRegion>, usize)> {
@@ -114,7 +115,6 @@ pub(super) fn build_cut_regions(
         }
     }
 
-    let mut exact = PlanePoints::new(&inputs.plane, ctx.projection)?;
     let mut visited = BTreeSet::<NodeKey>::new();
     let mut rings = Vec::new();
     for (&start, onward) in &outgoing {
@@ -183,7 +183,8 @@ pub(super) fn build_cut_regions(
         }
         rings.push(TracedRing { nodes, points });
     }
-    nest_rings(&exact, rings, limits, options)
+    rings.extend(extra);
+    nest_rings(exact, rings, limits, options)
 }
 
 /// The nodes of a traced ring that remain after dropping the redundant ones.
@@ -289,11 +290,12 @@ mod tests {
         build_cut_regions(
             &CutInputs {
                 chains: &chains,
-                plane,
                 segments: &segments,
                 region_edges: &region_edges,
                 region_ring_vertices: &ring_vertices,
             },
+            &mut PlanePoints::new(&plane, chains.projection).expect("points"),
+            Vec::new(),
             CutRegionLimits::new(10, 100, 1_000),
             &ExecutionOptions::new(Tolerance::METRE),
         )

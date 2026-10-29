@@ -173,7 +173,7 @@ MUTANTS = [
         '        self.compare(a, b, 1)', TESTS,
     ),
     (
-        'box pruning inverted', N,
+        'box pruning inverted', P,
         '        self.core[0] >= other.bounds[0]',
         '        self.core[0] <= other.bounds[0]', TESTS,
     ),
@@ -188,9 +188,9 @@ MUTANTS = [
         '(false, Some(_)) => {}', TESTS,
     ),
     (
-        'winding walk counts upward edges against the point', N,
-        'if exact.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {',
-        'if exact.compare(b, point, 1)? == Ordering::Greater && side == Sign::Negative {',
+        'winding walk counts upward edges against the point', P,
+        'if self.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {',
+        'if self.compare(b, point, 1)? == Ordering::Greater && side == Sign::Negative {',
         TESTS,
     ),
     (

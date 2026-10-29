@@ -27,6 +27,7 @@ use axiolid_mesh_section_contract::{
 
 use super::chains::{assemble_chains, ChainContext};
 use super::cut_regions::{build_cut_regions, CutInputs};
+use super::plane_points::PlanePoints;
 use super::regions::{
     build_regions, check_overlaps, InPlaneSet, InPlaneTriangle, Projection, Regions,
 };
@@ -66,6 +67,7 @@ pub(super) fn plane_section(
     let frame = request.frame;
     let plane = ExactSectionPlane::new(frame)?;
     let projection = Projection::new(&plane)?;
+    let mut exact = PlanePoints::new(&plane, projection)?;
     let classifications = classify_vertices(mesh, plane)?;
     let sheet = match request.role {
         SectionRole::Solid => false,
@@ -305,11 +307,12 @@ pub(super) fn plane_section(
             let (cut, pairs) = build_cut_regions(
                 &CutInputs {
                     chains: &chain_context,
-                    plane,
                     segments: &segments,
                     region_edges: &cut_edges,
                     region_ring_vertices: &ring_vertices,
                 },
+                &mut exact,
+                Vec::new(),
                 cut_limits,
                 options,
             )?;

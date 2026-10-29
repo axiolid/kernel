@@ -35,7 +35,7 @@ use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Operation, Sign
 use axiolid_core::Point2;
 use axiolid_mesh_section_contract::{CutRegion, CutRegionLimits, REFUSED_CROSSING_CUT_RINGS};
 
-use super::plane_points::PlanePoints;
+use super::plane_points::{Location, PlanePoints, RingBox};
 use super::regions::canonical_rotation;
 use super::{sequence_order, ScalarSection};
 
@@ -51,59 +51,18 @@ struct Ring {
     points: Vec<Point2>,
     /// Decided after the sweep has proven the ring simple.
     hole: bool,
-    /// `[min_u, min_v, max_u, max_v]` of the exact points, with every vertex
-    /// box at its outer limit: contains the ring.
-    bounds: [f64; 4],
-    /// The same with every vertex box at its inner limit: the extremes of the
-    /// ring reach at least this far.
-    core: [f64; 4],
+    extent: RingBox,
 }
 
 impl Ring {
     fn new(exact: &PlanePoints, traced: TracedRing) -> Self {
-        let mut bounds = [
-            f64::INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NEG_INFINITY,
-        ];
-        let mut core = [
-            f64::INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NEG_INFINITY,
-        ];
-        for &node in &traced.nodes {
-            let [u_lo, v_lo, u_hi, v_hi] = exact.bounds(node);
-            bounds = [
-                bounds[0].min(u_lo),
-                bounds[1].min(v_lo),
-                bounds[2].max(u_hi),
-                bounds[3].max(v_hi),
-            ];
-            core = [
-                core[0].min(u_hi),
-                core[1].min(v_hi),
-                core[2].max(u_lo),
-                core[3].max(v_lo),
-            ];
-        }
+        let extent = exact.ring_box(&traced.nodes);
         Self {
             nodes: traced.nodes,
             points: traced.points,
             hole: false,
-            bounds,
-            core,
+            extent,
         }
-    }
-
-    /// Whether this ring can lie in `other` by their boxes: its smallest
-    /// coordinate cannot be below the box of `other`, nor its largest above.
-    fn possibly_within(&self, other: &Self) -> bool {
-        self.core[0] >= other.bounds[0]
-            && self.core[1] >= other.bounds[1]
-            && self.core[2] <= other.bounds[2]
-            && self.core[3] <= other.bounds[3]
     }
 }
 
@@ -313,7 +272,7 @@ fn refuse_spikes(exact: &PlanePoints, ring: &[usize]) -> GeomResult<()> {
             ring[(index + 1) % ring.len()],
         );
         if exact.orient(before, at, after)? == Sign::Zero
-            && !strictly_between(exact, before, at, after)?
+            && !exact.strictly_between(before, at, after)?
         {
             return Err(refused());
         }
@@ -321,50 +280,10 @@ fn refuse_spikes(exact: &PlanePoints, ring: &[usize]) -> GeomResult<()> {
     Ok(())
 }
 
-/// The axis of the projection along which two distinct points of a line
-/// differ.
-fn dominant(exact: &PlanePoints, a: usize, b: usize) -> GeomResult<usize> {
-    Ok(if exact.compare(a, b, 0)? == Ordering::Equal {
-        1
-    } else {
-        0
-    })
-}
-
-/// `(low, high)` of two points along `axis`.
-fn ordered(exact: &PlanePoints, a: usize, b: usize, axis: usize) -> GeomResult<(usize, usize)> {
-    Ok(if exact.compare(a, b, axis)? == Ordering::Greater {
-        (b, a)
-    } else {
-        (a, b)
-    })
-}
-
-/// Whether collinear `at` lies strictly between `before` and `after`.
-fn strictly_between(
-    exact: &PlanePoints,
-    before: usize,
-    at: usize,
-    after: usize,
-) -> GeomResult<bool> {
-    let axis = dominant(exact, before, after)?;
-    let (low, high) = ordered(exact, before, after, axis)?;
-    Ok(exact.compare(low, at, axis)? == Ordering::Less
-        && exact.compare(at, high, axis)? == Ordering::Less)
-}
-
-/// Whether collinear `point` lies on the closed segment `start`-`end`.
-fn within_segment(exact: &PlanePoints, point: usize, start: usize, end: usize) -> GeomResult<bool> {
-    let axis = dominant(exact, start, end)?;
-    let (low, high) = ordered(exact, start, end, axis)?;
-    Ok(exact.compare(low, point, axis)? != Ordering::Greater
-        && exact.compare(point, high, axis)? != Ordering::Greater)
-}
-
 /// Whether `point` lies on the closed segment of `edge`.
 fn on_edge(exact: &PlanePoints, point: usize, edge: &Edge) -> GeomResult<bool> {
     Ok(exact.orient(edge.start, edge.end, point)? == Sign::Zero
-        && within_segment(exact, point, edge.start, edge.end)?)
+        && exact.within_segment(point, edge.start, edge.end)?)
 }
 
 /// The points where two closed edges touch: an end of one lying on the other.
@@ -402,7 +321,7 @@ fn passages(exact: &PlanePoints, ring: &[usize], point: usize) -> GeomResult<Vec
             ));
         } else if !exact.same(end, point)?
             && exact.orient(start, end, point)? == Sign::Zero
-            && strictly_between(exact, start, point, end)?
+            && exact.strictly_between(start, point, end)?
         {
             found.push(Passage::Edge(start, end));
         }
@@ -484,9 +403,9 @@ fn edges_conflict(exact: &PlanePoints, first: &Edge, second: &Edge) -> GeomResul
         return Ok(false);
     }
     // Collinear: compare along the line's dominant axis.
-    let axis = dominant(exact, a, b)?;
-    let (low, high) = ordered(exact, a, b, axis)?;
-    let (other_low, other_high) = ordered(exact, c, d, axis)?;
+    let axis = exact.dominant(a, b)?;
+    let (low, high) = exact.ordered(a, b, axis)?;
+    let (other_low, other_high) = exact.ordered(c, d, axis)?;
     let upper_low = if exact.compare(low, other_low, axis)? == Ordering::Less {
         other_low
     } else {
@@ -503,46 +422,6 @@ fn edges_conflict(exact: &PlanePoints, first: &Edge, second: &Edge) -> GeomResul
     Ok(overlap && same_way)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Location {
-    Inside,
-    Outside,
-    Boundary,
-}
-
-/// Where `point` lies relative to `ring`: a crossing-number walk with exact
-/// orientation tests.
-///
-/// `orient` is in the frame's sense and the `v` comparisons are in the
-/// projection's. When the projection mirrors the frame the walk counts the
-/// crossings of the opposite ray, which is the winding number negated; only
-/// zero or nonzero is used.
-fn locate(exact: &PlanePoints, point: usize, ring: &Ring) -> GeomResult<Location> {
-    let mut winding = 0i32;
-    for index in 0..ring.nodes.len() {
-        let (a, b) = (
-            ring.nodes[index],
-            ring.nodes[(index + 1) % ring.nodes.len()],
-        );
-        let side = exact.orient(a, b, point)?;
-        if side == Sign::Zero && within_segment(exact, point, a, b)? {
-            return Ok(Location::Boundary);
-        }
-        if exact.compare(a, point, 1)? != Ordering::Greater {
-            if exact.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {
-                winding += 1;
-            }
-        } else if exact.compare(b, point, 1)? != Ordering::Greater && side == Sign::Negative {
-            winding -= 1;
-        }
-    }
-    Ok(if winding == 0 {
-        Location::Outside
-    } else {
-        Location::Inside
-    })
-}
-
 /// For each ring, the rings that contain it.
 fn containers(
     exact: &PlanePoints,
@@ -554,14 +433,14 @@ fn containers(
     let mut containers = vec![Vec::new(); rings.len()];
     for (inner_index, inner) in rings.iter().enumerate() {
         for (outer_index, outer) in rings.iter().enumerate() {
-            if inner_index == outer_index || !inner.possibly_within(outer) {
+            if inner_index == outer_index || !inner.extent.possibly_within(&outer.extent) {
                 continue;
             }
             options.check_cancelled()?;
             count_pair(pairs, limits)?;
             let (mut inside, mut outside) = (false, false);
             for &node in &inner.nodes {
-                match locate(exact, node, outer)? {
+                match exact.locate(node, &outer.nodes)? {
                     Location::Inside => inside = true,
                     Location::Outside => outside = true,
                     Location::Boundary => {}
@@ -975,14 +854,17 @@ mod tests {
         let past = Point2::new(shift + 2.0, shift + 1.0 - 2.0 * f64::EPSILON * shift);
         let (_, mut exact) = flat_plane();
         let ring = traced(&mut exact, vec![triangle]).remove(0);
-        let ring = Ring::new(&exact, ring);
         let probes = traced(&mut exact, vec![vec![on_edge], vec![past]]);
         assert_eq!(
-            locate(&exact, probes[0].nodes[0], &ring).expect("locate"),
+            exact
+                .locate(probes[0].nodes[0], &ring.nodes)
+                .expect("locate"),
             Location::Boundary
         );
         assert_eq!(
-            locate(&exact, probes[1].nodes[0], &ring).expect("locate"),
+            exact
+                .locate(probes[1].nodes[0], &ring.nodes)
+                .expect("locate"),
             Location::Outside
         );
     }
