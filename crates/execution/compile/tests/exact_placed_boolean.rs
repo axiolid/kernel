@@ -546,15 +546,51 @@ fn a_scaled_opening_is_refused_by_name() {
     named(&refusal(g, cut), "scaled");
 }
 
+/// Two `2 x 2 x 2` boxes under `building()`, the second moved by `by`.
+fn two_boxes(g: &mut Graph, by: Vec3, operator: BooleanOperator) -> NodeId {
+    let first = g.extrusion(rect(2.0, 2.0), 2.0);
+    let first = g.instance(first, building());
+    let second = g.extrusion(rect(2.0, 2.0), 2.0);
+    let second = g.instance(second, building() * Transform3::from_translation(by));
+    g.boolean(first, second, operator)
+}
+
 #[test]
-fn a_union_or_intersection_of_placed_operands_is_refused_by_name() {
-    for operator in [BooleanOperator::Union, BooleanOperator::Intersection] {
-        let mut g = Graph::new();
-        let wall = g.wall(building());
-        let opening = g.opening(rect(1.0, 1.0), 1.0, (0.0, 1.0), 0.5, building());
-        let joined = g.boolean(wall, opening, operator);
-        named(&refusal(g, joined), "union or intersection");
-    }
+fn a_union_of_placed_operands_is_exact() {
+    // Overlapping in a unit cube: 8 + 8 - 1.
+    let mut g = Graph::new();
+    let joined = two_boxes(&mut g, Vec3::new(1.0, 1.0, 1.0), BooleanOperator::Union);
+    check(g, joined, 15.0, &[]);
+    // Disjoint: both stay.
+    let mut g = Graph::new();
+    let joined = two_boxes(&mut g, Vec3::new(5.0, 0.0, 0.0), BooleanOperator::Union);
+    check(g, joined, 16.0, &[]);
+}
+
+#[test]
+fn an_intersection_of_placed_operands_is_exact() {
+    let mut g = Graph::new();
+    let common = two_boxes(
+        &mut g,
+        Vec3::new(1.0, 1.0, 1.0),
+        BooleanOperator::Intersection,
+    );
+    check(g, common, 1.0, &[]);
+}
+
+#[test]
+fn an_intersection_of_disjoint_placed_operands_is_degenerate_and_says_so() {
+    let mut g = Graph::new();
+    let common = two_boxes(
+        &mut g,
+        Vec3::new(5.0, 0.0, 0.0),
+        BooleanOperator::Intersection,
+    );
+    let error = refusal(g, common);
+    assert!(
+        matches!(&error, GeomError::Degenerate(what) if what.contains("intersection")),
+        "{error:?}"
+    );
 }
 
 #[test]

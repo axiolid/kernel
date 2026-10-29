@@ -5,7 +5,7 @@
 //!
 //! It never falls back to mesh compilation. Extrusions (either way along
 //! the profile normal, #275), revolutions,
-//! booleans of sharp rectangle prisms along +z, differences of placed
+//! booleans of sharp rectangle prisms along +z, booleans of placed
 //! extrusions ([`boolean`], #228), clips of those by half-spaces ([`clip`],
 //! #234), disks swept along one segment or one arc, runs of sections at
 //! stations with a closed form (#247: a constant section along a line or a

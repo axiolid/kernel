@@ -11,9 +11,9 @@
 //! - Two bare sharp rectangles extruded along `+z`, without placements,
 //!   keep the prism path (`boolean_prisms_exact`): it decides the plan
 //!   with integer predicates and takes every operator.
-//! - A difference whose subject is a placed extrusion, or the result of
-//!   another difference compiled here, and whose tool is a placed
-//!   extrusion, runs the general exact B-rep boolean of ADR 0075
+//! - A boolean of any operator (#376) whose subject is a placed extrusion,
+//!   or the result of another boolean compiled here, and whose tool is a
+//!   placed extrusion, runs the general exact B-rep boolean of ADR 0075
 //!   (`axiolid_brep_boolean::boolean`) on the two operands' exact B-reps,
 //!   each placed by [`ExactBRep::transformed`]. Openings compose:
 //!   `((wall - o1) - o2) - o3` is three such differences.
@@ -28,11 +28,12 @@
 //! # Refused, by name
 //!
 //! An operand that is not a placed extrusion (a revolution, a swept disk,
-//! a mesh), a tool that is itself a boolean, a union or intersection of
-//! placed operands, a scaled or sheared placement, and every configuration
-//! the general boolean cannot build exactly ([`BooleanError`]) are
-//! `GeomError::UnsupportedInput` naming the case. A difference that removes
-//! the whole subject is `GeomError::Degenerate`. Nothing is meshed.
+//! a mesh), a tool that is itself a boolean, a scaled or sheared
+//! placement, and every configuration the general boolean cannot build
+//! exactly ([`BooleanError`]) are `GeomError::UnsupportedInput` naming the
+//! case. A boolean that leaves
+//! nothing (a difference that removes the whole subject, disjoint
+//! operands' intersection) is `GeomError::Degenerate`. Nothing is meshed.
 //!
 //! # Mesh operands, for a boolean's report only (#266)
 //!
@@ -85,17 +86,8 @@ impl ExactCompilation<'_> {
         // The subject may be a placed extrusion or an earlier cut (a placed
         // boolean, which compiles or refuses by itself); the tool is read
         // through its placements too.
-        let subject = self.placed(left)?;
+        self.placed(left)?;
         let tool = self.placed(right)?;
-        // A mesh operand is flattened only for a boolean's report (#266),
-        // whose meshes are unions as often as differences; the compiler's
-        // own scope for placed extrusions stays differences.
-        let meshed = subject == Placed::Mesh || tool == Placed::Mesh;
-        if operator != BooleanOperator::Difference && !meshed {
-            return Err(unsupported(
-                "exact union or intersection of placed operands",
-            ));
-        }
         if !matches!(tool, Placed::Extrusion | Placed::Mesh) {
             return Err(unsupported(
                 "exact boolean tool that is not a placed extrusion",
@@ -104,8 +96,12 @@ impl ExactCompilation<'_> {
         let subject = self.compile(left)?;
         let tool = self.compile(right)?;
         let (body, report) =
-            boolean_with_report(&subject, &tool, operator, self.options.tolerance())
-                .map_err(remap_boolean_error)?;
+            boolean_with_report(&subject, &tool, operator, self.options.tolerance()).map_err(
+                |error| match error {
+                    BooleanError::EmptyResult => emptied(operator),
+                    error => remap_boolean_error(error),
+                },
+            )?;
         self.boolean_report = Some(report);
         Ok(body)
     }
@@ -186,6 +182,19 @@ impl ExactCompilation<'_> {
             top: depth,
         }))
     }
+}
+
+/// A union, intersection or difference that leaves nothing: only the
+/// difference removes "the subject".
+fn emptied(operator: BooleanOperator) -> GeomError {
+    GeomError::Degenerate(
+        match operator {
+            BooleanOperator::Difference => "exact boolean difference removes the whole subject",
+            BooleanOperator::Intersection => "exact boolean intersection leaves nothing",
+            _ => "exact boolean union leaves nothing",
+        }
+        .to_owned(),
+    )
 }
 
 /// A general-boolean refusal, named for the compiler's caller.

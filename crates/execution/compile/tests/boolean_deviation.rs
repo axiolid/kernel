@@ -13,9 +13,10 @@
 //!
 //! Cases: a placed wall with a round window, an I-beam with root fillets
 //! and round holes through its web, a slab with a round shaft, a slab with
-//! oblique round openings (#287), and a gable wall clipped by two roof half-spaces (#234) with a round window. A union
-//! of placed operands, which the exact compiler refuses, stays unbounded
-//! with the refusal's name.
+//! oblique round openings (#287), and a gable wall clipped by two roof half-spaces (#234) with a round window. Unions and
+//! intersections of placed operands are measured like differences (#376);
+//! a boolean the exact compiler refuses stays unbounded with the refusal's
+//! name.
 
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -234,6 +235,21 @@ fn assert_measured(
     options: &ExecutionOptions,
     ceiling: Scalar,
 ) -> (Scalar, Scalar) {
+    assert_measured_within(name, case, options, ceiling, 0.0)
+}
+
+/// [`assert_measured`] with the sampled distances allowed `noise` above the
+/// bound. An all-planar result reports its bound at the mesh's rounding
+/// (#314), where the sampling itself is no finer: a point-to-triangle
+/// distance on the sliver triangles of a union's cross-shaped faces is
+/// good to about `1e-12` at this scale.
+fn assert_measured_within(
+    name: &str,
+    case: (GeometryGraph, NodeId, TriMesh, DeviationReport, Scalar),
+    options: &ExecutionOptions,
+    ceiling: Scalar,
+    noise: Scalar,
+) -> (Scalar, Scalar) {
     let (graph, root, mesh, report, seconds) = case;
     // Faces read as one surface within tolerance name how far that moved
     // an operand (#324), within the tolerance; the rest is the boolean's
@@ -280,7 +296,7 @@ fn assert_measured(
         samples.len()
     );
     assert!(
-        worst <= bound,
+        worst <= bound + noise,
         "{name}: an exact point lies {worst:e} from the mesh, above the reported {bound:e}"
     );
     assert!(
@@ -619,25 +635,111 @@ fn an_instanced_cut_wall_scales_the_measured_bound() {
     assert!(bound <= 2.0 * budget, "{bound}");
 }
 
+/// A circular column `r = 0.4` standing on, and through, a box, under a
+/// building placement.
+fn column_and_box(g: &mut Graph, operator: BooleanOperator) -> NodeId {
+    let a = g.extrusion(rect(1.0, 1.0), 1.0);
+    let a = g.place(a, building());
+    let b = g.extrusion(circle(0.4), 2.0);
+    let b = g.place(
+        b,
+        building() * Transform3::from_translation(Vec3::new(0.5, 0.0, -0.5)),
+    );
+    g.boolean(a, b, operator)
+}
+
 #[test]
-fn a_union_the_exact_compiler_refuses_stays_unbounded_by_name() {
+fn a_column_united_with_a_box_is_certified_against_its_exact_result() {
+    // The union of placed operands was unbounded by name before #376.
+    let options = options(1e-3);
+    let case = compile(|g| column_and_box(g, BooleanOperator::Union), &options);
+    let (bound, _) = assert_measured("column union box", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
+fn a_column_intersected_with_a_box_is_certified_against_its_exact_result() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| column_and_box(g, BooleanOperator::Intersection),
+        &options,
+    );
+    let (bound, _) = assert_measured("column intersect box", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+/// Two walls `4 x 0.3 x 3` meeting at a right angle and overlapping at
+/// the corner, under a building placement.
+fn two_walls(g: &mut Graph, offset: Vec3, operator: BooleanOperator) -> NodeId {
+    let a = g.extrusion(rect(4.0, 0.3), 3.0);
+    let a = g.place(a, building());
+    let b = g.extrusion(rect(4.0, 0.3), 3.0);
+    let b = g.place(
+        b,
+        building() * Transform3::from_translation(offset) * Transform3::from_rotation_z(FRAC_PI_2),
+    );
+    g.boolean(a, b, operator)
+}
+
+#[test]
+fn two_overlapping_walls_united_are_certified_against_their_exact_result() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| two_walls(g, Vec3::new(1.5, 1.8, 0.0), BooleanOperator::Union),
+        &options,
+    );
+    let (bound, _) = assert_measured_within("walls union", case, &options, f64::INFINITY, 2e-12);
+    assert!(bound <= 1e-11, "{bound:e}");
+}
+
+#[test]
+fn two_disjoint_walls_united_are_certified_against_their_exact_result() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| two_walls(g, Vec3::new(1.5, 9.0, 0.0), BooleanOperator::Union),
+        &options,
+    );
+    let (bound, _) =
+        assert_measured_within("walls disjoint union", case, &options, f64::INFINITY, 2e-12);
+    assert!(bound <= 1e-11, "{bound:e}");
+}
+
+#[test]
+fn a_union_of_a_cut_wall_and_a_column_is_certified() {
+    // A placed boolean is a subject of the union too.
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let cut = wall_with_round_window(g);
+            let column = g.extrusion(circle(0.3), 3.0);
+            let column = g.place(
+                column,
+                building() * Transform3::from_translation(Vec3::new(-2.5, 0.0, 0.0)),
+            );
+            g.boolean(cut, column, BooleanOperator::Union)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("cut wall union column", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
+fn a_union_whose_tool_is_a_boolean_stays_unbounded_by_name() {
+    // The tool restriction is #326, not the operator.
     let options = options(1e-3);
     let (_, _, _, report, _) = compile(
         |g| {
             let a = g.extrusion(rect(1.0, 1.0), 1.0);
-            let b = g.extrusion(circle(0.4), 2.0);
-            let b = g.place(b, Transform3::from_translation(Vec3::new(0.5, 0.0, -0.5)));
-            g.boolean(a, b, BooleanOperator::Union)
+            let tool = wall_with_round_window(g);
+            g.boolean(a, tool, BooleanOperator::Union)
         },
         &options,
     );
     assert_eq!(report.bound, None);
-    let contribution = report.contributions[0];
-    assert_eq!(contribution.path, DeviationPath::Boolean);
-    assert_eq!(contribution.detail, "no exact result");
     assert_eq!(
-        contribution.bound,
-        DeviationBound::Unbounded("exact union or intersection of placed operands")
+        report.contributions[0].bound,
+        DeviationBound::Unbounded("exact boolean tool that is not a placed extrusion")
     );
 }
 

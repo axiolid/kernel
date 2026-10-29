@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The exact compiler builds the union and the intersection of placed
+  extrusions (and of placed booleans, as subjects), as it did the
+  difference, through the general boolean; the deviation report certifies
+  their meshes against that result like a difference's, the same measured
+  bound, instead of `Unbounded("exact union or intersection of placed
+  operands")`, so a circular column united with a box at chord `1e-3`
+  reports a Certified bound within the budget. A tool that is itself a boolean
+  is still refused by name (#326). An intersection that leaves nothing
+  is `Degenerate` naming its operator, no longer "difference" (a union
+  cannot leave nothing). A symmetric difference of placed operands is
+  refused by name (#376).
+
 ## [0.3.38] - 2026-10-29
 
 ### Fixed

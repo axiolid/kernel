@@ -135,8 +135,8 @@
 //! - Booleans (#235): cutting two meshes moves the intersection curve, and
 //!   a one-sided bound on each operand does not bound it, so nothing is
 //!   derived from the operands. Where `ReferenceExactCompiler` builds the
-//!   exact result of the same node (differences of placed extrusions,
-//!   #228, and half-space clips, #234; for the report also booleans with
+//!   exact result of the same node (booleans of placed extrusions,
+//!   #228, #376, and half-space clips, #234; for the report also booleans with
 //!   a mesh operand, any operator, below), the mesh is certified against that
 //!   exact B-rep by the branch and bound above, over each face's trimmed
 //!   parameter domain; a boolean it refuses is unbounded with the
