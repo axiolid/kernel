@@ -7,6 +7,11 @@
 //! is not checked: a floating-point area sign is unreliable far from the
 //! origin (#274); the conformance suite checks it on fixtures.
 //!
+//! Cut regions (ADR 0092) are checked when, and only when, the request asked
+//! for them: a provider that ignores the request, or answers one that did not
+//! ask, violates the contract. Their rings follow the in-plane region checks,
+//! and a cut request is refused for a sheet before any provider runs.
+//!
 //! The source topology depends on the request's role: a solid is closed and
 //! oriented, a sheet may have boundary edges but not degenerate, non-manifold
 //! or inconsistently wound ones. The evidence repeats the role and the
@@ -19,8 +24,8 @@ use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, GeomResult, Oper
 use axiolid_core::Point2;
 use axiolid_mesh::{try_audit_mesh, TriMesh};
 use axiolid_mesh_section_contract::{
-    ChainEnd, InPlaneRegion, PlaneSection, PlaneSectionEvidence, SectionChain, SectionRequest,
-    SectionRole,
+    ChainEnd, CutRegion, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence,
+    SectionChain, SectionRequest, SectionRole,
 };
 
 use crate::section::validate_source_topology;
@@ -115,6 +120,139 @@ fn chain_cmp(left: &SectionChain, right: &SectionChain) -> Ordering {
     sequence_cmp(&left.points, &right.points).then_with(|| right.is_closed().cmp(&left.is_closed()))
 }
 
+fn violation(backend: BackendId, detail: &str) -> GeomError {
+    GeomError::BackendContractViolation {
+        backend,
+        detail: detail.into(),
+    }
+}
+
+/// Refuse a cut-region request for a sheet: a sheet has no inside.
+pub(crate) fn validate_cut_request(request: &SectionRequest) -> GeomResult<()> {
+    if request.cut_regions.is_some() && request.role == SectionRole::Sheet {
+        return Err(GeomError::InvalidInput(
+            "cut regions need SectionRole::Solid: a sheet has no inside".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Check one region ring and add its points to the running vertex total.
+///
+/// `label` names the kind of region in the messages and `resource` the
+/// vertex budget that runs out.
+fn check_ring(
+    backend: BackendId,
+    label: &str,
+    resource: &'static str,
+    max_vertices: usize,
+    ring: &[Point2],
+    vertices: &mut usize,
+) -> GeomResult<()> {
+    if ring.len() < 3 {
+        return Err(violation(
+            backend,
+            &format!("{label} ring needs at least three points"),
+        ));
+    }
+    if !ring.iter().all(|point| point.is_finite()) {
+        return Err(violation(
+            backend,
+            &format!("{label} contains a non-finite point"),
+        ));
+    }
+    if has_adjacent_duplicate(ring, true) {
+        return Err(violation(
+            backend,
+            &format!("{label} ring contains adjacent duplicate points"),
+        ));
+    }
+    if !starts_at_smallest(ring) {
+        return Err(violation(
+            backend,
+            &format!("{label} ring does not start at its smallest point"),
+        ));
+    }
+    *vertices = vertices
+        .checked_add(ring.len())
+        .ok_or(GeomError::BudgetExceeded { resource })?;
+    if *vertices > max_vertices {
+        return Err(GeomError::BudgetExceeded { resource });
+    }
+    Ok(())
+}
+
+/// Check the cut regions of a section against the request that asked for them
+/// (or did not).
+fn check_cut_regions(
+    backend: BackendId,
+    request: &SectionRequest,
+    section: &PlaneSection,
+) -> GeomResult<()> {
+    match (request.cut_regions, &section.cut_regions) {
+        (None, None) => Ok(()),
+        (Some(_), None) => Err(violation(
+            backend,
+            "provider did not trace the requested cut regions",
+        )),
+        (None, Some(_)) => Err(violation(
+            backend,
+            "provider returned cut regions that were not requested",
+        )),
+        (Some(limits), Some(cut_regions)) => {
+            if section
+                .regions
+                .iter()
+                .any(|region| region.side == InPlaneSide::Both)
+            {
+                return Err(violation(
+                    backend,
+                    "cut regions were returned beside in-plane faces of both sides",
+                ));
+            }
+            if cut_regions.len() > limits.max_regions {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "section cut regions",
+                });
+            }
+            let mut vertices = 0usize;
+            let mut previous: Option<&CutRegion> = None;
+            for region in cut_regions {
+                for ring in std::iter::once(&region.outer).chain(&region.holes) {
+                    check_ring(
+                        backend,
+                        "cut region",
+                        "section cut region vertices",
+                        limits.max_region_vertices,
+                        ring,
+                        &mut vertices,
+                    )?;
+                }
+                if region
+                    .holes
+                    .windows(2)
+                    .any(|pair| sequence_cmp(&pair[0], &pair[1]).is_gt())
+                {
+                    return Err(violation(
+                        backend,
+                        "cut region holes are not in canonical order",
+                    ));
+                }
+                if previous.is_some_and(|last| sequence_cmp(&last.outer, &region.outer).is_gt()) {
+                    return Err(violation(backend, "cut regions are not in canonical order"));
+                }
+                previous = Some(region);
+            }
+            if section.evidence.cut_pairs > limits.max_pairs {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "section cut pairs",
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
 pub(crate) fn validate_plane_section(
     backend: BackendId,
     mesh: &TriMesh,
@@ -122,10 +260,7 @@ pub(crate) fn validate_plane_section(
     boundary_edges: usize,
     section: &PlaneSection,
 ) -> GeomResult<()> {
-    let violation = |detail: &str| GeomError::BackendContractViolation {
-        backend,
-        detail: detail.into(),
-    };
+    let violation = |detail: &str| violation(backend, detail);
     let limits = request.limits;
     let region_limits = request.region_limits;
     if section.frame != request.frame {
@@ -203,35 +338,14 @@ pub(crate) fn validate_plane_section(
     let mut previous: Option<&InPlaneRegion> = None;
     for region in &section.regions {
         for ring in std::iter::once(&region.outer).chain(&region.holes) {
-            if ring.len() < 3 {
-                return Err(violation(
-                    "in-plane region ring needs at least three points",
-                ));
-            }
-            if !ring.iter().all(|point| point.is_finite()) {
-                return Err(violation("in-plane region contains a non-finite point"));
-            }
-            if has_adjacent_duplicate(ring, true) {
-                return Err(violation(
-                    "in-plane region ring contains adjacent duplicate points",
-                ));
-            }
-            if !starts_at_smallest(ring) {
-                return Err(violation(
-                    "in-plane region ring does not start at its smallest point",
-                ));
-            }
-            region_vertices =
-                region_vertices
-                    .checked_add(ring.len())
-                    .ok_or(GeomError::BudgetExceeded {
-                        resource: "section in-plane region vertices",
-                    })?;
-            if region_vertices > region_limits.max_region_vertices {
-                return Err(GeomError::BudgetExceeded {
-                    resource: "section in-plane region vertices",
-                });
-            }
+            check_ring(
+                backend,
+                "in-plane region",
+                "section in-plane region vertices",
+                region_limits.max_region_vertices,
+                ring,
+                &mut region_vertices,
+            )?;
         }
         if region
             .holes
@@ -253,6 +367,8 @@ pub(crate) fn validate_plane_section(
         previous = Some(region);
     }
 
+    check_cut_regions(backend, request, section)?;
+
     let evidence = section.evidence;
     if evidence.in_plane_pairs > region_limits.max_in_plane_pairs {
         return Err(GeomError::BudgetExceeded {
@@ -266,7 +382,13 @@ pub(crate) fn validate_plane_section(
             evidence.in_plane_pairs,
         )
         .with_role(request.role, boundary_edges)
-        .with_output(&section.chains, &section.regions);
+        .with_output(&section.chains, &section.regions)
+        .with_cut_pairs(if request.cut_regions.is_some() {
+            evidence.cut_pairs
+        } else {
+            0
+        })
+        .with_cut_output(section.cut_regions.as_deref().unwrap_or_default());
     if evidence != derived
         || !evidence.is_derived_from_input_mesh()
         || evidence.in_plane_triangles > mesh.triangle_count()

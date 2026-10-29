@@ -18,7 +18,9 @@ use axiolid_mesh_section_contract::{
 
 use crate::device::matches_device;
 use crate::frame::validate_frame;
-use crate::section_request::{validate_plane_section, validate_request_topology};
+use crate::section_request::{
+    validate_cut_request, validate_plane_section, validate_request_topology,
+};
 
 #[derive(Debug, Clone)]
 struct RegisteredSection {
@@ -190,6 +192,7 @@ impl MeshPlaneSectionRegistry {
     ) -> GeomResult<PlaneSection> {
         options.check_cancelled()?;
         validate_source_shape(mesh, request.frame, request.limits, options)?;
+        validate_cut_request(request)?;
 
         let mut has_matching_provider = false;
         let mut has_budgeted_provider = false;

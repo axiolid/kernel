@@ -344,8 +344,8 @@ fn source_and_scratch_limits_block_dispatch() {
 mod request {
     use super::*;
     use axiolid_mesh_section_contract::{
-        ChainEnd, InPlaneRegion, InPlaneSide, PlaneSection, PlaneSectionEvidence, RegionLimits,
-        SectionChain, SectionRequest, SectionRole,
+        ChainEnd, CutRegion, CutRegionLimits, InPlaneRegion, InPlaneSide, PlaneSection,
+        PlaneSectionEvidence, RegionLimits, SectionChain, SectionRequest, SectionRole,
     };
 
     fn pts(points: &[(f64, f64)]) -> Vec<Point2> {
@@ -386,11 +386,25 @@ mod request {
             }
             _ => 0,
         };
-        let evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
+        let mut evidence = PlaneSectionEvidence::input_mesh(mesh.triangle_count())
             .with_source_counts(mesh.triangle_count().min(2), 1, 3)
             .with_role(request.role, boundary_edges)
             .with_output(&chains, &regions);
-        PlaneSection::new(request.frame, chains, regions, evidence)
+        let mut section = PlaneSection::new(request.frame, chains, regions, evidence);
+        if request.cut_regions.is_some() {
+            let cut = vec![CutRegion::new(
+                pts(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
+                vec![pts(&[(0.2, 0.2), (0.2, 0.4), (0.4, 0.4)])],
+            )];
+            evidence = evidence.with_cut_pairs(2).with_cut_output(&cut);
+            section = PlaneSection::new(section.frame, section.chains, section.regions, evidence)
+                .with_cut_regions(cut);
+        }
+        section
+    }
+
+    fn cut_request() -> SectionRequest {
+        request().with_cut_regions(CutRegionLimits::new(10, 1_000, 1_000))
     }
 
     type Mutation = fn(&mut PlaneSection);
@@ -525,6 +539,117 @@ mod request {
                 "{name}: {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_valid_cut_answer_passes_unchanged() {
+        let section = run(|_| {}, &cut_request()).expect("valid");
+        assert_eq!(section, valid(&cube(), &cut_request()));
+        assert_eq!(section.evidence.cut_regions, 1);
+        assert_eq!(section.evidence.cut_region_vertices, 7);
+    }
+
+    #[test]
+    fn cut_regions_must_be_answered_exactly_when_requested() {
+        let ignored = run(|s| s.cut_regions = None, &cut_request()).expect_err("ignored");
+        let unasked = run(|s| s.cut_regions = Some(Vec::new()), &request()).expect_err("unasked");
+        for error in [ignored, unasked] {
+            assert!(
+                matches!(error, GeomError::BackendContractViolation { .. }),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_broken_cut_invariant_is_a_contract_violation() {
+        let cases: Vec<(&str, Mutation)> = vec![
+            ("ring too short", |s| {
+                s.cut_regions.as_mut().unwrap()[0].holes[0].truncate(2)
+            }),
+            ("ring non-finite", |s| {
+                s.cut_regions.as_mut().unwrap()[0].outer[1] = Point2::new(f64::NAN, 0.0)
+            }),
+            ("ring duplicate", |s| {
+                let outer = &mut s.cut_regions.as_mut().unwrap()[0].outer;
+                outer[1] = outer[0];
+            }),
+            ("ring start", |s| {
+                s.cut_regions.as_mut().unwrap()[0].outer.rotate_left(1)
+            }),
+            ("hole order", |s| {
+                let region = &mut s.cut_regions.as_mut().unwrap()[0];
+                region
+                    .holes
+                    .push(pts(&[(0.1, 0.1), (0.1, 0.15), (0.15, 0.15)]));
+            }),
+            ("region order", |s| {
+                let cut = s.cut_regions.as_mut().unwrap();
+                let mut second = cut[0].clone();
+                second.outer = pts(&[(-1.0, 0.0), (0.0, -1.0), (0.0, 0.5)]);
+                second.holes.clear();
+                cut.push(second);
+            }),
+            ("evidence cut regions", |s| s.evidence.cut_regions += 1),
+            ("evidence cut vertices", |s| {
+                s.evidence.cut_region_vertices += 1
+            }),
+            ("both sides", |s| {
+                s.regions[0].side = InPlaneSide::Both;
+                s.evidence = s.evidence.with_output(&s.chains, &s.regions);
+            }),
+        ];
+        for (name, mutate) in cases {
+            let error = run(mutate, &cut_request()).expect_err(name);
+            assert!(
+                matches!(error, GeomError::BackendContractViolation { .. }),
+                "{name}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cut_without_a_request_must_have_no_pairs() {
+        let error = run(|s| s.evidence.cut_pairs = 1, &request()).expect_err("pairs");
+        assert!(matches!(error, GeomError::BackendContractViolation { .. }));
+    }
+
+    #[test]
+    fn cut_budgets_are_enforced_on_the_answer() {
+        let cases = [
+            (CutRegionLimits::new(0, 1_000, 1_000), "section cut regions"),
+            (
+                CutRegionLimits::new(10, 6, 1_000),
+                "section cut region vertices",
+            ),
+            (CutRegionLimits::new(10, 1_000, 1), "section cut pairs"),
+        ];
+        for (limits, resource) in cases {
+            let error = run(|_| {}, &request().with_cut_regions(limits)).expect_err(resource);
+            assert!(
+                matches!(error, GeomError::BudgetExceeded { resource: found } if found == resource),
+                "{resource}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheet_with_cut_regions_is_invalid_input_before_any_provider_runs() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = MeshPlaneSectionRegistry::new();
+        registry.register(
+            0,
+            Scripted {
+                mutate: |_| {},
+                calls: Arc::clone(&calls),
+            },
+        );
+        let sheet = cut_request().with_role(SectionRole::Sheet);
+        let error = registry
+            .section_request(&cube(), &sheet, &options())
+            .expect_err("a sheet has no inside");
+        assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
