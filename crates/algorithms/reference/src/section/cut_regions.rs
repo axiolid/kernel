@@ -149,6 +149,8 @@ pub(super) fn build_cut_regions(
             ));
         }
         let points = chain_points(ctx.mesh, ctx.frame, ctx.classifications, &ring)?;
+        // A fail-closed check of the returned output, which the registry
+        // requires; not a geometric decision (those are on the exact points).
         if has_adjacent_duplicate(&points, true) {
             return Err(GeomError::Degenerate(
                 "cut region collapsed under projection".into(),

@@ -186,10 +186,19 @@ cost above):
   7). Each is evaluated in `Interval`s of the stored enclosures, and only
   when that straddles zero in `Dyadic`s. `Dyadic` has no range limit, so the
   tiny coordinates of a rotated mesh never cause a refusal. This is the
-  hidden-lines pattern (ADR 0068). `axiolid-reference` therefore depends on
-  `axiolid-exact`; every closure profile that lists the reference crate
-  already lists it. ADR 0080's amendment for #236 is the precedent for a
-  direct edge.
+  filter pattern of ADR 0068, as hidden lines use it (ADR 0090).
+  `axiolid-reference` therefore gains `axiolid-exact` and, through it,
+  `num-bigint` for the first time; every closure profile that lists the
+  reference crate already lists `axiolid-exact`, so no profile changes. (ADR
+  0080's amendment for #236 is not a precedent: there `axiolid-exact` was
+  already in the closure through `axiolid-nurbs`.)
+- **This reverses the placement argument of ADR 0090**, which kept hidden
+  lines out of `axiolid-reference` so that the umbrella crate would not pull
+  in `axiolid-exact` and its big integers. The reasons here are that the
+  section provider lives in `axiolid-reference` and is the exact oracle, and
+  that deciding on rounded output was shown unsound in #377. Moving the
+  section provider into its own crate would not help consumers of
+  `axiolid-reference`, which would still re-export it.
 - Expansion arithmetic was rejected: degree-11 products underflow for values
   such as `6e-17 * x`, and a range guard would refuse real input. A rounding
   band or snapping was rejected too: it would accept small real overlaps and
@@ -201,6 +210,10 @@ cost above):
   collinear stays `Degenerate`.
 - A sound box of every point (from the interval enclosures) prunes the sweep
   and the containment pairs; it never decides.
+
+The check for adjacent duplicates among the returned points stays: it is a
+fail-closed check of the output that the registry requires, not a geometric
+decision.
 
 **Returned coordinates** are unchanged bit for bit: those exact points
 computed in binary64. Rings that touch may therefore cross or overlap by

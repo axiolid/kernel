@@ -20,10 +20,15 @@
 //! - Only a [`SectionRole::Solid`](crate::SectionRole::Solid) has a cut; a
 //!   sheet request with cut regions is invalid input.
 //! - An outer ring is counter-clockwise and a hole is clockwise, so the
-//!   material lies on the left. Every ring has at least three points, no
-//!   adjacent duplicates (wrap-around included), no repeated vertex, and
-//!   starts at its lexicographically smallest point (`x`, then `y`, by
-//!   `total_cmp`). Holes are sorted by point sequence, regions by `outer`.
+//!   material lies on the left; this holds on the exact points (see
+//!   Exactness). For a ring within rounding of degenerate, the float area of
+//!   the returned points may not have the declared sign: use the declared
+//!   role (outer or hole) and never recompute it from the area. Every ring
+//!   has at least three points, no adjacent duplicates (wrap-around
+//!   included), and starts at its lexicographically smallest point (`x`, then
+//!   `y`, by `total_cmp`). It has no repeated vertex on the exact points; a
+//!   returned ring may, rarely, repeat a vertex after rounding. Holes are
+//!   sorted by point sequence, regions by `outer`.
 //! - On the exact geometry, rings never cross and have no repeated vertex, and
 //!   regions have disjoint interiors. The returned points are those exact
 //!   points computed in binary64, so rings that touch may cross or overlap by
@@ -49,7 +54,9 @@
 //! exact crossings of source edges with the plane through `origin`,
 //! `origin + x` and `origin + y`, never the returned coordinates. A self-
 //! intersecting mesh is not certified (ADR 0033); detected crossings are
-//! refused by name. Shells that overlap in the input, even by the rounding of
+//! refused by name. The check for adjacent duplicates among the returned
+//! points is a fail-closed check of the output (the registry requires it),
+//! not a geometric decision. Shells that overlap in the input, even by the rounding of
 //! the consumer's own transform, are still refused.
 
 use axiolid_core::Point2;

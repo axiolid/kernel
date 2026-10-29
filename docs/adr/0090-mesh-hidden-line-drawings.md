@@ -48,7 +48,8 @@ decision; only the endpoints of output segments are rounded.
   `discrete.hidden-lines`), arrives in a later stage. It is its own package
   rather than part of `axiolid-reference`, which would pull `axiolid-exact`
   and its big-integer dependency into the umbrella crate that ADR 0036 keeps
-  small.
+  small (amended by ADR 0092, #377: `axiolid-reference` now depends on
+  `axiolid-exact`).
 
 ### Semantics
 
