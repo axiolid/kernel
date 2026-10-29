@@ -30,6 +30,10 @@ axiolid-spatial.workspace = true
 name = "clash"
 harness = false
 
+[[bench]]
+name = "section_in_plane"
+harness = false
+
 [dev-dependencies]
 axiolid-dispatch = { workspace = true, features = ["mesh-section"] }
 
