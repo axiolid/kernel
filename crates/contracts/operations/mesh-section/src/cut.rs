@@ -24,7 +24,10 @@
 //!   adjacent duplicates (wrap-around included), no repeated vertex, and
 //!   starts at its lexicographically smallest point (`x`, then `y`, by
 //!   `total_cmp`). Holes are sorted by point sequence, regions by `outer`.
-//! - Rings never cross and regions have disjoint interiors.
+//! - On the exact geometry, rings never cross and have no repeated vertex, and
+//!   regions have disjoint interiors. The returned points are those exact
+//!   points computed in binary64, so rings that touch may cross or overlap by
+//!   rounding error in the returned coordinates.
 //! - A ring keeps a collinear vertex only where something else does: a
 //!   junction of a chain and a region edge, a vertex that a region ring keeps,
 //!   or a chain vertex that chain simplification keeps (a vertex of an
@@ -41,10 +44,13 @@
 //! # Exactness
 //!
 //! Which edges bound the cut and how they link come from exact source
-//! predicates. Outer or hole, nesting and crossing are decided exactly on the
-//! returned coordinates, because an edge-crossing point has no exact binary64
-//! position. A self-intersecting mesh is not certified (ADR 0033); detected
-//! crossings are refused by name.
+//! predicates. Outer or hole, nesting, contact and crossing are decided
+//! exactly on source data too: the points are source vertices in the plane and
+//! exact crossings of source edges with the plane through `origin`,
+//! `origin + x` and `origin + y`, never the returned coordinates. A self-
+//! intersecting mesh is not certified (ADR 0033); detected crossings are
+//! refused by name. Shells that overlap in the input, even by the rounding of
+//! the consumer's own transform, are still refused.
 
 use axiolid_core::Point2;
 

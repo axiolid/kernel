@@ -33,6 +33,7 @@ evaluation should depend on those directly.
 - [`axiolid-core`](./axiolid-core)
 - [`axiolid-curve`](./axiolid-curve)
 - [`axiolid-evaluate`](./axiolid-evaluate)
+- [`axiolid-exact`](./axiolid-exact)
 - [`axiolid-guarantees`](./axiolid-guarantees)
 - [`axiolid-measure`](./axiolid-measure)
 - [`axiolid-mesh`](./axiolid-mesh)

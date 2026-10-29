@@ -56,7 +56,7 @@ and no `semver-exceptions` entry.
   the material lies on the left, and every closed chain of a solid is a cut
   ring bit for bit. An open chain with both ends on a region is a contiguous
   run of exactly one ring, forward or reversed.
-- **Exactness, amended.** ADR 0091 decides every step on source data. Two
+- **Exactness, amended (amended again below).** ADR 0091 decides every step on source data. Two
   decisions here cannot: whether a ring is an outer ring or a hole, and how
   rings nest. An edge-crossing node has no exact binary64 position, so these
   are decided exactly **on the returned coordinates**: the sign of the
@@ -124,7 +124,8 @@ and no `semver-exceptions` entry.
 
 **Negative / costs**
 
-- Outer or hole and nesting use the returned coordinates, not source data;
+- (Amended below.) Outer or hole and nesting use the returned coordinates, not
+  source data;
   overlapping shells that the audit cannot see are refused when detected and
   otherwise stay uncertified.
 - The crossing, contact and containment tests are argued complete for polygon
@@ -147,6 +148,72 @@ and no `semver-exceptions` entry.
   `fixtures.rs` and `region_conformance.rs`: the suite.
 - `crates/execution/dispatch/src/section_request.rs`: the answer checks.
 - `crates/algorithms/reference/src/section/`: `request.rs` (which region
-  edges bound the cut), `cut_regions.rs` (ring tracing), `ring_nesting.rs`
-  (nesting).
+  edges bound the cut), `cut_regions.rs` (ring tracing), `plane_points.rs`
+  (the exact points of the cut nodes), `ring_nesting.rs` (nesting).
 - `scripts/probe_section_cut_regions_mutants.py`: the mutation probe.
+
+## Amendment 2026-10-29: decide on the exact source points (#377)
+
+Deciding on the returned coordinates was the risk this ADR accepted, and it
+refused shells that touch in the source. Measured on two boxes that touch
+along a line, with the plane turned by `pi k / 201` for `k = 1..=200`:
+
+- With the frame turned and the mesh as it is, 150 of 200 frames were refused
+  as crossing. The source touches exactly; the rounding of the projection to a
+  turned frame (`project_local`) and of the oblique edge crossings
+  (`node_point`) made the returned rings penetrate.
+- With the mesh rotated in binary64 and the frame as it is (a consumer that
+  places the mesh in world coordinates), 147 of 200 were refused, and they are
+  exactly the angles at which a rounded corner of one box lies strictly
+  inside the other, checked in rational arithmetic. That overlap is in the
+  input, so refusing it is the exact verdict (ADR 0033). No exact predicate
+  can call it touching; reading it as contact would need a tolerance, which
+  is a separate decision (#377).
+
+**Decision.** Crossing, contact, containment and the choice between outer
+ring and hole are decided on exact points of the plane, never on the returned
+coordinates (this supersedes the *Exactness, amended* paragraph and the first
+cost above):
+
+- A cut node is a source vertex in the plane or the exact crossing of a source
+  edge with it. The plane is the one the classification already uses, through
+  `origin`, `origin + x` and `origin + y` (not the rounded normal). With
+  `D(Q) = det[X - O, Y - O, Q - O]` (degree 3), a crossing of `A`-`B` is
+  `(D(A) B - D(B) A) / (D(A) - D(B))`, kept as homogeneous dyadic
+  coordinates `(x, y, w)`, `w > 0`, in the projection that drops one axis.
+- `orient` is the 3 x 3 determinant (degree 11 in the source coordinates when
+  all three points are crossings) and `compare` is `c_a w_b - c_b w_a` (degree
+  7). Each is evaluated in `Interval`s of the stored enclosures, and only
+  when that straddles zero in `Dyadic`s. `Dyadic` has no range limit, so the
+  tiny coordinates of a rotated mesh never cause a refusal. This is the
+  hidden-lines pattern (ADR 0068). `axiolid-reference` therefore depends on
+  `axiolid-exact`; every closure profile that lists the reference crate
+  already lists it. ADR 0080's amendment for #236 is the precedent for a
+  direct edge.
+- Expansion arithmetic was rejected: degree-11 products underflow for values
+  such as `6e-17 * x`, and a range guard would refuse real input. A rounding
+  band or snapping was rejected too: it would accept small real overlaps and
+  needs a proven error bound for the interpolation and the projection (ADR
+  0091: no tolerance and no rounded coordinate takes part in a decision).
+- A ring is an outer ring or a hole by its turn at its lexicographically
+  smallest vertex, taken after the crossing sweep, which has proven the ring
+  simple, so that vertex is never straight. A ring whose vertices are all
+  collinear stays `Degenerate`.
+- A sound box of every point (from the interval enclosures) prunes the sweep
+  and the containment pairs; it never decides.
+
+**Returned coordinates** are unchanged bit for bit: those exact points
+computed in binary64. Rings that touch may therefore cross or overlap by
+rounding error in the output, and a rounded ring may in rare cases repeat a
+vertex. The registry checks neither (cardinality, finiteness, adjacent
+duplicates, canonical start and order, budgets). The contract documents it.
+
+**Still refused.** An overlap that is in the input, including one that rounding
+put there, is refused as before. What a consumer does about shells that are
+unfused by an ulp after its own placement transform is open (#377).
+
+**Cost.** Building a point is about two degree-3 dyadic determinants. A
+rotated cable ladder (two rails, ten rungs) in plan took about 0.7 ms per
+request in release instead of 0.2 ms before. Only exactly degenerate cases
+(contacts, shared collinear edges) reach `Dyadic`. The nesting stays quadratic
+in the worst case.

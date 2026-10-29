@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Cut rings are decided on exact source points: crossing, contact,
+  containment and outer or hole no longer use the returned coordinates, which
+  the projection to a turned frame and the edge interpolation round. Shells
+  that touch in the source are no longer refused as crossing under a turned
+  frame or an oblique section. An overlap that is in the input is still
+  refused. The returned coordinates are unchanged (ADR 0092, #377).
+
+### Changed
+
+- Depends on `axiolid-exact` for the exact points of the cut.
+
 ## [0.3.13] - 2026-10-29
 
 ### Added

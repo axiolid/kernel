@@ -9,6 +9,14 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation of `CutRegion`: the invariant that rings never cross, and the
+  exactness section, now say that the decisions are made on exact source
+  points (source vertices in the plane and exact crossings of source edges),
+  and that the returned points are those computed in binary64, so rings that
+  touch may cross by rounding error (ADR 0092, #377).
+
 ## [0.3.5] - 2026-10-29
 
 ### Added
