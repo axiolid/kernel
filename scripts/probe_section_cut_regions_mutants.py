@@ -120,8 +120,57 @@ MUTANTS = [
     ),
     (
         'box of a crossing not divided by its weight', P,
-        '                enclosure[0].quotient(enclosure[2]),',
-        '                enclosure[0],', TESTS,
+        '            enclosure[0].quotient(enclosure[2]),',
+        '            enclosure[0],', TESTS,
+    ),
+    (
+        'fast path orients with a float determinant', P,
+        '            return Ok(sign_times(orient_sign(fa, fb, fc)?, self.frame_sign));',
+        '            let det = (fb.x - fa.x) * (fc.y - fa.y) - (fb.y - fa.y) * (fc.x - fa.x);\n'
+        '            let sign = if det > 0.0 {\n'
+        '                Sign::Positive\n'
+        '            } else if det < 0.0 {\n'
+        '                Sign::Negative\n'
+        '            } else {\n'
+        '                Sign::Zero\n'
+        '            };\n'
+        '            return Ok(sign_times(sign, self.frame_sign));', TESTS,
+    ),
+    (
+        'fast path orientation ignores the frame sign', P,
+        '            return Ok(sign_times(orient_sign(fa, fb, fc)?, self.frame_sign));',
+        '            return Ok(orient_sign(fa, fb, fc)?);', TESTS,
+    ),
+    (
+        'fast path comparison reversed', P,
+        '            return coordinate(fa, axis)\n'
+        '                .partial_cmp(&coordinate(fb, axis))',
+        '            return coordinate(fb, axis)\n'
+        '                .partial_cmp(&coordinate(fa, axis))', TESTS,
+    ),
+    (
+        'rounded crossing stored as a binary64 point', P,
+        '    (exact_candidate.mul(weight) == *numerator).then_some(candidate)',
+        '    Some(candidate)', TESTS,
+    ),
+    (
+        'edge fixed in a coordinate taken from its other end', P,
+        '            exact_quotient(&point[0], &point[2], fixed(a.x, b.x)),',
+        '            exact_quotient(&point[0], &point[2], fixed(a.x, b.x).map(|x| x.next_up())),',
+        TESTS,
+    ),
+    (
+        'vertex node not checked against its certified side', P,
+        '                if certified.sign != Sign::Zero {',
+        '                if false && certified.sign != Sign::Zero {', TESTS,
+    ),
+    (
+        'lexicographic order by the second coordinate only', P,
+        '        match self.compare(a, b, 0)? {\n'
+        '            Ordering::Equal => self.compare(a, b, 1),\n'
+        '            order => Ok(order),\n'
+        '        }',
+        '        self.compare(a, b, 1)', TESTS,
     ),
     (
         'box pruning inverted', N,
