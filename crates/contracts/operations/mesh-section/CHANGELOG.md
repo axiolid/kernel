@@ -19,13 +19,21 @@ caret rule for `0.x` versions.
 
 ### Changed
 
-- Documentation: the classes of the plane (`Below`, `Above`, `Both`) and that
-  regions have pairwise disjoint interiors; every `InPlaneSide::Both` region
-  is a cut region, equal to it bit for bit, and a provider may still refuse
-  overlapping in-plane faces by name. `in_plane_pairs` and
-  `RegionLimits::max_in_plane_pairs` count candidate pairs examined for the
-  in-plane faces, not only overlap tests. The region conformance suite checks
-  that every `Both` region is a cut region.
+- Every `InPlaneSide::Both` region is a cut region, equal to it bit for bit
+  (ADR 0093, #366). The region conformance suite checks it, and the registry
+  checks it instead of refusing cut regions beside a `Both` region. A
+  provider that reports a `Both` region and refuses only the cut request now
+  fails the conformance suite; it must either refuse the plain request too or
+  return the cut regions.
+- `in_plane_pairs` and `RegionLimits::max_in_plane_pairs` count the candidate
+  pairs examined for the in-plane faces (segment, piece-triangle and hole
+  containment pairs of a merge), not only overlap tests. The count grows for
+  the same mesh (68,104 to 105,600 on the 8,192-triangle bench grid), so a
+  `max_in_plane_pairs` sized to the old counts can now give
+  `BudgetExceeded`.
+- Documentation: the classes of the plane (`Below`, `Above`, `Both`), that
+  regions have pairwise disjoint interiors, and that a provider may still
+  refuse overlapping in-plane faces by name.
 
 ## [0.3.6] - 2026-10-29
 

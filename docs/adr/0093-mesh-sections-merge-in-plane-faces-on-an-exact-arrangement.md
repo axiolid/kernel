@@ -139,7 +139,10 @@ declared per element, 2560 bytes (was 1536), tallied beside
 - Every section with in-plane faces runs the arrangement, with no fast path.
   The reference stays an oracle, not a performance tier. Measured in wall
   clock (`cargo bench -p axiolid-reference --bench section_in_plane`, best of
-  five or three, the same bench on the commit before the merge): a conforming grid of
+  five or three, the same bench on the commit before the merge, 8e7f939; its
+  `section_in_plane.rs` does not compile there because it reads
+  `evidence.in_plane_crossings`, so add the `[[bench]]` entry to its manifest and drop that one field from the `format!` in
+  `time` to reproduce the baseline): a conforming grid of
   8,192 in-plane triangles takes 31 to 35 ms, against 15 to 21 ms before (1.5
   to 2.4 times). A first version took 61 ms; pruning the segment and piece
   pairs (a side test that stops most pairs after two signs, skipping segments
