@@ -28,7 +28,8 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::{boundary_distance, exact_properties};
 use axiolid_mesh_compile::ReferenceExactCompiler;
 use axiolid_model::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
+    CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, InstanceAtStation,
+    NodeId, SolidOperation, Station, StationFrame, StationOffsets,
 };
 use axiolid_profile::{
     CircleProfile, Contour, ContourProfile, Profile, ProfileSegment, RectangleProfile,
@@ -594,6 +595,45 @@ fn a_ring_turned_from_a_rectangle_is_cut_from_a_wall_as_a_groove() {
     let cut = g.minus(wall, ring);
     let groove = PI * (0.35 * 0.35 - 0.25 * 0.25) * 0.075;
     check(g, cut, L * T * H - groove, &[]);
+}
+
+#[test]
+fn a_solid_placed_at_a_station_is_cut_exactly() {
+    // A `1 x 2 x 3` block in the frame of a station on a straight plan line
+    // (tangent +y, lateral -x), offsets (0.5, 0.25, 1): around (1.5, 5, 0.25),
+    // x in [0.5, 2.5], y in [4.5, 5.5], z in [0.25, 3.25]. A box through its
+    // base removes `1 x 0.5 x 1`.
+    let mut g = Graph::new();
+    let basis = g.push(GeometryNode::Curve2(Curve2::Line(Line2 {
+        origin: Point2::new(2.0, 1.0),
+        direction: Vec2::new(0.0, 2.0),
+    })));
+    let block = g.extrusion(
+        Profile::Rectangle(RectangleProfile {
+            x: 1.0,
+            y: 2.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        }),
+        3.0,
+    );
+    let station = CurveStation {
+        basis,
+        station: Station::new(3.0, StationOffsets::new(0.5, 0.25, 1.0)),
+        frame: StationFrame::Section,
+    };
+    let placed = g
+        .builder
+        .push_value(InstanceAtStation::new(block, station.into()))
+        .expect("a valid node");
+    let notch = g.extrusion(rect(1.0, 0.5), 1.5);
+    let notch = g.instance(
+        notch,
+        Transform3::from_translation(Vec3::new(1.5, 5.0, -0.25)),
+    );
+    let cut = g.minus(placed, notch);
+    check(g, cut, 6.0 - 0.5, &[]);
 }
 
 #[test]

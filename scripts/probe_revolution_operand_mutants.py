@@ -4,8 +4,8 @@ exact boolean and of its measured deviation (#378).
 Each mutant reintroduces a way a revolution operand, or the compiled-solid
 reading of operands, failed or could fail -- the revolution refused again
 as subject or as tool (bare or under a placement), a boolean refused again
-as tool, a symmetric difference let through, the search settling at 10%
-above its lower bound across the budget -- and must turn a test red.
+as tool, a tool boolean's reading dropped from the report, the search
+settling at 10% above its lower bound across the budget -- and must turn a test red.
 `exact_placed_boolean.rs` checks the volumes of a torus cut through its axis
 (as subject and as tool) and of a ring groove turned from a rectangle;
 `boolean_deviation.rs` measures the box and bent tube of the issue under
@@ -53,6 +53,9 @@ MUTANTS = [
      [PLACED, MEASURED]),
     ("a boolean tool refused again", C,
      TOOL, refuse("right", BOOLEAN) + TOOL, [PLACED, MEASURED]),
+    ("a tool boolean's report dropped", "crates/execution/compile/src/exact.rs",
+     ".merged(&self.report_of(right))",
+     ".merged(&self.report_of(left))", [MEASURED]),
     ("the search settles across the budget", S,
      "            || (top.upper <= TIGHT * lower && !straddles)\n",
      "            || (top.upper <= TIGHT * lower)\n", [MEASURED]),

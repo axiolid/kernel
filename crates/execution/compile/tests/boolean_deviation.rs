@@ -25,8 +25,10 @@ use std::time::Instant;
 use axiolid_brep::ExactBRep;
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{
-    BooleanOperator, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3, Vec2, Vec3,
+    BooleanOperator, Frame3, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3,
+    Vec2, Vec3,
 };
+use axiolid_curve::{Circle3, Curve3};
 use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
@@ -769,7 +771,9 @@ fn box_and_bent_tube(g: &mut Graph, operator: BooleanOperator, up: bool) -> Node
 }
 
 /// The certified bound, measured against exact samples; `limit` times the
-/// budget at most (the cut of an intersection can land a hair beyond it).
+/// budget at most. TODO(#380): the intersection's cut of faceted operands
+/// meeting a face obliquely lands beyond the budget (1.02e-3 at 1e-3), so
+/// it is allowed 1.1x until the mesh boolean's cut is tightened.
 fn assert_bent_tube(operator: BooleanOperator, up: bool, limit: Scalar, name: &str) {
     let options = options(1e-3);
     let case = compile(|g| box_and_bent_tube(g, operator, up), &options);
@@ -855,6 +859,63 @@ fn a_union_whose_tool_is_a_boolean_is_certified() {
         &options,
     );
     assert_measured("box union cut wall", case, &options, 2.0);
+}
+
+/// A `1 x 1 x 2` box united with a disk of radius `0.1` swept along a
+/// quarter of a vertical circle of radius `2`, the pipe leaving the box
+/// obliquely through its side (a swept disk is compiled exactly, #378).
+#[test]
+fn a_box_united_with_a_bent_pipe_is_certified() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| {
+            let a = g.extrusion(rect(1.0, 1.0), 2.0);
+            let a = g.place(a, Transform3::from_translation(Vec3::new(0.0, 0.0, -1.0)));
+            let arc = g.push(GeometryNode::Curve3(Curve3::Circle(Circle3 {
+                frame: Frame3 {
+                    origin: Point3::new(2.0, 0.0, 0.0),
+                    x: Vec3::X,
+                    y: Vec3::Z,
+                    z: -Vec3::Y,
+                },
+                radius: 2.0,
+            })));
+            let pipe = g.push(GeometryNode::SolidOperation(SolidOperation::SweptDisk {
+                directrix: arc,
+                radius: 0.1,
+                inner_radius: None,
+                parameter_range: Some((PI, 1.5 * PI)),
+                fillet_radius: None,
+            }));
+            g.boolean(a, pipe, BooleanOperator::Union)
+        },
+        &options,
+    );
+    let (bound, _) = assert_measured("box union bent pipe", case, &options, 2.0);
+    assert!(bound <= 1e-3, "{bound}");
+}
+
+#[test]
+fn a_tool_boolean_reading_within_tolerance_reports_it() {
+    // The inner boolean (a wall with a window turned from sines and
+    // cosines) reads its caps within tolerance; the outer union with a
+    // faraway box takes no reading itself, so the report carries the
+    // tool's.
+    let options = options(1e-3);
+    let (_, _, _, report, _) = compile(
+        |g| {
+            let far = g.extrusion(rect(1.0, 1.0), 1.0);
+            let far = g.place(far, Transform3::from_translation(Vec3::new(40.0, 0.0, 0.0)));
+            let tool =
+                wall_with_flush_window(g, building(), Transform3::from_rotation_x(FRAC_PI_2));
+            g.boolean(far, tool, BooleanOperator::Union)
+        },
+        &options,
+    );
+    assert_eq!(
+        report.contributions[0].detail,
+        "measured against the exact compiler's result, operands within tolerance"
+    );
 }
 
 /// A wall `6 x 0.25 x 3` minus a window `1.25 x 1.5` flush with both its

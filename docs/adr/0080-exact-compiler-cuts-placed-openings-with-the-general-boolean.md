@@ -855,7 +855,9 @@ unbounded deviation.
 - **The tool restriction was historical.** The first landing (#228) took
   a placed extrusion as the tool because openings were the only case; the
   general boolean never distinguished subject from tool. A boolean as
-  tool is built the same way (#326, first point).
+  tool is built the same way. This is #326's triage decision (compile the
+  tool exactly, refuse by name what cannot be compiled); its
+  half-space-intersection example is still refused by `compile_clip`.
 - **Measurement.** The deviation measurement bounds every face of the exact
   result with `SurfaceBoundOracle`, whose torus bounds (`du` the largest
   ring radius, `dv` the minor radius, and the second partials) are certified
@@ -865,7 +867,9 @@ unbounded deviation.
 - **Search.** The branch and bound stopped at 10% above its lower bound
   even when the budget fell inside that gap, so a mesh within the budget
   could report just over it. It now tightens while the lower bound is under
-  the budget and the upper bound over it.
+  the budget and the upper bound over it, within the cell cap and the
+  resolution floor. The change also settles existing sweep results
+  (banked, clothoid, gradient), not only booleans.
 
 Tests: `tests/exact_placed_boolean.rs` (a torus cut through its axis, as
 subject and as tool, with the closed-form volumes; a ring groove; a boolean
