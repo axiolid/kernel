@@ -4,7 +4,7 @@ their measured deviation (#376).
 Each mutant reintroduces a way the operator handling of
 `compile_boolean` failed or could fail -- a union or an intersection
 refused again, the operator the exact boolean runs not the node's, the
-tool restriction (#326) dropped with the operator gate, the emptied result
+symmetric difference let through to the general boolean, the emptied result
 named for the wrong operator -- and must turn a test red.
 `exact_placed_boolean.rs` checks the volumes and refusals of the exact
 unions and intersections; `boolean_deviation.rs` measures their meshes
@@ -12,7 +12,7 @@ against the exact result. `--only NAME` runs only the mutants whose names
 contain NAME.
 
 Equivalent mutants, deliberately not listed: the bare-prism path before
-the gate (it takes every operator on its own and is probed by
+the placed dispatch (it takes every operator on its own and is probed by
 `probe_boolean_deviation_mutants.py` and the prism tests).
 """
 import probe_lib
@@ -46,10 +46,10 @@ MUTANTS = [
     ("an intersection run as a union", C,
      RUN, "boolean_with_report(&subject, &tool, match operator { BooleanOperator::Intersection => BooleanOperator::Union, other => other }, self.options.tolerance())",
      [PLACED, MEASURED]),
-    ("tool restriction dropped with the operator gate", C,
-     "        if !matches!(tool, Placed::Extrusion | Placed::Mesh) {",
-     "        if false && !matches!(tool, Placed::Extrusion | Placed::Mesh) {",
-     [PLACED, MEASURED]),
+    ("symmetric difference let through", C,
+     "        if operator == BooleanOperator::SymmetricDifference {",
+     "        if false && operator == BooleanOperator::SymmetricDifference {",
+     [PLACED]),
     ("an emptied result named for a difference whatever the operator", C,
      "BooleanError::EmptyResult => emptied(operator),",
      "BooleanError::EmptyResult => emptied(BooleanOperator::Difference),",

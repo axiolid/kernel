@@ -42,7 +42,7 @@ the general exact boolean, and `axiolid-mesh-compile` depends on
   single-ring subject in a shared frame, so it would serve a slab's first
   shaft and no opening after it, and a second route would be a second set
   of results to keep in agreement.
-- Refused by name: unions and intersections of placed operands, operands
+- Refused by name: operands
   that are not extrusions, a tool that is itself a boolean, scaled or
   sheared placements, and every `BooleanError` the general boolean
   raises. An emptied subject is `GeomError::Degenerate`.
@@ -814,3 +814,27 @@ lifted `9e-4`, `1e-6` and `4e-10` m reports half its lift; an exactly
 coplanar tilted top reports `0`), the `planar` unit tests (exact
 coplanarity, a diagonal wall on a national grid); probe
 `scripts/probe_faceted_planarity_mutants.py`.
+
+## Amendment 2026-10-29: unions and intersections of placed operands (#376)
+
+The exact compiler refused every union and intersection of placed
+extrusions, so a circular column united with a box had an unbounded
+deviation.
+
+- **Decision.** `compile_boolean` takes union and intersection of placed
+  extrusions, and of placed booleans as subjects, through
+  `boolean_with_report`, as it does the difference. The deviation
+  measurement certifies the distance from every face of the exact result to
+  the mesh and does not depend on the operator, so a union's or
+  intersection's bound is the same measured one a difference gets.
+- **Unchanged.** A tool that is itself a boolean is still refused by name
+  (#326). A symmetric difference of placed operands is refused by name
+  ("exact symmetric difference of placed operands"), where it used to fall
+  through to a misleading section-curve refusal. An intersection that
+  leaves nothing is `GeomError::Degenerate` naming the intersection; a
+  union cannot leave nothing.
+
+Tests: `tests/exact_placed_boolean.rs` (volumes of a union and an
+intersection, the degenerate intersection, the symmetric difference),
+`tests/boolean_deviation.rs` (a column united with a box, overlapping and
+disjoint walls); probe `scripts/probe_placed_union_mutants.py`.

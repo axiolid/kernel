@@ -28,7 +28,6 @@ use axiolid_core::{
     BooleanOperator, Plane3, Point2, Point3, Scalar, Tolerance, Transform2, Transform3, Vec2, Vec3,
 };
 use axiolid_exact_compile_contract::ExactCompiler;
-use axiolid_measure::proximity::closest_point_on_triangle;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
@@ -175,12 +174,35 @@ impl TriangleGrid {
     fn distance(&self, p: Point3) -> Scalar {
         let mut best = self.reach;
         for &i in self.cells.get(&key(p, self.cell)).into_iter().flatten() {
-            if let Ok(q) = closest_point_on_triangle(p, self.triangles[i]) {
-                best = best.min(p.distance(q));
-            }
+            best = best.min(triangle_distance(p, self.triangles[i]));
         }
         best
     }
+}
+
+/// The distance from `p` to a triangle: across the plane when the foot
+/// lies inside (the three edge signs agree), else to the nearest edge.
+/// Well conditioned on slivers, where the barycentric closest-point
+/// formulas lose digits.
+fn triangle_distance(p: Point3, [a, b, c]: [Point3; 3]) -> Scalar {
+    let n = (b - a).cross(c - a);
+    let side = |v0: Point3, v1: Point3| (v1 - v0).cross(p - v0).dot(n);
+    let signs = [side(a, b), side(b, c), side(c, a)];
+    if n.length() > 0.0 && (signs.iter().all(|s| *s >= 0.0) || signs.iter().all(|s| *s <= 0.0)) {
+        return (p - a).dot(n).abs() / n.length();
+    }
+    [(a, b), (b, c), (c, a)]
+        .into_iter()
+        .map(|(u, v)| {
+            let edge = v - u;
+            let t = if edge.length_squared() > 0.0 {
+                ((p - u).dot(edge) / edge.length_squared()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            p.distance(u + edge * t)
+        })
+        .fold(Scalar::INFINITY, Scalar::min)
 }
 
 fn key(p: Point3, cell: Scalar) -> [i64; 3] {
@@ -235,21 +257,6 @@ fn assert_measured(
     options: &ExecutionOptions,
     ceiling: Scalar,
 ) -> (Scalar, Scalar) {
-    assert_measured_within(name, case, options, ceiling, 0.0)
-}
-
-/// [`assert_measured`] with the sampled distances allowed `noise` above the
-/// bound. An all-planar result reports its bound at the mesh's rounding
-/// (#314), where the sampling itself is no finer: a point-to-triangle
-/// distance on the sliver triangles of a union's cross-shaped faces is
-/// good to about `1e-12` at this scale.
-fn assert_measured_within(
-    name: &str,
-    case: (GeometryGraph, NodeId, TriMesh, DeviationReport, Scalar),
-    options: &ExecutionOptions,
-    ceiling: Scalar,
-    noise: Scalar,
-) -> (Scalar, Scalar) {
     let (graph, root, mesh, report, seconds) = case;
     // Faces read as one surface within tolerance name how far that moved
     // an operand (#324), within the tolerance; the rest is the boolean's
@@ -296,7 +303,7 @@ fn assert_measured_within(
         samples.len()
     );
     assert!(
-        worst <= bound + noise,
+        worst <= bound,
         "{name}: an exact point lies {worst:e} from the mesh, above the reported {bound:e}"
     );
     assert!(
@@ -688,7 +695,18 @@ fn two_overlapping_walls_united_are_certified_against_their_exact_result() {
         |g| two_walls(g, Vec3::new(1.5, 1.8, 0.0), BooleanOperator::Union),
         &options,
     );
-    let (bound, _) = assert_measured_within("walls union", case, &options, f64::INFINITY, 2e-12);
+    let (bound, _) = assert_measured("walls union", case, &options, Scalar::INFINITY);
+    assert!(bound <= 1e-11, "{bound:e}");
+}
+
+#[test]
+fn two_overlapping_walls_intersected_are_certified_against_their_exact_result() {
+    let options = options(1e-3);
+    let case = compile(
+        |g| two_walls(g, Vec3::new(1.5, 1.8, 0.0), BooleanOperator::Intersection),
+        &options,
+    );
+    let (bound, _) = assert_measured("walls intersection", case, &options, Scalar::INFINITY);
     assert!(bound <= 1e-11, "{bound:e}");
 }
 
@@ -699,8 +717,7 @@ fn two_disjoint_walls_united_are_certified_against_their_exact_result() {
         |g| two_walls(g, Vec3::new(1.5, 9.0, 0.0), BooleanOperator::Union),
         &options,
     );
-    let (bound, _) =
-        assert_measured_within("walls disjoint union", case, &options, f64::INFINITY, 2e-12);
+    let (bound, _) = assert_measured("walls disjoint union", case, &options, Scalar::INFINITY);
     assert!(bound <= 1e-11, "{bound:e}");
 }
 

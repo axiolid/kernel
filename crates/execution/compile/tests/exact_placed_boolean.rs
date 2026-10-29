@@ -1,5 +1,5 @@
-//! Exact differences of placed extrusions: openings in walls and slabs
-//! (#228).
+//! Exact booleans of placed extrusions: openings cut in walls and slabs
+//! (#228), and unions and intersections (#376).
 //!
 //! A wall is a rectangle extruded along its local `z`, `L` long in `x` and
 //! `T` thick in `y`. A door or window opening is extruded across it, along
@@ -576,6 +576,15 @@ fn an_intersection_of_placed_operands_is_exact() {
         BooleanOperator::Intersection,
     );
     check(g, common, 1.0, &[]);
+}
+
+#[test]
+fn a_symmetric_difference_of_placed_operands_is_refused_by_name() {
+    for by in [Vec3::new(1.0, 1.0, 1.0), Vec3::new(5.0, 0.0, 0.0)] {
+        let mut g = Graph::new();
+        let either = two_boxes(&mut g, by, BooleanOperator::SymmetricDifference);
+        named(&refusal(g, either), "symmetric difference");
+    }
 }
 
 #[test]

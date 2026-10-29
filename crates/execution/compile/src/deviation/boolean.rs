@@ -78,8 +78,7 @@
 //! takes mesh operands: an authored polygon or triangle mesh, and a B-rep
 //! whose faces are all planes with straight edges or warped faces without
 //! a surface, each as the exact polyhedron of the triangles the mesh
-//! compiler makes of it (`crate::exact`'s `polyhedral` module), and a
-//! union or intersection when an operand is such a mesh. A warped face's
+//! compiler makes of it (`crate::exact`'s `polyhedral` module). A warped face's
 //! triangles lie within its slab width `w` of every reading of the face,
 //! both ways (`crate::planar`), so that exact result is the exact boolean
 //! of operands perturbed by at most the largest such `w`: ADR 0080's

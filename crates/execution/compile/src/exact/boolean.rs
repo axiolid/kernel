@@ -41,9 +41,8 @@
 //! `crate::deviation`) reads an authored mesh, or a B-rep of planes and
 //! warped faces without a surface, as a placed operand too, compiled to the
 //! exact polyhedron of its triangles (`super::polyhedral`), as subject or
-//! tool, and takes any operator when an operand is such a mesh. The rest
-//! of the dispatch, and every refusal above, is unchanged; the public
-//! compiler still refuses a mesh operand by name.
+//! tool. The rest of the dispatch, and every refusal above, is
+//! unchanged; the public compiler still refuses a mesh operand by name.
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_boolean::{boolean_with_report, BooleanError};
@@ -88,6 +87,9 @@ impl ExactCompilation<'_> {
         // through its placements too.
         self.placed(left)?;
         let tool = self.placed(right)?;
+        if operator == BooleanOperator::SymmetricDifference {
+            return Err(unsupported("exact symmetric difference of placed operands"));
+        }
         if !matches!(tool, Placed::Extrusion | Placed::Mesh) {
             return Err(unsupported(
                 "exact boolean tool that is not a placed extrusion",
@@ -191,7 +193,11 @@ fn emptied(operator: BooleanOperator) -> GeomError {
         match operator {
             BooleanOperator::Difference => "exact boolean difference removes the whole subject",
             BooleanOperator::Intersection => "exact boolean intersection leaves nothing",
-            _ => "exact boolean union leaves nothing",
+            BooleanOperator::Union => "exact boolean union leaves nothing",
+            BooleanOperator::SymmetricDifference => {
+                "exact boolean symmetric difference leaves nothing"
+            }
+            _ => "exact boolean leaves nothing",
         }
         .to_owned(),
     )

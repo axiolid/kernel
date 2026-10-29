@@ -220,9 +220,11 @@ pub(crate) fn certify_affine(
 
 /// How many times the rounding an affine search's sampled lower bound must
 /// exceed before the budget may settle it ([`certify_affine`]). A sample is
-/// an exact point-to-triangle distance from a point evaluated on the exact
-/// surface, so a mesh that is the exact result samples within a few ulps of
-/// its scale (`2e-14` for the 3.67 m wall of #314, where the rounding is
+/// a point-to-triangle distance from a point evaluated on the exact
+/// surface. It errs only upward, by up to a few `1e-12` on the sliver
+/// triangles of a union's faces (#376), which stays below the rounding; a
+/// mesh that is the exact result usually samples within a few ulps of its
+/// scale (`2e-14` for the 3.67 m wall of #314, where the rounding is
 /// `1.2e-12`): three decades above the rounding is no rounding, and still
 /// six below a millimetre budget at that scale, so every deviation a
 /// budget could be met with is seen as one.
