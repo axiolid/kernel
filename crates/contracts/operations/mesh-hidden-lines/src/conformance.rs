@@ -8,6 +8,8 @@
 
 use core::fmt;
 
+pub mod faces;
+
 use axiolid_contracts::ExecutionOptions;
 use axiolid_core::{Point2, Tolerance};
 

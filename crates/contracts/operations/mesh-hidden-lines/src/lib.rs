@@ -25,6 +25,7 @@
 pub mod conformance;
 mod contract;
 mod error;
+mod face_fixtures;
 mod faces;
 mod fixtures;
 

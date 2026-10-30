@@ -10,7 +10,7 @@
 //!   surface of that source covers it and no kept surface lies strictly in
 //!   front of that surface there;
 //! - a kept surface is a triangle of nonzero image area inside
-//!   `far <= W <= near` and the crop box, or the cap of a [`MeshRole::Solid`]
+//!   `far <= W <= near` and the crop box, or the cap of a [`MeshRole::Solid`](crate::MeshRole::Solid)
 //!   cut by `near` ([`FaceSource::Cap`], a surface at depth `near`);
 //! - equal depth never occludes, so sources tied over an area each get it
 //!   and the evidence counts the tied sides;
@@ -29,9 +29,7 @@
 use axiolid_contracts::{Backend, CancellationGranularity, ExecutionOptions, ScratchRequirement};
 use axiolid_core::{Aabb2, Point2};
 
-use crate::{
-    HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, MeshRole, OrthographicView,
-};
+use crate::{HiddenLineError, HiddenLineMesh, HiddenLineSource, MeshId, OrthographicView};
 
 /// Caller-chosen id of a set of triangles that share one surface pattern.
 ///
@@ -73,7 +71,7 @@ impl FaceGroups<'_> {
 pub enum FaceSource {
     /// The triangles of one group.
     Group(FaceGroup),
-    /// The cap of a [`MeshRole::Solid`] cut by the near plane: a surface at
+    /// The cap of a [`MeshRole::Solid`](crate::MeshRole::Solid) cut by the near plane: a surface at
     /// depth `near` covering the image points whose point in that plane lies
     /// inside the solid. A drawing fills it with the cut pattern.
     Cap,
@@ -300,7 +298,7 @@ impl VisibleFaceOutcome {
 ///
 /// Provider obligations beyond the types:
 ///
-/// - a [`FaceSource::Cap`] region exists only for a [`MeshRole::Solid`] that
+/// - a [`FaceSource::Cap`] region exists only for a [`MeshRole::Solid`](crate::MeshRole::Solid) that
 ///   `view.near` cuts, and has no `triangles`;
 /// - regions of one source never overlap; regions of different sources
 ///   overlap only where they tie in depth;
@@ -337,6 +335,7 @@ pub trait MeshVisibleFaces: Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MeshRole;
     use axiolid_mesh::TriMesh;
 
     #[test]

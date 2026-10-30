@@ -16,6 +16,13 @@ caret rule for `0.x` versions.
   triangle, `FaceSource` (group or near-plane cap), `VisibleFaceRequest`,
   `VisibleFaceLimits`, `VisibleRegion`, evidence and
   `FACES_CAPABILITY_ID`.
+- `conformance::faces::FaceConformanceSuite` for `MeshVisibleFaces`
+  providers: twelve exact cases (overlapping boxes, a hole under a box, an
+  elevation, a cut column on a slab, a sheet that is never capped,
+  interpenetrating sheets, a coplanar tie, an edge-on wall, two groups on
+  one face, a crop, a far clip and a floating cluster), an area case for
+  non-binary64 coordinates, the refusal cases, and determinism and
+  orientation checks (#383).
 - `HiddenLineMesh::groups` and `HiddenLineMesh::with_groups`; the field is
   read by `MeshVisibleFaces` only.
 
