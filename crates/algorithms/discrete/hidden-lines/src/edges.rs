@@ -87,7 +87,7 @@ impl SignExpr for Crease<'_> {
     }
 }
 
-/// What one mesh contributes.
+/// What one mesh contributes to edge collection.
 pub(crate) struct MeshEdges<'a> {
     pub index: usize,
     pub id: MeshId,
@@ -95,31 +95,30 @@ pub(crate) struct MeshEdges<'a> {
     pub mesh: &'a TriMesh,
     /// Scene vertex id of the mesh's first position.
     pub base: u32,
+    /// The mesh's first triangle in the scene's triangle list.
+    pub first_tri: usize,
 }
 
-/// Append the mesh's triangles to `tris` and its selected edges to `edges`.
-pub(crate) fn collect(
-    input: &MeshEdges<'_>,
+/// Append the mesh's triangles to `tris`, each with its exact image
+/// orientation. A triangle that is exactly collinear is refused.
+pub(crate) fn push_triangles(
+    id: MeshId,
+    mesh: &TriMesh,
+    base: u32,
     verts: &[Vert],
-    selection: &EdgeSelection,
     options: &ExecutionOptions,
     escalations: &mut usize,
     tris: &mut Vec<Tri>,
-    edges: &mut Vec<DrawEdge>,
 ) -> Result<(), HiddenLineError> {
-    let refuse = |error: GeomError| HiddenLineError::mesh(input.id, error);
+    let refuse = |error: GeomError| HiddenLineError::mesh(id, error);
     let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
-    let first_tri = tris.len();
-    let count = input.mesh.triangle_count();
-    tris.try_reserve(count).map_err(|_| memory())?;
-    let mut records: Vec<(u32, u32, u32, bool)> = Vec::new();
-    records.try_reserve_exact(3 * count).map_err(|_| memory())?;
-
-    for (t, corner) in input.mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+    tris.try_reserve(mesh.triangle_count())
+        .map_err(|_| memory())?;
+    for (t, corner) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
         if t % 1024 == 0 {
             options.check_cancelled()?;
         }
-        let points = triangle_points(input.mesh, corner);
+        let points = triangle_points(mesh, corner);
         for axis in 0..3 {
             let sign = decide(
                 &NormalComponent {
@@ -138,7 +137,7 @@ pub(crate) fn collect(
                 ))));
             }
         }
-        let v = [0, 1, 2].map(|k| input.base + corner[k]);
+        let v = [0, 1, 2].map(|k| base + corner[k]);
         let sigma = decide(
             &Orient2 {
                 verts,
@@ -154,6 +153,32 @@ pub(crate) fn collect(
             sigma,
             bounds: Bounds::of(verts, &v),
         });
+    }
+    Ok(())
+}
+
+/// Append the mesh's selected edges to `edges`, classified from the
+/// triangles `push_triangles` appended to `tris`.
+pub(crate) fn collect(
+    input: &MeshEdges<'_>,
+    verts: &[Vert],
+    tris: &[Tri],
+    selection: &EdgeSelection,
+    options: &ExecutionOptions,
+    escalations: &mut usize,
+    edges: &mut Vec<DrawEdge>,
+) -> Result<(), HiddenLineError> {
+    let refuse = |error: GeomError| HiddenLineError::mesh(input.id, error);
+    let memory = || HiddenLineError::from(GeomError::BudgetExceeded { resource: "memory" });
+    let first_tri = input.first_tri;
+    let count = input.mesh.triangle_count();
+    let mut records: Vec<(u32, u32, u32, bool)> = Vec::new();
+    records.try_reserve_exact(3 * count).map_err(|_| memory())?;
+
+    for (t, corner) in input.mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+        if t % 1024 == 0 {
+            options.check_cancelled()?;
+        }
         for k in 0..3 {
             let (i, j) = (corner[k], corner[(k + 1) % 3]);
             records.push(if i < j {

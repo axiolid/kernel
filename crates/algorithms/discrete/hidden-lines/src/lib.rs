@@ -15,8 +15,9 @@
 //! `param` (parameters along an edge and their interval algebra), `edges`
 //! (topology and edge kinds), `broad` (candidate triangles from a BVH), `occlusion` (one edge against the triangles), `caps` (the cross-sections
 //! of solids a near plane cuts),
-//! `output` (correctly rounded endpoints), `provider` (validation and the
-//! provider itself).
+//! `output` (correctly rounded endpoints), `prepare` (request validation and the
+//! scene shared with the visible-face operation), `provider` (the provider
+//! itself).
 
 mod broad;
 mod caps;
@@ -25,6 +26,7 @@ mod edges;
 mod occlusion;
 mod output;
 mod param;
+mod prepare;
 mod provider;
 mod recipe;
 mod view;

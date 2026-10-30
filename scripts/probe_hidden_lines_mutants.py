@@ -14,6 +14,7 @@ DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
 OUT = "crates/algorithms/discrete/hidden-lines/src/output.rs"
 BRD = "crates/algorithms/discrete/hidden-lines/src/broad.rs"
 PRO = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
+PRE = "crates/algorithms/discrete/hidden-lines/src/prepare.rs"
 TESTS = ["-p", "axiolid-hidden-lines"]
 
 MUTANTS = [
@@ -87,13 +88,16 @@ MUTANTS = [
     ('output limit unchecked', PRO,
      '            if segments.len() >= request.limits.max_output_segments {',
      '            if false && segments.len() >= request.limits.max_output_segments {', TESTS),
-    ('near clip through a cut solid accepted', PRO,
+    ('near clip through a cut solid accepted', PRE,
      '        if beyond && kept {',
      '        if false && beyond && kept {', TESTS),
     # No mutant makes `cut_by_near` report an uncut solid as cut: with caps
     # that only filters work. A solid wholly kept has no triangle beyond the
     # plane, and a solid wholly beyond it is crossed an even number of times
     # (the ray enters and leaves), so neither ever has an odd parity.
+    ('edge-on triangles occlude hidden lines', OCC,
+     '            if scene.edge_on_occludes {',
+     '            if false && scene.edge_on_occludes {', TESTS),
     ('collapsed neighbours not merged', PRO,
      '                if last.visibility == visibility {',
      '                if false && last.visibility == visibility {', TESTS),
@@ -113,7 +117,7 @@ MUTANTS = [
     ('perturbation ignores orientation', PAR,
      '        let side = if neg { side.reverse() } else { side };',
      '        let side = if neg && false { side.reverse() } else { side };', TESTS),
-    ('caps applied to sheets', PRO,
+    ('caps applied to sheets', PRE,
      '            (Some(near), MeshRole::Solid) => {',
      '            (Some(near), _) => {', TESTS),
     # The broad phase.

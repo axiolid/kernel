@@ -14,6 +14,14 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+### Changed
+
+- Request validation, the mesh audit and the building of view-space
+  vertices, triangles and near-plane caps moved into one `prepare` step that
+  the visible-face provider will share (ADR 0094, #383). The drawings and
+  the refusals are unchanged, except that a crease cosine outside `[-1, 1]`
+  is now refused before the other request checks, not after the depth range.
+
 ## [0.1.2] - 2026-10-29
 
 ### Changed

@@ -34,6 +34,9 @@ pub(crate) struct Scene<'a> {
     pub caps: &'a [Cap],
     /// The broad phase over `tris`.
     pub broad: &'a Broad,
+    /// Whether a triangle seen edge-on occludes through the depth range it
+    /// spans. Hidden lines: yes. Regions see it as covering no area.
+    pub edge_on_occludes: bool,
 }
 
 /// A piece of an edge with one visibility.
@@ -130,8 +133,10 @@ fn resolve_with(
         }
         *pairs += 1;
         if tri.sigma == Ordering::Equal {
-            for span in edge_on(solver, scene, edge, tri, kept)? {
-                solver.insert(&mut hidden, span)?;
+            if scene.edge_on_occludes {
+                for span in edge_on(solver, scene, edge, tri, kept)? {
+                    solver.insert(&mut hidden, span)?;
+                }
             }
         } else if let Some(span) = facing(solver, scene, tri, kept)? {
             solver.insert(&mut hidden, span)?;
@@ -349,6 +354,15 @@ mod tests {
 
     /// A triangle and an edge below it; returns the pieces.
     fn pieces(triangle: [Point3; 3], a: Point3, b: Point3) -> Vec<(bool, bool)> {
+        pieces_with(triangle, a, b, true)
+    }
+
+    fn pieces_with(
+        triangle: [Point3; 3],
+        a: Point3,
+        b: Point3,
+        edge_on_occludes: bool,
+    ) -> Vec<(bool, bool)> {
         let mesh = TriMesh::new(
             vec![triangle[0], triangle[1], triangle[2], a, b],
             vec![0, 1, 2],
@@ -391,6 +405,7 @@ mod tests {
             region: None,
             caps: &[],
             broad: &broad,
+            edge_on_occludes,
         };
         match resolve(&scene, &edge, usize::MAX, &mut Work::default()).expect("resolved") {
             Resolved::Pieces(pieces) => pieces
@@ -448,5 +463,15 @@ mod tests {
         let tri = [p(0.0, 0.0, 1.0), p(4.0, 0.0, 1.0), p(0.0, 4.0, 1.0)];
         let split = pieces(tri, p(1.0, 1.0, 0.0), p(5.0, 1.0, 0.0));
         assert_eq!(split.iter().map(|s| s.0).collect::<Vec<_>>(), [true, false]);
+    }
+
+    #[test]
+    fn an_edge_on_triangle_hides_only_when_it_occludes() {
+        // Seen edge-on in the plane y = 0, spanning depths 1 to 3, over an
+        // edge at depth 0 along the same image line.
+        let wall = [p(0.0, 0.0, 1.0), p(4.0, 0.0, 1.0), p(2.0, 0.0, 3.0)];
+        let (a, b) = (p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0));
+        assert_eq!(pieces_with(wall, a, b, true), [(true, true)]);
+        assert_eq!(pieces_with(wall, a, b, false), [(false, true)]);
     }
 }
