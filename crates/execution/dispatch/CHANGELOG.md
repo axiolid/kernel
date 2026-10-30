@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `MeshVisibleFacesRegistry` (feature `mesh-hidden-lines`): registration,
+  conformance-gated registration, fallback on `Unsupported`/`Unavailable`
+  only, memory admission, and an outcome check (mesh provenance, rings,
+  ascending triangles of the region's group, caps only for a solid with a
+  near plane, order, limits and evidence). A group slice whose length is not
+  the triangle count is refused naming the mesh (ADR 0094, #383).
+
+### Changed
+
+- The shape, topology and memory checks that the hidden-line registry ran
+  moved into helpers shared with the visible-face registry; the refusals
+  are unchanged.
+
 ## [0.3.11] - 2026-11-03
 
 ### Added

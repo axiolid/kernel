@@ -13,6 +13,8 @@
 mod device;
 #[cfg(any(feature = "mesh-section", feature = "mesh-hidden-lines"))]
 mod frame;
+#[cfg(feature = "mesh-hidden-lines")]
+mod view_checks;
 
 #[cfg(feature = "mesh-boolean")]
 mod boolean;
@@ -24,6 +26,8 @@ mod reconstruction;
 mod section;
 #[cfg(feature = "mesh-section")]
 mod section_request;
+#[cfg(feature = "mesh-hidden-lines")]
+mod visible_faces;
 
 #[cfg(feature = "mesh-boolean")]
 pub use boolean::MeshBooleanRegistry;
@@ -33,3 +37,5 @@ pub use hidden_lines::MeshHiddenLinesRegistry;
 pub use reconstruction::PointcloudReconstructionRegistry;
 #[cfg(feature = "mesh-section")]
 pub use section::MeshPlaneSectionRegistry;
+#[cfg(feature = "mesh-hidden-lines")]
+pub use visible_faces::MeshVisibleFacesRegistry;

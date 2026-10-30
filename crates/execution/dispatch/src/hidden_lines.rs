@@ -1,19 +1,21 @@
 //! Provider registration, validation, fallback, and budget policy for
 //! orthographic hidden-line drawings.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation, ScratchRequirement};
-use axiolid_mesh::{audit_mesh_scratch_bytes, try_audit_mesh};
+use axiolid_contracts::{BackendId, ExecutionOptions, GeomError, Operation};
+use axiolid_mesh::audit_mesh_scratch_bytes;
 use axiolid_mesh_hidden_lines_contract::{
     conformance::{ConformanceReport, ConformanceSuite},
-    EdgeKind, HiddenLineError, HiddenLineMesh, HiddenLineOutcome, HiddenLineRequest,
-    MeshHiddenLines, MeshRole, RefusedMesh, Visibility,
+    EdgeKind, HiddenLineError, HiddenLineOutcome, HiddenLineRequest, MeshHiddenLines, RefusedMesh,
+    Visibility,
 };
 
 use crate::device::matches_device;
-use crate::frame::validate_frame;
+use crate::view_checks::{
+    invalid, mesh_verdict, scratch_fits, source_totals, validate_meshes, validate_region,
+    validate_topology, validate_view, SharedLimits,
+};
 
 #[derive(Debug, Clone)]
 struct RegisteredHiddenLines {
@@ -133,8 +135,11 @@ impl MeshHiddenLinesRegistry {
             let descriptor = entry.provider.descriptor();
             if matches_device(options.device(), descriptor.id, descriptor.target) {
                 has_matching_provider = true;
-                has_budgeted_provider |=
-                    scratch_fits(entry.provider.scratch_requirement(), request, options);
+                has_budgeted_provider |= scratch_fits(
+                    entry.provider.scratch_requirement(),
+                    request.meshes,
+                    options,
+                );
             }
         }
         if !has_matching_provider {
@@ -146,13 +151,17 @@ impl MeshHiddenLinesRegistry {
 
         // The allocating topology audit happens only after at least one provider
         // and the audit itself have been admitted by the memory budget.
-        validate_topology(request, options)?;
+        validate_topology(request.meshes, options)?;
 
         let mut last_retryable = None;
         for entry in &self.providers {
             let descriptor = entry.provider.descriptor();
             if !matches_device(options.device(), descriptor.id, descriptor.target)
-                || !scratch_fits(entry.provider.scratch_requirement(), request, options)
+                || !scratch_fits(
+                    entry.provider.scratch_requirement(),
+                    request.meshes,
+                    options,
+                )
             {
                 continue;
             }
@@ -202,74 +211,26 @@ fn contract_violation(backend: BackendId, detail: &str) -> HiddenLineError {
     .into()
 }
 
-fn invalid(detail: impl Into<String>) -> HiddenLineError {
-    GeomError::InvalidInput(detail.into()).into()
-}
+const LABEL: &str = "hidden-line";
 
 fn validate_request_shape(
     request: &HiddenLineRequest<'_>,
     options: &ExecutionOptions,
 ) -> Result<(), HiddenLineError> {
     let limits = request.limits;
-    if request.meshes.is_empty() {
-        return Err(invalid("hidden-line request has no meshes"));
-    }
-    if request.meshes.len() > limits.max_meshes {
-        return Err(GeomError::BudgetExceeded {
-            resource: "hidden-line meshes",
-        }
-        .into());
-    }
-    let (vertices, triangles) = source_totals(request.meshes);
-    if vertices.is_none_or(|n| n > limits.max_source_vertices) {
-        return Err(GeomError::BudgetExceeded {
-            resource: "hidden-line source vertices",
-        }
-        .into());
-    }
-    if triangles.is_none_or(|n| n > limits.max_source_triangles) {
-        return Err(GeomError::BudgetExceeded {
-            resource: "hidden-line source triangles",
-        }
-        .into());
-    }
-
-    let mut ids = BTreeSet::new();
-    for entry in request.meshes {
-        if !ids.insert(entry.id) {
-            return Err(HiddenLineError::mesh(
-                entry.id,
-                GeomError::InvalidInput("duplicate mesh id".into()),
-            ));
-        }
-        if entry.mesh.indices.is_empty() || !entry.mesh.indices.len().is_multiple_of(3) {
-            return Err(HiddenLineError::mesh(
-                entry.id,
-                GeomError::InvalidInput(
-                    "hidden-line mesh has no triangles or a partial triangle".into(),
-                ),
-            ));
-        }
-    }
-
-    let view = &request.view;
-    validate_frame(
-        view.frame,
-        options.tolerance().angular(),
-        "hidden-line view frame",
+    validate_meshes(
+        request.meshes,
+        &SharedLimits {
+            label: LABEL,
+            max_meshes: limits.max_meshes,
+            max_source_vertices: limits.max_source_vertices,
+            max_source_triangles: limits.max_source_triangles,
+            meshes_resource: "hidden-line meshes",
+            vertices_resource: "hidden-line source vertices",
+            triangles_resource: "hidden-line source triangles",
+        },
     )?;
-    for (name, bound) in [("near", view.near), ("far", view.far)] {
-        if bound.is_some_and(|value| !value.is_finite()) {
-            return Err(invalid(format!("hidden-line {name} depth is not finite")));
-        }
-    }
-    if let (Some(near), Some(far)) = (view.near, view.far) {
-        if far >= near {
-            return Err(invalid(
-                "hidden-line far depth must be smaller than the near depth",
-            ));
-        }
-    }
+    validate_view(&request.view, options.tolerance().angular(), LABEL)?;
     if request
         .edges
         .crease_cosine
@@ -277,109 +238,7 @@ fn validate_request_shape(
     {
         return Err(invalid("hidden-line crease cosine must lie in [-1, 1]"));
     }
-    if let Some(region) = request.region {
-        let finite = region.min.is_finite() && region.max.is_finite();
-        if !finite || region.min.x > region.max.x || region.min.y > region.max.y {
-            return Err(invalid(
-                "hidden-line region must be finite with min not above max",
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Total positions and triangles; `None` on overflow.
-fn source_totals(meshes: &[HiddenLineMesh<'_>]) -> (Option<usize>, Option<usize>) {
-    meshes
-        .iter()
-        .fold((Some(0usize), Some(0usize)), |(v, t), m| {
-            (
-                v.and_then(|v| v.checked_add(m.mesh.positions.len())),
-                t.and_then(|t| t.checked_add(m.mesh.triangle_count())),
-            )
-        })
-}
-
-fn validate_topology(
-    request: &HiddenLineRequest<'_>,
-    options: &ExecutionOptions,
-) -> Result<(), HiddenLineError> {
-    for entry in request.meshes {
-        options.check_cancelled()?;
-        if let Some(error) = mesh_verdict(entry, options)? {
-            return Err(HiddenLineError::mesh(entry.id, error));
-        }
-    }
-    Ok(())
-}
-
-/// Why one mesh is refused, or `None` when it passes the audit. Shared by
-/// `hidden_lines` and `audit`, so both give the same verdict per mesh.
-fn mesh_verdict(
-    entry: &HiddenLineMesh<'_>,
-    options: &ExecutionOptions,
-) -> Result<Option<GeomError>, HiddenLineError> {
-    let health = try_audit_mesh(entry.mesh, options.tolerance())
-        .map_err(|_| GeomError::BudgetExceeded { resource: "memory" })?;
-    if let Some((triangle, index)) = health.first_invalid_index {
-        return Ok(Some(GeomError::InvalidInput(format!(
-            "triangle {triangle} references position {index}, but the mesh has {}",
-            health.positions
-        ))));
-    }
-    if let Some(position) = health.first_non_finite_position {
-        return Ok(Some(GeomError::InvalidInput(format!(
-            "position {position} is not finite"
-        ))));
-    }
-    if health.degenerate_triangles > 0 {
-        return Ok(Some(GeomError::Degenerate(format!(
-            "{} degenerate triangle(s)",
-            health.degenerate_triangles
-        ))));
-    }
-    if health.non_manifold_edges > 0 || health.inconsistent_winding_edges > 0 {
-        return Ok(Some(GeomError::NotManifold(format!(
-            "non_manifold={}, inconsistent_winding={}",
-            health.non_manifold_edges, health.inconsistent_winding_edges
-        ))));
-    }
-    if entry.role == MeshRole::Solid && health.boundary_edges > 0 {
-        return Ok(Some(GeomError::NotManifold(format!(
-            "a solid must be closed; boundary={}",
-            health.boundary_edges
-        ))));
-    }
-    Ok(None)
-}
-
-fn scratch_fits(
-    provider: ScratchRequirement,
-    request: &HiddenLineRequest<'_>,
-    options: &ExecutionOptions,
-) -> bool {
-    let Some(budget) = options.memory_budget_bytes() else {
-        return true;
-    };
-    let (vertices, triangles) = source_totals(request.meshes);
-    let (Some(vertices), Some(_)) = (vertices, triangles) else {
-        return false;
-    };
-    // Meshes are audited one after another, so the audit peak is the largest.
-    let mut audit_bytes = 0usize;
-    for entry in request.meshes {
-        let Some(bytes) = audit_mesh_scratch_bytes(entry.mesh.triangle_count()) else {
-            return false;
-        };
-        audit_bytes = audit_bytes.max(bytes);
-    }
-    let elements = vertices.max(triangles.unwrap_or(0));
-    let Some(provider_bytes) = provider.upper_bound_bytes(elements) else {
-        return false;
-    };
-    // Audit and provider phases are sequential, so their peak is the maximum,
-    // not their sum. Output storage is outside the scratch budget by contract.
-    audit_bytes.max(provider_bytes) <= budget
+    validate_region(request.region, LABEL)
 }
 
 fn validate_outcome(

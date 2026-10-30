@@ -18,7 +18,8 @@ Provider registration, ordering, fallback, and execution policy.
 ## Overview
 
 Runtime registries for operation providers: `MeshBooleanRegistry`,
-`MeshPlaneSectionRegistry`, `MeshHiddenLinesRegistry` and
+`MeshPlaneSectionRegistry`, `MeshHiddenLinesRegistry`,
+`MeshVisibleFacesRegistry` (behind the `mesh-hidden-lines` feature) and
 `PointcloudReconstructionRegistry`, each
 behind its own feature. A registry owns provider ordering, device matching,
 fallback to the next provider, and memory-budget admission. It defines no
