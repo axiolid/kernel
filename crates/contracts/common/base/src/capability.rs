@@ -176,6 +176,7 @@ pub enum Operation {
     Healing,
     GraphCompilation,
     MeshHiddenLines,
+    MeshVisibleFaces,
 }
 
 /// Provider identity only. It deliberately contains no operation booleans.

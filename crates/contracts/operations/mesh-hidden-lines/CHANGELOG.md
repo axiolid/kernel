@@ -9,6 +9,16 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- The `MeshVisibleFaces` operation contract (ADR 0094, #383): visible face
+  regions of meshes in the same orthographic view, with `FaceGroup`s per
+  triangle, `FaceSource` (group or near-plane cap), `VisibleFaceRequest`,
+  `VisibleFaceLimits`, `VisibleRegion`, evidence and
+  `FACES_CAPABILITY_ID`.
+- `HiddenLineMesh::groups` and `HiddenLineMesh::with_groups`; the field is
+  read by `MeshVisibleFaces` only.
+
 ## [0.1.2] - 2026-11-03
 
 ### Added

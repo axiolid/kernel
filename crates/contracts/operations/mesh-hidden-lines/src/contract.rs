@@ -4,7 +4,7 @@ use axiolid_contracts::{Backend, CancellationGranularity, ExecutionOptions, Scra
 use axiolid_core::{Aabb2, Frame3, Point2};
 use axiolid_mesh::TriMesh;
 
-use crate::HiddenLineError;
+use crate::{FaceGroup, FaceGroups, HiddenLineError};
 
 /// Caller-chosen identity of one input mesh, echoed in every segment and
 /// refusal that concerns it. Ids must be unique within a request.
@@ -36,12 +36,28 @@ pub struct HiddenLineMesh<'a> {
     pub role: MeshRole,
     /// Geometry. Winding does not change the outcome.
     pub mesh: &'a TriMesh,
+    /// Face groups, read by `MeshVisibleFaces` only; `MeshHiddenLines`
+    /// ignores them.
+    pub groups: FaceGroups<'a>,
 }
 
 impl<'a> HiddenLineMesh<'a> {
-    /// Bind a mesh to an id and a role.
+    /// Bind a mesh to an id and a role; every triangle is in
+    /// [`FaceGroup`]`(0)`.
     pub const fn new(id: MeshId, role: MeshRole, mesh: &'a TriMesh) -> Self {
-        Self { id, role, mesh }
+        Self {
+            id,
+            role,
+            mesh,
+            groups: FaceGroups::Single,
+        }
+    }
+
+    /// Give every triangle its own group id; `groups.len()` must equal the
+    /// mesh's triangle count, which a provider checks.
+    pub const fn with_groups(mut self, groups: &'a [FaceGroup]) -> Self {
+        self.groups = FaceGroups::PerTriangle(groups);
+        self
     }
 }
 

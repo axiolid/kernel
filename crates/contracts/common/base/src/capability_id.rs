@@ -40,6 +40,13 @@ pub mod capability_ids {
     /// operation draws edges, it never rasterises (ADR 0090).
     pub const MESH_HIDDEN_LINES: CapabilityId =
         CapabilityId::from_static("org.axiolid.geometry.mesh-hidden-lines.v1");
+    /// Visible face regions of triangle meshes in an orthographic view.
+    ///
+    /// Distinct from [`MESH_HIDDEN_LINES`]: a provider that draws edges does
+    /// not thereby claim filled regions. Both decide visibility exactly in
+    /// the view's own frame (ADR 0094).
+    pub const MESH_VISIBLE_FACES: CapabilityId =
+        CapabilityId::from_static("org.axiolid.geometry.mesh-visible-faces.v1");
     /// Point-sampled geometry reconstructed into a discrete surface.
     ///
     /// Distinct from [`MESH_BOOLEAN`] and friends because the input is not a
@@ -84,6 +91,7 @@ pub mod capability_ids {
         MESH_BOOLEAN,
         MESH_SECTION,
         MESH_HIDDEN_LINES,
+        MESH_VISIBLE_FACES,
         MESH_VALIDATE,
         MESH_MEASURE,
         RAY_MESH,

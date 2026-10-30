@@ -13,6 +13,10 @@ caret rule for `0.x` versions.
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+- The `MESH_VISIBLE_FACES` capability identifier
+  (`org.axiolid.geometry.mesh-visible-faces.v1`) and the
+  `Operation::MeshVisibleFaces` diagnostic variant, for the visible face
+  region contract (ADR 0094, #383).
 
 ## [0.3.5] - 2026-10-28
 

@@ -12,6 +12,9 @@
 //! - equal depth never occludes;
 //! - a face seen edge-on occludes through the depth range it spans.
 //!
+//! Visible face regions are a separate operation, [`MeshVisibleFaces`]
+//! (ADR 0094), over the same view and meshes.
+//!
 //! No tolerance enters a visibility decision; a provider refuses what it
 //! cannot decide.
 //!
@@ -22,6 +25,7 @@
 pub mod conformance;
 mod contract;
 mod error;
+mod faces;
 mod fixtures;
 
 pub use contract::{
@@ -30,6 +34,14 @@ pub use contract::{
     MeshId, MeshRole, OrthographicView, SourceEdge, Visibility,
 };
 pub use error::{HiddenLineError, RefusedMesh};
+pub use faces::{
+    FaceGroup, FaceGroups, FaceSource, MeshVisibleFaces, VisibleFaceEvidence, VisibleFaceLimits,
+    VisibleFaceOutcome, VisibleFaceRequest, VisibleRegion,
+};
 
 pub const CAPABILITY_ID: axiolid_contracts::CapabilityId =
     axiolid_contracts::capability_ids::MESH_HIDDEN_LINES;
+
+/// Capability proven by implementing [`MeshVisibleFaces`] (ADR 0094).
+pub const FACES_CAPABILITY_ID: axiolid_contracts::CapabilityId =
+    axiolid_contracts::capability_ids::MESH_VISIBLE_FACES;

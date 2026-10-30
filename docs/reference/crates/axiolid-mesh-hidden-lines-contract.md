@@ -23,6 +23,10 @@ selection, limits, segments, evidence, a refusal type that names the mesh at
 fault, and a conformance suite. It computes nothing itself; providers
 implement `MeshHiddenLines`, and `axiolid-dispatch` selects one. See ADR 0090.
 
+It also holds the sibling `MeshVisibleFaces` contract: the regions of the
+same view where each face group, or the near-plane cap of a cut solid, is
+frontmost. See ADR 0094.
+
 ## Depends on
 
 - [`axiolid-contracts`](./axiolid-contracts)
