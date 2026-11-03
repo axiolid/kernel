@@ -1247,7 +1247,7 @@ Runs of sections at stations (`StationedSpine`, `SectionsAtStations`,
 `SectionedSurface`, `OpenSectionsAtStations`) were meshed by bisection
 until a midpoint and a flatness test passed, and reported
 `DeviationBound::Unbounded("stationed sections: ... sampled, not
-bounded")`; the exact compiler refused them. A consumer (axioval, through
+bounded")`; the exact compiler refused them. A consumer (through
 ifc-geometry's IFC4X3 sectioned solids) could not cite even a deck along a
 straight polyline whose rectangle widens from 2 m to 4 m.
 

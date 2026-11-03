@@ -24,6 +24,9 @@ step "context (ADR 0078)" cargo xtask context check
 step "context mutation probe" scripts/probe_context_gate.sh
 step "generated docs" cargo xtask docs --check
 step "docs mutation probe" scripts/probe_docs_gate.sh
+# The docs site build refuses application names (docs/scripts/check-docs-ui.mjs);
+# run its source half here so a commit cannot land what the deploy rejects.
+step "docs source check" node docs/scripts/check-docs-ui.mjs .
 step "roadmap freshness" python3 scripts/check-roadmap-freshness.py
 step "capability evidence" python3 scripts/check-capabilities.py
 step "capability evidence mutation probe" scripts/probe_capabilities_gate.sh

@@ -7,7 +7,7 @@
 
 ## Context
 
-Issue #330 (consumer: axioval/engine, free-floor and turning-circle rules).
+Issue #330 (consumer: a downstream rule engine, free-floor and turning-circle rules).
 `Region::erode_inner`, `erode_outer`, `dilate_inner` and `dilate_outer` in
 `axiolid-overlay` build the disc morphology from the sum of a set with a
 64-gon in one exact arrangement (ADR 0070), on a stated side

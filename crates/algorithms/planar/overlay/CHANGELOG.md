@@ -63,7 +63,7 @@ caret rule for `0.x` versions.
 ### Fixed
 
 - A soup of grown triangles whose union is one polygon no longer needs
-  gigabytes (#338). axioval/engine's soup -- the strips of a faceted bar,
+  gigabytes (#338). A consumer's soup -- the strips of a faceted bar,
   each corner grown by a circumscribed 16-gon, hulled and fanned -- took
   4.1 GB and 26 s for `union_soup` at 128 facets and 1.9 GB and 10 s for
   `overlay(Intersection)`, and at 256 facets, and for the soup's union

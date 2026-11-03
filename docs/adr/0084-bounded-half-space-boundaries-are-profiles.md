@@ -7,7 +7,7 @@
 
 ## Context
 
-Issue #277 (consumer: openbimrs/ifc#398, axioval/engine#307).
+Issue #277 (consumers: openbimrs/ifc#398 and a downstream rule engine).
 `SolidOperation::BoundedHalfSpace` took its boundary as a closed 2D curve,
 and both compilers read only a `Curve2::Polyline`. IFC allows
 `IfcPolygonalBoundedHalfSpace` boundaries of line and circular-arc

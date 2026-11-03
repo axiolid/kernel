@@ -7,7 +7,7 @@
 
 ## Context
 
-Issue #338 (consumer: axioval/engine). A soup of grown triangles whose
+Issue #338 (consumer: a downstream rule engine). A soup of grown triangles whose
 union is one polygon needed gigabytes in `union_soup` and `overlay`: 128
 facets took 4 GB, and 256 facets and the soup's self-union failed to
 allocate, which aborts the host process. Profiling found two causes, both

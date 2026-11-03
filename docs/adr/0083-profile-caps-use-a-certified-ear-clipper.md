@@ -102,7 +102,7 @@ edge lines coincide constantly.
 ## Amendment 2026-10-04: pinch policy per caller (#262)
 
 Refusing rings that touch at one vertex is right for a solid and wrong for
-a region. A consumer (axioval) re-feeds overlay output as plan regions and
+a region. A consumer re-feeds overlay output as plan regions and
 surfaces: two rooms meeting at a corner as one union ring, an L-shaped
 room wrapped round a column corner, a corridor eroded to a point, the same
 pinch reported through even-odd fill as a figure eight, a room minus door
