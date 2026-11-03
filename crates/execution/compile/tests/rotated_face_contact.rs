@@ -193,6 +193,32 @@ impl Rng {
 }
 
 #[test]
+fn the_result_stands_where_its_operands_are() {
+    // Cut in the shared frame, placed by the subject's transform: the
+    // column's corners are among the result's vertices, wherever the
+    // corbel's own offset puts the tool's frame.
+    for composed in [false, true] {
+        let t = placement(0.5, Vec3::new(6.1e5, 5.6e6, 204.3));
+        let (graph, root) = column_and_corbel(t, 0, composed);
+        let (mesh, _) = compile(&graph, root).expect("one solid");
+        for corner in [
+            (-0.2, -0.25, 0.0),
+            (0.2, 0.25, 0.0),
+            (-0.2, 0.25, 6.0),
+            (0.2, -0.25, 6.0),
+        ] {
+            let placed = t.transform_point3(Vec3::new(corner.0, corner.1, corner.2));
+            assert!(
+                mesh.positions
+                    .iter()
+                    .any(|p| (*p - placed).abs().max_element() < 1e-6),
+                "composed {composed}: no vertex at {placed}"
+            );
+        }
+    }
+}
+
+#[test]
 fn random_turns_and_sites_are_one_solid() {
     let mut rng = Rng(356);
     for case in 0..200 {
