@@ -210,3 +210,55 @@ pub(crate) fn sign_at(
     }
     Ok(Ordering::Equal)
 }
+
+#[cfg(test)]
+mod tests {
+    use axiolid_core::Point2;
+    use axiolid_mesh_hidden_lines_contract::MeshRole::Sheet;
+
+    use super::*;
+    use crate::faces::testing::{p, plan, sheet, Setup};
+    use axiolid_mesh::TriMesh;
+
+    #[test]
+    fn depth_ties_are_equal_only_for_coplanar_triangles() {
+        // Triangles 0 and 2 are coplanar (z = 0); triangle 4 is a ramp that
+        // meets z = 0 along y = 2.
+        let ramp = TriMesh::new(
+            vec![
+                p(0.0, 0.0, -1.0),
+                p(4.0, 0.0, -1.0),
+                p(4.0, 4.0, 1.0),
+                p(0.0, 4.0, 1.0),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        );
+        let setup = Setup::new(
+            &[
+                (Sheet, sheet(0.0, 0.0, 4.0, 4.0, 0.0)),
+                (Sheet, sheet(1.0, 1.0, 3.0, 3.0, 0.0)),
+                (Sheet, ramp),
+            ],
+            plan(),
+            None,
+        );
+        let mut work = setup.work(usize::MAX);
+        let faces = setup.faces(&mut work);
+        let plane = |t: usize| faces.planes[t].as_ref().expect("plane");
+        let mut points = setup.points();
+        let a = points.store.push_flat(Point2::new(1.5, 2.0)).expect("a");
+        let b = points.store.push_flat(Point2::new(2.5, 2.0)).expect("b");
+        let side = SidePoint::new(&points.store, a, b, true);
+        let mut escalations = 0;
+        // Meshes: 0 -> triangles 0, 1; 1 -> 2, 3; 2 -> 4, 5.
+        let coplanar = sign_at(&side, &plane(0).in_front_of(plane(2)), &mut escalations);
+        assert_eq!(coplanar.expect("sign"), Ordering::Equal);
+        // Along y = 2 the ramp and the sheet agree on the line but not
+        // beside it.
+        let crossing =
+            sign_at(&side, &plane(0).in_front_of(plane(4)), &mut escalations).expect("sign");
+        assert_ne!(crossing, Ordering::Equal);
+        let reverse = sign_at(&side, &plane(4).in_front_of(plane(0)), &mut escalations);
+        assert_eq!(reverse.expect("sign"), crossing.reverse());
+    }
+}

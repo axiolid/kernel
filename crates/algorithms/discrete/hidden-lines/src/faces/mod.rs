@@ -33,6 +33,7 @@
 //! both and equals the hidden-line endpoint of the same point.
 
 mod intersect;
+mod label;
 mod points;
 mod segments;
 mod side;
