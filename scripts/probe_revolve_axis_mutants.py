@@ -60,7 +60,7 @@ MUTANTS = [
     ('line origin not preferred to a far end', P, '            if t == 0.0 {\n                0\n            } else {\n                2\n            }', '            2', TESTS),
     ('polyline vertex ranked below a curved end', P, '        Curve2::Polyline(_) => 1,', '        Curve2::Polyline(_) => 4,', TESTS),
     ('snap distance not measured', P, '        *moved = moved\n            .max((end - joint).length())\n            .max((start - joint).length());', '', TESTS),
-    ('arc end re-evaluated', P, '        if !near2(end, start, tolerance.linear()) {\n            continue;\n        }', '        if true {\n            continue;\n        }', TESTS),
+    ('arc end re-evaluated', P, '        if i == j {\n            continue;\n        }', '        if true {\n            continue;\n        }', TESTS),
     ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis', COMPILE),
 ]
 

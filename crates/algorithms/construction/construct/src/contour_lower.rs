@@ -111,10 +111,26 @@ const JOINT_ROUNDING: Scalar = 8.0 * Scalar::EPSILON;
 /// rounding of the two endpoint evaluations that meet there when that is
 /// larger (at `Tolerance::ZERO`, or a tolerance below an ulp of the
 /// coordinates).
-fn joint_slack(tolerance: Tolerance, entering: Scalar, leaving: Scalar) -> Scalar {
+pub(crate) fn joint_slack(tolerance: Tolerance, entering: Scalar, leaving: Scalar) -> Scalar {
     tolerance
         .linear()
         .max(JOINT_ROUNDING * (entering + leaving))
+}
+
+/// The magnitudes one segment's oriented end (`at_end`) or start is evaluated
+/// from, which bound its rounding (see `JOINT_ROUNDING`); `point` is the
+/// flattened endpoint, the fallback for a family evaluated otherwise.
+pub(crate) fn endpoint_scale(segment: &ProfileSegment, at_end: bool, point: Point2) -> Scalar {
+    let t = if at_end == segment.same_sense {
+        segment.domain.end
+    } else {
+        segment.domain.start
+    };
+    match &segment.curve {
+        Curve2::Line(line) => line.origin.length() + line.direction.length() * t.abs(),
+        Curve2::Circle(circle) => circle.frame.origin.length() + circle.radius.abs(),
+        _ => point.x.abs() + point.y.abs(),
+    }
 }
 
 /// One segment lowered: the ring vertices it contributes (each with the

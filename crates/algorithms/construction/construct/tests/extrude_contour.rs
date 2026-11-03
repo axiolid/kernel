@@ -6,6 +6,7 @@
 
 use axiolid_brep_audit::geometric_audit;
 use axiolid_construct::extrude::extrude_profile_exact;
+use axiolid_construct::profile::profile_rings;
 use axiolid_core::{Frame2, Interval, Point2, Tolerance, Vec2, Vec3};
 use axiolid_curve::{Circle2, Curve2, Ellipse2, Line2};
 use axiolid_profile::{Contour, ContourProfile, Profile, ProfileSegment};
@@ -179,6 +180,83 @@ fn an_open_contour_is_refused_rather_than_closed_silently() {
         text.contains("does not close"),
         "the refusal must say the contour is open, got {text}"
     );
+}
+
+#[test]
+fn the_mesh_flattening_refuses_an_open_contour_as_the_exact_path_does() {
+    // The closing joint: (0.5, 2) is 1.5 from the start (0, 0).
+    let open = Contour::new(vec![
+        line(Point2::new(0.0, 0.0), Point2::new(2.0, 0.0)),
+        line(Point2::new(2.0, 0.0), Point2::new(2.0, 2.0)),
+        line(Point2::new(2.0, 2.0), Point2::new(0.5, 2.0)),
+    ]);
+    let error = profile_rings(&profile(open), 1e-3, Tolerance::MILLIMETRE)
+        .expect_err("a ring bridging a gap is not the profile asked for");
+    assert!(
+        matches!(error, axiolid_contracts::GeomError::InvalidInput(_)),
+        "{error:?}"
+    );
+    assert!(format!("{error:?}").contains("does not close"), "{error:?}");
+
+    // A gap between two interior segments.
+    let broken = Contour::new(vec![
+        line(Point2::new(0.0, 0.0), Point2::new(2.0, 0.0)),
+        line(Point2::new(2.5, 0.0), Point2::new(2.0, 2.0)),
+        line(Point2::new(2.0, 2.0), Point2::new(0.0, 0.0)),
+    ]);
+    let error = profile_rings(&profile(broken), 1e-3, Tolerance::MILLIMETRE)
+        .expect_err("a gap inside the contour");
+    assert!(
+        matches!(error, axiolid_contracts::GeomError::InvalidInput(_)),
+        "{error:?}"
+    );
+    assert!(format!("{error:?}").contains("leave a gap"), "{error:?}");
+
+    // A closed contour still flattens.
+    let closed = Contour::new(vec![
+        line(Point2::new(0.0, 0.0), Point2::new(2.0, 0.0)),
+        line(Point2::new(2.0, 0.0), Point2::new(2.0, 2.0)),
+        line(Point2::new(2.0, 2.0), Point2::new(0.0, 0.0)),
+    ]);
+    profile_rings(&profile(closed), 1e-3, Tolerance::MILLIMETRE).expect("closed");
+}
+
+#[test]
+fn rounding_level_joints_flatten_at_zero_tolerance_as_the_exact_path_accepts_them() {
+    // A quarter arc ends 6e-17 from the exact point where the next line
+    // starts, and a line's end `origin + (to - from) * 1` rounds: neither is
+    // a gap anyone drew.
+    let quarter = Contour::new(vec![
+        arc(
+            Point2::new(0.0, 0.0),
+            1.0,
+            0.0,
+            core::f64::consts::FRAC_PI_2,
+        ),
+        line(Point2::new(0.0, 1.0), Point2::new(0.0, 0.0)),
+        line(Point2::new(0.0, 0.0), Point2::new(1.0, 0.0)),
+    ]);
+    let triangle = Contour::new(vec![
+        line(Point2::new(0.1, 0.0), Point2::new(0.7, 0.3)),
+        line(Point2::new(0.7, 0.3), Point2::new(0.3, 0.9)),
+        line(Point2::new(0.3, 0.9), Point2::new(0.1, 0.0)),
+    ]);
+    for contour in [quarter, triangle] {
+        let p = profile(contour);
+        extrude_profile_exact(&p, Vec3::Z, 1.0, Tolerance::ZERO)
+            .expect("the exact path accepts it");
+        profile_rings(&p, 1e-3, Tolerance::ZERO).expect("so does the mesh flattening");
+    }
+}
+
+#[test]
+fn an_open_centre_line_path_is_not_joined_back_to_its_start() {
+    let path = Contour::new(vec![
+        line(Point2::new(0.0, 0.0), Point2::new(4.0, 0.0)),
+        line(Point2::new(4.0, 0.0), Point2::new(4.0, 3.0)),
+    ]);
+    let p = Profile::CenterLine(axiolid_profile::CenterLineProfile::from_width(path, 0.4));
+    profile_rings(&p, 1e-3, Tolerance::MILLIMETRE).expect("an open path is a legal centre line");
 }
 
 #[test]

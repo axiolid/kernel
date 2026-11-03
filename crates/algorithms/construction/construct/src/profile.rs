@@ -73,7 +73,7 @@ pub fn profile_rings(
             Ok(rings)
         }
         Profile::CenterLine(cl) => {
-            crate::center_line::center_line_rings(cl, chord_error, tolerance, contour_points)
+            crate::center_line::center_line_rings(cl, chord_error, tolerance, open_contour_points)
         }
         other => Err(GeomError::Unsupported {
             backend: crate::BACKEND_ID,
@@ -190,7 +190,7 @@ pub fn profile_deviation(
         Profile::CenterLine(cl) => {
             profile_rings(profile, chord_error, tolerance)?;
             let mut merged: Scalar = 0.0;
-            contour_points_measured(&cl.path, chord_error, tolerance, &mut merged)?;
+            contour_points_measured(&cl.path, chord_error, tolerance, &mut merged, false)?;
             let straight = cl
                 .path
                 .segments
@@ -229,7 +229,7 @@ fn contour_deviation(
     let mut deviation = ProfileDeviation::Bounded(0.0);
     for contour in core::iter::once(&c.outer).chain(&c.holes) {
         let mut merged: Scalar = 0.0;
-        contour_points_measured(contour, chord_error, tolerance, &mut merged)?;
+        contour_points_measured(contour, chord_error, tolerance, &mut merged, true)?;
         let mut chords = ProfileDeviation::Bounded(0.0);
         for segment in &contour.segments {
             chords = chords.max(segment_deviation(&segment.curve, chord_error));
@@ -705,17 +705,31 @@ fn contour_points(
     tolerance: Tolerance,
 ) -> GeomResult<Vec<Point2>> {
     let mut merged = 0.0;
-    contour_points_measured(contour, chord_error, tolerance, &mut merged)
+    contour_points_measured(contour, chord_error, tolerance, &mut merged, true)
+}
+
+/// [`contour_points`] for a centre-line path, which is open: its last point
+/// is not joined back to its first.
+fn open_contour_points(
+    contour: &axiolid_profile::Contour,
+    chord_error: Scalar,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<Point2>> {
+    let mut merged = 0.0;
+    contour_points_measured(contour, chord_error, tolerance, &mut merged, false)
 }
 
 /// [`contour_points`], also raising `merged` to the largest distance
 /// between a dropped near-duplicate point and the point it merged into
-/// (#232): dropping it moves the ring by no more than that.
+/// (#232): dropping it moves the ring by no more than that. A `closed`
+/// contour must join its last segment to its first (#368); an open path
+/// need not.
 fn contour_points_measured(
     contour: &axiolid_profile::Contour,
     chord_error: Scalar,
     tolerance: Tolerance,
     merged: &mut Scalar,
+    closed: bool,
 ) -> GeomResult<Vec<Point2>> {
     let mut out: Vec<Point2> = Vec::new();
     let mut flattened = Vec::with_capacity(contour.segments.len());
@@ -726,7 +740,7 @@ fn contour_points_measured(
         }
         flattened.push(pts);
     }
-    snap_joints(contour, &mut flattened, tolerance, merged);
+    snap_joints(contour, &mut flattened, tolerance, merged, closed)?;
     for pts in flattened {
         for p in pts {
             match out.last() {
@@ -764,15 +778,18 @@ fn contour_points_measured(
 /// a line's endpoint at parameter 0, a polyline vertex, any other line
 /// endpoint, a curved endpoint; a tie keeps the earlier segment's end. Both
 /// segments then produce the bit-identical vertex. Only interior samples are
-/// ever trigonometric. A gap beyond the tolerance is left alone, as before.
-/// `moved` is raised to the distance a point moved, a rounding error far
+/// ever trigonometric. A gap beyond the tolerance is refused with
+/// `InvalidInput` (#368), as the exact path refuses it, rather than bridged
+/// by a straight edge; for a `closed` contour that includes the joint from
+/// the last segment back to the first. `moved` is raised to the distance a point moved, a rounding error far
 /// below the tolerance that [`profile_deviation`] adds to its bound.
 fn snap_joints(
     contour: &axiolid_profile::Contour,
     flattened: &mut [Vec<Point2>],
     tolerance: Tolerance,
     moved: &mut Scalar,
-) {
+    closed: bool,
+) -> GeomResult<()> {
     // Lower is more exact.
     let rank = |segment: &axiolid_profile::ProfileSegment, at_end: bool| match &segment.curve {
         Curve2::Line(_) => {
@@ -794,13 +811,29 @@ fn snap_joints(
     let n = flattened.len();
     for i in 0..n {
         let j = (i + 1) % n;
-        if i == j {
+        let wraps = j <= i;
+        if wraps && !closed {
             continue;
         }
         let (Some(&end), Some(&start)) = (flattened[i].last(), flattened[j].first()) else {
             continue;
         };
-        if !near2(end, start, tolerance.linear()) {
+        // The tolerance, or the rounding of the two endpoint evaluations
+        // when that is larger, as the exact path allows (`joint_slack`).
+        let slack = crate::contour_lower::joint_slack(
+            tolerance,
+            crate::contour_lower::endpoint_scale(&contour.segments[i], true, end),
+            crate::contour_lower::endpoint_scale(&contour.segments[j], false, start),
+        );
+        if !near2(end, start, slack) {
+            let gap = (start - end).length();
+            return Err(GeomError::InvalidInput(if wraps {
+                format!("contour does not close: {gap} from last segment end to start")
+            } else {
+                format!("contour segments leave a gap of {gap} at {start:?}")
+            }));
+        }
+        if i == j {
             continue;
         }
         let joint = if rank(&contour.segments[j], false) < rank(&contour.segments[i], true) {
@@ -818,6 +851,7 @@ fn snap_joints(
             *first = joint;
         }
     }
+    Ok(())
 }
 
 /// Whether two points coincide within a linear tolerance.

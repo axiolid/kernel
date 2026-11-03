@@ -14,6 +14,15 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+### Fixed
+
+- The mesh profile flattening refuses a contour whose consecutive segments,
+  or last and first, leave a gap beyond the linear tolerance with
+  `InvalidInput`, as the exact path does; it used to bridge the gap with a
+  straight edge. A joint within the tolerance, or within the rounding of the
+  two endpoint evaluations as the exact path allows, still closes. A
+  centre-line path is open and is not joined back to its start (#368).
+
 ## [0.3.26] - 2026-10-29
 
 ### Fixed
