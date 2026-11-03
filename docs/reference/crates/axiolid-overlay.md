@@ -105,5 +105,12 @@ Latest release, 0.3.22 (2026-11-03):
   options are unchanged (`src/arc_clearance.rs`, #388, ADR 0095).
   `scripts/probe_arc_clearance_mutants.py` lists the faults its tests must
   catch.
+- `OverlayError` implements `Display` and `std::error::Error`, so it
+  formats without `{:?}` and converts into `Box<dyn Error>` (#354).
+
+### Changed
+
+- `OverlayRefusal`'s message uses the wrapped `OverlayError`'s own wording,
+  and `Error::source` returns it (#354).
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

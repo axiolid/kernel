@@ -8,7 +8,7 @@ Constrained Delaunay triangulation with bounded quality refinement.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.6 (2026-10-28) |
+| Latest release | 0.3.7 (2026-11-03) |
 | crates.io | [`axiolid-triangulate`](https://crates.io/crates/axiolid-triangulate) |
 | Layer | algorithms (`algorithm.planar`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_triangulate/index.html) · [docs.rs](https://docs.rs/axiolid-triangulate) |
@@ -26,30 +26,31 @@ Constrained Delaunay triangulation with bounded quality refinement. The output o
 
 ## Changes
 
-Latest release, 0.3.6 (2026-10-28):
+Latest release, 0.3.7 (2026-11-03):
 
 ### Added
 
-- `triangulate_domain`, with `Ring` and `RingKind`: a constrained Delaunay
-  triangulation of the area inside outer rings and outside holes, by an
-  exact winding-number flood fill. Rings may share vertices and edges and be
-  listed either way round; points outside the domain are dropped and listed
-  by the new `Triangulation::outside_points` (#353).
-- `TriangulationError` variants `RingOutOfRange`, `TooFewRingVertices`,
-  `RepeatedRingVertex`, `FoldedRing`, `MisnestedRing` and `EmptyDomain`
-  (#353).
-
-### Changed
-
-- `refine` honours the domain of a `triangulate_domain` result: it
-  re-triangulates inside the rings instead of re-expanding to the hull
-  (#353).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `TriangulationError::NonFinitePoint { index }`: a point with a NaN or
+  infinite coordinate is refused up front (#355).
 
 ### Fixed
 
-- A constraint that passes exactly through input vertices, or ends on another
-  constraint, is split at the vertices on it and recovered as the pieces
-  between them, instead of being refused as `CrossingConstraints`;
-  `Triangulation::constraints` lists the pieces (#360).
+- A point with a non-finite coordinate is refused with `NonFinitePoint`.
+  Recovery by walking the segment would read its orientation as exactly
+  collinear and could return a made-up split (#355).
+
+### Changed
+
+- Constraint recovery no longer scans every triangle per missing
+  constraint. Edges are found through a vertex-to-triangle index that every
+  flip keeps current, and the edges a constraint crosses and the vertices on
+  it are found by walking the segment with the exact orientation predicate.
+  The triangulation is identical, triangle for triangle. On a jittered grid
+  with zigzag breaklines (`triangulate_constraints` benchmark, release
+  build), 10,000 points with 4,950 segments took 12.1 s and now take 0.065 s;
+  49,729 points with 12,432 segments took 168 s and now take 0.175 s
+  (best of three, same machine) (#355).
 
 Full history: [`crates/algorithms/planar/triangulate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/triangulate/CHANGELOG.md)

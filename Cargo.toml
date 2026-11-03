@@ -117,7 +117,7 @@ axiolid-fixtures = { path = "crates/representations/fixtures", version = "0.3.1"
 axiolid-overlay = { path = "crates/algorithms/planar/overlay", version = "0.3.22" }
 axiolid-project = { path = "crates/algorithms/planar/project", version = "0.3.1" }
 axiolid-route = { path = "crates/algorithms/planar/route", version = "0.3.7" }
-axiolid-triangulate = { path = "crates/algorithms/planar/triangulate", version = "0.3.6" }
+axiolid-triangulate = { path = "crates/algorithms/planar/triangulate", version = "0.3.7" }
 axiolid-constraint2d = { path = "crates/algorithms/planar/constraint2d", version = "0.1.2" }
 axiolid-field = { path = "crates/representations/sampled/field", version = "0.3.3" }
 axiolid-field-ops = { path = "crates/algorithms/sampled/field", version = "0.3.3", default-features = false }
