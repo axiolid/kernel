@@ -338,6 +338,107 @@ fn contacts_are_valid_but_not_strict() {
     );
 }
 
+fn diamond(cx: f64, cy: f64, hx: f64, hy: f64) -> ArcRing {
+    ring(&[
+        (cx - hx, cy, 0.0),
+        (cx, cy - hy, 0.0),
+        (cx + hx, cy, 0.0),
+        (cx, cy + hy, 0.0),
+    ])
+}
+
+#[test]
+fn contacts_that_cut_the_interior_apart_are_defects() {
+    // A diamond touching all four sides leaves four separate corners.
+    let cut = check(
+        rect(0.0, 0.0, 10.0, 10.0),
+        vec![ring(&[
+            (0.0, 5.0, 0.0),
+            (5.0, 0.0, 0.0),
+            (10.0, 5.0, 0.0),
+            (5.0, 10.0, 0.0),
+        ])],
+    );
+    assert_eq!(
+        cut.defects,
+        vec![ArcPolygonDefect::DisconnectedInterior {
+            rings: vec![ArcRingRef::Outer, ArcRingRef::Hole(0)]
+        }]
+    );
+    assert_eq!(cut.contacts.len(), 4);
+    // A closed chain: outer - A at (0, 5), A - B at (4, 5), B - outer at (10, 5).
+    let chain = check(
+        rect(0.0, 0.0, 10.0, 10.0),
+        vec![diamond(2.0, 5.0, 2.0, 2.0), diamond(7.0, 5.0, 3.0, 3.0)],
+    );
+    assert_eq!(
+        chain.defects,
+        vec![ArcPolygonDefect::DisconnectedInterior {
+            rings: vec![ArcRingRef::Outer, ArcRingRef::Hole(0), ArcRingRef::Hole(1)]
+        }]
+    );
+    // An open chain leaves the interior in one piece.
+    let open = check(
+        rect(0.0, 0.0, 10.0, 10.0),
+        vec![diamond(2.0, 5.0, 2.0, 2.0), diamond(6.0, 5.0, 2.0, 2.0)],
+    );
+    assert!(open.is_valid() && open.contacts.len() == 2, "{open:?}");
+}
+
+#[test]
+fn two_holes_touching_twice_cut_the_interior() {
+    // Hole 1 arches over hole 0 and meets it at (3, 5) and (7, 5).
+    let result = check(
+        rect(0.0, 0.0, 10.0, 10.0),
+        vec![
+            diamond(5.0, 5.0, 2.0, 2.0),
+            ring(&[
+                (3.0, 5.0, 0.0),
+                (5.0, 9.0, 0.0),
+                (7.0, 5.0, 0.0),
+                (5.0, 8.0, 0.0),
+            ]),
+        ],
+    );
+    assert_eq!(
+        result.defects,
+        vec![ArcPolygonDefect::DisconnectedInterior {
+            rings: vec![ArcRingRef::Hole(0), ArcRingRef::Hole(1)]
+        }]
+    );
+    assert_eq!(result.contacts.len(), 2);
+}
+
+#[test]
+fn an_arc_tangent_on_two_sides_cuts_the_interior() {
+    // The circle touches x = 0 at (0, 10) and x = 10 at (10, 10).
+    let result = check(
+        rect(0.0, 0.0, 10.0, 20.0),
+        vec![ArcRing::circle(Point2::new(5.0, 10.0), 5.0)],
+    );
+    assert_eq!(
+        result.defects,
+        vec![ArcPolygonDefect::DisconnectedInterior {
+            rings: vec![ArcRingRef::Outer, ArcRingRef::Hole(0)]
+        }]
+    );
+    assert_eq!(result.contacts.len(), 2);
+}
+
+#[test]
+fn three_rings_at_one_point_are_not_a_cycle() {
+    let result = check(
+        rect(0.0, 0.0, 10.0, 10.0),
+        vec![
+            ring(&[(8.0, 2.0, 0.0), (10.0, 5.0, 0.0), (8.0, 4.0, 0.0)]),
+            ring(&[(8.0, 6.0, 0.0), (10.0, 5.0, 0.0), (8.0, 8.0, 0.0)]),
+        ],
+    );
+    assert!(result.is_valid(), "{result:?}");
+    assert_eq!(result.contacts.len(), 3);
+    assert!(result.contacts.iter().all(|c| near(c.at, 10.0, 5.0)));
+}
+
 // ------------------------------------------------------ degenerate rings
 
 #[test]
@@ -499,6 +600,12 @@ fn reports_repeat_and_survive_translation() {
 }
 
 // ------------------------------------------------------------ the oracle
+
+// Limits of this oracle: one outer ring and at most one hole, so hole-hole
+// nesting is not compared; the straight overlay tests a hole's vertices only,
+// so a hole whose edges leave the outer between inside vertices is not
+// compared either; and contacts and disconnected interiors fall in the
+// undecided margin and are skipped.
 
 struct Rng(u64);
 impl Rng {

@@ -16,7 +16,8 @@ caret rule for `0.x` versions.
 - `check_arc_polygon` decides exactly whether an arc polygon's rings are
   simple and its holes nested: self-contact (crossings, pinches, tangencies,
   fold-backs), shared boundary, holes outside the outer ring or overlapping,
-  plus the isolated contact points between rings (#352, ADR 0095).
+  contacts that cut the interior apart, plus the isolated contact points
+  between rings (#352, ADR 0095).
 
 ## [0.3.20] - 2026-10-28
 

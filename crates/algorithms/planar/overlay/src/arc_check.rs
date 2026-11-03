@@ -29,14 +29,23 @@
 //!   on each side still consistent, is an [`ArcRingContact`], not a defect:
 //!   a hole touching its outer ring at a vertex, or two tangent holes, is
 //!   valid under the OGC rule and under the straight overlay's own
-//!   `hole_outside`. [`ArcPolygonCheck::is_strict`] refuses them. The list
+//!   `hole_outside`, as long as the contacts do not disconnect the interior. [`ArcPolygonCheck::is_strict`] refuses them. The list
 //!   holds every meeting point of two rings, also those of rings that carry
 //!   a defect between them (a crossing is a meeting point too).
+//!
+//! - **Disconnected interior.** Contacts can cut the interior apart even
+//!   though each is an isolated point: a diamond hole touching all four
+//!   sides of a rectangle, or a closed chain of holes. Such a polygon is not
+//!   valid under the OGC rule, whose interior must be connected. The rings and
+//!   the distinct contact points form a bipartite graph; a cycle in it is a
+//!   [`ArcPolygonDefect::DisconnectedInterior`]. It is judged only when no
+//!   other nesting defect is present, since a crossing also makes cycles.
 //!
 //! Winding is not read: each ring is taken as the region it encloses.
 //!
 //! Output order is deterministic: defects by ring, then edge pair, then the
-//! nesting defects in the order overlaps, holes outside, holes overlapping;
+//! nesting defects in the order overlaps, holes outside, holes overlapping,
+//! disconnected interiors;
 //! contacts by ring pair, then arrangement vertex index.
 
 use std::collections::BTreeSet;
@@ -85,6 +94,13 @@ pub enum ArcPolygonDefect {
     },
     /// Two rings share a stretch of boundary. `rings` ascending.
     BoundaryOverlap { rings: [ArcRingRef; 2] },
+    /// Contacts between rings cut the interior into separate pieces: the
+    /// rings and the contact points form a cycle. `rings` ascending, every
+    /// ring of the cut component.
+    DisconnectedInterior { rings: Vec<ArcRingRef> },
+    /// The exact arrangement that decides nesting refused the rings, so
+    /// nesting is undecided and the polygon is not called valid.
+    NestingUndecided { error: OverlayError },
     /// Part of a hole lies outside the outer ring.
     HoleOutsideOuter { hole: usize },
     /// Two holes' interiors meet (crossing or nested). `holes` ascending.
@@ -92,6 +108,7 @@ pub enum ArcPolygonDefect {
 }
 
 /// A point where two different rings meet.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArcRingContact {
     /// The two rings, ascending.
@@ -190,12 +207,11 @@ fn nesting(rings: &[&ArcRing], tolerance: Tolerance, check: &mut ArcPolygonCheck
         Ok(arrangement) => arrangement,
         Err(error) => {
             // Rings passed `validate_arc_ring` above, so this is the
-            // arrangement's own refusal; report it on the outer ring rather
-            // than call the polygon valid.
-            check.defects.push(ArcPolygonDefect::Ring {
-                ring: ArcRingRef::Outer,
-                error,
-            });
+            // arrangement's own refusal; nesting stays undecided rather
+            // than the polygon being called valid.
+            check
+                .defects
+                .push(ArcPolygonDefect::NestingUndecided { error });
             return;
         }
     };
@@ -237,6 +253,11 @@ fn nesting(rings: &[&ArcRing], tolerance: Tolerance, check: &mut ArcPolygonCheck
             }
         }
     }
+    let disconnected = if overlaps.is_empty() && outside.is_empty() && crowded.is_empty() {
+        cut_components(&at_vertex, rings.len())
+    } else {
+        Vec::new()
+    };
     // (ring pair, vertex) of every meeting point.
     let mut meetings: BTreeSet<([usize; 2], usize)> = BTreeSet::new();
     for (vertex, present) in at_vertex.iter_mut().enumerate() {
@@ -264,10 +285,61 @@ fn nesting(rings: &[&ArcRing], tolerance: Tolerance, check: &mut ArcPolygonCheck
             .into_iter()
             .map(|holes| ArcPolygonDefect::HolesOverlap { holes }),
     );
+    check.defects.extend(
+        disconnected
+            .into_iter()
+            .map(|rings| ArcPolygonDefect::DisconnectedInterior { rings }),
+    );
     check
         .contacts
         .extend(meetings.into_iter().map(|([a, b], vertex)| ArcRingContact {
             rings: [ArcRingRef::of(a), ArcRingRef::of(b)],
             at: arrangement.vertices()[vertex],
         }));
+}
+
+/// The ring sets of the components of the ring-and-contact-point graph that
+/// hold a cycle. `at_vertex[v]` lists the rings present at arrangement vertex
+/// `v`; a vertex with two or more rings is a contact point. Union-find over
+/// the ring-point edges: an edge whose ends are already joined closes a cycle.
+/// The graph is bipartite, so three rings meeting at one point are a star,
+/// while two contacts between one pair of rings are a cycle.
+fn cut_components(at_vertex: &[Vec<usize>], ring_count: usize) -> Vec<Vec<ArcRingRef>> {
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    // Nodes: rings first, then one per arrangement vertex.
+    let mut parent: Vec<usize> = (0..ring_count + at_vertex.len()).collect();
+    let mut closing = Vec::new();
+    for (vertex, present) in at_vertex.iter().enumerate() {
+        if present.len() < 2 {
+            continue;
+        }
+        let point = ring_count + vertex;
+        for &ring in present {
+            let (a, b) = (find(&mut parent, ring), find(&mut parent, point));
+            if a == b {
+                closing.push(ring);
+            } else {
+                parent[a] = b;
+            }
+        }
+    }
+    let roots: BTreeSet<usize> = closing
+        .into_iter()
+        .map(|ring| find(&mut parent, ring))
+        .collect();
+    roots
+        .into_iter()
+        .map(|root| {
+            (0..ring_count)
+                .filter(|&ring| find(&mut parent, ring) == root)
+                .map(ArcRingRef::of)
+                .collect()
+        })
+        .collect()
 }

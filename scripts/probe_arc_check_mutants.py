@@ -49,6 +49,15 @@ MUTANTS = [
     ("a ring meets itself at a vertex", "arc_check.rs",
      "                if !at_vertex[v].contains(&ring) {",
      "                if true {"),
+    ("closing contact cycle not detected", "arc_check.rs",
+     "            if a == b {\n                closing.push(ring);",
+     "            if false {\n                closing.push(ring);"),
+    ("all contact points merged into one node", "arc_check.rs",
+     "        let point = ring_count + vertex;",
+     "        let point = ring_count;"),
+    ("disconnected interior judged beside other defects", "arc_check.rs",
+     "    let disconnected = if overlaps.is_empty() && outside.is_empty() && crowded.is_empty() {",
+     "    let disconnected = if true {"),
 ]
 
 probe_lib.main(MUTANTS, tests=[["--release", "-p", "axiolid-overlay",
