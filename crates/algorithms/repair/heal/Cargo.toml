@@ -18,6 +18,9 @@ axiolid-predicates.workspace = true
 axiolid-spatial.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+num-bigint.workspace = true
+
 [package.metadata.axiolid]
 architecture-version = 1
 layer = "algorithms"

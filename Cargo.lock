@@ -430,6 +430,7 @@ dependencies = [
  "axiolid-mesh",
  "axiolid-predicates",
  "axiolid-spatial",
+ "num-bigint",
  "thiserror",
 ]
 

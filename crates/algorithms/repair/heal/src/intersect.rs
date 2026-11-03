@@ -12,6 +12,15 @@
 //! holding equal coordinates are a `DuplicateVertex` defect, reported
 //! separately; treating them as adjacent here would hide it.
 //!
+//! # Narrow phase
+//!
+//! Exact end to end: every decision is the sign of a certified `orient3d` or
+//! `orient2d`, so near-parallel planes (a rotation rounds vertices slightly
+//! off their common plane) are decided as the inputs stand, not by a float
+//! direction (#399). `triangles_intersect` gives the method and the contact
+//! rule. The coplanar branch's `orient2d` has no exact fallback once its
+//! products overflow (coordinates near 1e154 and above); TODO(#404).
+//!
 //! # Broad phase
 //!
 //! Candidate pairs come from the shared `Bvh`. The index is an accelerator
@@ -19,7 +28,7 @@
 //! checking every pair, and the two must agree on every input. If they ever
 //! disagree, the index is wrong -- that is a bug, not a tuning parameter.
 
-use axiolid_core::{Aabb, Point2, Point3, Vec3};
+use axiolid_core::{Aabb, Point2, Point3};
 use axiolid_guarantees::Sign;
 use axiolid_mesh::TriangleMeshView;
 use axiolid_predicates::{orient2d, orient3d};
@@ -56,37 +65,51 @@ fn share_a_vertex(a: [u64; 3], b: [u64; 3]) -> bool {
     a.iter().any(|i| b.contains(i))
 }
 
-/// Sign of `orient3d`, or `None` when the four points are coplanar.
+/// Sign of `orient3d`, zero when the four points are coplanar.
 ///
 /// The certified predicate decides the sign exactly, so a point lying in a
 /// plane is reported as coplanar rather than as an arbitrary side chosen by
 /// rounding.
-fn side(a: Point3, b: Point3, c: Point3, d: Point3) -> Option<i32> {
+fn side(a: Point3, b: Point3, c: Point3, d: Point3) -> i32 {
     match orient3d(a, b, c, d).sign() {
-        Some(Sign::Positive) => Some(1),
-        Some(Sign::Negative) => Some(-1),
-        _ => None,
+        Some(Sign::Positive) => 1,
+        Some(Sign::Negative) => -1,
+        _ => 0,
     }
 }
 
-/// Whether two non-adjacent triangles properly intersect.
+/// Whether two non-adjacent triangles intersect, decided exactly.
 ///
 /// Plane-side rejection alone is not sufficient. Two triangles can each
 /// straddle the other's plane and still miss entirely -- the cube's opposite
 /// faces do exactly that -- so passing the rejection test means only "not
 /// separated by these two planes", which is not the same as intersecting.
 ///
-/// The decision is therefore made on the intersection LINE of the two planes.
-/// Each triangle meets that line in an interval; the triangles intersect if
-/// and only if the intervals overlap. Intervals are compared through the
-/// signed plane distances rather than by constructing the line, so no
-/// intersection point is ever computed in floating point.
+/// # Method
 ///
-/// Coplanar configurations are decided by exact 2D region logic rather than
-/// assumed to intersect: the pair is projected onto its dominant plane and
-/// tested for shared interior area with `orient2d`. Triangles that merely
-/// touch along a shared edge or vertex have no common area and are not
-/// reported.
+/// Every decision is the sign of a certified `orient3d` or `orient2d`; no
+/// direction, distance or intersection point is ever computed in floating
+/// point. A float direction `n_p x n_q` is cancellation noise for nearly
+/// parallel planes, so none is used (#399).
+///
+/// 1. The six vertex-against-plane signs reject triangles wholly on one side
+///    of the other's plane.
+/// 2. Otherwise the planes are distinct and meet in a line `L`. Each
+///    triangle meets `L` in an interval, so the triangles meet exactly when
+///    an end of one interval lies in the other triangle, and that end is on
+///    an edge. So the pair intersects if and only if some edge of one
+///    triangle meets the closed other triangle (`edge_meets_triangle`).
+///    An edge lying in the other's plane is skipped: it lies on `L`, and the
+///    interval end it carries is a vertex, reached through the next edge.
+/// 3. Exactly coplanar pairs (all six signs zero) are projected onto a
+///    coordinate plane that keeps the triangle non-degenerate, which is
+///    exact, and decided with `orient2d` (`coplanar_triangles_overlap`).
+///
+/// Contact: outside the coplanar case the intersection is closed, so a vertex
+/// or edge of one triangle on the other counts. Coplanar triangles are
+/// reported only when they share interior area; sharing an edge or a vertex
+/// is touching, not overlapping. A triangle of zero area has no interior and
+/// is never reported.
 fn triangles_intersect(p: [Point3; 3], q: [Point3; 3]) -> bool {
     let Some(p_sides) = plane_sides(q, p) else {
         return coplanar_triangles_overlap(p, q);
@@ -100,20 +123,18 @@ fn triangles_intersect(p: [Point3; 3], q: [Point3; 3]) -> bool {
     if separated(q_sides) {
         return false;
     }
-    intervals_overlap(p, p_sides, q, q_sides)
+    (0..3).any(|i| edge_meets_triangle(p[i], p[(i + 1) % 3], [p_sides[i], p_sides[(i + 1) % 3]], q))
+        || (0..3).any(|i| {
+            edge_meets_triangle(q[i], q[(i + 1) % 3], [q_sides[i], q_sides[(i + 1) % 3]], p)
+        })
 }
 
 /// Signed side of each vertex of `t` against the plane of `plane`.
 fn plane_sides(plane: [Point3; 3], t: [Point3; 3]) -> Option<[i32; 3]> {
-    let a = side(plane[0], plane[1], plane[2], t[0]);
-    let b = side(plane[0], plane[1], plane[2], t[1]);
-    let c = side(plane[0], plane[1], plane[2], t[2]);
-    match (a, b, c) {
-        // All three coplanar with the other triangle: the interval test
-        // degenerates, so the caller falls back to conservative reporting.
-        (None, None, None) => None,
-        _ => Some([a.unwrap_or(0), b.unwrap_or(0), c.unwrap_or(0)]),
-    }
+    let sides = t.map(|v| side(plane[0], plane[1], plane[2], v));
+    // All three in the plane: the pair is coplanar, which the caller decides
+    // in two dimensions.
+    sides.iter().any(|&s| s != 0).then_some(sides)
 }
 
 /// Whether every vertex lies strictly on one side.
@@ -121,72 +142,25 @@ fn separated(sides: [i32; 3]) -> bool {
     sides.iter().all(|&s| s > 0) || sides.iter().all(|&s| s < 0)
 }
 
-/// Whether the two triangles' intervals on the planes' common line overlap.
+/// Whether the closed segment `a`-`b` meets the closed triangle `t`.
 ///
-/// Each triangle has one vertex alone on one side of the other's plane (or a
-/// vertex exactly on it). The two edges from that vertex cross the plane, and
-/// their crossing points bound the triangle's interval on the common line.
-/// Positions along the line are measured by projecting onto the line's
-/// direction, and the crossing points are interpolated by the signed
-/// distances, which is exactly where the edge meets the plane.
-fn intervals_overlap(p: [Point3; 3], p_sides: [i32; 3], q: [Point3; 3], q_sides: [i32; 3]) -> bool {
-    let direction = (p[1] - p[0])
-        .cross(p[2] - p[0])
-        .cross((q[1] - q[0]).cross(q[2] - q[0]));
-    if !direction.is_finite() || direction.length_squared() == 0.0 {
-        return true; // parallel planes that are not separated: conservative
+/// `ends` are the signs of `a` and `b` against the plane of `t`. The segment
+/// reaches the plane unless both ends are strictly on one side. A segment in
+/// the plane is skipped (see [`triangles_intersect`]). Otherwise it crosses
+/// the plane in one point `X`, and `X` lies in the closed triangle when the
+/// three `orient3d(a, b, t_i, t_j)` signs, which are the orientations of `X`
+/// against the three edges up to one common factor, are not both positive
+/// and negative (the Guigue-Devillers sign test).
+fn edge_meets_triangle(a: Point3, b: Point3, ends: [i32; 2], t: [Point3; 3]) -> bool {
+    if ends[0] * ends[1] > 0 || (ends[0] == 0 && ends[1] == 0) {
+        return false;
     }
-    let Some(p_span) = interval_on(p, p_sides, q, direction) else {
-        return true;
-    };
-    let Some(q_span) = interval_on(q, q_sides, p, direction) else {
-        return true;
-    };
-    p_span.0 <= q_span.1 && q_span.0 <= p_span.1
-}
-
-/// The triangle's interval along `direction`, bounded by where its edges
-/// cross the other triangle's plane.
-///
-/// Returns `None` when the configuration is degenerate enough that the
-/// crossing points cannot be located, so the caller can stay conservative.
-fn interval_on(
-    t: [Point3; 3],
-    sides: [i32; 3],
-    plane: [Point3; 3],
-    direction: Vec3,
-) -> Option<(f64, f64)> {
-    let distance = |point: Point3| {
-        let normal = (plane[1] - plane[0]).cross(plane[2] - plane[0]);
-        (point - plane[0]).dot(normal)
-    };
-    let mut hits: Vec<f64> = Vec::new();
-    for (i, j) in [(0usize, 1usize), (1, 2), (2, 0)] {
-        let (si, sj) = (sides[i], sides[j]);
-        if si == 0 {
-            hits.push(t[i].dot(direction));
-        }
-        if si != 0 && sj != 0 && si != sj {
-            let (di, dj) = (distance(t[i]), distance(t[j]));
-            let denominator = di - dj;
-            if denominator == 0.0 {
-                return None;
-            }
-            let ratio = di / denominator;
-            let crossing = t[i] + (t[j] - t[i]) * ratio;
-            hits.push(crossing.dot(direction));
-        }
-    }
-    if hits.is_empty() {
-        return None;
-    }
-    let mut low = f64::INFINITY;
-    let mut high = f64::NEG_INFINITY;
-    for hit in hits {
-        low = low.min(hit);
-        high = high.max(hit);
-    }
-    Some((low, high))
+    let around = [
+        side(a, b, t[0], t[1]),
+        side(a, b, t[1], t[2]),
+        side(a, b, t[2], t[0]),
+    ];
+    !(around.iter().any(|&s| s > 0) && around.iter().any(|&s| s < 0))
 }
 
 /// Triangle corner positions and vertex indices, if the triangle is usable.
@@ -289,104 +263,58 @@ pub fn self_intersections_brute_force<M: TriangleMeshView + ?Sized>(
 
 /// Whether two coplanar triangles share interior area, decided exactly.
 ///
-/// Both are projected onto the coordinate plane where their shared normal is
-/// largest, so no projected triangle degenerates to a segment. Every test
-/// below is `orient2d`, so this stays as exact as the non-coplanar path it
-/// replaces -- no tolerance, no constructed intersection point.
+/// Both are projected onto a coordinate plane in which the first triangle has
+/// non-zero area, so neither projection degenerates (both lie in one plane).
+/// Dropping a coordinate is exact, and every test below is `orient2d`: no
+/// tolerance and no constructed point.
 ///
-/// Touching is not overlapping: triangles sharing only an edge or a vertex
-/// have no interior area in common and are NOT reported.
+/// Two convex regions have disjoint interiors if and only if an edge line of
+/// one has the other wholly on its closed outer side (separating axis). That
+/// is decided for the edges of both triangles, so the shapes need not cross
+/// properly: equal triangles, a vertex on an edge and containment all overlap,
+/// while triangles sharing only an edge or a vertex are separated by that
+/// edge and are NOT reported.
 fn coplanar_triangles_overlap(p: [Point3; 3], q: [Point3; 3]) -> bool {
-    let normal = (p[1] - p[0]).cross(p[2] - p[0]);
-    let axis = dominant_axis(normal);
-    let pp = project_triangle(p, axis);
-    let qq = project_triangle(q, axis);
-
-    // Edge-crossing: any proper crossing of a p edge with a q edge means the
-    // boundaries pass through each other, which requires shared area.
-    for i in 0..3 {
-        for j in 0..3 {
-            if segments_properly_cross(pp[i], pp[(i + 1) % 3], qq[j], qq[(j + 1) % 3]) {
-                return true;
-            }
+    for axis in 0..3 {
+        let pp = project_triangle(p, axis);
+        let p_turn = orient_sign(pp[0], pp[1], pp[2]);
+        if p_turn == 0 {
+            continue;
         }
+        let qq = project_triangle(q, axis);
+        let q_turn = orient_sign(qq[0], qq[1], qq[2]);
+        if q_turn == 0 {
+            return false;
+        }
+        return !has_separating_edge(pp, p_turn, qq) && !has_separating_edge(qq, q_turn, pp);
     }
-
-    // Containment: no crossing but one triangle strictly inside the other.
-    pp.iter().any(|&v| strictly_inside(v, qq)) || qq.iter().any(|&v| strictly_inside(v, pp))
+    false
 }
 
-/// Index of the largest-magnitude normal component.
-fn dominant_axis(normal: Vec3) -> usize {
-    let (x, y, z) = (normal.x.abs(), normal.y.abs(), normal.z.abs());
-    if x >= y && x >= z {
-        0
-    } else if y >= z {
-        1
-    } else {
-        2
-    }
-}
-
-/// Drop the dominant axis, keeping the projection non-degenerate.
+/// Drop `axis`, keeping the other two coordinates in cyclic order.
 fn project_triangle(t: [Point3; 3], axis: usize) -> [Point2; 3] {
-    [
-        project_point(t[0], axis),
-        project_point(t[1], axis),
-        project_point(t[2], axis),
-    ]
-}
-
-fn project_point(p: Point3, axis: usize) -> Point2 {
-    match axis {
+    t.map(|p| match axis {
         0 => Point2::new(p.y, p.z),
         1 => Point2::new(p.z, p.x),
         _ => Point2::new(p.x, p.y),
-    }
+    })
 }
 
-/// Whether segments `a`-`b` and `c`-`d` cross at an interior point of both.
-///
-/// Requires all four orientations to be strictly non-zero and opposite in
-/// pairs. Collinear or touching-at-an-endpoint configurations are rejected:
-/// they share boundary, not area.
-fn segments_properly_cross(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
-    let (Some(o1), Some(o2), Some(o3), Some(o4)) = (
-        sign2(a, b, c),
-        sign2(a, b, d),
-        sign2(c, d, a),
-        sign2(c, d, b),
-    ) else {
-        return false;
-    };
-    o1 != o2 && o3 != o4
-}
-
-/// Strict `orient2d` sign, or `None` when the three points are collinear.
-fn sign2(a: Point2, b: Point2, c: Point2) -> Option<i32> {
+/// Sign of `orient2d` (zero when the three points are collinear).
+fn orient_sign(a: Point2, b: Point2, c: Point2) -> i32 {
     match orient2d(a, b, c).sign() {
-        Some(Sign::Positive) => Some(1),
-        Some(Sign::Negative) => Some(-1),
-        _ => None,
+        Some(Sign::Positive) => 1,
+        Some(Sign::Negative) => -1,
+        _ => 0,
     }
 }
 
-/// Whether `point` lies strictly inside triangle `t`.
-///
-/// A point on an edge is NOT inside: two triangles meeting along a shared
-/// edge touch without overlapping, and reporting that as a self-intersection
-/// is the false positive this whole function exists to remove.
-fn strictly_inside(point: Point2, t: [Point2; 3]) -> bool {
-    let mut seen: Option<i32> = None;
-    for i in 0..3 {
-        let Some(s) = sign2(t[i], t[(i + 1) % 3], point) else {
-            return false; // on an edge line: boundary, not interior
-        };
-        match seen {
-            None => seen = Some(s),
-            Some(previous) if previous == s => {}
-            Some(_) => return false,
-        }
-    }
-    true
+/// Whether some edge line of `t` (turning `turn`, +1 or -1) has every vertex
+/// of `other` on its outer side or on it.
+fn has_separating_edge(t: [Point2; 3], turn: i32, other: [Point2; 3]) -> bool {
+    (0..3).any(|i| {
+        other
+            .iter()
+            .all(|&v| orient_sign(t[i], t[(i + 1) % 3], v) * turn <= 0)
+    })
 }

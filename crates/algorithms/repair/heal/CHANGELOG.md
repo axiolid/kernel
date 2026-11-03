@@ -9,6 +9,21 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `self_intersections` no longer reports disjoint, nearly coplanar
+  triangles as intersecting after a rotation has rounded their vertices off
+  their common plane. The triangle-triangle test was exact only in its side
+  tests and fell back to a float `n_p x n_q` direction, which is noise for
+  nearly parallel planes. Every decision is now a certified `orient3d` or
+  `orient2d` sign: an edge of one triangle against the closed other triangle,
+  and for exactly coplanar pairs a separating-edge test on the exact
+  projection (#399).
+- Coplanar triangles that overlap without a proper edge crossing or a vertex
+  strictly inside the other (equal triangles, a vertex on an edge with shared
+  area) are now reported; touching along an edge or at a vertex still is not
+  (#399).
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
