@@ -97,7 +97,7 @@ axiolid-tetrahedralize = { path = "crates/algorithms/discrete/tetrahedralize", v
 axiolid-levelset = { path = "crates/algorithms/sampled/levelset", version = "0.3.1" }
 axiolid-evaluate = { path = "crates/algorithms/parametric/evaluate", version = "0.3.19" }
 axiolid-nurbs = { path = "crates/algorithms/parametric/nurbs", version = "0.3.8" }
-axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.26" }
+axiolid-construct = { path = "crates/algorithms/construction/construct", version = "0.3.27" }
 axiolid-arrangement = { path = "crates/algorithms/planar/arrangement", version = "0.3.1" }
 axiolid-profile = { path = "crates/representations/region/profile", version = "0.3.2" }
 axiolid-curve = { path = "crates/representations/analytic/curve", version = "0.3.11" }

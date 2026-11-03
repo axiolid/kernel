@@ -56,7 +56,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-brep-boolean`](./crates/axiolid-brep-boolean) | `algorithm.construction` | 0.1.13 | General exact B-rep booleans over analytic faces (ADR 0075) |
 | [`axiolid-collide`](./crates/axiolid-collide) | `algorithm.query` | 0.3.2 | Convex collision queries: separating axis, overlap, and separation distance |
 | [`axiolid-constraint2d`](./crates/axiolid-constraint2d) | `algorithm.planar` | 0.1.2 | Apollonius and tangent-circle constructions: circles tangent to three points, lines or circles in any combination |
-| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.26 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
+| [`axiolid-construct`](./crates/axiolid-construct) | `algorithm.construction` | 0.3.27 | Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping |
 | [`axiolid-decimate`](./crates/axiolid-decimate) | `algorithm.discrete` | 0.3.3 | Edge-collapse mesh decimation with a bounded, reported deviation |
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.2 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.19 | Analytic and spline curve/surface evaluation, jets, and inversion |

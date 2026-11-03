@@ -727,6 +727,43 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.27 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+### Fixed
+
+- The mesh tapered revolution meshes a profile whose start and end rings
+  touch an in-plane axis (a cone, a double cone): a ring vertex on the axis
+  at the same place at both ends is welded across the stations as in a plain
+  revolution, and the closed output holds the swept volume (#364). A vertex
+  on the axis at one end only, or one that slides along the axis between
+  the ends, is still `UnsupportedInput`, now named as such; welding a sliding
+  vertex would have swept the wrong solid. A partial tapered turn closes an
+  isolated touch into a sector point and welds it as `revolve` does; it was
+  refused as a pinch.
+- The mesh revolution judges an axis leaning out of the profile plane
+  (#362). The sweep is free of self-intersection exactly when the profile
+  lies on one closed side of the axis's projection into the plane, decided
+  by the exact side test of an in-plane axis; rings on both sides are
+  `InvalidInput`, which covers an axis piercing the profile. A profile that
+  meets the point where the axis crosses the plane, or is not certified
+  clear of it by more than the tolerance (measured along the projection, not
+  as an orbit radius), is `UnsupportedInput`; an axis perpendicular to the
+  plane is `InvalidInput`. The tapered revolution judges the whole blend:
+  a vertex on the projection at both ends is judged over its closed span of
+  offsets, and a vertex crossing the projection between the ends is invalid
+  input. Such axes were accepted unchecked.
+- The mesh profile flattening refuses a contour whose consecutive segments,
+  or last and first, leave a gap beyond the linear tolerance with
+  `InvalidInput`, as the exact path does; it used to bridge the gap with a
+  straight edge. A joint within the tolerance, or within the rounding of the
+  two endpoint evaluations as the exact path allows, still closes. A
+  centre-line path is open and is not joined back to its start (#368).
+
 ### 0.3.26 - 2026-10-29
 
 ### Fixed

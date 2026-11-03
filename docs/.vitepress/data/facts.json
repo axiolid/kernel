@@ -94,10 +94,10 @@
       "description": "Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping",
       "layer": "algorithms",
       "path": "crates/algorithms/construction/construct",
-      "released": "0.3.26",
-      "released_date": "2026-10-29",
+      "released": "0.3.27",
+      "released_date": "2026-11-03",
       "role": "algorithm.construction",
-      "version": "0.3.26"
+      "version": "0.3.27"
     },
     "axiolid-contracts": {
       "description": "Common backend-neutral execution and diagnostic contracts",
