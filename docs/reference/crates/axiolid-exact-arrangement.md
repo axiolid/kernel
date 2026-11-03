@@ -8,9 +8,10 @@ Exact arrangement of straight segments on rational points, with face tracing.
 
 | | |
 | --- | --- |
-| Latest release | not released (`main` is 0.1.0) |
+| Latest release | 0.1.0 (2026-11-03) |
+| crates.io | [`axiolid-exact-arrangement`](https://crates.io/crates/axiolid-exact-arrangement) |
 | Layer | algorithms (`algorithm.planar`) |
-| API documentation | [rustdoc](/api/rustdoc/axiolid_exact_arrangement/index.html) |
+| API documentation | [rustdoc](/api/rustdoc/axiolid_exact_arrangement/index.html) · [docs.rs](https://docs.rs/axiolid-exact-arrangement) |
 | Source | [`crates/algorithms/planar/exact-arrangement/`](https://github.com/axiolid/kernel/tree/main/crates/algorithms/planar/exact-arrangement) |
 
 ## Overview
@@ -28,6 +29,13 @@ It is the shared source of truth for those signs: the plane section of `axiolid-
 
 ## Changes
 
-No release yet.
+Latest release, 0.1.0 (2026-11-03):
+
+### Added
+
+- The exact point store, segment arrangement and ring tracing that the plane
+  section of `axiolid-reference` used (ADR 0093, #366), as a crate of their
+  own, so that the visible faces of `axiolid-hidden-lines` decide on the same
+  exact signs (ADR 0094, #383).
 
 Full history: [`crates/algorithms/planar/exact-arrangement/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/exact-arrangement/CHANGELOG.md)

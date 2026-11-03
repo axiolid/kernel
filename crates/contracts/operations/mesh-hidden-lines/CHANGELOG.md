@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-03
+
 ### Added
 
 - The `MeshVisibleFaces` operation contract (ADR 0094, #383): visible face

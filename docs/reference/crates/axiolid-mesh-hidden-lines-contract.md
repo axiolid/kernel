@@ -8,7 +8,7 @@ Portable orthographic hidden-line drawing request, result, and conformance contr
 
 | | |
 | --- | --- |
-| Latest release | 0.1.2 (2026-11-03) |
+| Latest release | 0.1.3 (2026-11-03) |
 | crates.io | [`axiolid-mesh-hidden-lines-contract`](https://crates.io/crates/axiolid-mesh-hidden-lines-contract) |
 | Facade | [`axiolid`](./axiolid) feature `mesh-hidden-lines` |
 | Layer | contracts (`contract.operation`) |
@@ -35,13 +35,23 @@ frontmost. See ADR 0094.
 
 ## Changes
 
-Latest release, 0.1.2 (2026-11-03):
+Latest release, 0.1.3 (2026-11-03):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-- `RefusedMesh`: a refused input mesh and its `GeomError`, as listed by the
-  registry's audit so a caller learns every refusal in one call (#370).
+- The `MeshVisibleFaces` operation contract (ADR 0094, #383): visible face
+  regions of meshes in the same orthographic view, with `FaceGroup`s per
+  triangle, `FaceSource` (group or near-plane cap), `VisibleFaceRequest`,
+  `VisibleFaceLimits`, `VisibleRegion`, evidence and
+  `FACES_CAPABILITY_ID`.
+- `conformance::faces::FaceConformanceSuite` for `MeshVisibleFaces`
+  providers: twelve exact cases (overlapping boxes, a hole under a box, an
+  elevation, a cut column on a slab, a sheet that is never capped,
+  interpenetrating sheets, a coplanar tie, an edge-on wall, two groups on
+  one face, a crop, a far clip and a floating cluster), an area case for
+  non-binary64 coordinates, the refusal cases, and determinism and
+  orientation checks (#383).
+- `HiddenLineMesh::groups` and `HiddenLineMesh::with_groups`; the field is
+  read by `MeshVisibleFaces` only.
 
 Full history: [`crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/contracts/operations/mesh-hidden-lines/CHANGELOG.md)

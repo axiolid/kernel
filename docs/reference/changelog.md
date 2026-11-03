@@ -8,6 +8,16 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid
 
+### 0.4.7 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+- `mesh_hidden_lines` re-exports `ScalarVisibleFaces` under the
+  `hidden-lines-provider` feature (ADR 0094, #383).
+
 ### 0.4.6 - 2026-10-29
 
 ### Added
@@ -1651,6 +1661,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-contracts
 
+### 0.3.6 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- The `MESH_VISIBLE_FACES` capability identifier
+  (`org.axiolid.geometry.mesh-visible-faces.v1`) and the
+  `Operation::MeshVisibleFaces` diagnostic variant, for the visible face
+  region contract (ADR 0094, #383).
+
 ### 0.3.5 - 2026-10-28
 
 ### Added
@@ -2188,6 +2209,23 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-dispatch
+
+### 0.3.12 - 2026-11-03
+
+### Added
+
+- `MeshVisibleFacesRegistry` (feature `mesh-hidden-lines`): registration,
+  conformance-gated registration, fallback on `Unsupported`/`Unavailable`
+  only, memory admission, and an outcome check (mesh provenance, rings,
+  ascending triangles of the region's group, caps only for a solid with a
+  near plane, order, limits and evidence). A group slice whose length is not
+  the triangle count is refused naming the mesh (ADR 0094, #383).
+
+### Changed
+
+- The shape, topology and memory checks that the hidden-line registry ran
+  moved into helpers shared with the visible-face registry; the refusals
+  are unchanged.
 
 ### 0.3.11 - 2026-11-03
 
@@ -2958,6 +2996,18 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   `Interval::{quotient, disjoint}`.
 
 
+## axiolid-exact-arrangement
+
+### 0.1.0 - 2026-11-03
+
+### Added
+
+- The exact point store, segment arrangement and ring tracing that the plane
+  section of `axiolid-reference` used (ADR 0093, #366), as a crate of their
+  own, so that the visible faces of `axiolid-hidden-lines` decide on the same
+  exact signs (ADR 0094, #383).
+
+
 ## axiolid-exact-compile-contract
 
 ### 0.3.2 - 2026-10-28
@@ -3129,6 +3179,37 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-hidden-lines
+
+### 0.1.3 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `ScalarVisibleFaces`, the exact provider for `MeshVisibleFaces` (ADR 0094,
+  #383): the visible face regions of caller-grouped triangles in the view of
+  the hidden-line provider, decided in the exact planar arrangement of
+  `axiolid-exact-arrangement`, with region vertices that are exact points
+  rounded once. Checked by the faces conformance suite, an independent
+  binary64 ray-casting oracle and a mutation probe. On
+  `scenario/visible-faces` (a loaded machine, ranges over three runs) the BVH
+  beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
+  2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
+  isometric view at 400 boxes; the BVH is not consistently faster than the
+  scan in an isometric view or on interpenetrating boxes. A generic rotated scene can be refused as `Degenerate` when two exact ring
+  vertices round to the same binary64 value (`TODO(#410)`).
+
+### Changed
+
+- Request validation, the mesh audit and the building of view-space
+  vertices, triangles and near-plane caps moved into one `prepare` step that
+  the visible-face provider will share (ADR 0094, #383). The drawings and
+  the refusals are unchanged, except that a crease cosine outside `[-1, 1]`
+  is now refused before the other request checks, not after the depth range.
+- The rounding of an exact ratio to binary64 moved into
+  `axiolid-exact-arrangement` (`round_ratio`), so that the endpoints of
+  hidden lines and the vertices of visible-face regions round alike. The
+  drawings are unchanged.
 
 ### 0.1.2 - 2026-10-29
 
@@ -5736,6 +5817,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-hidden-lines-contract
 
+### 0.1.3 - 2026-11-03
+
+### Added
+
+- The `MeshVisibleFaces` operation contract (ADR 0094, #383): visible face
+  regions of meshes in the same orthographic view, with `FaceGroup`s per
+  triangle, `FaceSource` (group or near-plane cap), `VisibleFaceRequest`,
+  `VisibleFaceLimits`, `VisibleRegion`, evidence and
+  `FACES_CAPABILITY_ID`.
+- `conformance::faces::FaceConformanceSuite` for `MeshVisibleFaces`
+  providers: twelve exact cases (overlapping boxes, a hole under a box, an
+  elevation, a cut column on a slab, a sheet that is never capped,
+  interpenetrating sheets, a coplanar tie, an edge-on wall, two groups on
+  one face, a crop, a far clip and a floating cluster), an area case for
+  non-binary64 coordinates, the refusal cases, and determinism and
+  orientation checks (#383).
+- `HiddenLineMesh::groups` and `HiddenLineMesh::with_groups`; the field is
+  read by `MeshVisibleFaces` only.
+
 ### 0.1.2 - 2026-11-03
 
 ### Added
@@ -7427,6 +7527,27 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.16 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+### Changed
+
+- The exact point store, the segment arrangement and the ring tracing of the
+  section's in-plane faces moved into the new crate
+  `axiolid-exact-arrangement`, which the visible faces of
+  `axiolid-hidden-lines` use as well (ADR 0094, #383). The section's output
+  and refusals are unchanged. A state that cannot occur in that code is now
+  `GeomError::Degenerate`, no longer `BackendContractViolation`. Wall clock of
+  `cargo bench -p axiolid-reference --bench section_in_plane`, best of nine
+  runs on a loaded machine, before and after (ms per section): grid 51.9 and
+  54.1, footprint on a grid 51.4 and 51.0, skew grids 44.9 and 46.7, box on a
+  slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
+  this is unchanged within noise.
 
 ### 0.3.15 - 2026-11-03
 

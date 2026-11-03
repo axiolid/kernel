@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.11 (2026-11-03) |
+| Latest release | 0.3.12 (2026-11-03) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -54,15 +54,21 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.11 (2026-11-03):
+Latest release, 0.3.12 (2026-11-03):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-- `MeshHiddenLinesRegistry::audit` lists every input mesh that
-  `hidden_lines` would refuse, in request order, without searching (#370).
-  It shares the per-mesh audit with `hidden_lines`; refusals of the whole
-  request stay `Err`.
+- `MeshVisibleFacesRegistry` (feature `mesh-hidden-lines`): registration,
+  conformance-gated registration, fallback on `Unsupported`/`Unavailable`
+  only, memory admission, and an outcome check (mesh provenance, rings,
+  ascending triangles of the region's group, caps only for a solid with a
+  near plane, order, limits and evidence). A group slice whose length is not
+  the triangle count is refused naming the mesh (ADR 0094, #383).
+
+### Changed
+
+- The shape, topology and memory checks that the hidden-line registry ran
+  moved into helpers shared with the visible-face registry; the refusals
+  are unchanged.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

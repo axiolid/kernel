@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.15 (2026-11-03) |
+| Latest release | 0.3.16 (2026-11-03) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -49,28 +49,25 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.15 (2026-11-03):
-
-### Changed
-
-- `ScalarSection::section_request` merges the in-plane faces on an exact
-  arrangement instead of refusing overlaps: faces of one side that overlap or
-  only share a boundary segment form one region, and where faces of both
-  sides coincide the region is `InPlaneSide::Both`. It no longer returns
-  `REFUSED_OVERLAPPING_IN_PLANE_FACES` or
-  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`. Every `Both` region is a cut region
-  when cut regions are requested; a `Both` ring that visits a vertex twice is
-  refused as pinched, and a region edge that bounds the cut with in-plane
-  faces on the cut's side of it as crossing cut rings. It reports
-  `in_plane_crossings`, and `in_plane_pairs` counts segment, piece-triangle
-  and hole containment pairs (ADR 0093, #366).
-- The request scratch bound is 2560 bytes per element (was 1536), and the
-  crossings of in-plane edges are charged against the memory budget as they
-  are created.
+Latest release, 0.3.16 (2026-11-03):
 
 ### Added
 
-- Bench `section_in_plane`: the in-plane faces of a section request in wall
-  clock.
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+### Changed
+
+- The exact point store, the segment arrangement and the ring tracing of the
+  section's in-plane faces moved into the new crate
+  `axiolid-exact-arrangement`, which the visible faces of
+  `axiolid-hidden-lines` use as well (ADR 0094, #383). The section's output
+  and refusals are unchanged. A state that cannot occur in that code is now
+  `GeomError::Degenerate`, no longer `BackendContractViolation`. Wall clock of
+  `cargo bench -p axiolid-reference --bench section_in_plane`, best of nine
+  runs on a loaded machine, before and after (ms per section): grid 51.9 and
+  54.1, footprint on a grid 51.4 and 51.0, skew grids 44.9 and 46.7, box on a
+  slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
+  this is unchanged within noise.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

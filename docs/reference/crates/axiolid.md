@@ -8,7 +8,7 @@ Feature-gated facade for Axiolid's format-neutral geometry stack.
 
 | | |
 | --- | --- |
-| Latest release | 0.4.6 (2026-10-29) |
+| Latest release | 0.4.7 (2026-11-03) |
 | crates.io | [`axiolid`](https://crates.io/crates/axiolid) |
 | Layer | facade (`facade`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid/index.html) · [docs.rs](https://docs.rs/axiolid) |
@@ -132,12 +132,14 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.4.6 (2026-10-29):
+Latest release, 0.4.7 (2026-11-03):
 
 ### Added
 
-- `mesh_section` exports `CutRegion`, `CutRegionLimits` and the cut-region
-  refusal names, so `Application::section_mesh_request` can return the cut of
-  a solid as closed regions (ADR 0092, #372).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+- `mesh_hidden_lines` re-exports `ScalarVisibleFaces` under the
+  `hidden-lines-provider` feature (ADR 0094, #383).
 
 Full history: [`crates/facade/axiolid/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/facade/axiolid/CHANGELOG.md)

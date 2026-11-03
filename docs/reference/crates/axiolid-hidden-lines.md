@@ -8,7 +8,7 @@ Exact scalar hidden-line drawings of triangle meshes in orthographic views.
 
 | | |
 | --- | --- |
-| Latest release | 0.1.2 (2026-10-29) |
+| Latest release | 0.1.3 (2026-11-03) |
 | crates.io | [`axiolid-hidden-lines`](https://crates.io/crates/axiolid-hidden-lines) |
 | Facade | [`axiolid`](./axiolid) feature `hidden-lines-provider` |
 | Layer | algorithms (`algorithm.discrete`) |
@@ -32,6 +32,17 @@ cut solid in the plane needs no special case. A solid wholly beyond the plane is
 removed.
 It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
+`ScalarVisibleFaces` is the provider for `MeshVisibleFaces` (ADR 0094): the
+visible face regions of caller-grouped triangles in the same view, with the
+same preparation, clipping, caps and crop. The visible outlines, the clip
+lines, the crop and the exact intersection curves of the triangles go into
+the exact planar arrangement of `axiolid-exact-arrangement`; each side of
+each piece is labelled by the exact frontmost source at a symbolic side
+point, and the regions are traced from those labels. Region vertices are the
+exact points rounded once. Sources tied in depth each receive the area.
+Known limit: a generic rotated scene can be refused as `Degenerate` when two
+exact ring vertices round to the same binary64 value (`TODO(#410)`).
+
 ## Depends on
 
 - [`axiolid-contracts`](./axiolid-contracts)
@@ -45,10 +56,35 @@ It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
 ## Changes
 
-Latest release, 0.1.2 (2026-10-29):
+Latest release, 0.1.3 (2026-11-03):
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `ScalarVisibleFaces`, the exact provider for `MeshVisibleFaces` (ADR 0094,
+  #383): the visible face regions of caller-grouped triangles in the view of
+  the hidden-line provider, decided in the exact planar arrangement of
+  `axiolid-exact-arrangement`, with region vertices that are exact points
+  rounded once. Checked by the faces conformance suite, an independent
+  binary64 ray-casting oracle and a mutation probe. On
+  `scenario/visible-faces` (a loaded machine, ranges over three runs) the BVH
+  beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
+  2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
+  isometric view at 400 boxes; the BVH is not consistently faster than the
+  scan in an isometric view or on interpenetrating boxes. A generic rotated scene can be refused as `Degenerate` when two exact ring
+  vertices round to the same binary64 value (`TODO(#410)`).
 
 ### Changed
 
-- Candidate triangles for an edge, and the cap triangles of a cut solid, come from an `axiolid-spatial` BVH over view-space boxes instead of a linear scan. The predicate, the candidate set, its ascending order and `candidate_pairs` are unchanged (#138). Wall clock from `scenario/hidden-lines` (`cargo bench -p axiolid-benchmark --bench scenario -- hidden-lines`, which times the BVH and the linear scan, `ScanHiddenLines`, on each case; a loaded shared machine, so read these as ranges), linear scan / BVH: isometric 20x20 boxes 412 / 389 ms (a reviewer's run: 459 / 426), cut plan 20x20 174 / 140 ms (117 / 100; very noisy), isometric 50x50 3.34 / 2.52 s (3.62 / 2.88), cut plan 50x50 1.59 / 0.76 s (1.67 / 0.82). The gain is small at 400 boxes, because exact evaluation of the candidates dominates there, and 25-30% (isometric) to about 50% (cut plan) at 2,500.
+- Request validation, the mesh audit and the building of view-space
+  vertices, triangles and near-plane caps moved into one `prepare` step that
+  the visible-face provider will share (ADR 0094, #383). The drawings and
+  the refusals are unchanged, except that a crease cosine outside `[-1, 1]`
+  is now refused before the other request checks, not after the depth range.
+- The rounding of an exact ratio to binary64 moved into
+  `axiolid-exact-arrangement` (`round_ratio`), so that the endpoints of
+  hidden lines and the vertices of visible-face regions round alike. The
+  drawings are unchanged.
 
 Full history: [`crates/algorithms/discrete/hidden-lines/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/discrete/hidden-lines/CHANGELOG.md)
