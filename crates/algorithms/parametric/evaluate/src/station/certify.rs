@@ -119,7 +119,7 @@ mod panels;
 mod reading;
 
 pub(crate) use intrinsic::{reads_intrinsic, IntrinsicReader};
-pub(crate) use reading::PieceReader;
+pub(crate) use reading::{PieceReader, AXIS_ROUNDING};
 
 /// The input a length no certified bound here reaches is refused for.
 pub const UNCERTIFIED_LENGTH: &str =

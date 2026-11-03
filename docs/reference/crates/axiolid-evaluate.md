@@ -57,5 +57,16 @@ Latest release, 0.3.20 (2026-11-03):
   without bounds have no bend (`None`). `FrameLawBounds::forward` bounds
   `O'.N` from below for every frame with bounds. `FrameLaw::has_bend` tells a frame with a
   closed-form bend, which a narrower span bounds, from one without.
+- `station::FrameLaw::error_at` and `StationFrameError` (#405): how far
+  the frame read at ONE station lies from the exact frame law's, its point
+  and each axis, for a part placed at a station on a curved basis. A frame
+  read in closed form (a circle, a polyline, an elevated or banked curve
+  over a line or a circle) is charged its rounding, an intrinsic curve's is
+  compared with the exact one, and a distance resolved by the arc-length
+  inverse, or after joints measured by quadrature, carries the exact frame
+  to the one read through the derivative bounds. `None` for a frame read by
+  quadrature, a piece placed inexactly, a station within the resolution of
+  a seam it is not on, and every family `FrameLaw::bounds` leaves
+  unbounded.
 
 Full history: [`crates/algorithms/parametric/evaluate/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/parametric/evaluate/CHANGELOG.md)

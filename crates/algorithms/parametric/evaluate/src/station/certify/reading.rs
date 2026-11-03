@@ -50,7 +50,7 @@ use crate::station::offset::{OffsetTable, StationOffset};
 use crate::station::{reference_up_frame, SectionFrame, KEEPS_UP_TOLERANCE};
 
 /// The rounding allowed a computed unit axis.
-pub(super) const AXIS_ROUNDING: Scalar = 1e-14;
+pub(crate) const AXIS_ROUNDING: Scalar = 1e-14;
 
 /// What a piece's frames are read along.
 enum Source<'c> {

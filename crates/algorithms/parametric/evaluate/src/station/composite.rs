@@ -1040,6 +1040,20 @@ impl<'c> CompositeBasis<'c> {
         (k, distance - self.starts[k])
     }
 
+    /// The piece a station at `distance` reads on `side` and the distance
+    /// into it, the distance admitted as [`Self::section_on`] does (#405).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::section_on`] for the distance.
+    pub(super) fn locate_admitted(
+        &self,
+        distance: Scalar,
+        side: SeamSide,
+    ) -> GeomResult<(usize, Scalar)> {
+        Ok(self.locate(admitted(distance, Some(self.length()))?, side))
+    }
+
     /// The piece a station at `distance` reads on `side` (the one
     /// [`Self::section_on`] reads).
     ///

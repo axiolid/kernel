@@ -129,6 +129,40 @@
 //! profile, each with an orthonormal start frame and any curvature law
 //! with closed-form bounds of `k` to `k'''`.
 //!
+//! # One station (#405)
+//!
+//! A part placed at ONE station rests on one frame, not a run of them:
+//! [`FrameLaw::error_at`] charges the frame read at a distance against the
+//! exact frame law's there, its point and each axis ([`StationFrameError`]).
+//!
+//! The frame is read as [`StationPiece::section_on`] reads it: the piece a
+//! composite names at `distance` from `side`, a seam of the curve inside it
+//! read from the side named (#263). Two charges make the error:
+//!
+//! - **The read** (`e_p`, `e_a`). A slot read in closed form (a circle, a
+//!   polyline, an elevated or banked curve over a line or a circle) has no
+//!   error of its own but the rounding of the read: [`POINT_ROUNDING`](super::POINT_ROUNDING)
+//!   of the point's largest coordinate (one at least), and `1e-14` per axis. An intrinsic curve's slot (a 2D curve, a level planar space
+//!   curve, an elevated curve over an intrinsic plan) compares the read
+//!   frame with the exact one, as [`FrameLaw::bounds`] does for a run: both
+//!   sides of a seam of its law are compared, which covers the one named.
+//! - **The distance's resolution** (`delta`, the bounds' `measure`). Where
+//!   the distance is resolved by the arc-length inverse (a circle, a
+//!   polyline) the read stands within `delta` of the distance asked for,
+//!   and on a composite a piece after pieces measured by quadrature adds
+//!   its start's certified distance from the true joint. The exact frame at
+//!   the distance asked for is then within `delta |O'|` of the read point
+//!   and `delta max(|T'|, |L'|, |U'|)` of each read axis, the suprema taken
+//!   over `[u - 2 delta, u + 2 delta]` on the side read: where the station
+//!   is ON a seam it is clipped to the side named. A curve whose distance is
+//!   exact (a line, an elevated or banked curve, an intrinsic curve) has
+//!   `delta = 0`.
+//!
+//! Not charged, `None`: a slot read by quadrature or unbounded, a composite
+//! piece placed inexactly, a seam or a joint within `2 delta` of the
+//! station that it is not on (the exact frame might stand on its other
+//! side), and a result that is not finite.
+//!
 //! # Not bounded
 //!
 //! `None`, never a guess: a chain, and an offset beside one of them, beside
@@ -158,8 +192,10 @@ use crate::arc_parameter::ARC_LENGTH_TOLERANCE;
 use crate::bound::ROUNDING;
 
 mod bend;
+mod error;
 
 pub use bend::BendBounds;
+pub use error::StationFrameError;
 
 /// Which section frame a run places its sections in.
 #[non_exhaustive]
@@ -880,17 +916,9 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
         }
     }
 
-    /// The bounds of piece `k` over `[from, to]` into it.
-    fn read(
-        &self,
-        k: usize,
-        piece: &StationPiece<'c>,
-        from: Scalar,
-        to: Scalar,
-        table: Option<&OffsetTable>,
-        reading: FrameReading,
-    ) -> Option<FrameLawBounds> {
-        let slot = self.slots[k].get_or_init(|| {
+    /// Piece `k`'s reader, built when first asked for.
+    fn slot(&self, k: usize, piece: &StationPiece<'c>, table: Option<&OffsetTable>) -> &Slot<'c> {
+        self.slots[k].get_or_init(|| {
             if reads_intrinsic(piece.curve) {
                 return match IntrinsicReader::new(piece, self.tolerance) {
                     Ok(Some(reader)) => Slot::Intrinsic(Box::new(reader)),
@@ -904,8 +932,20 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
                 Ok(Some(reader)) => Slot::Read(Box::new(reader)),
                 _ => Slot::Unbounded,
             }
-        });
-        match slot {
+        })
+    }
+
+    /// The bounds of piece `k` over `[from, to]` into it.
+    fn read(
+        &self,
+        k: usize,
+        piece: &StationPiece<'c>,
+        from: Scalar,
+        to: Scalar,
+        table: Option<&OffsetTable>,
+        reading: FrameReading,
+    ) -> Option<FrameLawBounds> {
+        match self.slot(k, piece, table) {
             Slot::Closed => piece_frame_bounds(piece, from, to, reading),
             Slot::Read(reader) => read_frame_bounds(reader, piece, from, to, table, reading),
             Slot::Intrinsic(reader) => intrinsic_frame_bounds(reader, piece, from, to, reading),
