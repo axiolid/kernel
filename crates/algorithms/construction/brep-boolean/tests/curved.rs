@@ -8,10 +8,12 @@
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
-use axiolid_brep_boolean::boolean;
+use axiolid_brep_boolean::{boolean, boolean_with_report, BooleanError, ToleranceDecisionKind};
 use axiolid_construct::boolean_exact::{boolean_arc_prisms_exact, ArcPrism};
 use axiolid_construct::revolve_exact::revolve_profile_exact;
-use axiolid_core::{BooleanOperator, Frame2, Interval, Point2, Point3, Tolerance, Vec2, Vec3};
+use axiolid_core::{
+    BooleanOperator, Frame2, Interval, Point2, Point3, Tolerance, Transform3, Vec2, Vec3,
+};
 use axiolid_curve::{Circle2, Curve2, Line2};
 use axiolid_measure::exact_properties;
 use axiolid_overlay::ArcRing;
@@ -87,12 +89,21 @@ fn arc(centre: Point2, radius: f64, from: f64, to: f64) -> ProfileSegment {
 }
 
 fn revolve(segments: Vec<ProfileSegment>) -> ExactBRep {
+    revolve_about(segments, Point3::ZERO, Vec3::Y, TAU)
+}
+
+/// [`revolve`] about the axis through `origin` along `axis`, by `angle`.
+fn revolve_about(
+    segments: Vec<ProfileSegment>,
+    origin: Point3,
+    axis: Vec3,
+    angle: f64,
+) -> ExactBRep {
     let profile = Profile::Contour(ContourProfile {
         outer: Contour::new(segments),
         holes: Vec::new(),
     });
-    let solid =
-        revolve_profile_exact(&profile, Point3::ZERO, Vec3::Y, TAU, tol()).expect("revolves");
+    let solid = revolve_profile_exact(&profile, origin, axis, angle, tol()).expect("revolves");
     let health = geometric_audit(&solid, tol());
     assert!(health.is_consistent(), "{:?}", health.defects());
     solid
@@ -124,6 +135,18 @@ fn ring_turned(big: f64, r: f64, offset: f64) -> ExactBRep {
     ])
 }
 
+/// A disk of radius `r` about the profile origin, as four quarter arcs.
+fn disk(r: f64) -> Vec<ProfileSegment> {
+    let q = 0.5 * PI;
+    let c = Point2::new(0.0, 0.0);
+    vec![
+        arc(c, r, 0.0, q),
+        arc(c, r, q, PI),
+        arc(c, r, PI, 3.0 * q),
+        arc(c, r, 3.0 * q, TAU),
+    ]
+}
+
 /// A box from a column prism: `x`, `y` (world) and `z` ranges.
 fn block(x: (f64, f64), y: (f64, f64), z: (f64, f64)) -> ExactBRep {
     let p = ArcPrism {
@@ -148,6 +171,111 @@ fn a_box_holding_half_a_torus() {
     close("torus", volume(&torus), 2.0 * PI * PI * big * r * r, 1e-10);
     let half = block((0.0, 6.0), (-6.0, 6.0), (-6.0, 6.0));
     check(&torus, &half, Some(PI * PI * big * r * r), 1e-9);
+}
+
+/// The volume of the box x, y in [-1/2, 1/2], z in [0, 1] inside the torus
+/// about y with `R = 1`, `r = 1/10`. In cylindrical coordinates about y
+/// (`x = rho cos(phi)`, `z = rho sin(phi)`) the admissible `phi` in
+/// `[0, pi]` have measure
+/// `L(rho) = (pi - 2 acos(1/2 / rho)) - [rho > 1] (pi - 2 asin(1 / rho))`,
+/// and the volume is `int rho L(rho) 2 sqrt(r^2 - (rho - R)^2) d rho` over
+/// `[R - r, R + r]`; with `rho = R + r sin(theta)`, split at `theta = 0`
+/// (the kink at `rho = 1`), 1-D quadrature to 4e-16.
+const BOX_AND_TUBE: f64 = 0.024_084_318_409_872_973;
+
+#[test]
+fn a_box_less_a_torus_whose_tube_leaves_through_the_top() {
+    // #381. The top face z = 1 lies at the ring radius from the axis, so it
+    // touches the latitude circles where the tube's quarter faces meet. The
+    // trace's double root there splits in two roots 2e-8 apart; they are one
+    // cut within tolerance, a reading, so ZERO refuses.
+    let torus = ring(1.0, 0.1);
+    let column = block((-0.5, 0.5), (-0.5, 0.5), (0.0, 1.0));
+    check(&column, &torus, Some(BOX_AND_TUBE), 1e-9);
+    let (_, report) =
+        boolean_with_report(&column, &torus, BooleanOperator::Difference, tol()).expect("cuts");
+    assert!(!report.decisions().is_empty());
+    for d in report.decisions() {
+        assert!(
+            matches!(
+                d.kind,
+                ToleranceDecisionKind::CoincidentSupports | ToleranceDecisionKind::MergedPoints
+            ),
+            "{d:?}"
+        );
+    }
+    assert!(report.linear() <= 1e-7, "{}", report.linear());
+    let exact = boolean(&column, &torus, BooleanOperator::Difference, Tolerance::ZERO);
+    assert!(matches!(exact, Err(BooleanError::Undecided)), "{exact:?}");
+}
+
+/// A column `0.4 x 0.5 x 6` on `z = 0`, and a disk of radius `0.1` revolved a
+/// quarter turn about the line along `axis` through `(-1, 0, 0)`: its start
+/// cap is the disk about the origin in `z = 0`, in the column's foot (#382).
+fn column_and_bend(axis: Vec3) -> (ExactBRep, ExactBRep) {
+    let column = block((-0.2, 0.2), (-0.25, 0.25), (0.0, 6.0));
+    let bend = revolve_about(disk(0.1), Point3::new(-1.0, 0.0, 0.0), axis, 0.5 * PI);
+    (column, bend)
+}
+
+/// The column's volume and the bend's (Pappus: its area, the path of its
+/// centroid a quarter turn at radius 1).
+const COLUMN: f64 = 1.2;
+const BEND: f64 = 0.5 * PI * PI * 0.01;
+
+#[test]
+fn a_bend_hanging_from_a_column_foot_shares_its_cap_once() {
+    // The plane z = 0 contains the torus axis, so its section with each
+    // torus face is the cap's own circle, which the cap imprints as a
+    // closed-form circle: one stretch, one curve.
+    let (column, bend) = column_and_bend(Vec3::Y);
+    for tolerance in [Tolerance::ZERO, Tolerance::METRE] {
+        let (joined, report) =
+            boolean_with_report(&column, &bend, BooleanOperator::Union, tolerance)
+                .unwrap_or_else(|e| panic!("{tolerance:?}: {e}"));
+        let health = geometric_audit(&joined, tol());
+        assert!(health.is_consistent(), "{:?}", health.defects());
+        let topology = axiolid_topology::audit_brep(joined.topology());
+        assert!(topology.is_closed_manifold(), "{topology:?}");
+        close("union", volume(&joined), COLUMN + BEND, 1e-12);
+        if tolerance == Tolerance::ZERO {
+            assert!(report.is_exact(), "{report:?}");
+        }
+        let (cut, _) = boolean_with_report(&column, &bend, BooleanOperator::Difference, tolerance)
+            .unwrap_or_else(|e| panic!("{tolerance:?}: {e}"));
+        close("difference", volume(&cut), COLUMN, 1e-12);
+        // The solids only touch.
+        let common = boolean(&column, &bend, BooleanOperator::Intersection, tolerance);
+        assert_eq!(common.err(), Some(BooleanError::EmptyResult), "{tolerance:?}");
+    }
+}
+
+#[test]
+fn a_bend_rising_from_a_column_foot_shares_its_cap_once() {
+    // Turned the other way the bend rises through the column and leaves
+    // through its side x = -0.2.
+    let (column, bend) = column_and_bend(Vec3::NEG_Y);
+    let common = check(&column, &bend, None, 1e-9);
+    assert!(common > 0.0 && common < BEND, "{common}");
+}
+
+#[test]
+fn a_placed_bend_and_column_sew_within_a_micrometre() {
+    // Placed by one general rigid motion, the cap and the column's foot are
+    // coplanar only within rounding: a reading, so ZERO refuses.
+    let (column, bend) = column_and_bend(Vec3::Y);
+    let t = Transform3::from_translation(Vec3::new(1.0, 2.0, 3.0))
+        * Transform3::from_rotation_z(0.3)
+        * Transform3::from_rotation_x(0.6)
+        * Transform3::from_rotation_y(-0.2);
+    let (column, bend) = (
+        column.transformed(&t).expect("placed"),
+        bend.transformed(&t).expect("placed"),
+    );
+    let joined = run(&column, &bend, BooleanOperator::Union);
+    close("union", volume(&joined), COLUMN + BEND, 1e-9);
+    let refused = boolean(&column, &bend, BooleanOperator::Union, Tolerance::ZERO);
+    assert!(refused.is_err());
 }
 
 /// Area of a circle of radius `r` beyond a chord at distance `d`.

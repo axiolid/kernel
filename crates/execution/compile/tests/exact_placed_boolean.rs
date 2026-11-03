@@ -21,6 +21,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 
 use axiolid_brep::ExactBRep;
 use axiolid_brep_audit::geometric_audit;
+use axiolid_brep_boolean::ToleranceDecisionKind;
 use axiolid_contracts::{ExecutionOptions, GeomError};
 use axiolid_core::{BooleanOperator, Interval, Point2, Point3, Tolerance, Transform3, Vec2, Vec3};
 use axiolid_curve::{Circle2, Curve2, Line2};
@@ -574,6 +575,57 @@ fn a_torus_cut_through_its_axis_is_exact_as_subject_and_as_tool() {
     let mut g = Graph::new();
     let rest = torus_and_box(&mut g, BooleanOperator::Difference, false);
     check(g, rest, TORUS / 2.0, &[]);
+}
+
+/// A `1 x 1 x 1` box standing on `z = 0` less the torus of tube radius
+/// `0.1` about the line along `y` through `(-1, 0, 0)` (major radius `1`),
+/// whose tube leaves through the box's top face `z = 1` (#381).
+fn box_less_a_torus_through_its_top(g: &mut Graph) -> NodeId {
+    let torus = g.revolution(
+        Profile::Circle(CircleProfile {
+            radius: 0.1,
+            thickness: None,
+        }),
+        Point3::new(-1.0, 0.0, 0.0),
+        Vec3::Y,
+        2.0 * PI,
+    );
+    let block = g.extrusion(rect(1.0, 1.0), 1.0);
+    let block = g.instance(block, Transform3::from_translation(Vec3::new(-1.0, 0.0, 0.0)));
+    g.minus(block, torus)
+}
+
+#[test]
+fn a_box_less_a_torus_through_its_top_face_is_exact_within_a_micrometre() {
+    // The top face touches the latitude circles where the tube's quarter
+    // faces meet; the section's double root there is read within tolerance.
+    let mut g = Graph::new();
+    let cut = box_less_a_torus_through_its_top(&mut g);
+    let graph = g.finish(vec![cut]);
+    let (solid, report) = ReferenceExactCompiler::new()
+        .compile_exact_with_report(&graph, cut, &options())
+        .expect("exact at a micrometre");
+    audited(&solid);
+    let want = 1.0 - 0.024_084_318_409_872_973;
+    assert!((volume(&solid) - want).abs() <= 1e-9, "{}", volume(&solid));
+    for d in report.decisions() {
+        assert!(
+            matches!(
+                d.kind,
+                ToleranceDecisionKind::CoincidentSupports | ToleranceDecisionKind::MergedPoints
+            ),
+            "{d:?}"
+        );
+    }
+    assert!(report.linear() <= 1e-7, "{}", report.linear());
+    // The reading is a decision, so an exact tolerance refuses.
+    let mut g = Graph::new();
+    let cut = box_less_a_torus_through_its_top(&mut g);
+    let graph = g.finish(vec![cut]);
+    let error = ReferenceExactCompiler::new()
+        .compile_exact(&graph, cut, &ExecutionOptions::new(Tolerance::ZERO))
+        .expect_err("refused at zero");
+    assert!(error.to_string().contains("too close to a face boundary"), "{error}");
 }
 
 #[test]

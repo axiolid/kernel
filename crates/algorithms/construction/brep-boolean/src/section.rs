@@ -27,7 +27,10 @@
 //!   crossing, so they add no section: neither face changes sides there.
 //! - **A section along an existing edge** (the curve lies in the adjacent
 //!   face's surface too) is cut at the edge's ends and marked as lying
-//!   along that face's boundary: it splits the other face, not this one.
+//!   along that face's boundary: it splits the other face, not this one. A
+//!   traced piece along a line or conic edge is that edge's own curve over
+//!   its stretch, so one stretch has one curve on every face (#382: a
+//!   revolved torus wall's cap edge against the plane through its axis).
 //! - **Coincident supports** share a patch of surface. Each face's boundary
 //!   edges are imprinted on the other where they run inside it, so the
 //!   shared patch becomes a region of both faces; classification then sees
@@ -371,6 +374,15 @@ pub(crate) fn sections_and_contacts(
                     if at_b == Place::Outside {
                         continue;
                     }
+                    // A traced piece along a line or conic edge is that edge's
+                    // own curve over its stretch (#382).
+                    let edges: Vec<&(Curve3, Interval)> = along_a
+                        .iter()
+                        .filter(|_| at_a == Place::Boundary)
+                        .chain(along_b.iter().filter(|_| at_b == Place::Boundary))
+                        .collect();
+                    let (piece_curve, span) =
+                        along_edge_curve(piece_curve, span, mid, &edges, tolerance)?;
                     out.push(SectionEdge {
                         face_a: side_a.faces[fa],
                         face_b: side_b.faces[fb],
@@ -830,16 +842,20 @@ fn near_crossing(
     }
 }
 
-/// Cuts on a line or conic that lie within tolerance of each other in
-/// space, merged into one at their mean parameter.
+/// Cuts on a line, conic or traced section that lie within tolerance of
+/// each other in space, merged into one at their mean parameter.
 ///
 /// A curve crossing a face's edge where it touches the edge's other
 /// surface -- a wall's face meeting an arched opening's jamb where the jamb
 /// runs tangent into the arch -- has a double root there, and the exact
 /// intersection returns it as two roots about `sqrt(eps)` apart. Kept
 /// apart, they leave a sliver piece `1e-8` long whose ends no other piece
-/// meets, and the face does not split (#228). Other curves are returned
-/// unchanged.
+/// meets, and the face does not split (#228). A traced section does the same
+/// where it touches a face's edge: a plane at a ring's radius touches the
+/// latitude circle where a revolved circle's quarter faces meet, and the
+/// trace's double root splits into roots `2e-8` apart (#381; the trace's
+/// spurious roots are TODO(#397)). A traced loop is not merged across its
+/// start. Other curves are returned unchanged.
 ///
 /// Each merged cut moves by at most the caller's linear tolerance. A chain
 /// of cuts each within tolerance of the next but spanning more than it
@@ -851,7 +867,7 @@ fn merge_close(
     tolerance: Tolerance,
 ) -> Result<Vec<Scalar>, BooleanError> {
     let periodic = matches!(curve, Curve3::Circle(_) | Curve3::Ellipse(_));
-    if !(periodic || matches!(curve, Curve3::Line(_))) {
+    if !(periodic || matches!(curve, Curve3::Line(_) | Curve3::ImplicitSection(_))) {
         return Ok(cuts);
     }
     // Cuts within rounding of each other are one cut and need no tolerance;
@@ -1597,6 +1613,70 @@ fn runs_along(
         }
         _ => Ok(false),
     }
+}
+
+/// A traced piece (`curve` over `span`, its `sample` inside) that runs along
+/// one of `edges` that is a line, circle or ellipse, as that edge's own
+/// curve over the stretch between the piece's ends; any other piece
+/// unchanged (#382).
+///
+/// A plane through a torus's axis meets the torus in the circles its faces
+/// start from, found as traced sections; the coincident cap on that plane
+/// imprints the same circles in closed form. A parametric midpoint decides
+/// whether two copies of a stretch are one (`crate::split`), and a traced
+/// curve's parameter is not the circle's angle, so the copies would be
+/// imprinted twice and the faces would not sew. One stretch has one curve.
+///
+/// The ends move onto the edge by their residue, adopted only within the
+/// tolerance (a decision [`ToleranceDecisionKind::SectionAlongEdge`], read
+/// as for a section along an edge); a piece cut at its edge's ends, as
+/// every piece along an edge is, does not move further than the incident
+/// tolerance.
+fn along_edge_curve(
+    curve: Curve3,
+    span: Interval,
+    sample: Point3,
+    edges: &[&(Curve3, Interval)],
+    tolerance: Tolerance,
+) -> Result<(Curve3, Interval), BooleanError> {
+    if !matches!(curve, Curve3::ImplicitSection(_) | Curve3::PairSection(_)) {
+        return Ok((curve, span));
+    }
+    let at = |c: &Curve3, t: Scalar| evaluate3(c, t).map_err(|_| BooleanError::Evaluation);
+    let (start, end) = (at(&curve, span.start)?, at(&curve, span.end)?);
+    for (edge, edge_span) in edges.iter().copied() {
+        let periodic = matches!(edge, Curve3::Circle(_) | Curve3::Ellipse(_));
+        if !(periodic || matches!(edge, Curve3::Line(_)))
+            || !on_edge(edge, *edge_span, sample, tolerance)?
+        {
+            continue;
+        }
+        let locate = |p: Point3| {
+            locate3(edge, p, report::floored(tolerance)).map_err(|_| BooleanError::Evaluation)
+        };
+        let (ts, te, tm) = (locate(start)?, locate(end)?, locate(sample)?);
+        let adopted = if periodic {
+            // Round the stretch from `ts` through `tm` to `te`, whichever
+            // way it runs: `te` and `tm` in `(ts, ts + 2 pi]`.
+            let up = |t: Scalar| t - TAU * ((t - ts) / TAU).ceil() + TAU;
+            let (te_up, tm_up) = (up(te), up(tm));
+            if tm_up < te_up {
+                Interval::new(ts, te_up)
+            } else {
+                Interval::new(te_up - TAU, ts)
+            }
+        } else {
+            Interval::new(ts.min(te), ts.max(te))
+        };
+        let residue = (at(edge, ts)? - start)
+            .length()
+            .max((at(edge, te)? - end).length());
+        if !report::near(ToleranceDecisionKind::SectionAlongEdge, residue, tolerance) {
+            return Ok((curve, span));
+        }
+        return Ok((edge.clone(), adopted));
+    }
+    Ok((curve, span))
 }
 
 /// Whether `point` lies on the edge within tolerance and inside its span.

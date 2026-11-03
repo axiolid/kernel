@@ -788,6 +788,24 @@ fn a_box_united_with_a_quarter_turn_revolution_is_certified() {
 }
 
 #[test]
+fn a_box_united_with_a_quarter_turn_revolution_is_certified_at_a_micrometre() {
+    // The settings a building model uses: a micrometre tolerance, a
+    // millimetre chord. The bend's cap shares the box's foot with no
+    // reading larger than the tolerance (#382).
+    let options = ExecutionOptions::new(Tolerance::METRE)
+        .with_chord_error(1e-3)
+        .unwrap();
+    for up in [false, true] {
+        let case = compile(
+            |g| box_and_bent_tube(g, BooleanOperator::Union, up),
+            &options,
+        );
+        let (bound, _) = assert_measured("box union tube, micrometre", case, &options, 2.0);
+        assert!(bound <= 1e-3, "up {up}: {bound}");
+    }
+}
+
+#[test]
 fn a_box_minus_a_quarter_turn_revolution_is_certified() {
     assert_bent_tube(BooleanOperator::Difference, true, 1.0, "box minus tube");
 }

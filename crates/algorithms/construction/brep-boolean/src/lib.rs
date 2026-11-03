@@ -14,7 +14,9 @@
 //! Operands may touch as well as cross: faces sharing a patch of one
 //! surface, sections running along existing edges, tangent contact, and
 //! solids meeting along an edge or at a point are all handled, not
-//! refused.
+//! refused. A traced section along an operand's line or conic edge takes
+//! that edge's curve, so a revolution's cap coplanar with a face sews
+//! (#382).
 //!
 //! Nothing is meshed or fitted. A configuration a step cannot build is
 //! refused by name ([`BooleanError`]).
@@ -47,11 +49,11 @@
 //! - a section that touches the surface next to an edge, whose double root
 //!   rounding split or lost, is cut where it meets the edge itself, within
 //!   `eps`;
-//! - cuts on a section within `eps` of each other are one cut, a boundary
-//!   split within `eps` of the boundary piece's end is that end, a cut on an
-//!   edge imprinted from a coincident face within `eps` of that edge's own
-//!   end is that end (#276), and two evaluations of a vertex within `eps`
-//!   are one vertex;
+//! - cuts on a section (traced sections too, #381) within `eps` of each
+//!   other are one cut, a boundary split within `eps` of the boundary
+//!   piece's end is that end, a cut on an edge imprinted from a coincident
+//!   face within `eps` of that edge's own end is that end (#276), and two
+//!   evaluations of a vertex within `eps` are one vertex;
 //! - a section is an iso-parameter curve of a face within `eps`;
 //! - a plane is parallel or perpendicular to a cylinder's axis, or touches
 //!   the cylinder, when that moves the plane by at most `eps` over where
