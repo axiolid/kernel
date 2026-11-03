@@ -157,10 +157,10 @@
       "description": "Provider registration, ordering, fallback, and execution policy",
       "layer": "execution",
       "path": "crates/execution/dispatch",
-      "released": "0.3.10",
+      "released": "0.3.11",
       "released_date": "2026-11-03",
       "role": "execution.dispatch",
-      "version": "0.3.10"
+      "version": "0.3.11"
     },
     "axiolid-evaluate": {
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
@@ -346,10 +346,10 @@
       "description": "Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes",
       "layer": "contracts",
       "path": "crates/contracts/operations/mesh-hidden-lines",
-      "released": "0.1.1",
-      "released_date": "2026-10-28",
+      "released": "0.1.2",
+      "released_date": "2026-11-03",
       "role": "contract.operation",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     "axiolid-mesh-section-contract": {
       "description": "Portable mesh plane-section request, result, and evidence contract",

@@ -143,8 +143,8 @@ axiolid-mesh-boolean-contract = { path = "crates/contracts/operations/mesh-boole
 axiolid-pointcloud-reconstruction-contract = { path = "crates/contracts/operations/pointcloud-reconstruction", version = "0.3.3" }
 axiolid-curve-evaluate-contract = { path = "crates/contracts/operations/curve-evaluate", version = "0.3.7" }
 axiolid-mesh-section-contract = { path = "crates/contracts/operations/mesh-section", version = "0.3.7" }
-axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.1" }
-axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.10", default-features = false }
+axiolid-mesh-hidden-lines-contract = { path = "crates/contracts/operations/mesh-hidden-lines", version = "0.1.2" }
+axiolid-dispatch = { path = "crates/execution/dispatch", version = "0.3.11", default-features = false }
 axiolid-backend-cpu = { path = "crates/execution/cpu", version = "0.3.2", default-features = false }
 axiolid-backend-gpu = { path = "crates/execution/gpu", version = "0.3.1", default-features = false }
 axiolid-mesh-boolean-boolmesh = { path = "crates/providers/mesh/boolmesh", version = "0.3.6" }

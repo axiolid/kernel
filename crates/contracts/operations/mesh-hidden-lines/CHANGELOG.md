@@ -9,11 +9,12 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-03
+
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
-
 - `RefusedMesh`: a refused input mesh and its `GeomError`, as listed by the
   registry's audit so a caller learns every refusal in one call (#370).
 

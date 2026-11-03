@@ -2120,6 +2120,17 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.11 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `MeshHiddenLinesRegistry::audit` lists every input mesh that
+  `hidden_lines` would refuse, in request order, without searching (#370).
+  It shares the per-mesh audit with `hidden_lines`; refusals of the whole
+  request stay `Err`.
+
 ### 0.3.10 - 2026-11-03
 
 ### Changed
@@ -5518,6 +5529,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-hidden-lines-contract
+
+### 0.1.2 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `RefusedMesh`: a refused input mesh and its `GeomError`, as listed by the
+  registry's audit so a caller learns every refusal in one call (#370).
 
 ### 0.1.1 - 2026-10-28
 

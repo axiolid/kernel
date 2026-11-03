@@ -42,7 +42,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-mesh-boolean-contract`](./crates/axiolid-mesh-boolean-contract) | `contract.operation` | 0.3.4 | Portable mesh boolean request, result, evidence, and conformance contract |
 | [`axiolid-mesh-compile-contract`](./crates/axiolid-mesh-compile-contract) | `contract.operation` | 0.3.5 | Portable graph-to-mesh compilation contract |
 | [`axiolid-mesh-contracts`](./crates/axiolid-mesh-contracts) | `contract.common.mesh` | 0.3.2 | Shared mesh admissibility contracts |
-| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.1 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
+| [`axiolid-mesh-hidden-lines-contract`](./crates/axiolid-mesh-hidden-lines-contract) | `contract.operation` | 0.1.2 | Portable orthographic hidden-line drawing request, result, and conformance contract for triangle meshes |
 | [`axiolid-mesh-section-contract`](./crates/axiolid-mesh-section-contract) | `contract.operation` | 0.3.7 | Portable mesh plane-section request, result, and evidence contract |
 | [`axiolid-pointcloud-reconstruction-contract`](./crates/axiolid-pointcloud-reconstruction-contract) | `contract.operation` | 0.3.3 | Portable pointcloud-to-surface reconstruction contract, evidence, and conformance suite. |
 | [`axiolid-tessellation-contract`](./crates/axiolid-tessellation-contract) | `contract.operation` | 0.3.3 | Curves, surfaces and B-reps to triangles under an explicit tolerance. |
@@ -95,7 +95,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | --- | --- | --- | --- |
 | [`axiolid-backend-cpu`](./crates/axiolid-backend-cpu) | `execution.context` | 0.3.3 | Portable and runtime-optimized CPU execution context for Axiolid geometry |
 | [`axiolid-backend-gpu`](./crates/axiolid-backend-gpu) | `execution.context` | 0.3.2 | GPU executor adapter contract for batched Axiolid geometry |
-| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.10 | Provider registration, ordering, fallback, and execution policy |
+| [`axiolid-dispatch`](./crates/axiolid-dispatch) | `execution.dispatch` | 0.3.11 | Provider registration, ordering, fallback, and execution policy |
 | [`axiolid-mesh-compile`](./crates/axiolid-mesh-compile) | `execution.orchestration` | 0.3.40 | Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch. |
 
 ## Facade

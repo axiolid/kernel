@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.10 (2026-11-03) |
+| Latest release | 0.3.11 (2026-11-03) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,13 +53,15 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.10 (2026-11-03):
+Latest release, 0.3.11 (2026-11-03):
 
-### Changed
+### Added
 
-- `MeshPlaneSectionRegistry::section_request` no longer refuses cut regions
-  returned beside a `Both` region; it checks that each `Both` region equals
-  one cut region, and carries `PlaneSectionEvidence::in_plane_crossings` into
-  the evidence it derives from the answer (ADR 0093, #366).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+- `MeshHiddenLinesRegistry::audit` lists every input mesh that
+  `hidden_lines` would refuse, in request order, without searching (#370).
+  It shares the per-mesh audit with `hidden_lines`; refusals of the whole
+  request stay `Err`.
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)
