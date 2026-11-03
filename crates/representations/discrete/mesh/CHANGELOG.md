@@ -11,6 +11,11 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `audit_mesh_cycle` and `try_audit_mesh_cycle` return `MeshCycleHealth`: the
+  `MeshHealth` plus the number of unbalanced edges and the first one, so a
+  mesh closed up to edge-touching shells can be told from an open one. A
+  closed oriented cycle is weaker than a closed two-manifold (#416).
+
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 

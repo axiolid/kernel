@@ -122,6 +122,10 @@ struct EdgeSummary {
     boundary: usize,
     non_manifold: usize,
     inconsistent_winding: usize,
+    /// Edges whose net direction over all usable incident triangles is not zero.
+    unbalanced: usize,
+    /// Smallest `(low, high)` among the unbalanced edges.
+    first_unbalanced: Option<(u64, u64)>,
 }
 
 trait EdgeSink {
@@ -239,6 +243,10 @@ impl EdgeSink for VecEdgeSink {
                 winding += i128::from(self.edges[end].direction);
                 end += 1;
             }
+            if winding != 0 {
+                summary.unbalanced += 1;
+                summary.first_unbalanced.get_or_insert(key);
+            }
             match end - start {
                 1 => summary.boundary += 1,
                 2 if winding != 0 => summary.inconsistent_winding += 1,
@@ -264,7 +272,12 @@ impl EdgeSink for MapEdgeSink {
     }
 
     fn summarize(&mut self) -> EdgeSummary {
+        let mut unbalanced = self.edges.iter().filter(|(_, &(_, winding))| winding != 0);
+        let first_unbalanced = unbalanced.next().map(|(&key, _)| key);
+        let unbalanced = usize::from(first_unbalanced.is_some()) + unbalanced.count();
         EdgeSummary {
+            unbalanced,
+            first_unbalanced,
             boundary: self
                 .edges
                 .values()
@@ -291,10 +304,7 @@ impl EdgeSink for MapEdgeSink {
 /// memory budget should use [`try_audit_mesh`] and preflight
 /// [`audit_mesh_scratch_bytes`] instead.
 pub fn audit_mesh<M: TriangleMeshView + ?Sized>(mesh: &M, tolerance: Tolerance) -> MeshHealth {
-    match VecEdgeSink::try_new(mesh.triangle_count(), mesh.position_count()) {
-        Ok(edges) => audit_with_edges(mesh, tolerance, edges),
-        Err(_) => audit_with_edges(mesh, tolerance, MapEdgeSink::default()),
-    }
+    audit_mesh_cycle(mesh, tolerance).health
 }
 
 /// Audit using one fallible, precomputable edge-record allocation.
@@ -305,6 +315,63 @@ pub fn try_audit_mesh<M: TriangleMeshView + ?Sized>(
     mesh: &M,
     tolerance: Tolerance,
 ) -> Result<MeshHealth, MeshAuditError> {
+    try_audit_mesh_cycle(mesh, tolerance).map(|audit| audit.health)
+}
+
+/// [`MeshHealth`] plus the oriented-cycle facts of the same pass.
+///
+/// A usable mesh is a closed oriented cycle when every undirected edge is
+/// used equally often in each direction: the triangles then form a 2-cycle,
+/// so the divergence sum of a signed volume does not depend on its base
+/// point. This is weaker than [`MeshHealth::is_closed_two_manifold`]: it also
+/// admits edges shared by four triangles (two per direction) and shells that
+/// touch along an edge, and it refuses a T-junction, whose long edge is
+/// matched by two short edges the audit cannot pair.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshCycleHealth {
+    /// The structural facts [`audit_mesh`] reports for the same mesh.
+    pub health: MeshHealth,
+    /// Undirected edges among usable triangles whose net direction is not zero.
+    pub unbalanced_edges: usize,
+    /// Smallest unbalanced edge as ascending `(low, high)` source indices.
+    pub first_unbalanced_edge: Option<(u64, u64)>,
+}
+
+impl MeshCycleHealth {
+    /// Whether the usable mesh is a closed oriented cycle: surface-usable,
+    /// no degenerate triangle and no unbalanced edge.
+    ///
+    /// Every closed two-manifold mesh is one. Enclosed volume additionally
+    /// needs the winding number to be 0 or 1 everywhere, which no edge audit
+    /// can see.
+    pub fn is_closed_oriented_cycle(&self) -> bool {
+        self.health.is_surface_usable()
+            && self.health.degenerate_triangles == 0
+            && self.unbalanced_edges == 0
+    }
+}
+
+/// [`audit_mesh`] with the oriented-cycle facts, in the same pass.
+///
+/// Falls back to the map-backed audit like [`audit_mesh`] when the bounded
+/// reservation fails.
+pub fn audit_mesh_cycle<M: TriangleMeshView + ?Sized>(
+    mesh: &M,
+    tolerance: Tolerance,
+) -> MeshCycleHealth {
+    match VecEdgeSink::try_new(mesh.triangle_count(), mesh.position_count()) {
+        Ok(edges) => audit_with_edges(mesh, tolerance, edges),
+        Err(_) => audit_with_edges(mesh, tolerance, MapEdgeSink::default()),
+    }
+}
+
+/// [`audit_mesh_cycle`] with one fallible, precomputable edge-record
+/// allocation; [`audit_mesh_scratch_bytes`] bounds it like [`try_audit_mesh`].
+pub fn try_audit_mesh_cycle<M: TriangleMeshView + ?Sized>(
+    mesh: &M,
+    tolerance: Tolerance,
+) -> Result<MeshCycleHealth, MeshAuditError> {
     let edges = VecEdgeSink::try_new(mesh.triangle_count(), mesh.position_count())?;
     Ok(audit_with_edges(mesh, tolerance, edges))
 }
@@ -313,7 +380,7 @@ fn audit_with_edges<M: TriangleMeshView + ?Sized, E: EdgeSink>(
     mesh: &M,
     tolerance: Tolerance,
     mut edges: E,
-) -> MeshHealth {
+) -> MeshCycleHealth {
     let positions = mesh.position_count();
     let triangles = mesh.triangle_count();
     let first_non_finite_position = (0..positions).find(|&index| !mesh.position(index).is_finite());
@@ -372,18 +439,22 @@ fn audit_with_edges<M: TriangleMeshView + ?Sized, E: EdgeSink>(
     }
 
     let edge_summary = edges.summarize();
-    MeshHealth {
-        positions,
-        triangles,
-        usable_triangles,
-        invalid_indices,
-        non_finite_positions,
-        degenerate_triangles,
-        boundary_edges: edge_summary.boundary,
-        non_manifold_edges: edge_summary.non_manifold,
-        inconsistent_winding_edges: edge_summary.inconsistent_winding,
-        first_invalid_index,
-        first_non_finite_position,
+    MeshCycleHealth {
+        health: MeshHealth {
+            positions,
+            triangles,
+            usable_triangles,
+            invalid_indices,
+            non_finite_positions,
+            degenerate_triangles,
+            boundary_edges: edge_summary.boundary,
+            non_manifold_edges: edge_summary.non_manifold,
+            inconsistent_winding_edges: edge_summary.inconsistent_winding,
+            first_invalid_index,
+            first_non_finite_position,
+        },
+        unbalanced_edges: edge_summary.unbalanced,
+        first_unbalanced_edge: edge_summary.first_unbalanced,
     }
 }
 
@@ -475,5 +546,7 @@ mod tests {
         let via_counting = audit_with_edges(&mesh, tolerance, fast);
         let via_map = audit_with_edges(&mesh, tolerance, MapEdgeSink::default());
         assert_eq!(via_counting, via_map, "sinks must report identical health");
+        assert!(via_counting.unbalanced_edges > 0);
+        assert!(via_counting.first_unbalanced_edge.is_some());
     }
 }
