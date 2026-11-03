@@ -58,7 +58,10 @@ Validation runs on the lowered ring, exactly, and reports what it finds.
 - **Contacts are reports, not defects.** An isolated point where two rings
   meet is listed as a contact. `is_valid` accepts it (the OGC rule, and the
   straight overlay's `hole_outside` accepts a hole touching its outer ring at
-  a vertex); `is_strict` refuses it. Inside one ring, any shared point other
+  a vertex); `is_strict` refuses it. The OGC rule also needs a connected
+  interior, so contacts that cut it apart (a cycle in the graph of rings and
+  distinct contact points, found by union-find) are a `DisconnectedInterior`
+  defect. Inside one ring, any shared point other
   than the joint two consecutive edges share is a defect: crossings, pinches,
   tangencies and fold-backs.
 - **Refusals stay typed.** A contour that does not lower (family, frame,

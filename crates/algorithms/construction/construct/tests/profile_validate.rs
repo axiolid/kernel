@@ -741,3 +741,15 @@ fn a_hole_names_its_own_segments_across_a_split_arc() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn contacts_that_cut_the_interior_apart_are_findings() {
+    let diamond = polygon(&[p(0.0, 5.0), p(5.0, 0.0), p(10.0, 5.0), p(5.0, 10.0)]);
+    let report = validate(&contours(rect(0.0, 0.0, 10.0, 10.0), vec![diamond]));
+    assert_eq!(
+        report.findings,
+        vec![ProfileFinding::DisconnectedInterior {
+            contours: vec![ContourRef::Outer, ContourRef::Hole(0)]
+        }]
+    );
+}

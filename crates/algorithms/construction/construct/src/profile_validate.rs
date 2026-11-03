@@ -67,7 +67,9 @@
 //! hole outside the outer contour, and holes whose interiors meet. An
 //! isolated point where two contours meet is a [`ProfileContact`], not a
 //! finding: [`ProfileReport::is_valid`] accepts it and
-//! [`ProfileReport::is_strict`] refuses it.
+//! [`ProfileReport::is_strict`] refuses it. Contacts that together cut the
+//! interior apart (a hole touching the outer contour at several points, a
+//! closed chain of holes) are a `DisconnectedInterior` finding.
 
 use axiolid_contracts::GeomError;
 use axiolid_core::{Point2, Scalar, Tolerance};
@@ -146,6 +148,15 @@ pub enum ProfileFinding {
     HoleOutsideOuter {
         hole: usize,
     },
+    /// Contacts between contours cut the interior into separate pieces.
+    /// `contours` ascending, every contour of the cut component.
+    DisconnectedInterior {
+        contours: Vec<ContourRef>,
+    },
+    /// A defect of the arc polygon check this version does not map to a
+    /// finding of its own, such as `NestingUndecided`: nesting could not be
+    /// decided, so the profile is not valid.
+    Polygon(ArcPolygonDefect),
     /// Two holes' interiors meet. `holes` ascending.
     HolesOverlap {
         holes: [usize; 2],
@@ -153,6 +164,7 @@ pub enum ProfileFinding {
 }
 
 /// A point where two different contours meet.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProfileContact {
     /// The two contours, ascending.
@@ -274,9 +286,14 @@ fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) -> ProfileR
                 ProfileFinding::HoleOutsideOuter { hole }
             }
             ArcPolygonDefect::HolesOverlap { holes } => ProfileFinding::HolesOverlap { holes },
+            ArcPolygonDefect::DisconnectedInterior { rings } => {
+                ProfileFinding::DisconnectedInterior {
+                    contours: rings.into_iter().map(ContourRef::from).collect(),
+                }
+            }
             // `ArcPolygonDefect` is non-exhaustive: a defect this version
-            // does not know cannot be called valid.
-            other => unreachable!("unmapped arc polygon defect {other:?}"),
+            // does not know is carried whole, never dropped.
+            other => ProfileFinding::Polygon(other),
         });
     }
     report.contacts = check

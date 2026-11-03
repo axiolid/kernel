@@ -46,6 +46,9 @@ MUTANTS = [
     ("self-contact segments left unsorted", "profile_validate.rs",
      "                segments.sort_unstable();",
      "                segments.reverse();"),
+    ("disconnected interior not mapped", "profile_validate.rs",
+     "                    contours: rings.into_iter().map(ContourRef::from).collect(),",
+     "                    contours: Vec::new(),"),
 ]
 
 probe_lib.main(MUTANTS, tests=[["-p", "axiolid-construct", "--test", "profile_validate"],
