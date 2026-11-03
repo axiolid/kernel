@@ -2264,6 +2264,44 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.19 - 2026-11-03
+
+### Fixed
+
+- `IntrinsicPositions` (#317) now charges the heading's rounding of a
+  harmonic term of a curvature law (`Sinusoid`, `Composite`) on its own,
+  `8 eps |A/w| (2 + |p| + |w| L)` per harmonic: the closed-form heading
+  `-(A/w)(cos(w s + p) - cos p)` cancels, so for a slow or strongly phased
+  harmonic its rounding is far above the `64 eps (1 + K L)` charged before,
+  and a point could lie past its certified error.
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+
+- `bound::IntrinsicPositionTable` and `MAX_TABLE_PANELS` (#361): certified,
+  random-access positions of an intrinsic curve (2D, or a planar space
+  curve) over `[0, end]`. The composite two-point Gauss-Legendre rule on
+  the closed-form tangent has the remainder `w^5 / 4320 |f''''|`, with
+  `|f''''| <= sup|k'''| + 4 sup|k| sup|k''| + 3 sup k'^2 + 6 sup k^2 sup|k'|
+  + sup k^4` per seam-free piece, so any curvature law with closed-form
+  bounds of `k` to `k'''` qualifies. Checkpoints every 64 panels make any
+  read cost at most 64 panels and independent of the order of reads, where
+  `IntrinsicPositions` (midpoint rule) marches forward and restarts on a
+  backward read.
+- `FrameLaw` bounds the frames of sections at stations along intrinsic
+  curves (#361): a 2D intrinsic curve, a level planar intrinsic space curve
+  and an elevated curve over an intrinsic plan (a gradient curve over
+  lines, arcs and clothoids). The derivative bounds are the curvature
+  law's closed-form suprema (`|T'| <= sup|k|`, `|T''| <= sup|k'| + sup
+  k^2`, composed with the profile in plan distance), and each frame read
+  is compared with the exact one (point from an `IntrinsicPositionTable`,
+  axes from the closed-form heading) into `point_error` and `axis_error`.
+  `piece_frame_bounds` still returns `None` for every intrinsic curve.
+  Still unbounded: chains, banked curves over intrinsic or chain plans,
+  intrinsic space curves with torsion or tilted, and curves with a stretched
+  or skewed start frame.
+
 ### 0.3.18 - 2026-10-28
 
 ### Changed
@@ -3875,6 +3913,21 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.42 - 2026-11-03
+
+### Added
+
+- Runs of sections at stations along an intrinsic plan report a certified
+  deviation (#361): a clothoid, or lines, arcs and transitions in one
+  piecewise law, alone, level in space or under an elevation (a gradient
+  curve), in the section and the plan frame. The bound rests on the
+  curvature law's closed-form derivative suprema and a certified position
+  table (`axiolid-evaluate` 0.3.19). A 5 km alignment at a 1 mm chord error
+  compiles and certifies in about 370 ms. The `UNCERTIFIED_FRAMES` text no
+  longer names intrinsic curves in general: chains, banked curves over an
+  intrinsic plan, intrinsic space curves with torsion or tilted, and
+  offsets beside intrinsic curves stay unbounded by name.
 
 ### 0.3.41 - 2026-11-03
 

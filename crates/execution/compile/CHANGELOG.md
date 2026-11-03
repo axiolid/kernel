@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.42] - 2026-11-03
+
 ### Added
 
 - Runs of sections at stations along an intrinsic plan report a certified

@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.41 (2026-11-03) |
+| Latest release | 0.3.42 (2026-11-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -78,17 +78,19 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.41 (2026-11-03):
+Latest release, 0.3.42 (2026-11-03):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-
-### Fixed
-
-- A box less a torus whose tube leaves through its top face (#381), and a
-  column united with a revolved bend whose cap lies in its foot (#382),
-  compile exactly at a micrometre; requires `axiolid-brep-boolean` 0.1.13.
+- Runs of sections at stations along an intrinsic plan report a certified
+  deviation (#361): a clothoid, or lines, arcs and transitions in one
+  piecewise law, alone, level in space or under an elevation (a gradient
+  curve), in the section and the plan frame. The bound rests on the
+  curvature law's closed-form derivative suprema and a certified position
+  table (`axiolid-evaluate` 0.3.19). A 5 km alignment at a 1 mm chord error
+  compiles and certifies in about 370 ms. The `UNCERTIFIED_FRAMES` text no
+  longer names intrinsic curves in general: chains, banked curves over an
+  intrinsic plan, intrinsic space curves with torsion or tilted, and
+  offsets beside intrinsic curves stay unbounded by name.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

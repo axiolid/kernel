@@ -166,10 +166,10 @@
       "description": "Analytic and spline curve/surface evaluation, jets, and inversion",
       "layer": "algorithms",
       "path": "crates/algorithms/parametric/evaluate",
-      "released": "0.3.18",
-      "released_date": "2026-10-28",
+      "released": "0.3.19",
+      "released_date": "2026-11-03",
       "role": "algorithm.parametric",
-      "version": "0.3.18"
+      "version": "0.3.19"
     },
     "axiolid-exact": {
       "description": "Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c)",
@@ -319,10 +319,10 @@
       "description": "Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch.",
       "layer": "execution",
       "path": "crates/execution/compile",
-      "released": "0.3.41",
+      "released": "0.3.42",
       "released_date": "2026-11-03",
       "role": "execution.orchestration",
-      "version": "0.3.41"
+      "version": "0.3.42"
     },
     "axiolid-mesh-compile-contract": {
       "description": "Portable graph-to-mesh compilation contract",

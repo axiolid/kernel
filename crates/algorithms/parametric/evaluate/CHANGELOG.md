@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-11-03
+
 ### Fixed
 
 - `IntrinsicPositions` (#317) now charges the heading's rounding of a
