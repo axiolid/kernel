@@ -8,7 +8,7 @@ Provider registration, ordering, fallback, and execution policy.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.9 (2026-10-29) |
+| Latest release | 0.3.10 (2026-11-03) |
 | crates.io | [`axiolid-dispatch`](https://crates.io/crates/axiolid-dispatch) |
 | Facade | [`axiolid`](./axiolid) feature `dispatch-mesh-boolean`, `dispatch-mesh-hidden-lines`, `dispatch-mesh-section`, `dispatch-pointcloud-reconstruction` |
 | Layer | execution (`execution.dispatch`) |
@@ -53,15 +53,13 @@ Default: none.
 
 ## Changes
 
-Latest release, 0.3.9 (2026-10-29):
+Latest release, 0.3.10 (2026-11-03):
 
-### Added
+### Changed
 
-- `MeshPlaneSectionRegistry::section_request` checks cut regions: a provider
-  must answer them exactly when asked, with canonical rings, budgets and
-  evidence, and no `Both` region; a sheet request with cut regions is refused
-  before dispatch (ADR 0092, #372). A provider that ignores the request and
-  answers with `cut_regions: None` is treated as `Unsupported`, so the next
-  provider is tried and a registry without one refuses.
+- `MeshPlaneSectionRegistry::section_request` no longer refuses cut regions
+  returned beside a `Both` region; it checks that each `Both` region equals
+  one cut region, and carries `PlaneSectionEvidence::in_plane_crossings` into
+  the evidence it derives from the answer (ADR 0093, #366).
 
 Full history: [`crates/execution/dispatch/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/dispatch/CHANGELOG.md)

@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-11-03
+
 ### Changed
 
 - `ScalarSection::section_request` merges the in-plane faces on an exact

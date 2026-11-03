@@ -8,7 +8,7 @@ Portable scalar reference implementation and certified predicates.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.14 (2026-10-29) |
+| Latest release | 0.3.15 (2026-11-03) |
 | crates.io | [`axiolid-reference`](https://crates.io/crates/axiolid-reference) |
 | Facade | [`axiolid`](./axiolid) feature `portable-provider` |
 | Layer | algorithms (`algorithm.reference`) |
@@ -48,19 +48,28 @@ evaluation should depend on those directly.
 
 ## Changes
 
-Latest release, 0.3.14 (2026-10-29):
-
-### Fixed
-
-- Cut rings are decided on exact source points: crossing, contact,
-  containment and outer or hole no longer use the returned coordinates, which
-  the projection to a turned frame and the edge interpolation round. Shells
-  that touch in the source are no longer refused as crossing under a turned
-  frame or an oblique section. An overlap that is in the input is still
-  refused. The returned coordinates are unchanged (ADR 0092, #377).
+Latest release, 0.3.15 (2026-11-03):
 
 ### Changed
 
-- Depends on `axiolid-exact` for the exact points of the cut.
+- `ScalarSection::section_request` merges the in-plane faces on an exact
+  arrangement instead of refusing overlaps: faces of one side that overlap or
+  only share a boundary segment form one region, and where faces of both
+  sides coincide the region is `InPlaneSide::Both`. It no longer returns
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES` or
+  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`. Every `Both` region is a cut region
+  when cut regions are requested; a `Both` ring that visits a vertex twice is
+  refused as pinched, and a region edge that bounds the cut with in-plane
+  faces on the cut's side of it as crossing cut rings. It reports
+  `in_plane_crossings`, and `in_plane_pairs` counts segment, piece-triangle
+  and hole containment pairs (ADR 0093, #366).
+- The request scratch bound is 2560 bytes per element (was 1536), and the
+  crossings of in-plane edges are charged against the memory budget as they
+  are created.
+
+### Added
+
+- Bench `section_in_plane`: the in-plane faces of a section request in wall
+  clock.
 
 Full history: [`crates/algorithms/reference/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/reference/CHANGELOG.md)

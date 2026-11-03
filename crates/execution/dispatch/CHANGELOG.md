@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-11-03
+
 ### Changed
 
 - `MeshPlaneSectionRegistry::section_request` no longer refuses cut regions

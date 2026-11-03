@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-dispatch"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-section-contract"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-reference"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

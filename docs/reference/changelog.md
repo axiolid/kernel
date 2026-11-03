@@ -2120,6 +2120,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-dispatch
 
+### 0.3.10 - 2026-11-03
+
+### Changed
+
+- `MeshPlaneSectionRegistry::section_request` no longer refuses cut regions
+  returned beside a `Both` region; it checks that each `Both` region equals
+  one cut region, and carries `PlaneSectionEvidence::in_plane_crossings` into
+  the evidence it derives from the answer (ADR 0093, #366).
+
 ### 0.3.9 - 2026-10-29
 
 ### Added
@@ -5534,6 +5543,34 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-mesh-section-contract
 
+### 0.3.7 - 2026-11-03
+
+### Added
+
+- `PlaneSectionEvidence::in_plane_crossings` and
+  `with_in_plane_crossings`: the distinct points, other than source vertices,
+  where in-plane source edges cross (ADR 0093, #366).
+- Fixtures for stacked boxes, tubes and an L-step block, whose faces coincide
+  in the plane, and for `Both` regions as cut regions.
+
+### Changed
+
+- Every `InPlaneSide::Both` region is a cut region, equal to it bit for bit
+  (ADR 0093, #366). The region conformance suite checks it, and the registry
+  checks it instead of refusing cut regions beside a `Both` region. A
+  provider that reports a `Both` region and refuses only the cut request now
+  fails the conformance suite; it must either refuse the plain request too or
+  return the cut regions.
+- `in_plane_pairs` and `RegionLimits::max_in_plane_pairs` count the candidate
+  pairs examined for the in-plane faces (segment, piece-triangle and hole
+  containment pairs of a merge), not only overlap tests. The count grows for
+  the same mesh (68,104 to 105,600 on the 8,192-triangle bench grid), so a
+  `max_in_plane_pairs` sized to the old counts can now give
+  `BudgetExceeded`.
+- Documentation: the classes of the plane (`Below`, `Above`, `Both`), that
+  regions have pairwise disjoint interiors, and that a provider may still
+  refuse overlapping in-plane faces by name.
+
 ### 0.3.6 - 2026-10-29
 
 ### Changed
@@ -7142,6 +7179,30 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-reference
+
+### 0.3.15 - 2026-11-03
+
+### Changed
+
+- `ScalarSection::section_request` merges the in-plane faces on an exact
+  arrangement instead of refusing overlaps: faces of one side that overlap or
+  only share a boundary segment form one region, and where faces of both
+  sides coincide the region is `InPlaneSide::Both`. It no longer returns
+  `REFUSED_OVERLAPPING_IN_PLANE_FACES` or
+  `REFUSED_IN_PLANE_FACES_ON_BOTH_SIDES`. Every `Both` region is a cut region
+  when cut regions are requested; a `Both` ring that visits a vertex twice is
+  refused as pinched, and a region edge that bounds the cut with in-plane
+  faces on the cut's side of it as crossing cut rings. It reports
+  `in_plane_crossings`, and `in_plane_pairs` counts segment, piece-triangle
+  and hole containment pairs (ADR 0093, #366).
+- The request scratch bound is 2560 bytes per element (was 1536), and the
+  crossings of in-plane edges are charged against the memory budget as they
+  are created.
+
+### Added
+
+- Bench `section_in_plane`: the in-plane faces of a section request in wall
+  clock.
 
 ### 0.3.14 - 2026-10-29
 
