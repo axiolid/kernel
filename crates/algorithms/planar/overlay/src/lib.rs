@@ -24,6 +24,7 @@
 //! `scripts/probe_degenerate_drop_mutants.py` lists the faults the tests
 //! in `tests/degenerate_drop.rs` must catch.
 mod arc;
+mod arc_check;
 mod arc_overlay;
 mod arrangement;
 mod budget;
@@ -45,6 +46,9 @@ mod visibility;
 
 pub use arc::{
     arc_edge_radius, arc_ring_area, reverse_arc_ring, validate_arc_ring, ArcRing, ArcVertex,
+};
+pub use arc_check::{
+    check_arc_polygon, ArcPolygonCheck, ArcPolygonDefect, ArcRingContact, ArcRingRef,
 };
 pub use arc_overlay::{arc_overlay, ArcOverlayEvidence, ArcOverlayResult, ArcPolygon};
 pub use arrangement::{

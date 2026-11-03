@@ -17,6 +17,9 @@ cargo add axiolid-overlay
   topological decision is an exact sign, and output is rounded once, so an input vertex comes
   back bit-identical. `i_overlay` remains only for offsets. The core's maintenance rules and
   verification commands are in that module's docs.
+- An arc polygon is checked exactly for self-contact, shared boundary and hole nesting by
+  `check_arc_polygon`, with no tolerance in any contact or nesting decision (`src/arc_check.rs`,
+  #352, ADR 0095). `scripts/probe_arc_check_mutants.py` lists the faults its tests must catch.
 - Operand validation and output settling share one exact notion of when two boundary edges
   meet (`src/contact.rs`, #272): an end on the other edge within the tolerance, or a proper
   crossing, so every output is a valid operand wherever it lies.

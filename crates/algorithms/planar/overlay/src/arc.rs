@@ -193,12 +193,11 @@ pub fn arc_edge_radius(from: ArcVertex, to: ArcVertex) -> Option<f64> {
 ///   the arc path has no rule leaving it out), and from [`arc_ring_area`]
 ///   otherwise (#274)
 ///
-/// Self-intersection is NOT checked here. Arc/arc and arc/segment crossing
-/// tests are genuinely part of the overlay algorithm, and a cheap
-/// approximation would either reject valid input or pass invalid input.
-/// The straight-edge contract checks it because there the test is exact;
-/// claiming the same guarantee for arcs without the machinery would be
-/// dishonest, so the gap is named instead.
+/// Self-intersection is NOT checked here: a cheap approximation would either
+/// reject valid input or pass invalid input. [`check_arc_polygon`] decides it
+/// exactly, for a ring and for the holes nested in it (#352).
+///
+/// [`check_arc_polygon`]: crate::check_arc_polygon
 pub fn validate_arc_ring(ring: &ArcRing, tolerance: Tolerance) -> Result<(), OverlayError> {
     let count = ring.vertices.len();
     if count < 2 {

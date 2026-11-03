@@ -97,8 +97,8 @@ use axiolid_guarantees::Sign;
 use crate::arc::{arc_orientation, arc_ring_area, ArcRing, ArcVertex};
 use crate::{OverlayError, OverlayOperation};
 
-pub(crate) use edge::Bounds;
-use edge::{crossings, orient_f64, Carrier, Edge};
+pub(crate) use edge::{crossings, Bounds, Edge};
+use edge::{orient_f64, Carrier};
 
 /// The exact orientation of three doubles: positive when `c` lies left
 /// of the line `a -> b`. The `f64` filter answers almost always; two equal
@@ -158,7 +158,8 @@ impl Hasher for WordHasher {
 }
 
 pub(crate) use point::round_ratio;
-use point::{cmp_y, dy, orient, same_point, sign, Circle, Pred, Tangent, XPoint};
+use point::{cmp_y, dy, orient, sign, Circle, Pred, Tangent};
+pub(crate) use point::{same_point, XPoint};
 
 /// Which operand a piece came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +241,7 @@ struct Mono {
     arc: Option<(Arc<Circle>, Sign)>,
 }
 
-fn edges_of(ring: &ArcRing) -> Vec<Edge> {
+pub(crate) fn edges_of(ring: &ArcRing) -> Vec<Edge> {
     let n = ring.vertices.len();
     let ends: Vec<XPoint> = ring
         .vertices
