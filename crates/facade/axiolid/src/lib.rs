@@ -307,10 +307,11 @@ pub mod mesh_section {
     pub use axiolid_mesh_section_contract::*;
 }
 
-/// Orthographic hidden-line drawings of triangle meshes.
+/// Orthographic hidden-line drawings and visible face regions of triangle meshes.
 ///
-/// The contract and its types (ADR 0090). The exact scalar provider arrives
-/// with the `hidden-lines-provider` feature, or a caller supplies its own.
+/// The contracts and their types (ADR 0090, ADR 0094). The exact scalar
+/// providers arrive with the `hidden-lines-provider` feature, or a caller
+/// supplies its own.
 #[cfg(feature = "mesh-hidden-lines")]
 pub mod mesh_hidden_lines {
     pub use axiolid_mesh_hidden_lines_contract::*;
@@ -318,6 +319,11 @@ pub mod mesh_hidden_lines {
     /// Reference provider: visibility decided exactly in the view's frame.
     #[cfg(feature = "hidden-lines-provider")]
     pub use axiolid_hidden_lines::ScalarHiddenLines;
+
+    /// Reference provider: visible face regions decided exactly in the view's
+    /// frame.
+    #[cfg(feature = "hidden-lines-provider")]
+    pub use axiolid_hidden_lines::ScalarVisibleFaces;
 }
 
 #[cfg(feature = "graph-compile")]

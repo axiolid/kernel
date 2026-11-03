@@ -14,6 +14,9 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+- `mesh_hidden_lines` re-exports `ScalarVisibleFaces` under the
+  `hidden-lines-provider` feature (ADR 0094, #383).
+
 ## [0.4.6] - 2026-10-29
 
 ### Added
