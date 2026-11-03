@@ -731,17 +731,27 @@ fn unbounded_reason(graph: &GeometryGraph, root: NodeId) -> &'static str {
 #[test]
 fn a_numerical_frame_and_a_curved_taper_are_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
-    // A clothoid: its frame rests on a quadrature no bound here reaches
-    // (an ellipse's is certified since #316).
+    // A banked curve over a clothoid plan: the clothoid itself is certified
+    // since #361, but cant over it is out of scope (an ellipse's frame is
+    // certified since #316).
     let clothoid = b
-        .push_value(Curve2::Intrinsic(Intrinsic2::new(
-            Frame2 {
-                origin: Point2::ZERO,
-                x: Vec2::X,
-                y: Vec2::Y,
-            },
-            CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
-            60.0,
+        .push_value(Curve3::Banked(Banked3::new(
+            Elevated3::new(
+                Curve2::Intrinsic(Intrinsic2::new(
+                    Frame2 {
+                        origin: Point2::ZERO,
+                        x: Vec2::X,
+                        y: Vec2::Y,
+                    },
+                    CurvatureLaw::clothoid(0.0, 1.0 / 300.0, 60.0),
+                    60.0,
+                )),
+                ElevationLaw::level(0.0),
+            ),
+            CantLaw::new(vec![CantPiece::constant(60.0, 0.1)]),
+            CantLaw::zero(60.0),
+            1.5,
+            BankConvention::TangentRotation,
         )))
         .unwrap();
     let line = b

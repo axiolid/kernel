@@ -72,6 +72,15 @@
 //! frame and `sqrt 3` for a turned one (`|sum w_i dF_i| <= sqrt 3 e_a` for
 //! unit components `w`).
 //!
+//! An intrinsic plan (#361: a clothoid, or lines, arcs and transitions in
+//! one piecewise law, alone, level in space, or under an elevation) reads
+//! its point by quadrature too but its axes in closed form, and its
+//! distance exactly (arc length, or plan distance under an elevation): the
+//! derivative bounds come from the curvature law's closed-form suprema, `e_p`
+//! from a certified position table's error and the point's distance from
+//! its exact position, `e_a` from the axes' distance from the closed-form
+//! heading's, and `delta` is zero.
+//!
 //! # Mitres
 //!
 //! A cell beside a mitre ends on the mitre's plane. Where the piece it
@@ -97,10 +106,11 @@ pub(crate) const MITRED_SECTIONS: &str =
 /// Why a run along a basis without a certified frame law is not bounded.
 pub(crate) const UNCERTIFIED_FRAMES: &str =
     "stationed sections: the frame law along this basis has no certified derivative bounds (a \
-     frame read on an intrinsic curve or a chain, an offset beside one of them or beside an \
-     elevated or banked curve, a skewed circle, a steep tangent, a curve read by quadrature \
-     placed in a frame that tilts +Z, or a piece after joints whose distances cannot be \
-     certified)";
+     frame read on a chain, on a banked curve over an intrinsic plan, or on an intrinsic space \
+     curve with torsion, tilted or with a stretched frame, an offset beside an intrinsic curve, \
+     a chain or an elevated or banked curve, a skewed circle, a steep tangent, a curve read by \
+     quadrature placed in a frame that tilts +Z, or a piece after joints whose distances \
+     cannot be certified)";
 
 /// Why an orientation that turns too far between stations is not bounded.
 pub(crate) const UNBOUNDED_TURN: &str =

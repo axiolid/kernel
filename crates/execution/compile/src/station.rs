@@ -28,10 +28,13 @@
 //! [`DeviationBound::Certified`] wherever the frame law along its basis has
 //! certified derivative bounds -- since #316 also where it reads its frame
 //! by quadrature, on an ellipse, a B-spline or an offset beside a curve in
-//! closed form -- and [`DeviationBound::Unbounded`] by name elsewhere (a
-//! frame on an intrinsic curve, a chain or an offset beside one, a cell
-//! beside a mitre on a curved piece or with a changing section, different
-//! curved profiles).
+//! closed form, and since #361 on an intrinsic plan (a clothoid, or lines,
+//! arcs and transitions in one piecewise law), alone or under an elevation
+//! -- and [`DeviationBound::Unbounded`] by name elsewhere (a frame on a
+//! chain, on a banked curve over an intrinsic plan or on an intrinsic space
+//! curve with torsion or tilted, an offset beside an intrinsic curve or a
+//! chain, a cell beside a mitre on a curved piece or with a changing
+//! section, different curved profiles).
 //!
 //! The `exact` module builds the runs with a closed form exactly (#247):
 //! a constant section along a line or a straight polyline (an extrusion)

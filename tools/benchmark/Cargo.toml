@@ -132,3 +132,7 @@ harness = false
 [[bench]]
 name = "overlay_slender"
 harness = false
+
+[[bench]]
+name = "station_clothoid"
+harness = false

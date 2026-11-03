@@ -478,7 +478,7 @@ fn a_run_along_an_ellipse_and_along_its_offset_is_certified() {
 }
 
 #[test]
-fn intrinsic_curves_and_their_offsets_stay_unbounded_by_name() {
+fn an_offset_beside_an_intrinsic_curve_stays_unbounded_by_name() {
     let mut b = GeometryGraphBuilder::new();
     let clothoid = b
         .push_value(Curve2::Intrinsic(Intrinsic2::new(
@@ -503,12 +503,10 @@ fn intrinsic_curves_and_their_offsets_stay_unbounded_by_name() {
         SectionAtStation::new(profile, Station::at(5.0)),
         SectionAtStation::new(profile, Station::at(40.0)),
     ];
-    let along = spine(&mut b, clothoid, sections.clone());
+    // The clothoid itself is certified since #361 (`station_bound_clothoid`).
     let offset = spine(&mut b, beside, sections);
-    let graph = b.finish(vec![along, offset]).unwrap();
-    for root in [along, offset] {
-        let reason = unbounded(&graph, root);
-        assert!(reason.contains("certified derivative bounds"), "{reason}");
-        assert!(reason.contains("intrinsic curve"), "{reason}");
-    }
+    let graph = b.finish(vec![offset]).unwrap();
+    let reason = unbounded(&graph, offset);
+    assert!(reason.contains("certified derivative bounds"), "{reason}");
+    assert!(reason.contains("intrinsic curve"), "{reason}");
 }

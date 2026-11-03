@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- Runs of sections at stations along an intrinsic plan report a certified
+  deviation (#361): a clothoid, or lines, arcs and transitions in one
+  piecewise law, alone, level in space or under an elevation (a gradient
+  curve), in the section and the plan frame. The bound rests on the
+  curvature law's closed-form derivative suprema and a certified position
+  table (`axiolid-evaluate` 0.3.19). A 5 km alignment at a 1 mm chord error
+  compiles and certifies in about 370 ms. The `UNCERTIFIED_FRAMES` text no
+  longer names intrinsic curves in general: chains, banked curves over an
+  intrinsic plan, intrinsic space curves with torsion or tilted, and
+  offsets beside intrinsic curves stay unbounded by name.
+
 ## [0.3.41] - 2026-11-03
 
 ### Added
