@@ -33,8 +33,11 @@ use axiolid_core::{Frame3, Point2, Point3};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::{InPlaneRegion, InPlaneSide, RegionLimits};
 
-use super::arrangement::{sort_exact, Class, InPlaneArrangement};
-use super::plane_points::{Location, PlanePoints, RingBox};
+pub(super) use axiolid_exact_arrangement::canonical_rotation;
+use axiolid_exact_arrangement::{canonical_start, trace, HalfEdge, PairBudget, PieceId, VertexId};
+
+use super::arrangement::{Class, InPlaneArrangement};
+use super::plane_points::PlanePoints;
 use super::ring_nesting::TracedRing;
 use super::{
     internal_topology_error, mesh_index, orient_sign, sequence_order, sign_times, ExactSectionPlane,
@@ -141,38 +144,6 @@ pub(super) fn strictly_between(a: Point3, point: Point3, b: Point3) -> bool {
         && within(a.z, point.z, b.z)
 }
 
-/// Index at which a ring starts to be canonical: at its lexicographically
-/// smallest point; of several equal smallest points the rotation that orders
-/// lowest wins.
-pub(super) fn canonical_start(points: &[Point2]) -> usize {
-    let rotated = |start: usize| -> Vec<Point2> {
-        points[start..]
-            .iter()
-            .chain(&points[..start])
-            .copied()
-            .collect()
-    };
-    let smallest = points
-        .iter()
-        .min_by(|left, right| super::point_order(left, right))
-        .copied();
-    (0..points.len())
-        .filter(|&start| Some(points[start]) == smallest)
-        .min_by(|&left, &right| sequence_order(&rotated(left), &rotated(right)))
-        .unwrap_or(0)
-}
-
-/// Rotate a ring to start at its lexicographically smallest point; of
-/// several equal smallest points the rotation that orders lowest wins.
-pub(super) fn canonical_rotation(points: Vec<Point2>) -> Vec<Point2> {
-    let start = canonical_start(&points);
-    points[start..]
-        .iter()
-        .chain(&points[..start])
-        .copied()
-        .collect()
-}
-
 /// The regions of a section and what the cut needs to know about them.
 #[derive(Debug)]
 pub(super) struct Regions {
@@ -188,283 +159,8 @@ pub(super) struct Regions {
     pub(super) pairs: usize,
 }
 
-/// A direction out of a vertex along a piece.
-#[derive(Debug, Clone, Copy)]
-struct Spoke {
-    to: usize,
-    piece: usize,
-    /// 0 for directions in `v > 0`, or `v = 0` and `u > 0`, in the
-    /// projection's coordinates; 1 for the others.
-    half: u8,
-}
-
-/// A closed boundary cycle of one class.
-struct Cycle {
-    class: Class,
-    /// Kept vertex numbers.
-    ring: Vec<usize>,
-    outer: bool,
-}
-
 fn collapsed() -> GeomError {
     GeomError::Degenerate("in-plane region collapsed under projection".into())
-}
-
-/// What covers the left and the right of a piece, going out of `from`.
-fn seen_from(arrangement: &InPlaneArrangement, piece: usize, from: usize) -> (Class, Class) {
-    let piece = &arrangement.pieces[piece];
-    if piece.ends[0] == from {
-        (piece.left, piece.right)
-    } else {
-        (piece.right, piece.left)
-    }
-}
-
-/// The pieces at each vertex that has a boundary, in counter-clockwise order
-/// in the frame's sense. Both `orient` and the half-plane split are in the
-/// projection's coordinates up to the frame sign, which reverses the order
-/// within a half but keeps the cyclic order.
-fn fans(
-    arrangement: &InPlaneArrangement,
-    exact: &PlanePoints,
-    on_boundary: &[usize],
-    options: &ExecutionOptions,
-) -> GeomResult<BTreeMap<usize, Vec<Spoke>>> {
-    let mut fans = BTreeMap::<usize, Vec<Spoke>>::new();
-    for (index, piece) in arrangement.pieces.iter().enumerate() {
-        for (from, to) in [
-            (piece.ends[0], piece.ends[1]),
-            (piece.ends[1], piece.ends[0]),
-        ] {
-            if on_boundary[from] == 0 {
-                continue;
-            }
-            let (here, there) = (
-                arrangement.vertices[from].exact,
-                arrangement.vertices[to].exact,
-            );
-            let upper = exact.compare(there, here, 1)? == std::cmp::Ordering::Greater
-                || (exact.compare(there, here, 1)? == std::cmp::Ordering::Equal
-                    && exact.compare(there, here, 0)? == std::cmp::Ordering::Greater);
-            fans.entry(from).or_default().push(Spoke {
-                to,
-                piece: index,
-                half: u8::from(!upper),
-            });
-        }
-    }
-    for (&vertex, fan) in &mut fans {
-        options.check_cancelled()?;
-        let here = arrangement.vertices[vertex].exact;
-        sort_exact(fan, |left, right| {
-            if left.half != right.half {
-                return Ok(left.half.cmp(&right.half));
-            }
-            let (a, b) = (
-                arrangement.vertices[left.to].exact,
-                arrangement.vertices[right.to].exact,
-            );
-            match exact.orient(here, a, b)? {
-                Sign::Positive => Ok(std::cmp::Ordering::Less),
-                Sign::Negative => Ok(std::cmp::Ordering::Greater),
-                // Two pieces leave a vertex the same way only if they
-                // overlap, which the arrangement has cut apart.
-                _ => Err(internal_topology_error()),
-            }
-        })?;
-    }
-    Ok(fans)
-}
-
-/// The vertex the boundary of `class` leaves `at` for, after it came from
-/// `from`: the first boundary met turning clockwise from `from`.
-fn next_vertex(
-    arrangement: &InPlaneArrangement,
-    fans: &BTreeMap<usize, Vec<Spoke>>,
-    from: usize,
-    at: usize,
-    class: Class,
-) -> GeomResult<usize> {
-    let fan = fans.get(&at).ok_or_else(internal_topology_error)?;
-    let index = fan
-        .iter()
-        .position(|spoke| spoke.to == from)
-        .ok_or_else(internal_topology_error)?;
-    for step in 1..=fan.len() {
-        let spoke = fan[(index + fan.len() - step) % fan.len()];
-        let (left, right) = seen_from(arrangement, spoke.piece, at);
-        // The sector between two neighbouring pieces is the left of one and
-        // the right of the other.
-        if left != class {
-            return Err(internal_topology_error());
-        }
-        if right != class {
-            return Ok(spoke.to);
-        }
-    }
-    Err(internal_topology_error())
-}
-
-/// The eight lexicographic orders tried for the extreme vertex of a ring:
-/// which axis is major, and whether each runs ascending.
-const EXTREME_ORDERS: [(usize, bool, bool); 8] = [
-    (0, true, true),
-    (0, true, false),
-    (0, false, true),
-    (0, false, false),
-    (1, true, true),
-    (1, true, false),
-    (1, false, true),
-    (1, false, false),
-];
-
-/// Whether the cycle is an outer boundary (counter-clockwise in the frame),
-/// by the exact turn at its extreme vertex.
-///
-/// The minimum of a lexicographic order is a convex corner. The first order
-/// whose minimum the ring visits once decides; a ring that touches itself at
-/// every extreme (a weakly simple ring) is refused.
-fn is_outer(
-    arrangement: &InPlaneArrangement,
-    exact: &PlanePoints,
-    ring: &[usize],
-) -> GeomResult<bool> {
-    for (major, major_up, minor_up) in EXTREME_ORDERS {
-        let order = |left: usize, right: usize| -> GeomResult<std::cmp::Ordering> {
-            let (a, b) = (
-                arrangement.vertices[ring[left]].exact,
-                arrangement.vertices[ring[right]].exact,
-            );
-            let first = exact.compare(a, b, major)?;
-            let first = if major_up { first } else { first.reverse() };
-            if first.is_ne() {
-                return Ok(first);
-            }
-            let second = exact.compare(a, b, 1 - major)?;
-            Ok(if minor_up { second } else { second.reverse() })
-        };
-        let mut smallest = 0;
-        for index in 1..ring.len() {
-            if order(index, smallest)?.is_lt() {
-                smallest = index;
-            }
-        }
-        let mut visits = 0;
-        for index in 0..ring.len() {
-            if order(index, smallest)?.is_eq() {
-                visits += 1;
-            }
-        }
-        if visits != 1 {
-            continue;
-        }
-        let count = ring.len();
-        let at = |index: usize| arrangement.vertices[ring[index % count]].exact;
-        return match exact.orient(at(smallest + count - 1), at(smallest), at(smallest + 1))? {
-            Sign::Positive => Ok(true),
-            Sign::Negative => Ok(false),
-            _ => Err(GeomError::Degenerate(
-                "in-plane region boundary has a spike at its extreme vertex".into(),
-            )),
-        };
-    }
-    Err(GeomError::Degenerate(
-        "in-plane region boundary visits every extreme vertex twice".into(),
-    ))
-}
-
-/// What simplifying a ring may keep: vertices where other boundary meets, and
-/// the protected ones.
-struct Keep<'a> {
-    /// Boundary pieces at each vertex.
-    on_boundary: &'a [usize],
-    protected: &'a BTreeSet<u32>,
-}
-
-/// Drop vertices that lie strictly between their neighbours on a line and
-/// where only this ring's two boundary pieces meet, except protected ones; a
-/// spike is refused.
-fn simplify(
-    arrangement: &InPlaneArrangement,
-    exact: &PlanePoints,
-    ring: &mut Vec<usize>,
-    keep: &Keep<'_>,
-    options: &ExecutionOptions,
-) -> GeomResult<()> {
-    let collapsed =
-        || GeomError::Degenerate("in-plane region collapsed under simplification".into());
-    let mut index = 0usize;
-    let mut clean = 0usize;
-    while clean < ring.len() {
-        options.check_cancelled()?;
-        if ring.len() < 3 {
-            return Err(collapsed());
-        }
-        let at = index % ring.len();
-        let (previous, vertex, next) = (
-            ring[(at + ring.len() - 1) % ring.len()],
-            ring[at],
-            ring[(at + 1) % ring.len()],
-        );
-        let point = |vertex: usize| arrangement.vertices[vertex].exact;
-        if exact.orient(point(previous), point(vertex), point(next))? != Sign::Zero {
-            clean += 1;
-            index = at + 1;
-            continue;
-        }
-        if !exact.strictly_between(point(previous), point(vertex), point(next))? {
-            return Err(GeomError::Degenerate(
-                "in-plane region boundary has a zero-width spike".into(),
-            ));
-        }
-        let protected = arrangement.vertices[vertex]
-            .sources
-            .iter()
-            .any(|source| keep.protected.contains(source));
-        if protected || keep.on_boundary[vertex] != 2 {
-            clean += 1;
-            index = at + 1;
-            continue;
-        }
-        ring.remove(at);
-        clean = 0;
-        index = (at + ring.len().saturating_sub(1)) % ring.len().max(1);
-    }
-    if ring.len() < 3 {
-        return Err(collapsed());
-    }
-    Ok(())
-}
-
-/// Whether `inner` lies in `outer`: its vertices not on the boundary agree.
-/// `Degenerate` when they do not, or when none decides.
-fn within(exact: &PlanePoints, inner: &[usize], outer: &[usize]) -> GeomResult<bool> {
-    let (mut inside, mut outside) = (false, false);
-    for &node in inner {
-        match exact.locate(node, outer)? {
-            Location::Inside => inside = true,
-            Location::Outside => outside = true,
-            Location::Boundary => {}
-        }
-    }
-    match (inside, outside) {
-        (true, false) => Ok(true),
-        (false, true) => Ok(false),
-        _ => Err(GeomError::Degenerate(
-            "in-plane region rings cross or touch without a deciding vertex".into(),
-        )),
-    }
-}
-
-/// Count one candidate pair against the budget.
-fn count_pair(pairs: &mut usize, max_pairs: usize) -> GeomResult<()> {
-    *pairs += 1;
-    if *pairs > max_pairs {
-        return Err(GeomError::BudgetExceeded {
-            resource: "section in-plane pairs",
-        });
-    }
-    Ok(())
 }
 
 /// Regions of the arranged in-plane triangles: one per maximal part of a
@@ -481,119 +177,47 @@ pub(super) fn build_regions(
     limits: RegionLimits,
     options: &ExecutionOptions,
 ) -> GeomResult<Regions> {
-    let mut pairs = arrangement.pairs;
+    let mut budget = PairBudget::new(limits.max_in_plane_pairs, "section in-plane pairs");
+    budget.used = arrangement.pairs;
 
-    // Boundary half-edges, with the class on their left.
-    let mut half_edges = BTreeSet::<(Class, usize, usize)>::new();
+    // Boundary half-edges per class, with the class on their left.
+    let mut half_edges = BTreeMap::<Class, Vec<HalfEdge>>::new();
     let mut on_boundary = vec![0usize; arrangement.vertices.len()];
-    for piece in &arrangement.pieces {
+    for (index, piece) in arrangement.pieces.iter().enumerate() {
         if piece.left == piece.right {
             continue;
         }
         let [from, to] = piece.ends;
         on_boundary[from] += 1;
         on_boundary[to] += 1;
-        if piece.left != Class::Empty {
-            half_edges.insert((piece.left, from, to));
+        let piece = PieceId(index);
+        if arrangement.pieces[index].left != Class::Empty {
+            half_edges
+                .entry(arrangement.pieces[index].left)
+                .or_default()
+                .push(HalfEdge {
+                    piece,
+                    forward: true,
+                });
         }
-        if piece.right != Class::Empty {
-            half_edges.insert((piece.right, to, from));
+        if arrangement.pieces[index].right != Class::Empty {
+            half_edges
+                .entry(arrangement.pieces[index].right)
+                .or_default()
+                .push(HalfEdge {
+                    piece,
+                    forward: false,
+                });
         }
     }
-    let fans = fans(arrangement, exact, &on_boundary, options)?;
-
-    // Cycles, as vertex numbers.
-    let mut seen = BTreeSet::<(Class, usize, usize)>::new();
-    let mut cycles = Vec::<Cycle>::new();
-    let keep = Keep {
-        on_boundary: &on_boundary,
-        protected,
-    };
-    let mut ring_vertices = BTreeSet::new();
-    for &start in &half_edges {
-        if seen.contains(&start) {
-            continue;
-        }
-        let (class, _, _) = start;
-        let mut ring = Vec::new();
-        let mut edge = start;
-        loop {
-            options.check_cancelled()?;
-            seen.insert(edge);
-            ring.push(edge.1);
-            let after = next_vertex(arrangement, &fans, edge.1, edge.2, class)?;
-            edge = (class, edge.2, after);
-            if edge == start {
-                break;
-            }
-            if !half_edges.contains(&edge) || seen.contains(&edge) || ring.len() > half_edges.len()
-            {
-                return Err(internal_topology_error());
-            }
-        }
-        let outer = is_outer(arrangement, exact, &ring)?;
-        simplify(arrangement, exact, &mut ring, &keep, options)?;
-        for &vertex in &ring {
-            ring_vertices.extend(arrangement.vertices[vertex].sources.iter().copied());
-        }
-        cycles.push(Cycle { class, ring, outer });
-    }
-
-    // Exact rings, and the owner of each hole.
-    let exact_ring = |cycle: &Cycle| -> Vec<usize> {
-        cycle
-            .ring
+    // A vertex stays on a ring where other boundary meets or a cut ends.
+    let keep = |vertex: VertexId| {
+        arrangement.vertices[vertex.0]
+            .sources
             .iter()
-            .map(|&vertex| arrangement.vertices[vertex].exact)
-            .collect()
+            .any(|source| protected.contains(source))
+            || on_boundary[vertex.0] != 2
     };
-    let rings: Vec<Vec<usize>> = cycles.iter().map(exact_ring).collect();
-    let boxes: Vec<RingBox> = rings.iter().map(|ring| exact.ring_box(ring)).collect();
-    let mut owner = vec![None::<usize>; cycles.len()];
-    for (hole, cycle) in cycles.iter().enumerate() {
-        if cycle.outer {
-            continue;
-        }
-        let mut containers = Vec::new();
-        for (candidate, other) in cycles.iter().enumerate() {
-            if !other.outer
-                || other.class != cycle.class
-                || !boxes[hole].possibly_within(&boxes[candidate])
-            {
-                continue;
-            }
-            options.check_cancelled()?;
-            count_pair(&mut pairs, limits.max_in_plane_pairs)?;
-            if within(exact, &rings[hole], &rings[candidate])? {
-                containers.push(candidate);
-            }
-        }
-        let mut innermost = Vec::new();
-        for &candidate in &containers {
-            let mut holds_all = true;
-            for &other in &containers {
-                if other == candidate {
-                    continue;
-                }
-                count_pair(&mut pairs, limits.max_in_plane_pairs)?;
-                if !within(exact, &rings[candidate], &rings[other])? {
-                    holds_all = false;
-                    break;
-                }
-            }
-            if holds_all {
-                innermost.push(candidate);
-            }
-        }
-        match innermost.as_slice() {
-            [only] => owner[hole] = Some(*only),
-            _ => {
-                return Err(GeomError::Degenerate(
-                    "in-plane hole has no single innermost outer boundary".into(),
-                ))
-            }
-        }
-    }
 
     // Output points, rounded once per vertex.
     let mut points = BTreeMap::<usize, Point2>::new();
@@ -607,11 +231,10 @@ pub(super) fn build_regions(
     };
     // A ring as plane-local points and the exact points they come from, in
     // canonical rotation.
-    let mut traced = |cycle: &Cycle| -> GeomResult<TracedRing> {
-        let local = cycle
-            .ring
+    let mut traced = |ring: &[VertexId]| -> GeomResult<TracedRing> {
+        let local = ring
             .iter()
-            .map(|&vertex| point_of(vertex))
+            .map(|&vertex| point_of(vertex.0))
             .collect::<GeomResult<Vec<_>>>()?;
         if local.len() < 3
             || (0..local.len()).any(|index| local[index] == local[(index + 1) % local.len()])
@@ -619,85 +242,83 @@ pub(super) fn build_regions(
             return Err(collapsed());
         }
         let start = canonical_start(&local);
-        let rotate = |items: &[usize]| -> Vec<usize> {
-            items[start..]
-                .iter()
-                .chain(&items[..start])
-                .copied()
-                .collect()
-        };
+        let nodes: Vec<usize> = ring
+            .iter()
+            .map(|&vertex| arrangement.vertices[vertex.0].exact)
+            .collect();
         Ok(TracedRing {
-            nodes: rotate(
-                &cycle
-                    .ring
-                    .iter()
-                    .map(|&vertex| arrangement.vertices[vertex].exact)
-                    .collect::<Vec<_>>(),
-            ),
+            nodes: nodes[start..]
+                .iter()
+                .chain(&nodes[..start])
+                .copied()
+                .collect(),
             points: canonical_rotation(local),
         })
     };
 
+    let mut ring_vertices = BTreeSet::new();
     let mut regions = Vec::new();
     let mut both_rings = Vec::new();
     let mut both_pinched = false;
     let mut vertices = 0usize;
-    for (index, cycle) in cycles.iter().enumerate() {
-        if !cycle.outer {
-            continue;
-        }
-        let Some(side) = cycle.class.side() else {
+    for (class, class_half_edges) in &half_edges {
+        let Some(side) = class.side() else {
             return Err(internal_topology_error());
         };
-        if regions.len() >= limits.max_regions {
-            return Err(GeomError::BudgetExceeded {
-                resource: "section in-plane regions",
-            });
-        }
-        let outer = traced(cycle)?;
-        let mut holes = Vec::new();
-        for (hole, owned) in owner.iter().enumerate() {
-            if *owned == Some(index) {
-                holes.push(traced(&cycles[hole])?);
+        let (rings, class_regions) = trace(
+            exact.store(),
+            &arrangement.cut,
+            class_half_edges,
+            &keep,
+            &mut budget,
+            options,
+        )?;
+        for ring in &rings {
+            for &vertex in &ring.vertices {
+                ring_vertices.extend(arrangement.vertices[vertex.0].sources.iter().copied());
             }
         }
-        holes.sort_by(|left, right| sequence_order(&left.points, &right.points));
-        vertices += outer.points.len() + holes.iter().map(|ring| ring.points.len()).sum::<usize>();
-        if vertices > limits.max_region_vertices {
-            return Err(GeomError::BudgetExceeded {
-                resource: "section in-plane region vertices",
-            });
-        }
-        if side == InPlaneSide::Both {
-            for ring in std::iter::once(&outer).chain(&holes) {
-                let distinct: BTreeSet<usize> = ring.nodes.iter().copied().collect();
-                both_pinched |= distinct.len() != ring.nodes.len();
-            }
-            both_rings.push(TracedRing {
-                nodes: outer.nodes.clone(),
-                points: outer.points.clone(),
-            });
-            for ring in &holes {
-                both_rings.push(TracedRing {
-                    nodes: ring.nodes.clone(),
-                    points: ring.points.clone(),
+        for region in &class_regions {
+            if regions.len() >= limits.max_regions {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "section in-plane regions",
                 });
             }
+            let outer = traced(&rings[region.outer].vertices)?;
+            let mut holes = Vec::new();
+            for &hole in &region.holes {
+                holes.push(traced(&rings[hole].vertices)?);
+            }
+            holes.sort_by(|left, right| sequence_order(&left.points, &right.points));
+            vertices +=
+                outer.points.len() + holes.iter().map(|ring| ring.points.len()).sum::<usize>();
+            if vertices > limits.max_region_vertices {
+                return Err(GeomError::BudgetExceeded {
+                    resource: "section in-plane region vertices",
+                });
+            }
+            if side == InPlaneSide::Both {
+                for ring in std::iter::once(&outer).chain(&holes) {
+                    let distinct: BTreeSet<usize> = ring.nodes.iter().copied().collect();
+                    both_pinched |= distinct.len() != ring.nodes.len();
+                }
+                both_rings.push(TracedRing {
+                    nodes: outer.nodes.clone(),
+                    points: outer.points.clone(),
+                });
+                for ring in &holes {
+                    both_rings.push(TracedRing {
+                        nodes: ring.nodes.clone(),
+                        points: ring.points.clone(),
+                    });
+                }
+            }
+            regions.push(InPlaneRegion::new(
+                side,
+                outer.points,
+                holes.into_iter().map(|ring| ring.points).collect(),
+            ));
         }
-        regions.push(InPlaneRegion::new(
-            side,
-            outer.points,
-            holes.into_iter().map(|ring| ring.points).collect(),
-        ));
-    }
-    if owner
-        .iter()
-        .zip(&cycles)
-        .any(|(owned, cycle)| !cycle.outer && owned.is_none())
-    {
-        return Err(GeomError::Degenerate(
-            "in-plane component has a hole but no outer boundary".into(),
-        ));
     }
     regions.sort_by(|left, right| {
         left.side
@@ -709,7 +330,7 @@ pub(super) fn build_regions(
         ring_vertices,
         both_rings,
         both_pinched,
-        pairs,
+        pairs: budget.used,
     })
 }
 

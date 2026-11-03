@@ -36,6 +36,7 @@ use axiolid_mesh_section_contract::{
 
 use crate::orient3::orient3d;
 use crate::orientation::orient2d;
+use axiolid_exact_arrangement::{point_order, sequence_order};
 use chains::assemble_contours;
 
 /// Bytes per element declared for a request, and charged by the in-plane
@@ -475,21 +476,6 @@ fn exact_area_sign(points: &[Point2]) -> GeomResult<Sign> {
         twice = expansion_sum(&twice, &[-backward_error, -backward]);
     }
     Ok(expansion_sign(&twice))
-}
-
-fn point_order(left: &Point2, right: &Point2) -> std::cmp::Ordering {
-    left.x
-        .total_cmp(&right.x)
-        .then_with(|| left.y.total_cmp(&right.y))
-}
-
-/// Lexicographic order of point sequences; a prefix sorts first.
-fn sequence_order(left: &[Point2], right: &[Point2]) -> std::cmp::Ordering {
-    left.iter()
-        .zip(right)
-        .map(|(a, b)| point_order(a, b))
-        .find(|order| order.is_ne())
-        .unwrap_or_else(|| left.len().cmp(&right.len()))
 }
 
 fn check_source_limits(mesh: &TriMesh, limits: SectionLimits) -> GeomResult<()> {

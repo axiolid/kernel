@@ -385,6 +385,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiolid-exact-arrangement"
+version = "0.1.0"
+dependencies = [
+ "axiolid-contracts",
+ "axiolid-core",
+ "axiolid-exact",
+ "axiolid-predicates",
+ "num-bigint",
+]
+
+[[package]]
 name = "axiolid-exact-compile-contract"
 version = "0.3.2"
 dependencies = [
@@ -442,11 +453,11 @@ dependencies = [
  "axiolid-core",
  "axiolid-dispatch",
  "axiolid-exact",
+ "axiolid-exact-arrangement",
  "axiolid-guarantees",
  "axiolid-mesh",
  "axiolid-mesh-hidden-lines-contract",
  "axiolid-spatial",
- "num-bigint",
 ]
 
 [[package]]
@@ -773,6 +784,7 @@ dependencies = [
  "axiolid-dispatch",
  "axiolid-evaluate",
  "axiolid-exact",
+ "axiolid-exact-arrangement",
  "axiolid-guarantees",
  "axiolid-measure",
  "axiolid-mesh",

@@ -4,6 +4,7 @@
 - **Date:** 2026-10-29
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
+- **Amended by:** [0094](./0094-visible-face-regions-share-the-hidden-line-view-and-an-exact-arrangement.md): the arrangement moves to `axiolid-exact-arrangement`.
 - **Amends:** [0091](./0091-mesh-sections-report-in-plane-regions-and-open-chains.md), [0092](./0092-mesh-sections-report-the-solids-cut-as-closed-regions.md)
 
 ## Context

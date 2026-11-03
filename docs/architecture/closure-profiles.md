@@ -11,12 +11,12 @@ Each profile is a compatibility promise verified by `cargo xtask architecture cl
 | `2d-curves` | 3 | A 2D plan-geometry application: curves, affine transforms, and application-owned unit conversion without solids or CSG. |
 | `parametric-curves` | 8 | A parametric application: curve/surface values plus scalar evaluation, without the reference umbrella. |
 | `cad-exact` | 14 | A CAD application: analytic curves/surfaces, topology, exact B-rep results, and NURBS. |
-| `rust-facade-application` | 33 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
-| `c-abi-profile` | 34 | Versioned native boundary over the supported portable application provider bundle. |
+| `rust-facade-application` | 34 | Supported facade boundary with portable providers for the v0.4 reference workflows. |
+| `c-abi-profile` | 35 | Versioned native boundary over the supported portable application provider bundle. |
 | `core-only` | 1 | The narrowest supported consumer: core values only -- points, vectors, frames, intervals, tolerances. Proves axiolid-core is independently usable. |
 | `spatial-rule-checker` | 2 | A proximity rule checker over points: spatial indexing and core values, with no discrete geometry at all. |
 | `linear-data` | 2 | Linear data modelling -- alignments, centrelines, polylines -- stored and measured without any query or intersection algorithm. |
-| `full` | 35 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
+| `full` | 36 | The maximal supported closure: every facade feature at once. The upper bound the narrow profiles are measured against. |
 
 ## linear-intersection-minimal
 
@@ -32,7 +32,7 @@ Compiles exactly these internal packages:
 - `axiolid-linear-intersection`
 - `axiolid-predicates`
 
-And must never acquire any of 19 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 20 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## mesh-rule-checker
 
@@ -47,7 +47,7 @@ Compiles exactly these internal packages:
 - `axiolid-mesh`
 - `axiolid-spatial`
 
-And must never acquire any of 31 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 32 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## 2d-curves
 
@@ -61,7 +61,7 @@ Compiles exactly these internal packages:
 - `axiolid-curve`
 - `axiolid-linear`
 
-And must never acquire any of 36 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 37 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## parametric-curves
 
@@ -80,7 +80,7 @@ Compiles exactly these internal packages:
 - `axiolid-linear`
 - `axiolid-surface`
 
-And must never acquire any of 28 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 29 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## cad-exact
 
@@ -105,7 +105,7 @@ Compiles exactly these internal packages:
 - `axiolid-surface`
 - `axiolid-topology`
 
-And must never acquire any of 24 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 25 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## rust-facade-application
 
@@ -127,6 +127,7 @@ Compiles exactly these internal packages:
 - `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-exact`
+- `axiolid-exact-arrangement`
 - `axiolid-guarantees`
 - `axiolid-linear`
 - `axiolid-measure`
@@ -172,6 +173,7 @@ Compiles exactly these internal packages:
 - `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-exact`
+- `axiolid-exact-arrangement`
 - `axiolid-guarantees`
 - `axiolid-linear`
 - `axiolid-measure`
@@ -206,7 +208,7 @@ Compiles exactly these internal packages:
 
 - `axiolid-core`
 
-And must never acquire any of 39 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 40 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## spatial-rule-checker
 
@@ -219,7 +221,7 @@ Compiles exactly these internal packages:
 - `axiolid-core`
 - `axiolid-spatial`
 
-And must never acquire any of 38 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 39 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## linear-data
 
@@ -232,7 +234,7 @@ Compiles exactly these internal packages:
 - `axiolid-core`
 - `axiolid-linear`
 
-And must never acquire any of 38 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
+And must never acquire any of 39 forbidden packages, including `axiolid`, `axiolid-backend-cpu`, `axiolid-backend-gpu`.
 
 ## full
 
@@ -255,6 +257,7 @@ Compiles exactly these internal packages:
 - `axiolid-dispatch`
 - `axiolid-evaluate`
 - `axiolid-exact`
+- `axiolid-exact-arrangement`
 - `axiolid-guarantees`
 - `axiolid-heal`
 - `axiolid-linear`

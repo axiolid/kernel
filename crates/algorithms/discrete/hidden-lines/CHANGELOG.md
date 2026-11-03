@@ -21,6 +21,10 @@ caret rule for `0.x` versions.
   the visible-face provider will share (ADR 0094, #383). The drawings and
   the refusals are unchanged, except that a crease cosine outside `[-1, 1]`
   is now refused before the other request checks, not after the depth range.
+- The rounding of an exact ratio to binary64 moved into
+  `axiolid-exact-arrangement` (`round_ratio`), so that the endpoints of
+  hidden lines and the vertices of visible-face regions round alike. The
+  drawings are unchanged.
 
 ## [0.1.2] - 2026-10-29
 

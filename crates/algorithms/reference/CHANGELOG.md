@@ -14,6 +14,20 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+### Changed
+
+- The exact point store, the segment arrangement and the ring tracing of the
+  section's in-plane faces moved into the new crate
+  `axiolid-exact-arrangement`, which the visible faces of
+  `axiolid-hidden-lines` use as well (ADR 0094, #383). The section's output
+  and refusals are unchanged. A state that cannot occur in that code is now
+  `GeomError::Degenerate`, no longer `BackendContractViolation`. Wall clock of
+  `cargo bench -p axiolid-reference --bench section_in_plane`, best of nine
+  runs on a loaded machine, before and after (ms per section): grid 51.9 and
+  54.1, footprint on a grid 51.4 and 51.0, skew grids 44.9 and 46.7, box on a
+  slab 0.015 and 0.018. Single runs of one build spread from 53 to 192 ms, so
+  this is unchanged within noise.
+
 ## [0.3.15] - 2026-11-03
 
 ### Changed

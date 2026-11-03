@@ -17,10 +17,13 @@ Q = "crates/algorithms/reference/src/section/request.rs"
 D = "crates/execution/dispatch/src/section_request.rs"
 C = "crates/algorithms/reference/src/section/chains.rs"
 A = "crates/algorithms/reference/src/section/arrangement.rs"
+X = "crates/algorithms/planar/exact-arrangement/src/arrangement.rs"
+T = "crates/algorithms/planar/exact-arrangement/src/trace.rs"
 TESTS = [
     ["-p", "axiolid-reference", "--test", "section_request"],
     ["-p", "axiolid-reference", "--test", "section_conformance"],
     ["-p", "axiolid-reference", "--lib", "section"],
+    ["-p", "axiolid-exact-arrangement"],
 ]
 
 SEGMENT = (
@@ -68,23 +71,23 @@ MUTANTS = [
         '                    touching_edges += 1;', '                    touching_edges += 0;', TESTS,
     ),
     (
-        'pair budget unchecked', A,
-        '    if *pairs > max_pairs {', '    if false && *pairs > max_pairs {', TESTS,
+        'pair budget unchecked', X,
+        '        if self.used > self.max {', '        if false && self.used > self.max {', TESTS,
     ),
     (
-        'outer and hole swapped', R,
+        'outer and hole swapped', T,
         'Sign::Positive => Ok(true),', 'Sign::Positive => Ok(false),', TESTS,
     ),
     (
-        'collinear region vertex kept', R,
+        'collinear region vertex kept', T,
         'if exact.orient(point(previous), point(vertex), point(next))? != Sign::Zero {',
         'if true || exact.orient(point(previous), point(vertex), point(next))? != Sign::Zero {',
         TESTS,
     ),
     (
         'cut-segment node simplified away', R,
-        '        if protected || keep.on_boundary[vertex] != 2 {',
-        '        if keep.on_boundary[vertex] != 2 {',
+        '            .any(|source| protected.contains(source))',
+        '            .any(|_| false)',
         TESTS,
     ),
     (
@@ -165,7 +168,7 @@ MUTANTS = [
         TESTS,
     ),
     (
-        'pinched extreme vertex has no fallback order', R,
+        'pinched extreme vertex has no fallback order', T,
         'for (major, major_up, minor_up) in EXTREME_ORDERS {',
         'for (major, major_up, minor_up) in EXTREME_ORDERS.into_iter().take(1) {', TESTS,
     ),

@@ -4,7 +4,7 @@
 - **Date:** 2026-10-30
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
-- **Amends:** [0090](./0090-mesh-hidden-line-drawings.md)
+- **Amends:** [0090](./0090-mesh-hidden-line-drawings.md), [0093](./0093-mesh-sections-merge-in-plane-faces-on-an-exact-arrangement.md)
 
 ## Context
 
@@ -45,9 +45,44 @@ request, limits, outcome, evidence and conformance suite.
   under rounding, and cancellation. No tolerance enters a decision.
 
 A second registry, `MeshVisibleFacesRegistry`, in `axiolid-dispatch` checks
-the outcome like the hidden-line registry does. The provider and the exact
-arrangement it needs arrive in later steps of the same issue; this ADR is
-amended then.
+the outcome like the hidden-line registry does.
+
+**The exact arrangement is a crate of its own.** The point store, the
+segment arrangement and the ring tracing that ADR 0093 built inside
+`axiolid-reference` move to `axiolid-exact-arrangement`
+(`crates/algorithms/planar/exact-arrangement`, layer `algorithms`, role
+`algorithm.planar`, domain `planar.exact-arrangement`). The section of
+`axiolid-reference` and the visible faces of `axiolid-hidden-lines` both
+depend on it, so a sign about points, crossings and containment has one
+source of truth (ADR 0036 §4). What stays in `axiolid-reference` is what
+knows the plane: the plane values, the interning of cut nodes, the coverage
+of in-plane triangles and the checks of cut rings. The section's output is
+unchanged bit for bit, which every existing section test pins.
+
+- *Closure.* The crate adds `axiolid-core`, `axiolid-contracts`,
+  `axiolid-exact`, `axiolid-predicates` and `num-bigint` (already in the
+  closure through `axiolid-exact`) and no third-party crate. It joins
+  `expected_internal` of the `rust-facade-application`, `c-abi-profile` and
+  `full` profiles, the only ones that contain `axiolid-reference`, and
+  `forbidden_internal` of every profile that forbids `axiolid-reference`.
+  `axiolid-reference` and `axiolid-hidden-lines` list it in
+  `allowed-internal-dependencies`. `round_ratio`, the single rounding of an
+  exact ratio, moves into the crate too, since the hidden-line output and
+  the new region vertices must round alike.
+- *Orientation.* The store takes a frame sign: the section works in a frame
+  that may mirror the projected axes and passes the sign, the visible faces
+  pass the positive one.
+- *Inconsistency errors.* The crate has no backend id, so a state that
+  cannot occur (overlapping pieces leaving a vertex the same way, parallel
+  segments asked to cross) is `GeomError::Degenerate`, no longer the
+  section's `BackendContractViolation`. No input reaches it.
+
+| Option | Why not |
+| --- | --- |
+| Inside `axiolid-exact` | The arithmetic crate would depend on `axiolid-contracts` and carry about 3,000 lines of topology every exact consumer pays for. |
+| `axiolid-hidden-lines` depends on `axiolid-reference` | Pulls the umbrella (curve, evaluate, measure, surface, primitive) into a provider closure, against ADR 0090 and ADR 0036. |
+| Copy the code | Two sources of truth for a sign. |
+| `axiolid-overlay` or `axiolid-arrangement` | A tolerance-snapping overlay and an editable binary64 subdivision: neither decides on exact points. |
 
 ## Alternatives considered
 

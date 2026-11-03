@@ -1,0 +1,26 @@
+[package]
+name = "axiolid-exact-arrangement"
+description = "Exact arrangement of straight segments on rational points, with face tracing"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+
+[dependencies]
+axiolid-core.workspace = true
+axiolid-contracts.workspace = true
+axiolid-exact.workspace = true
+axiolid-predicates.workspace = true
+num-bigint.workspace = true
+
+[package.metadata.axiolid]
+architecture-version = 1
+layer = "algorithms"
+role = "algorithm.planar"
+domain = "planar.exact-arrangement"
+public = true
+format-neutral = true
+allowed-internal-dependencies = ["axiolid-core", "axiolid-contracts", "axiolid-exact", "axiolid-predicates"]

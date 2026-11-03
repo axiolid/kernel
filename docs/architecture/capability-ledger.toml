@@ -1067,8 +1067,8 @@ area = "planar"
 name = "arrangements of curves (segments, arcs, conics, Bezier)"
 issue = "curved-arrangement-2d"
 level = "narrow"
-summary = "axiolid-arrangement is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — Vertex/HalfEdge/Face store Point2 positions with no curve type. Arcs are handled only inside the separate, non-incremental arc_overlay boolean path (F1/F2), not as arrangement edges; conics and Bezier ..."
-evidence = ["crates/algorithms/planar/arrangement/src/lib.rs::Arrangement", "crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one"]
+summary = "axiolid-arrangement is a general editable DCEL, but only for STRAIGHT-EDGE (segment) boundaries — Vertex/HalfEdge/Face store Point2 positions with no curve type. Arcs are handled only inside the separate, non-incremental arc_overlay boolean path (F1/F2), not as arrangement edges; conics and Bezier ... A second, exact arrangement of straight segments on rational points (axiolid-exact-arrangement, ADR 0094) cuts segments at every crossing, T-junction and overlap and traces labelled faces with holes; it backs the plane section's in-plane faces and the visible faces of a hidden-line view, and is not for curves."
+evidence = ["crates/algorithms/planar/arrangement/src/lib.rs::Arrangement", "crates/algorithms/planar/arrangement/tests/arrangement.rs::a_square_builds_one_bounded_face_plus_the_outer_one", "crates/algorithms/planar/exact-arrangement/src/arrangement.rs::arrange"]
 occt = []
 cgal = ["Arrangement_on_surface_2"]
 

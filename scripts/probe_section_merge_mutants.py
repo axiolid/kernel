@@ -21,6 +21,8 @@ regions, which already contain them).
 import probe_lib
 
 A = "crates/algorithms/reference/src/section/arrangement.rs"
+X = "crates/algorithms/planar/exact-arrangement/src/arrangement.rs"
+T = "crates/algorithms/planar/exact-arrangement/src/trace.rs"
 R = "crates/algorithms/reference/src/section/regions.rs"
 Q = "crates/algorithms/reference/src/section/request.rs"
 D = "crates/execution/dispatch/src/section_request.rs"
@@ -29,6 +31,7 @@ TESTS = [
     ["-p", "axiolid-reference", "--test", "section_conformance"],
     ["-p", "axiolid-reference", "--lib", "section"],
     ["-p", "axiolid-dispatch", "--all-features", "--test", "mesh_section_contract"],
+    ["-p", "axiolid-exact-arrangement"],
 ]
 
 MUTANTS = [
@@ -55,47 +58,47 @@ MUTANTS = [
         TESTS,
     ),
     (
-        'every pair of segments taken for one of a vertex', A,
-        '.any(|vertex| vertex == high_key.0 || vertex == high_key.1)',
-        '.any(|_| true)', TESTS,
+        'every pair of segments taken for one of a vertex', X,
+        '.position(|&other| other == end)',
+        '.position(|_| true)', TESTS,
     ),
     (
-        'proper crossings skipped', A,
+        'proper crossings skipped', X,
         '            if proper {', '            if false && proper {', TESTS,
     ),
     (
-        'ends of the later segment never split the earlier', A,
+        'ends of the later segment never split the earlier', X,
         [
-            ('if around[0] == Sign::Zero && exact.strictly_between(a, c, b)? {',
-             'if false && around[0] == Sign::Zero && exact.strictly_between(a, c, b)? {'),
-            ('if around[1] == Sign::Zero && exact.strictly_between(a, d, b)? {',
-             'if false && around[1] == Sign::Zero && exact.strictly_between(a, d, b)? {'),
+            ('if around[0] == Sign::Zero && points.strictly_between(a, c, b)? {',
+             'if false && around[0] == Sign::Zero && points.strictly_between(a, c, b)? {'),
+            ('if around[1] == Sign::Zero && points.strictly_between(a, d, b)? {',
+             'if false && around[1] == Sign::Zero && points.strictly_between(a, d, b)? {'),
         ],
         TESTS,
     ),
     (
-        'ends of the earlier segment never split the later', A,
+        'ends of the earlier segment never split the later', X,
         [
-            ('if around[2] == Sign::Zero && exact.strictly_between(c, a, d)? {',
-             'if false && around[2] == Sign::Zero && exact.strictly_between(c, a, d)? {'),
-            ('if around[3] == Sign::Zero && exact.strictly_between(c, b, d)? {',
-             'if false && around[3] == Sign::Zero && exact.strictly_between(c, b, d)? {'),
+            ('if around[2] == Sign::Zero && points.strictly_between(c, a, d)? {',
+             'if false && around[2] == Sign::Zero && points.strictly_between(c, a, d)? {'),
+            ('if around[3] == Sign::Zero && points.strictly_between(c, b, d)? {',
+             'if false && around[3] == Sign::Zero && points.strictly_between(c, b, d)? {'),
         ],
         TESTS,
     ),
     (
-        'coincident source vertices not joined', A,
-        '        if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
-        '            points.union(pair[0], pair[1]);',
-        '        if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        'coincident source vertices not joined', X,
+        '        if points.same(local.exact[pair[0]], local.exact[pair[1]])? {\n'
+        '            local.union(pair[0], pair[1]);',
+        '        if points.same(local.exact[pair[0]], local.exact[pair[1]])? {\n'
         '            let _ = pair;',
         TESTS,
     ),
     (
-        'equal points along a segment not joined', A,
-        '            if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
-        '                points.union(pair[0], pair[1]);',
-        '            if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {\n'
+        'equal points along a segment not joined', X,
+        '            if points.same(local.exact[pair[0]], local.exact[pair[1]])? {\n'
+        '                local.union(pair[0], pair[1]);',
+        '            if points.same(local.exact[pair[0]], local.exact[pair[1]])? {\n'
         '                let _ = pair;',
         TESTS,
     ),
@@ -113,24 +116,24 @@ MUTANTS = [
     ),
     (
         'coverage pairs not counted', A,
-        '        count_pair(pairs, max_pairs)?;\n        let (from, to) = (',
+        '        budget.count()?;\n        let (from, to) = (',
         '        let (from, to) = (', TESTS,
     ),
     (
-        'memory charge disabled', A,
-        'Some(needed) if needed <= budget => Ok(()),', 'Some(_) => Ok(()),', TESTS,
+        'memory charge disabled', X,
+        'Some(needed) if needed <= budget => {', 'Some(_) => {', TESTS,
     ),
     (
         'crossing output position ignores the parameter', A,
         'let t = exact.segment_parameter(ends)?;', 'let t = 0.5;', TESTS,
     ),
     (
-        'counter-clockwise next instead of clockwise', R,
-        'let spoke = fan[(index + fan.len() - step) % fan.len()];',
-        'let spoke = fan[(index + step) % fan.len()];', TESTS,
+        'counter-clockwise next instead of clockwise', T,
+        'let to = to_of(&fan[(index + fan.len() - step) % fan.len()]);',
+        'let to = to_of(&fan[(index + step) % fan.len()]);', TESTS,
     ),
     (
-        'fan order reversed within a half', R,
+        'fan order reversed within a half', X,
         [
             ('Sign::Positive => Ok(std::cmp::Ordering::Less),',
              'Sign::Positive => Ok(std::cmp::Ordering::Greater),'),
@@ -141,13 +144,13 @@ MUTANTS = [
     ),
     (
         'collinear vertex where other boundary meets dropped', R,
-        '        if protected || keep.on_boundary[vertex] != 2 {',
-        '        if protected {', TESTS,
+        '            || on_boundary[vertex.0] != 2\n    };',
+        '            || false\n    };', TESTS,
     ),
     (
-        'hole owned by the outermost container', R,
-        'if !within(exact, &rings[candidate], &rings[other])? {',
-        'if !within(exact, &rings[other], &rings[candidate])? {', TESTS,
+        'hole owned by the outermost container', T,
+        'if !within(points, &rings[candidate], &rings[other])? {',
+        'if !within(points, &rings[other], &rings[candidate])? {', TESTS,
     ),
     (
         'pinch of a Both ring never noticed', R,
@@ -174,16 +177,16 @@ MUTANTS = [
         '                    .any(|_| false)', TESTS,
     ),
     (
-        'hole containment pairs not counted', R,
-        '            count_pair(&mut pairs, limits.max_in_plane_pairs)?;\n'
-        '            if within(exact, &rings[hole], &rings[candidate])? {',
-        '            if within(exact, &rings[hole], &rings[candidate])? {', TESTS,
+        'hole containment pairs not counted', T,
+        '            budget.count()?;\n'
+        '            if within(points, &rings[hole], &rings[candidate])? {',
+        '            if within(points, &rings[hole], &rings[candidate])? {', TESTS,
     ),
     (
-        'innermost container pairs not counted', R,
-        '                count_pair(&mut pairs, limits.max_in_plane_pairs)?;\n'
-        '                if !within(exact, &rings[candidate], &rings[other])? {',
-        '                if !within(exact, &rings[candidate], &rings[other])? {', TESTS,
+        'innermost container pairs not counted', T,
+        '                budget.count()?;\n'
+        '                if !within(points, &rings[candidate], &rings[other])? {',
+        '                if !within(points, &rings[candidate], &rings[other])? {', TESTS,
     ),
     (
         'collapsed ring accepted', R,

@@ -37,6 +37,7 @@ It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 - [`axiolid-contracts`](./axiolid-contracts)
 - [`axiolid-core`](./axiolid-core)
 - [`axiolid-exact`](./axiolid-exact)
+- [`axiolid-exact-arrangement`](./axiolid-exact-arrangement)
 - [`axiolid-guarantees`](./axiolid-guarantees)
 - [`axiolid-mesh`](./axiolid-mesh)
 - [`axiolid-mesh-hidden-lines-contract`](./axiolid-mesh-hidden-lines-contract)

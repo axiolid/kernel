@@ -4,7 +4,7 @@
 
 # Crate reference
 
-Axiolid publishes 62 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
+Axiolid publishes 63 crates, each versioned and released on its own. The [`axiolid`](./crates/axiolid) facade re-exports them behind features; every crate can also be used directly. [Selecting a package](./selecting-packages) says which to start from.
 
 Every page here is generated from the crate itself: its manifest, its crate documentation and its changelog. Sections follow the layers of the [crate map](/architecture/crate-map).
 
@@ -61,6 +61,7 @@ Every page here is generated from the crate itself: its manifest, its crate docu
 | [`axiolid-decompose`](./crates/axiolid-decompose) | `algorithm.discrete` | 0.3.2 | Convex decomposition of a solid, exact or approximate and always labelled |
 | [`axiolid-evaluate`](./crates/axiolid-evaluate) | `algorithm.parametric` | 0.3.19 | Analytic and spline curve/surface evaluation, jets, and inversion |
 | [`axiolid-exact`](./crates/axiolid-exact) | `algorithm.reference` | 0.1.3 | Filtered exact arithmetic: interval filter, dyadic big integers, a + b*sqrt(c) |
+| [`axiolid-exact-arrangement`](./crates/axiolid-exact-arrangement) | `algorithm.planar` | not released | Exact arrangement of straight segments on rational points, with face tracing |
 | [`axiolid-field-ops`](./crates/axiolid-field-ops) | `algorithm.sampled` | 0.3.3 | Sampling, morphology, clearance, and navigation over Axiolid layered fields. |
 | [`axiolid-heal`](./crates/axiolid-heal) | `algorithm.repair` | 0.3.3 | Explicit diagnosis and opt-in repair contracts for dirty geometry |
 | [`axiolid-hidden-lines`](./crates/axiolid-hidden-lines) | `algorithm.discrete` | 0.1.2 | Exact scalar hidden-line drawings of triangle meshes in orthographic views |

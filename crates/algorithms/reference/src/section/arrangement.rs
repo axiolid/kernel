@@ -1,24 +1,16 @@
 //! The exact arrangement of the in-plane faces of a section (ADR 0093, #366).
 //!
 //! The in-plane triangles may touch, abut and overlap. Their source edges are
-//! cut at every point where they meet, into pieces that no other piece
+//! cut at every point where they meet into pieces that no other piece
 //! crosses, and each piece records which class of material covers each of its
 //! sides. Every decision is an exact sign on `PlanePoints`; the returned
 //! coordinates only label the output.
 //!
-//! 1. Vertices: each in-plane source vertex is an exact point; vertices at
-//!    one position share a point.
-//! 2. Segments: the unique in-plane source edges, a sweep over their boxes
-//!    proposes pairs. A proper crossing creates a crossing point
-//!    (`PlanePoints::segment_crossing`); an end of one segment lying strictly
-//!    inside the other, which covers T-junctions and collinear overlaps,
-//!    splits it.
-//! 3. Equal points: along each segment its points are ordered exactly and
-//!    equal neighbours are joined, so three segments through one point, or a
-//!    crossing at a source vertex, give one vertex.
-//! 4. Pieces: the stretch between two consecutive distinct vertices of a
-//!    segment, once however many source edges run over it.
-//! 5. Coverage: a triangle that carries a piece covers the side its third
+//! 1. Cutting: the unique in-plane source edges are the segments of
+//!    `axiolid_exact_arrangement::arrange` (ADR 0094), which joins equal
+//!    points, splits at crossings, T-junctions and collinear overlaps, and
+//!    returns the pieces.
+//! 2. Coverage: a triangle that carries a piece covers the side its third
 //!    vertex is on; every other triangle either contains the piece in its
 //!    interior, covering both sides, or does not. A triangle is convex, so a
 //!    piece lies inside it or outside, never partly, and the pieces need no
@@ -35,8 +27,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use axiolid_contracts::{ExecutionOptions, GeomError, GeomResult, Sign};
+use axiolid_contracts::{ExecutionOptions, GeomResult, Sign};
 use axiolid_core::{Frame3, Point2};
+use axiolid_exact_arrangement::{arrange, union_box, Arrangement, PairBudget, PointId, Segment};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_section_contract::InPlaneSide;
 
@@ -46,10 +39,6 @@ use super::{
     internal_topology_error, mesh_index, project_local, Classification, EdgeKey, NodeKey,
     REQUEST_SCRATCH_PER_ELEMENT,
 };
-
-/// Bytes charged for one crossing point: the Dyadic coordinates, the
-/// enclosure, the label and the union-find entry (ADR 0088).
-const CROSSING_SCRATCH_BYTES: usize = 512;
 
 /// What covers one side of a piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -112,110 +101,20 @@ pub(super) struct InPlaneArrangement {
     /// The pieces of each source edge from `key.0` to `key.1`, with whether
     /// that direction runs from `ends[0]` to `ends[1]` of the piece.
     edges: BTreeMap<EdgeKey, Vec<(usize, bool)>>,
+    /// The arrangement the vertices and pieces were taken from, for tracing.
+    pub(super) cut: Arrangement,
     /// Vertices without a source vertex.
     pub(super) crossings: usize,
     /// Candidate pairs examined so far.
     pub(super) pairs: usize,
 }
 
-/// A point while the arrangement is built: its exact point and its label.
-enum Label {
-    Source(u32),
-    Crossing((EdgeKey, EdgeKey), [usize; 4]),
-}
-
 /// One unique in-plane source edge.
-struct Segment {
-    key: EdgeKey,
-    /// Local point numbers of the ends.
+struct SourceEdge {
+    /// Exact points of the ends, the lower source vertex first.
     ends: [usize; 2],
-    /// The triangles with this edge and their third vertices (local points).
+    /// The triangles with this edge and their third vertices (exact points).
     carriers: Vec<(usize, usize)>,
-    /// `[min_u, min_v, max_u, max_v]`.
-    bounds: [f64; 4],
-    /// Local points inside the segment, from the pairs examined.
-    splits: Vec<usize>,
-    /// All local points from the first end to the second, in order.
-    path: Vec<usize>,
-}
-
-/// Points while building: exact point, label and union-find parent.
-struct Points {
-    exact: Vec<usize>,
-    labels: Vec<Label>,
-    parent: Vec<usize>,
-}
-
-impl Points {
-    fn push(&mut self, exact: usize, label: Label) -> usize {
-        self.exact.push(exact);
-        self.labels.push(label);
-        self.parent.push(self.parent.len());
-        self.parent.len() - 1
-    }
-
-    fn find(&mut self, mut point: usize) -> usize {
-        while self.parent[point] != point {
-            self.parent[point] = self.parent[self.parent[point]];
-            point = self.parent[point];
-        }
-        point
-    }
-
-    /// Join two points; the root is the smaller number.
-    fn union(&mut self, left: usize, right: usize) {
-        let (left, right) = (self.find(left), self.find(right));
-        self.parent[left.max(right)] = left.min(right);
-    }
-}
-
-fn overlap(first: &[f64; 4], second: &[f64; 4]) -> bool {
-    first[0] <= second[2] && second[0] <= first[2] && first[1] <= second[3] && second[1] <= first[3]
-}
-
-fn union_box(boxes: &[[f64; 4]]) -> [f64; 4] {
-    boxes.iter().fold(
-        [
-            f64::INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NEG_INFINITY,
-        ],
-        |all, one| {
-            [
-                all[0].min(one[0]),
-                all[1].min(one[1]),
-                all[2].max(one[2]),
-                all[3].max(one[3]),
-            ]
-        },
-    )
-}
-
-fn count_pair(pairs: &mut usize, max_pairs: usize) -> GeomResult<()> {
-    *pairs += 1;
-    if *pairs > max_pairs {
-        return Err(GeomError::BudgetExceeded {
-            resource: "section in-plane pairs",
-        });
-    }
-    Ok(())
-}
-
-/// Sort `items` by an exact comparison that can fail.
-pub(super) fn sort_exact<T: Copy>(
-    items: &mut [T],
-    mut compare: impl FnMut(T, T) -> GeomResult<std::cmp::Ordering>,
-) -> GeomResult<()> {
-    let mut failure = None;
-    items.sort_by(|&left, &right| match compare(left, right) {
-        Ok(order) => order,
-        Err(error) => {
-            failure.get_or_insert(error);
-            std::cmp::Ordering::Equal
-        }
-    });
-    failure.map_or(Ok(()), Err)
 }
 
 impl InPlaneArrangement {
@@ -228,100 +127,133 @@ impl InPlaneArrangement {
         max_pairs: usize,
         options: &ExecutionOptions,
     ) -> GeomResult<Self> {
-        let mut points = Points {
-            exact: Vec::new(),
-            labels: Vec::new(),
-            parent: Vec::new(),
-        };
-        let corners = source_points(mesh, classifications, triangles, exact, &mut points)?;
-        let mut segments = segments_of(triangles, &corners, exact, &points);
-        let mut pairs = 0usize;
-        cut_segments(
-            mesh,
-            &mut segments,
-            exact,
-            &mut points,
-            (&mut pairs, max_pairs),
-            options,
-        )?;
-        order_segments(&mut segments, exact, &mut points, options)?;
-
-        let (vertices, vertex_of) = number_vertices(&mut points);
-        let crossing_vertices = vertices
+        // The exact point of every source vertex, in vertex order.
+        let mut sources: Vec<u32> = triangles
             .iter()
-            .filter(|vertex| vertex.sources.is_empty())
-            .count();
-
-        // Pieces, once each however many segments run over them.
-        let mut by_ends = BTreeMap::<(usize, usize), usize>::new();
-        let mut carriers = Vec::<BTreeSet<(usize, usize)>>::new();
-        let mut on_edges = Vec::<(EdgeKey, usize, bool)>::new();
-        for segment in &segments {
-            options.check_cancelled()?;
-            let mut previous: Option<usize> = None;
-            for &point in &segment.path {
-                let vertex = vertex_of[&points.find(point)];
-                if let Some(from) = previous {
-                    if from != vertex {
-                        let ends = (from.min(vertex), from.max(vertex));
-                        let next = carriers.len();
-                        let piece = *by_ends.entry(ends).or_insert(next);
-                        if piece == next {
-                            carriers.push(BTreeSet::new());
-                        }
-                        carriers[piece].extend(segment.carriers.iter().copied());
-                        on_edges.push((segment.key, piece, from < vertex));
-                    }
-                }
-                previous = Some(vertex);
+            .flat_map(|triangle| triangle.vertices)
+            .collect();
+        sources.sort_unstable();
+        sources.dedup();
+        let mut point_of = BTreeMap::<u32, usize>::new();
+        let mut source_of = BTreeMap::<usize, u32>::new();
+        for &vertex in &sources {
+            let point = exact.node(mesh, classifications, NodeKey::Vertex(vertex))?;
+            point_of.insert(vertex, point);
+            source_of.insert(point, vertex);
+        }
+        let corners: Vec<[usize; 3]> = triangles
+            .iter()
+            .map(|triangle| triangle.vertices.map(|vertex| point_of[&vertex]))
+            .collect();
+        let mut by_key = BTreeMap::<EdgeKey, SourceEdge>::new();
+        for (index, triangle) in triangles.iter().enumerate() {
+            for (from, to, third) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
+                let key = EdgeKey::new(triangle.vertices[from], triangle.vertices[to]);
+                let ends = if triangle.vertices[from] < triangle.vertices[to] {
+                    [corners[index][from], corners[index][to]]
+                } else {
+                    [corners[index][to], corners[index][from]]
+                };
+                by_key
+                    .entry(key)
+                    .or_insert_with(|| SourceEdge {
+                        ends,
+                        carriers: Vec::new(),
+                    })
+                    .carriers
+                    .push((index, corners[index][third]));
             }
         }
-        // Piece numbers in order of their ends.
-        let mut ends_of = vec![(0, 0); carriers.len()];
-        for (&ends, &piece) in &by_ends {
-            ends_of[piece] = ends;
-        }
-        let mut renumber = vec![0usize; carriers.len()];
-        let mut order: Vec<usize> = (0..carriers.len()).collect();
-        order.sort_by_key(|&piece| ends_of[piece]);
-        for (rank, &piece) in order.iter().enumerate() {
-            renumber[piece] = rank;
-        }
+        let keys: Vec<EdgeKey> = by_key.keys().copied().collect();
+        let edges_in_order: Vec<SourceEdge> = by_key.into_values().collect();
+        let segments: Vec<Segment> = edges_in_order
+            .iter()
+            .map(|edge| Segment {
+                ends: edge.ends.map(PointId),
+            })
+            .collect();
 
+        let mut budget = PairBudget::new(max_pairs, "section in-plane pairs");
+        let declared = REQUEST_SCRATCH_PER_ELEMENT
+            .saturating_mul(mesh.positions.len().max(mesh.triangle_count()));
+        let cut = arrange(exact.store_mut(), &segments, &mut budget, declared, options)?;
+
+        let vertices: Vec<Vertex> = cut
+            .vertices
+            .iter()
+            .map(|vertex| {
+                let mut sources: Vec<u32> = vertex
+                    .inputs
+                    .iter()
+                    .filter_map(|point| source_of.get(&point.0).copied())
+                    .collect();
+                sources.sort_unstable();
+                Vertex {
+                    exact: vertex.point.0,
+                    sources,
+                    crossing: vertex.crossing.map(|crossing| {
+                        (
+                            (keys[crossing.segments[0]], keys[crossing.segments[1]]),
+                            crossing.ends.map(|end| end.0),
+                        )
+                    }),
+                }
+            })
+            .collect();
+        let ends_of: Vec<(usize, usize)> = cut
+            .pieces
+            .iter()
+            .map(|piece| (piece.ends[0].0, piece.ends[1].0))
+            .collect();
+        let carriers: Vec<BTreeSet<(usize, usize)>> = cut
+            .pieces
+            .iter()
+            .map(|piece| {
+                piece
+                    .segments
+                    .iter()
+                    .flat_map(|&segment| edges_in_order[segment].carriers.iter().copied())
+                    .collect()
+            })
+            .collect();
         let covered = coverage(
             (triangles, &corners),
-            &points,
             &Pieces {
                 vertices: &vertices,
                 ends_of: &ends_of,
                 carriers: &carriers,
             },
             exact,
-            (&mut pairs, max_pairs),
+            &mut budget,
             options,
         )?;
-        let mut pieces = Vec::with_capacity(order.len());
-        for &piece in &order {
-            let (below_left, above_left, below_right, above_right) = covered[piece];
-            pieces.push(Piece {
-                ends: [ends_of[piece].0, ends_of[piece].1],
-                left: Class::of(below_left, above_left),
-                right: Class::of(below_right, above_right),
-            });
-        }
+        let pieces = covered
+            .iter()
+            .zip(&ends_of)
+            .map(
+                |(&(below_left, above_left, below_right, above_right), &(a, b))| Piece {
+                    ends: [a, b],
+                    left: Class::of(below_left, above_left),
+                    right: Class::of(below_right, above_right),
+                },
+            )
+            .collect();
         let mut edges = BTreeMap::<EdgeKey, Vec<(usize, bool)>>::new();
-        for (key, piece, forward) in on_edges {
-            edges
-                .entry(key)
-                .or_default()
-                .push((renumber[piece], forward));
+        for (key, path) in keys.iter().zip(&cut.paths) {
+            edges.insert(
+                *key,
+                path.iter()
+                    .map(|&(piece, forward)| (piece.0, forward))
+                    .collect(),
+            );
         }
         Ok(Self {
             vertices,
             pieces,
             edges,
-            crossings: crossing_vertices,
-            pairs,
+            crossings: cut.crossings,
+            cut,
+            pairs: budget.used,
         })
     }
 
@@ -378,287 +310,6 @@ impl InPlaneArrangement {
     }
 }
 
-/// Intern the source vertices of the triangles, and join those at one
-/// position. Returns the local points of each triangle's corners.
-fn source_points(
-    mesh: &TriMesh,
-    classifications: &[Classification],
-    triangles: &[InPlaneTriangle],
-    exact: &mut PlanePoints,
-    points: &mut Points,
-) -> GeomResult<Vec<[usize; 3]>> {
-    let mut local = BTreeMap::<u32, usize>::new();
-    let mut corners = Vec::with_capacity(triangles.len());
-    for triangle in triangles {
-        let mut at = [0usize; 3];
-        for (slot, &vertex) in at.iter_mut().zip(&triangle.vertices) {
-            *slot = match local.get(&vertex) {
-                Some(&known) => known,
-                None => {
-                    let point = exact.node(mesh, classifications, NodeKey::Vertex(vertex))?;
-                    let new = points.push(point, Label::Source(vertex));
-                    local.insert(vertex, new);
-                    new
-                }
-            };
-        }
-        corners.push(at);
-    }
-    // Vertices at one position share a point.
-    let mut sources: Vec<usize> = local.values().copied().collect();
-    sort_exact(&mut sources, |left, right| {
-        exact.lexicographic(points.exact[left], points.exact[right])
-    })?;
-    for pair in sources.windows(2) {
-        if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {
-            points.union(pair[0], pair[1]);
-        }
-    }
-    Ok(corners)
-}
-
-/// The unique in-plane source edges with their carriers and boxes.
-fn segments_of(
-    triangles: &[InPlaneTriangle],
-    corners: &[[usize; 3]],
-    exact: &PlanePoints,
-    points: &Points,
-) -> Vec<Segment> {
-    let mut by_key = BTreeMap::<EdgeKey, Segment>::new();
-    for (index, triangle) in triangles.iter().enumerate() {
-        for (from, to, third) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
-            let key = EdgeKey::new(triangle.vertices[from], triangle.vertices[to]);
-            let (first, second) = if triangle.vertices[from] < triangle.vertices[to] {
-                (corners[index][from], corners[index][to])
-            } else {
-                (corners[index][to], corners[index][from])
-            };
-            let segment = by_key.entry(key).or_insert_with(|| {
-                let (low, high) = (
-                    exact.bounds(points.exact[first]),
-                    exact.bounds(points.exact[second]),
-                );
-                Segment {
-                    key,
-                    ends: [first, second],
-                    carriers: Vec::new(),
-                    bounds: [
-                        low[0].min(high[0]),
-                        low[1].min(high[1]),
-                        low[2].max(high[2]),
-                        low[3].max(high[3]),
-                    ],
-                    splits: Vec::new(),
-                    path: Vec::new(),
-                }
-            });
-            segment.carriers.push((index, corners[index][third]));
-        }
-    }
-    by_key.into_values().collect()
-}
-
-/// Examine the pairs of segments whose boxes overlap: join the proper
-/// crossings and the ends that lie inside the other segment.
-fn cut_segments(
-    mesh: &TriMesh,
-    segments: &mut [Segment],
-    exact: &mut PlanePoints,
-    points: &mut Points,
-    (pairs, max_pairs): (&mut usize, usize),
-    options: &ExecutionOptions,
-) -> GeomResult<()> {
-    let mut order: Vec<usize> = (0..segments.len()).collect();
-    order.sort_by(|&left, &right| {
-        segments[left].bounds[0]
-            .total_cmp(&segments[right].bounds[0])
-            .then(left.cmp(&right))
-    });
-    // The boxes in sweep order, to scan them without looking segments up.
-    let boxes: Vec<[f64; 4]> = order.iter().map(|&index| segments[index].bounds).collect();
-    let elements = mesh.positions.len().max(mesh.triangle_count());
-    let mut created = 0usize;
-    for (rank, &first) in order.iter().enumerate() {
-        options.check_cancelled()?;
-        for (&second, held) in order[rank + 1..].iter().zip(&boxes[rank + 1..]) {
-            if held[0] > boxes[rank][2] {
-                break;
-            }
-            if !overlap(&boxes[rank], held) {
-                continue;
-            }
-            options.check_cancelled()?;
-            count_pair(pairs, max_pairs)?;
-            let (low, high) = (first.min(second), first.max(second));
-            let [a, b] = segments[low].ends.map(|end| points.exact[end]);
-            let [c, d] = segments[high].ends.map(|end| points.exact[end]);
-            // Segments of one source vertex meet only there, or they overlap
-            // on a line; then the far end of the shorter is a vertex of its
-            // triangle's third edge, which is examined against the longer.
-            let (low_key, high_key) = (segments[low].key, segments[high].key);
-            if [low_key.0, low_key.1]
-                .into_iter()
-                .any(|vertex| vertex == high_key.0 || vertex == high_key.1)
-            {
-                continue;
-            }
-            // Both ends of one segment strictly on one side of the other's
-            // line: they neither cross nor touch, and most pairs end here.
-            let (past_c, past_d) = (exact.orient(a, b, c)?, exact.orient(a, b, d)?);
-            if past_c == past_d && past_c != Sign::Zero {
-                continue;
-            }
-            let (past_a, past_b) = (exact.orient(c, d, a)?, exact.orient(c, d, b)?);
-            if past_a == past_b && past_a != Sign::Zero {
-                continue;
-            }
-            let around = [past_c, past_d, past_a, past_b];
-            let proper = around.iter().all(|&sign| sign != Sign::Zero)
-                && around[0] != around[1]
-                && around[2] != around[3];
-            if proper {
-                charge_crossing(options, elements, created)?;
-                let keys = (segments[low].key, segments[high].key);
-                let ends = [a, b, c, d];
-                let point = exact.segment_crossing(keys, ends)?;
-                let new = points.push(point, Label::Crossing(keys, ends));
-                created += 1;
-                segments[low].splits.push(new);
-                segments[high].splits.push(new);
-            } else {
-                let (low_ends, high_ends) = (segments[low].ends, segments[high].ends);
-                if around[0] == Sign::Zero && exact.strictly_between(a, c, b)? {
-                    segments[low].splits.push(high_ends[0]);
-                }
-                if around[1] == Sign::Zero && exact.strictly_between(a, d, b)? {
-                    segments[low].splits.push(high_ends[1]);
-                }
-                if around[2] == Sign::Zero && exact.strictly_between(c, a, d)? {
-                    segments[high].splits.push(low_ends[0]);
-                }
-                if around[3] == Sign::Zero && exact.strictly_between(c, b, d)? {
-                    segments[high].splits.push(low_ends[1]);
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Refuse the next crossing when the scratch declared per element and the
-/// crossings made so far no longer fit the memory budget.
-fn charge_crossing(options: &ExecutionOptions, elements: usize, created: usize) -> GeomResult<()> {
-    let Some(budget) = options.memory_budget_bytes() else {
-        return Ok(());
-    };
-    let needed = REQUEST_SCRATCH_PER_ELEMENT
-        .checked_mul(elements)
-        .and_then(|declared| {
-            CROSSING_SCRATCH_BYTES
-                .checked_mul(created + 1)
-                .and_then(|crossings| declared.checked_add(crossings))
-        });
-    match needed {
-        Some(needed) if needed <= budget => Ok(()),
-        _ => Err(GeomError::BudgetExceeded { resource: "memory" }),
-    }
-}
-
-/// Put the points of every segment in order along it, and join equal ones.
-fn order_segments(
-    segments: &mut [Segment],
-    exact: &PlanePoints,
-    points: &mut Points,
-    options: &ExecutionOptions,
-) -> GeomResult<()> {
-    for segment in segments {
-        options.check_cancelled()?;
-        let [first, last] = segment.ends.map(|end| points.exact[end]);
-        let axis = exact.dominant(first, last)?;
-        let descending = exact.compare(first, last, axis)? == std::cmp::Ordering::Greater;
-        let mut inner = std::mem::take(&mut segment.splits);
-        inner.sort_unstable();
-        inner.dedup();
-        sort_exact(&mut inner, |left, right| {
-            let order = exact.compare(points.exact[left], points.exact[right], axis)?;
-            Ok(if descending { order.reverse() } else { order })
-        })?;
-        segment.path = std::iter::once(segment.ends[0])
-            .chain(inner)
-            .chain(std::iter::once(segment.ends[1]))
-            .collect();
-        for pair in segment.path.windows(2) {
-            if exact.same(points.exact[pair[0]], points.exact[pair[1]])? {
-                points.union(pair[0], pair[1]);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Number the groups of equal points: those with source vertices first, by
-/// their smallest vertex, then the crossings, by their smallest pair of edges.
-fn number_vertices(points: &mut Points) -> (Vec<Vertex>, BTreeMap<usize, usize>) {
-    struct Group {
-        sources: Vec<u32>,
-        /// The smallest crossing label of the group, with its point.
-        crossing: Option<((EdgeKey, EdgeKey), usize)>,
-        /// Any point of the group.
-        any: usize,
-    }
-    let mut groups = BTreeMap::<usize, Group>::new();
-    for point in 0..points.parent.len() {
-        let root = points.find(point);
-        let group = groups.entry(root).or_insert(Group {
-            sources: Vec::new(),
-            crossing: None,
-            any: point,
-        });
-        match &points.labels[point] {
-            Label::Source(vertex) => group.sources.push(*vertex),
-            Label::Crossing(keys, _) => {
-                if group.crossing.is_none_or(|(known, _)| *keys < known) {
-                    group.crossing = Some((*keys, point));
-                }
-            }
-        }
-    }
-    let mut ordered: Vec<(usize, Group)> = groups.into_iter().collect();
-    for (_, group) in &mut ordered {
-        group.sources.sort_unstable();
-    }
-    ordered.sort_by(
-        |(_, left), (_, right)| match (left.sources.first(), right.sources.first()) {
-            (Some(a), Some(b)) => a.cmp(b),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => left.crossing.map(|c| c.0).cmp(&right.crossing.map(|c| c.0)),
-        },
-    );
-    let mut vertex_of = BTreeMap::new();
-    let mut vertices = Vec::with_capacity(ordered.len());
-    for (number, (root, group)) in ordered.into_iter().enumerate() {
-        vertex_of.insert(root, number);
-        let crossing = match (group.sources.is_empty(), group.crossing) {
-            (true, Some((keys, point))) => match &points.labels[point] {
-                Label::Crossing(_, ends) => Some((keys, *ends)),
-                Label::Source(_) => None,
-            },
-            _ => None,
-        };
-        let point = match (group.sources.is_empty(), group.crossing) {
-            (true, Some((_, point))) => point,
-            _ => group.any,
-        };
-        vertices.push(Vertex {
-            exact: points.exact[point],
-            sources: group.sources,
-            crossing,
-        });
-    }
-    (vertices, vertex_of)
-}
-
 /// The pieces found so far: their vertices, ends and carrying triangles.
 #[derive(Clone, Copy)]
 struct Pieces<'a> {
@@ -672,10 +323,9 @@ struct Pieces<'a> {
 /// below right, above right)`.
 fn coverage(
     (triangles, corners): (&[InPlaneTriangle], &[[usize; 3]]),
-    points: &Points,
     pieces: &Pieces<'_>,
     exact: &PlanePoints,
-    (pairs, max_pairs): (&mut usize, usize),
+    budget: &mut PairBudget,
     options: &ExecutionOptions,
 ) -> GeomResult<Vec<(bool, bool, bool, bool)>> {
     let Pieces {
@@ -704,7 +354,7 @@ fn coverage(
             vertices[ends_of[piece].1].exact,
         );
         for &(triangle, third) in set {
-            match exact.orient(from, to, points.exact[third])? {
+            match exact.orient(from, to, third)? {
                 Sign::Positive => cover(piece, true, false, triangles[triangle].facing),
                 Sign::Negative => cover(piece, false, true, triangles[triangle].facing),
                 _ => return Err(internal_topology_error()),
@@ -740,7 +390,7 @@ fn coverage(
         .collect();
     let triangle_boxes: Vec<[f64; 4]> = corners
         .iter()
-        .map(|at| union_box(&at.map(|corner| exact.bounds(points.exact[corner]))))
+        .map(|at| union_box(&at.map(|corner| exact.bounds(corner))))
         .collect();
     let by_min_u = |boxes: &[[f64; 4]]| {
         let mut order: Vec<usize> = (0..boxes.len()).collect();
@@ -772,14 +422,14 @@ fn coverage(
         {
             return Ok(());
         }
-        count_pair(pairs, max_pairs)?;
+        budget.count()?;
         let (from, to) = (
             vertices[ends_of[piece].0].exact,
             vertices[ends_of[piece].1].exact,
         );
         let facing = triangles[triangle].facing;
         // Counter-clockwise in the frame's sense.
-        let at = corners[triangle].map(|corner| points.exact[corner]);
+        let at = corners[triangle];
         let ring = if facing == Sign::Positive {
             [at[0], at[1], at[2]]
         } else {
@@ -850,6 +500,7 @@ fn contains_piece(
 
 #[cfg(test)]
 mod tests {
+    use axiolid_contracts::GeomError;
     use axiolid_core::{Point3, Tolerance, Vec3};
 
     use super::super::regions::Projection;

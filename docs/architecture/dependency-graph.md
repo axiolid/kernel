@@ -31,6 +31,7 @@ graph TD
     axiolid_dispatch["axiolid-dispatch\nexecution.dispatch"]
     axiolid_evaluate["axiolid-evaluate\nalgorithm.parametric"]
     axiolid_exact["axiolid-exact\nalgorithm.reference"]
+    axiolid_exact_arrangement["axiolid-exact-arrangement\nalgorithm.planar"]
     axiolid_exact_compile_contract["axiolid-exact-compile-contract\ncontract.operation"]
     axiolid_field["axiolid-field\nrepresentation.sampled"]
     axiolid_field_ops["axiolid-field-ops\nalgorithm.sampled"]
@@ -232,6 +233,10 @@ graph TD
     axiolid_evaluate --> axiolid_surface
     axiolid_exact --> axiolid_core
     axiolid_exact --> axiolid_guarantees
+    axiolid_exact_arrangement --> axiolid_contracts
+    axiolid_exact_arrangement --> axiolid_core
+    axiolid_exact_arrangement --> axiolid_exact
+    axiolid_exact_arrangement --> axiolid_predicates
     axiolid_exact_compile_contract --> axiolid_brep
     axiolid_exact_compile_contract --> axiolid_contracts
     axiolid_exact_compile_contract --> axiolid_model
@@ -250,6 +255,7 @@ graph TD
     axiolid_hidden_lines --> axiolid_core
     axiolid_hidden_lines --> axiolid_dispatch
     axiolid_hidden_lines --> axiolid_exact
+    axiolid_hidden_lines --> axiolid_exact_arrangement
     axiolid_hidden_lines --> axiolid_guarantees
     axiolid_hidden_lines --> axiolid_mesh
     axiolid_hidden_lines --> axiolid_mesh_hidden_lines_contract
@@ -398,6 +404,7 @@ graph TD
     axiolid_reference --> axiolid_dispatch
     axiolid_reference --> axiolid_evaluate
     axiolid_reference --> axiolid_exact
+    axiolid_reference --> axiolid_exact_arrangement
     axiolid_reference --> axiolid_guarantees
     axiolid_reference --> axiolid_measure
     axiolid_reference --> axiolid_mesh

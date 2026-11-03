@@ -23,13 +23,15 @@ import probe_lib
 Q = "crates/algorithms/reference/src/section/request.rs"
 K = "crates/algorithms/reference/src/section/cut_regions.rs"
 N = "crates/algorithms/reference/src/section/ring_nesting.rs"
-P = "crates/algorithms/reference/src/section/plane_points.rs"
+P = "crates/algorithms/planar/exact-arrangement/src/points.rs"
+PR = "crates/algorithms/reference/src/section/plane_points.rs"
 D = "crates/execution/dispatch/src/section_request.rs"
 TESTS = [
     ["-p", "axiolid-reference", "--test", "section_request"],
     ["-p", "axiolid-reference", "--test", "section_conformance"],
     ["-p", "axiolid-reference", "--lib", "section"],
     ["-p", "axiolid-dispatch", "--all-features", "--test", "mesh_section_contract"],
+    ["-p", "axiolid-exact-arrangement"],
 ]
 
 MUTANTS = [
@@ -91,30 +93,30 @@ MUTANTS = [
     ),
     (
         'crossing weight not made positive', P,
-        '        if point[2].sign() == Some(Sign::Negative) {',
-        '        if false && point[2].sign() == Some(Sign::Negative) {', TESTS,
+        '            Some(Sign::Negative) => point = point.map(|value| value.neg()),',
+        '            Some(Sign::Negative) => {}', TESTS,
     ),
     (
         'orientation fallback guesses a sign', P,
-        '            None => determinant(&a.exact, &b.exact, &c.exact)\n'
-        '                .sign()\n'
-        '                .ok_or_else(undecided)?,',
-        '            None => Sign::Positive,', TESTS,
+        '                determinant(&a.exact, &b.exact, &c.exact)\n'
+        '                    .sign()\n'
+        '                    .ok_or_else(undecided)?',
+        '                Sign::Positive', TESTS,
     ),
     (
         'comparison fallback guesses a sign', P,
-        '            None => difference(&a.exact, &b.exact, axis)\n'
-        '                .sign()\n'
-        '                .ok_or_else(undecided)?,',
-        '            None => Sign::Positive,', TESTS,
+        '                difference(&a.exact, &b.exact, axis)\n'
+        '                    .sign()\n'
+        '                    .ok_or_else(undecided)?',
+        '                Sign::Positive', TESTS,
     ),
     (
-        'vertex off the plane accepted', P,
+        'vertex off the plane accepted', PR,
         '        if self.plane_value(point)?.sign() != Some(Sign::Zero) {',
         '        if false && self.plane_value(point)?.sign() != Some(Sign::Zero) {', TESTS,
     ),
     (
-        'edge on one side of the plane crossed', P,
+        'edge on one side of the plane crossed', PR,
         '        if !opposite {',
         '        if false && !opposite {', TESTS,
     ),
@@ -125,7 +127,8 @@ MUTANTS = [
     ),
     (
         'fast path orients with a float determinant', P,
-        '            return Ok(sign_times(orient_sign(fa, fb, fc)?, self.frame_sign));',
+        '            let sign = orient2d(fa, fb, fc).sign().ok_or_else(undecided)?;\n'
+        '            return Ok(sign_times(sign, self.frame_sign));',
         '            let det = (fb.x - fa.x) * (fc.y - fa.y) - (fb.y - fa.y) * (fc.x - fa.x);\n'
         '            let sign = if det > 0.0 {\n'
         '                Sign::Positive\n'
@@ -138,8 +141,10 @@ MUTANTS = [
     ),
     (
         'fast path orientation ignores the frame sign', P,
-        '            return Ok(sign_times(orient_sign(fa, fb, fc)?, self.frame_sign));',
-        '            return Ok(orient_sign(fa, fb, fc)?);', TESTS,
+        '            let sign = orient2d(fa, fb, fc).sign().ok_or_else(undecided)?;\n'
+        '            return Ok(sign_times(sign, self.frame_sign));',
+        '            let sign = orient2d(fa, fb, fc).sign().ok_or_else(undecided)?;\n'
+        '            return Ok(sign);', TESTS,
     ),
     (
         'fast path comparison reversed', P,
@@ -154,13 +159,13 @@ MUTANTS = [
         '    Some(candidate)', TESTS,
     ),
     (
-        'edge fixed in a coordinate taken from its other end', P,
-        '            exact_quotient(&point[0], &point[2], fixed(a.x, b.x)),',
-        '            exact_quotient(&point[0], &point[2], fixed(a.x, b.x).map(|x| x.next_up())),',
+        'edge fixed in a coordinate taken from its other end', PR,
+        '        let hints = [fixed(a.x, b.x), fixed(a.y, b.y)];',
+        '        let hints = [fixed(a.x, b.x).map(|x| x.next_up()), fixed(a.y, b.y)];',
         TESTS,
     ),
     (
-        'vertex node not checked against its certified side', P,
+        'vertex node not checked against its certified side', PR,
         '                if certified.sign != Sign::Zero {',
         '                if false && certified.sign != Sign::Zero {', TESTS,
     ),

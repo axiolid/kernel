@@ -180,6 +180,15 @@
       "role": "algorithm.reference",
       "version": "0.1.3"
     },
+    "axiolid-exact-arrangement": {
+      "description": "Exact arrangement of straight segments on rational points, with face tracing",
+      "layer": "algorithms",
+      "path": "crates/algorithms/planar/exact-arrangement",
+      "released": null,
+      "released_date": null,
+      "role": "algorithm.planar",
+      "version": "0.1.0"
+    },
     "axiolid-exact-compile-contract": {
       "description": "Portable graph-to-exact-B-rep compilation contract",
       "layer": "contracts",
@@ -615,6 +624,7 @@
           "axiolid-decompose",
           "axiolid-evaluate",
           "axiolid-exact",
+          "axiolid-exact-arrangement",
           "axiolid-field-ops",
           "axiolid-heal",
           "axiolid-hidden-lines",
@@ -666,6 +676,6 @@
         "title": "Facade"
       }
     ],
-    "total": 62
+    "total": 63
   }
 }

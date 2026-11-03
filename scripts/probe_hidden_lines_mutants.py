@@ -11,7 +11,8 @@ OCC = "crates/algorithms/discrete/hidden-lines/src/occlusion.rs"
 EDG = "crates/algorithms/discrete/hidden-lines/src/edges.rs"
 PAR = "crates/algorithms/discrete/hidden-lines/src/param.rs"
 DEC = "crates/algorithms/discrete/hidden-lines/src/decide.rs"
-OUT = "crates/algorithms/discrete/hidden-lines/src/output.rs"
+RATIO = "crates/algorithms/planar/exact-arrangement/src/ratio.rs"
+RATIO_TESTS = ["-p", "axiolid-exact-arrangement"]
 BRD = "crates/algorithms/discrete/hidden-lines/src/broad.rs"
 PRO = "crates/algorithms/discrete/hidden-lines/src/provider.rs"
 PRE = "crates/algorithms/discrete/hidden-lines/src/prepare.rs"
@@ -79,12 +80,12 @@ MUTANTS = [
      '    *escalations += 1;\n    match expr.sign_in::<Dyadic>() {',
      '    *escalations += 1;\n    match Some(Sign::Zero).filter(|_| expr.sign_in::<Dyadic>().is_some()) {', TESTS),
     # What is written out.
-    ('ties round up', OUT,
+    ('ties round up', RATIO,
      'std::cmp::Ordering::Equal => sticky || kept.bit(0),',
-     'std::cmp::Ordering::Equal => true,', TESTS),
-    ('sticky remainder ignored', OUT,
+     'std::cmp::Ordering::Equal => true,', RATIO_TESTS),
+    ('sticky remainder ignored', RATIO,
      'std::cmp::Ordering::Equal => sticky || kept.bit(0),',
-     'std::cmp::Ordering::Equal => kept.bit(0),', TESTS),
+     'std::cmp::Ordering::Equal => kept.bit(0),', RATIO_TESTS),
     ('output limit unchecked', PRO,
      '            if segments.len() >= request.limits.max_output_segments {',
      '            if false && segments.len() >= request.limits.max_output_segments {', TESTS),

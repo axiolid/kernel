@@ -5,8 +5,9 @@
 //! the coordinates a section returns are rounded: a crossing is interpolated,
 //! and the projection to a turned frame multiplies and adds. Rings that touch
 //! in the source can cross by an ulp in those coordinates, so every decision
-//! about rings (crossing, contact, containment, outer or hole) is made here,
-//! on exact points, and the returned coordinates take no part in it.
+//! about rings (crossing, contact, containment, outer or hole) is made on
+//! exact points (`axiolid_exact_arrangement::ExactPoints`, ADR 0094), and the
+//! returned coordinates take no part in it.
 //!
 //! The plane is the one `ExactSectionPlane` classifies against: `O = origin`,
 //! `X = x_point`, `Y = y_point`. Let `N = (X - O) x (Y - O)` and
@@ -20,111 +21,48 @@
 //! - the crossing of the edge `A`-`B`, whose ends have `D` of strictly
 //!   opposite signs: `x = D(A) B_u - D(B) A_u`, `y` the same in `v`, and
 //!   `w = D(A) - D(B)`, all negated when `w < 0`. The degrees are 4, 4 and 3.
-//!   When `x = q w` and `y = r w` hold exactly for binary64 `q` and `r`
-//!   (checked in `Dyadic`), the crossing is stored as `(q, r, 1)`, the same
-//!   point, so that it takes the fast path below.
-//!
-//! The predicates are polynomials in these values. `orient` is the 3 x 3
-//! determinant (degree 11 in the source coordinates when all three points are
-//! crossings) and `compare` is `c_a w_b - c_b w_a` for a coordinate `c`
-//! (degree 7). When every point has `w = 1` they are the exact `orient2d` of
-//! the binary64 coordinates and a plain comparison. Otherwise each is
-//! evaluated twice at most: in `Interval`s of the stored enclosures, which
-//! decides nearly every call, and, when that straddles zero, in `Dyadic`s of
-//! the stored exact values. `Dyadic` has no range limit, so products of tiny
-//! coordinates are no reason to refuse.
-//!
-//! The boxes in `bounds` are sound enclosures of the projected points. They
-//! only prune candidates and never decide.
+//!   When `x = q w` and `y = r w` hold exactly for binary64 `q` and `r`, the
+//!   crossing is stored as `(q, r, 1)`, the same point, so that it takes the
+//!   fast path of the predicates.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use axiolid_contracts::{GeomError, GeomResult, Sign};
+use axiolid_contracts::{GeomResult, Sign};
 use axiolid_core::{Point2, Point3};
-use axiolid_exact::{Arith, Dyadic, Interval};
+use axiolid_exact::{Arith, Dyadic};
+use axiolid_exact_arrangement::{ExactPoints, PointId};
+pub(super) use axiolid_exact_arrangement::{Location, RingBox};
 use axiolid_mesh::TriMesh;
 
 use super::regions::Projection;
 use super::{
-    internal_topology_error, mesh_index, orient_sign, sign_times, Classification, EdgeKey,
-    ExactSectionPlane, NodeKey,
+    internal_topology_error, mesh_index, Classification, EdgeKey, ExactSectionPlane, NodeKey,
 };
 use crate::coplanar::project;
 
-/// Homogeneous coordinates `(x, y, w)`.
-type Homogeneous<T> = [T; 3];
-
-struct ExactPoint {
-    exact: Homogeneous<Dyadic>,
-    enclosure: Homogeneous<Interval>,
-    /// `[u_lo, v_lo, u_hi, v_hi]` of the projected point.
-    bounds: [f64; 4],
-    /// The projected coordinates when `w = 1`.
-    flat: Option<Point2>,
-}
-
-/// Where a point lies relative to a ring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Location {
-    Inside,
-    Outside,
-    Boundary,
-}
-
-/// The extent of a ring, for pruning candidate pairs. Never decides.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct RingBox {
-    /// `[min_u, min_v, max_u, max_v]` of the exact points, with every vertex
-    /// box at its outer limit: contains the ring.
-    bounds: [f64; 4],
-    /// The same with every vertex box at its inner limit: the extremes of the
-    /// ring reach at least this far.
-    core: [f64; 4],
-}
-
-impl RingBox {
-    /// Whether this ring can lie in `other` by their boxes: its smallest
-    /// coordinate cannot be below the box of `other`, nor its largest above.
-    pub(super) fn possibly_within(&self, other: &Self) -> bool {
-        self.core[0] >= other.bounds[0]
-            && self.core[1] >= other.bounds[1]
-            && self.core[2] <= other.bounds[2]
-            && self.core[3] <= other.bounds[3]
-    }
-}
-
-/// The exact points of one section, interned by cut node.
+/// The exact points of one section, interned by cut node. The predicates are
+/// those of `ExactPoints`, on plain indices.
 pub(super) struct PlanePoints {
     origin: [Dyadic; 3],
     normal: [Dyadic; 3],
     axis: usize,
-    frame_sign: Sign,
-    points: Vec<ExactPoint>,
+    points: ExactPoints,
     by_node: BTreeMap<NodeKey, usize>,
-    /// Crossings of two in-plane source edges, by the edges in key order.
-    by_edges: BTreeMap<(EdgeKey, EdgeKey), usize>,
     /// `D` of the mesh vertices met so far.
     values: BTreeMap<u32, Dyadic>,
 }
 
-fn not_finite() -> GeomError {
-    GeomError::Degenerate("cut ring point is not finite".into())
-}
-
-fn undecided() -> GeomError {
-    GeomError::Degenerate("a cut ring sign could not be decided exactly".into())
-}
-
 fn exact(value: f64) -> GeomResult<Dyadic> {
-    Dyadic::try_from_f64(value).ok_or_else(not_finite)
+    Dyadic::try_from_f64(value).ok_or_else(|| {
+        axiolid_contracts::GeomError::Degenerate("cut ring point is not finite".into())
+    })
 }
 
 fn exact_point(point: Point3) -> GeomResult<[Dyadic; 3]> {
     Ok([exact(point.x)?, exact(point.y)?, exact(point.z)?])
 }
 
-fn dot<T: Arith>(left: &[T; 3], right: &[T; 3]) -> T {
+fn dot(left: &[Dyadic; 3], right: &[Dyadic; 3]) -> Dyadic {
     left[0]
         .mul(&right[0])
         .add(&left[1].mul(&right[1]))
@@ -132,42 +70,8 @@ fn dot<T: Arith>(left: &[T; 3], right: &[T; 3]) -> T {
 }
 
 /// `p_i q_j - q_i p_j`.
-fn minor<T: Arith>(p: &Homogeneous<T>, q: &Homogeneous<T>, i: usize, j: usize) -> T {
+fn minor(p: &[Dyadic; 3], q: &[Dyadic; 3], i: usize, j: usize) -> Dyadic {
     p[i].mul(&q[j]).sub(&q[i].mul(&p[j]))
-}
-
-/// `p x q`: the line through two points, or the point where two lines meet.
-fn cross<T: Arith>(p: &Homogeneous<T>, q: &Homogeneous<T>) -> Homogeneous<T> {
-    [minor(p, q, 1, 2), minor(p, q, 2, 0), minor(p, q, 0, 1)]
-}
-
-/// `det[a; b; c]`: positive when the points turn counter-clockwise in the
-/// projected plane (their weights are positive).
-fn determinant<T: Arith>(a: &Homogeneous<T>, b: &Homogeneous<T>, c: &Homogeneous<T>) -> T {
-    a[0].mul(&minor(b, c, 1, 2))
-        .sub(&a[1].mul(&minor(b, c, 0, 2)))
-        .add(&a[2].mul(&minor(b, c, 0, 1)))
-}
-
-/// `c_a w_b - c_b w_a` for coordinate `axis` (0 = u, 1 = v).
-fn difference<T: Arith>(a: &Homogeneous<T>, b: &Homogeneous<T>, axis: usize) -> T {
-    a[axis].mul(&b[2]).sub(&b[axis].mul(&a[2]))
-}
-
-fn ordering(sign: Sign) -> Ordering {
-    match sign {
-        Sign::Positive => Ordering::Greater,
-        Sign::Negative => Ordering::Less,
-        _ => Ordering::Equal,
-    }
-}
-
-fn coordinate(point: Point2, axis: usize) -> f64 {
-    if axis == 0 {
-        point.x
-    } else {
-        point.y
-    }
 }
 
 fn sub3(left: &[Dyadic; 3], right: &[Dyadic; 3]) -> [Dyadic; 3] {
@@ -176,23 +80,6 @@ fn sub3(left: &[Dyadic; 3], right: &[Dyadic; 3]) -> [Dyadic; 3] {
         left[1].sub(&right[1]),
         left[2].sub(&right[2]),
     ]
-}
-
-/// `numerator / weight` as a binary64 number, when that is exact. `hint` is a
-/// candidate, such as an end of an edge that does not move in this coordinate.
-fn exact_quotient(numerator: &Dyadic, weight: &Dyadic, hint: Option<f64>) -> Option<f64> {
-    let candidate = match hint {
-        Some(hint) => hint,
-        // Both convert exactly up to 53 bits, so the division is then
-        // correctly rounded and equals the quotient whenever that is
-        // representable.
-        None if numerator.bits() <= 53 && weight.bits() <= 53 => {
-            numerator.to_f64() / weight.to_f64()
-        }
-        None => return None,
-    };
-    let exact_candidate = Dyadic::try_from_f64(candidate)?;
-    (exact_candidate.mul(weight) == *numerator).then_some(candidate)
 }
 
 impl PlanePoints {
@@ -209,12 +96,20 @@ impl PlanePoints {
             origin,
             normal,
             axis: projection.axis(),
-            frame_sign: projection.frame_sign(),
-            points: Vec::new(),
+            points: ExactPoints::with_frame_sign(projection.frame_sign()),
             by_node: BTreeMap::new(),
-            by_edges: BTreeMap::new(),
             values: BTreeMap::new(),
         })
+    }
+
+    /// The store, for the arrangement.
+    pub(super) fn store(&self) -> &ExactPoints {
+        &self.points
+    }
+
+    /// The store, for the arrangement.
+    pub(super) fn store_mut(&mut self) -> &mut ExactPoints {
+        &mut self.points
     }
 
     /// `D(point)`: zero on the plane.
@@ -285,24 +180,7 @@ impl PlanePoints {
     }
 
     fn push_vertex(&mut self, point: Point3) -> GeomResult<usize> {
-        let flat = project(point, self.axis);
-        self.push_flat(flat)
-    }
-
-    fn push_flat(&mut self, flat: Point2) -> GeomResult<usize> {
-        let exact = [exact(flat.x)?, exact(flat.y)?, exact(1.0)?];
-        let enclosure = [
-            Interval::point(flat.x),
-            Interval::point(flat.y),
-            Interval::point(1.0),
-        ];
-        self.points.push(ExactPoint {
-            exact,
-            enclosure,
-            bounds: [flat.x, flat.y, flat.x, flat.y],
-            flat: Some(flat),
-        });
-        Ok(self.points.len() - 1)
+        Ok(self.points.push_flat(project(point, self.axis))?.0)
     }
 
     /// The crossing of the edge `a`-`b` with the plane; the ends lie strictly
@@ -323,192 +201,78 @@ impl PlanePoints {
         if !opposite {
             return Err(internal_topology_error());
         }
-        let (a, b) = (project(a, self.axis), project(b, self.axis));
-        let mut point = [
+        let (a, b): (Point2, Point2) = (project(a, self.axis), project(b, self.axis));
+        let point = [
             da.mul(&exact(b.x)?).sub(&db.mul(&exact(a.x)?)),
             da.mul(&exact(b.y)?).sub(&db.mul(&exact(a.y)?)),
             da.sub(db),
         ];
-        if point[2].sign() == Some(Sign::Negative) {
-            point = point.map(|value| value.neg());
-        }
         // An edge that does not move in a coordinate crosses at that value.
         let fixed = |from: f64, to: f64| (from == to).then_some(from);
-        if let (Some(u), Some(v)) = (
-            exact_quotient(&point[0], &point[2], fixed(a.x, b.x)),
-            exact_quotient(&point[1], &point[2], fixed(a.y, b.y)),
-        ) {
-            return self.push_flat(Point2::new(u, v));
-        }
-        Ok(self.push_homogeneous(point))
+        let hints = [fixed(a.x, b.x), fixed(a.y, b.y)];
+        Ok(self.points.push_hinted(point, hints)?.0)
     }
 
-    /// A point of positive weight that is not a binary64 position.
-    fn push_homogeneous(&mut self, point: Homogeneous<Dyadic>) -> usize {
-        let enclosure = [
-            point[0].enclosure(),
-            point[1].enclosure(),
-            point[2].enclosure(),
-        ];
-        let (u, v) = (
-            enclosure[0].quotient(enclosure[2]),
-            enclosure[1].quotient(enclosure[2]),
-        );
-        self.points.push(ExactPoint {
-            exact: point,
-            enclosure,
-            bounds: [u.lo(), v.lo(), u.hi(), v.hi()],
-            flat: None,
-        });
-        self.points.len() - 1
-    }
-
-    /// The point where the in-plane source edges `key.0` (from `ends[0]` to
-    /// `ends[1]`) and `key.1` (from `ends[2]` to `ends[3]`) cross properly,
-    /// interned by the pair of edges. The ends are exact source vertices.
-    ///
-    /// The lines `L = a x b` and the meeting point `X = L1 x L2` have degrees
-    /// 2 and (3, 3, 2) in the coordinates; `w` is made positive. When the
-    /// point is a binary64 position it takes the fast path, like a plane
-    /// crossing does.
-    pub(super) fn segment_crossing(
-        &mut self,
-        key: (EdgeKey, EdgeKey),
-        ends: [usize; 4],
-    ) -> GeomResult<usize> {
-        let (key, ends) = if key.0 <= key.1 {
-            (key, ends)
-        } else {
-            ((key.1, key.0), [ends[2], ends[3], ends[0], ends[1]])
-        };
-        if let Some(&index) = self.by_edges.get(&key) {
-            return Ok(index);
-        }
-        let [a, b, c, d] = ends.map(|end| &self.points[end]);
-        let mut point = cross(&cross(&a.exact, &b.exact), &cross(&c.exact, &d.exact));
-        match point[2].sign() {
-            Some(Sign::Positive) => {}
-            Some(Sign::Negative) => point = point.map(|value| value.neg()),
-            // Parallel edges do not cross in one point.
-            _ => return Err(internal_topology_error()),
-        }
-        // An edge that does not move in a coordinate crosses at that value.
-        let fixed = |axis: usize| -> Option<f64> {
-            [(a, b), (c, d)].into_iter().find_map(|(from, to)| {
-                let (from, to) = (coordinate(from.flat?, axis), coordinate(to.flat?, axis));
-                (from == to).then_some(from)
-            })
-        };
-        let hints = [fixed(0), fixed(1)];
-        let index = if let (Some(u), Some(v)) = (
-            exact_quotient(&point[0], &point[2], hints[0]),
-            exact_quotient(&point[1], &point[2], hints[1]),
-        ) {
-            self.push_flat(Point2::new(u, v))?
-        } else {
-            self.push_homogeneous(point)
-        };
-        self.by_edges.insert(key, index);
-        Ok(index)
-    }
-
-    /// The parameter `t` along the first of two crossing in-plane source
-    /// edges (`a` to `b` and `c` to `d`, as in `segment_crossing`) at which
-    /// they cross: `a + t (b - a)`. For output only.
+    /// The parameter along the first of two crossing source edges at which
+    /// they cross (`ExactPoints::segment_parameter`). For output only.
     pub(super) fn segment_parameter(&self, ends: [usize; 4]) -> GeomResult<f64> {
-        let [a, b, c, d] = ends.map(|end| &self.points[end].exact);
-        let difference = |to: &Homogeneous<Dyadic>, from: &Homogeneous<Dyadic>| {
-            [to[0].sub(&from[0]), to[1].sub(&from[1])]
-        };
-        let turn = |p: [Dyadic; 2], q: [Dyadic; 2]| p[0].mul(&q[1]).sub(&p[1].mul(&q[0]));
-        let along = difference(d, c);
-        let numerator = turn(difference(c, a), along.clone());
-        let denominator = turn(difference(b, a), along);
-        if denominator.sign() == Some(Sign::Zero) {
-            return Err(internal_topology_error());
-        }
-        let (m_n, e_n) = numerator.approx_parts();
-        let (m_d, e_d) = denominator.approx_parts();
-        let shift = (e_n - e_d).clamp(-1100, 1100) as i32;
-        let t = m_n / m_d * 2f64.powi(shift / 2) * 2f64.powi(shift - shift / 2);
-        if t.is_finite() {
-            Ok(t)
-        } else {
-            Err(not_finite())
-        }
+        self.points.segment_parameter(ends.map(PointId))
+    }
+
+    /// `[u_lo, v_lo, u_hi, v_hi]`, a sound box of the projected point.
+    pub(super) fn bounds(&self, index: usize) -> [f64; 4] {
+        self.points.bounds(PointId(index))
+    }
+
+    /// The projected position of a point that has one in binary64.
+    #[cfg(test)]
+    pub(super) fn flat(&self, index: usize) -> Option<Point2> {
+        self.points.flat(PointId(index))
+    }
+
+    /// The exact homogeneous coordinates of a point.
+    #[cfg(test)]
+    pub(super) fn exact(&self, index: usize) -> &[Dyadic; 3] {
+        self.points.exact(PointId(index))
     }
 
     /// Exact orientation of `a`, `b`, `c` in the frame's own `(x, y)` sense:
     /// positive when they turn counter-clockwise there.
     pub(super) fn orient(&self, a: usize, b: usize, c: usize) -> GeomResult<Sign> {
-        let (a, b, c) = (&self.points[a], &self.points[b], &self.points[c]);
-        if let (Some(fa), Some(fb), Some(fc)) = (a.flat, b.flat, c.flat) {
-            return Ok(sign_times(orient_sign(fa, fb, fc)?, self.frame_sign));
-        }
-        let sign = match determinant(&a.enclosure, &b.enclosure, &c.enclosure).sign() {
-            Some(sign) => sign,
-            None => determinant(&a.exact, &b.exact, &c.exact)
-                .sign()
-                .ok_or_else(undecided)?,
-        };
-        Ok(sign_times(sign, self.frame_sign))
+        self.points.orient(PointId(a), PointId(b), PointId(c))
     }
 
     /// Order of the projected coordinates of `a` and `b` along `axis`
     /// (0 = u, 1 = v). The projection's own axes, not the frame's.
-    pub(super) fn compare(&self, a: usize, b: usize, axis: usize) -> GeomResult<Ordering> {
-        let (a, b) = (&self.points[a], &self.points[b]);
-        if let (Some(fa), Some(fb)) = (a.flat, b.flat) {
-            return coordinate(fa, axis)
-                .partial_cmp(&coordinate(fb, axis))
-                .ok_or_else(not_finite);
-        }
-        let sign = match difference(&a.enclosure, &b.enclosure, axis).sign() {
-            Some(sign) => sign,
-            None => difference(&a.exact, &b.exact, axis)
-                .sign()
-                .ok_or_else(undecided)?,
-        };
-        Ok(ordering(sign))
+    pub(super) fn compare(
+        &self,
+        a: usize,
+        b: usize,
+        axis: usize,
+    ) -> GeomResult<std::cmp::Ordering> {
+        self.points.compare(PointId(a), PointId(b), axis)
     }
 
     /// Whether `a` and `b` are the same point.
     pub(super) fn same(&self, a: usize, b: usize) -> GeomResult<bool> {
-        Ok(a == b
-            || (self.compare(a, b, 0)? == Ordering::Equal
-                && self.compare(a, b, 1)? == Ordering::Equal))
+        self.points.same(PointId(a), PointId(b))
     }
 
     /// Order by `u`, then `v`.
-    pub(super) fn lexicographic(&self, a: usize, b: usize) -> GeomResult<Ordering> {
-        match self.compare(a, b, 0)? {
-            Ordering::Equal => self.compare(a, b, 1),
-            order => Ok(order),
-        }
-    }
-
-    /// `[u_lo, v_lo, u_hi, v_hi]`, a sound box of the projected point.
-    pub(super) fn bounds(&self, index: usize) -> [f64; 4] {
-        self.points[index].bounds
+    pub(super) fn lexicographic(&self, a: usize, b: usize) -> GeomResult<std::cmp::Ordering> {
+        self.points.lexicographic(PointId(a), PointId(b))
     }
 
     /// The axis of the projection along which two distinct points of a line
     /// differ.
     pub(super) fn dominant(&self, a: usize, b: usize) -> GeomResult<usize> {
-        Ok(if self.compare(a, b, 0)? == Ordering::Equal {
-            1
-        } else {
-            0
-        })
+        self.points.dominant(PointId(a), PointId(b))
     }
 
     /// `(low, high)` of two points along `axis`.
     pub(super) fn ordered(&self, a: usize, b: usize, axis: usize) -> GeomResult<(usize, usize)> {
-        Ok(if self.compare(a, b, axis)? == Ordering::Greater {
-            (b, a)
-        } else {
-            (a, b)
-        })
+        let (low, high) = self.points.ordered(PointId(a), PointId(b), axis)?;
+        Ok((low.0, high.0))
     }
 
     /// Whether collinear `at` lies strictly between `before` and `after`.
@@ -518,10 +282,8 @@ impl PlanePoints {
         at: usize,
         after: usize,
     ) -> GeomResult<bool> {
-        let axis = self.dominant(before, after)?;
-        let (low, high) = self.ordered(before, after, axis)?;
-        Ok(self.compare(low, at, axis)? == Ordering::Less
-            && self.compare(at, high, axis)? == Ordering::Less)
+        self.points
+            .strictly_between(PointId(before), PointId(at), PointId(after))
     }
 
     /// Whether collinear `point` lies on the closed segment `start`-`end`.
@@ -531,72 +293,28 @@ impl PlanePoints {
         start: usize,
         end: usize,
     ) -> GeomResult<bool> {
-        let axis = self.dominant(start, end)?;
-        let (low, high) = self.ordered(start, end, axis)?;
-        Ok(self.compare(low, point, axis)? != Ordering::Greater
-            && self.compare(point, high, axis)? != Ordering::Greater)
+        self.points
+            .within_segment(PointId(point), PointId(start), PointId(end))
     }
 
-    /// Where `point` lies relative to the closed `ring`: a crossing-number
-    /// walk with exact orientation tests.
-    ///
-    /// `orient` is in the frame's sense and the `v` comparisons are in the
-    /// projection's. When the projection mirrors the frame the walk counts the
-    /// crossings of the opposite ray, which is the winding number negated; only
-    /// zero or nonzero is used.
+    /// Where `point` lies relative to the closed `ring`.
     pub(super) fn locate(&self, point: usize, ring: &[usize]) -> GeomResult<Location> {
-        let mut winding = 0i32;
-        for index in 0..ring.len() {
-            let (a, b) = (ring[index], ring[(index + 1) % ring.len()]);
-            let side = self.orient(a, b, point)?;
-            if side == Sign::Zero && self.within_segment(point, a, b)? {
-                return Ok(Location::Boundary);
-            }
-            if self.compare(a, point, 1)? != Ordering::Greater {
-                if self.compare(b, point, 1)? == Ordering::Greater && side == Sign::Positive {
-                    winding += 1;
-                }
-            } else if self.compare(b, point, 1)? != Ordering::Greater && side == Sign::Negative {
-                winding -= 1;
-            }
-        }
-        Ok(if winding == 0 {
-            Location::Outside
-        } else {
-            Location::Inside
-        })
+        let ring: Vec<PointId> = ring.iter().copied().map(PointId).collect();
+        self.points.locate(PointId(point), &ring)
     }
 
     /// The boxes of a ring of exact points.
     pub(super) fn ring_box(&self, ring: &[usize]) -> RingBox {
-        let mut bounds = [
-            f64::INFINITY,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NEG_INFINITY,
-        ];
-        let mut core = bounds;
-        for &node in ring {
-            let [u_lo, v_lo, u_hi, v_hi] = self.bounds(node);
-            bounds = [
-                bounds[0].min(u_lo),
-                bounds[1].min(v_lo),
-                bounds[2].max(u_hi),
-                bounds[3].max(v_hi),
-            ];
-            core = [
-                core[0].min(u_hi),
-                core[1].min(v_hi),
-                core[2].max(u_lo),
-                core[3].max(v_lo),
-            ];
-        }
-        RingBox { bounds, core }
+        let ring: Vec<PointId> = ring.iter().copied().map(PointId).collect();
+        self.points.ring_box(&ring)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
+    use axiolid_contracts::GeomError;
     use axiolid_core::{Frame3, Point2, Vec3};
 
     use super::super::{classify_vertices, node_point, orient_sign, project_local};
@@ -702,7 +420,7 @@ mod tests {
         let crossing = points
             .crossing(Point3::new(0.0, 0.0, -1.0), Point3::new(1.0, 2.0, 3.0))
             .expect("crossing");
-        assert_eq!(points.points[crossing].flat, Some(Point2::new(0.375, 0.75)));
+        assert_eq!(points.flat(crossing), Some(Point2::new(0.375, 0.75)));
         let vertex = points
             .vertex(Point3::new(0.375, 0.75, 0.5))
             .expect("vertex");
@@ -711,7 +429,7 @@ mod tests {
         let third = points
             .crossing(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.5))
             .expect("crossing");
-        assert_eq!(points.points[third].flat, None);
+        assert_eq!(points.flat(third), None);
         assert!(!points.same(third, vertex).expect("same"));
         // A neighbour of the binary64 position is not that position.
         let near = points
@@ -732,7 +450,7 @@ mod tests {
         let forward = points.crossing(a, b).expect("crossing");
         let backward = points.crossing(b, a).expect("crossing");
         assert!(points.same(forward, backward).expect("same"));
-        assert_eq!(points.points[forward].exact, points.points[backward].exact);
+        assert_eq!(points.exact(forward), points.exact(backward));
     }
 
     #[test]
@@ -801,7 +519,7 @@ mod tests {
             let mut points = PlanePoints::new(&plane, projection).expect("points");
             // On y = 0.1 at x = 1/3, 2/3 and 4/3.
             let line = slanted(&mut points, &[1.0, 2.0, 4.0]);
-            assert!(line.iter().all(|&i| points.points[i].flat.is_none()));
+            assert!(line.iter().all(|&i| points.flat(i).is_none()));
             assert_eq!(
                 points.orient(line[0], line[1], line[2]).expect("orient"),
                 Sign::Zero
@@ -838,7 +556,7 @@ mod tests {
         let column = points
             .crossing(Point3::new(0.25, 0.5, 1.0), Point3::new(0.25, 0.5, -1.0))
             .expect("crossing");
-        assert_eq!(points.points[column].flat, Some(Point2::new(0.25, 0.5)));
+        assert_eq!(points.flat(column), Some(Point2::new(0.25, 0.5)));
     }
 
     #[test]
@@ -850,156 +568,6 @@ mod tests {
         let off = points.node(&mesh, &classifications, NodeKey::Vertex(0));
         assert!(matches!(
             off,
-            Err(GeomError::BackendContractViolation { .. })
-        ));
-    }
-
-    /// The in-plane source vertices at `corners` in the flat frame.
-    fn square_corners(points: &mut PlanePoints, corners: &[(f64, f64)]) -> Vec<usize> {
-        corners
-            .iter()
-            .map(|&(x, y)| points.vertex(Point3::new(x, y, 0.5)).expect("vertex"))
-            .collect()
-    }
-
-    fn keys(first: (u32, u32), second: (u32, u32)) -> (EdgeKey, EdgeKey) {
-        (
-            EdgeKey::new(first.0, first.1),
-            EdgeKey::new(second.0, second.1),
-        )
-    }
-
-    #[test]
-    fn the_diagonals_of_the_unit_square_meet_at_its_centre_on_the_fast_path() {
-        let (plane, projection) = plane_of(flat_frame());
-        let mut points = PlanePoints::new(&plane, projection).expect("points");
-        let at = square_corners(
-            &mut points,
-            &[(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 1.0), (0.5, 0.5)],
-        );
-        let crossing = points
-            .segment_crossing(keys((0, 1), (2, 3)), [at[0], at[1], at[2], at[3]])
-            .expect("crossing");
-        assert_eq!(points.points[crossing].flat, Some(Point2::new(0.5, 0.5)));
-        assert!(points.same(crossing, at[4]).expect("same"));
-    }
-
-    #[test]
-    fn a_segment_crossing_does_not_depend_on_the_order_of_its_arguments() {
-        let (plane, projection) = plane_of(flat_frame());
-        let mut points = PlanePoints::new(&plane, projection).expect("points");
-        let at = square_corners(
-            &mut points,
-            &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0), (0.0, 1.0)],
-        );
-        let forward = points
-            .segment_crossing(keys((0, 1), (2, 3)), [at[0], at[1], at[2], at[3]])
-            .expect("crossing");
-        // Edges swapped: the same point, interned once.
-        let swapped = points
-            .segment_crossing(keys((2, 3), (0, 1)), [at[2], at[3], at[0], at[1]])
-            .expect("crossing");
-        assert_eq!(forward, swapped);
-        assert_eq!(points.points[forward].flat, None);
-        let exact = &points.points[forward].exact;
-        // (1/3, 2/3): the numerators differ by a factor of two, the weight is positive.
-        assert_eq!(exact[0].add(&exact[0]), exact[1]);
-        assert_eq!(exact[2].sign(), Some(Sign::Positive));
-        // Each edge reversed, not interned: the same point all the same.
-        let (reversed_a, reversed_b) = (
-            points.points.len(),
-            points
-                .segment_crossing(keys((0, 5), (2, 6)), [at[1], at[0], at[3], at[2]])
-                .expect("crossing"),
-        );
-        assert_eq!(reversed_b, reversed_a);
-        assert!(points.same(forward, reversed_b).expect("same"));
-        assert_eq!(
-            points.points[forward].exact,
-            points.points[reversed_b].exact
-        );
-    }
-
-    #[test]
-    fn crossings_on_one_source_edge_are_collinear_in_either_frame_sense() {
-        let counter = flat_frame();
-        let mirrored = Frame3 {
-            y: -Vec3::Y,
-            z: -Vec3::Z,
-            ..counter
-        };
-        for (frame, turn) in [(counter, Sign::Positive), (mirrored, Sign::Negative)] {
-            let (plane, projection) = plane_of(frame);
-            let mut points = PlanePoints::new(&plane, projection).expect("points");
-            // The edge 0-1 from (0.1, 0.1) to (3.7, 2.9), crossed by three
-            // edges whose crossing points are not binary64.
-            let mut corners = vec![(0.1, 0.1), (3.7, 2.9), (2.0, 0.0)];
-            for x in [0.7, 1.3, 2.9] {
-                corners.extend([(x, -1.0), (x + 0.3, 4.0)]);
-            }
-            let at = square_corners(&mut points, &corners);
-            let crossing: Vec<usize> = (0..3)
-                .map(|k| {
-                    let (c, d) = (3 + 2 * k, 4 + 2 * k);
-                    points
-                        .segment_crossing(
-                            keys((0, 1), (c as u32, d as u32)),
-                            [at[0], at[1], at[c], at[d]],
-                        )
-                        .expect("crossing")
-                })
-                .collect();
-            assert!(crossing.iter().all(|&i| points.points[i].flat.is_none()));
-            assert_eq!(
-                points
-                    .orient(crossing[0], crossing[1], crossing[2])
-                    .expect("orient"),
-                Sign::Zero
-            );
-            // (2, 0) lies below the edge, to the right of it going from the
-            // first crossing to the second.
-            let side = points
-                .orient(crossing[0], crossing[1], at[2])
-                .expect("orient");
-            assert_eq!(side, sign_times(Sign::Negative, turn));
-        }
-    }
-
-    #[test]
-    fn the_parameter_of_a_segment_crossing_is_its_position_along_the_edge() {
-        let (plane, projection) = plane_of(flat_frame());
-        let mut points = PlanePoints::new(&plane, projection).expect("points");
-        let at = square_corners(
-            &mut points,
-            &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0), (0.0, 1.0)],
-        );
-        let t = points
-            .segment_parameter([at[0], at[1], at[2], at[3]])
-            .expect("parameter");
-        assert!((t - 2.0 / 3.0).abs() < 1e-15, "{t}");
-        // Along (1,0)-(0,1) the crossing (1/3, 2/3) is at 2/3 as well.
-        let back = points
-            .segment_parameter([at[2], at[3], at[0], at[1]])
-            .expect("parameter");
-        assert!((back - 2.0 / 3.0).abs() < 1e-15, "{back}");
-        let same = points.segment_parameter([at[0], at[1], at[0], at[1]]);
-        assert!(matches!(
-            same,
-            Err(GeomError::BackendContractViolation { .. })
-        ));
-    }
-
-    #[test]
-    fn parallel_edges_have_no_crossing() {
-        let (plane, projection) = plane_of(flat_frame());
-        let mut points = PlanePoints::new(&plane, projection).expect("points");
-        let at = square_corners(
-            &mut points,
-            &[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)],
-        );
-        let parallel = points.segment_crossing(keys((0, 1), (2, 3)), [at[0], at[1], at[2], at[3]]);
-        assert!(matches!(
-            parallel,
             Err(GeomError::BackendContractViolation { .. })
         ));
     }
