@@ -52,6 +52,18 @@ pub(crate) struct Built {
     /// [`Built::with_deviation`]; instances, collections and booleans
     /// derive it from their operands.
     pub deviation: crate::deviation::Deviation,
+    /// A boolean cut in its operands' shared frame (#356): that frame's
+    /// transform and the unplaced result, so an enclosing boolean in the
+    /// same frame cuts against it. `None` for every other node.
+    pub local: Option<Box<LocalBoolean>>,
+}
+
+/// A boolean's result in the frame its operands share, before the frame's
+/// transform places it (`ReferenceMeshCompiler::boolean_in_shared_frame`).
+#[derive(Debug, Clone)]
+pub(crate) struct LocalBoolean {
+    pub transform: axiolid_core::Transform3,
+    pub built: Built,
 }
 
 impl Built {
@@ -74,6 +86,7 @@ impl Built {
             fates,
             closure,
             deviation: crate::deviation::Deviation::default(),
+            local: None,
         }
     }
 

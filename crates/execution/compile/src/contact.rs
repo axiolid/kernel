@@ -170,7 +170,9 @@ mod tests {
         let outer = cube(Point3::ZERO, Point3::new(10.0, 10.0, 10.0));
         let mut void = cube(Point3::new(2.0, 2.0, 2.0), Point3::new(8.0, 8.0, 8.0));
         void.indices
-            .chunks_exact_mut(3)
+            .as_chunks_mut::<3>()
+            .0
+            .iter_mut()
             .for_each(|triangle| triangle.swap(1, 2));
         let island = cube(Point3::new(3.0, 3.0, 3.0), Point3::new(4.0, 4.0, 4.0));
         let mesh = together(&together(&outer, &void), &island);

@@ -524,8 +524,12 @@ fn near_flush_openings_far_from_the_origin_are_never_refused_after_the_snap() {
         }
         let moved = snapped(&report);
         let residues = cuts.iter().any(|c| c.given != c.closed);
+        // The wall and its openings share a placement, so they are cut in
+        // their own frame (#356): a residue of the openings' arithmetic
+        // there (about `1e-16`, invisible once placed) is landed on too,
+        // and reported with the placement's rounding it grows by.
         assert!(
-            moved.is_none() || residues,
+            moved.is_none() || residues || moved.is_some_and(|m| m <= 8.0 * ulp(FAR.y)),
             "{what}: a snap without a rounding residue: {report:?}"
         );
         assert!(

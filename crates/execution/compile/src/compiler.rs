@@ -825,6 +825,15 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
     /// A boolean, with the operands' channel fates composed onto the
     /// provider's (#115): a channel lost upstream stays reported lost.
     /// `budget` is the boolean's own, the placed scale included (#312).
+    ///
+    /// Operands placed by the same linear part are cut in the frame they
+    /// share and the result is placed (#356,
+    /// [`Self::boolean_in_shared_frame`]): placing each operand rounds the
+    /// vertices of faces that lie on one plane in exact arithmetic onto
+    /// planes a residue apart, which the snap, landing only on axis-aligned
+    /// planes, cannot close under a general rotation. That cut is never
+    /// worse: where it is refused, for any reason (the unmerged-contact
+    /// guard included), the operands are cut in the world frame as before.
     fn build_boolean(
         &self,
         graph: &GeometryGraph,
@@ -834,6 +843,11 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         budget: Budget,
         cache: &Cache,
     ) -> GeomResult<Built> {
+        if let Ok(Some(built)) =
+            self.boolean_in_shared_frame(graph, (left, right), operator, options, budget, cache)
+        {
+            return Ok(built);
+        }
         let subject = self.cached(cache, left, budget)?;
         refuse_surface_operand(subject, "subject")?;
         let clipping = matches!(
@@ -856,12 +870,153 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
                 (&built.mesh, Some(&built.fates), Some(&built.deviation))
             }
         };
+        self.boolean_of(
+            subject,
+            (tool, tool_fates, tool_deviation),
+            operator,
+            options,
+            budget.placed,
+        )
+    }
+
+    /// The operand of a boolean as a frame sees it (#356): an `Instance`'s
+    /// transform with its source as cached for it, or the frame a boolean
+    /// was itself cut in with its unplaced result. `None` for any other
+    /// node, and for an instance whose source is re-meshed for its
+    /// placement's rounding ([`Self::placement_retry`]): the world frame
+    /// handles that.
+    fn frame_of<'c>(
+        &self,
+        graph: &GeometryGraph,
+        id: NodeId,
+        budget: Budget,
+        cache: &'c Cache,
+    ) -> GeomResult<Option<(Transform3, &'c Built)>> {
+        let node = self.node(graph, id)?;
+        if let GeometryNode::Instance(instance) = node {
+            if self
+                .placement_retry(graph, node, EvalKey::new(id, budget), cache)?
+                .is_some()
+            {
+                return Ok(None);
+            }
+            let source_budget = instance_local_budget(instance.transform, budget, 0.0)?;
+            let source = self.cached(cache, instance.source, source_budget)?;
+            return Ok(Some((instance.transform, source)));
+        }
+        Ok(self
+            .cached(cache, id, budget)?
+            .local
+            .as_deref()
+            .map(|local| (local.transform, &local.built)))
+    }
+
+    /// The boolean cut in the frame its operands share and placed by the
+    /// subject's transform (#356): `None` when they share none, that is
+    /// when either is not framed ([`Self::frame_of`]) or their linear parts
+    /// differ in a bit ([`crate::frame::shared_linear`]; TODO(#391)), or
+    /// when the tool is a half-space clip. The tool is moved by its offset
+    /// in the subject's frame, which is exactly zero when the translations
+    /// are equal.
+    ///
+    /// The result keeps its unplaced form in [`Built::local`], so an
+    /// enclosing boolean in the same frame cuts against it: a chain of
+    /// corbels on a column stays in the column's frame.
+    fn boolean_in_shared_frame(
+        &self,
+        graph: &GeometryGraph,
+        (left, right): (NodeId, NodeId),
+        operator: axiolid_core::BooleanOperator,
+        options: &ExecutionOptions,
+        budget: Budget,
+        cache: &Cache,
+    ) -> GeomResult<Option<Built>> {
+        let clipping = matches!(
+            operator,
+            axiolid_core::BooleanOperator::Difference | axiolid_core::BooleanOperator::Intersection
+        );
+        if clipping && clip_tool(graph, right).is_some() {
+            return Ok(None);
+        }
+        let Some((subject_frame, subject)) = self.frame_of(graph, left, budget, cache)? else {
+            return Ok(None);
+        };
+        let Some((tool_frame, tool)) = self.frame_of(graph, right, budget, cache)? else {
+            return Ok(None);
+        };
+        if !crate::frame::shared_linear(subject_frame, tool_frame) {
+            return Ok(None);
+        }
+        refuse_surface_operand(subject, "subject")?;
+        refuse_surface_operand(tool, "tool")?;
+        let offset = crate::frame::relative_offset(subject_frame, tool_frame).ok_or_else(|| {
+            GeomError::InvalidInput("operand translations have no finite offset".into())
+        })?;
+        let shifted;
+        let tool = if offset == Vec3::ZERO {
+            tool
+        } else {
+            let shift = Transform3::from_translation(offset);
+            let rounding = crate::deviation::placement_rounding(&tool.mesh.positions, shift);
+            shifted = channels::transform(tool, shift, rounding);
+            &shifted
+        };
+        let local_budget = instance_local_budget(subject_frame, budget, 0.0)?;
+        let tool_budget = instance_local_budget(tool_frame, budget, 0.0)?;
+        let local_options = options
+            .clone()
+            .with_tolerance(local_budget.tolerance)
+            .with_chord_error(local_budget.chord)
+            .ok_or_else(|| {
+                GeomError::InvalidInput(format!(
+                    "chord budget {} is not positive and finite",
+                    local_budget.chord
+                ))
+            })?;
+        let local = self.boolean_of(
+            subject,
+            (&tool.mesh, Some(&tool.fates), Some(&tool.deviation)),
+            operator,
+            &local_options,
+            local_budget.placed.max(tool_budget.placed),
+        )?;
+        let rounding = placed_rounding(&local.mesh, subject_frame, budget.chord)?;
+        let mut placed = channels::transform(&local, subject_frame, rounding);
+        placed.local = Some(Box::new(channels::LocalBoolean {
+            transform: subject_frame,
+            built: local,
+        }));
+        Ok(Some(placed))
+    }
+
+    /// The cut of two operands in one frame: settled onto each other
+    /// ([`crate::snap`]), cut, and reported. `placed` is the scale the
+    /// result is placed at (#312).
+    fn boolean_of(
+        &self,
+        subject: &Built,
+        (tool, tool_fates, tool_deviation): (
+            &TriMesh,
+            Option<&channels::Fates>,
+            Option<&crate::deviation::Deviation>,
+        ),
+        operator: axiolid_core::BooleanOperator,
+        options: &ExecutionOptions,
+        placed: Scalar,
+    ) -> GeomResult<Built> {
         // Faces of the two operands a rounding residue apart are moved
         // together first, so a skin or sliver that thin is not cut as one
         // (#276, narrowed to rounding in #291; `crate::snap`): the rounding
         // of the operands' coordinates, or of the coordinates the result is
         // placed at, whichever is coarser (#312).
-        let settled = crate::snap::settle(&subject.mesh, tool, options.tolerance(), budget.placed);
+        // A union reads contact at the tolerance (#357), the others at the
+        // rounding.
+        let reach = if operator == axiolid_core::BooleanOperator::Union {
+            crate::snap::contact_reach(options.tolerance())
+        } else {
+            crate::snap::reach(&subject.mesh, tool, options.tolerance(), placed)
+        };
+        let settled = crate::snap::settle(&subject.mesh, tool, reach);
         let snapped = if settled.moved > 0.0 {
             // A snap never turns a working boolean into a refusal (#291):
             // where the snapped operands are refused, or their result touches

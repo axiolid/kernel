@@ -54,5 +54,6 @@ pub(crate) fn after_boolean(
                 "boolean result: no operand bound covers the cut",
             ),
         ),
+        local: None,
     }
 }

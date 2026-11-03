@@ -33,7 +33,7 @@ use axiolid_exact_compile_contract::ExactCompiler;
 use axiolid_measure::FaceDomain;
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::deviation::COINCIDENT_OPERANDS;
+use axiolid_mesh_compile::deviation::{COINCIDENT_OPERANDS, SNAPPED_OPERANDS};
 use axiolid_mesh_compile::{
     DeviationBound, DeviationContribution, DeviationPath, DeviationReport, ReferenceExactCompiler,
     ReferenceMeshCompiler,
@@ -277,15 +277,22 @@ fn assert_measured(
 ) -> (Scalar, Scalar) {
     let (graph, root, mesh, report, seconds) = case;
     // Faces read as one surface within tolerance name how far that moved
-    // an operand (#324), within the tolerance; the rest is the boolean's
-    // own measurement.
-    let (coincident, measured): (Vec<&DeviationContribution>, Vec<_>) = report
+    // an operand (#324), within the tolerance; a union's operands snapped
+    // onto each other within it name the move of a vertex, at most
+    // `sqrt 3` times that (#357); the rest is the boolean's own measurement.
+    let (named, measured): (Vec<&DeviationContribution>, Vec<_>) = report
         .contributions
         .iter()
-        .partition(|c| c.detail == COINCIDENT_OPERANDS);
-    for c in &coincident {
+        .partition(|c| c.detail == COINCIDENT_OPERANDS || c.detail == SNAPPED_OPERANDS);
+    for c in &named {
+        let eps = options.tolerance().linear();
+        let reach = if c.detail == SNAPPED_OPERANDS {
+            3.0_f64.sqrt() * eps
+        } else {
+            eps
+        };
         assert!(
-            matches!(c.bound, DeviationBound::Certified(moved) if moved <= options.tolerance().linear()),
+            matches!(c.bound, DeviationBound::Certified(moved) if moved <= reach),
             "{name}: {report:?}"
         );
     }

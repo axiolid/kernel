@@ -17,10 +17,22 @@ caret rule for `0.x` versions.
   with `UNMERGED_UNION_CONTACT`, instead of returned as two disjoint solids
   (#356, #357). A union whose operand already holds two shells within the
   tolerance is refused too.
+- A boolean of operands placed by the same linear part (a rotation and
+  uniform scale) is cut in their shared frame and the result placed, so
+  faces in contact under a general rotation merge (#356), and a flush
+  opening under a turned placement shared with its wall cuts through; the
+  world-frame cut remains the fallback. A snap in that frame is reported
+  with the placement's rounding added.
 
 ### Changed
 
 - Depends on `axiolid-inspect` (`surface_gap`) in production (ADR 0096).
+- A union reads its operands as touching within the linear tolerance: faces
+  of the two operands on a shared axis-aligned plane within the tolerance
+  are set onto each other, so such a union fuses into one body, adding at
+  most the tolerance of material. The move is reported under
+  `SNAPPED_OPERANDS` (#357, ADR 0096). Differences and intersections keep
+  the rounding reach (#291).
 
 ## [0.3.42] - 2026-11-03
 

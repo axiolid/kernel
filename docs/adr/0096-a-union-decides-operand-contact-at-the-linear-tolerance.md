@@ -65,9 +65,48 @@ forbids `axiolid-inspect` or `axiolid-heal`, so no profile changes
 (`cargo xtask architecture closure check` passes). The same change fixes `min_gap` (#390), which read a bar through
 a box as clearance because no edge-crosses-face test existed.
 
-**D3, D4, D6** (booleans in the frame their operands share; the union's contact
-reach; operands with different linear parts) are decided, landing in the next
-change; they are completed here then.
+**D3. Booleans run in the frame their operands share (#356).** When both
+operands are framed by linear parts equal bit for bit, the boolean is cut in
+the subject's local frame and the result is placed by the subject's
+transform. An operand is framed if it is an `Instance`, or a boolean that was
+itself cut that way, so chains of unions work (`Built::local`). In the local
+frame, faces that are axis-aligned there are exactly coplanar, or a residue
+apart that the existing exact landing closes. The frame is a property of the
+operands, not of the operator, so it applies to differences and intersections
+too, and it removes ADR 0080's #276 known limit for operands that share a
+placement (a flush opening and its wall under one turned placement). The
+tool's offset in the subject's frame is `subject.matrix3^-1 * (tool.translation
+- subject.translation)`, exactly zero when the translations are equal. The cut
+is never worse: where the shared-frame boolean is refused for any reason (the
+guard included), the world-frame boolean runs as before and its result or
+refusal is returned. An instance whose source is re-meshed for its
+placement's rounding (#295) is left to the world frame.
+
+**D4. Contact reach for unions (#357).** A union's per-plane reach is the
+linear tolerance, not `min(eps / sqrt 3, 16 eps_mach S)`. Only exactly
+axis-aligned planes are landed on, exactly, as before. A face plane moves by
+at most `eps`, ADR 0080's "faces moved by at most eps"; a vertex near two or
+three planes by at most `sqrt 3 eps`. The move is reported under
+`SNAPPED_OPERANDS` with the true vertex move. A fused union gains at most
+`eps` of material per landed face. A per-coordinate reach of `eps / sqrt 3`
+was rejected: it would close fewer gaps than the guard and the exact path read
+as contact, and the gaps in between would be refused instead of merged.
+
+**D6. Operands whose linear parts differ in bits.** They are not merged in the
+mesh path. Two bodies are refused by D2 and a pinch by #194; a one-body result
+with sub-rounding wedge cracks remains possible. Fusing them exactly is
+`TODO(#391)`: an exact referee that compiles the union exactly where the mesh
+union fails D2 or the pinch check, and tessellates the B-rep, which needs an
+`ExactBRep` tessellator with a certified bound that does not exist.
+
+**D7. Differences and intersections (O1).** They are unchanged: a skin
+thinner than the tolerance is authored (#291). A difference whose tool is
+thinner than the tolerance cutting through can still return two pieces closer
+than the tolerance, labelled `Solid`. That is recorded here, not decided.
+
+**D8. The exact path.** The contract (merged or refused, never bodies within
+the tolerance) applies to both compilers. The exact compiler is checked by
+characterization tests, not changed; a failure there is a `brep-boolean` issue.
 
 ## Alternatives considered
 
@@ -104,9 +143,21 @@ change; they are completed here then.
   stays as it is; extending D2 to differences and intersections reverses #291
   and is a separate decision.
 
+## Tests
+
+`tests/union_contact.rs` (the #357 boxes: gaps within the tolerance fuse and
+report the move, a gap beyond it stays two bodies, differences keep a skin,
+differently turned operands are refused by name, a property over random
+placements never returns bodies in contact), `tests/rotated_face_contact.rs`
+(the #356 sweep on four faces, random turns and sites, a chain of four
+corbels, a translation offset in the shared frame, a flush opening under a
+turned placement, a certified report), `snap.rs` and `frame.rs` unit tests,
+and `scripts/probe_union_contact_mutants.py`.
+
 ## Relation to existing code
 
-- `crates/execution/compile/src/contact.rs`, `src/compiler.rs` (`cut`).
+- `crates/execution/compile/src/contact.rs`, `src/frame.rs`, `src/snap.rs`,
+  `src/compiler.rs` (`cut`, `boolean_in_shared_frame`, `boolean_of`).
 - `crates/algorithms/query/inspect/src/clearance.rs` (`surface_gap`).
 - Tests: `crates/execution/compile/tests/union_contact.rs`,
   `tests/rotated_face_contact.rs`.

@@ -52,6 +52,7 @@ pub(crate) fn merge(members: &[&Built]) -> Built {
         fates,
         closure: super::combined_closure(members.iter().copied()),
         deviation,
+        local: None,
     }
 }
 

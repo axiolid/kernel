@@ -13,7 +13,8 @@ use axiolid_core::{BooleanOperator, Mat3, Scalar, Tolerance, Transform3, Vec3};
 use axiolid_inspect::enclosed_volume;
 use axiolid_mesh::{component_count, TriMesh};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
-use axiolid_mesh_compile::{ReferenceMeshCompiler, UNMERGED_UNION_CONTACT};
+use axiolid_mesh_compile::deviation::SNAPPED_OPERANDS;
+use axiolid_mesh_compile::{DeviationBound, ReferenceMeshCompiler, UNMERGED_UNION_CONTACT};
 use axiolid_mesh_compile_contract::{MeshClosure, MeshCompiler};
 use axiolid_model::{
     GeometryGraph, GeometryGraphBuilder, GeometryNode, Instance, NodeId, SolidOperation,
@@ -27,6 +28,15 @@ fn compiler() -> ReferenceMeshCompiler<BoolmeshBoolean> {
 /// A unit box `[-0.5, 0.5]^2 x [0, 1]` under `first`, and another under
 /// `second` moved `offset` in its own frame, united.
 fn boxes(first: Transform3, second: Transform3, offset: Vec3) -> (GeometryGraph, NodeId) {
+    boxes_by(BooleanOperator::Union, first, second, offset)
+}
+
+fn boxes_by(
+    operator: BooleanOperator,
+    first: Transform3,
+    second: Transform3,
+    offset: Vec3,
+) -> (GeometryGraph, NodeId) {
     let mut builder = GeometryGraphBuilder::new();
     let mut push = |node| builder.push(node).expect("a valid node");
     let profile = push(GeometryNode::Profile(Profile::Rectangle(
@@ -54,13 +64,21 @@ fn boxes(first: Transform3, second: Transform3, offset: Vec3) -> (GeometryGraph,
     let root = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
         left: a,
         right: b,
-        operator: BooleanOperator::Union,
+        operator,
     }));
     (builder.finish(vec![root]).expect("a valid graph"), root)
 }
 
 fn compile(graph: &GeometryGraph, root: NodeId) -> Result<(TriMesh, MeshClosure), GeomError> {
-    let options = ExecutionOptions::new(Tolerance::METRE)
+    compile_at(graph, root, Tolerance::METRE)
+}
+
+fn compile_at(
+    graph: &GeometryGraph,
+    root: NodeId,
+    tolerance: Tolerance,
+) -> Result<(TriMesh, MeshClosure), GeomError> {
+    let options = ExecutionOptions::new(tolerance)
         .with_chord_error(1e-3)
         .expect("a positive chord error");
     let outcome = compiler().compile_mesh_reported(graph, root, &options)?;
@@ -93,6 +111,96 @@ fn a_gap_beyond_the_tolerance_stays_two_bodies() {
         assert_eq!(closure, MeshClosure::Solid, "gap {gap:e}");
         assert!((volume(&mesh) - 2.0).abs() < 1e-12, "gap {gap:e}");
     }
+}
+
+#[test]
+fn a_gap_within_the_tolerance_fuses() {
+    for gap in [0.0, 1e-15, 1e-9, 0.5e-6, 0.9e-6] {
+        let (graph, root) = boxes(
+            Transform3::IDENTITY,
+            Transform3::IDENTITY,
+            Vec3::new(1.0 + gap, 0.0, 0.0),
+        );
+        let (mesh, closure) = compile(&graph, root).unwrap_or_else(|e| panic!("gap {gap:e}: {e}"));
+        assert_eq!(component_count(&mesh), 1, "gap {gap:e}");
+        assert_eq!(closure, MeshClosure::Solid, "gap {gap:e}");
+        // The tool's near face lands on the host's: the union gains the gap.
+        assert!((volume(&mesh) - (2.0 + gap)).abs() < 1e-12, "gap {gap:e}");
+
+        let options = ExecutionOptions::new(Tolerance::METRE)
+            .with_chord_error(1e-3)
+            .expect("a positive chord error");
+        let (_, report) = compiler()
+            .compile_mesh_with_deviation(&graph, root, &options)
+            .unwrap_or_else(|e| panic!("gap {gap:e}: {e}"));
+        let snapped: Vec<Scalar> = report
+            .contributions
+            .iter()
+            .filter(|c| c.detail == SNAPPED_OPERANDS)
+            .map(|c| match c.bound {
+                DeviationBound::Certified(moved) => moved,
+                other => panic!("a snap is certified: {other:?}"),
+            })
+            .collect();
+        if gap > 1e-12 {
+            // Only the tool's near face moves, by the gap itself.
+            assert_eq!(snapped.len(), 1, "gap {gap:e}");
+            assert!((snapped[0] - gap).abs() < 1e-15, "gap {gap:e}");
+        } else {
+            // Sub-rounding gaps vanish in the operands' coordinates.
+            assert!(snapped.iter().all(|m| *m <= 1e-14), "gap {gap:e}");
+        }
+    }
+}
+
+#[test]
+fn a_gap_within_a_millimetre_tolerance_fuses() {
+    let (graph, root) = boxes(
+        Transform3::IDENTITY,
+        Transform3::IDENTITY,
+        Vec3::new(1.0 + 0.5e-3, 0.0, 0.0),
+    );
+    let (mesh, closure) = compile_at(&graph, root, Tolerance::MILLIMETRE).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!((volume(&mesh) - (2.0 + 0.5e-3)).abs() < 1e-12);
+}
+
+#[test]
+fn a_difference_keeps_a_skin_within_the_tolerance() {
+    // #291 stands for the other operators: a skin thinner than the
+    // tolerance is authored, not closed. The tool stops 0.5e-6 short of the
+    // host's far face and leaves exactly that skin.
+    let skin = 0.5e-6;
+    let (graph, root) = boxes_by(
+        BooleanOperator::Difference,
+        Transform3::IDENTITY,
+        Transform3::IDENTITY,
+        Vec3::new(skin, 0.0, 0.0),
+    );
+    let (mesh, closure) = compile(&graph, root).expect("the skin is kept");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!((volume(&mesh) - skin).abs() < 1e-12, "{}", volume(&mesh));
+}
+
+#[test]
+fn a_gap_within_the_tolerance_under_a_turn_fuses() {
+    // The #357 boxes under one turned placement at georeferenced
+    // coordinates: cut in their shared frame, where the faces are
+    // axis-aligned, and placed.
+    let turn = Transform3::from_translation(Vec3::new(6.1e5, 5.6e6, 204.3))
+        * Transform3::from_rotation_z(0.7);
+    let gap = 0.5e-6;
+    let (graph, root) = boxes(turn, turn, Vec3::new(1.0 + gap, 0.0, 0.0));
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!(
+        (volume(&mesh) - (2.0 + gap)).abs() < 1e-8,
+        "{}",
+        volume(&mesh)
+    );
 }
 
 #[test]
@@ -151,7 +259,7 @@ fn a_union_never_returns_bodies_in_contact() {
         let site = rng.pick(&sites);
         let a = Transform3::from_mat3_translation(Mat3::from_axis_angle(axis, angle), site);
         let half = Mat3::from_axis_angle(axis, 0.5 * angle);
-        let b = if rng.next() % 2 == 0 {
+        let b = if rng.next().is_multiple_of(2) {
             a
         } else {
             Transform3::from_mat3_translation(half * half, site)

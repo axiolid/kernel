@@ -876,3 +876,13 @@ subject and as tool, with the closed-form volumes; a ring groove; a boolean
 as tool), `tests/boolean_deviation.rs` (the issue's box and bent tube under
 each operator, a placed pair, a ring groove); probe
 `scripts/probe_revolution_operand_mutants.py`.
+
+## Amendment 2026-11-03: unions and shared frames (#356, #357)
+
+[ADR 0096](./0096-a-union-decides-operand-contact-at-the-linear-tolerance.md)
+amends two readings here. The #291 reach (rounding only) is amended for unions:
+a union's operands are read as touching within the linear tolerance, and a
+union that still leaves two bodies within it is refused by name. And the #276
+known limit (a boolean under a general rotation cannot land on tilted planes)
+is superseded where the operands share their linear part bit for bit: such a
+boolean is cut in the shared frame and the result placed.

@@ -60,6 +60,7 @@ pub(crate) fn transform(built: &Built, transform: Transform3, rounding: Scalar) 
         fates: built.fates.clone(),
         closure: built.closure,
         deviation: built.deviation.transformed(transform, rounding),
+        local: None,
     }
 }
 

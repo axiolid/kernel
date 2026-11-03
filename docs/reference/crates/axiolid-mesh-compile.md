@@ -49,10 +49,19 @@ owns graph traversal and dispatch; the construction algorithms themselves
   onto them exactly, so a tool a rounding error short of its host's face
   leaves no skin that thin, near the origin or placed far from it (#276,
   #312); a thicker skin is authored and kept whatever the tolerance
-  (#291). The move is at most the tolerance, none
-  at zero, and the deviation report names it
-  (`deviation::SNAPPED_OPERANDS`). A boolean whose snapped operands are
+  (#291). A union reads contact at the tolerance instead: operands whose
+  axis-aligned faces lie within it are set onto each other, adding at most
+  the tolerance of material (#357, ADR 0096). A coordinate moves by at
+  most the tolerance, none at zero, and the deviation report names the
+  move (`deviation::SNAPPED_OPERANDS`). A boolean whose snapped operands are
   refused is cut as given, with no snap reported.
+- A boolean of operands placed by the same linear part (rotation, scale),
+  bit for bit, is cut in their shared frame and the result placed (#356,
+  ADR 0096), so faces in contact under a general rotation are exactly
+  coplanar to the snap, and a chain of unions stays in that frame. A
+  refused shared-frame cut falls back to the world-frame cut. Operands
+  placed by differing linear parts are cut in the world frame
+  (TODO(#391)).
 - A union whose result holds two bodies within the linear tolerance of
   each other is refused with `GeomError::Degenerate`, starting with
   `UNMERGED_UNION_CONTACT`: the operands meet within the tolerance, as the

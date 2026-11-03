@@ -64,8 +64,17 @@ fn column_and_corbel(
     face: usize,
     composed: bool,
 ) -> (GeometryGraph, NodeId) {
+    column_and_corbels(transform, &[face], composed)
+}
+
+/// The column and a corbel on each of `faces`, united one after another:
+/// `Union(Union(column, first), second)` and so on.
+fn column_and_corbels(
+    transform: Transform3,
+    faces: &[usize],
+    composed: bool,
+) -> (GeometryGraph, NodeId) {
     let mut builder = GeometryGraphBuilder::new();
-    let (centre, size) = FACES[face];
     let mut graph = |node| builder.push(node).expect("a valid node");
     let profile = graph(rectangle(0.4, 0.5));
     let column = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
@@ -73,37 +82,40 @@ fn column_and_corbel(
         direction: Vec3::Z,
         depth: 6.0,
     }));
-    let column = graph(GeometryNode::Instance(Instance {
+    let mut root = graph(GeometryNode::Instance(Instance {
         source: column,
         transform,
     }));
-    let profile = graph(rectangle(size[0], size[1]));
-    let corbel = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
-        profile,
-        direction: Vec3::Z,
-        depth: 0.5,
-    }));
-    let offset = Transform3::from_translation(Vec3::new(centre[0], centre[1], 3.5));
-    let corbel = if composed {
-        graph(GeometryNode::Instance(Instance {
-            source: corbel,
-            transform: transform * offset,
-        }))
-    } else {
-        let lifted = graph(GeometryNode::Instance(Instance {
-            source: corbel,
-            transform: offset,
+    for &face in faces {
+        let (centre, size) = FACES[face];
+        let profile = graph(rectangle(size[0], size[1]));
+        let corbel = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 0.5,
         }));
-        graph(GeometryNode::Instance(Instance {
-            source: lifted,
-            transform,
-        }))
-    };
-    let root = graph(GeometryNode::SolidOperation(SolidOperation::Boolean {
-        left: column,
-        right: corbel,
-        operator: BooleanOperator::Union,
-    }));
+        let offset = Transform3::from_translation(Vec3::new(centre[0], centre[1], 3.5));
+        let corbel = if composed {
+            graph(GeometryNode::Instance(Instance {
+                source: corbel,
+                transform: transform * offset,
+            }))
+        } else {
+            let lifted = graph(GeometryNode::Instance(Instance {
+                source: corbel,
+                transform: offset,
+            }));
+            graph(GeometryNode::Instance(Instance {
+                source: lifted,
+                transform,
+            }))
+        };
+        root = graph(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: root,
+            right: corbel,
+            operator: BooleanOperator::Union,
+        }));
+    }
     (builder.finish(vec![root]).expect("a valid graph"), root)
 }
 
@@ -120,7 +132,9 @@ fn compile(graph: &GeometryGraph, root: NodeId) -> Result<(TriMesh, MeshClosure)
 fn volume(mesh: &TriMesh) -> Scalar {
     let origin = mesh.positions[0];
     mesh.indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize] - origin);
             a.dot(b.cross(c)) / 6.0
@@ -128,8 +142,26 @@ fn volume(mesh: &TriMesh) -> Scalar {
         .sum()
 }
 
+/// Compiled and checked: one `Solid` body of `expected` volume.
+fn assert_one_solid(
+    graph: &GeometryGraph,
+    root: NodeId,
+    expected: Scalar,
+    slack: Scalar,
+    what: &str,
+) {
+    let (mesh, closure) = compile(graph, root).unwrap_or_else(|e| panic!("{what}: {e}"));
+    assert_eq!(component_count(&mesh), 1, "{what}: two bodies in contact");
+    assert_eq!(closure, MeshClosure::Solid, "{what}");
+    let measured = volume(&mesh);
+    assert!(
+        (measured - expected).abs() <= slack * expected,
+        "{what}: volume {measured}"
+    );
+}
+
 #[test]
-fn the_issue_sweep_is_one_solid_or_refused_by_name() {
+fn the_issue_sweep_is_one_solid_on_every_face() {
     let translation = Vec3::new(1.0, 2.0, 0.0);
     for composed in [false, true] {
         for face in 0..FACES.len() {
@@ -138,20 +170,161 @@ fn the_issue_sweep_is_one_solid_or_refused_by_name() {
                 let (graph, root) =
                     column_and_corbel(placement(theta, translation), face, composed);
                 let what = format!("theta {theta}, face {face}, composed {composed}");
-                match compile(&graph, root) {
-                    Ok((mesh, closure)) => {
-                        assert_eq!(component_count(&mesh), 1, "{what}: two bodies in contact");
-                        assert_eq!(closure, MeshClosure::Solid, "{what}");
-                        let measured = volume(&mesh);
-                        assert!(
-                            (measured - VOLUME).abs() <= 1e-9 * VOLUME,
-                            "{what}: volume {measured}"
-                        );
-                    }
-                    Err(GeomError::Degenerate(_)) => {}
-                    Err(other) => panic!("{what}: {other}"),
-                }
+                assert_one_solid(&graph, root, VOLUME, 1e-9, &what);
             }
         }
+    }
+}
+
+/// xorshift64*: a fixed stream, so the cases are the same on every run.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn unit(&mut self) -> Scalar {
+        (self.next() >> 11) as Scalar / (1u64 << 53) as Scalar
+    }
+}
+
+#[test]
+fn random_turns_and_sites_are_one_solid() {
+    let mut rng = Rng(356);
+    for case in 0..200 {
+        let theta = rng.unit() * std::f64::consts::TAU;
+        let face = (rng.next() % FACES.len() as u64) as usize;
+        let translation = if rng.next().is_multiple_of(2) {
+            Vec3::new(1.0, 2.0, 0.0)
+        } else {
+            Vec3::new(6.1e5, 5.6e6, 204.3)
+        };
+        let composed = rng.next().is_multiple_of(2);
+        let (graph, root) = column_and_corbel(placement(theta, translation), face, composed);
+        let what = format!("case {case}: theta {theta}, face {face}, at {translation}");
+        assert_one_solid(&graph, root, VOLUME, 1e-8, &what);
+    }
+}
+
+#[test]
+fn a_column_with_corbels_on_four_faces_is_one_solid() {
+    // A chain of unions: each result stays in the column's frame for the
+    // next (`Built::local`).
+    for k in 0..20 {
+        let theta = 0.001 + k as Scalar * 0.31;
+        for composed in [false, true] {
+            let (graph, root) = column_and_corbels(
+                placement(theta, Vec3::new(1.0, 2.0, 0.0)),
+                &[0, 1, 2, 3],
+                composed,
+            );
+            let what = format!("theta {theta}, composed {composed}");
+            assert_one_solid(&graph, root, 1.2 + 4.0 * 0.025, 1e-9, &what);
+        }
+    }
+}
+
+#[test]
+fn operands_offset_in_their_shared_frame_fuse() {
+    // The corbel under a transform with the column's linear part and a
+    // translation offset by the rotated lift, computed in `f64`: the offset
+    // between them in the column's frame rounds, and the snap closes it.
+    for theta in [0.001, 0.5, 2.0, 5.0] {
+        let t = placement(theta, Vec3::new(6.1e5, 5.6e6, 204.3));
+        let face = 1;
+        let (centre, size) = FACES[face];
+        let mut builder = GeometryGraphBuilder::new();
+        let mut graph = |node| builder.push(node).expect("a valid node");
+        let profile = graph(rectangle(0.4, 0.5));
+        let column = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 6.0,
+        }));
+        let column = graph(GeometryNode::Instance(Instance {
+            source: column,
+            transform: t,
+        }));
+        let profile = graph(rectangle(size[0], size[1]));
+        let corbel = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 0.5,
+        }));
+        let lift = t.matrix3 * Vec3::new(centre[0], centre[1], 3.5);
+        let corbel = graph(GeometryNode::Instance(Instance {
+            source: corbel,
+            transform: Transform3 {
+                matrix3: t.matrix3,
+                translation: t.translation + lift,
+            },
+        }));
+        let root = graph(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: column,
+            right: corbel,
+            operator: BooleanOperator::Union,
+        }));
+        let graph = builder.finish(vec![root]).expect("a valid graph");
+        assert_one_solid(&graph, root, VOLUME, 1e-8, &format!("theta {theta}"));
+    }
+}
+
+#[test]
+fn a_flush_opening_under_a_shared_turned_placement_cuts_through() {
+    // A wall `4 x 0.25 x 3` less an opening exactly as deep as the wall,
+    // both under one turned placement far from the origin: the opening's
+    // faces are the wall's planes, which the world frame leaves a rounding
+    // apart (ADR 0080's #276 limit).
+    let t = placement(0.4, Vec3::new(6.0e5, 5.6e6, 0.0));
+    let mut builder = GeometryGraphBuilder::new();
+    let mut graph = |node| builder.push(node).expect("a valid node");
+    let profile = graph(rectangle(4.0, 0.25));
+    let wall = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+        profile,
+        direction: Vec3::Z,
+        depth: 3.0,
+    }));
+    let wall = graph(GeometryNode::Instance(Instance {
+        source: wall,
+        transform: t,
+    }));
+    let profile = graph(rectangle(1.0, 0.25));
+    let opening = graph(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+        profile,
+        direction: Vec3::Z,
+        depth: 2.0,
+    }));
+    let opening = graph(GeometryNode::Instance(Instance {
+        source: opening,
+        transform: t * Transform3::from_translation(Vec3::new(0.0, 0.0, 0.5)),
+    }));
+    let root = graph(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: wall,
+        right: opening,
+        operator: BooleanOperator::Difference,
+    }));
+    let graph = builder.finish(vec![root]).expect("a valid graph");
+    assert_one_solid(&graph, root, 3.0 - 0.5, 1e-9, "flush opening");
+}
+
+#[test]
+fn measured_unions_in_a_shared_frame_are_certified() {
+    let options = ExecutionOptions::new(Tolerance::METRE)
+        .with_chord_error(1e-3)
+        .expect("a positive chord error");
+    for theta in [0.001, 0.5, 2.0] {
+        let (graph, root) = column_and_corbel(placement(theta, Vec3::new(1.0, 2.0, 0.0)), 0, false);
+        let (outcome, report) = compiler()
+            .compile_mesh_with_deviation(&graph, root, &options)
+            .unwrap_or_else(|e| panic!("theta {theta}: {e}"));
+        assert_eq!(component_count(&outcome.mesh), 1, "theta {theta}");
+        let bound = report
+            .bound
+            .unwrap_or_else(|| panic!("theta {theta}: {report:?}"));
+        assert!(bound <= 1e-3, "theta {theta}: {report:?}");
     }
 }

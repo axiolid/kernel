@@ -58,6 +58,20 @@
 //! `1 mm` tolerance stays in the mesh (#291), however thin its tolerance
 //! would allow it to be read.
 //!
+//! # Unions: the tolerance (#357)
+//!
+//! A union reads its operands as touching within the linear tolerance, not
+//! only within rounding: closing a gap adds at most `eps` of material and
+//! never removes any, and the caller declared such points equal through the
+//! tolerance. The exact compiler already fuses them (ADR 0080). The reach
+//! of a union is [`contact_reach`], `eps` per face plane, and what moves is
+//! still only an exact landing on an axis-aligned plane. A plane moves by
+//! at most `eps`; a vertex near two or three planes by at most
+//! `sqrt 3 * eps`, which [`crate::deviation::SNAPPED_OPERANDS`] reports as
+//! the true vertex move. A difference or an intersection keeps the
+//! rounding reach above: a skin thinner than the tolerance is authored
+//! there (#291), and closing it removes material (ADR 0096).
+//!
 //! # What moves: an exact landing only
 //!
 //! A move by a rounding residue helps only if the vertex then lies exactly
@@ -89,10 +103,20 @@
 //! operand thinner than the reach), stays.
 //!
 //! Each operand mesh is then the given one with every vertex moved by at
-//! most `sqrt 3 * reach <= eps`, so every point of it (a convex
+//! most `sqrt 3 * reach` (`<= eps` at the rounding reach), so every point of it (a convex
 //! combination of its triangle's corners) by at most that: the mesh
 //! boolean's result is the boolean of operands perturbed within the
 //! tolerance, the reading ADR 0080 gives the exact boolean.
+//!
+//! # Frames: where axis-aligned faces are
+//!
+//! Faces land only where they are axis-aligned, which under a general
+//! rotation they are not in the world frame, so a boolean of operands placed
+//! by the same linear part is cut in their shared frame and the result
+//! placed ([`crate::frame`], #356): there the faces that meet are axis-aligned
+//! and exactly coplanar, or a residue apart that this snap closes. Operands
+//! placed by linear parts that differ in a bit have no such frame
+//! (TODO(#391)).
 //!
 //! # Never silently, never worse
 //!
@@ -196,16 +220,23 @@ pub(crate) fn reach(
     (REACH_EPSILONS * Scalar::EPSILON * scale).min(eps / 3.0_f64.sqrt())
 }
 
+/// How far a union's operands are read as touching (#357): the linear
+/// tolerance, per face plane, `0` at a zero or non-finite tolerance (see
+/// the module notes, "Unions").
+pub(crate) fn contact_reach(tolerance: Tolerance) -> Scalar {
+    let eps = tolerance.linear();
+    if eps > 0.0 && eps.is_finite() {
+        eps
+    } else {
+        0.0
+    }
+}
+
 /// Move the tool's coordinates onto the subject's axis-aligned faces, then
-/// the subject's onto the moved tool's, each by at most [`reach`] (see the
-/// module notes); `placed` is the boolean's placed scale.
-pub(crate) fn settle(
-    subject: &TriMesh,
-    tool: &TriMesh,
-    tolerance: Tolerance,
-    placed: Scalar,
-) -> Settled {
-    let reach = reach(subject, tool, tolerance, placed);
+/// the subject's onto the moved tool's, each by at most `reach` (see the
+/// module notes): [`reach`] for most operators, [`contact_reach`] for a
+/// union.
+pub(crate) fn settle(subject: &TriMesh, tool: &TriMesh, reach: Scalar) -> Settled {
     let mut out = Settled {
         subject: None,
         tool: None,
@@ -442,6 +473,16 @@ mod tests {
         TriMesh::new(positions, indices)
     }
 
+    /// [`settle`] at the rounding [`reach`].
+    fn settle_at(
+        subject: &TriMesh,
+        tool: &TriMesh,
+        tolerance: Tolerance,
+        placed: Scalar,
+    ) -> Settled {
+        settle(subject, tool, reach(subject, tool, tolerance, placed))
+    }
+
     fn metre() -> Tolerance {
         Tolerance::METRE
     }
@@ -521,7 +562,7 @@ mod tests {
     fn a_tool_short_of_a_face_lands_on_it_exactly() {
         let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
         let tool = cube(Point3::new(1.0, 4.5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.iter().any(|p| p.y == 0.0));
         assert!(moved.positions.iter().all(|p| p.y == 0.0 || p.y == 0.35));
@@ -535,7 +576,7 @@ mod tests {
         // Bottom just above the host's floor face, end short of its front:
         // the corner near both lands on their common edge.
         let tool = cube(Point3::new(1.0, 4e-15, 4e-15), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved
             .positions
@@ -555,17 +596,49 @@ mod tests {
             (5e-4, Tolerance::MILLIMETRE),
         ] {
             let tool = cube(Point3::new(1.0, gap, 0.5), Point3::new(2.0, 0.35, 2.5));
-            let s = settle(&host, &tool, tolerance, 0.0);
+            let s = settle_at(&host, &tool, tolerance, 0.0);
             assert!(s.tool.is_none() && s.subject.is_none(), "{gap}");
             assert_eq!(s.moved, 0.0);
         }
     }
 
     #[test]
+    fn a_union_contact_within_the_tolerance_lands_exactly() {
+        let host = cube(Point3::ZERO, Point3::ONE);
+        let gap = 0.5e-6;
+        let tool = cube(Point3::new(1.0 + gap, 0.0, 0.0), Point3::new(2.0, 1.0, 1.0));
+        let s = settle(&host, &tool, contact_reach(metre()));
+        let moved = s.tool.expect("the tool moves");
+        assert!(moved.positions.iter().all(|p| p.x == 1.0 || p.x == 2.0));
+        assert!((s.moved - gap).abs() < 1e-15, "{}", s.moved);
+        // The rounding reach leaves it (#291).
+        assert!(settle_at(&host, &tool, metre(), 0.0).tool.is_none());
+    }
+
+    #[test]
+    fn a_union_contact_beyond_the_tolerance_stays() {
+        let host = cube(Point3::ZERO, Point3::ONE);
+        let tool = cube(
+            Point3::new(1.0 + 2e-6, 0.0, 0.0),
+            Point3::new(2.0, 1.0, 1.0),
+        );
+        let s = settle(&host, &tool, contact_reach(metre()));
+        assert!(s.tool.is_none() && s.subject.is_none());
+        assert_eq!(s.moved, 0.0);
+    }
+
+    #[test]
+    fn the_contact_reach_is_the_tolerance_and_nothing_at_zero() {
+        assert_eq!(contact_reach(metre()), 1e-6);
+        assert_eq!(contact_reach(Tolerance::MILLIMETRE), 1e-3);
+        assert_eq!(contact_reach(Tolerance::ZERO), 0.0);
+    }
+
+    #[test]
     fn nothing_moves_at_zero_tolerance() {
         let host = cube(Point3::ZERO, Point3::new(4.0, 0.25, 3.0));
         let tool = cube(Point3::new(1.0, 4.5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, Tolerance::ZERO, 0.0);
+        let s = settle_at(&host, &tool, Tolerance::ZERO, 0.0);
         assert!(s.tool.is_none() && s.subject.is_none());
     }
 
@@ -575,7 +648,7 @@ mod tests {
         // Cuts the top half off all but a skin a rounding error thick.
         let top = 1.0 - 4.0 * Scalar::EPSILON;
         let tool = cube(Point3::new(-1.0, -1.0, 0.5), Point3::new(2.0, 2.0, top));
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
         let subject = s.subject.expect("the subject moves");
         assert!(subject.positions.iter().all(|p| p.z == 0.0 || p.z == top));
@@ -585,7 +658,7 @@ mod tests {
     fn a_corner_near_three_faces_lands_on_their_corner() {
         let host = cube(Point3::ZERO, Point3::splat(2.0));
         let tool = cube(Point3::splat(4.5e-15), Point3::ONE);
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.contains(&Point3::ZERO));
         assert!(s.moved <= 3.0_f64.sqrt() * reach(&host, &tool, metre(), 0.0));
@@ -602,7 +675,7 @@ mod tests {
             Point3::new(1.0, 4.5e-15, -1e-6),
             Point3::new(2.0, 0.35, 2.5),
         );
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.iter().all(|p| p.y == 0.0 || p.y == 0.35));
         assert!(moved.positions.iter().any(|p| p.z == -1e-6));
@@ -614,7 +687,7 @@ mod tests {
         // Both of its faces lie within the reach of the host's face:
         // moving both onto it would fold the tool flat.
         let tool = cube(Point3::new(1.0, -6e-15, 0.5), Point3::new(2.0, -2e-15, 2.5));
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
     }
 
@@ -623,7 +696,7 @@ mod tests {
         // A subject slab thinner than the reach: no single plane to land on.
         let host = cube(Point3::ZERO, Point3::new(4.0, 1e-14, 3.0));
         let tool = cube(Point3::new(1.0, 5e-15, 0.5), Point3::new(2.0, 0.35, 2.5));
-        let s = settle(&host, &tool, metre(), 0.0);
+        let s = settle_at(&host, &tool, metre(), 0.0);
         assert!(s.tool.is_none());
     }
 
@@ -641,7 +714,7 @@ mod tests {
         }
         for y in [0.0, 2e-15, -2e-15] {
             let tool = cube(Point3::new(1.0, y, 0.5), Point3::new(2.0, 0.35, 2.5));
-            let s = settle(&host, &tool, metre(), 0.0);
+            let s = settle_at(&host, &tool, metre(), 0.0);
             assert!(s.tool.is_none() && s.subject.is_none(), "{y}");
         }
     }
