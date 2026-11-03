@@ -82,3 +82,4 @@ Package names and paths in older accepted records describe the tree at the time 
 | [0095](./0095-profiles-are-validated-on-their-lowered-arc-rings.md) | Profiles are validated on their lowered arc rings |
 | [0096](./0096-a-union-decides-operand-contact-at-the-linear-tolerance.md) | A union decides operand contact at the linear tolerance |
 | [0097](./0097-ruled-surfaces-are-a-graph-relation-between-two-curve-sides.md) | Ruled surfaces are a graph relation between two curve sides |
+| [0098](./0098-a-union-the-mesh-cut-cannot-settle-is-decided-by-the-exact-compiler.md) | A union the mesh cut cannot settle is decided by the exact compiler |

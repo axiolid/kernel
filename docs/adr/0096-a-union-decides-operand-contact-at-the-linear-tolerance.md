@@ -98,10 +98,10 @@ as contact, and the gaps in between would be refused instead of merged.
 
 **D6. Operands whose linear parts differ in bits.** They are not merged in the
 mesh path. Two bodies are refused by D2 and a pinch by #194; a one-body result
-with sub-rounding wedge cracks remains possible. Fusing them exactly is
-`TODO(#391)`: an exact referee that compiles the union exactly where the mesh
-union fails D2 or the pinch check, and tessellates the B-rep, which needs an
-`ExactBRep` tessellator with a certified bound that does not exist.
+with sub-rounding wedge cracks remains possible. Fusing them exactly is the
+exact referee (#391, [ADR 0098](./0098-a-union-the-mesh-cut-cannot-settle-is-decided-by-the-exact-compiler.md)):
+it compiles the union exactly where the mesh cut cannot settle the contact,
+and tessellates the B-rep.
 
 **D7. Differences and intersections (O1).** They are unchanged: a skin
 thinner than the tolerance is authored (#291). A difference whose tool is
@@ -135,7 +135,8 @@ characterization tests, not changed; a failure there is a `brep-boolean` issue.
   refused even when the other operand is far away. Such an input is itself
   non-manifold under the tolerance; the refusal is accepted.
 - One body with sub-rounding wedge cracks, where contact faces met under
-  different placements, is not seen by the guard (`TODO(#391)`).
+  different placements, is not seen by the guard (decided by the exact
+  referee instead: #391, ADR 0098).
 
 **Follow-ups / risks to watch**
 
@@ -165,3 +166,12 @@ and `scripts/probe_union_contact_mutants.py`.
 - `crates/algorithms/query/inspect/src/clearance.rs` (`surface_gap`).
 - Tests: `crates/execution/compile/tests/union_contact.rs`,
   `tests/rotated_face_contact.rs`.
+
+## Amendment 2026-11-03: the exact referee (#391)
+
+[ADR 0098](./0098-a-union-the-mesh-cut-cannot-settle-is-decided-by-the-exact-compiler.md)
+settles D6. A union whose cut has faces that nearly share a plane within the
+tolerance, or is refused as a pinch or by D2, is compiled by the exact
+compiler and the exact result tessellated; the mesh result or refusal stands
+where the exact compiler refuses too, and a refusal names the referee's
+reason.
