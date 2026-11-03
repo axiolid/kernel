@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.22] - 2026-11-03
+
 ### Added
 
 - `check_arc_polygon_with` and `ArcCheckOptions::with_clearance` add an

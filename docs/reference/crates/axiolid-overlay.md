@@ -8,7 +8,7 @@ Deterministic validated planar overlay contract.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.21 (2026-11-03) |
+| Latest release | 0.3.22 (2026-11-03) |
 | crates.io | [`axiolid-overlay`](https://crates.io/crates/axiolid-overlay) |
 | Facade | [`axiolid`](./axiolid) feature `overlay` |
 | Layer | algorithms (`algorithm.planar`) |
@@ -87,16 +87,23 @@ Validated, deterministic planar booleans (intersection, union, difference, xor) 
 
 ## Changes
 
-Latest release, 0.3.21 (2026-11-03):
+Latest release, 0.3.22 (2026-11-03):
 
 ### Added
 
-- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
-- `check_arc_polygon` decides exactly whether an arc polygon's rings are
-  simple and its holes nested: self-contact (crossings, pinches, tangencies,
-  fold-backs), shared boundary, holes outside the outer ring or overlapping,
-  contacts that cut the interior apart, plus the isolated contact points
-  between rings (#352, ADR 0095).
+- `check_arc_polygon_with` and `ArcCheckOptions::with_clearance` add an
+  opt-in clearance check: a pair of edges whose distance has a local minimum
+  strictly between zero and the given one away from their meeting points, or
+  that form an exact cusp (they meet and leave in the same direction), is an
+  `ArcPolygonDefect::Clearance`, naming both edges and a certified lower
+  bound on their distance; the neighbourhood of a meeting point at a nonzero
+  angle (a narrow wedge) is not reported. A certified box
+  bound drops far pairs, then exact signs over offset circles and segment
+  distances decide the rest; a pair the exact tier cannot decide is reported
+  with `undecided` set, never cleared. A non-finite or negative distance is
+  an `ArcPolygonDefect::InvalidClearance`. `check_arc_polygon` and the default
+  options are unchanged (`src/arc_clearance.rs`, #388, ADR 0095).
+  `scripts/probe_arc_clearance_mutants.py` lists the faults its tests must
+  catch.
 
 Full history: [`crates/algorithms/planar/overlay/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/planar/overlay/CHANGELOG.md)

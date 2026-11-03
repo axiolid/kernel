@@ -737,6 +737,32 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-construct
 
+### 0.3.29 - 2026-11-03
+
+### Added
+
+- `ExactProfileValidator::validate_with` and `validate_contours_with` take
+  `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
+  distance has a local minimum below it away from their meeting points, or
+  that form an exact cusp, are a `ProfileFinding::Clearance` naming both
+  segments (a narrow wedge at a nonzero angle is not reported), with a certified lower
+  bound on their distance and an `undecided` flag for a pair the exact check
+  could not clear. `ValidateProfile::validate` and the extruder are unchanged
+  (#388, ADR 0095).
+
+### Fixed
+
+- `extrude_profile_exact` ran no profile check and built a solid from a
+  contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),
+  a hole outside the outer contour, or holes that cross each other or the
+  outer contour, also as the member of a composite. It now runs the exact
+  arc polygon check on each contour (and on each composite member) and refuses
+  such a profile as `InvalidInput` naming the defects; a nesting the exact
+  check cannot decide is refused as `UnsupportedInput`. Valid profiles,
+  including those with an accepted isolated contact or an edge or arc below
+  the tolerance, extrude unchanged, and the lowering's own refusals keep their
+  error class (#401).
+
 ### 0.3.28 - 2026-11-03
 
 ### Added
@@ -6691,6 +6717,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-overlay
+
+### 0.3.22 - 2026-11-03
+
+### Added
+
+- `check_arc_polygon_with` and `ArcCheckOptions::with_clearance` add an
+  opt-in clearance check: a pair of edges whose distance has a local minimum
+  strictly between zero and the given one away from their meeting points, or
+  that form an exact cusp (they meet and leave in the same direction), is an
+  `ArcPolygonDefect::Clearance`, naming both edges and a certified lower
+  bound on their distance; the neighbourhood of a meeting point at a nonzero
+  angle (a narrow wedge) is not reported. A certified box
+  bound drops far pairs, then exact signs over offset circles and segment
+  distances decide the rest; a pair the exact tier cannot decide is reported
+  with `undecided` set, never cleared. A non-finite or negative distance is
+  an `ArcPolygonDefect::InvalidClearance`. `check_arc_polygon` and the default
+  options are unchanged (`src/arc_clearance.rs`, #388, ADR 0095).
+  `scripts/probe_arc_clearance_mutants.py` lists the faults its tests must
+  catch.
 
 ### 0.3.21 - 2026-11-03
 

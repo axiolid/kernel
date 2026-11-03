@@ -8,7 +8,7 @@ Solid generation: profiles, lofts, sweeps, revolutions and half-space clipping.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.28 (2026-11-03) |
+| Latest release | 0.3.29 (2026-11-03) |
 | crates.io | [`axiolid-construct`](https://crates.io/crates/axiolid-construct) |
 | Facade | [`axiolid`](./axiolid) feature `generate` |
 | Layer | algorithms (`algorithm.construction`) |
@@ -73,13 +73,30 @@ dependencies, so the allowlist in `Cargo.toml` is what keeps it out.
 
 ## Changes
 
-Latest release, 0.3.28 (2026-11-03):
+Latest release, 0.3.29 (2026-11-03):
 
 ### Added
 
-- `profile_validate::ExactProfileValidator` implements `ValidateProfile` for
-  `ContourProfile` and `Profile`. It decides closure, self-contact and hole
-  nesting exactly on the contour as the exact path lowers it, or refuses with
-  a typed finding naming the segments (#352, ADR 0095).
+- `ExactProfileValidator::validate_with` and `validate_contours_with` take
+  `ArcCheckOptions`; with a clearance, segments of the lowered contour whose
+  distance has a local minimum below it away from their meeting points, or
+  that form an exact cusp, are a `ProfileFinding::Clearance` naming both
+  segments (a narrow wedge at a nonzero angle is not reported), with a certified lower
+  bound on their distance and an `undecided` flag for a pair the exact check
+  could not clear. `ValidateProfile::validate` and the extruder are unchanged
+  (#388, ADR 0095).
+
+### Fixed
+
+- `extrude_profile_exact` ran no profile check and built a solid from a
+  contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),
+  a hole outside the outer contour, or holes that cross each other or the
+  outer contour, also as the member of a composite. It now runs the exact
+  arc polygon check on each contour (and on each composite member) and refuses
+  such a profile as `InvalidInput` naming the defects; a nesting the exact
+  check cannot decide is refused as `UnsupportedInput`. Valid profiles,
+  including those with an accepted isolated contact or an edge or arc below
+  the tolerance, extrude unchanged, and the lowering's own refusals keep their
+  error class (#401).
 
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

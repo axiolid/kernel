@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-11-03
+
 ### Added
 
 - `ExactProfileValidator::validate_with` and `validate_contours_with` take
