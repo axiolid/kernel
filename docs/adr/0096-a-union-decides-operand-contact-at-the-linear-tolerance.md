@@ -66,7 +66,8 @@ forbids `axiolid-inspect` or `axiolid-heal`, so no profile changes
 a box as clearance because no edge-crosses-face test existed.
 
 **D3. Booleans run in the frame their operands share (#356).** When both
-operands are framed by linear parts equal bit for bit, the boolean is cut in
+operands are framed by linear parts equal bit for bit and a similarity (a
+rotation and uniform scale), the boolean is cut in
 the subject's local frame and the result is placed by the subject's
 transform. An operand is framed if it is an `Instance`, or a boolean that was
 itself cut that way, so chains of unions work (`Built::local`). In the local
@@ -79,7 +80,10 @@ tool's offset in the subject's frame is `subject.matrix3^-1 * (tool.translation
 - subject.translation)`, exactly zero when the translations are equal. The cut
 is never worse: where the shared-frame boolean is refused for any reason (the
 guard included), the world-frame boolean runs as before and its result or
-refusal is returned. An instance whose source is re-meshed for its
+refusal is returned. A stretch that differs by direction is left to the world frame: the local
+tolerance is the world one over the largest stretch, which reads too small along
+the others. As defence in depth a union whose placed result still holds bodies
+within the world tolerance is cut in the world frame. An instance whose source is re-meshed for its
 placement's rounding (#295) is left to the world frame.
 
 **D4. Contact reach for unions (#357).** A union's per-plane reach is the

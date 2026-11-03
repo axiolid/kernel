@@ -204,6 +204,99 @@ fn a_gap_within_the_tolerance_under_a_turn_fuses() {
 }
 
 #[test]
+fn a_stretch_that_differs_by_direction_still_fuses_or_is_refused_by_name() {
+    // Both boxes under a stretch of 1000 along z: a local tolerance shrunk
+    // by the largest stretch would read the x gap too small, so the
+    // operands are cut in the world frame, where the gap is within the
+    // tolerance (the first review of #356).
+    let gap = 0.5e-6;
+    let stretch = Transform3::from_scale(Vec3::new(1.0, 1.0, 1000.0));
+    let (graph, root) = boxes(stretch, stretch, Vec3::new(1.0 + gap, 0.0, 0.0));
+    let (mesh, closure) = compile(&graph, root).expect("fused");
+    assert_eq!(component_count(&mesh), 1);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!((volume(&mesh) - 2000.0).abs() < 1e-3, "{}", volume(&mesh));
+}
+
+#[test]
+fn a_uniform_scale_reads_the_gap_at_the_world_tolerance() {
+    // Boxes of side 1000 (a uniform scale of 1000): the world tolerance
+    // 1e-6 is 1e-9 in their frame. A world gap of 0.5e-6 fuses, one of
+    // 2e-6 is authored and stays two bodies.
+    let scale = Transform3::from_scale(Vec3::splat(1000.0));
+    for (gap, bodies) in [(0.5e-6, 1), (2e-6, 2)] {
+        let (graph, root) = boxes(scale, scale, Vec3::new(1.0 + gap / 1000.0, 0.0, 0.0));
+        let (mesh, closure) = compile(&graph, root).unwrap_or_else(|e| panic!("gap {gap:e}: {e}"));
+        assert_eq!(component_count(&mesh), bodies, "gap {gap:e}");
+        assert_eq!(closure, MeshClosure::Solid, "gap {gap:e}");
+    }
+}
+
+#[test]
+fn a_sheared_placement_never_returns_bodies_in_contact() {
+    let shear = Transform3::from_mat3(Mat3::from_cols(Vec3::X, Vec3::new(0.5, 1.0, 0.0), Vec3::Z));
+    for gap in [0.0, 0.5e-6, 0.9e-6] {
+        let (graph, root) = boxes(shear, shear, Vec3::new(1.0 + gap, 0.0, 0.0));
+        match compile(&graph, root) {
+            Ok((mesh, _)) => assert_eq!(component_count(&mesh), 1, "gap {gap:e}"),
+            Err(e) => assert!(is_unmerged(&e) || is_pinch(&e), "gap {gap:e}: {e}"),
+        }
+    }
+}
+
+#[test]
+fn a_union_snap_moves_nothing_away_from_the_contact() {
+    // A unit box; a tool united of B against it (0.5e-6 off) and C 2.5 m
+    // away whose +x face has B's near-face coordinate. Only B's face lands;
+    // C keeps its volume: the snap adds material, never removes any.
+    let gap = 0.5e-6;
+    let mut builder = GeometryGraphBuilder::new();
+    let mut push = |node| builder.push(node).expect("a valid node");
+    let profile = push(GeometryNode::Profile(Profile::Rectangle(
+        RectangleProfile {
+            x: 1.0,
+            y: 1.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        },
+    )));
+    let solid = push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+        profile,
+        direction: Vec3::Z,
+        depth: 1.0,
+    }));
+    let mut place = |offset: Vec3| {
+        push(GeometryNode::Instance(Instance {
+            source: solid,
+            transform: Transform3::from_translation(offset),
+        }))
+    };
+    let a = place(Vec3::ZERO);
+    let b = place(Vec3::new(1.0 + gap, 0.0, 0.0));
+    let c = place(Vec3::new(gap, 3.5, 0.0));
+    let tool = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: b,
+        right: c,
+        operator: BooleanOperator::Union,
+    }));
+    let root = push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+        left: a,
+        right: tool,
+        operator: BooleanOperator::Union,
+    }));
+    let graph = builder.finish(vec![root]).expect("a valid graph");
+    let (mesh, closure) = compile(&graph, root).expect("A and B fuse, C stays");
+    assert_eq!(component_count(&mesh), 2);
+    assert_eq!(closure, MeshClosure::Solid);
+    assert!(
+        (volume(&mesh) - (3.0 + gap)).abs() < 1e-13,
+        "{}",
+        volume(&mesh)
+    );
+}
+
+#[test]
 fn differently_turned_operands_a_gap_within_the_tolerance_apart_are_refused_by_name() {
     // Two placements of the same turn, composed another way: their linear
     // parts differ in the last bits, so the faces that meet are not exactly

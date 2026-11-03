@@ -18,7 +18,11 @@
 use axiolid_core::{Transform3, Vec3};
 
 /// Whether two transforms have the same linear part, bit for bit (`-0.0`
-/// read as `0.0`), finite and invertible.
+/// read as `0.0`), finite, invertible and a similarity: orthogonal columns
+/// of one length, to `32 f64::EPSILON` of it. Under a stretch that differs
+/// by direction the local tolerance, shrunk by the largest stretch, reads
+/// too small along the others, so such a frame is left to the world cut; a
+/// doubtful part is read as no similarity.
 pub(crate) fn shared_linear(a: Transform3, b: Transform3) -> bool {
     let columns = a.matrix3.to_cols_array();
     let determinant = a.matrix3.determinant();
@@ -26,6 +30,23 @@ pub(crate) fn shared_linear(a: Transform3, b: Transform3) -> bool {
         && columns == b.matrix3.to_cols_array()
         && determinant.is_finite()
         && determinant != 0.0
+        && is_similarity(a)
+}
+
+fn is_similarity(transform: Transform3) -> bool {
+    let m = transform.matrix3;
+    let (x, y, z) = (m.x_axis, m.y_axis, m.z_axis);
+    let (sx, sy, sz) = (x.length(), y.length(), z.length());
+    let tolerance = 32.0 * f64::EPSILON;
+    let longest = sx.max(sy).max(sz);
+    if ![sx, sy, sz, longest].iter().all(|v| v.is_finite()) {
+        return false;
+    }
+    let equal = (sx - sy).abs().max((sx - sz).abs()) <= tolerance * longest;
+    let orthogonal = x.dot(y).abs() <= tolerance * sx * sy
+        && x.dot(z).abs() <= tolerance * sx * sz
+        && y.dot(z).abs() <= tolerance * sy * sz;
+    equal && orthogonal
 }
 
 /// The tool's offset in the subject's frame: `subject.matrix3^-1 *
@@ -84,6 +105,21 @@ mod tests {
         let mut nan = Transform3::IDENTITY;
         nan.matrix3.x_axis.x = f64::NAN;
         assert!(!shared_linear(nan, nan));
+    }
+
+    #[test]
+    fn a_stretch_that_differs_by_direction_is_not_shared() {
+        let stretched = Transform3::from_scale(Vec3::new(1.0, 1.0, 1000.0));
+        assert!(!shared_linear(stretched, stretched));
+        let sheared = Transform3::from_mat3(axiolid_core::Mat3::from_cols(
+            Vec3::X,
+            Vec3::new(0.5, 1.0, 0.0),
+            Vec3::Z,
+        ));
+        assert!(!shared_linear(sheared, sheared));
+        let uniform =
+            Transform3::from_scale(Vec3::splat(1000.0)) * Transform3::from_rotation_z(0.3);
+        assert!(shared_linear(uniform, uniform));
     }
 
     #[test]

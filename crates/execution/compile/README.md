@@ -47,12 +47,13 @@ cargo add axiolid-mesh-compile
   most the tolerance, none at zero, and the deviation report names the
   move (`deviation::SNAPPED_OPERANDS`). A boolean whose snapped operands are
   refused is cut as given, with no snap reported.
-- A boolean of operands placed by the same linear part (rotation, scale),
-  bit for bit, is cut in their shared frame and the result placed (#356,
+- A boolean of operands placed by the same linear part (a rotation and
+  uniform scale), bit for bit, is cut in their shared frame and the result placed (#356,
   ADR 0096), so faces in contact under a general rotation are exactly
   coplanar to the snap, and a chain of unions stays in that frame. A
   refused shared-frame cut falls back to the world-frame cut. Operands
-  placed by differing linear parts are cut in the world frame
+  placed by differing linear parts, or stretched by direction, are cut in
+  the world frame
   (TODO(#391)).
 - A union whose result holds two bodies within the linear tolerance of
   each other is refused with `GeomError::Degenerate`, starting with

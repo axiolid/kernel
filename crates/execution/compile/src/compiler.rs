@@ -982,6 +982,16 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         )?;
         let rounding = placed_rounding(&local.mesh, subject_frame, budget.chord)?;
         let mut placed = channels::transform(&local, subject_frame, rounding);
+        // Defence in depth: the local tolerance is the world one over the
+        // frame's stretch, so a union that still leaves bodies within the
+        // world tolerance once placed is refused here, and `build_boolean`
+        // cuts it in the world frame instead.
+        if operator == axiolid_core::BooleanOperator::Union {
+            let eps = options.tolerance().linear();
+            if let Some(found) = crate::contact::unmerged(&placed.mesh, eps) {
+                return Err(crate::contact::refusal(&found, eps));
+            }
+        }
         placed.local = Some(Box::new(channels::LocalBoolean {
             transform: subject_frame,
             built: local,
@@ -1016,7 +1026,12 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         } else {
             crate::snap::reach(&subject.mesh, tool, options.tolerance(), placed)
         };
-        let settled = crate::snap::settle(&subject.mesh, tool, reach);
+        let settled = crate::snap::settle(
+            &subject.mesh,
+            tool,
+            reach,
+            operator != axiolid_core::BooleanOperator::Union,
+        );
         let snapped = if settled.moved > 0.0 {
             // A snap never turns a working boolean into a refusal (#291):
             // where the snapped operands are refused, or their result touches
@@ -1084,14 +1099,7 @@ impl<B: MeshBoolean> ReferenceMeshCompiler<B> {
         if operator == axiolid_core::BooleanOperator::Union {
             let eps = options.tolerance().linear();
             if let Some(found) = crate::contact::unmerged(&outcome.mesh, eps) {
-                return Err(GeomError::Degenerate(format!(
-                    "{}: two bodies {:e} apart, within the linear tolerance {eps:e} \
-                     (boxes {:?} and {:?})",
-                    crate::UNMERGED_UNION_CONTACT,
-                    found.distance,
-                    found.first,
-                    found.second
-                )));
+                return Err(crate::contact::refusal(&found, eps));
             }
         }
         Ok(outcome)

@@ -22,6 +22,7 @@
 //! where contact faces met under different placements. That stays open
 //! (`TODO(#391)`).
 
+use axiolid_contracts::GeomError;
 use axiolid_core::{Aabb, Point3, Scalar};
 use axiolid_mesh::{decompose, TriMesh};
 
@@ -87,6 +88,15 @@ fn close(a: &Aabb, b: &Aabb, eps: Scalar) -> bool {
         && b.min.y - eps <= a.max.y
         && a.min.z - eps <= b.max.z
         && b.min.z - eps <= a.max.z
+}
+
+/// The refusal of a union that left `found` apart, within `eps`.
+pub(crate) fn refusal(found: &Unmerged, eps: Scalar) -> GeomError {
+    GeomError::Degenerate(format!(
+        "{UNMERGED_UNION_CONTACT}: two bodies {:e} apart, within the linear tolerance {eps:e} \
+         (boxes {:?} and {:?})",
+        found.distance, found.first, found.second
+    ))
 }
 
 #[cfg(test)]

@@ -531,3 +531,45 @@ fn a_surface_model_still_refuses_a_hole_that_encloses_no_area() {
         "{error:?}"
     );
 }
+
+#[test]
+fn a_boolean_of_equally_placed_surface_operands_is_refused() {
+    // Both operands are instanced by one transform, so the boolean is a
+    // candidate for the shared frame; a surface is refused there as well.
+    let place = axiolid_core::Transform3::from_translation(Vec3::new(3.0, 0.0, 0.0));
+    let mut b = GeometryGraphBuilder::new();
+    let solid = b.push(GeometryNode::BRep(cube(true))).unwrap();
+    let surface = b.push(GeometryNode::BRep(cube(false))).unwrap();
+    let mut place = |source| {
+        b.push(GeometryNode::Instance(axiolid_model::Instance {
+            source,
+            transform: place,
+        }))
+        .unwrap()
+    };
+    let (solid, surface) = (place(solid), place(surface));
+    let as_tool = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: solid,
+            right: surface,
+            operator: BooleanOperator::Union,
+        }))
+        .unwrap();
+    let as_subject = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Boolean {
+            left: surface,
+            right: solid,
+            operator: BooleanOperator::Union,
+        }))
+        .unwrap();
+    let graph = b.finish(vec![as_tool, as_subject]).unwrap();
+    for root in [as_tool, as_subject] {
+        let error = compiler()
+            .compile_mesh(&graph, root, &options())
+            .expect_err("a surface has no volume to combine");
+        assert!(
+            matches!(&error, GeomError::InvalidInput(m) if m.contains("surface model")),
+            "{error:?}"
+        );
+    }
+}

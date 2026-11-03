@@ -235,8 +235,9 @@ pub(crate) fn contact_reach(tolerance: Tolerance) -> Scalar {
 /// Move the tool's coordinates onto the subject's axis-aligned faces, then
 /// the subject's onto the moved tool's, each by at most `reach` (see the
 /// module notes): [`reach`] for most operators, [`contact_reach`] for a
-/// union.
-pub(crate) fn settle(subject: &TriMesh, tool: &TriMesh, reach: Scalar) -> Settled {
+/// union. `whole` moves every vertex that shares a coordinate value with one
+/// in reach (see [`onto`]); a union moves only the vertices in reach.
+pub(crate) fn settle(subject: &TriMesh, tool: &TriMesh, reach: Scalar, whole: bool) -> Settled {
     let mut out = Settled {
         subject: None,
         tool: None,
@@ -245,12 +246,12 @@ pub(crate) fn settle(subject: &TriMesh, tool: &TriMesh, reach: Scalar) -> Settle
     if reach <= 0.0 {
         return out;
     }
-    if let Some((moved_tool, by)) = onto(tool, subject, reach) {
+    if let Some((moved_tool, by)) = onto(tool, subject, reach, whole) {
         out.moved = out.moved.max(by);
         out.tool = Some(moved_tool);
     }
     let fixed = out.tool.as_ref().unwrap_or(tool);
-    if let Some((moved_subject, by)) = onto(subject, fixed, reach) {
+    if let Some((moved_subject, by)) = onto(subject, fixed, reach, whole) {
         out.moved = out.moved.max(by);
         out.subject = Some(moved_subject);
     }
@@ -289,7 +290,21 @@ fn axis_of(corners: &[Point3; 3]) -> Option<usize> {
 /// its end moved whole, not only the corners above the floor). A value
 /// within `reach` of two planes `x_k = c` (a skin of `fixed` thinner than
 /// the reach), or of a plane and already on another, stays.
-fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Scalar)> {
+///
+/// Without `whole` (a union, which must never remove material away from the
+/// contact) a coordinate moves by its face instead of its value: the
+/// vertices of the connected axis-aligned patch of `moving` the near vertex
+/// lies in move, not another face of `moving` on the same plane value (a
+/// second body 2.5 m away).
+/// A patch moves only outward from its own operand (against the winding of
+/// its flat triangles), so a union gains material and never loses any where
+/// the operands overlap; an overlapping pair fuses in the boolean as it is.
+fn onto(
+    moving: &TriMesh,
+    fixed: &TriMesh,
+    reach: Scalar,
+    whole: bool,
+) -> Option<(TriMesh, Scalar)> {
     let (mlo, mhi) = bounds(&moving.positions)?;
     let grow = Vec3::splat(reach);
     let faces: Vec<Face> = fixed
@@ -326,7 +341,15 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
     // two planes claim it.
     let mut held: [HashMap<u64, Option<Scalar>>; 3] = Default::default();
     let key = |v: Scalar| (v + 0.0).to_bits();
-    for p in &moving.positions {
+    let (patch, outward) = patches(moving);
+    let id = |i: usize, k: usize, v: Scalar| {
+        if whole {
+            key(v)
+        } else {
+            patch[k][i] as u64
+        }
+    };
+    for (i, p) in moving.positions.iter().enumerate() {
         for face in &faces {
             let k = face.axis;
             if p.cmplt(face.lo).any()
@@ -336,8 +359,12 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
             {
                 continue;
             }
+            // A union's operand only grows: outward from its own patch.
+            if !whole && outward[k][i] * (face.at - p[k]) < 0.0 || !whole && outward[k][i] == 0.0 {
+                continue;
+            }
             held[k]
-                .entry(key(p[k]))
+                .entry(id(i, k, p[k]))
                 .and_modify(|at| {
                     if *at != Some(face.at) {
                         *at = None;
@@ -348,10 +375,10 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
     }
     let mut positions = moving.positions.clone();
     let mut moved: Scalar = 0.0;
-    for p in &mut positions {
+    for (i, p) in positions.iter_mut().enumerate() {
         let mut to = *p;
         for (k, held) in held.iter().enumerate() {
-            if let Some(Some(at)) = held.get(&key(p[k])) {
+            if let Some(Some(at)) = held.get(&id(i, k, p[k])) {
                 to[k] = *at;
             }
         }
@@ -376,6 +403,61 @@ fn onto(moving: &TriMesh, fixed: &TriMesh, reach: Scalar) -> Option<(TriMesh, Sc
     let mut out = moving.clone();
     out.positions = positions;
     Some((out, moved))
+}
+
+/// Per axis, the connected axis-aligned patch of each vertex: triangles
+/// whose corners share one coordinate exactly are joined along it, and a
+/// vertex in no such triangle is a patch of its own. The patch is named by
+/// its smallest vertex index. And the sum of the flat triangles' normals
+/// along the axis over the patch: its outward side, `0` for a lone vertex.
+fn patches(mesh: &TriMesh) -> ([Vec<usize>; 3], [Vec<Scalar>; 3]) {
+    let n = mesh.positions.len();
+    let mut out: [Vec<usize>; 3] = std::array::from_fn(|_| (0..n).collect());
+    let mut outward: [Vec<Scalar>; 3] = std::array::from_fn(|_| vec![0.0; n]);
+    for (k, root) in out.iter_mut().enumerate() {
+        fn find(root: &mut [usize], mut i: usize) -> usize {
+            while root[i] != i {
+                root[i] = root[root[i]];
+                i = root[i];
+            }
+            i
+        }
+        for t in mesh.indices.as_chunks::<3>().0 {
+            let c = t.map(|i| i as usize);
+            if c.iter().any(|&i| i >= n) {
+                continue;
+            }
+            let at = mesh.positions[c[0]][k];
+            if c.iter().all(|&i| mesh.positions[i][k] == at) {
+                for &i in &c[1..] {
+                    let (a, b) = (find(root, c[0]), find(root, i));
+                    root[a.max(b)] = a.min(b);
+                }
+            }
+        }
+        for i in 0..n {
+            let r = find(root, i);
+            root[i] = r;
+        }
+        // The normal along `k` of each flat triangle, summed on its patch.
+        let mut sum = vec![0.0; n];
+        for t in mesh.indices.as_chunks::<3>().0 {
+            let c = t.map(|i| i as usize);
+            if c.iter().any(|&i| i >= n) {
+                continue;
+            }
+            let at = mesh.positions[c[0]][k];
+            if c.iter().all(|&i| mesh.positions[i][k] == at) {
+                let normal = (mesh.positions[c[1]] - mesh.positions[c[0]])
+                    .cross(mesh.positions[c[2]] - mesh.positions[c[0]]);
+                sum[root[c[0]]] += normal[k];
+            }
+        }
+        for i in 0..n {
+            outward[k][i] = sum[root[i]];
+        }
+    }
+    (out, outward)
 }
 
 /// The distance from `p` to the closed triangle `t`.
@@ -480,7 +562,7 @@ mod tests {
         tolerance: Tolerance,
         placed: Scalar,
     ) -> Settled {
-        settle(subject, tool, reach(subject, tool, tolerance, placed))
+        settle(subject, tool, reach(subject, tool, tolerance, placed), true)
     }
 
     fn metre() -> Tolerance {
@@ -607,7 +689,7 @@ mod tests {
         let host = cube(Point3::ZERO, Point3::ONE);
         let gap = 0.5e-6;
         let tool = cube(Point3::new(1.0 + gap, 0.0, 0.0), Point3::new(2.0, 1.0, 1.0));
-        let s = settle(&host, &tool, contact_reach(metre()));
+        let s = settle(&host, &tool, contact_reach(metre()), false);
         let moved = s.tool.expect("the tool moves");
         assert!(moved.positions.iter().all(|p| p.x == 1.0 || p.x == 2.0));
         assert!((s.moved - gap).abs() < 1e-15, "{}", s.moved);
@@ -622,7 +704,7 @@ mod tests {
             Point3::new(1.0 + 2e-6, 0.0, 0.0),
             Point3::new(2.0, 1.0, 1.0),
         );
-        let s = settle(&host, &tool, contact_reach(metre()));
+        let s = settle(&host, &tool, contact_reach(metre()), false);
         assert!(s.tool.is_none() && s.subject.is_none());
         assert_eq!(s.moved, 0.0);
     }
