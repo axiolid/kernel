@@ -1063,3 +1063,101 @@ fn a_union_in_face_contact_under_a_turn_is_one_solid() {
         );
     }
 }
+
+/// The #356 column and a corbel on one of its four side faces: the corbel's
+/// centre in the column's frame and its profile size.
+const CORBEL_FACES: [([f64; 2], [f64; 2]); 4] = [
+    ([-0.325, 0.0], [0.25, 0.2]),
+    ([0.325, 0.0], [0.25, 0.2]),
+    ([0.0, -0.375], [0.2, 0.25]),
+    ([0.0, 0.375], [0.2, 0.25]),
+];
+
+/// The column and the corbel on `face`, united. The column stands under
+/// `T(site) Rz(theta)`; the corbel under `T(site) Rz(theta / 2) Rz(theta / 2)
+/// T(offset)`, the same turn computed another way, so the two linear parts
+/// can differ in the last bit. Returns the union's graph and root, and
+/// whether the two linear parts differ in bits.
+fn column_and_corbel(theta: f64, face: usize, site: Vec3) -> (GeometryGraph, NodeId, bool) {
+    let ([cx, cy], [sx, sy]) = CORBEL_FACES[face];
+    let column_placement = Transform3::from_translation(site) * Transform3::from_rotation_z(theta);
+    let half = Transform3::from_rotation_z(theta / 2.0);
+    let corbel_placement = Transform3::from_translation(site)
+        * half
+        * half
+        * Transform3::from_translation(Vec3::new(cx, cy, 3.5));
+    let differ =
+        column_placement.matrix3.to_cols_array() != corbel_placement.matrix3.to_cols_array();
+    let mut g = Graph::new();
+    let column = g.extrusion(rect(0.4, 0.5), 6.0);
+    let column = g.instance(column, column_placement);
+    let corbel = g.extrusion(rect(sx, sy), 0.5);
+    let corbel = g.instance(corbel, corbel_placement);
+    let root = g.boolean(column, corbel, BooleanOperator::Union);
+    (g.finish(vec![root]), root, differ)
+}
+
+/// The exact compiler reads the same union however the turn was computed
+/// (ADR 0096, D8): one audited shell of the column and one corbel, or a
+/// refusal that names its reason. At the origin every turn fuses. At a
+/// site `6e5, 5.6e6, 200` away, most turns are refused whether or not the
+/// two linear parts differ in bits (a `brep-boolean` limit, the same count
+/// with one composition), so each refusal is pinned by name and by count
+/// per face and the pin must move when `brep-boolean` improves.
+#[test]
+fn a_union_under_differently_composed_turns_is_one_solid() {
+    let sites = [Vec3::ZERO, Vec3::new(6e5, 5.6e6, 200.0)];
+    let mut differing = 0usize;
+    // Per face: refused as "do not sew", refused as "too close to classify".
+    let mut refused = [[0usize; 2]; CORBEL_FACES.len()];
+    for site in sites {
+        for (face, counts) in refused.iter_mut().enumerate() {
+            for k in 0..50 {
+                let theta = 0.001 + k as f64 * 0.031_415_9;
+                let (graph, root, differ) = column_and_corbel(theta, face, site);
+                differing += usize::from(differ);
+                let what = format!("site {site:?}, face {face}, theta {theta}");
+                let solids = ReferenceExactCompiler::new().compile_exact_batch_with_reports(
+                    &graph,
+                    &[root],
+                    &options(),
+                );
+                let mut solids = match solids {
+                    Ok(solids) => solids,
+                    Err(error) => {
+                        assert!(site != Vec3::ZERO, "{what}: refused: {error}");
+                        if named_by(&error, "do not sew into a solid") {
+                            counts[0] += 1;
+                        } else {
+                            named(&error, "too close to a face boundary to classify");
+                            counts[1] += 1;
+                        }
+                        continue;
+                    }
+                };
+                let (brep, _) = solids.remove(0);
+                let scale = site.abs().max_element().max(1.0);
+                let health = geometric_audit(&brep, Tolerance::METRE);
+                assert!(health.is_consistent(), "{what}: {:?}", health.defects());
+                let topology = axiolid_topology::audit_brep(brep.topology());
+                assert!(topology.is_closed_manifold(), "{what}: {topology:?}");
+                assert_eq!(brep.topology().shells().len(), 1, "{what}");
+                let measured = volume(&brep);
+                assert!(
+                    (measured - 1.225).abs() <= 1e-9 * scale,
+                    "{what}: volume {measured}"
+                );
+            }
+        }
+    }
+    assert!(differing > 0, "no case composed its turn differently");
+    assert_eq!(
+        refused,
+        [[27, 4], [28, 3], [31, 4], [31, 4]],
+        "the refused turns changed"
+    );
+}
+
+fn named_by(error: &GeomError, part: &str) -> bool {
+    matches!(error, GeomError::UnsupportedInput { input, .. } if input.contains(part))
+}
