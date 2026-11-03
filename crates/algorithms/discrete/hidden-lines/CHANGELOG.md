@@ -13,6 +13,18 @@ caret rule for `0.x` versions.
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
+- `ScalarVisibleFaces`, the exact provider for `MeshVisibleFaces` (ADR 0094,
+  #383): the visible face regions of caller-grouped triangles in the view of
+  the hidden-line provider, decided in the exact planar arrangement of
+  `axiolid-exact-arrangement`, with region vertices that are exact points
+  rounded once. Checked by the faces conformance suite, an independent
+  binary64 ray-casting oracle and a mutation probe. On
+  `scenario/visible-faces` (a loaded machine, ranges over three runs) the BVH
+  beats a full scan on a cut plan by 1.4-2.1x at 400 boxes and 4.1-6.6x at
+  2,500 boxes, and the depth prune of hidden edges saves 2.7-3.2x in an
+  isometric view at 400 boxes; the BVH is not consistently faster than the
+  scan in an isometric view or on interpenetrating boxes. A generic rotated scene can be refused as `Degenerate` when two exact ring
+  vertices round to the same binary64 value (`TODO(#410)`).
 
 ### Changed
 

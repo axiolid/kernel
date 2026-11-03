@@ -1,6 +1,6 @@
 # 0094 — Visible face regions of meshes share the hidden-line view and an exact arrangement
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-30
 - **Deciders:** Friedrich Schrödter
 - **Supersedes:** —
@@ -109,6 +109,27 @@ unchanged bit for bit, which every existing section test pins.
 **Negative / costs**
 
 - A second registry and a second conformance suite to maintain.
+- Cost. `scenario/visible-faces` (`tools/benchmark/benches/scenario.rs`, grids
+  of boxes, three runs on a noisy machine, run-to-run spread up to 50%)
+  times `ScalarVisibleFaces` (`bvh`) against a full pair scan (`scan`) and
+  against the BVH without the depth prune of hidden edges (`unpruned`). All
+  three return identical regions, which the bench asserts. The machine was
+  loaded by other jobs, so read the ratios as ranges over the three runs.
+  The BVH beats the scan on the cut plan by 1.4-2.1x at 400 boxes and by
+  4.1-6.6x at 2,500 boxes (50x50: 1.4-2.0 s against 7.0-9.6 s). The prune
+  saves 2.7-3.2x in the isometric view at 400 boxes (`bvh` 2.0-2.8 s,
+  `unpruned` 6.3-7.8 s) and 1.4-2.7x at 100 boxes; on the 50x50 cut plan
+  `unpruned` was slower than `bvh` in every paired run (1.3-2.0x), while at
+  400 boxes on the cut plan the runs disagree and no gain is claimed. In the
+  isometric view and on the interpenetrating 6x6 scenes the BVH is not
+  consistently faster than the scan; no gain is claimed there. A request
+  takes seconds at a few thousand triangles, because exact intersection
+  curves and labelling dominate; the 50x50 isometric grid takes over ten
+  seconds and is not in the bench.
+- A known limit. A generic rotated scene can be refused as `Degenerate` when
+  two exact ring vertices round to the same binary64 value, because the
+  region would collapse under rounding. The refusal is typed and names the
+  mesh; the remedy belongs to the snapping decision of #377 (`TODO(#410)`).
 
 **Follow-ups / risks to watch**
 

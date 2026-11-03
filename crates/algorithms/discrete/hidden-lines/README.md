@@ -15,6 +15,17 @@ cut solid in the plane needs no special case. A solid wholly beyond the plane is
 removed.
 It does not draw perspective views, exact B-rep edges or smooth silhouettes.
 
+`ScalarVisibleFaces` is the provider for `MeshVisibleFaces` (ADR 0094): the
+visible face regions of caller-grouped triangles in the same view, with the
+same preparation, clipping, caps and crop. The visible outlines, the clip
+lines, the crop and the exact intersection curves of the triangles go into
+the exact planar arrangement of `axiolid-exact-arrangement`; each side of
+each piece is labelled by the exact frontmost source at a symbolic side
+point, and the regions are traced from those labels. Region vertices are the
+exact points rounded once. Sources tied in depth each receive the area.
+Known limit: a generic rotated scene can be refused as `Degenerate` when two
+exact ring vertices round to the same binary64 value (`TODO(#410)`).
+
 ```bash
 cargo add axiolid-hidden-lines
 ```
