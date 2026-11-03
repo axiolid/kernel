@@ -2348,6 +2348,22 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-evaluate
 
+### 0.3.20 - 2026-11-03
+
+### Added
+
+- `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
+  seam-free span, of the coefficients of the signed bend of a section frame
+  law, `O'.N`, `L.N'` and `U.N'` (`N` the frame's tangent), in the section
+  and the plan reading. A section point moves along the plane normal at
+  `O'.N + long' - a L.N' - b U.N'`, so a caller can tell where the section
+  planes stop advancing (a fold). Closed-form frames only: a line, a circle,
+  a polyline's segment, an elevated or banked curve over a line or a
+  circle, and an intrinsic curve; frames read by quadrature and every frame
+  without bounds have no bend (`None`). `FrameLawBounds::forward` bounds
+  `O'.N` from below for every frame with bounds. `FrameLaw::has_bend` tells a frame with a
+  closed-form bend, which a narrower span bounds, from one without.
+
 ### 0.3.19 - 2026-11-03
 
 ### Fixed
@@ -4059,6 +4075,38 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.44 - 2026-11-03
+
+### Changed
+
+- The B-rep tessellator reads its supports through a resolved view, an
+  edge's 3D curve, a use's pcurve with its parameter span and a face's
+  surface, instead of looking each handle up in the graph (#412). A handle
+  that does not resolve to a node of its kind (an edge curve, a pcurve or a
+  face surface) is now refused up front by name with
+  `GeomError::InvalidInput`, whether or not any face reads the handle. A
+  shelled planar face whose edge use carries a pcurve handle to a Curve3
+  node, or whose edge curve handle points at a Surface node, was meshed (or
+  reported Unbounded) before and is refused now. A B-rep with broken
+  topology is still reported as such first.
+
+### Fixed
+
+- A station-placed spine whose section planes fold is refused as invalid
+  input, by the mesh and the exact compiler alike (#361). A section vertex
+  on the inner side of a bend at or past its centre of curvature (the plan
+  arc's radius against the section's lateral extent, a vertical arc's
+  against its up extent in the section frame), or one receding along the
+  tangent faster than the basis advances, makes the sections cross: the
+  loft was meshed into a self-intersecting shell and reported certified.
+  The check is exact where the frame law has a closed-form bend (unturned
+  sections along a line, circle, polyline, elevated or banked curve over
+  those, or an intrinsic curve; a touch within rounding is refused too) and
+  conservative elsewhere (a turned section, a frame read by quadrature):
+  there it never refuses and reports the run unbounded by name when a fold
+  cannot be excluded. A fold between two far-apart parts of the run is not
+  detected.
 
 ### 0.3.43 - 2026-11-03
 
@@ -7537,6 +7585,8 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ### Changed
 
+- Requires `axiolid-evaluate` 0.3.20, whose station frame laws bound their
+  signed bend (#361).
 - The exact point store, the segment arrangement and the ring tracing of the
   section's in-plane faces moved into the new crate
   `axiolid-exact-arrangement`, which the visible faces of

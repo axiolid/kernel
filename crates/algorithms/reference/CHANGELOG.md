@@ -18,6 +18,8 @@ caret rule for `0.x` versions.
 
 ### Changed
 
+- Requires `axiolid-evaluate` 0.3.20, whose station frame laws bound their
+  signed bend (#361).
 - The exact point store, the segment arrangement and the ring tracing of the
   section's in-plane faces moved into the new crate
   `axiolid-exact-arrangement`, which the visible faces of

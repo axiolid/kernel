@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-evaluate"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "axiolid-contracts",
  "axiolid-core",

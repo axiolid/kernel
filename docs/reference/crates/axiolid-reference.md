@@ -58,6 +58,8 @@ Latest release, 0.3.16 (2026-11-03):
 
 ### Changed
 
+- Requires `axiolid-evaluate` 0.3.20, whose station frame laws bound their
+  signed bend (#361).
 - The exact point store, the segment arrangement and the ring tracing of the
   section's in-plane faces moved into the new crate
   `axiolid-exact-arrangement`, which the visible faces of

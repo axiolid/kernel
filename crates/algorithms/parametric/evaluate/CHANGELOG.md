@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-11-03
+
 ### Added
 
 - `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a

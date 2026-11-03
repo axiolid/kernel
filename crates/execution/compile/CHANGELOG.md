@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.44] - 2026-11-03
+
 ### Changed
 
 - The B-rep tessellator reads its supports through a resolved view, an

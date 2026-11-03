@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.43 (2026-11-03) |
+| Latest release | 0.3.44 (2026-11-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -95,31 +95,36 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.43 (2026-11-03):
-
-### Fixed
-
-- A mesh union whose result holds two bodies within the linear tolerance of
-  each other (faces in contact under a general rotation, or a gap smaller
-  than the tolerance) is refused by name, `GeomError::Degenerate` starting
-  with `UNMERGED_UNION_CONTACT`, instead of returned as two disjoint solids
-  (#356, #357). A union whose operand already holds two shells within the
-  tolerance is refused too.
-- A boolean of operands placed by the same linear part (a rotation and
-  uniform scale) is cut in their shared frame and the result placed, so
-  faces in contact under a general rotation merge (#356), and a flush
-  opening under a turned placement shared with its wall cuts through; the
-  world-frame cut remains the fallback. A snap in that frame is reported
-  with the placement's rounding added.
+Latest release, 0.3.44 (2026-11-03):
 
 ### Changed
 
-- Depends on `axiolid-inspect` (`surface_gap`) in production (ADR 0096).
-- A union reads its operands as touching within the linear tolerance: faces
-  of the two operands on a shared axis-aligned plane within the tolerance
-  are set onto each other, so such a union fuses into one body, adding at
-  most the tolerance of material. The move is reported under
-  `SNAPPED_OPERANDS` (#357, ADR 0096). Differences and intersections keep
-  the rounding reach (#291).
+- The B-rep tessellator reads its supports through a resolved view, an
+  edge's 3D curve, a use's pcurve with its parameter span and a face's
+  surface, instead of looking each handle up in the graph (#412). A handle
+  that does not resolve to a node of its kind (an edge curve, a pcurve or a
+  face surface) is now refused up front by name with
+  `GeomError::InvalidInput`, whether or not any face reads the handle. A
+  shelled planar face whose edge use carries a pcurve handle to a Curve3
+  node, or whose edge curve handle points at a Surface node, was meshed (or
+  reported Unbounded) before and is refused now. A B-rep with broken
+  topology is still reported as such first.
+
+### Fixed
+
+- A station-placed spine whose section planes fold is refused as invalid
+  input, by the mesh and the exact compiler alike (#361). A section vertex
+  on the inner side of a bend at or past its centre of curvature (the plan
+  arc's radius against the section's lateral extent, a vertical arc's
+  against its up extent in the section frame), or one receding along the
+  tangent faster than the basis advances, makes the sections cross: the
+  loft was meshed into a self-intersecting shell and reported certified.
+  The check is exact where the frame law has a closed-form bend (unturned
+  sections along a line, circle, polyline, elevated or banked curve over
+  those, or an intrinsic curve; a touch within rounding is refused too) and
+  conservative elsewhere (a turned section, a frame read by quadrature):
+  there it never refuses and reports the run unbounded by name when a fold
+  cannot be excluded. A fold between two far-apart parts of the run is not
+  detected.
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)
