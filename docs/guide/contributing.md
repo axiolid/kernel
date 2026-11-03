@@ -44,6 +44,8 @@ python3 scripts/verify-packages.py --minimal-versions-only --allow-dirty --crate
 
 It needs the crates.io index, and it stops rather than guess when the index cannot be read. `scripts/probe_minimal_versions_gate.py` lowers `axiolid-mesh-compile`'s floors back to the 0.3.28 situation and proves the check rejects it, also when the check itself is mutated.
 
+Every publishable crate ships its licence texts ([ADR 0089](../adr/0089-dual-licence-with-a-commercial-option.md), kernel#358). A new crate directory needs relative symlinks `LICENSE` and, unless its `license` is `MPL-2.0` only (as `axiolid-mesh-boolean-boolmesh`, [ADR 0047](../adr/0047-absorb-mesh-boolean.md)), `LICENSE-COMMERCIAL`, both pointing at the repository root files (`ln -s ../../../LICENSE .`, with as many `../` as the depth). Cargo packages the target's contents. Crates with `publish = false` get neither. `scripts/verify-packages.py` fails when an archive lacks a file, ships `LICENSE-COMMERCIAL` without the commercial licence, or holds contents that differ from the root files, for example a symlink a Windows checkout turned into a text file.
+
 ## Design rules
 
 - Keep Axiolid format-agnostic: source semantics belong in adapter projects.

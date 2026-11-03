@@ -83,6 +83,53 @@ def assert_no_packaged_lockfile(archive: Path) -> None:
         )
 
 
+LICENCE_FILE = "LICENSE"
+COMMERCIAL_FILE = "LICENSE-COMMERCIAL"
+COMMERCIAL_TERM = "LicenseRef-Commercial"
+
+
+def licence_problems(package: dict, members: dict[str, bytes | None]) -> list[str]:
+    """What is wrong with the licence files in one crate archive (kernel#358).
+
+    `members` maps a file name at the archive's crate root to its bytes, or to
+    None when it is not a regular file. The archive must carry the root
+    `LICENSE`, and the root `LICENSE-COMMERCIAL` exactly when the crate's SPDX
+    expression offers the commercial licence. Byte identity with the root
+    files catches a symlink that a Windows checkout turned into a text file.
+    """
+    dual = COMMERCIAL_TERM in (package.get("license") or "")
+    wanted = [LICENCE_FILE] + ([COMMERCIAL_FILE] if dual else [])
+    problems = []
+    for name in wanted:
+        if name not in members:
+            problems.append(f"{name} is missing")
+        elif members[name] != (ROOT / name).read_bytes():
+            problems.append(f"{name} differs from the repository root file")
+    if not dual and COMMERCIAL_FILE in members:
+        problems.append(f"{COMMERCIAL_FILE} is shipped by a crate that is not dual-licensed")
+    return problems
+
+
+def assert_licence_files(archive: Path, package: dict) -> None:
+    prefix = f'{package["name"]}-{package["version"]}/'
+    members: dict[str, bytes | None] = {}
+    with tarfile.open(archive, "r:gz") as crate:
+        for name in (LICENCE_FILE, COMMERCIAL_FILE):
+            try:
+                member = crate.getmember(prefix + name)
+            except KeyError:
+                continue
+            stream = crate.extractfile(member) if member.isfile() else None
+            members[name] = stream.read() if stream else None
+    problems = licence_problems(package, members)
+    if problems:
+        raise SystemExit(
+            f"LICENCE_FILES=FAIL {package['name']}: {'; '.join(problems)}. Every "
+            f"publishable crate links {LICENCE_FILE} (and {COMMERCIAL_FILE} when "
+            "dual-licensed) to the repository root; see docs/guide/contributing.md"
+        )
+
+
 def assert_archives_identical(patched: Path, unpatched: Path) -> None:
     patched_checksum = archive_checksum(patched)
     unpatched_checksum = archive_checksum(unpatched)
@@ -195,6 +242,11 @@ def bootstrap_preflight(
         )
     for archive in sorted((patched_target / "package").glob("*.crate")):
         assert_no_packaged_lockfile(archive)
+    for package in publishable:
+        assert_licence_files(
+            patched_target / "package" / f'{package["name"]}-{package["version"]}.crate',
+            package,
+        )
 
     roots = internal_roots(publishable)
     for package in roots:
@@ -594,7 +646,7 @@ def main() -> None:
     if roots is not None:
         print(
             f"PACKAGE_SOURCE_PREFLIGHT=PASS archives={len(publishable)} "
-            f"lockfiles=absent roots_byte_identical={roots} "
+            f"lockfiles=absent licences=present roots_byte_identical={roots} "
             f"excluded={','.join(package['name'] for package in excluded) or '-'}"
         )
     print(

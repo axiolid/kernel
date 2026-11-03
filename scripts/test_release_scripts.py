@@ -343,6 +343,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 """
 
 
+class LicenceFilesTests(unittest.TestCase):
+    """The licence files in a crate archive (kernel#358)."""
+
+    DUAL = {"name": "a", "license": "MPL-2.0 OR LicenseRef-Commercial"}
+    SINGLE = {"name": "b", "license": "MPL-2.0"}
+
+    def root(self, name: str) -> bytes:
+        return (verify.ROOT / name).read_bytes()
+
+    def both(self) -> dict:
+        return {
+            "LICENSE": self.root("LICENSE"),
+            "LICENSE-COMMERCIAL": self.root("LICENSE-COMMERCIAL"),
+        }
+
+    def test_complete_archives_pass(self) -> None:
+        self.assertEqual(verify.licence_problems(self.DUAL, self.both()), [])
+        single = {"LICENSE": self.root("LICENSE")}
+        self.assertEqual(verify.licence_problems(self.SINGLE, single), [])
+
+    def test_missing_file_is_reported(self) -> None:
+        self.assertEqual(
+            verify.licence_problems(self.DUAL, {"LICENSE": self.root("LICENSE")}),
+            ["LICENSE-COMMERCIAL is missing"],
+        )
+        self.assertEqual(verify.licence_problems(self.SINGLE, {}), ["LICENSE is missing"])
+
+    def test_commercial_file_in_single_licensed_crate_is_reported(self) -> None:
+        self.assertEqual(
+            verify.licence_problems(self.SINGLE, self.both()),
+            ["LICENSE-COMMERCIAL is shipped by a crate that is not dual-licensed"],
+        )
+
+    def test_text_file_in_place_of_symlink_is_reported(self) -> None:
+        members = {"LICENSE": b"../../../LICENSE", "LICENSE-COMMERCIAL": None}
+        self.assertEqual(
+            verify.licence_problems(self.DUAL, members),
+            [
+                "LICENSE differs from the repository root file",
+                "LICENSE-COMMERCIAL differs from the repository root file",
+            ],
+        )
+
+
 class MinimalVersionsTests(unittest.TestCase):
     """The minimal-internal-versions release check (kernel#337)."""
 
