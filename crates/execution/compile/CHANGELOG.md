@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Changed
+
+- The B-rep tessellator reads its supports through a resolved view, an
+  edge's 3D curve, a use's pcurve with its parameter span and a face's
+  surface, instead of looking each handle up in the graph (#412). A handle
+  that does not resolve to a node of its kind (an edge curve, a pcurve or a
+  face surface) is now refused up front by name with
+  `GeomError::InvalidInput`, whether or not any face reads the handle. A
+  shelled planar face whose edge use carries a pcurve handle to a Curve3
+  node, or whose edge curve handle points at a Surface node, was meshed (or
+  reported Unbounded) before and is refused now. A B-rep with broken
+  topology is still reported as such first.
+
 ## [0.3.43] - 2026-11-03
 
 ### Fixed

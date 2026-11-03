@@ -42,13 +42,13 @@ use std::collections::BTreeMap;
 
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::Vec3;
-use axiolid_model::NodeId;
 use axiolid_topology::Orientation;
 
 use super::inversion::{self, EdgeTrace, SurfaceInverter};
+use super::view::Pcurve;
 use super::{
-    edge_sample_count, edge_samples, face_surface, takes_curved_path, trim_samples,
-    with_curved_face_transaction, EdgeSamples, FaceBound, FaceContext, SpanBounds, WeldedVertices,
+    edge_sample_count, edge_samples, takes_curved_path, trim_samples, with_curved_face_transaction,
+    EdgeSamples, FaceBound, FaceContext, SpanBounds, WeldedVertices,
 };
 use axiolid_mesh::TriMesh;
 
@@ -62,8 +62,7 @@ struct EdgePlan<'g> {
 
 /// A pcurve use of an edge: its trim, its face's surface and its direction.
 struct PcurveSource<'g> {
-    node: NodeId,
-    trim: &'g axiolid_curve::Curve2,
+    pcurve: Pcurve<'g>,
     surface: &'g axiolid_surface::Surface,
     sense: Orientation,
 }
@@ -115,17 +114,17 @@ fn plan_edges<'g>(
     ctx: &FaceContext<'g>,
     shells: &[(&axiolid_topology::Shell, bool)],
 ) -> GeomResult<BTreeMap<usize, EdgePlan<'g>>> {
-    let (brep, graph) = (ctx.brep, ctx.graph);
+    let brep = ctx.brep;
     let mut plans: BTreeMap<usize, EdgePlan<'g>> = BTreeMap::new();
     for &(face_id, _) in shells.iter().flat_map(|(shell, _)| shell.faces.iter()) {
         let face = brep
             .faces()
             .get(face_id.index())
             .ok_or_else(|| GeomError::InvalidInput("face missing".to_string()))?;
-        let Some(surface) = face_surface(graph, face)? else {
+        let Some(surface) = face.surface else {
             continue;
         };
-        if !takes_curved_path(brep, graph, face, surface) {
+        if !takes_curved_path(brep, face, surface) {
             continue;
         }
         let bound = FaceBound::new(surface);
@@ -141,17 +140,10 @@ fn plan_edges<'g>(
                     .get(use_.edge.index())
                     .ok_or_else(|| GeomError::InvalidInput("edge missing".to_string()))?;
                 let (segments, source) = match use_.pcurve {
-                    Some(node) => {
-                        let Some(axiolid_model::GeometryNode::Curve2(trim)) = graph.get(node)
-                        else {
-                            return Err(GeomError::InvalidInput(
-                                "edge pcurve must reference a Curve2 node".to_string(),
-                            ));
-                        };
-                        let segments = edge_sample_count(trim, surface, ctx.chord_error)?;
+                    Some(pcurve) => {
+                        let segments = edge_sample_count(&pcurve, surface, ctx.chord_error)?;
                         let source = PcurveSource {
-                            node,
-                            trim,
+                            pcurve,
                             surface,
                             sense: use_.orientation,
                         };
@@ -176,7 +168,7 @@ fn plan_edges<'g>(
                     if plan
                         .pcurve
                         .as_ref()
-                        .is_none_or(|kept| source.node < kept.node)
+                        .is_none_or(|kept| source.pcurve.key < kept.pcurve.key)
                     {
                         plan.pcurve = Some(source);
                     }
@@ -191,12 +183,12 @@ fn plan_edges<'g>(
 /// bounds on the edge's 3D curve.
 fn planned_samples(
     ctx: &FaceContext<'_>,
-    edge: &axiolid_topology::Edge<NodeId>,
+    edge: &axiolid_topology::Edge<&axiolid_curve::Curve3>,
     plan: &EdgePlan<'_>,
 ) -> GeomResult<(Vec<Vec3>, Orientation, SpanBounds)> {
     let n = plan.segments;
     if let Some(source) = &plan.pcurve {
-        let points = trim_samples(source.trim, n)?
+        let points = trim_samples(&source.pcurve, n)?
             .iter()
             .map(|p| axiolid_reference::surface::evaluate(source.surface, p.x, p.y))
             .collect::<GeomResult<Vec<_>>>()?;

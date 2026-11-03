@@ -61,9 +61,9 @@
 //! samples; its 3D chord bound is then known only for a straight edge, and a
 //! curved one is reported unbounded by name.
 
+use super::view::Pcurve;
 use axiolid_contracts::{GeomError, GeomResult};
 use axiolid_core::{Point2, Scalar, Tolerance, Vec3};
-use axiolid_model::NodeId;
 use axiolid_nurbs::{
     CertifiedSurfaceProjectionOptions, PeriodicBSplineSurface, SurfaceInversionCertificate3,
     SurfaceInversionRefusal, MAX_CERTIFIED_SURFACE_PROJECTION_DEPTH,
@@ -536,7 +536,7 @@ fn parameter_domain(surface: &Surface) -> ((Scalar, Scalar), (Scalar, Scalar)) {
 pub(super) fn inverted_edge_use(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
-    use_: &EdgeUse<NodeId>,
+    use_: &EdgeUse<Pcurve<'_>>,
     inverter: &SurfaceInverter<'_>,
     bound: &mut FaceBound<'_>,
     previous_end: Option<Point2>,
@@ -627,7 +627,7 @@ pub(super) const NO_CHORD_BOUND: &str = "edge curve family with no chord bound";
 
 pub(super) fn edge_trace<'g>(
     ctx: &FaceContext<'g>,
-    edge: &axiolid_topology::Edge<NodeId>,
+    edge: &axiolid_topology::Edge<&'g axiolid_curve::Curve3>,
 ) -> GeomResult<EdgeTrace<'g>> {
     let position = |vertex: axiolid_topology::VertexId| -> GeomResult<Vec3> {
         Ok(ctx
@@ -638,13 +638,8 @@ pub(super) fn edge_trace<'g>(
             .position)
     };
     let (start, end) = (position(edge.start)?, position(edge.end)?);
-    let Some(id) = edge.curve else {
+    let Some(curve) = edge.curve else {
         return Ok(EdgeTrace::Straight(start, end));
-    };
-    let Some(axiolid_model::GeometryNode::Curve3(curve)) = ctx.graph.get(id) else {
-        return Err(GeomError::InvalidInput(
-            "edge curve must reference a Curve3 node".to_string(),
-        ));
     };
     let span =
         super::trim::vertex_span(curve, (edge.start, start), (edge.end, end), ctx.tolerance)?;

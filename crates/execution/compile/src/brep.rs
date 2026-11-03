@@ -35,6 +35,15 @@
 //! face then takes those samples, a planar face's straight edges included,
 //! whatever order the shell lists the faces in.
 //!
+//! # Supports (#412)
+//!
+//! The tessellator holds no graph. It reads a [`view::ResolvedBRep`]: an
+//! edge's 3D curve, a use's pcurve with the parameter span the use runs
+//! over, and a face's surface, each resolved once by [`view`]. A handle
+//! that does not resolve to a node of its kind is refused up front, even
+//! when no meshed face reaches it. Sampling a pcurve always runs from its
+//! span's start to its end.
+//!
 //! # Deviation (#232)
 //!
 //! Every face also reports a certified bound on how far its exact surface
@@ -121,6 +130,9 @@ use crate::weld::EdgeSplits;
 mod edges;
 mod inversion;
 mod trim;
+mod view;
+
+use view::{Pcurve, ResolvedBRep};
 
 const MAX_BREP_FACES: usize = 1 << 16;
 const MAX_BREP_TOPOLOGY_ITEMS: usize = 1 << 20;
@@ -129,7 +141,7 @@ const MAX_TOTAL_CURVED_RECORDS: usize = 1 << 22;
 const MAX_MESH_POSITIONS: usize = 1 << 22;
 const MAX_MESH_INDICES: usize = 1 << 24;
 
-fn check_tessellation_input_budget(brep: &BRep<NodeId>) -> GeomResult<()> {
+fn check_tessellation_input_budget<C3, C2, S>(brep: &BRep<C3, C2, S>) -> GeomResult<()> {
     for (count, resource) in [
         (brep.vertices().len(), "B-rep vertices"),
         (brep.edges().len(), "B-rep edges"),
@@ -275,16 +287,35 @@ pub fn tessellate(
     tolerance: axiolid_core::Tolerance,
     chord_error: Scalar,
 ) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
+    // Before the copy, so an oversized B-rep is refused without being read.
     check_tessellation_input_budget(brep)?;
-    // Structure before geometry. A dangling handle or an open loop
-    // produces a mesh that looks plausible and is wrong, so the
-    // topology is audited before a single triangle is emitted.
+    // Structure before handles: a broken topology is reported as such, not
+    // as the first handle that does not resolve.
+    check_tessellable(brep)?;
+    tessellate_resolved(&view::from_graph(brep, graph)?, tolerance, chord_error)
+}
+
+/// Structure before geometry. A dangling handle or an open loop produces a
+/// mesh that looks plausible and is wrong, so the topology is audited before
+/// a single triangle is emitted.
+fn check_tessellable<C3, C2, S>(brep: &BRep<C3, C2, S>) -> GeomResult<()> {
     let health = axiolid_topology::audit_brep(brep);
     if !health.is_tessellable() {
         return Err(GeomError::InvalidInput(format!(
             "brep topology is not tessellable: {health:?}"
         )));
     }
+    Ok(())
+}
+
+/// [`tessellate`] over a B-rep whose supports are already resolved (#412).
+fn tessellate_resolved(
+    brep: &ResolvedBRep<'_>,
+    tolerance: axiolid_core::Tolerance,
+    chord_error: Scalar,
+) -> GeomResult<(TriMesh, MeshClosure, Deviation)> {
+    check_tessellation_input_budget(brep)?;
+    check_tessellable(brep)?;
 
     // Each shell with whether it is a void. Every solid contributes: a
     // B-rep of several disjoint solids (a composite profile whose members
@@ -359,11 +390,10 @@ pub fn tessellate(
     let mut mesh = TriMesh::default();
     let ctx = FaceContext {
         brep,
-        graph,
         tolerance,
         chord_error,
         closure,
-        splits: shared_edge_splits(brep, graph, &shells),
+        splits: shared_edge_splits(brep, &shells),
     };
     let mut edge_cache: EdgeSamples = EdgeSamples::new();
     let mut welded: std::collections::HashMap<axiolid_topology::VertexId, u32> =
@@ -411,7 +441,7 @@ pub fn tessellate(
 
 /// A void shell must be closed on its own: every edge its faces use is
 /// used exactly twice within it.
-fn check_void_closed(brep: &BRep<NodeId>, shell: &axiolid_topology::Shell) -> GeomResult<()> {
+fn check_void_closed(brep: &ResolvedBRep<'_>, shell: &axiolid_topology::Shell) -> GeomResult<()> {
     let mut uses: std::collections::HashMap<axiolid_topology::EdgeId, usize> =
         std::collections::HashMap::new();
     for &(face_id, _) in &shell.faces {
@@ -464,8 +494,7 @@ fn face_into_cavity(mesh: &mut TriMesh, first_index: usize) {
 /// Triangulate one face and append it to the mesh.
 /// Everything a face needs that does not vary within one shell.
 struct FaceContext<'a> {
-    brep: &'a BRep<NodeId>,
-    graph: &'a axiolid_model::GeometryGraph,
+    brep: &'a ResolvedBRep<'a>,
     tolerance: axiolid_core::Tolerance,
     /// How far a chord may sit from a curved face or edge (#165).
     chord_error: Scalar,
@@ -482,22 +511,22 @@ struct FaceContext<'a> {
 fn append_face(
     mesh: &mut TriMesh,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<NodeId>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     flip: bool,
     welded: &mut std::collections::HashMap<axiolid_topology::VertexId, u32>,
     cache: &mut EdgeSamples,
     total_curved_records: &mut usize,
     deviation: &mut Deviation,
 ) -> GeomResult<()> {
-    let (brep, graph) = (ctx.brep, ctx.graph);
+    let brep = ctx.brep;
     // A curved support cannot be tessellated by projecting the boundary onto
     // a plane: the interior curves away from it and the error is invisible in
     // the output. Sample the surface itself when the face states its boundary
     // in surface parameters, and refuse when it does not: a missing wall is
     // cheap, a wrong wall corrupts every downstream quantity.
-    let support = face_surface(graph, face)?;
+    let support = face.surface;
     if let Some(surface) = support {
-        if takes_curved_path(brep, graph, face, surface) {
+        if takes_curved_path(brep, face, surface) {
             let mut bound = FaceBound::new(surface);
             with_curved_face_transaction(
                 mesh,
@@ -648,8 +677,8 @@ type SampledEdges<'a> = (&'a EdgeSamples, &'a [Vec3]);
 /// holes in their authored order after it. With `samples`, each edge the
 /// edge pass sampled contributes its interior samples too (#336).
 fn planar_rings(
-    brep: &BRep<NodeId>,
-    face: &axiolid_topology::Face<NodeId>,
+    brep: &ResolvedBRep<'_>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     samples: Option<SampledEdges<'_>>,
 ) -> GeomResult<Vec<Ring>> {
     let mut rings: Vec<Ring> = Vec::new();
@@ -710,8 +739,7 @@ fn project_rings(rings: &[Ring]) -> Option<(Vec<[Scalar; 2]>, Vec<usize>, Projec
 /// cannot be read or projected here is skipped: tessellating it refuses it
 /// by name.
 fn shared_edge_splits(
-    brep: &BRep<NodeId>,
-    graph: &axiolid_model::GeometryGraph,
+    brep: &ResolvedBRep<'_>,
     shells: &[(&axiolid_topology::Shell, bool)],
 ) -> EdgeSplits<Corner> {
     let mut splits = EdgeSplits::new();
@@ -719,10 +747,10 @@ fn shared_edge_splits(
         let Some(face) = brep.faces().get(face_id.index()) else {
             continue;
         };
-        match face_surface(graph, face) {
-            Ok(None) => {}
-            Ok(Some(surface)) if !takes_curved_path(brep, graph, face, surface) => {}
-            _ => continue,
+        match face.surface {
+            None => {}
+            Some(surface) if !takes_curved_path(brep, face, surface) => {}
+            Some(_) => continue,
         }
         // Recorded between vertices: a corner inside an edge the edge pass
         // samples is not taken by the faces across it, and the closure
@@ -814,7 +842,7 @@ fn report_steiner(rings: &[Ring], steiner: &[Vec3], deviation: &mut Deviation) -
 /// Walk a bound loop and collect its vertex positions in order, each
 /// edge's interior samples after its start when `samples` holds the edge.
 fn loop_points(
-    brep: &BRep<NodeId>,
+    brep: &ResolvedBRep<'_>,
     bound: &axiolid_topology::FaceBound,
     samples: Option<SampledEdges<'_>>,
 ) -> GeomResult<Ring> {
@@ -875,12 +903,11 @@ fn surface_is_planar(surface: &axiolid_surface::Surface) -> bool {
 /// Whether a face with the support `surface` is meshed as a curved face:
 /// its surface curves, or it is a plane with an edge that follows a curve.
 fn takes_curved_path(
-    brep: &BRep<NodeId>,
-    graph: &axiolid_model::GeometryGraph,
-    face: &axiolid_topology::Face<NodeId>,
+    brep: &ResolvedBRep<'_>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     surface: &axiolid_surface::Surface,
 ) -> bool {
-    !surface_is_planar(surface) || curved_plane(brep, graph, face)
+    !surface_is_planar(surface) || curved_plane(brep, face)
 }
 
 /// Whether a face on a declared plane has an edge that follows a curve
@@ -891,9 +918,8 @@ fn takes_curved_path(
 /// edges' chord bounds plus each sample's distance from the plane. A face
 /// that declares no surface keeps the planar path.
 fn curved_plane(
-    brep: &BRep<NodeId>,
-    graph: &axiolid_model::GeometryGraph,
-    face: &axiolid_topology::Face<NodeId>,
+    brep: &ResolvedBRep<'_>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
 ) -> bool {
     face.bounds
         .iter()
@@ -901,33 +927,7 @@ fn curved_plane(
         .flat_map(|wire| wire.edges.iter())
         .filter_map(|use_| brep.edges().get(use_.edge.index()))
         .filter_map(|edge| edge.curve)
-        .any(|id| match graph.get(id) {
-            Some(axiolid_model::GeometryNode::Curve3(curve)) => !inversion::straight_curve(curve),
-            _ => false,
-        })
-}
-
-/// Resolve a face's support surface from the graph, if it declares one.
-///
-/// A face may legitimately omit its surface: a planar polygon's boundary
-/// already determines its plane. A declared handle that does not resolve to
-/// a Surface node is a graph error, not an absent surface.
-fn face_surface<'g>(
-    graph: &'g axiolid_model::GeometryGraph,
-    face: &axiolid_topology::Face<NodeId>,
-) -> GeomResult<Option<&'g axiolid_surface::Surface>> {
-    let Some(id) = face.surface else {
-        return Ok(None);
-    };
-    match graph.get(id) {
-        Some(axiolid_model::GeometryNode::Surface(s)) => Ok(Some(s)),
-        Some(_) => Err(GeomError::InvalidInput(format!(
-            "face support {id:?} is not a Surface node"
-        ))),
-        None => Err(GeomError::InvalidInput(format!(
-            "face support {id:?} does not belong to this graph"
-        ))),
-    }
+        .any(|curve| !inversion::straight_curve(curve))
 }
 
 fn seed_grid_vertices(
@@ -1167,7 +1167,7 @@ const MAX_CURVED_FACE_VERTICES: usize = 1 << 18;
 /// u in [0, TAU]: two points in parameter space, a full circle in space.
 /// Subdivide until the mapped midpoint is within tolerance of the chord.
 fn edge_sample_count(
-    curve: &axiolid_curve::Curve2,
+    pcurve: &Pcurve<'_>,
     surface: &axiolid_surface::Surface,
     tolerance: Scalar,
 ) -> GeomResult<usize> {
@@ -1176,9 +1176,9 @@ fn edge_sample_count(
             "curved-edge chord tolerance must be positive and finite".to_owned(),
         ));
     }
-    let domain = axiolid_reference::curve::domain2(curve);
+    let domain = pcurve.span;
     let at = |t: Scalar| -> GeomResult<Vec3> {
-        let p = axiolid_reference::curve::evaluate2(curve, t)?;
+        let p = axiolid_reference::curve::evaluate2(pcurve.curve, t)?;
         axiolid_reference::surface::evaluate(surface, p.x, p.y)
     };
     // Powers of two keep the count stable: a face arriving later computes
@@ -1195,7 +1195,7 @@ fn edge_sample_count(
             worst = worst.max((m - 0.5 * (a + b)).length());
         }
         if worst <= tolerance {
-            return Ok(certified_edge_count(curve, surface, tolerance, n));
+            return Ok(certified_edge_count(pcurve, surface, tolerance, n));
         }
         if n >= MAX_CURVED_EDGE_SEGMENTS {
             return Err(GeomError::BudgetExceeded {
@@ -1218,7 +1218,7 @@ fn edge_sample_count(
 /// split by interior refinement, so a coarse one would leave its
 /// triangles' bounds wide.
 fn certified_edge_count(
-    curve: &axiolid_curve::Curve2,
+    pcurve: &Pcurve<'_>,
     surface: &axiolid_surface::Surface,
     tolerance: Scalar,
     n: usize,
@@ -1226,7 +1226,7 @@ fn certified_edge_count(
     let Some(oracle) = SurfaceBoundOracle::new(surface) else {
         return n;
     };
-    let domain = axiolid_reference::curve::domain2(curve);
+    let (curve, domain) = (pcurve.curve, pcurve.span);
     let fits = |count: usize| -> Option<bool> {
         let at = |i: usize| {
             domain.start + (domain.end - domain.start) * (i as Scalar) / (count as Scalar)
@@ -1272,12 +1272,12 @@ fn certified_edge_count(
 /// without shifting the pcurve-to-vertex pairing. Callers omit the final
 /// point when appending the edge to a loop; the next edge contributes that
 /// junction.
-fn trim_samples(curve: &axiolid_curve::Curve2, n: usize) -> GeomResult<Vec<axiolid_core::Point2>> {
-    let domain = axiolid_reference::curve::domain2(curve);
+fn trim_samples(pcurve: &Pcurve<'_>, n: usize) -> GeomResult<Vec<axiolid_core::Point2>> {
+    let domain = pcurve.span;
     let mut out = Vec::with_capacity(n + 1);
     for i in 0..=n {
         let t = domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar);
-        out.push(axiolid_reference::curve::evaluate2(curve, t)?);
+        out.push(axiolid_reference::curve::evaluate2(pcurve.curve, t)?);
     }
     Ok(out)
 }
@@ -1479,11 +1479,11 @@ fn distinct_steps(values: &mut Vec<Scalar>, start: Scalar, span: Scalar) -> Opti
 fn curved_boundary(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<NodeId>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     surface: &axiolid_surface::Surface,
     bound: &mut FaceBound<'_>,
 ) -> GeomResult<CurvedBoundary> {
-    let (brep, graph) = (ctx.brep, ctx.graph);
+    let brep = ctx.brep;
     let mut out = CurvedBoundary {
         uv: Vec::new(),
         shared: Vec::new(),
@@ -1525,20 +1525,15 @@ fn curved_boundary(
                 out.shared.extend(shared.into_iter().take(n));
                 continue;
             };
-            let Some(axiolid_model::GeometryNode::Curve2(trim)) = graph.get(pcurve) else {
-                return Err(GeomError::InvalidInput(
-                    "edge pcurve must reference a Curve2 node".to_string(),
-                ));
-            };
             let n = match state.edge_samples.get(&use_.edge) {
                 Some(cached) => cached.indices.len().checked_sub(1).ok_or_else(|| {
                     GeomError::Degenerate("cached edge has no segments".to_owned())
                 })?,
-                None => edge_sample_count(trim, surface, ctx.chord_error)?,
+                None => edge_sample_count(&pcurve, surface, ctx.chord_error)?,
             };
             state.reserve_face_vertices(n)?;
-            let params = trim_samples(trim, n)?;
-            bound.trim(trim, n, &params);
+            let params = trim_samples(&pcurve, n)?;
+            bound.trim(&pcurve, n, &params);
             if let (Some(end), Some(&start)) = (previous_end, params.first()) {
                 bound.gap(end, start, surface);
             }
@@ -1701,7 +1696,7 @@ fn welded_vertex(
 fn append_curved_face(
     state: &mut CurvedMeshState<'_>,
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<NodeId>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     surface: &axiolid_surface::Surface,
     flip: bool,
     bound: &mut FaceBound<'_>,
@@ -2349,7 +2344,7 @@ pub(crate) fn surface_family(surface: &axiolid_surface::Surface) -> &'static str
 /// polygon's corners are within that of the exact face's boundary.
 fn planar_face_bound(
     ctx: &FaceContext<'_>,
-    face: &axiolid_topology::Face<NodeId>,
+    face: &axiolid_topology::Face<&axiolid_surface::Surface>,
     support: Option<&axiolid_surface::Surface>,
     cache: &EdgeSamples,
     positions: &[Vec3],
@@ -2375,21 +2370,7 @@ fn planar_face_bound(
                 .edges()
                 .get(use_.edge.index())
                 .ok_or_else(|| GeomError::InvalidInput("edge missing".to_owned()))?;
-            let straight = match edge.curve {
-                None => true,
-                Some(id) => {
-                    matches!(
-                        ctx.graph.get(id),
-                        Some(axiolid_model::GeometryNode::Curve3(
-                            axiolid_curve::Curve3::Line(_)
-                        ))
-                    ) || matches!(
-                        ctx.graph.get(id),
-                        Some(axiolid_model::GeometryNode::Curve3(axiolid_curve::Curve3::Polyline(p)))
-                            if p.points.len() == 2 && !p.closed
-                    )
-                }
-            };
+            let straight = edge.curve.is_none_or(inversion::straight_curve);
             if !straight {
                 return Ok(DeviationBound::Unbounded(
                     "planar face with a curved edge, chorded vertex to vertex",
@@ -2492,11 +2473,11 @@ impl<'s> FaceBound<'s> {
     }
 
     /// The lens terms of one pcurve sampled as `n` uniform spans.
-    fn trim(&mut self, curve: &axiolid_curve::Curve2, n: usize, params: &[Point2]) {
+    fn trim(&mut self, pcurve: &Pcurve<'_>, n: usize, params: &[Point2]) {
         if self.unbounded.is_some() {
             return;
         }
-        let domain = axiolid_reference::curve::domain2(curve);
+        let (curve, domain) = (pcurve.curve, pcurve.span);
         let at =
             |i: usize| domain.start + (domain.end - domain.start) * (i as Scalar) / (n as Scalar);
         for i in 0..n {
@@ -2877,7 +2858,12 @@ mod tests {
             radius: 2.0,
         });
 
-        let error = edge_sample_count(&trim, &surface, 1.0e-20)
+        let pcurve = Pcurve {
+            span: axiolid_reference::curve::domain2(&trim),
+            curve: &trim,
+            key: 0,
+        };
+        let error = edge_sample_count(&pcurve, &surface, 1.0e-20)
             .expect_err("the boundary sampler must not return an unverified polyline");
         assert!(matches!(
             error,
@@ -3313,5 +3299,41 @@ mod tests {
         let (u, v) = surface_periods(&surface);
         assert_eq!(u, Some(core::f64::consts::TAU), "u must wrap");
         assert_eq!(v, None, "the axis direction does not wrap");
+    }
+
+    #[test]
+    fn broken_topology_is_reported_before_a_mistyped_handle() {
+        use axiolid_model::GeometryGraphBuilder;
+        use axiolid_topology::{Face, FaceBound, Loop};
+        let mut builder = GeometryGraphBuilder::default();
+        let curve = builder
+            .push_value(axiolid_curve::Curve3::Polyline(axiolid_curve::Polyline3 {
+                points: vec![Point3::ZERO, Point3::new(1.0, 0.0, 0.0)],
+                closed: false,
+            }))
+            .expect("curve node");
+        let graph = builder.finish(vec![curve]).expect("graph");
+        // A loop handle the B-rep below has no loop for.
+        let mut other = BRep::<NodeId>::default();
+        other.add_loop(Loop { edges: Vec::new() });
+        let dangling = other.add_loop(Loop { edges: Vec::new() });
+        // The face's support is a Curve3 node, not a Surface.
+        let mut brep = BRep::<NodeId>::default();
+        brep.add_face(Face {
+            surface: Some(curve),
+            bounds: vec![FaceBound {
+                loop_id: dangling,
+                orientation: Orientation::Forward,
+                outer: true,
+            }],
+            orientation: Orientation::Forward,
+        });
+        let tolerance = axiolid_core::Tolerance::new(1e-9, 1e-9).expect("tolerance");
+        let error = tessellate(&brep, &graph, tolerance, 0.1).expect_err("refused");
+        assert!(
+            matches!(&error, GeomError::InvalidInput(text)
+                if text.starts_with("brep topology is not tessellable")),
+            "{error:?}"
+        );
     }
 }
