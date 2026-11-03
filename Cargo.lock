@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-inspect"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "axiolid-core",
  "axiolid-exact",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "axiolid-mesh-compile"
-version = "0.3.42"
+version = "0.3.43"
 dependencies = [
  "axiolid-brep",
  "axiolid-brep-audit",

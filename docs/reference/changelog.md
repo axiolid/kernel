@@ -3161,6 +3161,25 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 ## axiolid-inspect
 
+### 0.3.8 - 2026-11-03
+
+### Added
+
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+- `surface_gap`: the distance between two meshes' surfaces with no
+  containment test, so a mesh in another's cavity is as far from it as the
+  surfaces are. `min_gap` delegates to it after its containment check
+  (#356, #357).
+
+### Fixed
+
+- `min_gap` and clearance reported a positive gap for meshes that cross with
+  no vertex inside the other (a bar through a box, a pipe through a wall).
+  An edge crossing a face is now a certified `orient3d` test and reads as
+  `Some(0.0)` (#390).
+
 ### 0.3.7 - 2026-10-28
 
 ### Changed
@@ -3959,6 +3978,33 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
 
 
 ## axiolid-mesh-compile
+
+### 0.3.43 - 2026-11-03
+
+### Fixed
+
+- A mesh union whose result holds two bodies within the linear tolerance of
+  each other (faces in contact under a general rotation, or a gap smaller
+  than the tolerance) is refused by name, `GeomError::Degenerate` starting
+  with `UNMERGED_UNION_CONTACT`, instead of returned as two disjoint solids
+  (#356, #357). A union whose operand already holds two shells within the
+  tolerance is refused too.
+- A boolean of operands placed by the same linear part (a rotation and
+  uniform scale) is cut in their shared frame and the result placed, so
+  faces in contact under a general rotation merge (#356), and a flush
+  opening under a turned placement shared with its wall cuts through; the
+  world-frame cut remains the fallback. A snap in that frame is reported
+  with the placement's rounding added.
+
+### Changed
+
+- Depends on `axiolid-inspect` (`surface_gap`) in production (ADR 0096).
+- A union reads its operands as touching within the linear tolerance: faces
+  of the two operands on a shared axis-aligned plane within the tolerance
+  are set onto each other, so such a union fuses into one body, adding at
+  most the tolerance of material. The move is reported under
+  `SNAPPED_OPERANDS` (#357, ADR 0096). Differences and intersections keep
+  the rounding reach (#291).
 
 ### 0.3.42 - 2026-11-03
 

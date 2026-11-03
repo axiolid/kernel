@@ -8,7 +8,7 @@ Mesh queries: clearance, containment, ray casting, and genus.
 
 | | |
 | --- | --- |
-| Latest release | 0.3.7 (2026-10-28) |
+| Latest release | 0.3.8 (2026-11-03) |
 | crates.io | [`axiolid-inspect`](https://crates.io/crates/axiolid-inspect) |
 | Layer | algorithms (`algorithm.query`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_inspect/index.html) · [docs.rs](https://docs.rs/axiolid-inspect) |
@@ -30,14 +30,23 @@ Queries over triangle meshes: clearance between meshes, point containment and wi
 
 ## Changes
 
-Latest release, 0.3.7 (2026-10-28):
+Latest release, 0.3.8 (2026-11-03):
 
-### Changed
+### Added
 
-- The licence is now `MPL-2.0 OR LicenseRef-Commercial` (was `MPL-2.0`):
-  a commercial licence is available from the copyright holder
-  (`LICENSE-COMMERCIAL`, ADR 0089, #358).
-- The minimum supported Rust version is now 1.99 (was 1.88), and the
-  workspace builds on Rust 1.99.1 (#349).
+- The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
+  repository root), so the licence texts travel with the archive (#358).
+
+- `surface_gap`: the distance between two meshes' surfaces with no
+  containment test, so a mesh in another's cavity is as far from it as the
+  surfaces are. `min_gap` delegates to it after its containment check
+  (#356, #357).
+
+### Fixed
+
+- `min_gap` and clearance reported a positive gap for meshes that cross with
+  no vertex inside the other (a bar through a box, a pipe through a wall).
+  An edge crossing a face is now a certified `orient3d` test and reads as
+  `Some(0.0)` (#390).
 
 Full history: [`crates/algorithms/query/inspect/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/query/inspect/CHANGELOG.md)

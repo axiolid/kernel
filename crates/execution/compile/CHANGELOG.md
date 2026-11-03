@@ -9,6 +9,8 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+## [0.3.43] - 2026-11-03
+
 ### Fixed
 
 - A mesh union whose result holds two bodies within the linear tolerance of

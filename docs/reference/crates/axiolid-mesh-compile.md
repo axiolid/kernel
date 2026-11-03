@@ -8,7 +8,7 @@ Scalar reference MeshCompiler: profiles, extrusion, transforms, boolean dispatch
 
 | | |
 | --- | --- |
-| Latest release | 0.3.42 (2026-11-03) |
+| Latest release | 0.3.43 (2026-11-03) |
 | crates.io | [`axiolid-mesh-compile`](https://crates.io/crates/axiolid-mesh-compile) |
 | Layer | execution (`execution.orchestration`) |
 | API documentation | [rustdoc](/api/rustdoc/axiolid_mesh_compile/index.html) · [docs.rs](https://docs.rs/axiolid-mesh-compile) |
@@ -95,19 +95,31 @@ owns graph traversal and dispatch; the construction algorithms themselves
 
 ## Changes
 
-Latest release, 0.3.42 (2026-11-03):
+Latest release, 0.3.43 (2026-11-03):
 
-### Added
+### Fixed
 
-- Runs of sections at stations along an intrinsic plan report a certified
-  deviation (#361): a clothoid, or lines, arcs and transitions in one
-  piecewise law, alone, level in space or under an elevation (a gradient
-  curve), in the section and the plan frame. The bound rests on the
-  curvature law's closed-form derivative suprema and a certified position
-  table (`axiolid-evaluate` 0.3.19). A 5 km alignment at a 1 mm chord error
-  compiles and certifies in about 370 ms. The `UNCERTIFIED_FRAMES` text no
-  longer names intrinsic curves in general: chains, banked curves over an
-  intrinsic plan, intrinsic space curves with torsion or tilted, and
-  offsets beside intrinsic curves stay unbounded by name.
+- A mesh union whose result holds two bodies within the linear tolerance of
+  each other (faces in contact under a general rotation, or a gap smaller
+  than the tolerance) is refused by name, `GeomError::Degenerate` starting
+  with `UNMERGED_UNION_CONTACT`, instead of returned as two disjoint solids
+  (#356, #357). A union whose operand already holds two shells within the
+  tolerance is refused too.
+- A boolean of operands placed by the same linear part (a rotation and
+  uniform scale) is cut in their shared frame and the result placed, so
+  faces in contact under a general rotation merge (#356), and a flush
+  opening under a turned placement shared with its wall cuts through; the
+  world-frame cut remains the fallback. A snap in that frame is reported
+  with the placement's rounding added.
+
+### Changed
+
+- Depends on `axiolid-inspect` (`surface_gap`) in production (ADR 0096).
+- A union reads its operands as touching within the linear tolerance: faces
+  of the two operands on a shared axis-aligned plane within the tolerance
+  are set onto each other, so such a union fuses into one body, adding at
+  most the tolerance of material. The move is reported under
+  `SNAPPED_OPERANDS` (#357, ADR 0096). Differences and intersections keep
+  the rounding reach (#291).
 
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)
