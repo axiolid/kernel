@@ -178,16 +178,18 @@ pub fn tapered_revolve(
     // starts on one side and ends on the other (#351).
     // Each ring stays a ring of its own: an isolated touch is judged by a
     // vertex's neighbours in its ring.
-    let ends = Rings {
-        outer: start.outer.clone(),
-        holes: core::iter::once(&end.outer)
-            .chain(&start.holes)
-            .chain(&end.holes)
-            .cloned()
-            .collect(),
-    };
-    let flags =
-        crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?;
+    // A partial turn closes an isolated touch into a sector point, a full
+    // one pinches there, as in `revolve`. A leaning axis is judged over the
+    // whole blend.
+    let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;
+    let flags = crate::revolve::check_blend_axis_side(
+        start,
+        end,
+        axis_origin,
+        axis_direction,
+        tolerance,
+        full,
+    )?;
     let welded = tapered_welds(start, end, &flags)?;
     let mut max_r: Scalar = 0.0;
     let starts = start.outer.iter().chain(start.holes.iter().flatten());

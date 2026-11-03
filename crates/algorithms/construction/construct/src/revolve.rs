@@ -232,38 +232,61 @@ fn ring_sides(rings: &Rings, a: Point2, d: Vec3) -> GeomResult<Vec<Sign>> {
 /// rational in the inputs without division, so it is decided with a margin:
 /// the profile's contact with `N` (its vertices on `N`, and the edges
 /// between two of them) must keep clear of `X` by more than
-/// `tolerance.linear()` plus a rounding allowance, and is otherwise
-/// `UnsupportedInput`, a case that is not certified. A profile strictly to
-/// one side of `N` has no contact and needs no margin. An axis exactly
-/// perpendicular to the plane has no projection: every copy of the profile
-/// lies in the plane and they coincide, `InvalidInput`.
+/// `tolerance.linear()` plus a rounding allowance, measured along `N` (the
+/// distance between the two points of the plane, not their orbit radius
+/// about the axis), and is otherwise `UnsupportedInput`, a case that is not
+/// certified. A profile strictly to one side of `N` has no contact and needs
+/// no margin. An axis exactly perpendicular to the plane has no projection:
+/// every copy of the profile lies in the plane and they coincide,
+/// `InvalidInput`.
+///
+/// A tapered revolution blends `start` into `end` linearly, so every
+/// station is judged: a vertex on one side of `N` at one end and on the
+/// other at the other end crosses `N` between them, which the pooled side
+/// test refuses; a vertex on `N` at both ends slides along it, and its
+/// whole closed span of offsets, and an edge on `N` at both ends the span of
+/// its four, must keep clear of `X`. A vertex or edge on `N` at one end only
+/// touches it there alone. A plain revolution passes its rings as both.
 ///
 /// No vertex is welded: a vertex on `N` is off the axis. A partial turn is
 /// judged alike, as an in-plane axis is.
 fn check_leaning_axis(
-    rings: &Rings,
+    start: &Rings,
+    end: &Rings,
     axis_origin: Point3,
     axis_direction: Vec3,
     tolerance: Tolerance,
-) -> GeomResult<Vec<bool>> {
+) -> GeomResult<()> {
     if axis_direction.x == 0.0 && axis_direction.y == 0.0 {
         return Err(GeomError::InvalidInput(
             "revolved profile lies in a plane perpendicular to the axis: its copies coincide"
                 .to_owned(),
         ));
     }
+    let structure = |r: &Rings| -> Vec<usize> {
+        core::iter::once(r.outer.len())
+            .chain(r.holes.iter().map(Vec::len))
+            .collect()
+    };
+    let shape = structure(start);
+    if shape != structure(end) {
+        return Err(GeomError::InvalidInput(
+            "the end rings of a revolution must share their ring structure".to_owned(),
+        ));
+    }
     let a = Point2::new(axis_origin.x, axis_origin.y);
-    let sides = ring_sides(rings, a, axis_direction)?;
-    if sides.contains(&Sign::Positive) && sides.contains(&Sign::Negative) {
+    let sides_start = ring_sides(start, a, axis_direction)?;
+    let sides_end = ring_sides(end, a, axis_direction)?;
+    let both = |sign: Sign| sides_start.contains(&sign) || sides_end.contains(&sign);
+    if both(Sign::Positive) && both(Sign::Negative) {
         return Err(GeomError::InvalidInput(
             "revolved profile crosses the axis: its rings lie on both sides of the axis's \
              projection into the profile plane"
                 .to_owned(),
         ));
     }
-    let count = sides.len();
-    if !sides.contains(&Sign::Zero) {
-        return Ok(vec![false; count]);
+    if !both(Sign::Zero) {
+        return Ok(());
     }
     // Positions along N measured from where the axis meets the plane.
     let along = axis_direction.x.hypot(axis_direction.y);
@@ -289,37 +312,87 @@ fn check_leaning_axis(
                 .max(reach.abs());
         tolerance.linear() + 64.0 * Scalar::EPSILON * scale
     };
-    let points: Vec<Point2> = rings
-        .outer
-        .iter()
-        .chain(rings.holes.iter().flatten())
-        .copied()
-        .collect();
-    let mut start = 0;
-    for len in core::iter::once(rings.outer.len()).chain(rings.holes.iter().map(Vec::len)) {
-        let ring = &points[start..start + len];
+    let flat = |r: &Rings| -> Vec<Point2> {
+        r.outer
+            .iter()
+            .chain(r.holes.iter().flatten())
+            .copied()
+            .collect()
+    };
+    let (from, to) = (flat(start), flat(end));
+    // The offset along N of ring point `i` at one end, if it is on N.
+    let at = |sides: &[Sign], points: &[Point2], i: usize| {
+        (sides[i] == Sign::Zero).then(|| offset_of(points[i]))
+    };
+    let mut first = 0;
+    for len in shape {
         for k in 0..len {
-            if sides[start + k] != Sign::Zero {
-                continue;
-            }
-            let here = offset_of(ring[k]);
-            let next = (k + 1) % len;
-            let (low, high) = if sides[start + next] == Sign::Zero {
-                let other = offset_of(ring[next]);
-                (here.min(other), here.max(other))
-            } else {
-                (here, here)
-            };
-            let margin = slack(ring[k]);
-            if !(low.is_finite() && high.is_finite())
-                || (low - margin <= 0.0 && 0.0 <= high + margin)
-            {
-                return Err(uncertified());
+            let (f, g) = (first + k, first + (k + 1) % len);
+            let (s0, s1) = (at(&sides_start, &from, f), at(&sides_start, &from, g));
+            let (e0, e1) = (at(&sides_end, &to, f), at(&sides_end, &to, g));
+            let margin = slack(from[f]).max(slack(to[f]));
+            // The closed spans of offsets the vertex and the edge cover: at
+            // each end alone, and sliding along N between the two.
+            for group in [
+                vec![s0],
+                vec![e0],
+                vec![s0, e0],
+                vec![s0, s1],
+                vec![e0, e1],
+                vec![s0, s1, e0, e1],
+            ] {
+                // A group counts only when every member is on N.
+                if group.iter().any(Option::is_none) {
+                    continue;
+                }
+                let offsets: Vec<Scalar> = group.into_iter().flatten().collect();
+                let low = offsets.iter().copied().fold(Scalar::INFINITY, Scalar::min);
+                let high = offsets
+                    .iter()
+                    .copied()
+                    .fold(Scalar::NEG_INFINITY, Scalar::max);
+                if !(low.is_finite() && high.is_finite())
+                    || (low - margin <= 0.0 && 0.0 <= high + margin)
+                {
+                    return Err(uncertified());
+                }
             }
         }
-        start += len;
+        first += len;
     }
-    Ok(vec![false; count])
+    Ok(())
+}
+
+/// [`check_axis_side`] for a tapered revolution from `start` to `end` (#364,
+/// #362): the flags are over `[start.outer, end.outer, start.holes..,
+/// end.holes..]`, the order its welding reads.
+///
+/// An axis leaning out of the plane is judged over the whole blend (see
+/// [`check_leaning_axis`]) and flags nothing. Otherwise the rings are judged
+/// together, each as a ring of its own, so a section that starts on one
+/// side of the axis and ends on the other is refused (#351).
+pub(crate) fn check_blend_axis_side(
+    start: &Rings,
+    end: &Rings,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    tolerance: Tolerance,
+    full: bool,
+) -> GeomResult<Vec<bool>> {
+    let ends = Rings {
+        outer: start.outer.clone(),
+        holes: core::iter::once(&end.outer)
+            .chain(&start.holes)
+            .chain(&end.holes)
+            .cloned()
+            .collect(),
+    };
+    if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
+        check_leaning_axis(start, end, axis_origin, axis_direction, tolerance)?;
+        let count = ends.outer.len() + ends.holes.iter().map(Vec::len).sum::<usize>();
+        return Ok(vec![false; count]);
+    }
+    check_axis_side(&ends, axis_origin, axis_direction, tolerance, full)
 }
 
 /// Refuse rings that lie on both sides of the axis, and report which touch
@@ -355,7 +428,8 @@ pub(crate) fn check_axis_side(
 ) -> GeomResult<Vec<bool>> {
     let count = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
     if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
-        return check_leaning_axis(rings, axis_origin, axis_direction, tolerance);
+        check_leaning_axis(rings, rings, axis_origin, axis_direction, tolerance)?;
+        return Ok(vec![false; count]);
     }
     let offset = axis_origin.z.abs() > tolerance.linear();
     let exact = axis_origin.z == 0.0 && axis_direction.z == 0.0;

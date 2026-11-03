@@ -25,7 +25,8 @@ MUTANTS = [
     ('nothing welded', S, '        welded.push(here);', '        welded.push(false);', TESTS),
     ('everything welded', S, '        welded.push(here);', '        welded.push(true);', TESTS),
     ('end flags read from the start ring', S, '    let at_end = flags[outer..2 * outer]', '    let at_end = flags[..outer]', TESTS),
-    ('one-end refusal with the wrong variant', S, '    let refuse = |input| GeomError::UnsupportedInput {', '    let refuse = |input| GeomError::InvalidInput(input.to_owned());\n    let _unused = |input| GeomError::UnsupportedInput {', TESTS),
+    ('one-end refusal with the wrong variant', S, '    let refuse = |input| GeomError::UnsupportedInput {', '    let refuse = |input: &\'static str| GeomError::InvalidInput(input.to_owned());\n    let _unused = |input| GeomError::UnsupportedInput {', TESTS),
+    ('partial turn judged as a full one', S, '    let full = (angle.abs() - core::f64::consts::TAU).abs() <= 1e-9;', '    let full = true;', TESTS),
     ('weld flags not handed to the loft', S, 'loft::loft_tapered_welded(&far, start, &stations, &welded)?', 'loft::loft_tapered(&far, start, &stations)?', TESTS),
     ('tapered caps do not share the axis vertices', L, '            let end = t.map(|f| id[last + f as usize]);', '            let end = t.map(|f| (last + f as usize) as u32);', TESTS),
 ]

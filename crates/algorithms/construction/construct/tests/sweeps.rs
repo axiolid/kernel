@@ -450,9 +450,14 @@ fn polygon(points: &[(Scalar, Scalar)]) -> Rings {
 /// closed and holds the volume the swept section gives: a meridian plane at
 /// angle `a` cuts the solid in the blended section, so the volume is
 /// `angle * integral of M(t) dt` with `M` its first moment about the axis.
-fn assert_tapered_revolution(start: &Rings, end: &Rings, moment_integral: Scalar, chord: Scalar) {
+fn assert_tapered_revolution(
+    start: &Rings,
+    end: &Rings,
+    moment_integral: Scalar,
+    chord: Scalar,
+    angle: Scalar,
+) {
     let tol = tol_for(chord);
-    let angle = core::f64::consts::PI;
     let mesh = sweep::tapered_revolve(start, end, Point3::ZERO, Vec3::Y, angle, tol)
         .expect("a tapered revolution touching the axis at both ends");
     let health = axiolid_mesh::audit_mesh(&mesh, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
@@ -487,7 +492,7 @@ fn a_tapered_revolution_of_a_cone_is_closed_and_has_the_swept_volume() {
     // (1 + t)^2 / 3 over [0, 1] is 7 / 9.
     let start = polygon(&[(0.0, 0.0), (1.0, 0.0), (0.0, 2.0)]);
     let end = polygon(&[(0.0, 0.0), (2.0, 0.0), (0.0, 2.0)]);
-    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5);
+    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5, core::f64::consts::PI);
 }
 
 #[test]
@@ -496,7 +501,7 @@ fn a_tapered_revolution_of_a_double_cone_is_closed_and_has_the_swept_volume() {
     // First moment k^2 / 3, as for the cone; the integral is 7 / 9.
     let start = polygon(&[(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]);
     let end = polygon(&[(0.0, -1.0), (2.0, 0.0), (0.0, 1.0)]);
-    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5);
+    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5, core::f64::consts::PI);
 }
 
 #[test]
@@ -529,4 +534,77 @@ fn a_tapered_revolution_touching_the_axis_at_one_end_only_is_refused_by_name() {
         );
         assert!(format!("{error:?}").contains("one end only"), "{error:?}");
     }
+}
+
+#[test]
+fn a_partial_tapered_revolution_closes_an_isolated_touch_into_a_sector_point() {
+    // The apex (0, 0) is the only vertex on the axis; a partial turn welds
+    // it as `revolve` does, a full one pinches there. The triangle
+    // (0,0) (r,-1) (r,1) has first moment 2 r^2 / 3, and r runs from 1 to 2.
+    let start = polygon(&[(0.0, 0.0), (1.0, -1.0), (1.0, 1.0)]);
+    let end = polygon(&[(0.0, 0.0), (2.0, -1.0), (2.0, 1.0)]);
+    assert_tapered_revolution(&start, &end, 14.0 / 9.0, 1e-4, 1.0);
+    let error = sweep::tapered_revolve(
+        &start,
+        &end,
+        Point3::ZERO,
+        Vec3::Y,
+        core::f64::consts::TAU,
+        tol_for(1e-3),
+    )
+    .expect_err("a full turn pinches at the apex");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_tapered_revolution_about_a_leaning_axis_is_judged_over_the_whole_blend() {
+    // The axis leans out of the plane and meets it at the origin; its
+    // projection N is the y axis.
+    let lean = Vec3::new(0.0, 1.0, 0.5);
+    let turn =
+        |a: &Rings, b: &Rings| sweep::tapered_revolve(a, b, Point3::ZERO, lean, 1.0, tol_for(1e-3));
+    let column = |lo: Scalar, hi: Scalar| polygon(&[(0.0, lo), (1.0, lo), (1.0, hi), (0.0, hi)]);
+    // Each end is clear of the origin, but the edge on N slides through it.
+    let error = turn(&column(1.0, 2.0), &column(-2.0, -1.0)).expect_err("slides through X");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+    // Sliding along N clear of the origin is fine.
+    turn(&column(1.0, 2.0), &column(3.0, 4.0)).expect("clear of X throughout");
+    // A vertex on N at one end only touches it there: that end is judged.
+    let off = polygon(&[(0.5, 3.0), (1.0, 3.0), (1.0, 4.0), (0.5, 4.0)]);
+    turn(&column(1.0, 2.0), &off).expect("leaves N clear of X");
+    assert!(matches!(
+        turn(&column(-1.0, 1.0), &off),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    assert!(matches!(
+        turn(&off, &column(-1.0, 1.0)),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    // A lone vertex on N slides through the origin between the ends.
+    let rising = polygon(&[(0.0, 1.0), (1.0, 0.0), (1.0, 2.0)]);
+    let falling = polygon(&[(0.0, -1.0), (1.0, -2.0), (1.0, 0.0)]);
+    assert!(matches!(
+        turn(&rising, &falling),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    // A lone vertex on N at the origin, at either end, is judged too.
+    let apex = polygon(&[(0.0, 0.0), (1.0, -1.0), (1.0, 1.0)]);
+    let far = polygon(&[(0.5, 3.0), (1.5, 2.0), (1.5, 4.0)]);
+    for (a, b) in [(&apex, &far), (&far, &apex)] {
+        assert!(matches!(
+            turn(a, b),
+            Err(GeomError::UnsupportedInput { .. })
+        ));
+    }
+    // A vertex crossing N between the ends puts the rings on both sides.
+    let right = polygon(&[(0.5, 1.0), (1.5, 1.0), (1.5, 2.0), (0.5, 2.0)]);
+    let left = polygon(&[(-1.5, 1.0), (-0.5, 1.0), (-0.5, 2.0), (-1.5, 2.0)]);
+    let error = turn(&right, &left).expect_err("crosses N");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
 }
