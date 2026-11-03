@@ -76,8 +76,8 @@ MUTANTS = [
      "            (r_t)", [LIB]),
     # The composition.
     ("a joint's certified error is not added", FB,
-     "                        bounds.measure += self.joint_error(composite, k)?;",
-     "                        bounds.measure += 0.0 * self.joint_error(composite, k)?;", [LAW]),
+     "            bounds.measure += self.joint_error(composite, at.slot)?;",
+     "            bounds.measure += 0.0 * self.joint_error(composite, at.slot)?;", [LAW]),
     ("a piece read by quadrature takes the closed-form bounds", FB,
      "            if !by_quadrature(piece.curve) {",
      "            if true || !by_quadrature(piece.curve) {", [LAW, QUAD]),

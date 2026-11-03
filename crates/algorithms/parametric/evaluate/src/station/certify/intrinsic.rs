@@ -170,6 +170,31 @@ impl<'c> IntrinsicReader<'c> {
         }
     }
 
+    /// The curve's closed-form jet `(O', O'')` at its measure `m`, per unit
+    /// of that measure (#361): the unit tangent of a plan or level curve
+    /// and `k` times its normal, or an elevated curve's `(p', z')` and
+    /// `(k n, z'')` in plan distance. `None` where the law has no value at
+    /// `m`.
+    pub(crate) fn jet(&self, m: Scalar) -> Option<(Vec3, Vec3)> {
+        match self.base {
+            Base::Elevated(elevated, _) => Some((
+                crate::elevated::elevated_derivative(elevated, m).ok()?,
+                crate::elevated::elevated_second_derivative(elevated, m).ok()?,
+            )),
+            Base::Plan(_) | Base::Level(_) => {
+                let (sin, cos) = self.local.heading_at(m)?.sin_cos();
+                let start = &self.local.start;
+                let tangent = start.x * cos + start.y * sin;
+                let normal = start.y * cos - start.x * sin;
+                let kappa = crate::frenet::law_value(&self.local.curvature, m)?;
+                Some((
+                    Vec3::new(tangent.x, tangent.y, 0.0),
+                    kappa * Vec3::new(normal.x, normal.y, 0.0),
+                ))
+            }
+        }
+    }
+
     /// The exact frame at the curve's measure `m` read from `side`, and the
     /// certified error of its point.
     fn exact(&self, m: Scalar, side: SeamSide) -> GeomResult<Option<(SectionFrame, Scalar)>> {

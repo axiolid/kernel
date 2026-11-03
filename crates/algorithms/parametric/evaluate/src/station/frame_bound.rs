@@ -72,6 +72,19 @@
 //! Gauss-Legendre rule is exact up to rounding and the root find stops
 //! within its tolerance: twice [`ARC_LENGTH_TOLERANCE`]` * max(1, s)`.
 //!
+//! # The signed bend (#361)
+//!
+//! The derivative suprema bound how far a section moves, not whether the
+//! section planes keep advancing. [`FrameLawBounds::forward`] bounds the
+//! forward rate `O'.N` of the basis point from below (one in arc length and
+//! in plan distance, the horizontal part of the tangent under the plan
+//! reading of an arc-length space curve, times a placement's smallest
+//! column length), and [`FrameLaw::bend`] bounds it together with the
+//! tangent's turning toward the lateral and the up axis, `L.N'` and `U.N'`:
+//! a section point `(a, b)` advances at `O'.N - a L.N' - b U.N'` plus its
+//! longitudinal rate, and the planes fold where that is not positive. The
+//! `bend` module states the closed forms.
+//!
 //! # Read by quadrature (#316)
 //!
 //! An ellipse, a B-spline and an offset beside a line, a circle, an
@@ -144,6 +157,10 @@ use super::{CompositeBasis, DistanceConvention, StationCurve, StationPiece, KEEP
 use crate::arc_parameter::ARC_LENGTH_TOLERANCE;
 use crate::bound::ROUNDING;
 
+mod bend;
+
+pub use bend::BendBounds;
+
 /// Which section frame a run places its sections in.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +196,11 @@ pub struct FrameLawBounds {
     /// How far each of a read frame's axes may lie from the exact frame
     /// law's, likewise.
     pub axis_error: Scalar,
+    /// A certified lower bound over the span of `O'.N`, `N` the frame's
+    /// tangent: one in arc length and in plan distance, the horizontal
+    /// floor `rho` under the plan reading of an arc-length space curve,
+    /// times a placement's smallest column length, less rounding (#361).
+    pub forward: Scalar,
 }
 
 impl FrameLawBounds {
@@ -404,6 +426,14 @@ fn placement_stretch(rigid: axiolid_core::Transform3) -> Option<Scalar> {
     orthogonal.then(|| sx.max(sy).max(sz) * (1.0 + 3.0 * eps))
 }
 
+/// The smallest factor a placement's linear part shrinks a length by; call
+/// it only where [`placement_stretch`] holds (orthogonal columns).
+fn placement_shrink(rigid: axiolid_core::Transform3) -> Scalar {
+    let m = rigid.matrix3;
+    let (sx, sy, sz) = (m.x_axis.length(), m.y_axis.length(), m.z_axis.length());
+    sx.min(sy).min(sz) * (1.0 - 3.0 * 32.0 * f64::EPSILON)
+}
+
 /// Certified bounds on the derivatives, in station distance, of the
 /// section frame `piece` presents over `[from, to]` (distances into the
 /// piece, in the composite's direction), read as `reading`; see the
@@ -499,8 +529,10 @@ fn finish(
         law.middle = -law.middle;
     }
     let mut scale = 1.0;
+    let mut shrink = 1.0;
     if let Some(rigid) = piece.placement {
         scale = placement_stretch(rigid)?;
+        shrink = placement_shrink(rigid);
         law.middle = unit(rigid.transform_vector3(law.middle))?;
         if (rigid.transform_vector3(Vec3::Z) - Vec3::Z).length() > KEEPS_UP_TOLERANCE {
             if piece.convention() == DistanceConvention::PlanDistance {
@@ -530,6 +562,7 @@ fn finish(
         }
     };
     let [point_error, mut axis_error] = errors;
+    let mut forward = 1.0;
     let (tangent, lateral, up) = match reading {
         FrameReading::Section => (tangent, lateral, up),
         // A 2D curve's frame is already its plan frame.
@@ -541,6 +574,11 @@ fn finish(
                 axis_error = 2.0 * axis_error / rho;
             }
             let flat = normalised(k1, k2, rho);
+            // `O'` is the horizontal unit vector in plan distance, and the
+            // tangent's horizontal part in arc length.
+            if piece.convention() != DistanceConvention::PlanDistance {
+                forward = rho;
+            }
             (flat, flat, [0.0, 0.0])
         }
     };
@@ -553,11 +591,17 @@ fn finish(
         measure: law.measure,
         point_error: point_error * scale * (1.0 + ROUNDING),
         axis_error: axis_error * scale * (1.0 + ROUNDING),
+        forward: forward * shrink * (1.0 - ROUNDING),
     };
     let finite = [out.point, out.tangent, out.lateral, out.up]
         .iter()
         .flatten()
-        .chain([&out.measure, &out.point_error, &out.axis_error])
+        .chain([
+            &out.measure,
+            &out.point_error,
+            &out.axis_error,
+            &out.forward,
+        ])
         .all(|v| v.is_finite());
     finite.then_some(out)
 }
@@ -688,6 +732,19 @@ impl core::fmt::Debug for FrameLaw<'_, '_> {
     }
 }
 
+/// A span of the basis, as the piece that holds it sees it.
+struct Located<'b, 'c> {
+    /// The piece's slot.
+    slot: usize,
+    piece: StationPiece<'c>,
+    /// The span as distances into the piece.
+    from: Scalar,
+    to: Scalar,
+    table: Option<&'b OffsetTable>,
+    /// The composite the piece is in, whose joints add to the measure.
+    composite: Option<&'b CompositeBasis<'c>>,
+}
+
 /// Whether a piece's frame is read by quadrature.
 fn by_quadrature(curve: StationCurve<'_>) -> bool {
     matches!(curve, StationCurve::Offset(_)) || !curve.measure_is_exact()
@@ -756,35 +813,69 @@ impl<'b, 'c> FrameLaw<'b, 'c> {
     /// where they are not certified (see the [type documentation](Self)).
     #[must_use]
     pub fn bounds(&self, a: Scalar, b: Scalar, reading: FrameReading) -> Option<FrameLawBounds> {
+        let at = self.locate(a, b)?;
+        let mut bounds = self.read(at.slot, &at.piece, at.from, at.to, at.table, reading)?;
+        if let Some(composite) = at.composite {
+            bounds.measure += self.joint_error(composite, at.slot)?;
+        }
+        Some(bounds)
+    }
+
+    /// The piece holding the span `[a, b]` of the basis and the span as
+    /// distances into it; `None` for a span that lies in no piece.
+    fn locate(&self, a: Scalar, b: Scalar) -> Option<Located<'b, 'c>> {
         match &self.basis {
             LawBasis::Atomic {
                 curve,
                 placement,
                 whole,
             } => match whole {
-                Some(whole) => self.read(0, whole, a, b, None, reading),
+                Some(whole) => Some(Located {
+                    slot: 0,
+                    piece: *whole,
+                    from: a,
+                    to: b,
+                    table: None,
+                    composite: None,
+                }),
                 None => {
                     let mut piece = StationPiece::between(*curve, a, b).ok()?;
                     if let Some(rigid) = placement {
                         piece = piece.placed(*rigid, true);
                     }
-                    piece_frame_bounds(&piece, 0.0, b - a, reading)
+                    Some(Located {
+                        slot: 0,
+                        piece,
+                        from: 0.0,
+                        to: b - a,
+                        table: None,
+                        composite: None,
+                    })
                 }
             },
             LawBasis::Composite(composite) => {
+                let composite: &'b CompositeBasis<'c> = composite;
                 let slack = numerical_measure(b);
                 let starts = composite.starts();
-                for (k, piece) in composite.pieces().iter().enumerate() {
-                    let (start, end) = (starts[k], starts[k] + piece.length());
-                    if a >= start - slack && b <= end + slack {
-                        let table = composite.tables()[k].as_ref();
-                        let mut bounds =
-                            self.read(k, piece, a - start, b - start, table, reading)?;
-                        bounds.measure += self.joint_error(composite, k)?;
-                        return Some(bounds);
-                    }
-                }
-                None
+                // The piece holding the span's middle: a span narrower than
+                // the slack that starts at a joint is the later piece's.
+                let mid = 0.5 * (a + b);
+                composite
+                    .pieces()
+                    .iter()
+                    .enumerate()
+                    .find_map(|(k, piece)| {
+                        let (start, end) = (starts[k], starts[k] + piece.length());
+                        let holds = a >= start - slack && b <= end + slack;
+                        (holds && mid >= start && mid <= end).then(|| Located {
+                            slot: k,
+                            piece: *piece,
+                            from: a - start,
+                            to: b - start,
+                            table: composite.tables()[k].as_ref(),
+                            composite: Some(composite),
+                        })
+                    })
             }
         }
     }
@@ -919,6 +1010,111 @@ mod tests {
             4.0,
         );
         assert!((bounds.point[1] - 1.0 / 3.0).abs() <= 1e-12);
+    }
+
+    /// A certified lower bound of `O'.N` in station distance, at sampled
+    /// stations of a piece: `forward` never exceeds the forward rate the
+    /// frames show.
+    fn assert_forward(
+        section: impl Fn(Scalar) -> SectionFrame,
+        bounds: &FrameLawBounds,
+        lo: Scalar,
+        hi: Scalar,
+    ) {
+        let h = 1e-5 * (hi - lo);
+        for i in 1..20 {
+            let s = lo + (hi - lo) * i as Scalar / 20.0;
+            let rate =
+                (section(s + h).point - section(s - h).point).dot(section(s).tangent) / (2.0 * h);
+            assert!(
+                bounds.forward <= rate + 1e-6,
+                "{} > {rate} at {s}",
+                bounds.forward
+            );
+        }
+    }
+
+    #[test]
+    fn a_plan_circle_advances_at_unit_rate() {
+        let curve = Curve2::Circle(Circle2 {
+            frame: Frame2 {
+                origin: Point2::ZERO,
+                x: Vec2::X,
+                y: Vec2::Y,
+            },
+            radius: 10.0,
+        });
+        let piece = StationPiece::between(StationCurve::Two(&curve), 0.0, 20.0).unwrap();
+        for reading in [FrameReading::Section, FrameReading::Plan] {
+            let bounds = piece_frame_bounds(&piece, 0.0, 20.0, reading).unwrap();
+            assert!(
+                (1.0 - bounds.forward).abs() <= 2.0 * ROUNDING,
+                "{}",
+                bounds.forward
+            );
+            assert_forward(|s| station_section2(&curve, s).unwrap(), &bounds, 0.0, 20.0);
+        }
+    }
+
+    #[test]
+    fn a_graded_curve_advances_at_least_at_unit_rate_in_plan_distance() {
+        let curve = Curve3::Elevated(Elevated3 {
+            plan: Box::new(Curve2::Line(Line2 {
+                origin: Point2::ZERO,
+                direction: Vec2::X,
+            })),
+            elevation: ElevationLaw::Polynomial {
+                coefficients: vec![0.0, 0.1],
+            },
+        });
+        let piece = whole3(&curve, 0.0, 20.0);
+        for reading in [FrameReading::Section, FrameReading::Plan] {
+            let bounds = piece_frame_bounds(&piece, 0.0, 20.0, reading).unwrap();
+            assert!(
+                (1.0 - bounds.forward).abs() <= 2.0 * ROUNDING,
+                "{}",
+                bounds.forward
+            );
+        }
+    }
+
+    #[test]
+    fn a_tilted_line_advances_at_its_horizontal_part_in_the_plan_reading() {
+        let tilt: Scalar = 0.6;
+        let curve = Curve3::Line(axiolid_curve::Line3 {
+            origin: Point3::ZERO,
+            direction: Vec3::new(tilt.cos(), 0.0, tilt.sin()),
+        });
+        let piece = whole3(&curve, 0.0, 10.0);
+        let section = piece_frame_bounds(&piece, 0.0, 10.0, FrameReading::Section).unwrap();
+        assert!((1.0 - section.forward).abs() <= 2.0 * ROUNDING);
+        let plan = piece_frame_bounds(&piece, 0.0, 10.0, FrameReading::Plan).unwrap();
+        assert!(plan.forward <= tilt.cos());
+        assert!(
+            tilt.cos() - plan.forward <= 4.0 * ROUNDING,
+            "{}",
+            plan.forward
+        );
+    }
+
+    #[test]
+    fn a_placement_scales_the_forward_rate_by_its_smallest_column() {
+        let curve = Curve2::Line(Line2 {
+            origin: Point2::ZERO,
+            direction: Vec2::X,
+        });
+        let squeeze = Transform3::from_cols(
+            Vec3::new(0.5, 0.0, 0.0),
+            Vec3::new(0.0, 0.5, 0.0),
+            Vec3::new(0.0, 0.0, 0.5),
+            Point3::ZERO,
+        );
+        let piece = StationPiece::between(StationCurve::Two(&curve), 0.0, 10.0)
+            .unwrap()
+            .placed(squeeze, true);
+        let bounds = piece_frame_bounds(&piece, 0.0, 10.0, FrameReading::Section).unwrap();
+        assert!(bounds.forward <= 0.5);
+        assert!(0.5 - bounds.forward <= 1e-12, "{}", bounds.forward);
     }
 
     #[test]

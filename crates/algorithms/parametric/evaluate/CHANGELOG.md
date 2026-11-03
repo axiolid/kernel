@@ -9,6 +9,20 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- `FrameLaw::bend` and `BendBounds` (#361): certified bounds, over a
+  seam-free span, of the coefficients of the signed bend of a section frame
+  law, `O'.N`, `L.N'` and `U.N'` (`N` the frame's tangent), in the section
+  and the plan reading. A section point moves along the plane normal at
+  `O'.N + long' - a L.N' - b U.N'`, so a caller can tell where the section
+  planes stop advancing (a fold). Closed-form frames only: a line, a circle,
+  a polyline's segment, an elevated or banked curve over a line or a
+  circle, and an intrinsic curve; frames read by quadrature and every frame
+  without bounds have no bend (`None`). `FrameLawBounds::forward` bounds
+  `O'.N` from below for every frame with bounds. `FrameLaw::has_bend` tells a frame with a
+  closed-form bend, which a narrower span bounds, from one without.
+
 ## [0.3.19] - 2026-11-03
 
 ### Fixed
