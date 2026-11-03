@@ -1,8 +1,28 @@
 //! Surface relationships that compose curve and surface nodes.
 
-use axiolid_core::{Scalar, Vec3};
+use axiolid_core::{Interval, Point3, Scalar, Vec3};
 
 use crate::{NodeId, SectionAtStation, StationFrame, StationedOpenSection};
+
+/// One side of a ruled surface (#402).
+///
+/// A side is read over `u` in `[0, 1]`; the two sides of a
+/// [`SurfaceRelation::Ruled`] are joined at equal `u`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(deny_unknown_fields)
+)]
+pub enum RuledSide {
+    /// An atomic `Curve3` node run over `interval`, oriented (a reversed
+    /// interval is allowed): `u` reads the curve at
+    /// `interval.start + u (interval.end - interval.start)`.
+    Curve { curve: NodeId, interval: Interval },
+    /// Every ruling ends at this point.
+    Apex(Point3),
+}
 
 /// Relationship between surface nodes.
 #[non_exhaustive]
@@ -72,6 +92,13 @@ pub enum SurfaceRelation {
         sections: Vec<SectionAtStation>,
         frame: StationFrame,
     },
+    /// Surface ruled between two sides (#402):
+    /// `p(u, v) = (1 - v) first(u) + v second(u)` for `u`, `v` in `[0, 1]`.
+    ///
+    /// The sides are atomic `Curve3` nodes over oriented intervals, or an
+    /// apex point (not both). Two sides that are the same curve over the
+    /// same interval would give no surface and are refused.
+    Ruled { first: RuledSide, second: RuledSide },
 }
 
 impl SurfaceRelation {
@@ -102,6 +129,13 @@ impl SurfaceRelation {
             } => {
                 out.push(*directrix);
                 out.extend(sections.iter().map(|section| section.profile));
+            }
+            Self::Ruled { first, second } => {
+                for side in [first, second] {
+                    if let RuledSide::Curve { curve, .. } = side {
+                        out.push(*curve);
+                    }
+                }
             }
         }
     }

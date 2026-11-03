@@ -402,3 +402,26 @@ variant is additive. Every graph written before keeps its meaning.
   references as the old one's. `scripts/probe_prism_axis_mutants.py`
   reads the variant in a 1.3 payload, never labels 1.4 and skips its
   references; each is caught.
+
+## Note 2026-11-03: format 1.5 (#402)
+
+Format 1.5 adds a surface ruled between two sides, so `FORMAT_VERSION` is
+`1.5`, a minor change under the version rules above. `SurfaceRelation` is
+`#[non_exhaustive]`, so the variant is additive.
+
+- **What it adds.** One variant, `SurfaceRelation::Ruled { first, second }`,
+  and the enum `RuledSide`: a `Curve { curve, interval }` (an atomic
+  `Curve3` node over an oriented interval) or an `Apex` point.
+- **Its feature test** (#297's rule). `wire::required_version` raises the
+  version to 1.5 when a node is a `Ruled`. The reader refuses the same test
+  in a 1.4 or older payload as `UnknownKind { kind: "Ruled" }`, as such a
+  reader would. A graph without the variant is written exactly as before,
+  labelled 1.0 to 1.4.
+- **Golden payloads.** `tests/wire/v1.5/every-kind.json` adds two ruled
+  surfaces and is what today's writer writes.
+- **Guards.** A test reinstates each ruled surface of the every-kind
+  fixture in turn over the fixture with its 1.5 content taken out: each
+  reads, lifts the payload to 1.5 (JSON and CBOR), and is refused in a 1.4
+  payload. A ruled surface read is validated as one built in memory.
+  `scripts/probe_ruled_surface_mutants.py` reads the variant in a 1.4
+  payload and never labels 1.5; each is caught.

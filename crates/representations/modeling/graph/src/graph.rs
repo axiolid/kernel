@@ -35,6 +35,12 @@ pub enum GraphError {
         /// What is wrong, in the caller's terms.
         detail: &'static str,
     },
+    /// A ruled surface's sides are malformed (#402): a non-finite or empty
+    /// interval, a non-finite apex, two apexes, or the same curve run twice.
+    InvalidRuledSurface {
+        /// What is wrong, in the caller's terms.
+        detail: &'static str,
+    },
 }
 
 impl fmt::Display for GraphError {
@@ -55,6 +61,9 @@ impl fmt::Display for GraphError {
                 write!(f, "contradictory surface-curve master: {detail}")
             }
             Self::InvalidStation { detail } => write!(f, "invalid station: {detail}"),
+            Self::InvalidRuledSurface { detail } => {
+                write!(f, "invalid ruled surface: {detail}")
+            }
             Self::UnknownRoot { root, node_count } => {
                 write!(f, "root {root} exceeds graph size {node_count}")
             }

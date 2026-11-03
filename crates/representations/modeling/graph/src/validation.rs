@@ -12,8 +12,8 @@ use axiolid_curve::{BSplineCurve2, Curve2};
 
 use crate::{
     BasisEnd, CurveRelation, GeometryNode, GraphError, MasterRepresentation, NodeId,
-    OrientedCurveStation, RunStation, SolidOperation, Station, StationOrientation, SurfaceRelation,
-    TrimSelector, TrimmingPreference,
+    OrientedCurveStation, RuledSide, RunStation, SolidOperation, Station, StationOrientation,
+    SurfaceRelation, TrimSelector, TrimmingPreference,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +22,8 @@ enum ExpectedReference {
     Curve2,
     BoundedOpenCurve2,
     Curve3,
+    /// An atomic `Curve3` node: no instance, no curve relation (#402).
+    AtomicCurve3,
     Surface,
     Profile,
     OpenProfile,
@@ -374,6 +376,7 @@ impl ExpectedReference {
             Self::Curve2 => "curve2",
             Self::BoundedOpenCurve2 => "bounded open curve2",
             Self::Curve3 => "curve3",
+            Self::AtomicCurve3 => "curve3 value",
             Self::Surface => "surface",
             Self::Profile => "profile",
             Self::OpenProfile => "open profile",
@@ -401,6 +404,7 @@ impl ExpectedReference {
             Self::Curve3 => {
                 return curve_has_dimension(reference, nodes, CurveDimension::Three);
             }
+            Self::AtomicCurve3 => return matches!(node, GeometryNode::Curve3(_)),
             Self::HalfSpaceBoundary => {
                 return Self::Curve2.accepts(reference, node, nodes)
                     || Self::Profile.accepts(reference, node, nodes);
@@ -428,7 +432,11 @@ impl ExpectedReference {
             GeometryNode::Surface(_) | GeometryNode::SurfaceRelation(_)
         );
         match self {
-            Self::Curve | Self::Curve2 | Self::BoundedOpenCurve2 | Self::Curve3 => false,
+            Self::Curve
+            | Self::Curve2
+            | Self::BoundedOpenCurve2
+            | Self::Curve3
+            | Self::AtomicCurve3 => false,
             Self::Surface => surface,
             Self::Profile => matches!(node, GeometryNode::Profile(_)),
             Self::OpenProfile => matches!(node, GeometryNode::OpenProfile(_)),
@@ -849,6 +857,7 @@ fn validate_surface_relation(
             validate_station_run(sections.iter().map(|section| &section.station))?;
             validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)
         }
+        SurfaceRelation::Ruled { first, second } => validate_ruled(first, second, nodes),
         SurfaceRelation::OpenSectionsAtStations {
             directrix,
             sections,
@@ -862,6 +871,88 @@ fn validate_surface_relation(
             }
             validate_station_run(sections.iter().map(|section| &section.station))?;
             validate_section_tags(sections.iter().map(|section| section.tags.as_slice()), true)
+        }
+    }
+}
+
+/// A ruled surface's two sides (#402): each side's reference and values,
+/// first then second, then the pair.
+fn validate_ruled(
+    first: &RuledSide,
+    second: &RuledSide,
+    nodes: &[GeometryNode],
+) -> Result<(), GraphError> {
+    validate_ruled_side(first, nodes, &RULED_FIRST)?;
+    validate_ruled_side(second, nodes, &RULED_SECOND)?;
+    match (first, second) {
+        (RuledSide::Apex(_), RuledSide::Apex(_)) => Err(GraphError::InvalidRuledSurface {
+            detail: "both sides are apexes",
+        }),
+        (
+            RuledSide::Curve {
+                curve: a,
+                interval: ia,
+            },
+            RuledSide::Curve {
+                curve: b,
+                interval: ib,
+            },
+        ) if ia == ib && (a == b || nodes[a.index()] == nodes[b.index()]) => {
+            Err(GraphError::InvalidRuledSurface {
+                detail: "both sides run the same curve over the same interval",
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The detail strings of one ruled side.
+struct RuledDetails {
+    not_finite: &'static str,
+    empty: &'static str,
+    apex_not_finite: &'static str,
+}
+
+const RULED_FIRST: RuledDetails = RuledDetails {
+    not_finite: "the first side's interval is not finite",
+    empty: "the first side's interval is empty",
+    apex_not_finite: "the first apex is not finite",
+};
+
+const RULED_SECOND: RuledDetails = RuledDetails {
+    not_finite: "the second side's interval is not finite",
+    empty: "the second side's interval is empty",
+    apex_not_finite: "the second apex is not finite",
+};
+
+fn validate_ruled_side(
+    side: &RuledSide,
+    nodes: &[GeometryNode],
+    details: &RuledDetails,
+) -> Result<(), GraphError> {
+    match side {
+        RuledSide::Curve { curve, interval } => {
+            expect_reference(nodes, *curve, ExpectedReference::AtomicCurve3)?;
+            if !interval.start.is_finite() || !interval.end.is_finite() {
+                return Err(GraphError::InvalidRuledSurface {
+                    detail: details.not_finite,
+                });
+            }
+            if interval.start == interval.end {
+                return Err(GraphError::InvalidRuledSurface {
+                    detail: details.empty,
+                });
+            }
+            Ok(())
+        }
+        RuledSide::Apex(point) => {
+            if point.is_finite() {
+                Ok(())
+            } else {
+                Err(GraphError::InvalidRuledSurface {
+                    detail: details.apex_not_finite,
+                })
+            }
         }
     }
 }

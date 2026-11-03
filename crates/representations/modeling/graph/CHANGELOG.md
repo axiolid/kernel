@@ -11,6 +11,16 @@ caret rule for `0.x` versions.
 
 ### Added
 
+- `SurfaceRelation::Ruled { first, second }` and `RuledSide`: a surface
+  ruled between two sides, `p(u, v) = (1 - v) first(u) + v second(u)`. A
+  side is an atomic `Curve3` node over an oriented interval, or an apex
+  point. The builder refuses a non-finite or empty interval, a non-finite
+  apex, two apexes and the same curve over the same interval, with the new
+  `GraphError::InvalidRuledSurface { detail }`; a side that is no atomic
+  `Curve3` is an `InvalidReferenceType` (#402).
+- Wire format 1.5: only a graph holding a `Ruled` surface is labelled 1.5;
+  every other graph is written as before, and a 1.4 payload holding one is
+  refused as `UnknownKind` (#402).
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 

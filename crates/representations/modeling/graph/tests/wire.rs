@@ -22,10 +22,10 @@ use axiolid_model::wire::{self, FormatVersion, WireError, FORMAT_NAME, FORMAT_VE
 use axiolid_model::{
     BasisEnd, CurveRelation, CurveSegment, CurveStation, GeometryGraph, GeometryGraphBuilder,
     GeometryNode, GraphError, Instance, InstanceAtStation, MasterRepresentation, NodeId,
-    OpenProfile, OrientedCurveStation, PointOnCurve, PointOnSurface, RunStation, SeamSide, Section,
-    SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets, StationOrientation,
-    StationedOpenSection, StationedSection, SurfaceRelation, SurfaceSides, Transition,
-    TrimSelector, TrimmingPreference,
+    OpenProfile, OrientedCurveStation, PointOnCurve, PointOnSurface, RuledSide, RunStation,
+    SeamSide, Section, SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets,
+    StationOrientation, StationedOpenSection, StationedSection, SurfaceRelation, SurfaceSides,
+    Transition, TrimSelector, TrimmingPreference,
 };
 use axiolid_primitive::{HalfSpace, Primitive};
 use axiolid_profile::{
@@ -1034,7 +1034,44 @@ fn fixture() -> (GeometryGraph, Coverage) {
             ],
             frame: StationFrame::Section,
         },
+        // Format 1.5: a surface ruled between two sides (#402).
+        SurfaceRelation::Ruled {
+            first: RuledSide::Curve {
+                curve: curves3[1],
+                interval: Interval {
+                    start: 0.0,
+                    end: 1.0,
+                },
+            },
+            second: RuledSide::Curve {
+                curve: line_3d,
+                interval: Interval {
+                    start: 2.0,
+                    end: 0.5,
+                },
+            },
+        },
+        SurfaceRelation::Ruled {
+            first: RuledSide::Curve {
+                curve: line_3d,
+                interval: Interval {
+                    start: 0.0,
+                    end: 2.0,
+                },
+            },
+            second: RuledSide::Apex(Point3::new(1.0, 2.0, 3.0)),
+        },
     ];
+    coverage.all(
+        "RuledSide",
+        &surface_relations
+            .iter()
+            .flat_map(|relation| match relation {
+                SurfaceRelation::Ruled { first, second } => vec![*first, *second],
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>(),
+    );
     coverage.all("SurfaceRelation", &surface_relations);
     for relation in surface_relations {
         push(GeometryNode::SurfaceRelation(relation));
@@ -1312,6 +1349,7 @@ fn every_enum() -> Vec<(&'static str, BTreeSet<String>)> {
         ),
         ("SolidOperation", variants_of::<SolidOperation>()),
         ("SurfaceRelation", variants_of::<SurfaceRelation>()),
+        ("RuledSide", variants_of::<RuledSide>()),
         ("StationFrame", variants_of::<StationFrame>()),
         ("SeamSide", variants_of::<SeamSide>()),
         ("BasisEnd", variants_of::<BasisEnd>()),
@@ -1660,7 +1698,7 @@ fn every_golden_payload_is_written_back_identically_under_its_version() {
         written.push(label);
     }
     written.sort();
-    assert_eq!(written, ["1.0", "1.1", "1.2", "1.3", "1.4"]);
+    assert_eq!(written, ["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1785,7 +1823,7 @@ fn an_unknown_field_is_refused_by_name() {
 
 #[test]
 fn a_version_this_reader_does_not_read_is_refused_before_the_graph() {
-    for found in ["2.0", "1.5", "0.9", "1", "one", "1.0.0", ""] {
+    for found in ["2.0", "1.6", "0.9", "1", "one", "1.0.0", ""] {
         let mut payload = small_payload();
         payload["version"] = json!(found);
         // Even with content this reader does not know: the version is
@@ -2176,8 +2214,8 @@ fn a_node_reference_does_not_deserialise_outside_a_graph_payload() {
 
 #[test]
 fn the_format_version_is_named_in_every_payload() {
-    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 4));
-    assert_eq!(FORMAT_VERSION.to_string(), "1.4");
+    assert_eq!(FORMAT_VERSION, FormatVersion::new(1, 5));
+    assert_eq!(FORMAT_VERSION.to_string(), "1.5");
     let payload = small_payload();
     assert_eq!(payload["format"], FORMAT_NAME);
     // A graph without windows is labelled 1.0, the lowest version that
@@ -2461,15 +2499,32 @@ fn a_window_in_any_station_carrier_and_only_a_window_selects_one_one() {
 // Format 1.2: seam sides and windows on run stations (#301)
 // ---------------------------------------------------------------------------
 
-/// `value` with what formats 1.3 and 1.4 added taken out: every run
+/// `value` with what formats 1.3 to 1.5 added taken out: every run
 /// station at its basis's start stated at `0`, which it is, and every one
 /// at its basis's end stated one past its predecessor (#303); and every
 /// half-space bounded along its placement's `z` as one bounded along its
-/// plane's normal ([`without_along_z`]). The fixture's 1.2 content stays as
-/// it is.
+/// plane's normal ([`without_along_z`]), and every ruled surface as an offset
+/// surface ([`without_ruled`]). The fixture's 1.2 content stays as it is.
 fn without_basis_ends(value: &mut Value) {
+    without_ruled(value);
     without_along_z(value);
     without_stated_ends(value);
+}
+
+/// `value` with what format 1.5 added taken out (#402): every ruled surface
+/// written as a copy of the fixture's offset surface.
+fn without_ruled(value: &mut Value) {
+    let nodes = value["graph"]["nodes"].as_array_mut().unwrap();
+    let offset = nodes
+        .iter()
+        .find(|node| kind_of(node) == "SurfaceRelation::Offset")
+        .unwrap()
+        .clone();
+    for node in nodes {
+        if kind_of(node) == "SurfaceRelation::Ruled" {
+            *node = offset.clone();
+        }
+    }
 }
 
 /// `value` with what format 1.4 added taken out (#321): every
@@ -2511,7 +2566,7 @@ fn without_stated_ends(value: &mut Value) {
     }
 }
 
-/// `value` with what formats 1.2 to 1.4 added taken out: every
+/// `value` with what formats 1.2 to 1.5 added taken out: every
 /// `OffsetsAtStations` written as the `OffsetByStations` of its plain
 /// stations (its basis's ends stated, [`without_basis_ends`]), and every
 /// section at a station without its side and window. The fixture's 1.1
@@ -2602,7 +2657,7 @@ fn plain_station_pointers(value: &Value, at: &str, found: &mut Vec<String>) {
 fn a_side_or_window_on_any_run_station_and_only_that_selects_one_two() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
+    assert_eq!(payload["version"], "1.5", "the fixture uses 1.5");
     without_run_seams(&mut payload);
     payload["version"] = json!("1.1");
 
@@ -2908,7 +2963,7 @@ fn plain_station_kinds() -> BTreeSet<String> {
 fn a_basis_end_on_any_run_station_and_only_that_selects_one_three() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
+    assert_eq!(payload["version"], "1.5", "the fixture uses 1.5");
     without_basis_ends(&mut payload);
     payload["version"] = json!("1.2");
     assert!(!payload.to_string().contains("basis_end"));
@@ -3111,7 +3166,8 @@ fn run_station_basis_ends_round_trip_and_a_stated_station_writes_none() {
 fn a_half_space_bounded_along_z_and_only_that_selects_one_four() {
     let (graph, _) = fixture();
     let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
-    assert_eq!(payload["version"], "1.4", "the fixture uses 1.4");
+    assert_eq!(payload["version"], "1.5", "the fixture uses 1.5");
+    without_ruled(&mut payload);
     without_along_z(&mut payload);
     payload["version"] = json!("1.3");
     assert!(!payload.to_string().contains("BoundedHalfSpaceAlongZ"));
@@ -3157,6 +3213,107 @@ fn a_half_space_bounded_along_z_and_only_that_selects_one_four() {
     assert!(
         lifted_nodes >= 3,
         "the fixture's bounded half-spaces: {lifted_nodes}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Format 1.5: a surface ruled between two sides (#402)
+// ---------------------------------------------------------------------------
+
+/// A graph without a ruled surface is labelled as before 1.5; any one of
+/// them lifts it to 1.5, and a 1.4 reader refuses that payload by the
+/// variant's name. Every ruled surface of the every-kind fixture is
+/// reinstated in turn, alone, over the fixture with its 1.5 content taken
+/// out.
+#[test]
+fn a_ruled_surface_and_only_that_selects_one_five() {
+    let (graph, _) = fixture();
+    let mut payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    assert_eq!(payload["version"], "1.5", "the fixture uses 1.5");
+    let originals: Vec<(usize, Value)> = payload["graph"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| kind_of(node) == "SurfaceRelation::Ruled")
+        .map(|(index, node)| (index, node.clone()))
+        .collect();
+    assert_eq!(originals.len(), 2, "the fixture's ruled surfaces");
+    without_ruled(&mut payload);
+    payload["version"] = json!("1.4");
+    assert!(!payload.to_string().contains("\"Ruled\":{\"first\""));
+    let plain = read_json(&payload).unwrap();
+    assert_eq!(version_of(&plain.to_json().unwrap()), "1.4");
+    assert_eq!(cbor_version_of(&plain.to_cbor().unwrap()), "1.4");
+
+    for (index, original) in originals {
+        let mut lifted = payload.clone();
+        lifted["version"] = json!("1.5");
+        lifted["graph"]["nodes"][index] = original;
+        let what = format!("node {index} ruled");
+        let graph = read_json(&lifted).unwrap_or_else(|error| panic!("{what}: {error}"));
+        assert_eq!(version_of(&graph.to_json().unwrap()), "1.5", "{what}");
+        assert_eq!(
+            cbor_version_of(&graph.to_cbor().unwrap()),
+            "1.5",
+            "CBOR: {what}"
+        );
+        lifted["version"] = json!("1.4");
+        refused(
+            &lifted,
+            &WireError::UnknownKind {
+                kind: "Ruled".into(),
+                version: FormatVersion::new(1, 4),
+            },
+        );
+    }
+}
+
+/// A ruled surface read from the wire is validated as one built in memory:
+/// a side that is no atomic curve, a forward reference, and a malformed
+/// interval are refused by the graph's own rules.
+#[test]
+fn a_ruled_surface_read_is_validated() {
+    let (graph, _) = fixture();
+    let payload: Value = serde_json::from_str(&graph.to_json().unwrap()).unwrap();
+    let index = payload["graph"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|node| kind_of(node) == "SurfaceRelation::Ruled")
+        .unwrap();
+    let nodes = payload["graph"]["nodes"].as_array().unwrap().len();
+
+    let mut forward = payload.clone();
+    forward["graph"]["nodes"][index]["SurfaceRelation"]["Ruled"]["second"]["Curve"]["curve"] =
+        json!(nodes - 1);
+    let error = read_json(&forward).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            WireError::InvalidGraph {
+                error: GraphError::NonPriorReference { .. },
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+
+    let mut empty = payload.clone();
+    empty["graph"]["nodes"][index]["SurfaceRelation"]["Ruled"]["first"]["Curve"]["interval"]
+        ["end"] = json!(0.0);
+    let error = read_json(&empty).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            WireError::InvalidGraph {
+                error: GraphError::InvalidRuledSurface {
+                    detail: "the first side's interval is empty"
+                },
+                ..
+            }
+        ),
+        "{error:?}"
     );
 }
 

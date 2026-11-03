@@ -33,8 +33,8 @@
 //! features. A graph with no seam-snapping window is a 1.0 payload, one
 //! whose run stations carry no seam side or window a 1.0 or 1.1 payload,
 //! one with no run station at its basis's start or end at most a 1.2
-//! payload, and one with no half-space bounded along its placement's `z` at
-//! most a 1.3 payload.
+//! payload, one with no half-space bounded along its placement's `z` at
+//! most a 1.3 payload, and one with no ruled surface at most a 1.4 payload.
 //!
 //! | Version | Added |
 //! | --- | --- |
@@ -43,6 +43,7 @@
 //! | 1.2 | Seam sides and windows on run stations (#301): `SectionAtStation.seam` and `.seam_window`, omitted at `Outgoing` and `+0.0` and read so when absent; the variant `CurveRelation::OffsetsAtStations`, whose `RunStation`s carry the same two fields. |
 //! | 1.3 | Run stations at their basis's ends (#303): `RunStation.basis_end`, `"Start"` or `"End"`, omitted when absent (a stated distance) and read so. |
 //! | 1.4 | A half-space bounded along its placement's `z` (#321): the variant `SolidOperation::BoundedHalfSpaceAlongZ`, fields as `BoundedHalfSpace`'s. |
+//! | 1.5 | A surface ruled between two sides (#402): the variant `SurfaceRelation::Ruled` with its `RuledSide`s, a curve node over an interval or an apex point. |
 //!
 //! # Refusals
 //!
@@ -88,7 +89,7 @@ pub const FORMAT_NAME: &str = "axiolid-geometry-graph";
 /// labelled with the lowest version that represents it, which is this one
 /// only when the graph uses what this version added (see the
 /// [module documentation](self#versions)).
-pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 4);
+pub const FORMAT_VERSION: FormatVersion = FormatVersion::new(1, 5);
 
 /// A `MAJOR.MINOR` wire format version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -401,6 +402,9 @@ const BASIS_END_SINCE: FormatVersion = FormatVersion::new(1, 3);
 /// (#321).
 const ALONG_Z_SINCE: FormatVersion = FormatVersion::new(1, 4);
 
+/// The version that introduced `SurfaceRelation::Ruled` (#402).
+const RULED_SINCE: FormatVersion = FormatVersion::new(1, 5);
+
 /// The lowest version that represents `nodes` (#297): the version every
 /// payload is labelled with, so an older reader reads every graph that
 /// uses nothing newer than it knows.
@@ -421,6 +425,9 @@ fn required_version(nodes: &[GeometryNode]) -> FormatVersion {
     }
     if nodes.iter().any(is_along_z) {
         version = version.max(ALONG_Z_SINCE);
+    }
+    if nodes.iter().any(is_ruled) {
+        version = version.max(RULED_SINCE);
     }
     version
 }
@@ -514,7 +521,8 @@ fn run_sections(node: &GeometryNode) -> &[SectionAtStation] {
             | SurfaceRelation::Offset { .. }
             | SurfaceRelation::LinearExtrusion { .. }
             | SurfaceRelation::Revolution { .. }
-            | SurfaceRelation::SectionedSurface { .. } => &[],
+            | SurfaceRelation::SectionedSurface { .. }
+            | SurfaceRelation::Ruled { .. } => &[],
         },
         GeometryNode::Point2(_)
         | GeometryNode::Point3(_)
@@ -640,12 +648,21 @@ fn is_along_z(node: &GeometryNode) -> bool {
     )
 }
 
+/// Whether `node` is what format 1.5 added (#402): a ruled surface.
+fn is_ruled(node: &GeometryNode) -> bool {
+    matches!(
+        node,
+        GeometryNode::SurfaceRelation(SurfaceRelation::Ruled { .. })
+    )
+}
+
 /// What `node` holds that `version` does not have, refused as an older
 /// reader would refuse it: a seam-snapping window on an oriented station
 /// in a 1.0 payload; a seam side or window on a run station, or an
 /// `OffsetsAtStations`, in a payload older than 1.2; a run station at its
 /// basis's start or end in a payload older than 1.3; a half-space bounded
-/// along its placement's `z` in a payload older than 1.4.
+/// along its placement's `z` in a payload older than 1.4; a ruled surface in
+/// a payload older than 1.5.
 /// No writer of those versions wrote them. (A default is what its absence
 /// means, so it is not told apart.)
 fn newer_feature(node: &GeometryNode, version: FormatVersion) -> Option<WireError> {
@@ -678,6 +695,12 @@ fn newer_feature(node: &GeometryNode, version: FormatVersion) -> Option<WireErro
     if version < ALONG_Z_SINCE && is_along_z(node) {
         return Some(WireError::UnknownKind {
             kind: "BoundedHalfSpaceAlongZ".to_owned(),
+            version,
+        });
+    }
+    if version < RULED_SINCE && is_ruled(node) {
+        return Some(WireError::UnknownKind {
+            kind: "Ruled".to_owned(),
             version,
         });
     }

@@ -37,5 +37,5 @@ pub use station::{
     SectionAtStation, Station, StationFrame, StationOffsets, StationOrientation,
     StationedOpenSection, StationedSection, ORIENTATION_TOLERANCE,
 };
-pub use surface_relation::SurfaceRelation;
+pub use surface_relation::{RuledSide, SurfaceRelation};
 pub use value::BuiltInNode;
