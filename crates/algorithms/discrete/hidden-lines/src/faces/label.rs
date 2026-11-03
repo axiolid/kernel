@@ -335,6 +335,22 @@ mod tests {
     }
 
     #[test]
+    fn labelling_counts_its_candidate_pairs_against_the_budget() {
+        let setup = Setup::new(
+            &[(MeshRole::Sheet, sheet(0.0, 0.0, 4.0, 4.0, 0.0))],
+            plan(),
+            None,
+        );
+        let mut work = setup.work(0);
+        let faces = setup.faces(&mut work);
+        let mut points = setup.points();
+        let mut push = |(x, y)| points.store.push_flat(Point2::new(x, y)).expect("point");
+        let ends = [push((1.0, 1.0)), push((2.0, 1.0))];
+        let error = label_piece(&faces, &points.store, ends, &mut work).expect_err("over budget");
+        assert!(matches!(error, GeomError::BudgetExceeded { .. }), "{error}");
+    }
+
+    #[test]
     fn the_nearer_sheet_wins_and_equal_depth_keeps_both() {
         let low = sheet(0.0, 0.0, 4.0, 4.0, 0.0);
         let setup = Setup::new(

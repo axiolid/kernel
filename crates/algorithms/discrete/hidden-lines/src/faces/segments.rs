@@ -253,6 +253,21 @@ mod tests {
     }
 
     #[test]
+    fn an_edge_on_triangle_contributes_no_edge_of_its_own() {
+        let wall = TriMesh::new(
+            vec![
+                p(0.0, 0.0, 0.0),
+                p(2.0, 0.0, 0.0),
+                p(2.0, 0.0, 3.0),
+                p(0.0, 0.0, 3.0),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        );
+        let setup = Setup::new(&[(Sheet, wall)], plan(), None);
+        assert!(edges(&setup, false).0.is_empty());
+    }
+
+    #[test]
     fn an_edge_on_an_edge_on_walls_line_is_kept() {
         // The wall stands on the floor's bottom edge and is edge-on in plan.
         let wall = TriMesh::new(
