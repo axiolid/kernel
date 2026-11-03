@@ -16,11 +16,14 @@ use axiolid::application::Application;
 use axiolid::contracts::ExecutionOptions;
 use axiolid_benchmark::workload;
 use axiolid_core::{Frame3, Point3, Tolerance, Vec3};
-use axiolid_hidden_lines::{ScalarHiddenLines, ScanHiddenLines};
+use axiolid_hidden_lines::{
+    ScalarHiddenLines, ScalarVisibleFaces, ScanHiddenLines, ScanVisibleFaces, UnprunedVisibleFaces,
+};
 use axiolid_mesh::TriMesh;
 use axiolid_mesh_hidden_lines_contract::{
     EdgeSelection, HiddenLineLimits, HiddenLineMesh, HiddenLineRequest, MeshHiddenLines, MeshId,
-    MeshRole, OrthographicView, Visibility,
+    MeshRole, MeshVisibleFaces, OrthographicView, Visibility, VisibleFaceLimits,
+    VisibleFaceRequest,
 };
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
@@ -241,5 +244,110 @@ fn hidden_lines(criterion: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(scenarios, wall_subtraction, mesh_section, hidden_lines);
+/// Visible face regions of a grid of boxes, three broad phases.
+///
+/// `bvh` is the shipped provider (BVH candidates, depth-pruned occluders),
+/// `scan` tests every pair, and `unpruned` keeps the BVH but skips the
+/// prune. The `overlap` scene makes neighbouring boxes interpenetrate, so
+/// the exact intersection curves are part of the timing.
+fn visible_faces(criterion: &mut Criterion) {
+    let bvh = ScalarVisibleFaces::new();
+    let providers: [(&str, &dyn MeshVisibleFaces); 3] = [
+        ("bvh", &bvh),
+        ("scan", &ScanVisibleFaces),
+        ("unpruned", &UnprunedVisibleFaces),
+    ];
+    let options = ExecutionOptions::new(tolerance());
+    let (s2, s6, s3) = (
+        std::f64::consts::FRAC_1_SQRT_2,
+        1.0 / 6.0_f64.sqrt(),
+        1.0 / 3.0_f64.sqrt(),
+    );
+    let isometric = OrthographicView::new(Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::new(s2, -s2, 0.0),
+        y: Vec3::new(s6, s6, -2.0 * s6),
+        z: Vec3::new(s3, s3, s3),
+    });
+    let plan = OrthographicView::new(Frame3 {
+        origin: Point3::ZERO,
+        x: Vec3::X,
+        y: Vec3::Y,
+        z: Vec3::Z,
+    })
+    .with_near(2.0);
+    let mut group = criterion.benchmark_group("scenario/visible-faces");
+    group.sample_size(10);
+
+    // (scene, grid side, box width, view). The 50x50 isometric grid is left
+    // out: exact intersection and labelling make one request take seconds.
+    let scenes = [
+        ("isometric", 10_usize, 0.75, isometric),
+        ("isometric", 20, 0.75, isometric),
+        ("cut-plan", 20, 0.75, plan),
+        ("cut-plan", 50, 0.75, plan),
+        ("overlap-plan", 6, 1.5, plan),
+        ("overlap-isometric", 6, 1.5, isometric),
+    ];
+    for (name, n, width, view) in scenes {
+        let meshes: Vec<TriMesh> = (0..n * n)
+            .map(|k| {
+                let (i, j) = ((k % n) as f64, (k / n) as f64);
+                let height = 1.0 + ((k * 7 + (k / n) * 3) % 5) as f64 * 0.5;
+                hidden_line_box([i, j, 0.0], [i + width, j + width, height])
+            })
+            .collect();
+        let entries: Vec<HiddenLineMesh<'_>> = meshes
+            .iter()
+            .enumerate()
+            .map(|(k, mesh)| HiddenLineMesh::new(MeshId(k as u64 + 1), MeshRole::Solid, mesh))
+            .collect();
+        let limits = VisibleFaceLimits::new(
+            n * n,
+            8 * n * n,
+            12 * n * n,
+            4_000_000_000,
+            1_000_000,
+            100_000_000,
+        );
+        let request = VisibleFaceRequest::new(&entries, view, limits);
+        let outcome = bvh
+            .visible_faces(&request, &options)
+            .expect("the grid resolves");
+        // A scene with no regions would time beautifully.
+        assert!(!outcome.regions.is_empty(), "{name} {n}x{n}: no regions");
+        // The variants are baselines only if they return the same regions.
+        for (phase, provider) in providers {
+            let other = provider
+                .visible_faces(&request, &options)
+                .expect("the grid resolves");
+            assert_eq!(
+                format!("{:?}", outcome.regions),
+                format!("{:?}", other.regions),
+                "{name} {n}x{n}: {phase} disagrees"
+            );
+        }
+        group.throughput(Throughput::Elements(outcome.regions.len() as u64));
+        for (phase, provider) in providers {
+            group.bench_function(format!("{name}/{n}x{n}/{phase}"), |bencher| {
+                bencher.iter(|| {
+                    black_box(
+                        provider
+                            .visible_faces(black_box(&request), &options)
+                            .expect("the grid resolves"),
+                    )
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
+criterion_group!(
+    scenarios,
+    wall_subtraction,
+    mesh_section,
+    hidden_lines,
+    visible_faces
+);
 criterion_main!(scenarios);
