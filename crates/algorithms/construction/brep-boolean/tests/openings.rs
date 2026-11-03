@@ -313,3 +313,40 @@ fn a_floor_standing_door_an_authored_distance_past_the_face_is_not_refused() {
         );
     }
 }
+
+/// The door a fraction of a micrometre past the wall's face under a
+/// millimetre tolerance (#403). Merging the wall's floor edge's cut into the
+/// door's corner within the tolerance leaves faces that do not sew, and the
+/// finer tolerance (`2^-10` of it, `9.8e-7`) would merge it again, so only
+/// the cut with ends merged within the rounding floor (#291) succeeds, at
+/// the caller's tolerance. It is not the finer cut, and the report holds
+/// that run's decisions only: the door's end read onto the wall's face.
+#[test]
+fn a_floor_standing_door_below_the_finer_tolerance_past_the_face_is_cut_with_ends_apart() {
+    let wall = solid(square(0.0, 0.0, 4.0, 0.25), 0.0, 3.0);
+    let millimetre = Tolerance::MILLIMETRE;
+    for gap in [-3e-7, -7e-7] {
+        let door = solid(square(1.0, gap, 2.0, 0.5), 0.0, 2.0);
+        let (cut, report) = axiolid_brep_boolean::boolean_with_report(
+            &wall,
+            &door,
+            BooleanOperator::Difference,
+            millimetre,
+        )
+        .unwrap_or_else(|e| panic!("gap {gap}: {e}"));
+        let topology = axiolid_topology::audit_brep(cut.topology());
+        assert!(topology.is_closed_manifold(), "gap {gap}: {topology:?}");
+        assert!(!report.finer(), "gap {gap}: {report:?}");
+        let moved = report
+            .decisions()
+            .iter()
+            .map(|d| d.linear)
+            .fold(0.0, f64::max);
+        assert!(moved <= millimetre.linear(), "gap {gap}: {report:?}");
+        let got = volume(&cut);
+        assert!(
+            (got - (3.0 - 0.5)).abs() <= 40.0 * moved + 1e-12,
+            "gap {gap}: {got}"
+        );
+    }
+}
