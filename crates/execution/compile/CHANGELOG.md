@@ -99,6 +99,11 @@ caret rule for `0.x` versions.
   cannot be excluded. A fold between two far-apart parts of the run is not
   detected.
 
+- An extrusion of a polyline profile with runs of collinear vertices avoids
+  degenerate cap triangles whatever its placement whenever a triangulation
+  avoids them, and a cap triangle that is a sliver and flat to rounding is
+  refused by name (#415, in `axiolid-construct`).
+
 ## [0.3.43] - 2026-11-03
 
 ### Fixed

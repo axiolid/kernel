@@ -123,4 +123,13 @@ Latest release, 0.3.29 (2026-11-03):
     a tilted axis almost never satisfied); the difference is charged to the
     budget.
 
+- The caps of `extrude::extrude_profile` and of a loft avoid sliver triangles
+  (doubled area within the tolerance squared) whenever a triangulation
+  avoids them, and refuse by name a cap triangle that is both a sliver and
+  flat to rounding. A polyline profile with runs of collinear vertices left
+  cap triangles a few ulps off a line, which placement rounds to zero area
+  and `audit_mesh` reads as an open mesh (#415). A sliver that is not flat
+  (a fine chord's) is still meshed, as it is legitimate there.
+  `triangulate` and `triangulate_with` are unchanged.
+
 Full history: [`crates/algorithms/construction/construct/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/algorithms/construction/construct/CHANGELOG.md)

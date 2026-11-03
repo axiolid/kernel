@@ -787,6 +787,15 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
     a tilted axis almost never satisfied); the difference is charged to the
     budget.
 
+- The caps of `extrude::extrude_profile` and of a loft avoid sliver triangles
+  (doubled area within the tolerance squared) whenever a triangulation
+  avoids them, and refuse by name a cap triangle that is both a sliver and
+  flat to rounding. A polyline profile with runs of collinear vertices left
+  cap triangles a few ulps off a line, which placement rounds to zero area
+  and `audit_mesh` reads as an open mesh (#415). A sliver that is not flat
+  (a fine chord's) is still meshed, as it is legitimate there.
+  `triangulate` and `triangulate_with` are unchanged.
+
 ### 0.3.28 - 2026-11-03
 
 ### Added
@@ -4236,6 +4245,11 @@ Every publishable crate versions and publishes independently ([ADR 0067](/adr/00
   there it never refuses and reports the run unbounded by name when a fold
   cannot be excluded. A fold between two far-apart parts of the run is not
   detected.
+
+- An extrusion of a polyline profile with runs of collinear vertices avoids
+  degenerate cap triangles whatever its placement whenever a triangulation
+  avoids them, and a cap triangle that is a sliver and flat to rounding is
+  refused by name (#415, in `axiolid-construct`).
 
 ### 0.3.43 - 2026-11-03
 

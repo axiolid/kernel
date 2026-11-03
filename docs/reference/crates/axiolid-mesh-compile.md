@@ -194,4 +194,9 @@ Latest release, 0.3.44 (2026-11-03):
   cannot be excluded. A fold between two far-apart parts of the run is not
   detected.
 
+- An extrusion of a polyline profile with runs of collinear vertices avoids
+  degenerate cap triangles whatever its placement whenever a triangulation
+  avoids them, and a cap triangle that is a sliver and flat to rounding is
+  refused by name (#415, in `axiolid-construct`).
+
 Full history: [`crates/execution/compile/CHANGELOG.md`](https://github.com/axiolid/kernel/blob/main/crates/execution/compile/CHANGELOG.md)

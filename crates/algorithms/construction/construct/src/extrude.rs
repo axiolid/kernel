@@ -117,7 +117,7 @@ pub fn extrude_profile(
     if mesh_offset(direction, depth)?.z.abs() <= tolerance.linear() {
         return Err(in_profile_plane());
     }
-    let (points, triangles) = crate::profile::triangulate(rings)?;
+    let (points, triangles) = crate::profile::triangulate_cap(rings, tolerance)?;
     let mut loops = Vec::with_capacity(1 + rings.holes.len());
     let mut start = 0usize;
     loops.push(start..rings.outer.len());

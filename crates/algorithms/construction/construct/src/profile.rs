@@ -522,6 +522,50 @@ pub fn triangulate_with(
     crate::ring_triangulation::triangulate_rings(&rings.outer, &rings.holes, pinches)
 }
 
+/// [`triangulate`] for the caps of a mesh solid: slivers are avoided
+/// whenever a triangulation avoids them, and a cap triangle that is flat to
+/// rounding is refused (#415).
+///
+/// A sliver has a doubled area within `tolerance.linear()^2`, the audit's
+/// degeneracy threshold. Ear clipping cuts the other ears first, and the
+/// slivers it still leaves are flipped away where a neighbour allows
+/// (`ring_triangulation::flip`), so a vertex a few ulps off its neighbours'
+/// line, which placement rounds flat, is joined across. A sliver no
+/// triangulation avoids stays, as a fine chord's thin triangles do; only
+/// one that is also flat to rounding ([`crate::ring_triangulation::is_flat`])
+/// is refused.
+///
+/// # Errors
+///
+/// As [`triangulate`]; `Degenerate`, naming the triangle, if a triangle
+/// that is a sliver and flat to rounding is unavoidable.
+pub(crate) fn triangulate_cap(
+    rings: &Rings,
+    tolerance: axiolid_core::Tolerance,
+) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
+    check_ring_sizes(rings)?;
+    let flat = tolerance.linear();
+    let (points, triangles) = crate::ring_triangulation::triangulate_rings_unflat(
+        &rings.outer,
+        &rings.holes,
+        PinchPolicy::Refuse,
+        flat,
+    )?;
+    for t in &triangles {
+        let [a, b, c] = t.map(|i| points[i as usize]);
+        if crate::ring_triangulation::is_sliver(a, b, c, flat)
+            && crate::ring_triangulation::is_flat(a, b, c)
+        {
+            return Err(GeomError::Degenerate(format!(
+                "cap triangle over vertices {}, {}, {} is a sliver and flat to rounding \
+                 and no cap triangulation avoids it",
+                t[0], t[1], t[2]
+            )));
+        }
+    }
+    Ok((points, triangles))
+}
+
 /// Refuse an outer ring or a hole of fewer than three vertices.
 fn check_ring_sizes(rings: &Rings) -> GeomResult<()> {
     if rings.outer.len() < 3 {

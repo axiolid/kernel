@@ -51,10 +51,13 @@ use crate::profile::PinchPolicy;
 
 mod bridge;
 mod clip;
+mod flip;
 mod pinch;
 mod seal;
 mod seam;
 mod validate;
+
+pub(crate) use flip::{is_flat, is_sliver};
 
 pub(crate) use seal::Steiner;
 
@@ -68,6 +71,17 @@ pub(crate) fn triangulate_rings(
     holes: &[Vec<Point2>],
     policy: PinchPolicy,
 ) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
+    triangulate_rings_unflat(outer, holes, policy, 0.0)
+}
+
+/// [`triangulate_rings`] with the slivers of length `flat` flipped away
+/// ([`flip`], #415).
+pub(crate) fn triangulate_rings_unflat(
+    outer: &[Point2],
+    holes: &[Vec<Point2>],
+    policy: PinchPolicy,
+    flat: f64,
+) -> GeomResult<(Vec<Point2>, Vec<[u32; 3]>)> {
     let (points, rings) = gather(outer, holes)?;
     validate::check_rings(&points, &rings)?;
     let seams = seam::find(&points, &rings);
@@ -78,7 +92,7 @@ pub(crate) fn triangulate_rings(
         let triangles = seam::triangulate(&points, &rings, &seams)?;
         return Ok((points, triangles));
     }
-    let triangles = without_seams(&points, &rings, policy)?;
+    let triangles = without_seams_unflat(&points, &rings, policy, flat)?;
     Ok((points, triangles))
 }
 
@@ -110,6 +124,16 @@ fn without_seams(
     rings: &[core::ops::Range<usize>],
     policy: PinchPolicy,
 ) -> GeomResult<Vec<[u32; 3]>> {
+    without_seams_unflat(points, rings, policy, 0.0)
+}
+
+/// [`without_seams`] with the slivers of length `flat` flipped away (#415).
+fn without_seams_unflat(
+    points: &[Point2],
+    rings: &[core::ops::Range<usize>],
+    policy: PinchPolicy,
+    flat: f64,
+) -> GeomResult<Vec<[u32; 3]>> {
     let source: Vec<usize> = (0..rings.len()).collect();
     let touches = validate::check_edges(points, rings, &source, policy)?;
     if let Some(canon) = pinch::canonical(points, &touches) {
@@ -118,7 +142,8 @@ fn without_seams(
     }
     let loops = validate::orient_and_place(points, rings)?;
     let mut polygon = bridge::bridge_holes(points, &loops)?;
-    let triangles = clip::clip_ears(points, &mut polygon)?;
+    let mut triangles = clip::clip_ears(points, &mut polygon)?;
+    flip::unsliver(points, &mut triangles, flat);
     certify(points, &loops, &triangles, 1, loops.len() - 1)?;
     Ok(triangles)
 }
