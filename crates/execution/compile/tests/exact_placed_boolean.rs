@@ -996,3 +996,70 @@ fn a_wall_end_ten_tolerances_from_an_opening_is_kept() {
     assert!(sliver > notch, "{sliver} faces: the sliver must stay");
     assert_eq!(touching, notch);
 }
+
+/// Two unit boxes `[-0.5, 0.5]^2 x [0, 1]`, the second `1 + gap` along `x`
+/// from the first, united (#357).
+fn boxes_a_gap_apart(gap: f64) -> (GeometryGraph, NodeId) {
+    let mut g = Graph::new();
+    let a = g.extrusion(rect(1.0, 1.0), 1.0);
+    let a = g.instance(a, Transform3::IDENTITY);
+    let b = g.extrusion(rect(1.0, 1.0), 1.0);
+    let b = g.instance(
+        b,
+        Transform3::from_translation(Vec3::new(1.0 + gap, 0.0, 0.0)),
+    );
+    let root = g.boolean(a, b, BooleanOperator::Union);
+    (g.finish(vec![root]), root)
+}
+
+/// The exact union's solid and whether it read a coincidence, at
+/// `Tolerance::METRE`.
+fn exact_union(graph: &GeometryGraph, root: NodeId) -> (ExactBRep, bool) {
+    let mut solids = ReferenceExactCompiler::new()
+        .compile_exact_batch_with_reports(graph, &[root], &options())
+        .expect("exact");
+    let (brep, report) = solids.remove(0);
+    (
+        brep,
+        report.contains(ToleranceDecisionKind::CoincidentSupports),
+    )
+}
+
+/// The exact compiler reads contact within the tolerance (ADR 0080): the
+/// reference the mesh path's union agrees with (ADR 0096, D8).
+#[test]
+fn a_union_across_a_gap_within_the_tolerance_is_one_solid() {
+    let (graph, root) = boxes_a_gap_apart(0.5e-6);
+    let (brep, coincident) = exact_union(&graph, root);
+    audited(&brep);
+    assert!(coincident, "the faces are read as one surface");
+    assert_eq!(brep.topology().shells().len(), 1);
+    assert!((volume(&brep) - 2.0).abs() <= 1e-6, "{}", volume(&brep));
+}
+
+#[test]
+fn a_union_in_face_contact_under_a_turn_is_one_solid() {
+    // The #356 column and a corbel on its -X face, under one turned placement.
+    for theta in [0.001, 0.5, 2.0] {
+        let t = Transform3::from_translation(Vec3::new(1.0, 2.0, 0.0))
+            * Transform3::from_rotation_z(theta);
+        let mut g = Graph::new();
+        let column = g.extrusion(rect(0.4, 0.5), 6.0);
+        let column = g.instance(column, t);
+        let corbel = g.extrusion(rect(0.25, 0.2), 0.5);
+        let corbel = g.instance(
+            corbel,
+            t * Transform3::from_translation(Vec3::new(-0.325, 0.0, 3.5)),
+        );
+        let root = g.boolean(column, corbel, BooleanOperator::Union);
+        let graph = g.finish(vec![root]);
+        let (brep, _) = exact_union(&graph, root);
+        audited(&brep);
+        assert_eq!(brep.topology().shells().len(), 1, "theta {theta}");
+        assert!(
+            (volume(&brep) - 1.225).abs() <= 1e-9,
+            "theta {theta}: {}",
+            volume(&brep)
+        );
+    }
+}
