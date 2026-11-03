@@ -9,6 +9,11 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Added
+
+- The package now ships `LICENSE` (a symlink to the repository root), so the
+  licence text travels with the archive (#358).
+
 ### Changed
 
 - The minimum supported Rust version is now 1.99 (was 1.88), and the
