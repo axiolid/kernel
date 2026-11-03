@@ -16,6 +16,15 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- The mesh revolution judges an axis leaning out of the profile plane
+  (#362). The sweep is free of self-intersection exactly when the profile
+  lies on one closed side of the axis's projection into the plane, decided
+  by the exact side test of an in-plane axis; rings on both sides are
+  `InvalidInput`, which covers an axis piercing the profile. A profile that
+  meets the point where the axis crosses the plane, or is not certified
+  clear of it by more than the tolerance, is `UnsupportedInput`; an axis
+  perpendicular to the plane is `InvalidInput`. The tapered revolution
+  judges its end rings alike. Such axes were accepted unchecked.
 - The mesh profile flattening refuses a contour whose consecutive segments,
   or last and first, leave a gap beyond the linear tolerance with
   `InvalidInput`, as the exact path does; it used to bridge the gap with a

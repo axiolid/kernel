@@ -310,6 +310,41 @@ fn a_revolution_whose_profile_crosses_the_axis_is_refused_and_one_touching_it_is
     assert!(compile_about(-0.3).is_ok());
 }
 
+#[test]
+fn a_revolution_about_a_leaning_axis_is_refused_when_the_axis_meets_the_profile() {
+    // The axis leaves the profile plane and meets it at (axis_x, 0) (#362).
+    // The profile spans x in -0.1..0.1: an axis at x = 0 pierces it and the
+    // swept solid passes through itself; one at x = -0.1 meets its left edge,
+    // a point the sweep would pinch; one at x = -0.3 misses it and meshes.
+    let compile_about = |axis_x: Scalar| {
+        let mut builder = GeometryGraphBuilder::new();
+        let root = revolution_about(
+            &mut builder,
+            rect(0.2, 0.3),
+            Point3::new(axis_x, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.4).normalize(),
+            TAU,
+        );
+        let graph = builder.finish(vec![root]).expect("a valid graph");
+        ReferenceMeshCompiler::new(BoolmeshBoolean::new()).compile_mesh(
+            &graph,
+            root,
+            &ExecutionOptions::new(Tolerance::MILLIMETRE),
+        )
+    };
+    assert!(matches!(
+        compile_about(0.0),
+        Err(GeomError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        compile_about(-0.1),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    let clear = compile_about(-0.3).expect("an axis that misses the profile is meshed");
+    let health = axiolid_mesh::audit_mesh(&clear, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
+}
+
 /// The rectangle's corners in the order its rings list them.
 fn corners(x: Scalar, y: Scalar) -> [Point2; 4] {
     let (hx, hy) = (x / 2.0, y / 2.0);

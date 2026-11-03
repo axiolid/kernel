@@ -698,10 +698,10 @@ fn an_axis_parallel_to_the_plane_and_offset_is_checked_for_crossing_only() {
 }
 
 #[test]
-fn an_axis_leaning_out_of_the_plane_is_not_judged_by_its_projection() {
+fn an_axis_leaning_out_of_the_plane_that_misses_the_profile_revolves() {
     // The ring's edge x = 0 lies on the axis's projection into the plane,
-    // but the axis itself passes 1 m or more clear of it. Whether such a
-    // sweep crosses itself is not decided here (TODO(#362)).
+    // but the axis meets the plane at the origin, 1 m or more clear of the
+    // profile: the sweep is sound (#362).
     let r = rings(square(0.0, 2.0, 1.0, 2.0), vec![]);
     let mesh = revolve(
         &r,
@@ -713,6 +713,128 @@ fn an_axis_leaning_out_of_the_plane_is_not_judged_by_its_projection() {
     let mesh = mesh.expect("revolves");
     assert_sound(&mesh);
     assert_unwelded(&mesh);
+}
+
+fn leaning(
+    r: &Rings,
+    origin: Point3,
+    direction: Vec3,
+    angle: Scalar,
+) -> Result<TriMesh, GeomError> {
+    revolve(r, origin, direction, angle, tol_for(1e-3))
+}
+
+#[test]
+fn an_axis_leaning_out_of_the_plane_through_the_profile_is_refused() {
+    // The axis meets the plane at the origin, inside the square: the point
+    // is fixed under the rotation and the copies overlap (#362).
+    let r = rings(square(-1.0, 1.0, -1.0, 1.0), vec![]);
+    let lean = Vec3::new(0.0, 1.0, 0.5);
+    let error = leaning(&r, Point3::ZERO, lean, FULL).expect_err("pierces the profile");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+    assert!(
+        format!("{error:?}").contains("crosses the axis"),
+        "{error:?}"
+    );
+    // A partial turn is judged alike.
+    assert!(matches!(
+        leaning(&r, Point3::ZERO, lean, 1.0),
+        Err(GeomError::InvalidInput(_))
+    ));
+    // Through a point above the plane: the axis meets it at (0, -2).
+    let below = rings(square(-1.0, 1.0, -3.0, -1.0), vec![]);
+    assert!(matches!(
+        leaning(&below, Point3::new(0.0, 0.0, 1.0), lean, FULL),
+        Err(GeomError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn an_axis_leaning_out_of_the_plane_beside_a_straddling_profile_is_refused_too() {
+    // The axis meets the plane at the origin, clear of the square, but the
+    // square straddles the axis's projection (x = 0): points mirrored across
+    // it share an orbit, so the sweep overlaps itself.
+    let r = rings(square(-1.0, 1.0, 1.0, 2.0), vec![]);
+    let error = leaning(&r, Point3::ZERO, Vec3::new(0.0, 1.0, 0.5), FULL)
+        .expect_err("a mirror pair shares an orbit");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
+}
+
+#[test]
+fn an_axis_leaning_out_of_the_plane_touching_the_profile_is_refused_by_name() {
+    let lean = Vec3::new(0.0, 1.0, 0.5);
+    // The corner (0, 0) is where the axis meets the plane.
+    let corner = rings(square(0.0, 1.0, 0.0, 1.0), vec![]);
+    assert!(matches!(
+        leaning(&corner, Point3::ZERO, lean, FULL),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    // The point is inside the span of the edge x = 0.
+    let edge = rings(square(0.0, 1.0, -0.5, 0.5), vec![]);
+    assert!(matches!(
+        leaning(&edge, Point3::ZERO, lean, FULL),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    // Within the tolerance of the edge's end is not certified clear.
+    let near = rings(square(0.0, 1.0, 0.0005, 1.0), vec![]);
+    assert!(matches!(
+        leaning(&near, Point3::ZERO, lean, FULL),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    // Beyond the tolerance it is clear.
+    let clear = rings(square(0.0, 1.0, 0.01, 1.0), vec![]);
+    leaning(&clear, Point3::ZERO, lean, FULL).expect("clear of the point");
+    // Touching the projection on the other side of the point is clear too,
+    // and so is a profile that does not touch the projection at all.
+    let below = rings(square(0.0, 1.0, -1.0, -0.5), vec![]);
+    leaning(&below, Point3::ZERO, lean, FULL).expect("below the point");
+    let beside = rings(square(0.5, 1.5, 0.0, 1.0), vec![]);
+    leaning(&beside, Point3::ZERO, lean, FULL).expect("beside the point");
+    // A vertex off the projection level with the point is no contact: only
+    // the edge x = 0 from y = 0.5 up touches it.
+    let slanted = rings(
+        vec![
+            Point2::new(0.0, 0.5),
+            Point2::new(1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(0.0, 1.5),
+        ],
+        vec![],
+    );
+    leaning(&slanted, Point3::ZERO, lean, FULL).expect("level with the point, off the projection");
+}
+
+#[test]
+fn the_point_where_a_leaning_axis_meets_the_plane_follows_its_origin_and_slope() {
+    // From (0, 0, 1) along (0, 2, 1) the axis meets the plane at (0, -2).
+    let lean = Vec3::new(0.0, 2.0, 1.0);
+    let origin = Point3::new(0.0, 0.0, 1.0);
+    let touching = rings(square(0.0, 1.0, -2.0, -1.5), vec![]);
+    assert!(matches!(
+        leaning(&touching, origin, lean, FULL),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+    let clear = rings(square(0.0, 1.0, -1.0, 0.0), vec![]);
+    leaning(&clear, origin, lean, FULL).expect("clear of (0, -2)");
+    // An origin so far off the plane that the point overflows is not
+    // certified.
+    let far = rings(square(0.0, 1.0, 0.0, 1.0), vec![]);
+    assert!(matches!(
+        leaning(
+            &far,
+            Point3::new(0.0, 0.0, 1e308),
+            Vec3::new(0.0, 1.0, 0.01),
+            FULL
+        ),
+        Err(GeomError::UnsupportedInput { .. })
+    ));
+}
+
+#[test]
+fn an_axis_perpendicular_to_the_profile_plane_is_refused() {
+    let r = rings(square(1.0, 2.0, 1.0, 2.0), vec![]);
+    let error = leaning(&r, Point3::ZERO, Vec3::Z, FULL).expect_err("the copies coincide");
+    assert!(matches!(error, GeomError::InvalidInput(_)), "{error:?}");
 }
 
 // An arc ending on the axis (#365): its end is the joint with the next

@@ -49,7 +49,7 @@ MUTANTS = [
     ('leaning axis not skipped', R, '    if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {', '    if false {', TESTS),
     ('z noise switches the offset on', R, '    let offset = axis_origin.z.abs() > tolerance.linear();', '    let offset = axis_origin.z != 0.0;', TESTS),
     ('offset axis never offset', R, '    let offset = axis_origin.z.abs() > tolerance.linear();', '    let offset = false;', TESTS),
-    ('axis direction ignored', R, '        let side = side_of_axis(a, axis_direction, *p);', '        let side = side_of_axis(a, Vec3::Y, *p);', TESTS),
+    ('axis direction ignored', R, '        sides.push(side_of_axis(a, d, *p));', '        sides.push(side_of_axis(a, Vec3::Y, *p));', TESTS),
     ('side decided against a rounded a + d', R, '    expansion_sign(&sum)', '    {\n        let b = Point2::new(a.x + d.x, a.y + d.y);\n        let c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);\n        if c > 0.0 { Sign::Positive } else if c < 0.0 { Sign::Negative } else { Sign::Zero }\n    }', TESTS),
     ('holes not checked', R, '    for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {\n        if !(p.x', '    for p in rings.outer.iter() {\n        if !(p.x', TESTS),
     ('check not called', R, '    let on_axis = check_axis_side(rings, axis_origin, axis_direction, tolerance, full)?;', '    let _ = check_axis_side;\n    let on_axis = vec![false; rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>()];', TESTS),
@@ -61,7 +61,7 @@ MUTANTS = [
     ('polyline vertex ranked below a curved end', P, '        Curve2::Polyline(_) => 1,', '        Curve2::Polyline(_) => 4,', TESTS),
     ('snap distance not measured', P, '        *moved = moved\n            .max((end - joint).length())\n            .max((start - joint).length());', '', TESTS),
     ('arc end re-evaluated', P, '        if i == j {\n            continue;\n        }', '        if true {\n            continue;\n        }', TESTS),
-    ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis', COMPILE),
+    ('crossing refused with the wrong variant', R, '        return Err(GeomError::InvalidInput(\n            "revolved profile crosses the axis: its rings lie on both sides".to_owned()', '        return Err(GeomError::Degenerate(\n            "revolved profile crosses the axis: its rings lie on both sides".to_owned()', COMPILE),
 ]
 
 probe_lib.main(MUTANTS, timeout=1200)

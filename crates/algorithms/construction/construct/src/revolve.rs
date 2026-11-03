@@ -194,6 +194,134 @@ fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
     expansion_sign(&sum)
 }
 
+/// The exact side of every ring vertex of the line through `a` along the
+/// `x`, `y` of `d`, in flat ring order (outer ring, then each hole).
+fn ring_sides(rings: &Rings, a: Point2, d: Vec3) -> GeomResult<Vec<Sign>> {
+    let mut sides = Vec::new();
+    for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
+        if !(p.x.is_finite() && p.y.is_finite()) {
+            return Err(GeomError::InvalidInput(
+                "revolved profile must have finite vertices".to_owned(),
+            ));
+        }
+        sides.push(side_of_axis(a, d, *p));
+    }
+    Ok(sides)
+}
+
+/// Judge an axis leaning out of the profile plane (`axis_direction.z`
+/// beyond the tolerance) (#362).
+///
+/// A point `p` of the plane has the invariants `h`, its position along the
+/// axis, and `rho`, its distance from it, and two points sweep the same
+/// orbit exactly when they agree in both. `h` is linear in the plane, so
+/// each level set is a line perpendicular to the axis's projection `N` into
+/// the plane; along it `rho^2 = s^2 + c` is even about `N`. Two points
+/// share an orbit exactly when they are mirror images across `N`, so the
+/// sweep is free of self-intersection exactly when no two points of the
+/// profile are, and for a region that holds no mirror pair, that is when it
+/// lies on one closed side of `N`. The exact side test of the in-plane axis,
+/// applied to `N` (the line through the origin's `x`, `y` along the
+/// direction's), decides that, with no tolerance band: rings on both
+/// strict sides are `InvalidInput`. This subsumes an axis piercing the
+/// interior of the profile, which puts rings on both sides.
+///
+/// The axis meets the plane at one point `X` on `N`. A profile touching `N`
+/// is fine, its points have `rho > 0`, unless `X` is on the profile: that
+/// point is fixed under the rotation and the solid pinches there. `X` is not
+/// rational in the inputs without division, so it is decided with a margin:
+/// the profile's contact with `N` (its vertices on `N`, and the edges
+/// between two of them) must keep clear of `X` by more than
+/// `tolerance.linear()` plus a rounding allowance, and is otherwise
+/// `UnsupportedInput`, a case that is not certified. A profile strictly to
+/// one side of `N` has no contact and needs no margin. An axis exactly
+/// perpendicular to the plane has no projection: every copy of the profile
+/// lies in the plane and they coincide, `InvalidInput`.
+///
+/// No vertex is welded: a vertex on `N` is off the axis. A partial turn is
+/// judged alike, as an in-plane axis is.
+fn check_leaning_axis(
+    rings: &Rings,
+    axis_origin: Point3,
+    axis_direction: Vec3,
+    tolerance: Tolerance,
+) -> GeomResult<Vec<bool>> {
+    if axis_direction.x == 0.0 && axis_direction.y == 0.0 {
+        return Err(GeomError::InvalidInput(
+            "revolved profile lies in a plane perpendicular to the axis: its copies coincide"
+                .to_owned(),
+        ));
+    }
+    let a = Point2::new(axis_origin.x, axis_origin.y);
+    let sides = ring_sides(rings, a, axis_direction)?;
+    if sides.contains(&Sign::Positive) && sides.contains(&Sign::Negative) {
+        return Err(GeomError::InvalidInput(
+            "revolved profile crosses the axis: its rings lie on both sides of the axis's \
+             projection into the profile plane"
+                .to_owned(),
+        ));
+    }
+    let count = sides.len();
+    if !sides.contains(&Sign::Zero) {
+        return Ok(vec![false; count]);
+    }
+    // Positions along N measured from where the axis meets the plane.
+    let along = axis_direction.x.hypot(axis_direction.y);
+    let t = -axis_origin.z / axis_direction.z;
+    let uncertified = || GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: Operation::Sweep,
+        input: "revolution about an axis leaning out of the profile plane that may meet the \
+                profile",
+    };
+    if !t.is_finite() || !along.is_finite() {
+        return Err(uncertified());
+    }
+    let unit = (axis_direction.x / along, axis_direction.y / along);
+    let reach = t * along;
+    let offset_of = |p: Point2| (p.x - a.x) * unit.0 + (p.y - a.y) * unit.1 - reach;
+    let slack = |p: Point2| {
+        let scale =
+            p.x.abs()
+                .max(p.y.abs())
+                .max(a.x.abs())
+                .max(a.y.abs())
+                .max(reach.abs());
+        tolerance.linear() + 64.0 * Scalar::EPSILON * scale
+    };
+    let points: Vec<Point2> = rings
+        .outer
+        .iter()
+        .chain(rings.holes.iter().flatten())
+        .copied()
+        .collect();
+    let mut start = 0;
+    for len in core::iter::once(rings.outer.len()).chain(rings.holes.iter().map(Vec::len)) {
+        let ring = &points[start..start + len];
+        for k in 0..len {
+            if sides[start + k] != Sign::Zero {
+                continue;
+            }
+            let here = offset_of(ring[k]);
+            let next = (k + 1) % len;
+            let (low, high) = if sides[start + next] == Sign::Zero {
+                let other = offset_of(ring[next]);
+                (here.min(other), here.max(other))
+            } else {
+                (here, here)
+            };
+            let margin = slack(ring[k]);
+            if !(low.is_finite() && high.is_finite())
+                || (low - margin <= 0.0 && 0.0 <= high + margin)
+            {
+                return Err(uncertified());
+            }
+        }
+        start += len;
+    }
+    Ok(vec![false; count])
+}
+
 /// Refuse rings that lie on both sides of the axis, and report which touch
 /// it (#351, #363).
 ///
@@ -217,7 +345,7 @@ fn side_of_axis(a: Point2, d: Vec3, p: Point2) -> Sign {
 /// not switch the check off. An axis parallel to the plane but offset from
 /// it is checked for crossing only: no ring point reaches the axis, since
 /// its radius stays at least the offset, so nothing is reported. An axis
-/// leaning out of the plane is unchecked and tracked in #362.
+/// leaning out of the plane is judged by [`check_leaning_axis`] (#362).
 pub(crate) fn check_axis_side(
     rings: &Rings,
     axis_origin: Point3,
@@ -226,22 +354,15 @@ pub(crate) fn check_axis_side(
     full: bool,
 ) -> GeomResult<Vec<bool>> {
     let count = rings.outer.len() + rings.holes.iter().map(Vec::len).sum::<usize>();
-    // TODO(#362): an axis leaning out of the profile plane is not judged.
     if axis_direction.z.abs() > tolerance.linear() * axis_direction.length() {
-        return Ok(vec![false; count]);
+        return check_leaning_axis(rings, axis_origin, axis_direction, tolerance);
     }
     let offset = axis_origin.z.abs() > tolerance.linear();
     let exact = axis_origin.z == 0.0 && axis_direction.z == 0.0;
     let a = Point2::new(axis_origin.x, axis_origin.y);
     let (mut positive, mut negative, mut noisy_touch) = (false, false, false);
     let mut on_axis = Vec::with_capacity(count);
-    for p in rings.outer.iter().chain(rings.holes.iter().flatten()) {
-        if !(p.x.is_finite() && p.y.is_finite()) {
-            return Err(GeomError::InvalidInput(
-                "revolved profile must have finite vertices".to_owned(),
-            ));
-        }
-        let side = side_of_axis(a, axis_direction, *p);
+    for side in ring_sides(rings, a, axis_direction)? {
         match side {
             Sign::Positive => positive = true,
             Sign::Negative => negative = true,
