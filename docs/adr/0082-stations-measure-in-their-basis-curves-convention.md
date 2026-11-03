@@ -1689,3 +1689,9 @@ Evidence: `crates/algorithms/parametric/evaluate/src/station/frame_bound/error.r
 `crates/execution/compile/tests/station_placement_bound.rs` (the exact placed
 body from closed forms and Fresnel series) and
 `scripts/probe_station_placement_bound_mutants.py`.
+Measured: 1000 blocks of 4 x 2 x 3 m, one every 5 m along the gradient
+curve over the 5 km alignment, compile with their report at a 1 mm chord
+error in 97 ms (median of 10 samples, 93 to 106 ms, on a machine under a
+load of 70), every placement certified with a frame error of 0.32 um
+(`tools/benchmark/benches/station_clothoid.rs`); a measurement, not a
+performance claim.

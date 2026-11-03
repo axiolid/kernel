@@ -13,15 +13,22 @@
 //!   restarts on every backward read; `gauss2` is the checkpointed
 //!   two-point Gauss-Legendre `IntrinsicPositionTable`, built once;
 //! - `run`: a 12 m deck widening to 12 m along the gradient curve,
-//!   compiled with its deviation report at a 1 mm chord error, certified.
+//!   compiled with its deviation report at a 1 mm chord error, certified;
+//! - `placement`: 1000 blocks placed along the gradient curve, one every
+//!   5 m (#405), compiled with their deviation report at a 1 mm chord
+//!   error, every placement certified.
 //!
 //! Measured on a shared 4-job machine (medians, noisy): `positions`
 //! 198 ms for the midpoint rule against 3.9 ms for the Gauss-Legendre
 //! table, build included, about fifty times; `run` 367 ms with a certified
-//! bound of 0.49 mm against the 1 mm request.
+//! bound of 0.49 mm against the 1 mm request. `placement` (#405), on a
+//! machine under a load of 70: 97 ms for the 1000 blocks (median of 10, 93
+//! to 106 ms), every placement certified with a frame error of 0.32 um
+//! against the 1 mm request; a measurement, not a performance claim.
 //!
 //! Each case is validated before it is timed: both tables agree to their
-//! errors, and the run is `Certified` within its request.
+//! errors, and the run and the placements are `Certified` within their
+//! request.
 //!
 //! ```bash
 //! cargo bench -p axiolid-benchmark --bench station_clothoid
@@ -31,13 +38,13 @@ use std::hint::black_box;
 
 use axiolid::evaluate::bound::{IntrinsicPositionTable, IntrinsicPositions};
 use axiolid_contracts::ExecutionOptions;
-use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2};
+use axiolid_core::{Frame2, Point2, Scalar, Tolerance, Vec2, Vec3};
 use axiolid_curve::{CurvatureLaw, Curve2, Curve3, Elevated3, ElevationLaw, Intrinsic2};
 use axiolid_mesh_boolean_boolmesh::BoolmeshBoolean;
 use axiolid_mesh_compile::{DeviationBound, DeviationPath, ReferenceMeshCompiler};
 use axiolid_model::{
-    GeometryGraph, GeometryGraphBuilder, GeometryNode, NodeId, SectionAtStation, SolidOperation,
-    Station, StationFrame, StationOffsets,
+    CurveStation, GeometryGraph, GeometryGraphBuilder, GeometryNode, InstanceAtStation, NodeId,
+    SectionAtStation, SolidOperation, Station, StationFrame, StationOffsets,
 };
 use axiolid_profile::{Profile, RectangleProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
@@ -206,5 +213,74 @@ fn run(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, positions, run);
+/// 1000 blocks of 4 x 2 x 3 m along the gradient curve over the alignment,
+/// one every 5 m from 2.5 m, collected.
+fn blocks() -> (GeometryGraph, NodeId) {
+    let mut b = GeometryGraphBuilder::new();
+    let curve = Curve3::Elevated(Elevated3::new(
+        Curve2::Intrinsic(alignment()),
+        ElevationLaw::parabolic(10.0, 0.01, -0.01, 5000.0),
+    ));
+    let basis = b.push_value(curve).unwrap();
+    let profile = b
+        .push_value(Profile::Rectangle(RectangleProfile {
+            x: 4.0,
+            y: 2.0,
+            thickness: None,
+            outer_radius: None,
+            inner_radius: None,
+        }))
+        .unwrap();
+    let block = b
+        .push(GeometryNode::SolidOperation(SolidOperation::Extrusion {
+            profile,
+            direction: Vec3::Z,
+            depth: 3.0,
+        }))
+        .unwrap();
+    let members: Vec<NodeId> = (0..1000)
+        .map(|i| {
+            let station = CurveStation::new(basis, Station::at(2.5 + 5.0 * Scalar::from(i)));
+            b.push_value(InstanceAtStation::new(block, station.into()))
+                .unwrap()
+        })
+        .collect();
+    let root = b.push(GeometryNode::Collection(members)).unwrap();
+    (b.finish(vec![root]).unwrap(), root)
+}
+
+fn placement(c: &mut Criterion) {
+    let (graph, root) = blocks();
+    let options = ExecutionOptions::new(Tolerance::MILLIMETRE)
+        .with_chord_error(REQUEST)
+        .expect("a chord error");
+    let compiler = ReferenceMeshCompiler::new(BoolmeshBoolean::new());
+    let (_, report) = compiler
+        .compile_mesh_with_deviation(&graph, root, &options)
+        .expect("the blocks compile");
+    let frame = report
+        .contributions
+        .iter()
+        .find(|c| c.path == DeviationPath::StationPlacement)
+        .expect("the placements report their path");
+    let DeviationBound::Certified(bound) = frame.bound else {
+        panic!("a certified frame expected, got {report:?}");
+    };
+    assert!(report.meets_requested(), "{report:?}");
+    eprintln!("placement: frame error {bound:e}");
+    let mut group = c.benchmark_group("station/placement");
+    group.sample_size(10);
+    group.bench_function("1000 blocks at 1 mm", |b| {
+        b.iter(|| {
+            black_box(
+                compiler
+                    .compile_mesh_with_deviation(black_box(&graph), root, &options)
+                    .expect("a mesh and its report"),
+            )
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(benches, positions, run, placement);
 criterion_main!(benches);
