@@ -44,7 +44,7 @@ pub const MAX_POSITION_PANELS: usize = 1 << 22;
 /// Where a marched point is placed: by a 2D curve's start frame, or in the
 /// plane of a planar space curve's start frame.
 #[derive(Debug, Clone, Copy)]
-enum Placement {
+pub(super) enum Placement {
     Plane(Frame2),
     Space(Frame3),
 }
@@ -71,7 +71,7 @@ pub struct IntrinsicPositions {
 }
 
 /// Neumaier's compensated addition into `(sum, carry)`.
-fn add(acc: &mut (Scalar, Scalar), value: Scalar) {
+pub(super) fn add(acc: &mut (Scalar, Scalar), value: Scalar) {
     let total = acc.0 + value;
     acc.1 += if acc.0.abs() >= value.abs() {
         (acc.0 - total) + value
@@ -81,7 +81,7 @@ fn add(acc: &mut (Scalar, Scalar), value: Scalar) {
     acc.0 = total;
 }
 
-fn unit_frame() -> Frame2 {
+pub(super) fn unit_frame() -> Frame2 {
     Frame2 {
         origin: Point2::ZERO,
         x: Vec2::X,

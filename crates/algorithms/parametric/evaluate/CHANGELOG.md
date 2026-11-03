@@ -14,6 +14,17 @@ caret rule for `0.x` versions.
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
   repository root), so the licence texts travel with the archive (#358).
 
+- `bound::IntrinsicPositionTable` and `MAX_TABLE_PANELS` (#361): certified,
+  random-access positions of an intrinsic curve (2D, or a planar space
+  curve) over `[0, end]`. The composite two-point Gauss-Legendre rule on
+  the closed-form tangent has the remainder `w^5 / 4320 |f''''|`, with
+  `|f''''| <= sup|k'''| + 4 sup|k| sup|k''| + 3 sup k'^2 + 6 sup k^2 sup|k'|
+  + sup k^4` per seam-free piece, so any curvature law with closed-form
+  bounds of `k` to `k'''` qualifies. Checkpoints every 64 panels make any
+  read cost at most 64 panels and independent of the order of reads, where
+  `IntrinsicPositions` (midpoint rule) marches forward and restarts on a
+  backward read.
+
 ## [0.3.18] - 2026-10-28
 
 ### Changed
