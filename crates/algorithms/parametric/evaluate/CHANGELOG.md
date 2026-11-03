@@ -21,7 +21,6 @@ caret rule for `0.x` versions.
 ### Added
 
 - The package now ships `LICENSE` and `LICENSE-COMMERCIAL` (symlinks to the
-  repository root), so the licence texts travel with the archive (#358).
 
 - `bound::IntrinsicPositionTable` and `MAX_TABLE_PANELS` (#361): certified,
   random-access positions of an intrinsic curve (2D, or a planar space
