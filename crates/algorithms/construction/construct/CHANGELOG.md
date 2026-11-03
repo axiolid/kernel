@@ -16,6 +16,13 @@ caret rule for `0.x` versions.
 
 ### Fixed
 
+- The mesh tapered revolution meshes a profile whose start and end rings
+  touch an in-plane axis (a cone, a double cone): a ring vertex on the axis
+  at the same place at both ends is welded across the stations as in a plain
+  revolution, and the closed output holds the swept volume (#364). A vertex
+  on the axis at one end only, or one that slides along the axis between
+  the ends, is still `UnsupportedInput`, now named as such; welding a sliding
+  vertex would have swept the wrong solid.
 - The mesh revolution judges an axis leaning out of the profile plane
   (#362). The sweep is free of self-intersection exactly when the profile
   lies on one closed side of the axis's projection into the plane, decided

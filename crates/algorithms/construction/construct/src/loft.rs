@@ -64,6 +64,20 @@ pub(crate) fn loft_welded(
     closed: bool,
     welded: &[bool],
 ) -> GeomResult<TriMesh> {
+    loft_capped(rings, rings, stations, closed, welded)
+}
+
+/// [`loft_welded`] with the first cap triangulated from `near` and the last
+/// from `far` (#364): the two ends of a tapered loft carry different
+/// profiles of one ring structure. `near` and `far` are the rings of the
+/// first and last station; a welded point is fixed at both.
+fn loft_capped(
+    near: &Rings,
+    far: &Rings,
+    stations: &[Station],
+    closed: bool,
+    welded: &[bool],
+) -> GeomResult<TriMesh> {
     if stations.len() < 2 {
         return Err(GeomError::InvalidInput(format!(
             "a loft needs at least two stations, got {}",
@@ -145,18 +159,23 @@ pub(crate) fn loft_welded(
     // Caps. A closed loft needs none: the wall meets itself. An open one is
     // bounded by the profile at each end, wound opposite so both face out.
     if !closed {
-        let (points, tris) = crate::profile::triangulate(rings)?;
-        if points.len() != per_station {
-            return Err(GeomError::Degenerate(format!(
-                "cap triangulation produced {} points for {per_station} ring points",
-                points.len()
-            )));
+        let (near_points, near_tris) = crate::profile::triangulate(near)?;
+        let (far_points, far_tris) = crate::profile::triangulate(far)?;
+        for points in [&near_points, &far_points] {
+            if points.len() != per_station {
+                return Err(GeomError::Degenerate(format!(
+                    "cap triangulation produced {} points for {per_station} ring points",
+                    points.len()
+                )));
+            }
         }
         let last = (stations.len() - 1) * per_station;
-        for t in &tris {
+        for t in &near_tris {
             let first = t.map(|f| id[f as usize]);
-            let end = t.map(|f| id[last + f as usize]);
             indices.extend([first[0], first[2], first[1]]);
+        }
+        for t in &far_tris {
+            let end = t.map(|f| id[last + f as usize]);
             indices.extend([end[0], end[1], end[2]]);
         }
     }
@@ -359,30 +378,19 @@ pub fn blend(a: Point2, b: Point2, t: Scalar) -> Point2 {
 /// ends differ: a tapered solid needs each cap triangulated from its own
 /// profile. The walls are identical, so only the caps are rebuilt here.
 pub fn loft_tapered(start: &Rings, end: &Rings, stations: &[Station]) -> GeomResult<TriMesh> {
-    let mut mesh = loft(start, stations, false)?;
-    let per_station: usize = stations[0].loops.iter().map(|r| r.len()).sum();
-    // Drop the caps `loft` built from `start` and rebuild the far one from
-    // `end`. Wall triangles come first, so truncating to the wall count is
-    // exact rather than a search.
-    let spans = stations.len() - 1;
-    let ring_edges: usize = stations[0].loops.iter().map(|r| r.len()).sum();
-    let wall_indices = spans * ring_edges * 6;
-    mesh.indices.truncate(wall_indices);
-    let (near_pts, near_tris) = crate::profile::triangulate(start)?;
-    let (far_pts, far_tris) = crate::profile::triangulate(end)?;
-    if near_pts.len() != per_station || far_pts.len() != per_station {
-        return Err(GeomError::Degenerate(
-            "tapered cap triangulation disagrees with the station rings".to_owned(),
-        ));
-    }
-    let last = (spans * per_station) as u32;
-    for t in &near_tris {
-        mesh.indices.extend([t[0], t[2], t[1]]);
-    }
-    for t in &far_tris {
-        mesh.indices.extend([last + t[0], last + t[1], last + t[2]]);
-    }
-    Ok(mesh)
+    loft_tapered_welded(start, end, stations, &[])
+}
+
+/// [`loft_tapered`] with some ring points welded across stations (#364), as
+/// [`loft_welded`] welds them: a point on a revolution axis at both ends
+/// stays on it through the blend.
+pub(crate) fn loft_tapered_welded(
+    start: &Rings,
+    end: &Rings,
+    stations: &[Station],
+    welded: &[bool],
+) -> GeomResult<TriMesh> {
+    loft_capped(start, end, stations, false, welded)
 }
 
 #[cfg(test)]

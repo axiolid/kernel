@@ -77,11 +77,65 @@ pub fn tapered_extrude(
     loft::loft_tapered(start, &far, &[s0, s1])
 }
 
+/// The ring points of a tapered revolution to weld, from the axis flags of
+/// `[start.outer, end.outer, start.holes.., end.holes..]` (#364).
+///
+/// A point on the axis at both ends and at the same place there is fixed
+/// through the blend (the blend of equal coordinates is exact) and under the
+/// rotation, so its stations coincide and it is welded as in a plain
+/// revolution. A point on the axis at a single end leaves it through the
+/// blend, and one that slides along the axis has stations that are distinct
+/// points of the axis: the end caps then meet the axis in segments of
+/// different extent, which no closed mesh joins without a vertex where one
+/// ends. Both are refused by name, not welded.
+fn tapered_welds(start: &Rings, end: &Rings, flags: &[bool]) -> GeomResult<Vec<bool>> {
+    let outer = start.outer.len();
+    let holes: usize = start.holes.iter().map(Vec::len).sum();
+    let at_start = flags[..outer]
+        .iter()
+        .chain(&flags[2 * outer..2 * outer + holes]);
+    let at_end = flags[outer..2 * outer]
+        .iter()
+        .chain(&flags[2 * outer + holes..]);
+    let points = |rings: &Rings| -> Vec<Point2> {
+        rings
+            .outer
+            .iter()
+            .chain(rings.holes.iter().flatten())
+            .copied()
+            .collect()
+    };
+    let (from, to) = (points(start), points(end));
+    let refuse = |input| GeomError::UnsupportedInput {
+        backend: crate::BACKEND_ID,
+        operation: axiolid_contracts::Operation::Sweep,
+        input,
+    };
+    let mut welded = Vec::with_capacity(outer + holes);
+    for (f, (&here, &there)) in at_start.zip(at_end).enumerate() {
+        if here != there {
+            return Err(refuse(
+                "tapered revolution of a profile touching the axis at one end only",
+            ));
+        }
+        if here && from[f] != to[f] {
+            return Err(refuse(
+                "tapered revolution of a profile whose vertex on the axis slides along it",
+            ));
+        }
+        welded.push(here);
+    }
+    Ok(welded)
+}
+
 /// Revolve between two profiles.
 ///
 /// Unlike a plain revolution this can never close: a full turn would have
 /// to meet the start profile with the end profile, which are different by
 /// construction. It is always capped.
+///
+/// A ring vertex that stays in place on the axis is meshed once (#364); one
+/// that touches the axis at a single end, or slides along it, is refused.
 ///
 /// Every point of the surface the blended rings sweep lies within
 /// `tolerance.linear()` of the mesh (#231). With `t` in `[0, 1]` along the
@@ -116,6 +170,8 @@ pub fn tapered_revolve(
             "revolution axis must be a finite non-zero direction".to_owned(),
         ));
     }
+    // Refuses a structural mismatch of the two profiles before it is judged.
+    let far = blend_rings(start, end, 1.0)?;
     // The blend is linear in each vertex and a half-plane is convex, so
     // vertices strictly on one side at both ends stay there throughout.
     // Judging both profiles' vertices together also refuses a section that
@@ -130,13 +186,9 @@ pub fn tapered_revolve(
             .cloned()
             .collect(),
     };
-    // TODO(#364): the tapered loft does not collapse axis vertices yet.
-    if crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?
-        .contains(&true)
-    {
-        return Err(crate::revolve::touching_unsupported());
-    }
-    let far = blend_rings(start, end, 1.0)?;
+    let flags =
+        crate::revolve::check_axis_side(&ends, axis_origin, axis_direction, tolerance, true)?;
+    let welded = tapered_welds(start, end, &flags)?;
     let mut max_r: Scalar = 0.0;
     let starts = start.outer.iter().chain(start.holes.iter().flatten());
     let ends = far.outer.iter().chain(far.holes.iter().flatten());
@@ -171,7 +223,7 @@ pub fn tapered_revolve(
         }
         n = crate::revolve::grow(n)?;
     };
-    let mut mesh = loft::loft_tapered(&far, start, &stations)?;
+    let mut mesh = loft::loft_tapered_welded(&far, start, &stations, &welded)?;
     // Same cause and fix as `revolve::revolve` (#221): the station order
     // above only winds the walls outward for a positive angle, and `angle`
     // and `dir` matter only through their product, so a sign-of-`angle`

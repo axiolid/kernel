@@ -5,10 +5,10 @@
 //! swept disk on a straight path is a cylinder, and a sectioned spine with
 //! equal sections is a plain extrusion.
 
-use axiolid_construct::profile::profile_rings;
+use axiolid_construct::profile::{profile_rings, Rings};
 use axiolid_construct::sweep;
 use axiolid_contracts::GeomError;
-use axiolid_core::{Point3, Scalar, Tolerance, Vec3};
+use axiolid_core::{Point2, Point3, Scalar, Tolerance, Vec3};
 use axiolid_measure::volume_properties;
 use axiolid_mesh::TriMesh;
 use axiolid_profile::{Profile, RectangleProfile};
@@ -437,4 +437,96 @@ fn a_tapered_revolution_crossing_or_touching_the_axis_is_refused() {
         turn(&at(4.0), &at(0.5)),
         Err(GeomError::UnsupportedInput { .. })
     ));
+}
+
+fn polygon(points: &[(Scalar, Scalar)]) -> Rings {
+    Rings {
+        outer: points.iter().map(|&(x, y)| Point2::new(x, y)).collect(),
+        holes: Vec::new(),
+    }
+}
+
+/// A tapered turn whose start and end rings touch the axis (#364) is meshed
+/// closed and holds the volume the swept section gives: a meridian plane at
+/// angle `a` cuts the solid in the blended section, so the volume is
+/// `angle * integral of M(t) dt` with `M` its first moment about the axis.
+fn assert_tapered_revolution(start: &Rings, end: &Rings, moment_integral: Scalar, chord: Scalar) {
+    let tol = tol_for(chord);
+    let angle = core::f64::consts::PI;
+    let mesh = sweep::tapered_revolve(start, end, Point3::ZERO, Vec3::Y, angle, tol)
+        .expect("a tapered revolution touching the axis at both ends");
+    let health = axiolid_mesh::audit_mesh(&mesh, Tolerance::new(1e-9, 1e-9).expect("tolerance"));
+    assert!(health.is_closed_two_manifold(), "{health:?}");
+    // A vertex on the axis is one mesh vertex: no two coincide, and no
+    // triangle collapsed onto a line survives.
+    let mut seen = std::collections::HashSet::new();
+    for p in &mesh.positions {
+        assert!(
+            seen.insert([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]),
+            "{p:?} twice"
+        );
+    }
+    for t in mesh.indices.chunks(3) {
+        let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.positions[i as usize]);
+        assert!(
+            (b - a).cross(c - a).length() > 0.0,
+            "degenerate triangle {t:?}"
+        );
+    }
+    let (got, want) = (volume(&mesh, tol), angle * moment_integral);
+    assert!(
+        (got - want).abs() / want < 2.0 * chord,
+        "tapered revolution {got} vs {want}"
+    );
+}
+
+#[test]
+fn a_tapered_revolution_of_a_cone_is_closed_and_has_the_swept_volume() {
+    // The right triangle (0,0) (r,0) (0,2) grows from r = 1 to 2 with its
+    // edge on the axis: first moment r^2 / 3, and the integral of
+    // (1 + t)^2 / 3 over [0, 1] is 7 / 9.
+    let start = polygon(&[(0.0, 0.0), (1.0, 0.0), (0.0, 2.0)]);
+    let end = polygon(&[(0.0, 0.0), (2.0, 0.0), (0.0, 2.0)]);
+    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5);
+}
+
+#[test]
+fn a_tapered_revolution_of_a_double_cone_is_closed_and_has_the_swept_volume() {
+    // (0,-1) (k,0) (0,1) with k from 1 to 2: both apexes stay on the axis.
+    // First moment k^2 / 3, as for the cone; the integral is 7 / 9.
+    let start = polygon(&[(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]);
+    let end = polygon(&[(0.0, -1.0), (2.0, 0.0), (0.0, 1.0)]);
+    assert_tapered_revolution(&start, &end, 7.0 / 9.0, 1e-5);
+}
+
+#[test]
+fn a_tapered_revolution_whose_axis_vertex_slides_along_the_axis_is_refused_by_name() {
+    // The apexes are on the axis at both ends but move along it: their
+    // stations are distinct points, and the caps' axis edges differ in
+    // extent. Welding them would sweep the wrong solid.
+    let start = polygon(&[(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]);
+    let end = polygon(&[(0.0, -2.0), (2.0, 0.0), (0.0, 2.0)]);
+    let error = sweep::tapered_revolve(&start, &end, Point3::ZERO, Vec3::Y, 1.0, tol_for(1e-3))
+        .expect_err("a sliding vertex is not welded");
+    assert!(
+        matches!(error, GeomError::UnsupportedInput { .. }),
+        "{error:?}"
+    );
+    assert!(format!("{error:?}").contains("slides along"), "{error:?}");
+}
+
+#[test]
+fn a_tapered_revolution_touching_the_axis_at_one_end_only_is_refused_by_name() {
+    let start = polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (0.0, 2.0), (0.0, 1.0)]);
+    let end = polygon(&[(0.5, 0.0), (1.0, 0.0), (1.0, 2.0), (0.0, 2.0), (0.0, 1.0)]);
+    let tol = tol_for(1e-3);
+    for (a, b) in [(&start, &end), (&end, &start)] {
+        let error = sweep::tapered_revolve(a, b, Point3::ZERO, Vec3::Y, 1.0, tol)
+            .expect_err("a vertex leaves the axis through the blend");
+        assert!(
+            matches!(error, GeomError::UnsupportedInput { .. }),
+            "{error:?}"
+        );
+        assert!(format!("{error:?}").contains("one end only"), "{error:?}");
+    }
 }
