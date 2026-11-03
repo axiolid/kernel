@@ -22,6 +22,28 @@
 //! it bounds no volume either way. The mesh extruder refuses the same
 //! offsets by the same name (#281).
 //!
+//! # Invalid profiles (#401)
+//!
+//! A contour, section or centre-line profile (also a derived one, which
+//! lowers to one) is lowered as before, then checked exactly (ADR 0095,
+//! `axiolid_overlay::check_arc_polygon` at zero tolerance) before anything
+//! is oriented or built, because a self-contact, a hole outside the outer
+//! contour or crossing holes, or contacts that cut the interior apart bound
+//! no manifold solid. Such a defect is refused as `InvalidInput` naming the
+//! defects; a nesting the exact check could not decide is refused as
+//! `UnsupportedInput`. An isolated contact between contours is accepted, as
+//! `ProfileReport::is_valid` does.
+//!
+//! The check refuses region defects only. Per-ring degeneracies at the
+//! tolerance (an edge or an arc shorter than it) are not refused: the exact
+//! solid is valid, and what the lowering and orientation refused before
+//! (an unsupported family, an empty range, a ring that encloses no area)
+//! keeps its error class.
+//!
+//! A composite checks each member the same way before the union, and each
+//! region the union returns, since a union of valid members can still touch
+//! itself.
+//!
 //! # Oblique directions (#280)
 //!
 //! An offset that leans off the normal builds the sheared prism: the far
@@ -1135,14 +1157,22 @@ fn extrude_contour(
     // normals point out of the material. Orienting here rather than demanding
     // it of the caller means an imported contour with either winding builds
     // the same solid.
-    let outer = orient_arc_ring(&contour_to_arc_ring(&contour.outer, tolerance)?, true)?;
-    let mut rings = Vec::with_capacity(1 + contour.holes.len());
-    rings.push(outer);
+    let mut lowered = Vec::with_capacity(1 + contour.holes.len());
+    lowered.push(contour_to_arc_ring(&contour.outer, tolerance)?);
     for hole in &contour.holes {
-        rings.push(orient_arc_ring(
-            &contour_to_arc_ring(hole, tolerance)?,
-            false,
-        )?);
+        lowered.push(contour_to_arc_ring(hole, tolerance)?);
+    }
+    // A ring along one line keeps its refusal as a ring without area; any
+    // other ring that encloses none is a self-contact the check names.
+    for ring in lowered.iter().filter(|ring| is_flat(ring)) {
+        orient_arc_ring(ring, true)?;
+    }
+    // Before orienting or building anything: a profile that is not a valid
+    // region builds a solid that is not a valid manifold (#401).
+    refuse_invalid_region(&lowered[0], &lowered[1..])?;
+    let mut rings = Vec::with_capacity(lowered.len());
+    for (index, ring) in lowered.iter().enumerate() {
+        rings.push(orient_arc_ring(ring, index == 0)?);
     }
 
     // A section of only straight segments is a polygon, and the polygon path
@@ -1161,6 +1191,71 @@ fn extrude_contour(
     extrude_arc_rings(&rings, offset)
 }
 
+/// Whether every vertex of a straight-edged ring lies on one line.
+fn is_flat(ring: &axiolid_overlay::ArcRing) -> bool {
+    if ring.vertices.iter().any(|vertex| vertex.bulge != 0.0) {
+        return false;
+    }
+    let points: Vec<Point2> = ring.vertices.iter().map(|vertex| vertex.point).collect();
+    let Some(second) = points.iter().find(|point| **point != points[0]) else {
+        return true;
+    };
+    let direction = *second - points[0];
+    points
+        .iter()
+        .all(|point| direction.x * (point.y - points[0].y) == direction.y * (point.x - points[0].x))
+}
+
+/// Refuse a region (one outer ring and its holes, as lowered) the exact
+/// check flags (ADR 0095): see [`refusal_of`].
+fn refuse_invalid_region(
+    outer: &axiolid_overlay::ArcRing,
+    holes: &[axiolid_overlay::ArcRing],
+) -> GeomResult<()> {
+    let polygon = axiolid_overlay::ArcPolygon {
+        outer: outer.clone(),
+        holes: holes.to_vec(),
+    };
+    let check = axiolid_overlay::check_arc_polygon(&polygon, Tolerance::ZERO);
+    refusal_of(&check.defects)
+}
+
+/// The refusal for the defects of an arc polygon check: region defects as
+/// `InvalidInput` naming them, and, only when there are none, a nesting that
+/// could not be decided (or a defect this version does not know) as
+/// `UnsupportedInput`, never a guess. Per-ring degeneracies are left to the
+/// lowering and orientation, which keep their own error classes.
+fn refusal_of(defects: &[axiolid_overlay::ArcPolygonDefect]) -> GeomResult<()> {
+    use axiolid_overlay::ArcPolygonDefect as Defect;
+    let definite: Vec<&Defect> = defects
+        .iter()
+        .filter(|defect| {
+            matches!(
+                defect,
+                Defect::SelfContact { .. }
+                    | Defect::BoundaryOverlap { .. }
+                    | Defect::HoleOutsideOuter { .. }
+                    | Defect::HolesOverlap { .. }
+                    | Defect::DisconnectedInterior { .. }
+            )
+        })
+        .collect();
+    if !definite.is_empty() {
+        return Err(GeomError::InvalidInput(format!(
+            "exact extrusion profile is not a valid region: {definite:?}"
+        )));
+    }
+    if defects
+        .iter()
+        .any(|defect| !matches!(defect, Defect::Ring { .. }))
+    {
+        return Err(unsupported(
+            "exact extrusion profile with a contact undecided at the tolerance",
+        ));
+    }
+    Ok(())
+}
+
 /// Extrude a composite profile: union the members exactly, then extrude
 /// each connected piece. Disjoint members come back as one solid each in
 /// one `ExactBRep` (#111).
@@ -1169,9 +1264,22 @@ fn extrude_composite(
     offset: Vec3,
     tolerance: Tolerance,
 ) -> GeomResult<ExactBRep> {
+    // Each member is a region of its own before the union (a member that
+    // does not lower is left to `composite_regions` to refuse by name).
+    for member in members {
+        if let Ok(contour) = profile_to_contour(member, tolerance) {
+            let mut lowered = vec![contour_to_arc_ring(&contour.outer, tolerance)?];
+            for hole in &contour.holes {
+                lowered.push(contour_to_arc_ring(hole, tolerance)?);
+            }
+            refuse_invalid_region(&lowered[0], &lowered[1..])?;
+        }
+    }
     let regions = crate::profile_lower::composite_regions(members, tolerance)?;
     let mut pieces = Vec::with_capacity(regions.len());
     for region in regions {
+        // A union of valid members can still touch itself.
+        refuse_invalid_region(&region.outer, &region.holes)?;
         let mut rings = Vec::with_capacity(1 + region.holes.len());
         rings.push(orient_arc_ring(&region.outer, true)?);
         for hole in &region.holes {
@@ -1383,5 +1491,56 @@ pub fn profile_to_contour(profile: &Profile, tolerance: Tolerance) -> GeomResult
             "composite profile does not lower to an exact contour",
         )),
         _ => Err(unsupported("profile does not lower to a contour")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axiolid_overlay::{ArcPolygonDefect, OverlayError};
+
+    use super::*;
+
+    #[test]
+    fn a_region_that_touches_itself_is_refused() {
+        let ring = |points: &[(f64, f64)]| {
+            axiolid_overlay::ArcRing::from_points(
+                &points
+                    .iter()
+                    .map(|&(x, y)| Point2::new(x, y))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let pinched = ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 0.0), (0.0, 4.0)]);
+        assert!(matches!(
+            refuse_invalid_region(&pinched, &[]),
+            Err(GeomError::InvalidInput(_))
+        ));
+        let square = ring(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
+        assert!(refuse_invalid_region(&square, &[]).is_ok());
+    }
+
+    #[test]
+    fn undecided_defects_are_unsupported_and_definite_ones_invalid() {
+        let undecided = ArcPolygonDefect::NestingUndecided {
+            error: OverlayError::SelfIntersection,
+        };
+        let definite = ArcPolygonDefect::HoleOutsideOuter { hole: 0 };
+        let ring = ArcPolygonDefect::Ring {
+            ring: axiolid_overlay::ArcRingRef::Outer,
+            error: OverlayError::RepeatedVertex,
+        };
+        assert!(refusal_of(&[]).is_ok());
+        assert!(refusal_of(std::slice::from_ref(&ring)).is_ok());
+        assert!(matches!(
+            refusal_of(std::slice::from_ref(&undecided)),
+            Err(GeomError::UnsupportedInput { .. })
+        ));
+        match refusal_of(&[undecided, ring, definite]) {
+            Err(GeomError::InvalidInput(message)) => {
+                assert!(message.contains("HoleOutsideOuter"), "{message}");
+                assert!(!message.contains("NestingUndecided"), "{message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 }

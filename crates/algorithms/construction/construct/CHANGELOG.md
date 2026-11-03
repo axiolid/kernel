@@ -9,6 +9,19 @@ caret rule for `0.x` versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- `extrude_profile_exact` ran no profile check and built a solid from a
+  contour with a self-contact (a chord crossing an arc, a bow tie, a pinch),
+  a hole outside the outer contour, or holes that cross each other or the
+  outer contour, also as the member of a composite. It now runs the exact
+  arc polygon check on each contour (and on each composite member) and refuses
+  such a profile as `InvalidInput` naming the defects; a nesting the exact
+  check cannot decide is refused as `UnsupportedInput`. Valid profiles,
+  including those with an accepted isolated contact or an edge or arc below
+  the tolerance, extrude unchanged, and the lowering's own refusals keep their
+  error class (#401).
+
 ## [0.3.28] - 2026-11-03
 
 ### Added

@@ -224,7 +224,7 @@ impl ValidateProfile<Profile> for ExactProfileValidator {
     }
 }
 
-fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) -> ProfileReport {
+pub(crate) fn validate_contours(profile: &ContourProfile, tolerance: Tolerance) -> ProfileReport {
     let mut report = ProfileReport::default();
     let mut lowered: Vec<LoweredContour> = Vec::with_capacity(1 + profile.holes.len());
     let mut broken = false;
